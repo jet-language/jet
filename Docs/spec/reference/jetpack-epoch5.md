@@ -513,3 +513,12 @@ as `PROMPT: Prompt{ label: 5 }` is refused with the compiler's own type error
 at the `5`.
 A field left unwritten stays out of the checked record, and the
 environment applies its own default for it.
+
+The values written in an environment's fields are checked the same way. Each
+value is computed by the compiler as a module value of the source, so a field
+may read a sibling field in any order, and a cycle or type error is reported
+at the field in the source. A headless record takes the type its field gives
+it: `prompt: { label: "dev" }` is a `Prompt`, and each entry of
+`presets: ["dev": { … }]` is a `Preset`. The names a field holds
+(`presets: { dev: … }`, `.Rust`, `packages.app`) stay environment syntax; only
+the values inside them go to the compiler.

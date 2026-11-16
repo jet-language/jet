@@ -186,14 +186,23 @@ use {
     envmodel_test_check_snapshot("E0966", envmodel_test_render("env.jet", src, error))
 }
 
-#Test("ambient io in build is e3402") {
-    src: "\ndev: module {{\n    env.dev: Env{{\n        prompt: read_file(\"/etc/hostname\"),\n    }}\n}}\n"
+#Test("ambient io in a dev service build is e3402") {
+    src: "\nenv.dev: module {{\n    services: {{ db: {{ ready: read_file(\"/etc/hostname\") }} }}\n}}\n"
     error: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
     assert_eq(error.code, "E3402")
     rendered: envmodel_test_render("env.jet", src, error)
     assert(rendered.contains("`read_file` is not allowed during a sandboxed package build"))
     assert(rendered.contains("Package builds run with ambient I/O and network access disabled"))
     envmodel_test_check_snapshot("E3402", rendered)
+}
+
+#Test("ambient io in an env field is the compilers refusal at the call") {
+    src: "\ndev: module {{\n    env.dev: Env{{\n        prompt: read_file(\"/etc/hostname\"),\n    }}\n}}\n"
+    error: envmodel_test_source_error(envmodel_evaluate_source(src, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0107")
+    rendered: envmodel_test_render("env.jet", src, error)
+    assert(rendered.contains("Nothing named `read_file` exists here"), rendered)
+    assert(rendered.contains("--> env.jet:4:17"), rendered)
 }
 
 #Test("evaluate env builds plan from typed surface") {

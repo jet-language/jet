@@ -7,11 +7,13 @@ use {
         ENVMODEL_ENVIRONMENT_SCHEMA,
         FleetPlan,
         OptionPlan,
+        PromptPathMode,
         envmodel_evaluate_env,
         envmodel_evaluate_source,
         envmodel_find_jet_binary,
         envmodel_parse_program,
         module_values_evaluate,
+        module_values_program,
     ]
     jet_foundation.[CtValue, ast_comptime_value_show]
     jet_pkg_model.[EntryContribution, FactValue]
@@ -298,7 +300,8 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
 #Test("module_value_of_a_schema_type_is_its_written_fields") {
     dir: envmodel_test_oci_base_dir("module-value-schema")
     program: envmodel_parse_program(SCHEMA_VALUES) ?? panic("the values parse: {err.diagnostic.what}")
-    outcome: module_values_evaluate(program.items, SCHEMA_VALUES, dir, [String:CtValue]{}) ?? panic("the compiler answers: {err.detail}")
+    values_program: module_values_program(program.items, SCHEMA_VALUES, [String:CtValue]{}, "") ?? panic("the program builds: {err.diagnostic.what}")
+    outcome: module_values_evaluate(values_program.text, dir) ?? panic("the compiler answers: {err.detail}")
     files.remove_all(dir) ?? panic("remove the directory")
     computed := [String:CtValue]{}
     if outcome == {
@@ -329,4 +332,63 @@ SCHEMA_VALUES: "PROMPT: Prompt{{ label: \"x\", path: .Short }}\nLANGS: [\"rust\"
     head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
     assert_eq(head, expected)
     assert(head.contains("--> main.jet:1:"), head)
+}
+
+// Environment fields the compiler computes: a sibling read before its field,
+// a headless prompt record typed as a `Prompt`, and a map of headless preset
+// records typed as `Preset`s.
+ENV_FIELD_VALUES: `
+BASE: 8000
+
+dev: module {
+    env.dev: Env{
+        url: "http://localhost:{port}",
+        port: BASE + 1,
+        prompt: { label: "dev-{port}", path: .Full },
+        presets: ["ambient": { hostname: "host-{port}", extends: ["base"] }, "base": { variables: ["MODE": "dev"] }],
+    }
+}
+`
+
+#Test("env_field_values_are_the_compilers_in_any_order") {
+    dir: envmodel_test_oci_base_dir("env-field-values")
+    plan: envmodel_evaluate_env(ENV_FIELD_VALUES, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    assert_eq(plan.prompt, Val("dev-8001"))
+    assert_eq(plan.prompt_path, PromptPathMode.Full)
+    assert_eq(plan.presets.len(), 2)
+    loop preset in plan.presets {
+        if preset.name == "ambient" {
+            assert_eq(preset.hostname, Val("host-8001"))
+            assert_eq(preset.extends, [String]{"base"})
+        }
+        if preset.name == "base" -> assert_eq(preset.variables.get("MODE"), Val("dev"))
+    }
+    modules: envmodel_evaluate_source(ENV_FIELD_VALUES, dir) ?? panic("the revision evaluates")
+    entry: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "url"), Val(FactValue.Text{value: "http://localhost:8001"}))
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8001"}))
+    files.remove_all(dir) ?? return
+}
+
+#Test("env_field_cycle_names_the_fields_at_the_field") {
+    source: "dev: module {{\n    env.dev: Env{{\n        port: label.len(),\n        label: \"x{{port}}\",\n    }}\n}}\n"
+    dir: envmodel_test_oci_base_dir("env-field-cycle")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("port -> label -> port") || error.what.contains("label -> port -> label"), error.what)
+    assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    assert(head.contains("--> main.jet:3:") || head.contains("--> main.jet:4:"), head)
+}
+
+#Test("env_field_error_inside_a_nested_record_is_at_its_line") {
+    source: "dev: module {{\n    env.dev: Env{{\n        presets: [\n            \"ambient\": {{ user: \"me\" }},\n            \"web\": {{ hostname: 5 }},\n        ],\n    }}\n}}\n"
+    dir: envmodel_test_oci_base_dir("env-field-nested-error")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+    assert(head.contains("jet.BindingTypeMismatch"), head)
+    assert(head.contains("--> main.jet:5:32"), head)
+    assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
 }

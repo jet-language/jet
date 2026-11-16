@@ -95,16 +95,25 @@ comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir
 // them, so the source's values are typed against them.
 ENVMODEL_ENVIRONMENT_SCHEMA: #run embed_file("Schema/Environment.jet.schema")
 
-// Every module value of `source` (parsed as `items`), computed by the
-// sibling compiler in one request (JetCli `jet_config_module_values`): the
-// source's own declarations and the environment schema are checked as one
-// program that keeps the source's offsets, so a refusal's span inside the
-// source is a span of `source`, and one past its end lies in the schema or
-// the program's own lines. `environment` holds the value of each `$NAME`
-// the source reads.
-module_values_evaluate: fn(items: [Item], source: String, base_dir: String, environment: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
-    values: jet_config_module_values_program(items, source, environment) ?? return Ok(JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic})
-    program: "{values}\n{ENVMODEL_ENVIRONMENT_SCHEMA}"
+// The module-values program for `source` (parsed as `items`): the source's
+// own declarations, kept at their offsets so a span inside the source is a
+// span of `source`; then `generated`, the values EnvModel spells itself
+// (ValueProgram.jet), from offset `generated_at`; then the environment
+// schema. `environment` holds the value of each `$NAME` the source reads.
+ModuleValuesProgram: struct {
+    text: String
+    generated_at: Int
+}
+
+module_values_program: fn(items: [Item], source: String, environment: [String:CtValue], generated: String) -> ModuleValuesProgram ComptimeEvalError! {
+    values: jet_config_module_values_program(items, source, environment) ?? return Err(err)
+    Ok(ModuleValuesProgram{text: "{values}\n{generated}\n{ENVMODEL_ENVIRONMENT_SCHEMA}", generated_at: values.count_bytes() + 1})
+}
+
+// Every module value of `program`, computed by the sibling compiler in one
+// request (JetCli `jet_config_module_values`), or the first diagnostic of
+// its check, at its span in the program.
+module_values_evaluate: fn(program: &&String, base_dir: String) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
     // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
     response: envmodel_compiler_service(JET_COMPILER_SERVICE_MODULE_VALUES, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(err)
     outcome: compiler_service_module_values_outcome(response) ?? return Err(CompilerServiceError{detail: "the compiler's answer is not a module-values response"})

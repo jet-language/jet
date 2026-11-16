@@ -25,11 +25,14 @@ use {
 
 // What every module value evaluation reads besides its own expression: the
 // directory `embed_file` resolves against, the source text the values and
-// functions are spelled in, and the source's top-level pure functions.
+// functions are spelled in, the source's top-level pure functions, and the
+// value of each environment field expression the compiler computed, by its
+// start in the source (envmodel_value_of).
 ModuleEvalScope: struct {
     base_dir: String
     source: String
     funcs: [String:Func]
+    values: [Int:CtValue]
 }
 
 // One named field expression and the span that names it.

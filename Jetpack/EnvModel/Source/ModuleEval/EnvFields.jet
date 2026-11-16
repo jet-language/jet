@@ -43,12 +43,8 @@ use {
         PROMPT_FIELD_LABEL,
         PROMPT_FIELD_PATH,
         PROMPT_FIELD_STRIP,
-        PROMPT_PATH_FULL,
-        PROMPT_PATH_SHORT,
         PROMPT_SETTING_PATH,
         PROMPT_SETTING_STRIP,
-        PROMPT_STRIP_OFF,
-        PROMPT_STRIP_ON,
         SYSTEM_FIELD_PACKAGES,
         TYPE_ENV,
         TYPE_PROMPT,
@@ -140,9 +136,64 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
     }
 }
 
-// Module fields are a small pure dependency graph: a valid `port: base + 1,
-// base: 8000` must not depend on declaration order. Every sibling dependency
-// resolves first, then each field is lowered with the resolved values.
+// The fields of a computed kind, each written in one of the shapes its
+// reader takes: a field written as one value is one generated value
+// (ValueProgram.jet) its siblings read by name, in any order; a field in
+// EnvModel syntax (`presets: { dev: { … } }`) is walked, and the values in
+// it are generated. A headless record a field types (a prompt, a language,
+// a preset, a file) is passed through that type's `envmodel_expect_*`.
+envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
+    siblings := [String:String]{}
+    loop field in fields {
+        kind: EnvFieldKind.classify(field.name)
+        if !kind.is_computed() || siblings.get(field.name) != None -> next
+        one_value: (kind == EnvFieldKind.Prompt && envmodel_value_headless_record(field.value)) || !envmodel_value_structural(field.value)
+        siblings[field.name] = if one_value -> envmodel_value_name(plan) else -> ""
+    }
+    planned := [String:Bool]{}
+    loop field in fields {
+        kind: EnvFieldKind.classify(field.name)
+        if !kind.is_computed() -> next
+        generated: if planned.get(field.name) == None -> siblings.get(field.name) ?? "" else -> ""
+        planned[field.name] = true
+        if generated != "" {
+            expect: if kind == EnvFieldKind.Prompt && envmodel_value_headless_record(field.value) -> "envmodel_expect_prompt" else -> ""
+            envmodel_value_leaf(plan, envmodel_unparen(field.value), expect, generated, field.name_span, siblings, globals)
+            next
+        }
+        if kind == {
+            .Languages -> {
+                envmodel_value_plan_typed(plan, field.value, "envmodel_expect_lang", siblings, globals)
+            }
+            .Presets -> {
+                envmodel_value_plan_typed(plan, field.value, "envmodel_expect_preset", siblings, globals)
+            }
+            .Files -> {
+                envmodel_value_plan_typed(plan, field.value, "envmodel_expect_file", siblings, globals)
+            }
+            .Prompt | .Setting -> envmodel_value_plan(plan, field.value, siblings, globals)
+            .Packages | .Secrets | .Lifecycle -> {}
+        }
+    }
+}
+
+// envmodel_plan_env_fields for an `env.<name>: { … }` or `Env{ … }` value.
+envmodel_plan_env_contribution: fn(plan: &EnvValueProgram, value: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+    record: envmodel_record_literal(value) ?? value
+    if record == .StructLit(type_name, _, _, _, fields, _, _, _) {
+        if type_name != "" && type_name != TYPE_ENV {
+            return
+        }
+        named := [NamedExpr]{}
+        loop field in fields {
+            named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+        }
+        envmodel_plan_env_fields(plan, named, globals)
+    }
+}
+
+// Each field is lowered with the values computed for it (envmodel_value_of):
+// a sibling read was resolved by the compiler, in any declaration order.
 envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String:CtValue], source: String) -> EnvCapture EnvModelEvalError! {
     capture := EnvCapture{
         entry: EntryContribution{packages: [Pkg]{}, settings: [String:[FactContribution]]{}},
@@ -153,12 +204,6 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
         languages: [LanguageSpec]{},
         files: [ManagedFile]{},
     }
-    field_map := [String:NamedFieldExpr]{}
-    loop field in fields {
-        if EnvFieldKind.classify(field.name).is_computed() {
-            field_map[field.name] = NamedFieldExpr{span: field.name_span, expr: field.value}
-        }
-    }
     loop field in fields {
         if EnvFieldKind.classify(field.name) == EnvFieldKind.Packages {
             extracted: envmodel_extract_packages(field.value, src)
@@ -166,14 +211,12 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
             loop adapter in extracted.adapters -> capture.adapters.push(adapter)
         }
     }
-    computed: envmodel_evaluate_named_fields(field_map, globals, scope, Val(src), "module fields are pure computed values; a cycle has no deterministic evaluation order", "break the cycle by making one field a literal or by moving the shared computation into a pure function")
-    resolved: computed.values
     loop field in fields {
         span: field.name_span
         if EnvFieldKind.classify(field.name) == {
             .Packages -> {}
             .Prompt -> {
-                envmodel_capture_prompt_setting(capture.entry, field.value, scope, resolved, source)
+                envmodel_capture_prompt_setting(capture.entry, field.value, scope, source)
             }
             .Secrets -> {
                 loop spec in envmodel_parse_secret_specs(field.value, scope, globals) {
@@ -181,17 +224,17 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
                 }
             }
             .Presets -> {
-                value: resolved.get(field.name) ?? next
+                value: envmodel_value_of(field.value, scope)
                 presets: envmodel_presets_from_value(value) ?? return Err(envmodel_error("E1332", "environment preset declaration is invalid: {err.message}", "presets are named typed records with string package, variable, and inheritance facts", "use `presets: {{ dev: .{{ packages: [\"tool@jetpack\"] }} }}`", Val(span)))
                 loop preset in presets -> capture.presets.push(preset)
             }
             .Languages -> {
-                value: resolved.get(field.name) ?? next
+                value: envmodel_value_of(field.value, scope)
                 languages: envmodel_languages_from_value(value) ?? return Err(envmodel_error("E1333", "language-pack declaration is invalid: {err.message}", "languages is a typed map of Lang records that expands through Jet's catalog", "use `languages: {{ rust: Lang.{{ enable: true }} }}` or another name from `jet env info`", Val(span)))
                 loop language in languages -> capture.languages.push(language)
             }
             .Files -> {
-                value: resolved.get(field.name) ?? next
+                value: envmodel_value_of(field.value, scope)
                 declared: envmodel_files_from_value(value) ?? return Err(envmodel_error("E1326", "environment file declaration is invalid: {err}", "managed files use project-relative destinations and typed Symlink, Seed, or Copy records", "fix the file destination and source/content shape before running `jet env sync`", Val(span)))
                 loop file in declared -> capture.files.push(file)
             }
@@ -200,8 +243,7 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
                 envmodel_lifecycle_from_field(capture.lifecycle, field.name, value) ?? return Err(envmodel_error("E1333", "environment lifecycle declaration is invalid: {err.message}", "lifecycle fields use typed dotenv, unset, job names, hook records, and Git hook paths", "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, `git_hooks_path: \"scripts/githooks\"`, or `reload: .Prompt`", Val(span)))
             }
             .Setting -> {
-                value: resolved.get(field.name) ?? return Err(envmodel_field_missing_value(field.name, expr_span(field.value)))
-                envmodel_record_setting(capture.entry, field.name, ast_comptime_value_show(value), span, source)
+                envmodel_record_setting(capture.entry, field.name, ast_comptime_value_show(envmodel_value_of(field.value, scope)), span, source)
             }
         }
     }
@@ -297,10 +339,6 @@ envmodel_expression_name: fn(expr: Expr) -> String Never! {
     }
 }
 
-envmodel_field_missing_value: fn(name: String, span: Span) -> EnvModelEvalError Never! {
-    envmodel_error("E3403", "computed module field `{name}` did not produce a value", "a pure module field must evaluate to one deterministic value before the module is merged", "return a value from the field expression", Val(span))
-}
-
 // The fixed fields of a structured `Prompt{ … }` record.
 PromptField: enum {
     Label
@@ -317,53 +355,37 @@ PromptField: enum {
     }
 }
 
-// `prompt: "label"` or a structured
-// `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`, each recorded as
-// one environment-layer setting.
-envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, globals: [String:CtValue], source: String) EnvModelEvalError! {
-    if envmodel_record_literal(value) == .Val(record) {
-        envmodel_capture_prompt_setting(entry, record, scope, globals, source)
-        return
-    }
-    if value == {
-        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
-            if type_name == TYPE_PROMPT {
-                loop field in fields {
-                    span: field.name_span
-                    evaluated: envmodel_evaluate_expression(field.value, globals, scope)
-                    kind: PromptField.parse(field.name) ?? return Err(envmodel_prompt_bad_field(field.name, span))
-                    if kind == {
-                        .Label -> {
-                            label: if evaluated == {
-                                .Str(text) -> text
-                                .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> {
-                                    return Err(envmodel_prompt_bad_value(field.name, "a quoted label", span))
-                                }
-                            }
-                            envmodel_record_setting(entry, ENV_FIELD_PROMPT, label, span, source)
-                        }
-                        .Path -> {
-                            word: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
-                            if word != PROMPT_PATH_SHORT && word != PROMPT_PATH_FULL {
-                                return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
-                            }
-                            envmodel_record_setting(entry, PROMPT_SETTING_PATH, word, span, source)
-                        }
-                        .Strip -> {
-                            word: envmodel_prompt_word(evaluated) ?? return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
-                            if word != PROMPT_STRIP_ON && word != PROMPT_STRIP_OFF {
-                                return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
-                            }
-                            envmodel_record_setting(entry, PROMPT_SETTING_STRIP, word, span, source)
-                        }
-                    }
+// `prompt: "label"` or a `Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`
+// record, headed or headless, which the compiler checked as a `Prompt`: each
+// written field is recorded as one environment-layer setting at its name.
+envmodel_capture_prompt_setting: fn(entry: &EntryContribution, value: Expr, scope: ModuleEvalScope, source: String) EnvModelEvalError! {
+    evaluated: envmodel_value_of(value, scope)
+    record: envmodel_unparen_record(value)
+    if record == .StructLit(type_name, _, _, _, fields, _, _, _) && (type_name == "" || type_name == TYPE_PROMPT) {
+        checked := [String:CtValue]{}
+        if evaluated == .Struct(_, values) {
+            loop named in values -> checked[named.name] = named.value
+        }
+        loop field in fields {
+            span: field.name_span
+            written: checked.get(field.name) ?? return Err(envmodel_prompt_bad_field(field.name, span))
+            kind: PromptField.parse(field.name) ?? return Err(envmodel_prompt_bad_field(field.name, span))
+            if kind == {
+                .Label -> {
+                    envmodel_record_setting(entry, ENV_FIELD_PROMPT, ast_comptime_value_show(written), span, source)
                 }
-                return
+                .Path -> {
+                    word: envmodel_prompt_word(written) ?? return Err(envmodel_prompt_bad_value(field.name, ".Short or .Full", span))
+                    envmodel_record_setting(entry, PROMPT_SETTING_PATH, word, span, source)
+                }
+                .Strip -> {
+                    word: envmodel_prompt_word(written) ?? return Err(envmodel_prompt_bad_value(field.name, ".On or .Off", span))
+                    envmodel_record_setting(entry, PROMPT_SETTING_STRIP, word, span, source)
+                }
             }
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+        return
     }
-    evaluated: envmodel_evaluate_expression(value, globals, scope)
     envmodel_record_setting(entry, ENV_FIELD_PROMPT, ast_comptime_value_show(evaluated), expr_span(value), source)
 }
 

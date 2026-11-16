@@ -13,11 +13,11 @@ use {
         HostEntry,
         Item,
         ModuleDecl,
+        Namespace,
         Program,
         Span,
         SystemFieldValue,
         ast_comptime_value_show,
-        diagnostic_from_registry,
         jet_config_eval_diagnostic,
         jet_config_plain_literal,
     ]
@@ -132,9 +132,11 @@ envmodel_environment_globals: fn(reads: [EnvironmentRead]) -[Env]> [String:CtVal
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
 envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
-    scope: ModuleEvalScope{base_dir: base_dir, source: src, funcs: envmodel_collect_funcs(items)}
+    scope := ModuleEvalScope{base_dir: base_dir, source: src, funcs: envmodel_collect_funcs(items), values: [Int:CtValue]{}}
     reads: envmodel_environment_reads(src)
-    globals: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
+    computed: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
+    globals: computed.globals
+    scope.values = computed.values
     out := [EvaluatedModule]{}
     loop item in items {
         if item == {
@@ -160,17 +162,24 @@ envmodel_collect_funcs: fn(items: [Item]) -> [String:Func] Never! {
     funcs
 }
 
-// Resolve the module values before any namespace field runs: every immutable
-// `NAME: value`, with or without `#run`, as the compiler computes every one
-// while building. When each is a plain literal, the literal is its value.
-// Otherwise the sibling compiler checks the source's own declarations, with
-// the environment schema's types (`Prompt`, `Lang`, …), as one program and
-// computes every value at once (module_values_evaluate): a typed value, a
-// cycle, an impure `#run` or any other refusal is the compiler's own, at its
-// span in this source. A value the environment can't read as data (a
-// function, say) is refused at its name. The environment reads stay
-// readable beside the module values.
-envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> [String:CtValue] EnvModelEvalError! {
+// The module values and the environment fields' values, computed once.
+ComputedValues: struct {
+    globals: [String:CtValue]
+    values: [Int:CtValue]
+}
+
+// Resolve the module values and every value written in an environment field
+// before any namespace field runs: every immutable `NAME: value`, with or
+// without `#run`, as the compiler computes every one while building, and each
+// field value as a generated module value (ValueProgram.jet). A plain literal
+// is its own value. Otherwise the sibling compiler checks the source's own
+// declarations, the generated values and the environment schema's types
+// (`Prompt`, `Lang`, …) as one program and computes every value at once
+// (module_values_evaluate): a typed value, a cycle, an impure `#run` or any
+// other refusal is the compiler's own, at its span in this source. A value
+// the environment can't read as data (a function, say) is refused at its
+// name. The environment reads stay readable beside the module values.
+envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> ComputedValues EnvModelEvalError! {
     names := [String]{}
     name_spans := [Span]{}
     literals := [CtValue?]{}
@@ -191,13 +200,31 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
             .None -> { all_plain = false }
         }
     }
-    if all_plain -> return Ok(globals)
-    outcome: module_values_evaluate(items, scope.source, scope.base_dir, environment_globals) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[0]), "the module values could not be evaluated: {err.detail}")})
+    plan := envmodel_value_program(scope.source, environment_globals)
+    loop item in items {
+        if item == .Module(decl) {
+            if decl.auto_discovered -> envmodel_plan_module_values(plan, decl, globals)
+        }
+    }
+    if all_plain && !plan.needed -> return Ok(ComputedValues{globals: globals, values: plan.known})
+    first: if name_spans.len() > 0 -> name_spans[0] else -> plan.first ?? Span{start: 0, end: 0}
+    program: module_values_program(items, scope.source, environment_globals, plan.parts.join("")) ?? return Err(EnvModelEvalError{diagnostic: err.diagnostic})
+    outcome: module_values_evaluate(program.text, scope.base_dir) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(first), "the module values could not be evaluated: {err.detail}")})
     if outcome == {
         .Refused(diagnostic) -> {
-            // A span past the source lies in the schema or the program's own lines: the first value.
-            span: if diagnostic.span == .Val(at) && at.end <= scope.source.count_bytes() -> at else -> name_spans[0]
-            return Err(EnvModelEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(span), diagnostic.what, diagnostic.why, diagnostic.fix)})
+            // A span in the generated values stands for the source text it
+            // was spelled from; one past them lies in the schema or the
+            // program's own lines: the first value.
+            span := first
+            if diagnostic.span == .Val(at) {
+                if {
+                    at.end <= scope.source.count_bytes() -> { span = at }
+                    at.start >= program.generated_at -> {
+                        span = envmodel_value_place(plan, Span{start: at.start - program.generated_at, end: at.end - program.generated_at}) ?? first
+                    }
+                }
+            }
+            return Err(EnvModelEvalError{diagnostic: envmodel_value_diagnostic(plan, diagnostic, span)})
         }
         .Values(values, _) -> {
             computed := [String:CtValue]{}
@@ -207,7 +234,28 @@ envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, env
                 value: computed.get(name) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(name_spans[index]), "the module value `{name}` holds a value an environment can't read as data, such as a function")})
                 globals[name] = value
             }
-            return Ok(globals)
+            fields := plan.known
+            loop (start, generated) in plan.leaves {
+                if fields.get(start) != None -> next
+                value: computed.get(generated) ?? return Err(EnvModelEvalError{diagnostic: jet_config_eval_diagnostic(Val(Span{start: start, end: start}), "this value holds a value an environment can't read as data, such as a function")})
+                fields[start] = value
+            }
+            return Ok(ComputedValues{globals: globals, values: fields})
+        }
+    }
+}
+
+// Plan the values written in the environment fields of `decl`.
+envmodel_plan_module_values: fn(plan: &EnvValueProgram, decl: ModuleDecl, globals: [String:CtValue]) EnvModelEvalError! {
+    loop contribution in decl.contributions {
+        if contribution.value == {
+            .Expr(value) -> {
+                if contribution.namespace == Namespace.Env {
+                    envmodel_plan_env_contribution(plan, value, globals)
+                }
+            }
+            .Env(lit) -> envmodel_plan_env_fields(plan, lit.fields, globals)
+            .System(_) | .Image(_) | .Fleet(_) | .VMTest(_) | .Profile(_) | .Perf(_) -> {}
         }
     }
 }

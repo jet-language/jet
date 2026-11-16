@@ -1,6 +1,6 @@
 // The typed records of the environment surface (env.jet, image.jet,
 // system.jet), as Jet declarations. EnvModel appends this text to the
-// program the compiler checks for a source's values (module_values_evaluate),
+// program the compiler checks for a source's values (module_values_program),
 // so `Prompt{ … }`, `Lang{ … }` or `.Watch{ … }` in a value is typed by the
 // compiler against these declarations, with their field defaults and enum
 // cases. A field EnvModel reads only when it is written is optional with no
@@ -8,6 +8,17 @@
 // holds exactly the written fields. The open records (`Env`, a service, a
 // host override) and the names EnvModel resolves (packages, sources, hook
 // jobs, platforms) are not here.
+
+// The type a field gives a headless record written in it: EnvModel passes
+// `prompt: { label: "x" }` to the compiler as
+// `envmodel_expect_prompt({ label: "x" })`, so the record is a `Prompt`.
+envmodel_expect_prompt: fn(value: &&Prompt) -> Prompt { value }
+
+envmodel_expect_lang: fn(value: &&Lang) -> Lang { value }
+
+envmodel_expect_preset: fn(value: &&Preset) -> Preset { value }
+
+envmodel_expect_file: fn(value: &&File) -> File { value }
 
 // `prompt: Prompt{ label:, path: .Short|.Full, strip: .On|.Off }`.
 Prompt: struct {
