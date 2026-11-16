@@ -13,8 +13,11 @@
 // Core #Test at each optimize level), fuzz (the sema fuzz corpus Tests/Fuzz/Sema: invalid files
 // fail `jet check`, every other file passes it, and a differential file then runs at each
 // optimize level with the same exit and stdout as at O0; no jet exits 101), selfhost (the
-// fixed point s2 == s3) and perf (the self-compile against its budget) are test.jet's.
-// `full` runs every suite, so each package's #Tests run in it.
+// fixed point s2 == s3), inline_census (no `#Inline(Always)` call left after inlining in any
+// build of Examples, Core or the compiler, at each optimize level) and perf (the self-compile
+// against its budget) are test.jet's. `full` runs every suite but inline_census (whose
+// builds repeat the core suite's and build the compiler at each level), so each package's
+// #Tests run in it.
 // The build profiles: `jet build --profile dev Compiler` is the fast build for targeted
 // testing (no optimizer passes). `ship` pins the values the self-host stages build with
 // (O1, not the stock O2 of `jet build`); the selfhost and perf suites of test.jet
@@ -108,6 +111,9 @@ test: {
     },
     selfhost: TestProfile{
         suites: [selfhost]
+    },
+    inline_census: TestProfile{
+        suites: [inline_census]
     },
     perf: TestProfile{
         suites: [perf],
