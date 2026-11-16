@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110287,
+    "rev": 110300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26169,11 +26169,11 @@
         {
           "n": 4,
           "text": "Under D-IFHOLE2=A a `<>` header runs once for each arm tried, in arm order, and never for an arm after the first match; candidate expressions run at their substituted position at most once; errors propagate rather than becoming nonmatches; a header with an effect (an effectful call, a `&` argument or a `&self` receiver that changes state) is refused (E0442 HoleHeaderEffect) with a fix that names the value first. Proof: `jet test Compiler --profile golden --filter IfHole/HeaderEvalPerCandidate` on O0, O1 and O2, and `jet test Compiler --profile ui --filter E0442`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:52:56.873Z"
+          "evidence": "p220 batch compiler (census build of dev 17c073989d): jet test Compiler --profile ui --filter E0442 PASS 2/2 (IfHole-6-1-e0442-filter, 8a0e946561)",
+          "at": "2026-11-16T18:18:32.904Z"
         },
         {
           "n": 5,
@@ -26331,7 +26331,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-16T17:33:31.320Z",
+      "updated": "2026-11-16T18:18:32.904Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-16T16:45:52.582Z",
       "goals": [
@@ -27310,6 +27310,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Found by DeclTypes-6-1 during #6867: a program type named Task hides task.join/detach (repro: Task: struct + working: task {...}; working.detach()). Added as a criterion and assigned to DeclTypes-6-1."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p216: the c8 series landed. CoreErrorFamily, CompilerOwnedTypeNames, ForInReaders, NetworkHandleMethods and enum_paths pass; held on bare_core_enums_carry_their_declared_payloads, encoding_parity, corelib_parts_encoding_streams, Guards/core_declarations, core_surface_ledger x2, dns_error and the imported_secret lint. Sent to GoalsA-1-4."
         },
         {
@@ -27551,6 +27556,15 @@
           "verifiedBy": null,
           "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter key_is_the_core_term_declaration PASS",
           "at": "2026-11-16T17:11:12.250Z"
+        },
+        {
+          "n": 27,
+          "text": "A program type that shares a Core type's name never hides the Core type's methods: with a program `Task: struct` in scope, `working: task { … }` is still Core's task handle and `working.detach()` / `working.join()` resolve on it, on O0/O1/O2. Sema resolves a Core value's type by its owner, never by the bare name. Proof: `jet test Compiler --profile cases --filter program_type_named_like_core_keeps_core_methods`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T17:53:10.050Z"
         }
       ],
       "refs": [
@@ -27579,13 +27593,13 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T17:11:12.250Z",
+      "updated": "2026-11-16T17:53:11.819Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 26
+      "criteriaLastN": 27
     },
     {
       "id": "c04lnbtj",
@@ -42600,7 +42614,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "1. Patterns on `T? E!` accept `.Val(x)`, `.None`, `.Err(e)` directly; exhaustiveness over the three.\n2. Nested `.Ok(...)` form: greenfield cutover — migrate all sources; the old form gets no teaching diagnostic or jet fix (owner order).\n3. Failures keep automatic pass-up; None never leaves a function unless written (`?` on the optional) or `.or_err(\"why\")`.\n4. `??` resolves either state.\n5. Optional internal single-tag layout only with a paired perf cell.",
       "checkSteps": null,
@@ -42609,6 +42623,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met with recorded evidence (latest batch compilers p216-p219); closed by Main."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -42911,12 +42930,13 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-16T17:33:28.595Z",
+      "updated": "2026-11-16T18:18:07.451Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 26
+      "criteriaLastN": 26,
+      "completedAt": "2026-11-16T18:18:07.451Z"
     },
     {
       "id": "c0bs5inj",
@@ -100036,7 +100056,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -100045,6 +100065,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All criteria met with recorded evidence (latest batch compilers p216-p219); closed by Main."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -100079,9 +100104,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:56.474Z",
-      "updated": "2026-11-16T17:11:11.100Z",
+      "updated": "2026-11-16T18:18:09.245Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-16T18:18:09.245Z"
     },
     {
       "id": "c02vkuef",
@@ -100694,7 +100720,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p219: Speed-3-3 p215 regression roots landed. C (mount authority) 64ea4db4eb: inspect_choices_lists_one_apps_placement_exposure_and_context_reads and Core/Web/Web.jet pass. H/I (app address args) 1704c72db0: app_url_of_state_without_screen, web_build_missing_asset and push_open_state_without_a_route_is_a_compile_error pass. Known gap: pages and actions still claim FS.Read at registration."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -100741,7 +100773,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-16T05:55:12.321Z",
+      "updated": "2026-11-16T17:56:32.451Z",
       "updatedBy": "Main",
       "criteriaLastN": 4,
       "completedAt": "2026-11-16T05:55:12.321Z"
@@ -104271,11 +104303,11 @@
         {
           "n": 3,
           "text": "Derives are `impl Trait.Derive { fn expand(target: Target) }` with no `derive` or `derives` word; compiler facts are field-less structs implementing Fact, with their attachment and gate laws as trait constants and gates as Prelude Gate values, one form for value, scope and build facts (this replaces D-FACTDECL1's `fact Name(...)` form); the `fact` word is gone. Proof: `jet test Compiler --profile cases --filter decl_types_derive_and_fact_`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:44.799Z"
+          "evidence": "p220 batch compiler (census build of dev 17c073989d): jet test Compiler --profile cases --filter decl_types_derive_and_fact_ PASS (DeclTypes-6-1-6867-c10-native.r2 fixed the case text)",
+          "at": "2026-11-16T18:18:30.161Z"
         },
         {
           "n": 4,
@@ -104362,7 +104394,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:44.799Z",
-      "updated": "2026-11-16T16:45:32.314Z",
+      "updated": "2026-11-16T18:18:30.161Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -105289,6 +105321,16 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p219: bit sigils part a landed (594046a32a); BitSigils parser test, golden BitwiseNot/BitSigilsFollowTheirPrecedence, ui bit_complement_on_bool, bit_xor_update_in_condition, sigil_integer_not_retired and the bit_sigils1 migration case pass. c13 stays open: part b (the repository migration) was held from p220 because the migration writes compound bit updates into indexed slots (E0164 in Core/Crypto, TLS and X64Alloc); bit_not_wrong_type and the FmtLossless parser-validity manifest are with IfHole-6-1 in the same pass."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "c12 proof amended: the sigil meaning guard imports jet_lexer, so it is the nested guard package Tests/Guards/SigilMeaningTable (as ArrowSurface and DynSurface are), which the root guards filter does not reach. The census runs SigilMeaningTable, ArrowSurface and DynSurface through Land.jet GUARD_PACKAGES."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "IfHole-6-1 owns this card. Order: c13 power half (infix ^ gets the generic parse error), then c10/c11, then the D-BIT-SIGILS1=A operator cutover (new tokens, sema, lowering on every tier, E0398 flipped, a jet fix rule, a sweep of 6,582 .bit_* calls in 688 files, one SUB per tree), then c12's meaning table and guard on the finished lexer. Then c8, c5/c6, c1/c2, c3/c4 and c7."
         }
       ],
@@ -105394,12 +105436,12 @@
         },
         {
           "n": 12,
-          "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Guards --filter sigil_meaning_table`. (was #4022 c5)",
+          "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Guards/SigilMeaningTable` (a nested guard package, since it imports jet_lexer; the census runs it through GUARD_PACKAGES in Tools/Agent/Land.jet). (was #4022 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:07:03.417Z"
+          "at": "2026-11-16T17:48:03.569Z"
         },
         {
           "n": 13,
@@ -105409,6 +105451,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:07:04.412Z"
+        },
+        {
+          "n": 14,
+          "text": "Every nested guard package under Tests/Guards runs in the census through GUARD_PACKAGES in Tools/Agent/Land.jet and passes on dev, including ImplPlacement (87 impls outside their type's body on 7300cf5099) and CorpusAST (5 failures on 7300cf5099: EncodingEETF codable-structural site, examples_have_no_redundant_grouping_parentheses, the failure syntax detector and the failure surface). Proof: `jet test Tests/Guards/ImplPlacement` and `jet test Tests/Guards/CorpusAST` pass, and both names are in GUARD_PACKAGES.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T17:56:46.779Z"
         }
       ],
       "refs": [],
@@ -105422,9 +105473,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T17:11:08.517Z",
+      "updated": "2026-11-16T17:56:46.779Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 14
     },
     {
       "id": "c0gbe4aj",
@@ -106458,11 +106509,11 @@
         {
           "n": 5,
           "text": "Predicates the compiler can turn into SQL narrow the read set; any other predicate falls back to table-level invalidation, and `jet inspect` shows which. Proof: `jet test Compiler --profile cases --filter WebApp/live_query_read_set_narrowing`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:07:19.764Z"
+          "evidence": "p219 batch compiler (census build of dev 1123bf884d, Speed-3-3-p215-G-live-filter-comptime landed as 1f51921bea): jet test Compiler --profile cases --filter WebApp/live_query_read_set_narrowing PASS (it failed on p218; the comptime prefetch of a live: local now keeps its SQL filter)",
+          "at": "2026-11-16T17:56:27.946Z"
         },
         {
           "n": 6,
@@ -106558,7 +106609,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T16:45:33.926Z",
+      "updated": "2026-11-16T17:56:27.946Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -114917,6 +114968,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:15:13.535Z"
+        },
+        {
+          "n": 19,
+          "text": "Concurrent first use of the C toolchain pack waits for one unpack instead of failing: when two processes realize C dependencies at once on a fresh Hangar, the second waits for the first's unpack and both build. Seen on the p215, p217 and p219 batch suites as 'Couldn't realize C dependencies for `main.jet`: jet's C toolchain pack is unavailable: first use: unpacking the C toolchain into the Hangar' (cases Cffi/concurrent_processes_share_one_bridge_build_per_key and Cffi/concurrent_bridges_share_one_target_publish_without_racing, intermittent). Proof: both cases pass in 10 consecutive runs from an empty Hangar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T17:57:07.767Z"
         }
       ],
       "refs": [],
@@ -114930,9 +114990,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:23.499Z",
-      "updated": "2026-11-16T13:15:13.535Z",
+      "updated": "2026-11-16T17:57:07.767Z",
       "updatedBy": "Main",
-      "criteriaLastN": 18
+      "criteriaLastN": 19
     },
     {
       "id": "c0c7739a",
@@ -220830,6 +220890,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T18:18:32.904Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0p39lw2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T18:18:30.162Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0255wk0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T18:18:09.245Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gvf2dr",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T18:18:07.451Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T17:57:07.767Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0kwu568",
+      "note": "#19 Concurrent first use of the C toolchain pack waits for one u"
+    },
+    {
+      "at": "2026-11-16T17:56:46.779Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01gyy9b",
+      "note": "#14 Every nested guard package under Tests/Guards runs in the ce"
+    },
+    {
+      "at": "2026-11-16T17:56:32.452Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0voqhky",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T17:56:30.065Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01gyy9b",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T17:56:27.946Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00cqn1l",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T17:53:11.819Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T17:53:10.050Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w7t4qu",
+      "note": "#27 A program type that shares a Core type's name never hides th"
+    },
+    {
+      "at": "2026-11-16T17:48:03.569Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01gyy9b",
+      "note": "#12: the guard imports jet_lexer, so it lives in the nested package Tests/Guards/SigilMeaningTable, which the root guards filter does not reach; was: An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Gu"
+    },
+    {
+      "at": "2026-11-16T17:47:55.870Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01gyy9b",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-16T17:33:47.488Z",
       "by": "Main",
