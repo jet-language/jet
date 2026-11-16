@@ -42,11 +42,11 @@ use {
         body_codec_put_semaparallelbody,
         sema_core_body_ahead_take,
         sema_core_body_decode,
-        sema_core_body_was_loaded,
         sema_core_bodies_ahead_parts,
         sema_core_bodies_bytes,
         sema_core_bodies_keys,
         sema_core_bodies_key_at,
+        sema_core_bodies_loaded_keys,
         sema_core_bodies_offset,
         sema_core_bodies_position,
         sema_core_bodies_problem,
@@ -577,11 +577,11 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     ranked: "\nrank: fn(order: Ordering) -> Int {{\n    if order == {{\n        .Less -> 0\n        .Equal -> 1\n        .Greater -> 2\n    }}\n}}\n"
     failures := [String]{}
     captured := body_codec_check(failures, "core", body_codec_hooks(), true, ranked) ?? panic("BodyCodec could not check module `main`:\n{failures.join("\n")}")
-    bodies := sema_core_bodies_read(captured.core_bodies.move()) ?? panic("BodyCodec: the bodies file does not read back")
+    bodies := sema_core_bodies_read(body_codec_file(captured.core_bodies.move())) ?? panic("BodyCodec: the bodies file does not read back")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
     _ := body_codec_check(failures, "core", hooks, true, ranked, own_entry: true) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
-    if !sema_core_body_was_loaded(permit.value.core_bodies, permit.value.core_bodies_loaded, "function:<corelib>/body-codec::rank") {
+    if !sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded).has_key("function:<corelib>/body-codec::rank") {
         panic("BodyCodec: `rank`, which names `Ordering`, was checked from text in a compile with another entry")
     }
 }
@@ -655,6 +655,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
     loaded := body_codec_check(failures, package, hooks, core) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
     loaded_count := 0
+    loaded_keys: sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded)
     loop marked in permit.value.core_bodies_loaded {
         if marked -> loaded_count += 1
     }
@@ -672,7 +673,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
         row: loaded.modules[position]
         name: text.module_name
         loop function in text.functions {
-            if !sema_core_body_was_loaded(permit.value.core_bodies, permit.value.core_bodies_loaded, function.key) {
+            if !loaded_keys.has_key(function.key) {
                 failures.push("{function.key}: checked from text, not loaded")
             }
         }
@@ -762,7 +763,7 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
                 failures.push("record {record.position} was read ahead but does not load")
             }
             ahead += 1
-            hooks.core_bodies_ahead[record.owner.id] = SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size}
+            hooks.core_bodies_ahead[record.owner.id] = Val(SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size})
         }
     }
     if ahead < 6 -> failures.push("only {ahead} of {count} records were read ahead")
@@ -779,9 +780,11 @@ body_codec_load: fn(package: String, core: Bool, through_file: Bool{false}) {
             failures.push("record {position} was taken but not marked loaded")
         }
     }
-    if hooks.core_bodies_ahead.len() != 0 {
-        failures.push("{hooks.core_bodies_ahead.len()} packets read ahead were not taken")
+    left := 0
+    loop (_, row) in hooks.core_bodies_ahead {
+        if row != None -> left += 1
     }
+    if left != 0 -> failures.push("{left} packets read ahead were not taken")
     if hooks.core_bodies_read != total {
         failures.push("the takes counted {hooks.core_bodies_read} bytes read, not {total}")
     }

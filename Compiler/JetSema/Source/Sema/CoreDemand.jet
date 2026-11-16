@@ -368,6 +368,7 @@ sema_core_text_counters: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
 // and the rows of it the compile loaded, and `read` their records' bytes.
 sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], bodies: SemaCoreBodies?, loaded_rows: [Bool], read: Int, trace_sink: CompilerTraceSink?) Never! {
     sink: trace_sink ?? return
+    loaded_keys: sema_core_bodies_loaded_keys(bodies, loaded_rows)
     loaded := 0
     prelude := 0
     generic := 0
@@ -381,7 +382,7 @@ sema_core_text_count: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModule
         if !in_prelude && !module_is_core(checked.module_identity) -> next
         loop function in checked.functions {
             if function.stand_in -> next
-            if sema_core_body_was_loaded(bodies, loaded_rows, function.key) {
+            if loaded_keys.has_key(function.key) {
                 loaded += 1
                 next
             }

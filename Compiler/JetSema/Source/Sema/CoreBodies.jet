@@ -408,12 +408,28 @@ sema_core_bodies_keys: fn(bytes: [U8], input: &BodyCodecIn) -> [String] Never! {
 }
 
 // The position in `bodies` of the record keyed `key`, found by halving the
-// keys, which are in key order; None when it has none.
-sema_core_bodies_position: fn(bodies: SemaCoreBodies?, key: String) -> Int? Never! {
+// keys, which are in key order; None when it has none. A caller that looks
+// keys up in key order passes `from`, the position after the last one it
+// found: the halving then starts from steps that double away from it, so a
+// lookup near the last costs a few comparisons, not one per halving of the
+// whole file.
+sema_core_bodies_position: fn(bodies: SemaCoreBodies?, key: String, from: Int{0}) -> Int? Never! {
     if bodies == .Val(file) {
         wanted: key.bytes()
-        low := 0
+        low := from
         high := file.head.count
+        step := if from > 0 -> 1 else -> high
+        loop step < high - low {
+            probe: low + step - 1
+            order: sema_core_bodies_key_order(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, probe), wanted)
+            if order == 0 -> return Val(probe)
+            if order > 0 {
+                high = probe
+                break
+            }
+            low = probe + 1
+            step *= 2
+        }
         loop low < high {
             middle: low + (high - low) /% 2
             order: sema_core_bodies_key_order(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, middle), wanted)
@@ -453,12 +469,19 @@ sema_core_bodies_key_order: fn(bytes: [U8], at: Int, wanted: [U8]) -> Int Never!
     size - wanted.len()
 }
 
-// Whether this compile loaded the check of the function keyed `key`:
-// `loaded` is SemaRegistrationHostHooks.core_bodies_loaded, by position in
-// `bodies`.
-sema_core_body_was_loaded: fn(bodies: SemaCoreBodies?, loaded: [Bool], key: String) -> Bool Never! {
-    position: sema_core_bodies_position(bodies, key) ?? return false
-    position < loaded.len() && loaded[position]
+// The keys of the functions whose checks this compile loaded: `loaded` is
+// SemaRegistrationHostHooks.core_bodies_loaded, by position in `bodies`,
+// and each loaded record's key is read from the file once.
+sema_core_bodies_loaded_keys: fn(bodies: SemaCoreBodies?, loaded: [Bool]) -> [String:Bool] Never! {
+    keys := [String:Bool]{}
+    if bodies == .Val(file) {
+        loop position in 0..<loaded.len() {
+            if !loaded[position] || position >= file.head.count -> next
+            input := sema_core_bodies_record(file.bytes, sema_core_bodies_key_at(file.bytes, file.head, position))
+            keys[body_codec_get_string(file.bytes, input)] = true
+        }
+    }
+    keys
 }
 
 // The check of function `owner_id` of module `module_index` as the Core
@@ -508,9 +531,13 @@ sema_core_body_mark_loaded: fn(loaded: &[Bool], position: Int) Never! {
 // The packet of function `owner` that sema_core_bodies_ahead read ahead,
 // taken out of `hooks` (SemaRegistrationHostHooks.core_bodies_ahead) and
 // counted as sema_core_body_load counts a record it reads; None when none
-// was read ahead.
+// was read ahead. The take leaves None under the function's id in place: a
+// Map's removal shifts every later entry down, and a wave takes thousands of
+// packets in its module pass's order, not the Map's.
 sema_core_body_ahead_take: fn(hooks: &SemaRegistrationHostHooks, owner: SymbolID) -> SemaParallelBody? Never! {
-    row := hooks.core_bodies_ahead.remove(owner.id) ?? return None
+    if !hooks.core_bodies_ahead.has_key(owner.id) -> return None
+    displaced: hooks.core_bodies_ahead.add(owner.id, None) ?? return None
+    row := displaced.move() ?? return None
     hooks.core_bodies_read += row.size
     sema_core_body_mark_loaded(hooks.core_bodies_loaded, row.position)
     Val(row.packet.move())
@@ -670,7 +697,7 @@ sema_core_bodies_ahead_drop: fn(host_hooks: SemaHostHookAccess?) {
     access: host_hooks ?? return
     if access == .Callbacks(hooks) {
         permit: hooks.guard_edit()
-        permit.value.core_bodies_ahead = [U32:SemaCoreBodyAhead]{}
+        permit.value.core_bodies_ahead = [U32:SemaCoreBodyAhead?]{}
     }
 }
 
@@ -686,6 +713,9 @@ sema_core_bodies_ahead_read: fn(access: SemaHostHookAccess, graph: SemaRegistrat
         if permit.value.core_bodies == .Val(file) {
             if file.head.context == sema_core_bodies_context(graph) {
                 bytes := 0
+                // The keys come in key order, so each lookup starts past the
+                // last record found.
+                from := 0
                 loop start < keys.len() && bytes < SEMA_CORE_BODIES_AHEAD_ROUND_BYTES {
                     key: keys[start]
                     start += 1
@@ -694,7 +724,8 @@ sema_core_bodies_ahead_read: fn(access: SemaHostHookAccess, graph: SemaRegistrat
                         next
                     }
                     owner: symbol_find(graph.symbols, key) ?? next
-                    position: sema_core_bodies_position(permit.value.core_bodies, key) ?? next
+                    position: sema_core_bodies_position(permit.value.core_bodies, key, from) ?? next
+                    from = position + 1
                     at: sema_core_bodies_offset(file.bytes, file.head, position)
                     end: if position + 1 < file.head.count -> sema_core_bodies_offset(file.bytes, file.head, position + 1) else -> file.bytes.len()
                     bytes += end - at
@@ -720,7 +751,7 @@ sema_core_bodies_ahead_keep: fn(access: SemaHostHookAccess, done: &&[SemaCoreBod
                 record: parts[at].records.pop() ?? panic("a Core bodies round lost a record")
                 popped := parts[at].packets.pop() ?? panic("a Core bodies round lost a packet")
                 packet := popped.move() ?? next
-                permit.value.core_bodies_ahead[record.owner.id] = SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size}
+                permit.value.core_bodies_ahead[record.owner.id] = Val(SemaCoreBodyAhead{packet: packet.move(), position: record.position, size: record.size})
             }
         }
     }
