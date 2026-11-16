@@ -92,6 +92,7 @@ use jet_foundation.[
     foundation_named_type,
     integer_bounds_exact,
     measure_literal_value,
+    module_is_core,
     owned_trait_arithmetic,
     symbol_is_none,
     symbol_key_text,
@@ -2336,19 +2337,6 @@ sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_stmt_for_in_encoding_item_type: fn(name: String) -> Type? {
-    if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "JSONReader") || sema_stmt_for_in_type_is_named(Type.Named{name: name}, "CBORReader") {
-        return Val(Type.Named{name: "DataEvent"})
-    }
-    if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "JSONLReader") || sema_stmt_for_in_type_is_named(Type.Named{name: name}, "XMLReader") {
-        return Val(Type.Named{name: "Dyn"})
-    }
-    if sema_stmt_for_in_type_is_named(Type.Named{name: name}, "CSVReader") {
-        return Val(Type.Named{name: "CSVRow"})
-    }
-    None
-}
-
 // The associated types and method symbol keys of the `trait_name` impl of
 // the nominal `identity` keys, and the module that writes it: a top-level
 // impl row (the last one, as the loop source reads it), else an
@@ -2435,6 +2423,43 @@ sema_stmt_for_in_iterable_fact: fn(environment: SemaScopeEnvironment, program: S
     None
 }
 
+// A Core reader, one whose `next(&self)` answers `Item? E!` (`JSONReader`,
+// `CBORReader`, `CSVReader`, ...): the loop calls that `next` each step
+// (IR ir_encoding_reader_walk), so the item is the `Item` Core declares.
+sema_stmt_for_in_reader_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, collection_type: Type) -> SemaForInIterableFact? {
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row_at(graph, collection_type, sema_scope_caller_row(environment, graph)) ?? return None
+        if !module_is_core(graph.modules[row.module_index].nominals[row.row].symbol.module_identity) {
+            return None
+        }
+        loop method in graph.modules[row.module_index].nominals[row.row].methods {
+            if method.declaration.name != "next" -> next
+            item := sema_stmt_for_in_reader_item(method.signature) ?? next
+            if collection_type == .Apply(_, args) {
+                names: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+                item = sema_inference_substitute_type(item, names, args)
+            }
+            reader: graph.modules[row.module_index].nominals[row.row].identity_key
+            return Val(SemaForInIterableFact{method_kind: TForInMethod.EncodingReader{reader_type: reader}, item_type: item})
+        }
+    }
+    None
+}
+
+// The `Item` of a reader step `fn(&self) -> Item? E!`, or None for any other
+// signature.
+sema_stmt_for_in_reader_item: fn(signature: Type) -> Type? {
+    if signature == .Fn(params, ret, _, _, _, _) {
+        if params.len() != 1 -> return None
+        if ret == .Val(returned) {
+            if returned == .Result(ok, _) {
+                if ok == .Option(item) -> return Val(item)
+            }
+        }
+    }
+    None
+}
+
 sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInMethod? {
     if expression == {
         .MethodCall(receiver_expr, method, _, _, _, _, _) -> {
@@ -2483,20 +2508,8 @@ sema_stmt_for_in_method_kind: fn(expression: Expr, collection: TExpr) -> TForInM
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
-    if collection.ty == {
-        .Apply(name, args) -> {
-            if name == "Receiver" && args.len() == 1 -> return Val(TForInMethod.ChannelReceiver)
-            // A generic encoding reader (`JSONReader<R>`) walks like a plain one.
-            if sema_stmt_for_in_encoding_item_type(name) != None {
-                return Val(TForInMethod.EncodingReader{reader_type: name})
-            }
-        }
-        .Named(name) -> {
-            if sema_stmt_for_in_encoding_item_type(name) != None {
-                return Val(TForInMethod.EncodingReader{reader_type: name})
-            }
-        }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    if collection.ty == .Apply(name, args) {
+        if name == "Receiver" && args.len() == 1 -> return Val(TForInMethod.ChannelReceiver)
     }
     None
 }
@@ -3487,7 +3500,8 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
                         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
                     }
                 }
-                .EncodingReader(reader_type) -> return sema_stmt_for_in_encoding_item_type(reader_type)
+                // Its item is the reader fact's (iterable_item_type).
+                .EncodingReader(_) -> return None
                 .Iterable(_, _, _, _, item_type) -> return Val(item_type)
             }
         }
@@ -3501,14 +3515,12 @@ sema_stmt_for_in_item_type: fn(collection_type: Type, method_kind: TForInMethod?
             if (name == "Iter" || name == "ViewIter" || name == "Stream" || name == "View" || name == "ViewMut" || name == "ComputeViewMut" || name == "Receiver") && args.len() == 1 {
                 return Val(args[0])
             }
-            return sema_stmt_for_in_encoding_item_type(name)
         }
         .Named(name) -> {
             if name == "FileLines" || name == "StdinLines" || name == "ProcessLines" {
                 return Val(Type.String)
             }
             if name == "Range" -> return Val(Type.Int)
-            return sema_stmt_for_in_encoding_item_type(name)
         }
         .InlineRange(_, _, _) -> return Val(Type.Int)
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -10147,6 +10159,9 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         iterable_item_type := Type?{None}
                         if method_kind == None && !range_source {
                             iterable := sema_stmt_for_in_iterable_fact(environment, program, collection.ty)
+                            if iterable == None {
+                                iterable = sema_stmt_for_in_reader_fact(environment, program, collection.ty)
+                            }
                             if iterable != None {
                                 fact: iterable ?? SemaForInIterableFact{method_kind: TForInMethod.Chars, item_type: Type.Named{name: "Unit"}}
                                 method_kind = Val(fact.method_kind)
