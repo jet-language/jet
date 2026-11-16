@@ -1,0 +1,14 @@
+# A call of a user function declared and written as a Core function is
+# declared and written shows the same effects in `jet inspect` as the call of
+# the Core function: both reach what the declaration's body reaches, and a
+# declared row wider than the body (`files.scope`'s FS) adds nothing to
+# either. `queue.enqueue` shows the row its Core declaration writes.
+fixture: InspectEffectsCoreAndUserMatch/Input
+env: NO_COLOR=1
+step: jet inspect expand --facts effects --json same.jet
+exit: 0
+json: stdout doc $.semindex.effects[?function="same.core_today"][0].inferred = ["Time"]
+json: stdout doc $.semindex.effects[?function="same.core_today"][0].inferred == $.semindex.effects[?function="same.user_today"][0].inferred
+json: stdout doc $.semindex.effects[?function="same.core_scope"][0].inferred = []
+json: stdout doc $.semindex.effects[?function="same.core_scope"][0].inferred == $.semindex.effects[?function="same.user_scope"][0].inferred
+json: stdout doc $.semindex.effects[?function="same.core_enqueue"][0].inferred = ["DB","Time"]

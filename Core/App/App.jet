@@ -1432,7 +1432,8 @@ priv AppResumed: struct {
     value: String
 }
 
-// The bindings a task rendering a page read, in first-read order.
+// The bindings a task rendering a page or opening a screen (`App.__go`)
+// read, in first-read order.
 priv AppResumeReads: struct {
     task: TaskID
     ids: [Int]
@@ -1460,8 +1461,8 @@ priv resume_end: fn(task: TaskID) -> [Int] Never! {
     [Int]{}
 }
 
-// Notes that this task's page read binding `id`, when this task renders a
-// page and runs no binding's source.
+// Notes that this task's page or screen read binding `id`, when this task
+// renders a page or opens a screen and runs no binding's source.
 priv resume_note: fn(id: Int) Never! {
     if !resume_rendering() {
         return
@@ -2308,15 +2309,19 @@ App: struct {
     // `app.go(view)` as the compiler lowers it: opens the screen whose state
     // is `V`, which `state` names, at the address of the fields `names` with
     // the texts `values` (`__address_arg`): the screen becomes the current
-    // one (`__current`), and its view runs. The compiler refuses a state that
-    // no screen of the program's graph opens, so a state with no screen here
-    // is one whose graph this process has not built.
+    // one (`__current`), and its view runs. The bindings the view reads are
+    // the screen's route data (app_graph_route_data). The compiler refuses a
+    // state that no screen of the program's graph opens, so a state with no
+    // screen here is one whose graph this process has not built.
     __go: fn<V>(state: String, names: [String], values: [String]) -[Net, FS.Read]> Never! {
         fields := [String:String]{}
         loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
         graph: app_graph_open(state, fields.copy())
+        me: tasks.current_task()
+        resume_begin(me)
         _: graph.__open(screen, fields)
+        live_drop(app_graph_route_data(resume_end(me)))
     }
 
     // `app.current<V>()` as the compiler lowers it: the state of the current
@@ -2479,7 +2484,7 @@ Query: struct {
 // heads or queue yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None, route_data: [Int]{}}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -2958,8 +2963,9 @@ priv AppCurrent: struct {
 
 // The process's app graph: its title, its services by the name of each
 // (`.api`), the endpoints of the services it mounts by `{service}/{method}`,
-// its screens in the order it adds them, its offline mode and the screen
-// open now.
+// its screens in the order it adds them, its offline mode, the screen open
+// now and that screen's route data: the ids of the live bindings its view
+// read.
 priv AppGraph: struct {
     title: String
     apis: [String:AppAPI]
@@ -2967,9 +2973,10 @@ priv AppGraph: struct {
     screens: [AppScreen]
     offline: Offline
     current: AppCurrent?
+    route_data: [Int]
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None, route_data: [Int]{}}}
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.
@@ -2985,6 +2992,22 @@ priv app_graph_open: fn(state: String, fields: [String:String]) -> App Never! {
     held := APP_GRAPH.guard_edit()
     held.value.current = Val(AppCurrent{state: state, fields: fields})
     App{title: held.value.title.copy()}
+}
+
+// Makes the bindings `reads` the route data of the screen open now and
+// gives the ones the screen before it read that this one does not, which
+// no open screen holds any more. A binding is keyed by its source and
+// arguments (live_register), so route data is keyed by the route's
+// arguments; a write that meets a binding's read set makes it stale, and
+// the screen's next read runs its source again (`state`).
+priv app_graph_route_data: fn(reads: [Int]) -> [Int] Never! {
+    held := APP_GRAPH.guard_edit()
+    left := [Int]{}
+    loop id in held.value.route_data {
+        if !reads.contains(id) -> left.push(id)
+    }
+    held.value.route_data = reads
+    left
 }
 
 // The screen open now (`App.__go`); None before one opens.
@@ -4647,6 +4670,27 @@ live_register: fn(source: String, key: String, caller: String, every_ns: Int) ->
             registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, generation: 0, overtaken: 0, held_ns: 0, every_ns: every_ns, ran_ns: 0, reads: [String]{}, caller: caller.copy()})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return found
+    }
+}
+
+// Removes the bindings `ids` from the registry with their stored results
+// and read sets: the data of a screen that left. A screen that reads one
+// again registers it anew and runs its source.
+priv live_drop: fn(ids: [Int]) {
+    if ids.len() == 0 {
+        return
+    }
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        kept := [LiveRecord]{}
+        loop record in registry.records {
+            if record.source == LIVE_SYNC_SOURCE || !ids.contains(record.id) -> kept.push(record)
+        }
+        registry.records = kept
+        if live_cell_replace(seen, live_encode(registry)) {
+            return
+        }
     }
 }
 

@@ -1,0 +1,33 @@
+// Each user function is declared and written as Core declares and writes the
+// Core function beside it: `time.today` (its row is what its body reaches)
+// and `files.scope` (its `-[FS]>` row is wider than its body). A call of either
+// reaches the same effects as the call of its Core twin.
+use {
+    core.files
+    core.jobs
+    core.time
+}
+
+today: fn() -[Time]> time.LocalDate Never! { time.now_utc().date() }
+
+scope: fn(authority: Authority) -[FS]> files.FileScope Never! { {authority: authority} }
+
+core_today: fn() { _: time.today() }
+
+user_today: fn() { _: today() }
+
+core_scope: fn(authority: Authority) { _: files.scope(authority) }
+
+user_scope: fn(authority: Authority) { _: scope(authority) }
+
+#Job(.Dev) process: fn(payload: String) { print("job:{payload}") }
+
+// `queue.enqueue` forwards to `core.jobs.__enqueue`, declared `-[DB, Time]>`.
+core_enqueue: fn(queue: &jobs.JobQueue) { _: queue.enqueue(process, "now") ?? return }
+
+main: fn() {
+    core_today()
+    user_today()
+    queue := jobs.queue() ?? return
+    core_enqueue(queue)
+}

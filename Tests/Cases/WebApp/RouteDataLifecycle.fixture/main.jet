@@ -1,0 +1,160 @@
+// A screen's route data is the live bindings its view reads. The task
+// screen reads its task's title, keyed by the task's id, and the task count;
+// the board screen reads only the count.
+use {
+    app
+    db: core.db
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+TaskError: enum {
+    Unopened
+    Read
+}
+
+// The app's database handles, which the query functions read through, how
+// many times each query function ran, and the page the last screen showed.
+Store: struct {
+    tasks: db.DBScope?
+    title_runs: Int
+    count_runs: Int
+    page: String
+}
+
+STORE: Shared{Store{tasks: None, title_runs: 0, count_runs: 0, page: ""}}
+
+TaskView: struct {
+    id: String
+}
+
+BoardView: struct {
+    name: String
+}
+
+// A task's title; it reads the tasks table.
+task_title: fn(id: String) -[DB.Read]> String TaskError! {
+    store := STORE.guard_edit()
+    store.value.title_runs += 1
+    scope: store.value.tasks ?? return Err(TaskError.Unopened)
+    rows: scope.query(SQL{"SELECT title FROM tasks WHERE id = {id}"}) ?? return Err(TaskError.Read)
+    if rows.len() == 0 -> return "none"
+    db.row_text(rows[0], "title") ?? "?"
+}
+
+// How many tasks there are; it reads the tasks table too.
+task_count: fn() -[DB.Read]> Int TaskError! {
+    store := STORE.guard_edit()
+    store.value.count_runs += 1
+    scope: store.value.tasks ?? return Err(TaskError.Unopened)
+    rows: scope.query(SQL{"SELECT id FROM tasks"}) ?? return Err(TaskError.Read)
+    rows.len()
+}
+
+shown: fn(state: Loadable<String, TaskError>) -> String Never! {
+    if state == {
+        .Loaded(text) -> text.copy()
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+counted: fn(state: Loadable<Int, TaskError>) -> String Never! {
+    if state == {
+        .Loaded(count) -> "{count}"
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+shows: fn(page: String) -> String Never! {
+    store := STORE.guard_edit()
+    store.value.page = page.copy()
+    page.copy()
+}
+
+task_screen: fn(view: TaskView) -> String Never! {
+    title: app.live(task_title, view.id.copy())
+    count: app.live(task_count)
+    shows("{shown(app.state(title))} of {counted(app.state(count))}")
+}
+
+board_screen: fn(view: BoardView) -> String Never! {
+    count: app.live(task_count)
+    shows("{view.name}: {counted(app.state(count))} tasks")
+}
+
+graph: fn() -> app.App Never! {
+    app.new("Tasks").screen("/tasks/:id", task_screen).screen("/boards/:name", board_screen)
+}
+
+// The page shown, the query runs and the bindings the registry holds.
+after: fn(step: String) -> String Never! {
+    store: STORE.guard_read()
+    stats: app.live_stats()
+    queries: stats.split("queries=").to_list()[1].split(",").to_list()[0]
+    invalidations: stats.split("invalidations=").to_list()[1].split(",").to_list()[0]
+    "{step}: {store.value.page} | title runs={store.value.title_runs} count runs={store.value.count_runs} | queries={queries} invalidations={invalidations}"
+}
+
+add_task: fn(scope: db.DBScope, id: String, title: String) {
+    owner: "alice"
+    _: scope.execute(SQL{"INSERT INTO tasks (owner, id, title) VALUES ({owner}, {id}, {title})"}) ?? panic("insert task")
+}
+
+keep: fn(tasks: db.DBScope) {
+    store := STORE.guard_edit()
+    store.value.tasks = Val(tasks.copy())
+}
+
+run: fn() {
+    conn: db.open_memory()
+    task_policy: db.policy("tasks", "owner == user") ?? panic("tasks policy")
+    note_policy: db.policy("notes", "owner == user") ?? panic("notes policy")
+    tasks: conn.with_policy(task_policy, "alice")
+    notes: conn.with_policy(note_policy, "alice")
+    _: db.migrate(tasks, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, id TEXT, title TEXT)"}}) ?? panic("migrate tasks")
+    _: db.migrate(notes, "notes-v1", [db.SQL]{SQL{"CREATE TABLE notes (owner TEXT, body TEXT)"}}) ?? panic("migrate notes")
+    add_task(tasks, "7", "seven")
+    add_task(tasks, "8", "eight")
+    keep(tasks)
+    _: graph()
+
+    // Opening a screen fetches its route data.
+    app.go(TaskView{id: "7"})
+    print(after("open task 7"))
+
+    // Data is keyed by the route's arguments: task 8's title is its own
+    // binding, and the count both tasks read is shared. Task 7's title is
+    // dropped with the screen that read it.
+    app.go(TaskView{id: "8"})
+    print(after("open task 8"))
+
+    // The same address reads its data again without running a query.
+    app.go(TaskView{id: "8"})
+    print(after("reopen task 8"))
+
+    // A write outside the screen's read set leaves its data current.
+    owner: "alice"
+    body: "hello"
+    _: notes.execute(SQL{"INSERT INTO notes (owner, body) VALUES ({owner}, {body})"}) ?? panic("insert note")
+    app.go(TaskView{id: "8"})
+    print(after("after a note insert"))
+
+    // A write that meets the read set makes the data stale, and the screen
+    // refetches it.
+    renamed: "eight!"
+    id: "8"
+    _: tasks.execute(SQL{"UPDATE tasks SET title = {renamed} WHERE id = {id}"}) ?? panic("update task")
+    app.go(TaskView{id: "8"})
+    print(after("after a task update"))
+
+    // Another screen keeps the data it shares and drops the rest once the
+    // last screen that read it leaves.
+    app.go(BoardView{name: "launch"})
+    print(after("open the board"))
+
+    // Coming back fetches the dropped data again.
+    app.go(TaskView{id: "8"})
+    print(after("back to task 8"))
+}
