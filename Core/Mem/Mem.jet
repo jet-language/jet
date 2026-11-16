@@ -346,7 +346,9 @@ __ContextAllocator: struct {
 
         release: fn(&self, block: &&Block) Never! {
             __context_give(block.address, block.size)
-            #Unsafe("the block's bytes went back to the allocator that served them") { consume(block) }
+            #Unsafe("the block's bytes went back to the allocator that served them") {
+                consume(block)
+            }
         }
 
         resize: fn(&self, block: &Block, new_size: Int) -> Bool Never! {
