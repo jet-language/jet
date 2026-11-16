@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1017</code>: <code>tests/ui/inline_always_reads_trace.stderr</code>.</p>
 <pre class="diag">Error [jet.InlineAlwaysReadsTrace]: `depth` reads `context.trace`, so `#Inline(Always)` cannot expand it
-  --&gt; tests/ui/inline_always_reads_trace.jet:3:38
+  --&gt; tests/ui/inline_always_reads_trace.jet:3:46
     |
   3 | #Inline(Always) depth: fn() -&gt; Int { context.trace.len() }
-    |                                      ^^^^^^^^^^^^^
+    |                                              ^^^^^
  Why: `context.trace` starts at the reading function&#39;s own frame, and an inlined copy has no frame of its own: the trace would name the caller instead.
  Fix: Drop `#Inline(Always)`, or read `context.trace` in the function that calls `depth`.
 More: jet-lang.dev/e/E1017

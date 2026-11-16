@@ -38,10 +38,10 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1016</code>: <code>tests/ui/inline_always_scrub.stderr</code>.</p>
 <pre class="diag">Error [jet.InlineAlwaysScrub]: `redact` is `#Scrub`, so `#Inline(Always)` cannot expand it
-  --&gt; tests/ui/inline_always_scrub.jet:4:1
+  --&gt; tests/ui/inline_always_scrub.jet:4:3
     |
-  4 | #Inline(Always) #Scrub(PII) redact: fn(value: #PII String) -&gt; String { value }
-    | ^^^^^^^^^^^^^^^
+  4 | #[Inline(Always), Scrub(PII)]
+    |   ^^^^^^^^^^^^^^
  Why: A `#Scrub` routine reveals a fixed value as a public result, and only its own call keeps that value fixed up to the result; an inlined copy would let the fixed value flow on into the caller&#39;s code.
  Fix: Drop `#Inline(Always)`; a `#Scrub` routine stays a call.
 More: jet-lang.dev/e/E1016
