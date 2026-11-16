@@ -1,0 +1,16 @@
+use {
+    app
+    local: core.browser.storage.local
+    web: core.web
+}
+
+// Server code: `save` is an endpoint, so the server runs its body for the
+// caller. Local storage is in the caller's page, which the server never has.
+Drafts: struct {
+    #App.SignedIn save: fn(self, draft: String) -> Int {
+        local.set("draft", draft)
+        draft.len()
+    }
+}
+
+run: fn() { _: web.app().mount(Drafts{}) }

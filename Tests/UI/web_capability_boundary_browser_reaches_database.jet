@@ -1,0 +1,15 @@
+use {
+    db: core.db
+    local: core.browser.storage.local
+}
+
+// Browser code: `remember` is pinned to the page, where a draft stays in the
+// page's local storage. A database is on the server, which the page never
+// reaches.
+#Target(JS)
+remember: fn(draft: String) {
+    _: db.open_memory()
+    local.set("draft", draft)
+}
+
+run: fn() { remember("hello") }

@@ -1,0 +1,8 @@
+Error [jet.BrowserCodeReachesServerResource]: `remember` runs in the page, but it reaches `DB`, which only the server has.
+  --> Tests/UI/web_capability_boundary_browser_reaches_database.jet:10:1
+    |
+ 10 | remember: fn(draft: String) {
+    | ^^^^^^^^
+ Why: Code in JS (pinned `#Target(JS)`, using the `Browser` effect, or called from code that is) runs in the page, and a database or a secret stays on the server, so the page can never reach it; it is reported where the page first reaches it.
+ Fix: Move the `DB` work into a method of a service marked `#App.SignedIn` or `#App.Public` and call it through `app.Remote`, or keep `remember` out of the page.
+More: jet-lang.dev/e/E2823

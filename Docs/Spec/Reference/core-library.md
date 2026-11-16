@@ -5801,6 +5801,15 @@ calls one, each runs as the system (`db.Who.System`), which no row policy
 limits, and `jet inspect choices` lists it as a `rights` row under its
 marker.
 
+Code runs on the side of the app boundary that has what it uses. An
+endpoint, a job, a schedule, a webhook and a signing key run on the server,
+so such a method that uses the `Browser` effect is E2824
+(`jet.ServerCodeUsesBrowser`), at the method's name. In a program that opts
+in to the web partition, a function the partition places in JS runs in the
+page, so one that reaches a server resource (`DB` or `Secret`) is E2823
+(`jet.BrowserCodeReachesServerResource`), at the function where the page
+first reaches it: the one whose own JS callees reach none.
+
 The app graph is the program's one client-safe description: its services,
 its screens and how it works offline. `app.new(title)` starts it, and each
 call below gives the graph back, so the calls chain. Every target runs the
