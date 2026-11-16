@@ -545,6 +545,32 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
     }
 }
 
+// The order of the data objects functions and data exports reach, which
+// `placed` marks: where the text first reaches each, in function order, a
+// function's objects in relocation order with the objects their
+// relocations reach right after them, then the data exports (`data_rows`)
+// and what they reach, then the objects only code on its way to a stop
+// reads (X64Data cold: a bounds stop's site, a `panic` report's texts), in
+// the same order. With the hot functions first (ir_x64_hot_order) a short
+// run reads its data from few pages, with no stop's report between them.
+x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], data_rows: [Int], placed: &[Bool]) -> [Int] Never! {
+    order := [Int]{}
+    loop function in functions {
+        loop reloc in function.relocs {
+            if reloc.target == .Data(id) && !(id.value >= 0 && id.value < data.len() && data[id.value].cold) {
+                x64_object_data_place(data, id.value, placed, order)
+            }
+        }
+    }
+    loop index in data_rows -> x64_object_data_place(data, index, placed, order)
+    loop function in functions {
+        loop reloc in function.relocs {
+            if reloc.target == .Data(id) -> x64_object_data_place(data, id.value, placed, order)
+        }
+    }
+    order
+}
+
 #Test("Data objects are placed in first-reference order, depth first through their relocations") {
     // Object i's relocations reach the objects targets[i] names, in order.
     targets: [[Int]]{[Int]{2}, [Int]{}, [Int]{1, 4}, [Int]{}, [Int]{0}}
@@ -564,6 +590,30 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
     x64_object_data_place(data, 0, placed, order)
     loop index in 0..<data.len() -> x64_object_data_place(data, index, placed, order)
     assert_eq(order, [Int]{2, 1, 4, 0, 3})
+}
+
+#Test("The objects only code on its way to a stop reads go after every other reached object") {
+    // Object 4 reaches object 1; objects 0 and 3 are cold, object 1 is
+    // cold but a hot object reaches it, object 5 nothing reaches.
+    data := [X64Data]{}
+    loop row in 0..<6 {
+        relocs := [X64DataReloc]{}
+        if row == 4 -> relocs.push(X64DataReloc{offset: 0, target: X64DataID{value: 1}, addend: 0})
+        data.push(X64Data{id: X64DataID{value: row}, bytes: [U8]{0}, align: 1, relocs: relocs, read_only: true, cold: row == 0 || row == 1 || row == 3})
+    }
+    // Function i reads the objects reads[i] names, in order.
+    reads: [[Int]]{[Int]{3, 2}, [Int]{0, 4}}
+    functions := [X64CompiledFunction]{}
+    loop (index, rows) in reads {
+        relocs := [X64Reloc]{}
+        loop (at, row) in rows {
+            relocs.push(X64Reloc{at: 4 * at, target: X64RelocTarget.Data{id: X64DataID{value: row}}})
+        }
+        functions.push(X64CompiledFunction{id: X64FunctionID{value: index}, name: "f{index}", code: [U8]{}, relocs: relocs, align: 16})
+    }
+    placed := [Bool]{false, false, false, false, false, false}
+    assert_eq(x64_object_data_order(data, functions, [Int]{}, placed), [Int]{2, 4, 1, 3, 0})
+    assert(!placed[5])
 }
 
 // The little-endian field of `width` bytes at `at`.
@@ -841,13 +891,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         }
         extended = ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + program.data.len() + hooks) + 1 >= ELF64_OBJECT_SECTION_LIMIT
     }
-    // `.data` and `.rodata` hold each object where the text first reaches it:
-    // in function order, each function's objects in relocation order with
-    // the objects their relocations reach right after them, then the data
-    // exports and what they reach. An object nothing reaches is not written:
-    // a folded String the program reads no byte of costs no file bytes. With
-    // the hot functions first (ir_x64_hot_order) a short run then reads its
-    // data from few pages.
+    // `.data` and `.rodata` hold each object in x64_object_data_order. An
+    // object nothing reaches is not written: a folded String the program
+    // reads no byte of costs no file bytes.
     data := [U8]{}
     data_align := 1
     rodata := [U8]{}
@@ -857,15 +903,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     placed := [Bool]{}
     if !own_sections {
         loop _ in program.data -> placed.push(false)
-        order := [Int]{}
-        loop function in functions {
-            loop reloc in function.relocs {
-                if reloc.target == .Data(id) {
-                    x64_object_data_place(program.data, id.value, placed, order)
-                }
-            }
-        }
-        loop index in data_rows -> x64_object_data_place(program.data, index, placed, order)
+        order: x64_object_data_order(program.data, functions, data_rows, placed)
         loop index in order {
             object: program.data[index]
             if x64_object_read_only(object) {

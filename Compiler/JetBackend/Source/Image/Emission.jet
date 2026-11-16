@@ -162,12 +162,16 @@ X64DataReloc: struct {
 // `read_only`: no code writes the object (a text row's bytes). The object
 // writer puts such an object in `.rodata`, which loads read-only, when it
 // holds no address word; every other object is writable `.data`.
+// `cold`: only code on its way to a stop reads it (a bounds stop's site, a
+// `panic` report's texts), so the object writer lays it after the objects
+// running code reads (Object.jet x64_object_lay).
 X64Data: struct {
     id: X64DataID
     bytes: [U8]
     align: Int
     relocs: [X64DataReloc]
     read_only: Bool{false}
+    cold: Bool{false}
 }
 
 // The source facts of one compiled function: `file` is a row of

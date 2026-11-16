@@ -60,6 +60,9 @@ IRX64Tables: struct {
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
     fma: Int
+    // Per data row, whether code that goes on reads it (ir_x64_tables_heat);
+    // rows past its end are not.
+    hot: [Bool]{[Bool]{}}
 }
 
 // A data row a function's selection names besides the IR data rows: a
@@ -98,6 +101,11 @@ IRX64FunctionTables: struct {
     // Whether the selection keeps an emission log (JET_X64_EMIT_LOG,
     // ir_x64_compile_module_logged).
     logged: Bool
+    // The data rows its DataAddress and ConstText instructions read (module
+    // rows, a header as its local row), `cold` those on the way to a stop
+    // (ir_x64_dying), `hot` the others; ir_x64_tables_heat marks them.
+    hot: [Int]{[Int]{}}
+    cold: [Int]{[Int]{}}
 }
 
 // Whether JET_X64_EMIT_LOG entry list `names` names function `f`: an entry
@@ -332,7 +340,8 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
     tables := ir_x64_tables_start(m)
     loop (row, f) in m.functions {
         local: ir_x64_function_tables(m, row, [String]{})
-        _ := ir_x64_tables_add(tables, f, local.uses)
+        rows: ir_x64_tables_add(tables, f, local.uses)
+        ir_x64_tables_heat(tables, rows, local.hot, local.cold)
     }
     ir_x64_tables_finish(m, tables)
     tables
@@ -413,6 +422,28 @@ ir_x64_tables_finish: fn(m: IRModule, tables: &IRX64Tables) Never! {
     ir_x64_debug_types(m, tables)
 }
 
+// Marks the data rows a function's code reads (IRX64FunctionTables hot and
+// cold; use k as IR_X64_LOCAL_DATA + k, which `rows`, the module rows of its
+// uses, resolves), the next in function order: a row only code on its way
+// to a stop reads is cold (X64Data.cold), so the object writer lays it
+// after what running code reads. Any order of the functions marks the same.
+ir_x64_tables_heat: fn(tables: &IRX64Tables, rows: [Int], hot: [Int], cold: [Int]) Never! {
+    loop wanted in hot {
+        row: if wanted >= IR_X64_LOCAL_DATA -> rows[wanted - IR_X64_LOCAL_DATA] else -> wanted
+        if row < 0 || row >= tables.data.len() -> next
+        loop tables.hot.len() <= row -> tables.hot.push(false)
+        tables.hot[row] = true
+        tables.data[row].cold = false
+    }
+    loop wanted in cold {
+        row: if wanted >= IR_X64_LOCAL_DATA -> rows[wanted - IR_X64_LOCAL_DATA] else -> wanted
+        if row < 0 || row >= tables.data.len() || (row < tables.hot.len() && tables.hot[row]) {
+            next
+        }
+        tables.data[row].cold = true
+    }
+}
+
 // Points each data relocation of `function` at use k (data row
 // IR_X64_LOCAL_DATA + k) at `rows[k]`, the module's row of that use.
 ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
@@ -428,19 +459,32 @@ ir_x64_resolve: fn(function: &X64CompiledFunction, rows: [Int]) Never! {
 // texts of its numeric stops (ir_x64_add_stop_texts), a ConstText's String
 // header, a ConstBigInt's decimal and static Int, the FMA byte of a
 // jet_std_math_fma call. Its selection keeps an emission log when
-// JET_X64_EMIT_LOG entry list `names` names it (ir_x64_log_names).
+// JET_X64_EMIT_LOG entry list `names` names it (ir_x64_log_names). The
+// data rows its DataAddress and ConstText instructions read go in `hot`, or
+// in `cold` when the instruction is on its way to a stop (ir_x64_dying).
 ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64FunctionTables Never! {
     f: m.functions[row]
     tables := IRX64FunctionTables{uses: [IRX64Use]{}, lengths: [Int]{}, texts: [String:Int]{}, headers: [Int:Int]{}, ints: [String:Int]{}, fma: -1, logged: ir_x64_log_names(f, names)}
     _ := ir_x64_use_text(tables, f.source_file)
     // The stop texts already in (ir_x64_add_stop_texts).
     stops := [Bool]{false, false, false, false}
+    // The DataAddress and ConstText instructions, with the row each reads.
+    reads := [Int]{}
+    read_rows := [Int]{}
     loop at in 0..<f.op.len() {
         ir_x64_add_stop_texts(tables, stops, m, f, at)
+        if f.op[at] == .DataAddress && f.a[at] >= 0 && f.a[at] < m.data.len() {
+            reads.push(at)
+            read_rows.push(f.a[at])
+        }
         if f.op[at] == .ConstText {
             data: f.a[at]
-            if data >= 0 && data < m.data.len() && tables.headers.get(data) == None {
-                tables.headers[data] = ir_x64_add_use(tables, IRX64Use.Header{row: data}, 24)
+            if data >= 0 && data < m.data.len() {
+                if tables.headers.get(data) == None {
+                    tables.headers[data] = ir_x64_add_use(tables, IRX64Use.Header{row: data}, 24)
+                }
+                reads.push(at)
+                read_rows.push(tables.headers[data])
             }
         }
         if f.op[at] == .ConstBigInt && f.a[at] >= 0 && f.a[at] < m.names.len() {
@@ -454,7 +498,83 @@ ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
             tables.fma = ir_x64_add_use(tables, IRX64Use.Fma, 1)
         }
     }
+    if reads.len() > 0 {
+        dying: ir_x64_dying(f)
+        loop (index, at) in reads {
+            if dying[at] -> tables.cold.push(read_rows[index]) else {
+                tables.hot.push(read_rows[index])
+            }
+        }
+    }
     tables
+}
+
+// Per instruction of `f`, whether every way on from it ends at an
+// Unreachable: the arm of a stop that builds its report and calls the
+// runtime function that ends the program. Read backward: an Unreachable
+// starts such a run and a Br, BrIf or Return ends it (control may leave);
+// an arm's last instruction goes on to what follows its End (a Loop's
+// too: its End falls through), an If's start is such when both its arms'
+// starts are (an If without Else: its then arm's and what follows its End),
+// and a Block's or Loop's when its body's start is.
+ir_x64_dying: fn(f: IRFunction) -> [Bool] Never! {
+    count: f.op.len()
+    dying := [Bool]{}
+    loop _ in 0..<count -> dying.push(false)
+    // Per construct open in the backward walk: whether what follows its
+    // End dies, and whether its else arm's start dies (what follows the End
+    // until an Else is met).
+    after := [Bool]{}
+    other := [Bool]{}
+    dies := false
+    at := count - 1
+    loop at >= 0 {
+        op: f.op[at]
+        if op == .Unreachable -> dies = true else if op == .Br || op == .BrIf || op == .Return {
+            dies = false
+        } else if op == .End {
+            after.push(dies)
+            other.push(dies)
+        } else if op == .Else {
+            if other.len() > 0 {
+                other[other.len() - 1] = dies
+                dies = after[after.len() - 1]
+            }
+        } else if op == .If {
+            else_dies: other.pop() ?? false
+            _ := after.pop()
+            dies = dies && else_dies
+        } else if op == .Block || op == .Loop {
+            _ := other.pop()
+            _ := after.pop()
+        }
+        dying[at] = dies
+        at -= 1
+    }
+    dying
+}
+
+#Test("The instructions on the way to an Unreachable are the dying ones") {
+    f := ir_function_new("f", "f", "", "f.jet", 1)
+    _ := ir_emit(f, IROp.DataAddress, -1, 0, -1, -1, 1)
+    // A stop's then arm and an else arm that goes on.
+    _ := ir_open_if(f, -1, 1)
+    _ := ir_emit(f, IROp.DataAddress, -1, 0, -1, -1, 1)
+    _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 1)
+    ir_else(f, 1)
+    _ := ir_emit(f, IROp.DataAddress, -1, 0, -1, -1, 1)
+    ir_end(f, 1)
+    // A Block a BrIf leaves, ahead of the Unreachable after it.
+    _ := ir_open(f, IROp.Block, 1)
+    _ := ir_open_if(f, -1, 1)
+    _ := ir_emit(f, IROp.DataAddress, -1, 0, -1, -1, 1)
+    _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 1)
+    ir_end(f, 1)
+    _ := ir_emit(f, IROp.BrIf, -1, -1, 0, -1, 1)
+    _ := ir_emit(f, IROp.DataAddress, -1, 0, -1, -1, 1)
+    ir_end(f, 1)
+    _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 1)
+    assert_eq(ir_x64_dying(f), [Bool]{false, false, true, true, false, false, false, false, false, true, true, false, false, true, true, true})
 }
 
 // Adds use `wanted`, of `length` bytes; returns its local data row.
@@ -571,7 +691,9 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
         tables := ir_x64_tables_start(m)
         loop row in 0..<count {
             compiled := ir_x64_select_function(m, row, names)
-            ir_x64_resolve(compiled.function, ir_x64_tables_add(tables, m.functions[row], compiled.uses))
+            rows: ir_x64_tables_add(tables, m.functions[row], compiled.uses)
+            ir_x64_resolve(compiled.function, rows)
+            ir_x64_tables_heat(tables, rows, compiled.hot, compiled.cold)
             errors.extend(compiler_take_rows<String>(compiled.errors))
             log.extend(compiler_take_rows<String>(compiled.log))
             functions.push(compiled.function.move())
@@ -597,6 +719,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     row_errors := [[String]]{}
     row_logs := [[String]]{}
     row_uses := [[IRX64Use]]{}
+    row_hot := [[Int]]{}
+    row_cold := [[Int]]{}
     row := count - 1
     loop row >= 0 {
         taken := outputs.pop() ?? panic("the x64 selection lost a function row")
@@ -606,6 +730,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
             row_errors.push(compiler_take_rows<String>(selected.errors))
             row_logs.push(compiler_take_rows<String>(selected.log))
             row_uses.push(compiler_take_rows<IRX64Use>(selected.uses))
+            row_hot.push(compiler_take_rows<Int>(selected.hot))
+            row_cold.push(compiler_take_rows<Int>(selected.cold))
             functions.push(selected.function.move())
             debug.push(selected.debug.move())
             variables.push(selected.variables.move())
@@ -613,6 +739,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
             row_errors.push([String]{"{shells.programs[0].functions[row].name}: selection stopped: {stop}"})
             row_logs.push([String]{})
             row_uses.push([IRX64Use]{})
+            row_hot.push([Int]{})
+            row_cold.push([Int]{})
             functions.push(X64CompiledFunction{id: X64FunctionID{value: row}, name: shells.programs[0].functions[row].name, code: [U8]{}, relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN})
             debug.push(X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: [U8]{}, ranges: [X64VariableRange]{}})
             variables.push([X64DebugVariable]{})
@@ -623,6 +751,8 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     debug.reverse()
     variables.reverse()
     row_uses.reverse()
+    row_hot.reverse()
+    row_cold.reverse()
     loop row_errors.len() > 0 {
         listed := row_errors.pop() ?? {
             break
@@ -637,7 +767,11 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
     }
     program_back := shells.programs.pop() ?? panic("the x64 selection inputs lost the module")
     tables := ir_x64_tables_start(program_back)
-    loop (at, uses) in row_uses -> ir_x64_resolve(functions[at], ir_x64_tables_add(tables, program_back.functions[at], uses))
+    loop (at, uses) in row_uses {
+        rows: ir_x64_tables_add(tables, program_back.functions[at], uses)
+        ir_x64_resolve(functions[at], rows)
+        ir_x64_tables_heat(tables, rows, row_hot[at], row_cold[at])
+    }
     ir_x64_tables_finish(program_back, tables)
     IRX64Result{program: program_back.move(), functions: functions.move(), debug: debug.move(), variables: variables.move(), errors: errors.move(), tables: tables.move(), threads: threads, log: log.move()}
 }
