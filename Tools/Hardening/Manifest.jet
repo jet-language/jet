@@ -139,10 +139,12 @@ parse_exclusions: fn(text: String) -> [Exclusion] Err! {
     Ok(out)
 }
 
-// Tests/Conformance/Corpus/Core/Text/lower.jet witnesses `core.text.lower`.
+// Tests/Conformance/Corpus/Core/Text/lower.jet witnesses `core.text.lower`:
+// the folders spell the module path in TitleCase, the file name the member.
 witness_key: fn(path: String) -> String Never! {
-    relative: path.slice(CORPUS_ROOT.len() + 1..<path.len() - 4)
-    relative.split("/").to_list().join(".")
+    parts: path.slice(CORPUS_ROOT.len() + 1..<path.len() - 4).split("/").to_list()
+    segments: loop (index, part) in parts -> if index + 1 < parts.len() -> part.to_lower() else -> part.copy()
+    segments.join(".")
 }
 
 exclusion_row_id: fn(key: String) -> String Never! {
