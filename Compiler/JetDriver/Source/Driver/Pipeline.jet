@@ -18,6 +18,7 @@ use {
         SemaComptimeItemSource,
         SemaComptimeItemValue,
         SemaComptimeValueSites,
+        SemaComptimeScopes,
         SemaForeignProviderInput,
         SemaFunctionMemoryPlan,
         SemaGraphTrail,
@@ -42,7 +43,6 @@ use {
         sema_derive_template_loop_waits,
         SemaProgramTables,
         SemaScopeEnvironment,
-        SemaScopeProbe,
         SemaSourceLocation,
         SemaSourceOrigin,
         SemaSourceSegment,
@@ -96,7 +96,7 @@ use {
         sema_comptime_walk_run,
         sema_comptime_walk_take,
         sema_comptime_replay_demand,
-        sema_comptime_probe_init,
+        sema_comptime_scopes_init,
         sema_comptime_value_sites,
         sema_comptime_value_sites_empty,
         sema_copy_facts_table_empty,
@@ -1535,7 +1535,7 @@ jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: &JetD
 jet_driver_comptime_function_closure: fn(
     environment: &SemaScopeEnvironment,
     program: SemaProgramTables,
-    probe: &SemaScopeProbe,
+    comptime_scopes: &SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     index: &JetDriverComptimeRunIndex,
     memory_plan: &[SemaFunctionMemoryPlan],
@@ -1643,7 +1643,7 @@ jet_driver_comptime_function_closure: fn(
             settled_foreign -> index.nodes[node].foreign ?? panic("a settled foreign closure node lost its check")
             reused_row >= 0 -> checked_functions[reused_row]
             waiting_row >= 0 -> index.waiting_functions[waiting_row]
-            else -> jet_driver_comptime_prefetched(index, node, program, values) ?? sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
+            else -> jet_driver_comptime_prefetched(index, node, program, values) ?? sema_check_comptime_function(graph, environment, program, comptime_scopes, available, memory_plan[0], values, current.module_identity, current.function_key)
         }
         if fresh && checked.waiting_dependencies.len() > 0 {
             if waited_row >= 0 -> index.waiting_functions[waited_row] = checked.copy() else {
@@ -2532,7 +2532,7 @@ jet_driver_comptime_local_value_eval_reason: fn(result: JetEvalIRResult) -> Stri
 jet_driver_module_value_refused: fn(
     environment: &SemaScopeEnvironment,
     program: &SemaProgramTables,
-    probe: &SemaScopeProbe,
+    comptime_scopes: &SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     source: SemaComptimeItemSource,
     reported: Bool,
@@ -2542,7 +2542,7 @@ jet_driver_module_value_refused: fn(
     runtime := source.copy()
     runtime.module_value = false
     runtime.runtime_check = true
-    checked := sema_check_comptime_item(environment, program, probe, available, runtime)
+    checked := sema_check_comptime_item(environment, program, comptime_scopes, available, runtime)
     loop diagnostic in checked.diagnostics {
         if reported && diagnostic.severity != DIAGNOSTIC_ERROR -> next
         diagnostics.push(jet_driver_attach_program_source_location(diagnostic, program, source.module_identity))
@@ -2558,13 +2558,13 @@ jet_driver_module_value_refused: fn(
 jet_driver_module_values_refused: fn(
     environment: &SemaScopeEnvironment,
     program: &SemaProgramTables,
-    probe: &SemaScopeProbe,
+    comptime_scopes: &SemaComptimeScopes,
     available: SemaComptimeAvailableConstants,
     refusals: [JetDriverModuleValueRefusal],
     diagnostics: &[Diagnostic],
 ) -> Bool {
     loop refusal in refusals {
-        jet_driver_module_value_refused(environment, program, probe, available, refusal.source, true, refusal.reason, diagnostics)
+        jet_driver_module_value_refused(environment, program, comptime_scopes, available, refusal.source, true, refusal.reason, diagnostics)
     }
     refusals.len() > 0
 }
@@ -3327,7 +3327,7 @@ jet_driver_comptime_run: fn(
     known_sources := [String:Bool]{}
     loop source in sources -> known_sources["{source.module_identity.id}\n{source.key}"] = true
     // The module scope every item and function check of the run checks in.
-    probe := sema_comptime_probe_init(sema_host_hook_access(request.eval_config.host_hooks))
+    comptime_scopes := sema_comptime_scopes_init(sema_host_hook_access(request.eval_config.host_hooks))
     resolved_count := values.len()
     // Constants' AST values, which staged values never change, read in place.
     available := jet_driver_comptime_program_available(programs[0], values)
@@ -3427,7 +3427,7 @@ jet_driver_comptime_run: fn(
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
-            if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                 refused_any = true
                 stop_mark = diagnostics.len()
             }
@@ -3478,7 +3478,7 @@ jet_driver_comptime_run: fn(
                 if request.trace_sink == .Val(sink) {
                     sink.begin_item("comptime.check", source.source_file, source.name)
                 }
-                checked_item := jet_driver_comptime_prechecked(precheck, available, batch, prechecked_typed) ?? sema_check_comptime_item(environments[0], programs[0], probe, available, source)
+                checked_item := jet_driver_comptime_prechecked(precheck, available, batch, prechecked_typed) ?? sema_check_comptime_item(environments[0], programs[0], comptime_scopes, available, source)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
@@ -3497,7 +3497,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -3510,7 +3510,7 @@ jet_driver_comptime_run: fn(
                         if request.trace_sink == .Val(sink) {
                             sink.begin_item("comptime.check", source.source_file, source.name)
                         }
-                        checked_item = sema_check_comptime_item(environments[0], programs[0], probe, available, source)
+                        checked_item = sema_check_comptime_item(environments[0], programs[0], comptime_scopes, available, source)
                         jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                         counters.items_checked += 1
                     }
@@ -3556,7 +3556,7 @@ jet_driver_comptime_run: fn(
                     // A module value whose compile-time check fails, or that
                     // calls anything impure, is refused untried.
                     if jet_driver_module_value_check_refusal(programs[0], checked_item, false) == .Val(reason) {
-                        jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, false, reason, diagnostics)
+                        jet_driver_module_value_refused(environments[0], programs[0], comptime_scopes, available, source, false, reason, diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
                         next
@@ -3630,7 +3630,7 @@ jet_driver_comptime_run: fn(
                 if folded == None && source.module_value && sema_comptime_shared_payload(comptime_request.expression.tree, comptime_request.expression.root) == .Val(payload) {
                     folded = sema_comptime_fold_in(programs[0], comptime_request.expression.tree, payload, values)
                     if folded == None {
-                        jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, "a module `Shared` cell starts from literal data, and its value is not literal data", diagnostics)
+                        jet_driver_module_value_refused(environments[0], programs[0], comptime_scopes, available, source, true, "a module `Shared` cell starts from literal data, and its value is not literal data", diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
                         next
@@ -3658,7 +3658,7 @@ jet_driver_comptime_run: fn(
                 if request.trace_sink == .Val(sink) {
                     sink.begin_item("comptime.closure", source.source_file, source.name)
                 }
-                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics, request.compiler_threads)
+                closure := jet_driver_comptime_function_closure(environments[0], programs[0], comptime_scopes, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics, request.compiler_threads)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len() + closure.rows.len())
                 // A value computed ahead whose closure checked a function
                 // holding a `#run` site of a body is not computed ahead: no
@@ -3691,7 +3691,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -3732,7 +3732,7 @@ jet_driver_comptime_run: fn(
                     }
                     if closure.waiting_dependencies.len() == 0 && (closure_failed || closure.impurity != None) {
                         reason: closure.impurity ?? "a function it calls does not check completely"
-                        jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, reason, diagnostics)
+                        jet_driver_module_value_refused(environments[0], programs[0], comptime_scopes, available, source, true, reason, diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
                         next
@@ -3834,7 +3834,7 @@ jet_driver_comptime_run: fn(
                         sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                         return stopped
                     }
-                    if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+                    if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                         refused_any = true
                         stop_mark = diagnostics.len()
                     }
@@ -3847,7 +3847,7 @@ jet_driver_comptime_run: fn(
                     sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                     return stopped
                 }
-                if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+                if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                     refused_any = true
                     stop_mark = diagnostics.len()
                 }
@@ -3868,7 +3868,7 @@ jet_driver_comptime_run: fn(
                 sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
                 return stopped
             }
-            if jet_driver_module_values_refused(environments[0], programs[0], probe, available, flushed.refused, diagnostics) {
+            if jet_driver_module_values_refused(environments[0], programs[0], comptime_scopes, available, flushed.refused, diagnostics) {
                 refused_any = true
                 stop_mark = diagnostics.len()
             }

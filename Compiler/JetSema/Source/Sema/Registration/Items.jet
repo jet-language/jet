@@ -5954,7 +5954,7 @@ sema_registration_parameter_default: fn(parameters: [SemaRegistrationParameter],
 }
 
 sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    waiting := [SemaScopeProbeConstant]{}
+    waiting := [SemaComptimeWaitingConstant]{}
     sema_registration_apply_graph_module_rows(graph, module_identity, scopes, diagnostics, waiting)
 }
 
@@ -5964,7 +5964,7 @@ sema_registration_apply_graph_module: fn(graph: SemaRegistrationGraph, module_id
 // names (`namespace_bindings`) bind after its own declarations and the
 // imports before `namespace_import_split`, as Rust consults
 // `namespace_owner` after locals and imports.
-sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
+sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaComptimeWaitingConstant]) -> Bool {
     module_index: sema_registration_module_index(graph, module_identity) ?? return false
     module_row: graph.modules[module_index]
     complete := true
@@ -5981,7 +5981,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, why, symbol.span), module_row.source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
-            waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Symbol{position: position}})
+            waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Symbol{position: position}})
         }
     }
     namespace_from: if module_row.namespace_import_split < 0 -> module_row.imports.len() else -> module_row.namespace_import_split
@@ -5994,7 +5994,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
                 diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(binding.local, "imported names share the module namespace", binding.symbol.span), module_row.source_segments))
                 complete = false
             } else if sema_comptime_symbol_waits(binding.symbol) {
-                waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Import{import_index: import_index, binding: binding_index}})
+                waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Import{import_index: import_index, binding: binding_index}})
             }
         }
     }
@@ -6006,7 +6006,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
 
 // Binds the module's package names (`namespace_bindings`), each from its
 // declaring member's current symbol row.
-sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaScopeProbeConstant]) -> Bool {
+sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic], waiting: &[SemaComptimeWaitingConstant]) -> Bool {
     complete := true
     loop owner_index in 0..<graph.modules[module_index].namespace_bindings.len() {
         symbol: graph.modules[graph.modules[module_index].namespace_bindings[owner_index].module_index].symbols[graph.modules[module_index].namespace_bindings[owner_index].row]
@@ -6014,7 +6014,7 @@ sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "imported names share the module namespace", symbol.span), graph.modules[module_index].source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {
-            waiting.push(SemaScopeProbeConstant{binding: scopes.bindings.len() - 1, source: SemaScopeProbeSource.Namespace{module_index: graph.modules[module_index].namespace_bindings[owner_index].module_index, position: graph.modules[module_index].namespace_bindings[owner_index].row}})
+            waiting.push(SemaComptimeWaitingConstant{binding: scopes.bindings.len() - 1, source: SemaComptimeWaitingSource.Namespace{module_index: graph.modules[module_index].namespace_bindings[owner_index].module_index, position: graph.modules[module_index].namespace_bindings[owner_index].row}})
         }
     }
     complete

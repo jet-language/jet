@@ -661,7 +661,7 @@ SemaScopeEnvironment: struct {
     copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}}
     declarations: [SemaScopeDeclaration]
     generic_params: [TGenericParam]
-    // One publication survives probe retargets. The selected view may be empty
+    // One publication survives comptime retargets. The selected view may be empty
     // for an item check; the next function restores the publication, not a
     // reconstructed/copy-indexed list. Both carriers name the same fact cell.
     comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
@@ -699,51 +699,51 @@ sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: Sem
     false
 }
 
-// The declaration scopes of the modules compile-time probes (dependency
-// probes, item checks, function checks) check in:
+// The declaration scopes of the modules compile-time checks (item checks,
+// function checks) check in:
 // sema_registration_apply_graph_module runs once into a module's table instead
-// of once per probe, and each probe checks inside a mark and rolls back
-// (sema_comptime_probe_prepare). The probing environment's graph changes only
+// of once per check, and each check runs inside a mark and rolls back
+// (sema_comptime_scopes_prepare). The run environment's graph changes only
 // by staged values (sema_comptime_graph_apply_values), which type waiting
 // constants and nothing else, so a slot's `constants` names the only bindings
 // a rebuilt table could differ in, and where their graph rows live.
-// The probe keeps the slots of the last SEMA_COMPTIME_PROBE_SLOTS modules it
+// The run keeps the scopes of the last SEMA_COMPTIME_SCOPE_SLOTS modules it
 // entered, so a closure walk that moves back and forth between modules builds
 // each one's table once; `slots[current]` is the current module's.
-SemaScopeProbe: struct {
-    slots: [SemaScopeProbeSlot]
+SemaComptimeScopes: struct {
+    slots: [SemaComptimeModuleScope]
     current: Int{0}
-    // The host callbacks the probe's checks reach (SemaHostHookAccess).
+    // The host callbacks the checks reach (SemaHostHookAccess).
     host_hooks: SemaHostHookAccess?{None}
-    // How many times the probe entered a slot; a slot's `used` is the count
+    // How many times a check entered a slot; a slot's `used` is the count
     // at its last entry, so a new module replaces the least recent.
     entries: Int{0}
 }
 
-// One module's probe scope.
-SemaScopeProbeSlot: struct {
+// One module's comptime scope.
+SemaComptimeModuleScope: struct {
     module_identity: ModuleID
     table: SemaScopeTable
     // sema_registration_apply_graph_module's result and its diagnostics.
     applied: Bool
     diagnostics: [Diagnostic]
-    constants: [SemaScopeProbeConstant]
+    constants: [SemaComptimeWaitingConstant]
     // The graph state `constants` were last compared with: the number of
-    // staged values applied to the probing graph (-1: none yet).
+    // staged values applied to the run's graph (-1: none yet).
     version: Int
     used: Int{0}
 }
 
 // A module-scope binding whose symbol is a constant still waiting for its
 // known-time type (sema_comptime_symbol_waits), and its graph row.
-SemaScopeProbeConstant: struct {
+SemaComptimeWaitingConstant: struct {
     binding: Int
-    source: SemaScopeProbeSource
+    source: SemaComptimeWaitingSource
 }
 
 // `Namespace`: a package name bound from its declaring member's symbol row
 // (SemaRegistrationModule.namespace_bindings).
-SemaScopeProbeSource: enum {
+SemaComptimeWaitingSource: enum {
     Symbol(position: Int)
     Import(import_index: Int, binding: Int)
     Namespace(module_index: Int, position: Int)
@@ -1367,12 +1367,12 @@ sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, prog
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// A comptime probe borrows the program graph and replaces only scope facts.
+// A comptime check borrows the program graph and replaces only scope facts.
 // Its else-arm reset differs from real declaration/body entry; it keeps the
 // module's debug sites, so a compile-time `debug(…)` writes its expression
 // text and carries its E3405 unwrap edit as a run-time one does.
 // False when the graph has no such module.
-sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, comptime_body_values: &&SemaComptimeBodyValues) -> Bool Never! {
+sema_scope_environment_enter_comptime_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, comptime_body_values: &&SemaComptimeBodyValues) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity

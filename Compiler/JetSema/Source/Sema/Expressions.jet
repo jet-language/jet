@@ -4936,7 +4936,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if unresolved_index == .Val(unresolved) {
         if scopes.bindings[unresolved].symbol.kind == SymbolKind.Constant && sema_scope_binding_type(environment, scopes, unresolved) == None {
             context.name_references.push(sema_name_reference(span, sema_scope_binding_symbol(environment, scopes, unresolved), Val(SymbolKind.Constant)))
-            // A comptime probe reads this reference as a dependency wait; a
+            // A comptime item check reads this reference as a dependency wait; a
             // body check after the comptime run reaches here only when the
             // constant's value never landed, which the reason names.
             sema_check_unsupported(context, "constant `{name}` (read at offset {span.start}) has no staged compile-time value")
