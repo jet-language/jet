@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107500,
+    "rev": 107525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72385,29 +72385,32 @@
         {
           "n": 3,
           "text": "`#FX(...)` above a module line is enforced: modcap_breach.jet (a file read under `#FX(!Net, !FS)`) is refused with a registered effect error instead of checking clean, and `#FX` above a fn no longer crashes the compiler (fn_marker.jet). Proof: `jet test Compiler --profile ui --filter fx_module_line_breach` and `jet test Compiler --profile cases --filter effects/fx_above_fn_checks`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:11.600Z"
+          "evidence": "Moved to #3418 c32, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:23.847Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "The #6278 repro (xml.parse reached at comptime) prints 1 on o0, o1 and o2 with no false E0740 (a tests/cases row; `jet test Compiler --profile cases --filter comptime_xml_effects`).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:06:43.335Z"
+          "evidence": "Moved to #3418 c33, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:26.032Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
           "text": "A lint set to deny in `policy.lints.deny` reports E1293 as an error with exit code 1, including the tail-blocked lint on m06_tail_blocked_lint.jet. Proof: `jet test Compiler --profile cases --filter diagnostic_gate/denied` and `jet test Compiler --profile ui --filter E1293`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:47:12.480Z"
+          "evidence": "Moved to #3418 c34, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:29.307Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
@@ -72461,20 +72464,22 @@
         {
           "n": 12,
           "text": "A script can run `db.open(\"notes.db\").query(SQL{\"select …\"})` with no row policy, joining tables or touching none, with `query` needing DB.Read and `execute` DB.Write so the #5949 prompt shows read-only versus writing, while a row policy stays available through `with_policy`; and a policy scope no longer refuses a query outside its one table such as `select 1`. Today `c.query(...)` is E0102 and a script needs `db.policy`, `with_policy` and `migrate` first (Core/Db/Db.jet:697-727). The default without a policy is the ballot D-SQL-SCRIPT1, on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter db/script_query_without_policy` and `--filter db/policy_scope_select_1`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:33:44.957Z"
+          "evidence": "Moved to #6822 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:33.824Z",
+          "closure": "duplicate"
         },
         {
           "n": 13,
           "text": "A checked-text type's check runs on every way in: its generated decoder and its from_string run the type's check, not only .from, so no safe code builds an unchecked value (found 2026-11-15 by a D-APP-ID1 probe on gate-p174; it affects every user checked-text type). Proof: a case decodes, from_strings and .froms an invalid text and gets the same refusal from all three on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:48:09.319Z"
+          "evidence": "Moved to #6932 c5, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:38.603Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -72485,7 +72490,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T23:32:11.653Z",
-      "updated": "2026-11-16T00:55:21.062Z",
+      "updated": "2026-11-16T00:55:38.603Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -74481,20 +74486,22 @@
         {
           "n": 3,
           "text": "The ratified cache visualization ships: a jet command or report shows, per function and source line, cache misses by level and the points where the program falls to RAM or to disk (page faults), with an example whose golden output is checked on O0, O1 and O2. Proof: `jet test Compiler --profile golden --filter perf/cache_visualization`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:45.721Z"
+          "evidence": "Moved to #6841 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:41.984Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "Each ratified cache-control surface (D-CACHE-CONTROL1=A: `mem.prefetch`, `mem.stream_store`, the cache-line size fact) has a paired two-program cell against the plain spelling it replaces, recorded in the canonical manifest, and strictly beats it. Proof: `node Tools/gauntlet/harness/run.mjs --entry cache-control` shows no loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:46.627Z"
+          "evidence": "Moved to #6642 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:45.324Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
@@ -74508,38 +74515,42 @@
         {
           "n": 6,
           "text": "`jet perf run` with the memory method reports L1D, LLC and dTLB misses and page faults per source line on Linux x86-64. Proof: `jet test Compiler --profile cases --filter perf_run/memory_counters_per_line`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:47.540Z"
+          "evidence": "Moved to #6841 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:48.058Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
           "text": "A strided array walk reports more L1D misses per element than a sequential walk. Proof: `jet test Compiler --profile golden --filter perf/strided_vs_sequential_l1d`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:48.677Z"
+          "evidence": "Moved to #6841 c15, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:51.980Z",
+          "closure": "duplicate"
         },
         {
           "n": 8,
           "text": "Hosts without counters report unavailable with a reason, never zero counts. Proof: `jet test Compiler --profile cases --filter perf_run/no_counters_reports_unavailable`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:50.042Z"
+          "evidence": "Moved to #6841 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:54.453Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
           "text": "`jet perf run` on ScriptBench w04 (wordfreq) writes a sampling profile with self and inclusive time per Jet source line plus allocation counts per line. Proof: `jet test Compiler --profile cases --filter perf_run/sampling_profile_per_line`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:31:51.027Z"
+          "evidence": "Moved to #6841 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:56.991Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
@@ -74574,11 +74585,12 @@
         {
           "n": 13,
           "text": "Cache facts distinguish build and exec targets, private and shared caches and unknown values; the acceleration gate uses them without enlarging the scratch budget or worker count; transforms keep output, failure, effect and drop order; the decision ledger reports the facts; and a cache-locality paired entry (nested reuse against a single pass) passes the gate. Proof: `jet test Compiler --profile cases --filter jetir_facts/cache_facts` and `node Tools/gauntlet/harness/run.mjs --entry cache-locality`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:23:53.911Z"
+          "evidence": "Moved to #6642 c5, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:59.302Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -74589,8 +74601,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-15T05:31:51.027Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T00:55:59.302Z",
+      "updatedBy": "Main",
       "criteriaLastN": 13
     },
     {
@@ -74971,20 +74983,22 @@
         {
           "n": 3,
           "text": "D-TERM-COMMANDS1=A is built: `term.execute(...)` takes any number of `term.Command` cases (.ClearBuffer, .EnableRawMode, .EnterAlternateScreen, .HideCursor, .MoveTo, .Print and the rest of the research list) and writes them at once; every lasting setting records its undo, run on return, exit, panic, stop and SIGINT, SIGTERM, SIGHUP and SIGQUIT, on Linux, macOS and Windows. Proof: `jet test Compiler --profile golden --filter Systems/Terminal/Execute` on O0, O1 and O2 through a pseudo-terminal, and `jet test Compiler --profile cases --filter term/raw_mode_restored_after_panic`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:36:22.764Z"
+          "evidence": "Moved to #6446 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:01.635Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "D-CORE-TERMSTDIN1=A and D-TERM-INCREMENTAL1=A are built: the input, output and error handles answer `is_terminal()` (is_tty is renamed at Core/Term/Term.jet:62,129,149), and `term.keys()` returns a Receiver<Key> giving one whole key per receive, with `read_key` (Term.jet:427) deleted. Proof: `git grep -n -E 'is_tty|read_key' -- Core` prints nothing and `jet test Compiler --profile golden --filter Systems/Terminal/Keys` passes on O0, O1 and O2 through a pseudo-terminal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:36:23.952Z"
+          "evidence": "Moved to #6446 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:04.474Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
@@ -75065,8 +75079,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-15T03:36:48.555Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T00:56:04.474Z",
+      "updatedBy": "Main",
       "criteriaLastN": 14
     },
     {
@@ -75112,47 +75126,52 @@
         {
           "n": 1,
           "text": "The store-ingest (19), receipt-store (5) and lock-fixture (1) kit forms run against the real Jetpack store and receipt APIs, so those rows pass or fail on product behavior and none is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:53.746Z"
+          "evidence": "Moved to #6933 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:08.315Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "The hangar-verified-realization (17), hangar-verified-fixture (8) and hangar-fixture-backdate (7) kit forms drive the real hangar verification and fixture paths, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:54.675Z"
+          "evidence": "Moved to #6933 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:11.241Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "The budget-verify (13) and codec-allocation-probe (2) kit forms read the real budget and allocation reports, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:56.022Z"
+          "evidence": "Moved to #6933 c15, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:14.924Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "The remaining seams (crypto-provider-failure, process-file-fd, package-tests, core-tls-server, build-target, term-is-terminal, sparse-set-len, runtime-http-internals, process-merge-stderr, manifest-facts-parse, core-sys-raw-env) each have a product primitive the kit form calls, and none of those rows is REFUSED. Proof: `jet test Compiler --profile cases` reports no REFUSED row for these forms.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:56.986Z"
+          "evidence": "Moved to #6933 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:18.735Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
           "text": "A cases run at the landing commit shows 0 REFUSED rows outside #3594's PTY and read_bytes rows. Proof: the `jet test Compiler --profile cases` summary line at that commit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:57.918Z"
+          "evidence": "Moved to #6933 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:22.992Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
@@ -75186,11 +75205,12 @@
         {
           "n": 9,
           "text": "tests/ui/hangar_verify_digest_mismatch reaches E1315 through a real CLI fixture API (jetpack_hangar_digest_mismatch) and pins Jet-owned what/why/fix output, and diagnostics coverage counts E1315 with no scanner exception or allowlist. Proof: `jet test Compiler --profile ui --filter hangar_verify_digest_mismatch` and `jet test tests/guards --filter diagnostics_coverage`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:54:58.838Z"
+          "evidence": "Moved to #6933 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:26.787Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
@@ -75370,8 +75390,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T14:11:07.271Z",
-      "updated": "2026-11-15T04:55:17.015Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T00:56:26.787Z",
+      "updatedBy": "Main",
       "criteriaLastN": 28
     },
     {
@@ -76437,20 +76457,22 @@
         {
           "n": 2,
           "text": "Runtime startup and print pull in only what the program uses: a program that never spawns tasks, allocates or formats links none of that machinery, by liveness and lazy initialization, with one meaning on o0, o1 and o2 (I9) and no change to panic or error behavior. Proof: `jet test Compiler --profile cases --filter size/runtime_pay_for_use` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:37:58.679Z"
+          "evidence": "Moved to #6501 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:30.162Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "Jet's default build (jet build, no size flags) of hello and of every required perf workload is strictly smaller than each peer's smallest output for the same program (Zig ReleaseSmall stripped, C musl static -Os stripped, Rust opt-level=z stripped, Go -ldflags=-s -w, Odin -o:size), measured on the same machine; o0 (jet run/jet dev output) and --release are smaller still or equal, never larger. Proof: `node Tools/gauntlet/harness/run.mjs` binary_bytes column shows Jet strictly smallest in every required cell, O0 and --release included.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:37:59.606Z"
+          "evidence": "Moved to #6501 c5, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:33.163Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
@@ -76464,20 +76486,22 @@
         {
           "n": 5,
           "text": "The size win comes from the root design (pay-for-what-you-use runtime, lazy runtime initialization, liveness through every runtime and Core layer, no unconditional startup machinery), with no hello-world special case, no per-program flags, no stripping or compression tricks that peers are denied, and no change to panic, error, safety or I9 behavior; the receipt shows the same mechanism shrinking a non-trivial program. Proof: a committed receipt showing the same mechanism shrinking hello and a non-trivial program.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:01.466Z"
+          "evidence": "Moved to #6501 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:36.593Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
           "text": "For every program in the size corpus (hello, one program per required perf cell, and every landed #5072 tool twin, each with a hand-written, optimized x86-64 assembly reference committed beside it that delivers the same features, fault reporting included), the default jet build holds only the code the program reaches: its size is at most the assembly reference size (Jet/ceiling at most 1.00 in bytes). Every byte category above the reference is listed with the root that keeps it and the card that removes it. Proof: `node Tools/perf/asm-parity/asm-parity.mjs --jet $JET --gate` size columns, with the byte-category table committed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:02.489Z"
+          "evidence": "Moved to #6501 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:40.201Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
@@ -76549,11 +76573,12 @@
         {
           "n": 15,
           "text": "Known-value module constants fold to IR constants. Larger aggregates get static storage once. Only #Static stays addressable. Proof: `jet test Compiler --profile cases --filter ir/module_constants_fold`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:38:09.909Z"
+          "evidence": "Moved to #6501 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:56:43.576Z",
+          "closure": "duplicate"
         },
         {
           "n": 16,
@@ -76814,7 +76839,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-15T19:33:02.627Z",
+      "updated": "2026-11-16T00:56:43.576Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -224328,6 +224353,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T00:56:43.576Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-16T00:56:40.201Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T00:56:36.594Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T00:56:33.163Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T00:56:30.162Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T00:56:26.788Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-16T00:56:22.992Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T00:56:18.735Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T00:56:14.924Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T00:56:11.241Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T00:56:08.316Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T00:56:04.474Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T00:56:01.635Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T00:55:59.302Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-16T00:55:56.991Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-16T00:55:54.453Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T00:55:51.981Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T00:55:48.059Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T00:55:45.325Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T00:55:41.984Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T00:55:38.604Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-16T00:55:33.825Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-16T00:55:29.307Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T00:55:26.033Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T00:55:23.847Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02p6yln",
+      "note": "#3"
+    },
     {
       "at": "2026-11-16T00:55:21.062Z",
       "by": "Main",
