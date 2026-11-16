@@ -1,0 +1,30 @@
+// Two browser cases, each run on every engine browser-tests.conf names, in a
+// fresh browser and context per attempt. `greeting` passes; `banner` waits
+// for an element the page never shows, so each engine fails it twice. Each
+// banner attempt first checks that the failed attempt's cookie is gone.
+use browser: core.browser
+
+#Test("browser cases run on every engine") {
+    config: browser.config() ?? panic("browser-tests.conf: {err}")
+    server: browser.server_start(config) ?? panic("the app is not serving {config.server_url()}: {err}")
+    url: server.url()
+    banner_url: url.copy()
+    report := browser.report_new(config)
+    greeting: browser.run_case(config, "greeting", fn(page: BrowserPage) -[Env, Net, Time, Time.Wait]> BrowserError! {
+        page.goto(url)
+        page.get_by_css("#greeting").wait(browser.timeout(10000))
+    })
+    report = browser.report_add_case(report, greeting)
+    banner: browser.run_case(config, "banner", fn(page: BrowserPage) -[Env, Net, Time, Time.Wait]> BrowserError! {
+        page.goto(banner_url)
+        // A retry that saw its failed attempt's cookie would fail on that
+        // instead of timing out.
+        if page.cookie("tried") != None -> return Err(BrowserError{kind: "protocol"})
+        page.set_cookie("tried", "yes", "127.0.0.1")
+        page.get_by_css("#banner").wait(browser.timeout(300))
+    })
+    report = browser.report_add_case(report, banner)
+    server.stop()
+    browser.write_report(report, config.report_path()) ?? panic("the report: {err}")
+    assert_eq(report.failures(), [String]{})
+}

@@ -1933,11 +1933,12 @@ thread that opened them (**E1102**).
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
 | `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture BrowserError!` / `BrowserContext` / `BrowserPage` | Open a named test fixture (the locked engine at `JET_BROWSER_<ENGINE>_ENDPOINT` or `JET_BROWSER_ENDPOINT`, else launched from its lock; isolated context, page, event subscriptions) and read its context and page. |
+| `run_case(config, test, body)` | `BrowserTestCase` | Run one browser test on every configured engine, in engine order (chromium, firefox, webkit). Each attempt opens a fresh fixture, runs `body(page)` and closes the page, context and browser; a failed attempt runs again up to `retries` more times on that engine. Every attempt records the call's source position. A test the filter doesn't select runs nothing. |
 | `fixture_source(name, body)` / `generate_source(name, body, base_url)` | `String BrowserError!` | Generate bounded fixture source with escaped base-URL data. |
 | `selected(config, name)` | `Bool` | Apply the configured test filter to a test name. |
 | `report_new(config)` / `report_add_case(report, case)` | `BrowserTestReport` | Build an ordered browser test report. |
 | `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or the self-contained HTML viewer. |
-| `report_exit_code(report)` / `write_report(report, path)` | `Int` / `BrowserError!` | Produce the test exit code or write the configured report (plus the HTML viewer for `ui` runs). |
+| `report_exit_code(report)` / `report_failures(report)` / `write_report(report, path)` | `Int` / `[String]` / `BrowserError!` | Produce the test exit code (1 when a selected case ran no attempt or any engine's last attempt failed), one ``path:line:column: `test` failed on <engine> after <n> attempts: <error>`` line per failing engine (for `assert_eq(report.failures(), [String]{})`), or write the configured report (plus the HTML viewer for `ui` runs). |
 | `server_start(config)` / `server_stop(server)` / `server_url(server)` / `server_logs(server)` | `BrowserTestServer BrowserError!` / – / `String` / `String` | Start the configured test server and wait until it accepts connections; stop it and keep its bounded logs. |
 | `watch_changed(path, last_modified_ms)` | `Bool BrowserError!` | Report whether the watched path changed since the given modification time. |
 
