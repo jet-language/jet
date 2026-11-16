@@ -51,7 +51,6 @@ use {
         TOKEN_KW_PRIV,
         TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
-        TOKEN_KW_TAG,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -556,11 +555,10 @@ parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> Par
         loop {
             label := CallLabel?{None}
             label_kind: parser_current_kind(state)
-            if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || label_kind == TOKEN_KW_USE) && parser_kind_at(state, 1) == TOKEN_COLON {
+            if (label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_USE) && parser_kind_at(state, 1) == TOKEN_COLON {
                 label_token: parser_bump(state)
                 parser_bump(state)
                 label_name := parser_value(state, label_token)
-                if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }

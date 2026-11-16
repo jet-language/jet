@@ -44,7 +44,7 @@ const JET_MARKER_INBODY_SEPARATOR = ":";
 // - the other reserved/statement words (`defer`, `next`, `task`, `as`, ...)
 //   are the named `keyword` token, never anonymous, so the registry's
 //   anonymous-literal guard keeps holding;
-// - contextual declaration words (`state`, `protocol`, `fact`, ...) stay
+// - contextual declaration words (`state`, `protocol`, ...) stay
 //   identifiers and are colored only in declaration shape (`decl_head`:
 //   a word directly followed by a type name).
 
@@ -58,8 +58,8 @@ const PREC = {
 
 // Anonymous lowercase keywords that may still name a member after `.`.
 const MEMBER_KEYWORDS = [
-  "break", "else", "if", "in", "loop", "return", "derive", "enum", "extern",
-  "fn", "impl", "module", "pub", "struct", "tag", "trait", "use", "self",
+  "break", "else", "if", "in", "loop", "return", "enum", "extern",
+  "fn", "impl", "module", "pub", "struct", "trait", "use", "self",
 ];
 
 const OPERATORS = [
@@ -111,7 +111,6 @@ module.exports = grammar({
         $.enum_def,
         $.trait_def,
         $.impl_block,
-        $.tag_def,
         $.module_def,
         $.decl_head,
         $.binding,
@@ -233,7 +232,6 @@ module.exports = grammar({
     struct_def: ($) => declaration($, "struct"),
     enum_def: ($) => declaration($, "enum"),
     trait_def: ($) => declaration($, "trait"),
-    tag_def: ($) => declaration($, "tag"),
 
     // `impl Type.Trait { … }`, `impl Trait for Type { … }`.
     impl_block: ($) =>
@@ -300,7 +298,7 @@ module.exports = grammar({
     // `field: Type`, `key: value`, `LIMIT: 10`, named arguments and manifest keys.
     label: ($) => prec(PREC.label, seq(field("name", choice($._label_name, $.type_identifier)), ":")),
 
-    // Reserved words still name record fields and arguments (`tag: "x"`).
+    // Reserved words still name record fields and arguments (`copy: "x"`).
     _label_name: ($) =>
       prec(PREC.label, choice(
         $.identifier,
@@ -397,7 +395,7 @@ module.exports = grammar({
           1,
           choice(
             "priv", "null", "const", "copy", "move", "mutate", "it",
-            "as", "distinct", "uninit", "freeze", "effect", "rust", "via",
+            "as", "distinct", "uninit", "freeze", "rust", "via",
           ),
         ),
       ),
@@ -405,10 +403,9 @@ module.exports = grammar({
     _keyword_word: ($) =>
       choice(
         "if", "else", "in", "loop", "break", "return",
-        "derive", "extern", "pub", "use",
-        // `module.id`, `tag.name`: a declaration word used as a value.
+        "extern", "pub", "use",
+        // `module.id`: a declaration word used as a value.
         prec(-1, alias("module", $.identifier)),
-        prec(-1, alias("tag", $.identifier)),
       ),
 
     self: (_) => "self",

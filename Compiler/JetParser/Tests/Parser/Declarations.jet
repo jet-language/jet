@@ -219,6 +219,34 @@ run: fn() {}
     assert(diagnostics[0].what.contains("`fact` is not a Jet word"), diagnostics[0].what)
 }
 
+#Test("the_old_declaration_words_are_ordinary_names") {
+    lines: [String]{"tag Secret", "effect Net", "marker Traced {{\n}}", "derive Point.Describe {{}}"}
+    words: [String]{"tag", "effect", "marker", "derive"}
+    loop (index, line) in lines {
+        diagnostics: parser_test_errors("{line}\nrun: fn() {{}}\n")
+        assert_eq(diagnostics.len(), 1)
+        assert_eq(diagnostics[0].code, "E0003")
+        assert_eq(diagnostics[0].what, "`{words[index]}` is not a Jet word")
+    }
+    named: parser_test_result(
+        `Label: struct {
+    tag: String
+    effect: Int
+    derive: Bool
+}
+describe: fn(tag: String, effect: Int, derive: Bool) -> String {
+    marker: Label{tag: tag, effect: effect, derive: derive}
+    fact := marker.effect
+    "{marker.tag} {fact}"
+}
+run: fn() {
+    print(describe(tag: "ok", effect: 1, derive: true))
+}
+`,
+    )
+    assert(named.diagnostics.is_empty(), "a retired declaration word still parses as a name")
+}
+
 #Test("an_unknown_top_word_lists_the_declaration_forms") {
     diagnostics: parser_test_errors(
         `

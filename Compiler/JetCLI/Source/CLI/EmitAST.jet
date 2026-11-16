@@ -262,8 +262,8 @@ jet_cli_emit_ast_item: fn(tables: ASTTables, item: Item) -> JetCLIEmitNode Never
         .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "#loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(tables, value.source)})
         .GenericModule(value) -> jet_cli_emit_ast_items(tables, "generic-module", "generic module {value.name}", value.body)
         .ModuleAlias(value) -> jet_cli_emit_leaf("module-alias", "{value.name}: module = {value.target}")
-        .MarkerDecl(value) -> jet_cli_emit_leaf("marker", "marker {value.name}")
-        .FactDecl(value) -> jet_cli_emit_leaf("fact", "fact {value.name}")
+        .MarkerDecl(value) -> jet_cli_emit_leaf("marker", value.name)
+        .FactDecl(value) -> jet_cli_emit_leaf("fact", value.name)
     }
 }
 

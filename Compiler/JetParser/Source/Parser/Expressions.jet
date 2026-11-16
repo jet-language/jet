@@ -82,7 +82,6 @@ use {
         TOKEN_KW_IN,
         TOKEN_KW_IT,
         TOKEN_KW_LOOP,
-        TOKEN_KW_TAG,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -648,8 +647,7 @@ parser_header_typed_literal_ahead: fn(state: &JetParserState) -> Bool Never! {
 parser_literal_fields_ahead: fn(state: &JetParserState) -> Bool Never! {
     first := parser_kind_at(state, 1)
     if first == TOKEN_RBRACE -> return true
-    // `tag` names a field like any other word (`Label{tag: "ok"}`).
-    if first != TOKEN_IDENT && first != TOKEN_KW_TAG -> return false
+    if first != TOKEN_IDENT -> return false
     second := parser_kind_at(state, 2)
     second == TOKEN_COLON || second == TOKEN_COMMA || second == TOKEN_SEMI || second == TOKEN_RBRACE
 }
@@ -1105,12 +1103,6 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     if kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_KW_IT {
         parser_bump(state)
         return ParsedExpr{expr: Expr.Ident{name: if kind == TOKEN_IDENT -> word else -> parser_value(state, token), span: token.span, id: parser_node_id(state)}, span: token.span}
-    }
-    // The `tag` keyword also spells an ordinary name (a field, a variant
-    // field, a parameter), so a value reads it back as that name.
-    if kind == TOKEN_KW_TAG {
-        parser_bump(state)
-        return ParsedExpr{expr: Expr.Ident{name: "tag", span: token.span, id: parser_node_id(state)}, span: token.span}
     }
     if kind == TOKEN_TRUE || kind == TOKEN_FALSE {
         parser_bump(state)
@@ -2311,12 +2303,11 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
             if spread -> parser_bump(state)
             label := CallLabel?{None}
             label_kind := parser_current_kind(state)
-            has_label := label_kind == TOKEN_IDENT || label_kind == TOKEN_KW_TAG || (allow_marker_labels && label_kind == TOKEN_KW_USE)
+            has_label := label_kind == TOKEN_IDENT || (allow_marker_labels && label_kind == TOKEN_KW_USE)
             if has_label && parser_kind_at(state, 1) == TOKEN_COLON {
                 label_token: parser_bump(state)
                 parser_bump(state)
                 label_name := parser_value(state, label_token)
-                if label_token.kind == TOKEN_KW_TAG -> label_name = "tag"
                 if label_token.kind == TOKEN_KW_USE -> label_name = "use"
                 label = Val(CallLabel{name: label_name, span: label_token.span})
             }

@@ -34,9 +34,6 @@ word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Nev
                 112 -> {
                     if byte_at(source, start + 1) == 117 && byte_at(source, start + 2) == 98 -> K_PUB else -> K_IDENT // Syntax::KW_PUB
                 }
-                116 -> {
-                    if byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 103 -> K_TAG else -> K_IDENT // Syntax::KW_TAG
-                }
                 117 -> {
                     if byte_at(source, start + 1) == 115 && byte_at(source, start + 2) == 101 -> K_USE else -> K_IDENT // Syntax::KW_USE
                 }
@@ -110,19 +107,8 @@ word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Nev
         }
         6 -> {
             if byte_at(source, start + 0) == {
-                100 -> {
-                    if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 114 && byte_at(source, start + 3) == 105 && byte_at(source, start + 4) == 118 && byte_at(source, start + 5) == 101 -> K_DERIVE else -> K_IDENT // Syntax::KW_DERIVE
-                }
                 101 -> {
-                    if byte_at(source, start + 1) == {
-                        102 -> {
-                            if byte_at(source, start + 2) == 102 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 99 && byte_at(source, start + 5) == 116 -> K_EFFECT else -> K_IDENT // Syntax::KW_EFFECT_DECL
-                        }
-                        120 -> {
-                            if byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_EXTERN else -> K_IDENT // Syntax::KW_EXTERN
-                        }
-                        else -> K_IDENT
-                    }
+                    if byte_at(source, start + 1) == 120 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_EXTERN else -> K_IDENT // Syntax::KW_EXTERN
                 }
                 109 -> {
                     if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 100 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 108 && byte_at(source, start + 5) == 101 -> K_MODULE else -> K_IDENT // Syntax::KW_MODULE
@@ -174,8 +160,5 @@ LEXER_RETIRED_SPELLINGS: [String]{
     "mut",
     "take",
     "copy",
-    "tag",
-    "effect",
-    "derive",
     "const",
 }

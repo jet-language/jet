@@ -39,7 +39,6 @@ use {
         TOKEN_KW_MODULE,
         TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
-        TOKEN_KW_TAG,
         TOKEN_IDENT,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -656,12 +655,6 @@ parser_expect: fn(state: &JetParserState, kind: Int, context: String) -> Token {
 
 parser_expect_name: fn(state: &JetParserState, context: String) -> Token {
     if parser_current_kind(state) == TOKEN_IDENT -> return parser_bump(state)
-    // Rust `expect_ident`: the `tag` keyword also spells an ordinary name
-    // (a field, a variant field, a parameter).
-    if parser_current_kind(state) == TOKEN_KW_TAG {
-        keyword: parser_bump(state)
-        return parser_spelled_token(state, TOKEN_IDENT, keyword.span, "tag")
-    }
     token: parser_current(state)
     // Rust `expect_ident`: `in` is the source-loop keyword, never a name.
     if token.kind == TOKEN_KW_IN {
