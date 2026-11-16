@@ -10,12 +10,15 @@
 //
 // Ops:
 //   comptime-evaluate  {"program", "base_dir"} -> {"value"} | {"error"}
+//   module-values      {"program", "base_dir"} -> {"values", "unreadable"} | {"error"}
 //   check-entry        {"file", "source"}      -> {"diagnostics"}
 // A response `error` / `diagnostics` row is a wire diagnostic; the requester
 // places a config failure on its own expression. EnvModel's
 // `comptime_evaluate` (CompilerService.jet) asks `jet` through this service,
 // and JetCli's `jet_config_evaluate_program` answers it; the requester places
-// the outcome with `jet_config_eval_placed`.
+// the outcome with `jet_config_eval_placed`. A module-values program keeps
+// its source's offsets (JetParser `jet_config_module_values_program`), so the
+// span of its `error` is a span of the requester's source.
 use {
     service_json: core.encoding.json
     service_math: core.math
@@ -26,6 +29,8 @@ JET_COMPILER_SERVICE_VERB: "__jetpack"
 JET_COMPILER_SERVICE_COMPTIME_EVALUATE: "comptime-evaluate"
 
 JET_COMPILER_SERVICE_CHECK_ENTRY: "check-entry"
+
+JET_COMPILER_SERVICE_MODULE_VALUES: "module-values"
 
 // A config value that could not be evaluated: the diagnostic, placed on the
 // config source.
@@ -57,6 +62,15 @@ jet_config_eval_placed: fn(expr: Expr, diagnostic: Diagnostic) -> ComptimeEvalEr
 // refused it; the requester places that diagnostic on its config expression.
 JetConfigOutcome: enum {
     Value(value: CtValue)
+    Refused(diagnostic: Diagnostic)
+}
+
+// The module values of a module-values program: each top-level immutable
+// value by name, and the names of those whose value no wire spelling carries
+// (a function, say). Or the first error of the program's check, its span a
+// span of the program, or None when it lies outside the program.
+JetModuleValuesOutcome: enum {
+    Values(values: [NamedCtValue], unreadable: [String])
     Refused(diagnostic: Diagnostic)
 }
 
@@ -484,6 +498,43 @@ compiler_service_comptime_outcome: fn(response: Dyn) -> JetConfigOutcome? Never!
         return Val(JetConfigOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
     }
     None
+}
+
+// A value that no wire spelling carries is named in `unreadable`, as one the
+// evaluator could not read back is.
+compiler_service_module_values_response: fn(outcome: &&JetModuleValuesOutcome) -> String Never! {
+    if outcome == {
+        .Values(values, unreadable) -> {
+            rows := [Dyn]{}
+            names := [Dyn]{}
+            loop name in unreadable -> names.push(Dyn.Text(name))
+            loop named in values {
+                if compiler_service_value_wire(named.value) == .Val(wire) {
+                    rows.push(Dyn.Object(["name": Dyn.Text(named.name), "value": wire]))
+                } else { names.push(Dyn.Text(named.name)) }
+            }
+            compiler_service_render(Dyn.Object(["values": Dyn.Array(rows), "unreadable": Dyn.Array(names)]))
+        }
+        .Refused(diagnostic) -> compiler_service_render(Dyn.Object(["error": compiler_service_diagnostic_wire(diagnostic)]))
+    }
+}
+
+// The outcome a module-values response carries, or None for a response that
+// is not one.
+compiler_service_module_values_outcome: fn(response: Dyn) -> JetModuleValuesOutcome? Never! {
+    if compiler_service_get(response, "error") == .Val(wire) {
+        return Val(JetModuleValuesOutcome.Refused{diagnostic: compiler_service_diagnostic_from_wire(wire) ?? return None})
+    }
+    values := [NamedCtValue]{}
+    loop row in compiler_service_array(response, "values") ?? return None {
+        name: compiler_service_text(row, "name") ?? return None
+        values.push(NamedCtValue{name: name, value: compiler_service_value_from_wire(compiler_service_get(row, "value") ?? return None) ?? return None})
+    }
+    unreadable := [String]{}
+    loop row in compiler_service_array(response, "unreadable") ?? return None {
+        if row == .Text(name) -> unreadable.push(name) else -> return None
+    }
+    Val(JetModuleValuesOutcome.Values{values: values, unreadable: unreadable})
 }
 
 compiler_service_check_request: fn(file: &&String, source: &&String) -> String Never! {

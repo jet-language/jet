@@ -200,8 +200,75 @@ module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Ti
     assert(error.what.contains("FIRST -> SECOND -> FIRST"), error.what)
 }
 
-#Test("module_value_ambient_io_is_rejected_before_any_consumer") {
-    source: "HOST: #run {{ read_file(\"/etc/hostname\") }}\nsystem.web: module {{ target: linux.x64, options: [network.hostName: HOST] }}\n"
-    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
-    assert_eq(error.code, "E3402")
+// The headline and the `file:line:col` of a rendered refusal, the
+// directory of its file left out.
+module_value_refusal_head: fn(rendered: String) -> String {
+    head := [String]{}
+    loop line in rendered.split("\n") {
+        trimmed: line.trim()
+        if trimmed.starts_with("Error") -> head.push(trimmed)
+        if trimmed.starts_with("-->") {
+            parts: trimmed.split("/").to_list()
+            head.push("--> {parts[parts.len() - 1].removeprefix("--> ")}")
+        }
+        if head.len() == 2 -> break
+    }
+    head.join("\n")
+}
+
+// What `jet run` refuses `program` with.
+module_values_as_the_program_refuses_them: fn(program: String) -[FS, Env, Exec, Time.Wait]> String {
+    dir: envmodel_test_fresh_dir("module-value-refusal")
+    path: files.join(dir, "main.jet")
+    files.write(path, program) ?? panic("write the program")
+    child: process.cmd([String]{envmodel_find_jet_binary(), "run", path}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("start jet run: {err}")
+    receipt: child.wait() ?? panic("await jet run: {err}")
+    assert(receipt.code != 0, receipt.output)
+    files.remove_all(dir) ?? panic("remove the program")
+    module_value_refusal_head(receipt.errors)
+}
+
+// `declarations` as a program that prints `TOTAL`, refused by `jet run`,
+// and as an environment whose image exposes `TOTAL`: the environment is
+// refused with the program's diagnostic at the program's place.
+module_value_refusal_matches_the_program: fn(declarations: String, slug: String) -[FS, Env, Exec, Time.Wait]> String {
+    program: "{declarations}\nrun: fn() {{ print(TOTAL) }}\n"
+    expected: module_values_as_the_program_refuses_them(program)
+    source: "{program}\nimage.server: module {{ from: packages.app, expose: [TOTAL] }}\n"
+    dir: envmodel_test_oci_base_dir(slug)
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    files.remove_all(dir) ?? panic("remove the environment")
+    assert_eq(module_value_refusal_head(envmodel_test_render("main.jet", source, error)), expected)
+    expected
+}
+
+#Test("module_value_typed_struct_with_field_defaults_matches_the_program") {
+    declarations: "Server: struct {{\n    port: Int{{80}}\n    host: String{{\"web\"}}\n}}\n\nSERVER: Server{{}}\n\nTOTAL: #run {{ SERVER.port + 1 }}\nLABEL: \"{{SERVER.host}}-{{TOTAL}}\"\n"
+    assert_eq(module_values_as_the_program_prints_them("{declarations}\nrun: fn() {{ print(\"{{TOTAL}} {{LABEL}}\") }}\n"), "81 web-81")
+    dir: envmodel_test_oci_base_dir("module-value-typed")
+    source: "{declarations}\ndev: module {{ env.dev: Env{{ label: LABEL }} }}\n\nimage.server: module {{ from: packages.app, expose: [TOTAL] }}\n"
+    plan: envmodel_evaluate_env(source, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    assert_eq(plan.images[0].expose, [Int]{81})
+    modules: envmodel_evaluate_source(source, dir) ?? panic("the revision evaluates")
+    assert_eq(envmodel_test_setting_value(modules[0].entries[0].entry, "label"), Val(FactValue.Text{value: "web-81"}))
+    files.remove_all(dir) ?? return
+}
+
+#Test("module_value_cycle_is_the_programs_cycle_at_the_value") {
+    head: module_value_refusal_matches_the_program("TOTAL: #run {{ TOTAL + 1 }}\n", "module-value-cycle-parity")
+    assert(head.contains("jet.ComputedFieldCycle"), head)
+    assert(head.contains("TOTAL -> TOTAL"), head)
+    assert(head.contains("--> main.jet:1:15"), head)
+}
+
+#Test("module_value_effect_without_gate_is_the_programs_refusal") {
+    head: module_value_refusal_matches_the_program("noisy: fn() -> Int {{\n    print(\"hi\")\n    3\n}}\n\nTOTAL: #run noisy()\n", "module-value-effect-parity")
+    assert(head.contains("jet.ComptimeEffectWithoutImpure"), head)
+    assert(head.contains("--> main.jet:6:13"), head)
+}
+
+#Test("module_value_not_built_is_the_programs_refusal") {
+    head: module_value_refusal_matches_the_program("counted: fn() -> Int {{\n    print(\"counting\")\n    3\n}}\n\nTOTAL: counted()\n", "module-value-not-built-parity")
+    assert(head.contains("jet.ModuleValueNotBuilt"), head)
+    assert(head.contains("--> main.jet:6:8"), head)
 }

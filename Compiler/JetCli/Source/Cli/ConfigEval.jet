@@ -11,7 +11,10 @@
 // (JetEval IR/Native.jet); the checked value is read
 // back as a `CtValue`. The environment model reaches this evaluator through
 // `jet __jetpack comptime-evaluate` (JetpackService.jet), in `jet` and in
-// `jetpack` alike.
+// `jetpack` alike. Its module values arrive whole, through
+// `jet __jetpack module-values`: the source's own declarations checked as one
+// program (JetParser `jet_config_module_values_program`), every immutable
+// value read back by name.
 use {
     config_files: core.files
     jet_driver.[
@@ -24,10 +27,13 @@ use {
         jet_driver_compile,
     ]
     jet_foundation.[
+        ComptimeEvalError,
         DIAGNOSTIC_ERROR,
         JET_CONFIG_VALUE_FILE,
         JET_CONFIG_VALUE_NAME,
         JetConfigOutcome,
+        JetModuleValuesOutcome,
+        NamedCtValue,
         diagnostic_from_registry,
         jet_config_eval_diagnostic,
     ]
@@ -38,21 +44,7 @@ use {
 }
 
 jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigOutcome {
-    core_sources: if jet_cli_core_sources(base_dir) == {
-        .Loaded(sources) -> sources
-        .Missing(what, fix) -> {
-            return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)}
-        }
-    }
-    result: jet_config_compile(program, core_sources, base_dir) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {err}")}
-    loop diagnostic in result.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR {
-            return JetConfigOutcome.Refused{diagnostic: diagnostic_from_registry(diagnostic.code, None, diagnostic.what, diagnostic.why, diagnostic.fix)}
-        }
-    }
-    if result.internal_problem == .Val(problem) {
-        return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {problem}")}
-    }
+    result: jet_config_checked(program, base_dir, false) ?? return JetConfigOutcome.Refused{diagnostic: err.diagnostic}
     loop value in result.comptime_values {
         if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") {
             next
@@ -61,6 +53,58 @@ jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigO
         return JetConfigOutcome.Value{value: converted}
     }
     JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value produced no build-time value")}
+}
+
+// Every immutable value of a module-values program's own module, by name; the
+// program's `JET_CONFIG_VALUE` names that module. A value no config value can
+// hold (a function, say) is named unreadable. The first error of the check
+// keeps its span, a span of the requester's source.
+jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValuesOutcome {
+    result: jet_config_checked(program, base_dir, true) ?? return JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic}
+    owner := ""
+    loop value in result.comptime_values {
+        if value.kind == SemaComptimeItemKind.Constant && value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") {
+            owner = value.key.slice(0..<(value.key.len() - JET_CONFIG_VALUE_NAME.len()))
+        }
+    }
+    if owner == "" {
+        return JetModuleValuesOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "the module values produced no build-time values")}
+    }
+    values := [NamedCtValue]{}
+    unreadable := [String]{}
+    loop value in result.comptime_values {
+        if value.kind != SemaComptimeItemKind.Constant || !value.key.starts_with(owner) -> next
+        name: value.key.slice(owner.len()..<value.key.len())
+        if name == JET_CONFIG_VALUE_NAME || name.contains(":") -> next
+        if sema_user_template_ct_value(value.value) == {
+            .Val(converted) -> { values.push(NamedCtValue{name: name, value: converted}) }
+            .None -> unreadable.push(name)
+        }
+    }
+    JetModuleValuesOutcome.Values{values: values, unreadable: unreadable}
+}
+
+// The checked `program`, or the refusal of its first error. With `spans` the
+// refusal keeps its span when the error lies in the program itself.
+jet_config_checked: fn(program: String, base_dir: String, spans: Bool) -> JetDriverCompileResult ComptimeEvalError! {
+    core_sources: if jet_cli_core_sources(base_dir) == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> {
+            return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), fix)})
+        }
+    }
+    result: jet_config_compile(program, core_sources, base_dir) ?? return Err(ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {err}")})
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            in_program: (diagnostic.source_path ?? JET_CONFIG_VALUE_FILE).ends_with(JET_CONFIG_VALUE_FILE)
+            span: if spans && in_program -> diagnostic.span else -> None
+            return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, span, diagnostic.what, diagnostic.why, diagnostic.fix)})
+        }
+    }
+    if result.internal_problem == .Val(problem) {
+        return Err(ComptimeEvalError{diagnostic: jet_config_eval_diagnostic(None, "this config value could not be evaluated: {problem}")})
+    }
+    Ok(result)
 }
 
 // Check `program` as the one file of a source root at the config's own

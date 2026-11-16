@@ -11,16 +11,20 @@ use {
         CtValue,
         Expr,
         Func,
+        Item,
         JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
+        JET_COMPILER_SERVICE_MODULE_VALUES,
         JET_COMPILER_SERVICE_VERB,
+        JetModuleValuesOutcome,
         compiler_service_comptime_outcome,
         compiler_service_comptime_request,
+        compiler_service_module_values_outcome,
         foundation_parse_protocol_json,
         jet_config_eval_error,
         jet_config_eval_placed,
         jet_config_plain_literal,
     ]
-    jet_parser.[jet_config_program]
+    jet_parser.[jet_config_module_values_program, jet_config_program]
     sys: core.sys
     files: core.files
     process: core.process
@@ -84,4 +88,17 @@ comptime_evaluate: fn(expr: Expr, source: String, funcs: [String:Func], base_dir
         .Value(value) -> Ok(value)
         .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
     }
+}
+
+// Every module value of `source` (parsed as `items`), computed by the
+// sibling compiler in one request (JetCli `jet_config_module_values`): the
+// source's own declarations are checked as one program that keeps the
+// source's offsets, so a refusal's span is a span of `source`.
+// `environment` holds the value of each `$NAME` the source reads.
+module_values_evaluate: fn(items: [Item], source: String, base_dir: String, environment: [String:CtValue]) -[FS, Env, Exec, Time.Wait]> JetModuleValuesOutcome CompilerServiceError! {
+    program: jet_config_module_values_program(items, source, environment) ?? return Ok(JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic})
+    // copy: the request owns its base directory; `base_dir` is a read parameter the caller keeps.
+    response: envmodel_compiler_service(JET_COMPILER_SERVICE_MODULE_VALUES, compiler_service_comptime_request(program, base_dir.copy())) ?? return Err(err)
+    outcome: compiler_service_module_values_outcome(response) ?? return Err(CompilerServiceError{detail: "the compiler's answer is not a module-values response"})
+    Ok(outcome)
 }
