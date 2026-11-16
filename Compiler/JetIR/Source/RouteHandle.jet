@@ -270,14 +270,6 @@ ir_handle_math_route: fn(type_name: String, method: String) -> IRHandleRoute? {
     Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-ir_handle_loadable_route: fn(method: String) -> IRHandleRoute? {
-    if method == {
-        "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> return Val(ir_handle_core("core.pending", "loadable.{method}", "JetLoadable::{method}", [Bool]{true}, None))
-        "or_else" -> return Val(ir_handle_core("core.pending", "loadable.or_else", "JetLoadable::or_else", [Bool]{true, false}, None))
-        else -> return None
-    }
-}
-
 ir_handle_civil_time_route: fn(kind: String, method: String) -> IRHandleRoute? {
     is_date := kind == "Date" || kind == "LocalDate"
     prefix := if {
@@ -506,7 +498,6 @@ ir_handle_dynamic_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
         .PreciseMethod(type_name, method) -> return ir_handle_precise_route(type_name, method)
         .MathMethod(type_name, method) -> return ir_handle_math_route(type_name, method)
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
-        .LoadableMethod(method) -> return ir_handle_loadable_route(method)
         .CivilTimeMethod(kind, method) -> return ir_handle_civil_time_route(kind, method)
         .ProcessChildMethod(method) -> {
             if method == {
@@ -777,6 +768,6 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
-        .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TaskJoin | .MathMethod(_, _) | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
+        .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TaskJoin | .MathMethod(_, _) | .EventMethod(_) | .LayoutMethod(_) | .CivilTimeMethod(_, _) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
     }
 }
