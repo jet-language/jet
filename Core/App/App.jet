@@ -258,7 +258,7 @@ Remote: struct<S> {
     // once, when its client is cut off, when the client's earlier writes
     // are still queued, or when no answer comes (`queue_post`); otherwise
     // it runs as `__call` runs a call.
-    __write: fn<E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) E!, fail: fn(CallError) E!) E! -[Net, Time]> {
+    __write: fn<E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) E!, fail: fn(CallError) E!) -[Net, Time]> E! {
         held: self.service == .Val(_)
         queues: queue_on() && !held
         if !queues && links_cut(self.client) -> return fail(links_unreachable(self.client, method))
@@ -274,7 +274,7 @@ Remote: struct<S> {
     }
 
     // A write of the endpoint method `method` of `S`, which can't fail.
-    __write_value: fn(self, method: String, args: [String], direct: fn(S) Never!) CallError! -[Net, Time]> {
+    __write_value: fn(self, method: String, args: [String], direct: fn(S) Never!) -[Net, Time]> CallError! {
         held: self.service == .Val(_)
         queues: queue_on() && !held
         if !queues && links_cut(self.client) -> return Err(links_unreachable(self.client, method))
@@ -519,7 +519,7 @@ disconnect: fn(client: String) Never! { links_set(client, true) }
 // Restores the link `disconnect` cut: the client's next call reaches the
 // server again, and the writes the client queued meanwhile are sent now, in
 // order (`queue_drain`).
-reconnect: fn(client: String) Never! -[Net, Time]> {
+reconnect: fn(client: String) -[Net, Time]> Never! {
     links_set(client, false)
     _: queue_drain(client)
 }
@@ -2281,7 +2281,7 @@ App: struct {
     // one (`__current`), and its view runs. The compiler refuses a state that
     // no screen of the program's graph opens, so a state with no screen here
     // is one whose graph this process has not built.
-    __go: fn<V>(state: String, names: [String], values: [String]) Never! -[Net, FS.Read]> {
+    __go: fn<V>(state: String, names: [String], values: [String]) -[Net, FS.Read]> Never! {
         fields := [String:String]{}
         loop index in 0..<names.len() -> fields[names[index].copy()] = values[index].copy()
         screen: app_screen(state) ?? panic("no screen opens `{state}` yet: build the app graph (`app.new`) before opening a screen")
