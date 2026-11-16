@@ -1,14 +1,17 @@
 // One app graph gives the route set, the screens and the Remotes.
 // `.api<Board>` declares the service, `.mount` answers its calls in this
-// process, and `.screen` registers the board, whose view takes the graph's
-// Remote of `Board` beside its state. `app.go` opens the board at its
-// address, and `app.current` makes the state back from that address.
+// process, a public one and a signed-in one, and `.screen` registers the
+// board, whose view takes the graph's Remote of `Board` beside its state.
+// `app.go` opens the board at its address, and `app.current` makes the state
+// back from that address.
 use app
 
 Board: struct {
     owner: String
 
     #App.Public title: fn(self, project: String) -> String Never! { "{self.owner}'s {project}" }
+
+    #App.SignedIn owner_of: fn(self) -> String Never! { self.owner }
 }
 
 BoardView: struct {
