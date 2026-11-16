@@ -3113,6 +3113,8 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         .Func(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
     }
     type_kind: kind ?? return None
+    // A type lifted from an inline module prints by its source leaf name.
+    leaf: sema_name_type_leaf(module_row.program.items, name)
     TTypeDef{
         module_identity: module_row.module_identity,
         key: sema_checked_nominal_key(graph, module_row, nominal),
@@ -3137,6 +3139,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         compiler_builtin: sema_registration_compiler_builtin_marker(nominal),
         specified: if definition == .Enum(value) -> sema_enum_numbers_marker(value.type_markers, "Specified") != None else -> false,
         boxed_edges: boxed_edges,
+        shown: if leaf == name -> "" else -> leaf,
         kind: type_kind,
     }
 }
