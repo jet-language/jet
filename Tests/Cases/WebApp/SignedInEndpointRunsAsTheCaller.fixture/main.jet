@@ -1,0 +1,54 @@
+// A service whose `whoami` needs a signed-in caller, and gives its account.
+// The server signs `ann` in with core.auth. A call that carries her session,
+// as a cookie from the server's own origin or as a bearer token, runs acting
+// for her. A cookie sent from another origin, a forged session and a call
+// with no session are each answered 401, which a Remote reads as
+// `CallError.SignedOut`.
+use {
+    app
+    auth: core.auth
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+Accounts: struct {
+    name: String
+
+    // The account the call acts for.
+    #App.SignedIn whoami: fn(self) -> String { app.caller().raw() }
+}
+
+// POST a call of `whoami` from `origin` ("" sends no `Origin`) with the
+// header `name: value`, as the status and body it is answered with.
+call: fn(addr: String, origin: String, name: String, value: String) -> String HTTPError! {
+    fields := http.headers_set(http.headers(), name, value)
+    if origin != "" -> fields = http.headers_set(fields, "origin", origin)
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/whoami", fields, http.body_text("[]")))
+    Ok("{answer.status} {answer.text()}")
+}
+
+// What a call through a Remote gave, as text.
+shown: fn(who: String app.CallError!) -> String {
+    found: who ?? return if err == .SignedOut -> "signed out" else -> "{err}"
+    found
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    auth.register_user("ann", "ann's password hash") ?? panic("ann registers")
+    session: auth.password_login("ann", "ann's password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("ann signs in")
+    id: auth.session_id(session)
+    served: web.app().mount("/api", Accounts{name: "accounts"})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<5 { served.serve_once(listener) }
+    }
+    print("cookie: {call(addr, "http://{addr}", "cookie", "jet_session={id}")}")
+    print("bearer: {call(addr, "", "authorization", "Bearer {id}")}")
+    print("cookie from another site: {call(addr, "http://elsewhere.example", "cookie", "jet_session={id}")}")
+    print("forged: {call(addr, "", "authorization", "Bearer sess-{"0".repeat(64)}")}")
+    print("remote: {shown(app.remote_at<Accounts>("http://{addr}/api").whoami())}")
+    serving.join()
+}

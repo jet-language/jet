@@ -357,27 +357,13 @@ App: struct {
         self.copy()
     }
 
-    // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`.
-    // An App has no sign-in yet, so no call has a signed-in caller: each one
-    // is refused with 401, which a Remote reads as `CallError.SignedOut`.
-    // A call past the marker's `limit:` is answered 429 first; until sign-in
-    // names an account, the count is per network address.
-    __remote_signed_in: fn(self, path: String, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        counted: app_remote_limit(limit, window_ns)
+    // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`
+    // (sema lowers each here) as `__remote_public` does, for a signed-in
+    // caller only (`app_signed_in_response`).
+    __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.route_add(
-            app_table(self),
-            "POST",
-            path,
-            http_server.__handler(fn(request: HTTPRequest) {
-                if app_remote_limited(counted, request) == .Val(wait_ns) {
-                    return Ok(app_limited(wait_ns))
-                }
-                Ok(app_json(401, app_error_json("`{request.path}` needs a signed-in caller")))
-            }),
-            "",
-            at,
-        )
+        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
         self.copy()
     }
 
@@ -928,13 +914,12 @@ priv AppPushDevice: struct {
 // is a URL.
 priv C_APP_PUSH_TOKEN_MAX: 4096
 
-// Registers the device the body names for the signed-in caller, so
+// Registers the device the body names for the signed-in caller, the
+// account whose session the request carries (`app_session_account`), so
 // `app.notify` reaches it: 204 once a store keeps it, 401 with no caller,
-// 400 for a body that names no device and 503 when no store takes it. An
-// App has no sign-in yet, so a request names no caller, and each one is
-// refused with 401 until sign-in names an account.
+// 400 for a body that names no device and 503 when no store takes it.
 priv app_push_register: fn(request: HTTPRequest) -[Net]> HTTPResponse Never! {
-    account: calls.maybe_caller() ?? return app_json(401, app_error_json("`{C_APP_PUSH_DEVICES}` needs a signed-in caller"))
+    account: app_session_account(request) ?? return app_json(401, app_error_json("`{C_APP_PUSH_DEVICES}` needs a signed-in caller"))
     body: request.json<AppPushDevice>() ?? return app_json(400, app_error_json("the device's registration is no JSON object of service, token, key and auth"))
     if body.service != "apns" && body.service != "fcm" && body.service != "web" {
         return app_json(400, app_error_json("a device's service is apns, fcm or web"))
@@ -1342,22 +1327,23 @@ priv AppRemote: struct {
     limit: AppRemoteLimit
 }
 
-// An endpoint marker's `limit:`: at most `calls` calls from one network
-// address in each window of `window_ns`, counted in `windows` by address.
-// `calls` 0 is no limit.
+// An endpoint marker's `limit:`: at most `calls` calls from one caller in
+// each window of `window_ns`, counted in `windows` by caller: a signed-in
+// call's account, or else the call's network address. `calls` 0 is no
+// limit.
 priv AppRemoteLimit: struct {
     calls: Int
     window_ns: Int
     windows: Shared<[String:AppRemoteWindow]>
 }
 
-// One address's window: when it began, and the calls counted in it.
+// One caller's window: when it began, and the calls counted in it.
 priv AppRemoteWindow: struct {
     start_ns: Int
     calls: Int
 }
 
-// The most addresses a limit keeps a window for; past it, the windows that
+// The most callers a limit keeps a window for; past it, the windows that
 // have ended are dropped first.
 APP_REMOTE_LIMIT_ADDRESSES: 65536
 
@@ -1365,13 +1351,46 @@ priv app_remote_limit: fn(calls: Int, window_ns: Int) -> AppRemoteLimit Never! {
     AppRemoteLimit{calls: calls, window_ns: window_ns, windows: Shared{[String:AppRemoteWindow]{}}}
 }
 
-// How long until `request`'s address may call again when its window's calls
-// are used up; None counts the call in.
-priv app_remote_limited: fn(limit: AppRemoteLimit, request: HTTPRequest) -> Int? Never! {
+// Who a call counts against in its endpoint's limit: the account it acts
+// for, or else its network address.
+priv app_remote_who: fn(request: HTTPRequest) -> String Never! {
+    if calls.maybe_caller() == .Val(account) -> return "account:{account.raw()}"
+    "address:{request.__peer}"
+}
+
+// The account whose live session `request` carries: the id of an
+// `Authorization: Bearer <id>`, or else its session cookie
+// (`app_session_cookie`). Every id is looked up the same way
+// (`auth.session_validate`), at the second the request was read, and a
+// missing, malformed, unknown, expired or forged one gives None alike.
+priv app_session_account: fn(request: HTTPRequest) -> auth.AccountID? Never! {
+    bearer: request.header("authorization") ?? ""
+    id: if bearer.starts_with("Bearer ") -> bearer.slice(7, bearer.len()).trim() else -> app_session_cookie(request)
+    session: auth.session_validate(id, request.__received * 1000) ?? return None
+    Val(auth.AccountID.from_string(auth.session_user(session)))
+}
+
+// The `jet_session` cookie `request` carries, as core.auth mints it, on a
+// request whose `Origin` names the server it was sent to
+// (`app_same_origin`); "" for none. A cookie on a request with no `Origin`,
+// or another site's, counts for nothing, so another site can't call as the
+// signed-in user.
+priv app_session_cookie: fn(request: HTTPRequest) -> String Never! {
+    if request.header("origin") == None || !app_same_origin(request) -> return ""
+    loop part in (request.header("cookie") ?? "").split(";").to_list() {
+        pair: part.trim()
+        if pair.starts_with("jet_session=") -> return pair.slice(12, pair.len())
+    }
+    ""
+}
+
+// How long until the caller `who` (`app_remote_who`) may call again when
+// its window's calls are used up; None counts the call in.
+priv app_remote_limited: fn(limit: AppRemoteLimit, who: String) -> Int? Never! {
     if limit.calls <= 0 -> return None
     now: rt.clock_mono_ns()
     guard := limit.windows.guard_edit()
-    window := guard.value.get(request.__peer) ?? AppRemoteWindow{start_ns: now, calls: 0}
+    window := guard.value.get(who) ?? AppRemoteWindow{start_ns: now, calls: 0}
     if now - window.start_ns >= limit.window_ns -> window = AppRemoteWindow{start_ns: now, calls: 0}
     if window.calls >= limit.calls -> return Val(window.start_ns + limit.window_ns - now)
     window.calls += 1
@@ -1383,7 +1402,7 @@ priv app_remote_limited: fn(limit: AppRemoteLimit, request: HTTPRequest) -> Int?
         }
         guard.value = kept
     }
-    guard.value[request.__peer.copy()] = window
+    guard.value[who.copy()] = window
     None
 }
 
@@ -1397,13 +1416,16 @@ priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
 
 // A call of an endpoint method: 200 with its reply, or 422 with the field
 // errors (`app_invalid_json`) when the body is no JSON array of arguments
-// the method takes. The call is one transaction (`app_transacted`): a reply
-// that `__reply_err` made rolls it back. A call that carries an
+// the method takes; a call past the endpoint's limit is answered 429 first.
+// The call is one transaction (`app_transacted`): a reply that
+// `__reply_err` made rolls it back. A call that carries an
 // `Idempotency-Key` header carries it as its request key, with the account
 // it acts for: the call's reply is kept under the key for 24 hours, and the
 // call sent again under the key is answered with the kept reply.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    if app_remote_limited(endpoint.limit, request) == .Val(wait_ns) -> return app_limited(wait_ns)
+    if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_limited(wait_ns)
+    }
     key: request.header("idempotency-key") ?? ""
     if key.len() > APP_REQUEST_KEY_MAX {
         return app_json(400, app_error_json("an `Idempotency-Key` is at most {APP_REQUEST_KEY_MAX} bytes"))
@@ -1418,6 +1440,24 @@ priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, F
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
         (response: app_json(200, reply), commit: !app_reply_failed(reply))
     })
+}
+
+// A call of an `#App.SignedIn` endpoint method, which runs, as
+// `app_remote_response` runs a public one, acting for the account whose
+// session the call carries (`app_session_account`). A call with no live
+// session counts against its network address and is refused with 401,
+// which a Remote reads as `CallError.SignedOut`; the refusal is the same
+// whatever the session lacked.
+priv app_signed_in_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if app_session_account(request) == .Val(account) {
+        calls.callers.begin_account(account)
+        defer calls.callers.end()
+        return app_remote_response(endpoint, request)
+    }
+    if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_limited(wait_ns)
+    }
+    app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
 }
 
 // The longest request key a call carries, in bytes.
@@ -1522,6 +1562,42 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
     assert_eq(replayed.text(), "{{\"ok\":7}}")
     assert_eq(replayed.header("idempotent-replayed"), Val("true"))
     assert_eq(calls.transactions.current(), Int?{None})
+}
+
+#Test("a signed-in endpoint runs acting for the account whose session the call carries, and refuses every other call alike with 401") {
+    auth.register_user("web-test-ann", "ann's hash") ?? panic("ann registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    live: auth.password_login("web-test-ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
+    ended: auth.password_login("web-test-ann", "ann's hash", (now - 60) * 1000, 1) ?? panic("ann signed in before: {err}")
+    served: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<String>((calls.maybe_caller() ?? auth.AccountID.from_string("no one")).raw())) }, 0, 0)
+    table: app_table(served)
+    id: auth.session_id(live)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {id}", "theme=dark; jet_session=not-it"), "200 {{\"ok\":\"web-test-ann\"}}")
+    assert_eq(app_signed_in_test(table, now, "https://app.example", "", "theme=dark; jet_session={id}"), "200 {{\"ok\":\"web-test-ann\"}}")
+    refused: "401 {{\"error\":\"`/api/me` needs a signed-in caller\"}}"
+    assert_eq(app_signed_in_test(table, now, "https://elsewhere.example", "", "jet_session={id}"), refused)
+    assert_eq(app_signed_in_test(table, now, "", "", "jet_session={id}"), refused)
+    assert_eq(app_signed_in_test(table, now, "", "", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {auth.session_id(ended)}", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer sess-{"0".repeat(64)}", ""), refused)
+    assert_eq(app_signed_in_test(table, now, "", "Bearer {id}x", ""), refused)
+    assert_eq(app_signed_in_test(table, now + 120, "", "Bearer {id}", ""), refused)
+    assert_eq(calls.maybe_caller(), auth.AccountID?{None})
+}
+
+// The status and body `table` answers a call of `/api/me`, read at the
+// second `at`, on the server `app.example` that carries the `Origin`
+// `origin`, the `Authorization` `authorization` and the `Cookie` `cookie`
+// ("" sends none of each).
+priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorization: String, cookie: String) -[Net, FS.Read]> String Never! {
+    fields := web_http.headers_set(web_http.headers(), "host", "app.example")
+    if origin != "" -> fields = web_http.headers_set(fields, "origin", origin)
+    if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
+    if cookie != "" -> fields = web_http.headers_set(fields, "cookie", cookie)
+    request := web_http.server_request("POST", "/api/me", web_http.body_text("[]"), fields)
+    request.__received = at
+    answer: http_server.__dispatch(table, request)
+    "{answer.status} {answer.text() ?? "unreadable"}"
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
@@ -2866,19 +2942,23 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     }
     calls.push.store(devices)
     apns: "{{\"service\":\"apns\",\"token\":\"a1b2\"}}"
-    assert_eq(app_push_test_status(apns), 401)
-    ann: auth.AccountID.from_string("acct_ann")
-    statuses: calls.as_caller(ann, fn() {
-        [Int]{
-            app_push_test_status(apns),
-            app_push_test_status("{{\"service\":\"sms\",\"token\":\"a1b2\"}}"),
-            app_push_test_status("{{\"service\":\"fcm\",\"token\":\"\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
-            app_push_test_status("{{\"service\":\"web\",\"token\":\"https://push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
-            app_push_test_status("[1]"),
-        }
-    })
+    // A request names its caller only by the session it carries, whoever
+    // serves it.
+    assert_eq(app_push_test_status("", 0, apns), 401)
+    assert_eq(calls.as_caller(auth.AccountID.from_string("acct_ann"), fn() { app_push_test_status("", 0, "{{\"service\":\"apns\",\"token\":\"a1b2\"}}") }), 401)
+    auth.register_user("acct_ann", "ann's hash") ?? panic("ann registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    session: auth.password_login("acct_ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
+    ann: "Bearer {auth.session_id(session)}"
+    statuses: [Int]{
+        app_push_test_status(ann, now, apns),
+        app_push_test_status(ann, now, "{{\"service\":\"sms\",\"token\":\"a1b2\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"fcm\",\"token\":\"\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"https://push.example.net/1\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+        app_push_test_status(ann, now, "{{\"service\":\"web\",\"token\":\"https://push.example.net/1\",\"key\":\"BKey\",\"auth\":\"secret\"}}"),
+        app_push_test_status(ann, now, "[1]"),
+    }
     assert_eq(statuses, [Int]{204, 400, 400, 400, 400, 204, 400})
     held: kept.guard_read()
     assert_eq(held.value.len(), 2)
@@ -2903,9 +2983,14 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     assert_eq(notes[notes.len() - 1], "skipped fcm acct_unset: no FCM settings")
 }
 
-// The status a registration of `body` at `/__jet/push/devices` answers.
-priv app_push_test_status: fn(body: String) -[Net]> Int Never! {
-    request: web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), web_http.headers())
+// The status a registration of `body` at `/__jet/push/devices` answers,
+// read at the second `at`, with the `Authorization` `authorization` ("" for
+// none).
+priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Net]> Int Never! {
+    fields := web_http.headers()
+    if authorization != "" -> fields = web_http.headers_set(fields, "authorization", authorization)
+    request := web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), fields)
+    request.__received = at
     app_push_register(request).status
 }
 

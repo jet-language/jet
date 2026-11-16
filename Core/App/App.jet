@@ -748,7 +748,12 @@ priv(package) callers: module {
     // reads do.
     begin_system: fn() Never! { acting_begin(tasks.current_task(), Val(Acting.System)) }
 
-    // Ends this task's innermost `begin_system`.
+    // This task acts for `account` until `end`, as a signed-in call does.
+    begin_account: fn(account: auth.AccountID) Never! {
+        acting_begin(tasks.current_task(), Val(Acting.Account(account)))
+    }
+
+    // Ends this task's innermost `begin_system` or `begin_account`.
     end: fn() Never! { acting_end(tasks.current_task()) }
 }
 

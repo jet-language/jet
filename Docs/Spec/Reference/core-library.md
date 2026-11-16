@@ -5584,8 +5584,14 @@ A call through the Remote that `remote_at(address)` makes is a POST of the
 arguments, encoded as one JSON array, to `{address}/{method}`. A Public
 method answers `{"ok": value}` or `{"err": error}`, which the call returns as
 the method's value or error. `web.app().mount(prefix, service)` registers
-each marked method of the service as that POST route `{prefix}/{method}`; a
-SignedIn method answers 401 there until the App signs callers in. Since a
+each marked method of the service as that POST route `{prefix}/{method}`.
+There a SignedIn method runs acting for the account whose session the call
+carries. The session can come as an `Authorization: Bearer <id>`, or as the
+`jet_session` cookie that core.auth mints. The cookie counts only on a call
+whose `Origin` names the server, so that another site's page can't call as
+the signed-in user. A call with no live session answers 401. That covers a
+missing, malformed, unknown, expired or forged session, and the answer and
+the time the check takes are the same for each. Since a
 call can fail on the way, its type adds `CallError`, whichever Remote makes
 it: a method `-> T E!` is called as `T E!` and needs an
 `impl app.CallError -> E` conversion, and a method `-> T` is called as
@@ -5598,8 +5604,8 @@ the arguments did not decode; the body
 An endpoint marker may cap its calls: `#App.Public(limit: 30, per: 1min)`
 allows 30 calls from one network address in each one-minute window. `per`
 defaults to one minute, and `limit: 0`, the default, means no limit. A
-SignedIn method counts per account once the App signs callers in, and per
-network address until then. The mount checks `limit` as an Int and `per` as a
+SignedIn method counts a signed-in call per account, and a call with no live
+session per network address. The mount checks `limit` as an Int and `per` as a
 Duration. A call past the limit is answered 429 with `Retry-After` in whole
 seconds. The Remote reads that as `Unreachable`, with text that ends
 `is limited: retry after N s`.
