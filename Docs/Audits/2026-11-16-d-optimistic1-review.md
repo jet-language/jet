@@ -595,3 +595,115 @@ Each cost has a mitigation above. Before implementation, it still needs:
 - the owner's confirmation on enqueue;
 - the opt-out and pin spelling ballot;
 - the cards and criteria in the gap table.
+
+## Second redesign pass
+
+The first re-review left five named costs. This pass tries to remove each
+one. A cost stays only when no change removes it, and it keeps its price
+and its best mitigation.
+
+**D8. Policies run on the client too, when the client can run them.**
+
+- Crewboard's policies are named functions in `Logic/policy.jet`, a package
+  the client already builds against. `open_crew` attaches them with
+  `.guard(task_policy)`.
+- When `.guard`'s argument is a named function, the compiler records the
+  fact "table `tasks` is guarded by `task_policy`". It is not a run-time
+  closure. The client view attaches the same function to its table.
+- The client runs the policy for each predicted write with the session's
+  account as `Who`, under the same rules as the server: an update is
+  judged on the stored row and on the new row, and the policy's own reads
+  see earlier writes but not the one being judged. A policy that reads a
+  row the view does not hold stops the guess (D2). A policy whose effects
+  go beyond `DB.Read` stops it too: `member_policy` reads the clock, and
+  `invite_policy` calls `auth.verified_email`.
+- A table guarded by a closure that is not a named function makes every
+  method that writes it wait. Its methods are listed in inspect with that
+  reason.
+- In P1, case 2's guard would be a named function under D8, so the client
+  would refuse the move to `done` before showing it. The server refuses
+  too, so the screen never shows a guess the server will refuse.
+
+**D9. A live result sends each row once.**
+
+- D1 sent the rows a query read beside its result. D9 makes the result's
+  row-typed values references into those rows, so a `Board` encodes each
+  `Task` once, as a row, and the result holds its key.
+- So a push holds the same row bytes as today's result, plus one key per
+  reference, and a row shared by two results on one connection is sent
+  once. Derived values (`open_tasks`, `role`) stay plain values.
+
+**D10. Replay only what a push touched.**
+
+- While a guess runs, the client records the keys it read and wrote.
+- A push replays the pending calls from the first one whose read keys meet
+  the push's changed keys. The calls before it keep their layer as it is.
+- Cost: one key set per pending call, which holds no more keys than the
+  call read.
+
+**D11. The view survives a restart.**
+
+- The view and the pending calls live in the device store that #6867 c1
+  builds. That store also holds the queue and the notice list.
+- After a restart, the client replays the queue on the stored view, so the
+  guesses come back with the screens.
+
+**D12. The two owner choices go to ballots.** The drafts are attached to
+this card's submission:
+
+- whether a predicted method may queue a job;
+- how a marked method spells the opt-out and the pin.
+
+## Re-review, second pass
+
+Each cost the first re-review named, attacked again:
+
+1. **Policy refusals the client cannot foresee: removed** for every policy
+   that is a named function over held rows with only `DB.Read`. Methods
+   whose policy the client cannot run now wait, so they show no guess
+   rather than a wrong one. In Crewboard, `task_policy` and
+   `project_policy` run on the client. `member_policy` reads the clock, so
+   `set_role`, `remove_member` and `leave` wait unless the policy moves its
+   expiry check into `invited`'s caller. Named residual: a policy that
+   reads rows a screen does not hold makes a method wait there.
+   Mitigation: the devtools "cannot predict" count names the method and
+   the row it lacked.
+2. **Rows sent with each push: removed** by D9. A push is no larger than
+   today's result, and a row shared by two results is smaller.
+3. **The replay per push: removed** by D10. A push that touches none of a
+   call's reads replays nothing.
+4. **Logic disclosure for eligible methods: named cost.** An eligible body,
+   and under D8 its table's policy, is readable in the client. The
+   compiler cannot tell which logic is sensitive. Security does not depend
+   on it, because the server runs every check again. Mitigations: inspect
+   lists every shipped body and policy with the fact that made it eligible
+   (D6); one marker argument keeps a method on the server (ballot D12);
+   and a policy that is a closure ships nothing.
+5. **The client code for the view: named cost.** The view is one generic
+   module, the typed-table surface over in-memory rows, plus the eligible
+   bodies and their policies. Mitigations: the #6556 budget fails the build
+   when it is over; inspect gives each predicted method's bytes; and the
+   view loads with the first screen that has a predicted control, so a
+   screen without one pays nothing.
+6. **A restart drops the guesses: removed** by D11, once #6867 c1 builds the
+   device store.
+7. **A screen that does not hold a row waits: named cost.** This is the
+   behavior without prediction, not a regression, and the server's answer
+   arrives as it does today. Mitigation: the "cannot predict" count (D7)
+   names the row, so the screen can load it.
+8. **The owner choices: carried to ballots** (D12). Under the job
+   ballot's A, Crewboard predicts 6 of 12 writes, with D8 moving
+   `set_role`, `remove_member` and `leave` to waiting while `member_policy`
+   reads the clock. That leaves 3 of 12 today and 6 of 12 once the expiry
+   check moves. Under its B, 2 of 12 are predicted before D8 and 1 of 12
+   after (`move_task`).
+
+**The second pass passes the review.** Every downside is removed except
+three, and each of those is named with its cost and mitigation:
+
+- logic disclosure (item 4);
+- the view's client code (item 5);
+- waiting where a row is not held (item 7).
+
+Implementation still waits on the two ballots and on the cards in the gap
+table, plus one more: the static guard fact of D8.
