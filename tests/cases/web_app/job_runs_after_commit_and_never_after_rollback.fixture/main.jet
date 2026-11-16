@@ -58,13 +58,19 @@ Board: struct {
     }
 }
 
+// Adds note 2, which is refused, then note 1, through `board`.
+adds: fn(board: app.Remote<Board>) {
+    print("add 2: {shown(board.add(2, "fail"))}")
+    print("add 1: {shown(board.add(1, "first"))}")
+}
+
 // What `added` gave, as text.
 shown: fn(added: Int BoardError!) -> String {
-    if added == {
-        .Ok(id) -> "{id}"
-        .Err(BoardError.Refused) -> "refused"
-        .Err(_) -> "failed"
+    id: added ?? {
+        if err == .Refused -> return "refused"
+        return "failed"
     }
+    "{id}"
 }
 
 // Note `id`'s text, or "none".
@@ -79,9 +85,7 @@ note: fn(store: db.Store, id: Int) -> String {
 run: fn() {
     store: db.open_memory()
     runs: Shared{0}
-    board: app.remote(Board{store: store.copy(), runs: runs.copy()})
-    print("add 2: {shown(board.add(2, "fail"))}")
-    print("add 1: {shown(board.add(1, "first"))}")
+    adds(app.remote(Board{store: store.copy(), runs: runs.copy()}))
     loop _ in 0..<500 {
         if note(store, 101) != "none" -> break
         tasks.sleep(10)
