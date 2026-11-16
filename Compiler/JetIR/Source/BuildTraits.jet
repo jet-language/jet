@@ -233,12 +233,13 @@ ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slo
 }
 
 // The text a reflected trait value at `slot` names its type by: the payload
-// key its box holds maps to the declared type of that key among those the
-// names at `args[names]` list (sema_call_reflection_names: a count, then each
-// type's checked key, type name and path), so its path is the identity of the
-// TypeId `T.reflect()` reads for it. `part` picks the type name (0) or the
-// path (1); a key of no listed type keeps the checked text of the trait
-// value's own type.
+// key its box holds maps to the type of that key among those the names at
+// `args[names]` list (sema_call_reflection_names: a count, then each type's
+// payload identity, type name and path: a declared type's checked key, a
+// builtin's carrier identity), so its path is the identity of the TypeId
+// `T.reflect()` reads for it. `part` picks the type name (0) or the path
+// (1); a key of no listed type keeps the checked text of the trait value's
+// own type.
 ir_trait_reflect_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, args: [Int], names: Int, part: Int) -> Int Never! {
     count: ir_reflect_count(p, b, args[names + 2])
     builder: ir_text_builder(m, b)
