@@ -128,11 +128,11 @@ build_error: fn(inputs: Inputs) -> String Never! {
 #Test("special routes and exclusions must name real rows and real source text") {
     inputs: tree_inputs([String]{})
     specials := inputs.copy()
-    specials.specials_text = inputs.specials_text.replace("member != \"decode\" -> return SemaDirectSpecialCheck{{", "member != \"decode\" -> return SemaDirectSpecialGone{{")
+    specials.specials_text = inputs.specials_text.replace("member != \"decode\" {{", "member != \"decode_gone\" {{")
     assert(specials.specials_text != inputs.specials_text)
     specials.specials_text = "{specials.specials_text}module:core.text.no_such\t{BUILD_ROUTES_PATH}\tir_host_method(\nmodule:core.text.byte_count\t{BUILD_ROUTES_PATH}\tir_host_method(\n"
     message: build_error(specials)
-    assert(message.contains("does not contain `if module_name != \"core.args\" || member != \"decode\" -> return SemaDirectSpecialGone{{"))
+    assert(message.contains("does not contain `if module_name != \"core.args\" || member != \"decode_gone\" {{"))
     assert(message.contains("`module:core.text.no_such` is not a surface row"))
     assert(message.contains("`module:core.text.byte_count` already routes through source"))
     exclusions := inputs.copy()

@@ -645,7 +645,10 @@ none is E2102 too, never ignored: a switch takes no `=value`
   a bad free or a write after free.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
 - `--watch`, `--docs`, `--coverage`, `--where`, and `--capture`
-  control test or development execution; `--browser` selects browser engines.
+  control test or development execution; `--browser` selects browser engines;
+  `jet test --browser-scaffold=<name>` creates a browser test project (an app
+  `jet dev` serves, its `browser-tests.conf` and a first passing test) and runs
+  no test.
 - `--explain-partition` is the web-target build option that shows JavaScript or
   WebAssembly assignment.
 - `--threads N` caps the compiler at N threads on `build`, `run`, `check`,

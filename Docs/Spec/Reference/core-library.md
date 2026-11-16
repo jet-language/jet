@@ -1932,7 +1932,7 @@ thread that opened them (**E1102**).
 | `fact_hash(text)` | `String` | The FNV-1a 64 hex hash every event and trace fact carries, to compare a fact against text the caller holds. |
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
-| `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture BrowserError!` / `BrowserContext` / `BrowserPage` | Open a named test fixture (locked engine, isolated context, page, event subscriptions) and read its context and page. |
+| `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture BrowserError!` / `BrowserContext` / `BrowserPage` | Open a named test fixture (the locked engine at `JET_BROWSER_<ENGINE>_ENDPOINT` or `JET_BROWSER_ENDPOINT`, else launched from its lock; isolated context, page, event subscriptions) and read its context and page. |
 | `fixture_source(name, body)` / `generate_source(name, body, base_url)` | `String BrowserError!` | Generate bounded fixture source with escaped base-URL data. |
 | `selected(config, name)` | `Bool` | Apply the configured test filter to a test name. |
 | `report_new(config)` / `report_add_case(report, case)` | `BrowserTestReport` | Build an ordered browser test report. |

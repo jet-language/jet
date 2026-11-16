@@ -2230,6 +2230,32 @@ jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "use the canonical `jet test` flag spelling", color, JET_DRIVER_EXIT_USAGE)
 }
 
+// `jet test --browser-scaffold=<name>`: creates the browser test project
+// `name` and runs no test. It is `jet new`'s project with the `browser-test`
+// starter (Host.jet jet_cli_new_extra_files): an app `jet dev` serves, the
+// browser test settings that reuse that server, and a first passing test.
+jet_cli_test_browser_scaffold: fn(jet_argv: [String], name: String, color: Bool, quiet: Bool) -[FS]> JetCLIPlan Never! {
+    // A separate value belongs to its flag, as in jet_cli_test.
+    index := 0
+    loop index < jet_argv.len() {
+        argument: jet_argv[index]
+        if argument == "--" -> break
+        if index == 0 && argument == "test" {
+            index += 1
+            next
+        }
+        if argument == "--profile" || argument == "--threads" || argument == "--color" || argument == "--set" {
+            index += 2
+            next
+        }
+        if !argument.starts_with("-") {
+            return jet_cli_fail("E2104", "`--browser-scaffold` creates a project and runs no tests, so it takes no target or filter, not `{argument}`", jet_cli_why("E2104"), "run `jet test --browser-scaffold={name}` alone, then `jet test` in the project", color, JET_DRIVER_EXIT_USAGE)
+        }
+        index += 1
+    }
+    jet_cli_new_plan(name, "browser-test", false, quiet, jet_argv.contains("--json"), color)
+}
+
 // `jet test [<target>] [<filter>]` (`TestRunOpts::parse`, `run_test_opts`,
 // `run_test_target` up to the compile). A package directory (or no target
 // inside a package) tests through its own `test: fn(t: Test)` when it declares
@@ -2245,6 +2271,12 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
     cli_sys.set_core_file_limit(Val(0), Val(0)) ?? ()
     if jet_cli_option_flags_refusal(jet_cli_test_build_argv(jet_argv, ""), color) == .Val(refusal) {
         return refusal
+    }
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        if argument == "--browser-scaffold" || argument.starts_with("--browser-scaffold=") {
+            return jet_cli_test_browser_scaffold(jet_argv, argument.removeprefix("--browser-scaffold").removeprefix("="), color, quiet)
+        }
     }
     options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, measure: false, json: false, profile: "", project_root: None, status: ""}
     flags := [TestSetting]{}
@@ -2696,13 +2728,19 @@ jet_cli_new: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
             return jet_cli_fail("E2104", "`{template}` is not a `jet new` template", jet_cli_why("E2104"), "choose one of {JET_CLI_NEW_TEMPLATES.join(", ")}: `jet new {name} --template ui`", color, JET_DRIVER_EXIT_USAGE)
         }
     }
+    jet_cli_new_plan(name, template, jet_argv.contains("--annotated"), quiet, json, color)
+}
+
+// The project `jet new` (and `jet test --browser-scaffold`) creates in the
+// folder `name`, which must be a new, simple folder name.
+jet_cli_new_plan: fn(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool) -[FS]> JetCLIPlan Never! {
     if name.len() == 0 || name.contains("/") || name.contains("\\") {
         return jet_cli_fail("E2104", "project name must be a simple folder name", jet_cli_why("E2104"), "try: jet new my_app", color, JET_DRIVER_EXIT_USER_ERROR)
     }
     if cli_files.exists(name) {
         return jet_cli_fail("E2104", "`{name}` already exists", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.New{name: name, template: template, annotated: jet_argv.contains("--annotated"), quiet: quiet, json: json, color: color}
+    JetCLIPlan.New{name: name, template: template, annotated: annotated, quiet: quiet, json: json, color: color}
 }
 
 // `jet fmt` (`"fmt"`): `--lang` selects the environment formatter (`argv` is
