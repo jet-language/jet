@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110227,
+    "rev": 110229,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74980,7 +74980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T13:46:21.884Z",
+      "updated": "2026-11-16T13:55:42.582Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -95867,6 +95867,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T03:51:39.272Z"
+        },
+        {
+          "n": 5,
+          "text": "No UI snapshot ledger spells a pre-cutover path: the 3 UISnapshots tests whose ledgers still name tests/ui/ pass. Proof: `jet test Compiler/JetTestKit/Tests/UISnapshots.jet` reports 0 failed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T13:46:35.032Z"
         }
       ],
       "refs": [],
@@ -95877,9 +95886,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T13:20:03.399Z",
+      "updated": "2026-11-16T13:46:35.032Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0cnf5w8",
@@ -209976,7 +209985,7 @@
       "cardId": "c06he0ee",
       "group": "language",
       "title": "Branching on an enum: single tests stay free; else over several cases is an error with an instant fix",
-      "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. Code that tests one value against several cases often ends in else for the rest. When someone later adds a case, that else quietly takes it, and the program gives a wrong answer with no error. This vote picks how Jet catches that with the least friction for the common cases. We recommend letting people type else, and having jet fix write out the cases it covers before a build.",
+      "situation": "An enum is a type with a fixed list of cases, such as a shape that is a circle, a square, a line or a dot. Code that tests a few cases and ends in else quietly takes any case added later, and the program gives a wrong answer with no error. A package must also be able to add a case without breaking its users. This vote picks how Jet catches later cases while keeping the most common code free. We recommend an error with an instant fix, and #Open for package enums that grow.",
       "gist": "When code tests one enum value against several cases, how do we catch a case added later, with the least writing?",
       "lesson": "An enum has a fixed list of cases. The bug to prevent: code that tests a few cases and ends in else quietly takes any case added later. One test of one case stays free. The options differ in how much the writer must type to keep later cases from slipping into else.",
       "explainer": "Words used here, shown on the one program this ballot uses throughout.\n\n```jet\nShape: enum {                  // an enum: a type with a fixed list of cases\n    Circle(radius: Int)        // a case that carries a value, its radius\n    Square(side: Int)          // a case that carries its side length\n    Line                       // a case that carries nothing\n    Dot\n}\n```\n\nA case test asks whether a value is one case. shape == .Circle(r) is true for a circle, and r is then its radius.\n\nA chain is if ... else if ... else, with one case test per branch. Its final else takes every case not tested above, including cases added later.\n\nA table names the value once and gives one arm per case, as in if shape == { .Circle(r) -> 3 * r * r ... }. The arrow -> gives the arm's result, and | joins cases in one arm. A table over an enum must name every case, so an else arm there is refused.\n\nThe rest means the cases that code does not handle one by one, such as Line and Dot in area.",
@@ -209987,8 +209996,8 @@
         {
           "key": "A",
           "name": "An error with an instant fix",
-          "detail": "One test of one case stays free: if order == .Paid { … }. Two or more tests of one enum value, in a chain of ifs or a table, must name every case. An else over an enum is an error everywhere (E0641, as tables already do), and jet fix or the editor's quick fix replaces it with the cases it stands for. A rest meant to take every other case, now or later, is written _ and is never stopped; a key handler is the usual example.\n\nEvidence (Docs/Research/2026-11-16-enum-branching-in-real-code.md): single-case tests are 82–86% of enum branches in Java, TypeScript and Go. In Rust, half of the catch-alls cover three cases or fewer, and a quarter cover more than ten. Jet's own code holds 1.86 MB of long lists whose arm does nothing or fails, which _ removes.",
-          "technical": "E0641 already refuses else over an enum in a table, and its fix writes the cases. A extends it to a chain of ifs over one value. Sema recognises that chain by the same subject test it uses for tables (I8).\n\nA also adds _, a table arm for every remaining case, including later ones. It is not a binding, and no Jet code uses _ as an arm today. Non-enum subjects keep else. jet fix turns existing long lists whose arms do nothing or fail into _ only when asked (--open-rest).",
+          "detail": "Most common first. One test of one case stays free: if order == .Paid { … }. A table naming every case stays free. Two or more tests ending in else over one of your own enums is an error, and one quick fix replaces the else with the cases it stands for. A rest meant to take every other case, now or later, is written _.\n\nPackages can add cases. An enum a package marks #Open may gain cases in a minor version; users' tables over it need a _ arm, and single tests stay free. When an update adds a case, jet update lists every _ arm that now takes it, so nothing changes silently. An unmarked package enum is closed: adding a case is a major version, and jet publish says so.\n\nEvidence: Docs/Research/2026-11-16-enum-branching-in-real-code.md. In Rust, 20% of public enums opt into non_exhaustive, and 80% stay closed.",
+          "technical": "E0641 already refuses else over an enum in a table. A extends it to a chain of ifs over one value. Sema recognises that chain by the same subject test it uses for tables (I8).\n\n_ is a table arm for every remaining case, including later ones; it is not a binding. #Open is a Core marker declared like any other (#6849). A table over another package's #Open enum without _ is an error whose fix adds the arm. Non-enum subjects keep else.",
           "code": "Shape: enum {\n    Circle(radius: Int)\n    Square(side: Int)\n    Line\n    Dot\n}\n\narea: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
         },
         {
@@ -210026,7 +210035,7 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "It catches every later case with one quick fix, keeps single tests free, and _ ends long filler lists.",
+        "why": "Common code stays free, every later case is decided, and packages can grow #Open enums without breaking users.",
         "gains": [
           "Single-case tests stay free.",
           "A later case is decided at every site."
@@ -210037,8 +210046,8 @@
             "mitigation": "The editor's quick fix writes the cases in one keystroke."
           },
           {
-            "loss": "Adding a case to a package's enum breaks users' tables.",
-            "mitigation": "That is the point within one program; a package lists the change in its API diff."
+            "loss": "Tables over an #Open enum need a _ arm.",
+            "mitigation": "Only authors who expect growth mark #Open; jet update lists each _ that takes a new case."
           }
         ],
         "whyNot": [
@@ -210079,13 +210088,14 @@
           {
             "key": "A",
             "name": "An error with an instant fix",
-            "gist": "else over an enum is an error; jet fix writes the cases; _ keeps a rest open on purpose.",
+            "gist": "Single tests and full tables are free; else over your enum is an error with an instant fix; #Open enums grow.",
             "gains": [
               "A new case stops every place that has not decided it.",
-              "One quick fix writes the list."
+              "Packages can add cases to #Open enums."
             ],
             "losses": [
-              "Trying code stops until the fix runs."
+              "Trying code stops until the fix runs.",
+              "Tables over an #Open enum need a _ arm."
             ],
             "proposed": {
               "code": "area: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        else -> 0  // error: else stands for .Line | .Dot\n    }\n}\n// jet fix (or the editor's quick fix) writes:  .Line | .Dot -> 0\n// Ben adds Triangle: the build names it here.\n// Every other key, now or later:  _ -> type_into(key)"
@@ -210124,7 +210134,7 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It catches every later case with one quick fix, keeps single tests free, and _ ends long filler lists.",
+          "why": "Common code stays free, every later case is decided, and packages can grow #Open enums without breaking users.",
           "gains": [
             "Single-case tests stay free.",
             "A later case is decided at every site."
@@ -210135,8 +210145,8 @@
               "mitigation": "The editor's quick fix writes the cases in one keystroke."
             },
             {
-              "loss": "Adding a case to a package's enum breaks users' tables.",
-              "mitigation": "That is the point within one program; a package lists the change in its API diff."
+              "loss": "Tables over an #Open enum need a _ arm.",
+              "mitigation": "Only authors who expect growth mark #Open; jet update lists each _ that takes a new case."
             }
           ],
           "whyNot": [
@@ -210186,6 +210196,14 @@
             "Case sets: deferred to B, since _ covers the long open rests and jet fix writes closed ones."
           ],
           "result": "A closed long rest is a written list, made by jet fix."
+        },
+        {
+          "loss": "Adding a case to a package's enum would break every user's tables.",
+          "attempts": [
+            "Make every package enum open: rejected, users would need _ on every table; Rust keeps 80% of public enums closed.",
+            "An author opts an enum in with #Open, users' tables add _, and jet update lists each _ that takes a new case: kept."
+          ],
+          "result": "Growing enums grow without breaks, and nothing changes silently."
         }
       ]
     },
@@ -220358,6 +220376,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:55:42.582Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:46:35.032Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07k91t6",
+      "note": "#5 No UI snapshot ledger spells a pre-cutover path: the 3 UISna"
+    },
     {
       "at": "2026-11-16T13:46:21.884Z",
       "by": "Main",
