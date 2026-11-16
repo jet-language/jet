@@ -17,6 +17,7 @@ use {
     core.color.[Color]
     core.ui.host.[UIAccessibility, UIAccessibilityState, UITextRange]
     core.ui.host.ime.[UIIMEComposition]
+    core.ui.host.drag_drop.[UIDropItem]
     markup: core.text.html
     draw: __core_ui_draw
     wayland: __core_ui_wayland
@@ -231,7 +232,9 @@ text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
 
 // `text_input(state, ime, on_drop: (item: UIDropItem) -> { … })`: the compiler
 // registers the handler with the runtime's drop registry as slot `drop`, then
-// builds the input here.
+// builds the input here. This module imports UIDropItem so that a program
+// using core.ui loads its declaration: the handler's patterns read the
+// labeled case payloads, and the drop adapter builds the item from them.
 #Builtin.Role(.TextInputDrop) priv text_input_drop: fn(state: String, ime: UIIMEMode, drop: Int) -> UINode Never! {
     result := text_input(state, ime)
     result.drop = drop
