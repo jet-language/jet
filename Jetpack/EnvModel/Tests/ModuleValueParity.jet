@@ -8,6 +8,8 @@ use {
         FleetPlan,
         OptionPlan,
         PromptPathMode,
+        ReloadPolicy,
+        SecretGenerator,
         envmodel_evaluate_env,
         envmodel_evaluate_source,
         envmodel_find_jet_binary,
@@ -391,4 +393,52 @@ dev: module {
     assert(head.contains("jet.BindingTypeMismatch"), head)
     assert(head.contains("--> main.jet:5:32"), head)
     assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+}
+
+// Lifecycle and secret values the compiler computes, inside the EnvModel
+// syntax (job names, `.Watch{ … }`, `random(…)`, the secret map) that stays
+// around them.
+ENV_LIFECYCLE_SECRET_VALUES: `
+HOOKS: "scripts"
+LENGTH: 16
+APP: "app"
+TOKEN: "TOKEN"
+
+dev: module {
+    env.dev: Env{
+        git_hooks_path: "{HOOKS}/githooks",
+        unset: ["OLD_{TOKEN}"],
+        reload: .Watch{ watch: ["src/{APP}"], debounce: 100 * 2 },
+        secrets: {
+            API_KEY: { required: false, description: "key for {HOOKS}", generate: random(length: LENGTH * 2) },
+        },
+    }
+}
+`
+
+#Test("lifecycle_and_secret_values_are_the_compilers") {
+    dir: envmodel_test_oci_base_dir("env-lifecycle-secret-values")
+    plan: envmodel_evaluate_env(ENV_LIFECYCLE_SECRET_VALUES, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    files.remove_all(dir) ?? panic("remove the environment")
+    assert_eq(plan.lifecycle.git_hooks_path, Val("scripts/githooks"))
+    assert_eq(plan.lifecycle.unset, [String]{"OLD_TOKEN"})
+    assert_eq(plan.lifecycle.reload, ReloadPolicy.Watch{paths: [String]{"src/app"}, debounce_ms: 200})
+    assert_eq(plan.secrets.len(), 1)
+    assert_eq(plan.secrets[0].description, Val("key for scripts"))
+    assert(!plan.secrets[0].required)
+    assert_eq(plan.secrets[0].generate, SecretGenerator.Random{length: 32})
+}
+
+#Test("lifecycle_and_secret_value_errors_are_at_their_line") {
+    lifecycle: "dev: module {{\n    env.dev: Env{{\n        unset: [\"A\"],\n        git_hooks_path: \"a\" + 1,\n    }}\n}}\n"
+    secret: "dev: module {{\n    env.dev: Env{{\n        secrets: {{\n            API_KEY: {{ required: false, generate: random(length: \"x\" * 2) }},\n        }},\n    }}\n}}\n"
+    sources: [String]{lifecycle, secret}
+    loop source in sources {
+        dir: envmodel_test_oci_base_dir("env-lifecycle-secret-error")
+        error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+        files.remove_all(dir) ?? panic("remove the environment")
+        head: module_value_refusal_head(envmodel_test_render("main.jet", source, error))
+        assert(head.contains("--> main.jet:4:"), head)
+        assert(!error.what.contains("ENVMODEL_VALUE"), error.what)
+    }
 }

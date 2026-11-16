@@ -105,7 +105,8 @@ EnvFieldKind: enum {
         }
     }
 
-    // `packages`, `secrets`, and lifecycle references are not comptime values.
+    // `packages`, `secrets`, and lifecycle fields hold references, so they
+    // are not one value a sibling field can read.
     is_computed: fn(self) -> Bool Never! {
         if self == {
             .Packages | .Secrets | .Lifecycle -> false
@@ -136,12 +137,13 @@ envmodel_evaluate_env_contribution: fn(value: Expr, src: String, scope: ModuleEv
     }
 }
 
-// The fields of a computed kind, each written in one of the shapes its
-// reader takes: a field written as one value is one generated value
-// (ValueProgram.jet) its siblings read by name, in any order; a field in
-// EnvModel syntax (`presets: { dev: { … } }`) is walked, and the values in
-// it are generated. A headless record a field types (a prompt, a language,
-// a preset, a file) is passed through that type's `envmodel_expect_*`.
+// The values written in the fields, each field in one of the shapes its
+// reader takes: a field of a computed kind written as one value is one
+// generated value (ValueProgram.jet) its siblings read by name, in any
+// order; a field in EnvModel syntax (`presets: { dev: { … } }`, a secret
+// map, a lifecycle field's names) is walked, and the values in it are
+// generated. A headless record a field types (a prompt, a language, a
+// preset, a file) is passed through that type's `envmodel_expect_*`.
 envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], globals: [String:CtValue]) EnvModelEvalError! {
     siblings := [String:String]{}
     loop field in fields {
@@ -153,7 +155,7 @@ envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], global
     planned := [String:Bool]{}
     loop field in fields {
         kind: EnvFieldKind.classify(field.name)
-        if !kind.is_computed() -> next
+        if kind == EnvFieldKind.Packages -> next
         generated: if planned.get(field.name) == None -> siblings.get(field.name) ?? "" else -> ""
         planned[field.name] = true
         if generated != "" {
@@ -171,8 +173,10 @@ envmodel_plan_env_fields: fn(plan: &EnvValueProgram, fields: [NamedExpr], global
             .Files -> {
                 envmodel_value_plan_typed(plan, field.value, "envmodel_expect_file", siblings, globals)
             }
-            .Prompt | .Setting -> envmodel_value_plan(plan, field.value, siblings, globals)
-            .Packages | .Secrets | .Lifecycle -> {}
+            .Prompt | .Setting -> { envmodel_value_plan(plan, field.value, siblings, globals) }
+            .Secrets -> { envmodel_plan_secret_specs(plan, field.value, globals) }
+            .Lifecycle -> { envmodel_plan_lifecycle_value(plan, field.value, globals) }
+            .Packages -> {}
         }
     }
 }
@@ -239,7 +243,7 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
                 loop file in declared -> capture.files.push(file)
             }
             .Lifecycle -> {
-                value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)
+                value: envmodel_evaluate_lifecycle_value(field.value, scope)
                 envmodel_lifecycle_from_field(capture.lifecycle, field.name, value) ?? return Err(envmodel_error("E1333", "environment lifecycle declaration is invalid: {err.message}", "lifecycle fields use typed dotenv, unset, job names, hook records, and Git hook paths", "fix the field shape, for example `on_enter: [prepare]`, `dotenv: [\".env\"]`, `git_hooks_path: \"scripts/githooks\"`, or `reload: .Prompt`", Val(span)))
             }
             .Setting -> {
@@ -251,26 +255,24 @@ envmodel_evaluate_env_fields: fn(fields: [NamedExpr], src: String, scope: Module
 }
 
 // Lifecycle names are references, not comptime variable reads. Keep bare
-// identifiers as strings while still evaluating ordinary literals and the
-// explicit expert record's scalar fields.
-envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, globals: [String:CtValue]) -> CtValue EnvModelEvalError! {
+// identifiers as strings and assemble the EnvModel syntax around the values;
+// every other value is the one envmodel_plan_lifecycle_value generated.
+envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope) -> CtValue EnvModelEvalError! {
     if envmodel_record_literal(expr) == .Val(record) {
-        return Ok(envmodel_evaluate_lifecycle_value(record, scope, globals))
+        return Ok(envmodel_evaluate_lifecycle_value(record, scope))
     }
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(_, _, _, _) -> Ok(CtValue.Str{value: envmodel_expression_name(expr)})
         .ListLit(values, _, _) -> {
             items := [CtValue]{}
-            loop value in values {
-                items.push(envmodel_evaluate_lifecycle_value(value, scope, globals))
-            }
+            loop value in values { items.push(envmodel_evaluate_lifecycle_value(value, scope)) }
             Ok(CtValue.List{values: items})
         }
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
             loop field in fields {
-                lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope, globals)})
+                lowered.push(NamedCtValue{name: field.name, value: envmodel_evaluate_lifecycle_value(field.value, scope)})
             }
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
@@ -279,10 +281,10 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, global
             loop arg in args {
                 if arg == {
                     .Positional(value) -> {
-                        lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                        lowered.push(CtEnumArg{label: None, value: envmodel_evaluate_lifecycle_value(value, scope)})
                     }
                     .Named(label, value) -> {
-                        lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope, globals)})
+                        lowered.push(CtEnumArg{label: Val(label), value: envmodel_evaluate_lifecycle_value(value, scope)})
                     }
                 }
             }
@@ -291,21 +293,60 @@ envmodel_evaluate_lifecycle_value: fn(expr: Expr, scope: ModuleEvalScope, global
         .MapLit(entries, _, _) -> {
             lowered := [CtMapEntry]{}
             loop entry in entries {
-                key_value: envmodel_evaluate_lifecycle_value(entry.key, scope, globals)
+                key_value: envmodel_evaluate_lifecycle_value(entry.key, scope)
                 key: envmodel_scalar_ct_key(key_value) ?? return Err(envmodel_error("E1333", "lifecycle map keys must be deterministic scalar values", "lifecycle records are captured as stable plan facts", "use a string, integer, boolean, or character key", Val(expr_span(expr))))
                 // A repeated key keeps its last value (Rust `collect` into a map).
-                value: envmodel_evaluate_lifecycle_value(entry.value, scope, globals)
+                value: envmodel_evaluate_lifecycle_value(entry.value, scope)
                 if !envmodel_ct_map_insert(lowered, key, value) {
                     envmodel_ct_map_replace(lowered, key, value)
                 }
             }
             Ok(CtValue.Map{entries: lowered})
         }
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-            envmodel_check_build_io(expr)
-            Ok(envmodel_comptime_evaluate(expr, globals, scope))
-        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> Ok(envmodel_value_of(expr, scope))
     }
+}
+
+// Plan the values in a lifecycle field the way
+// envmodel_evaluate_lifecycle_value reads it: names stay references, the
+// records, enum cases, lists and maps around them are walked, and every
+// other value is generated.
+envmodel_plan_lifecycle_value: fn(plan: &EnvValueProgram, expr: Expr, globals: [String:CtValue]) EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) {
+        envmodel_plan_lifecycle_value(plan, record, globals)
+        return
+    }
+    if expr == .Ident(_, _, _) {
+        return
+    }
+    if expr == .Field(_, _, _, _) {
+        return
+    }
+    if expr == .ListLit(values, _, _) {
+        loop value in values -> envmodel_plan_lifecycle_value(plan, value, globals)
+        return
+    }
+    if expr == .StructLit(_, _, _, _, fields, _, _, _) {
+        loop field in fields -> envmodel_plan_lifecycle_value(plan, field.value, globals)
+        return
+    }
+    if expr == .EnumLit(_, _, _, args, _, _, _) {
+        loop arg in args {
+            if arg == {
+                .Positional(value) -> { envmodel_plan_lifecycle_value(plan, value, globals) }
+                .Named(_, value) -> envmodel_plan_lifecycle_value(plan, value, globals)
+            }
+        }
+        return
+    }
+    if expr == .MapLit(entries, _, _) {
+        loop entry in entries {
+            envmodel_plan_lifecycle_value(plan, entry.key, globals)
+            envmodel_plan_lifecycle_value(plan, entry.value, globals)
+        }
+        return
+    }
+    envmodel_value_plan(plan, expr, [String:String]{}, globals)
 }
 
 // Overwrite the value stored under an existing `key`.

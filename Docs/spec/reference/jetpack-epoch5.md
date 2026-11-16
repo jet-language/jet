@@ -520,5 +520,8 @@ may read a sibling field in any order, and a cycle or type error is reported
 at the field in the source. A headless record takes the type its field gives
 it: `prompt: { label: "dev" }` is a `Prompt`, and each entry of
 `presets: ["dev": { … }]` is a `Preset`. The names a field holds
-(`presets: { dev: … }`, `.Rust`, `packages.app`) stay environment syntax; only
-the values inside them go to the compiler.
+(`presets: { dev: … }`, `.Rust`, `packages.app`, the jobs in
+`on_enter: [prepare]`, a `secrets:` map with its `compose(…)`, `max_age(…)`
+and `random(…)` declarations) stay environment syntax; only the values inside
+them go to the compiler, so `git_hooks_path: "{HOOKS}/githooks"` or
+`random(length: LENGTH * 2)` reads the module's values.
