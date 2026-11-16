@@ -39,7 +39,6 @@ use jet_foundation.[
     TypeTupleField,
     TypedLitBody,
     UnitScaleProvenance,
-    VariantPayload,
     ViewProvenance,
     ViewSourcePath,
     core_record_field,
@@ -1613,8 +1612,10 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
         }
         if is_local {
             // A bound local answers the ownership planes the checker holds for
-            // it; reading them neither uses nor moves the local.
+            // it; reading them neither uses nor moves the local, but it does
+            // read its name, so the local is no unused binding (L0101).
             bound: symbol ?? return sema_fact_read_failed()
+            state.used_ids[bound.id.id] = true
             if read == FactRead.Sendability {
                 local_ty: bound.ty ?? return sema_fact_read_no_value(member, span, diagnostics)
                 problem: sema_ownership_crossing_problem_for_name(name, local_ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, state, context)
@@ -1627,16 +1628,6 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
                 if place == .Val(found) -> moved = sema_ownership_place_moved(state, found) != None
                 value: sema_fact_known("MovednessInfo", moved)
                 return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
-            }
-            if read == FactRead.Origin {
-                binding_index: index ?? return sema_fact_read_failed()
-                origin := scopes.bindings[binding_index].origin
-                place: sema_ownership_place_from_expr_inner(base, scopes)
-                if place == .Val(found) && sema_ownership_place_moved(state, found) != None {
-                    origin = None
-                }
-                value: sema_fact_local_origin(origin)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
             }
             if read == FactRead.Origin {
                 binding_index: index ?? return sema_fact_read_failed()

@@ -276,7 +276,7 @@ sema_schema_enter_registered_module: fn(environment: &SemaScopeEnvironment?, pro
 }
 
 sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int, snapshots: [String:SchemaSnapshot], diagnostics: &[Diagnostic]) Never! {
-    if environment == .Val(scope) {
+    if environment != None {
         if program.registration_graph == .Val(graph) {
             start: diagnostics.len()
             loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) {

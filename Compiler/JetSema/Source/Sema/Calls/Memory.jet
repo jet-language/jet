@@ -533,7 +533,7 @@ sema_call_memory_guard_check_lambda: fn(argument: CallArg, value_type: Type, ret
     if argument.expr == .Lambda(_, _) {
         return sema_expression_lambda_host_callback(argument.expr, Val(expected), editable, environment, program, scopes, state, tail_store, context, diagnostics)
     }
-    checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    _: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     diagnostics.push(sema_error("E0112", argument.span, "a SharedGuard operation needs a lambda", "the callback runs while the guard protects its value", "write a one-parameter lambda, such as `value -> value.field`"))
     return None
 }

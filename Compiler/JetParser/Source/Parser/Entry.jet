@@ -92,6 +92,7 @@ use {
         TOKEN_SELF,
         TOKEN_SEMI,
         TOKEN_SHR_EQ,
+        TOKEN_STAR,
         TOKEN_STRING,
         TOKEN_TILDE_PIPE_EQ,
         TOKEN_TRUE,
@@ -410,7 +411,6 @@ parser_chunk_scan: fn(tokens: [Token], source: [U8], file_rules: [Int], from: In
             next
         }
         if kind == TOKEN_IDENT {
-            start: tokens[index].span.start
             if (hash_ahead || (marker_list && depth == 1 && (previous == TOKEN_LBRACKET || previous == TOKEN_COMMA || previous == TOKEN_BANG))) && file_rules.contains(name_index(tokens[index].decoded)) {
                 return whole
             }
@@ -732,7 +732,62 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
     }
     parser_collect_used_import_names(tokens, tables, indexed_spans, candidate_ids, used_ids, used)
     parser_collect_marker_import_names(tokens, tables, candidates, used)
+    if parser_low_level_tier_spelled(tokens, tables) {
+        parser_collect_core_mem_gate_names(imports, used)
+    }
     used
+}
+
+// A `core.mem` import is the discovery gate of the low-level tier (E0424,
+// E3102): `Type{ uninit }`, a raw pointer `*x` or `p.*`, a `Ptr` and an
+// inline `#FFI(asm)` body need it though none of them spells its name. In a
+// file that writes one, every name a `core.mem` import binds is read.
+// Rust: none (Jet-only pass)
+parser_collect_core_mem_gate_names: fn(imports: [ImportDecl], used: &[String]) Never! {
+    loop declaration in imports {
+        if declaration.kind == {
+            .Module(name, _) -> {
+                if name == "core.mem" && !used.contains(declaration.alias) {
+                    used.push(declaration.alias)
+                }
+            }
+            .Unqualified(module_alias, _, items, _, _) -> {
+                loop item in items {
+                    if module_alias != "core.mem" && "{module_alias}.{item.original}" != "core.mem" {
+                        next
+                    }
+                    parts: item.original.split(".").to_list()
+                    local: item.alias ?? parts[parts.len() - 1]
+                    if !used.contains(local) -> used.push(local)
+                }
+            }
+            .File(_, _) -> {}
+        }
+    }
+}
+
+// Whether the file writes low-level-tier syntax: an `uninit` or `Ptr` name,
+// a `*` where an operand starts (`*x`, and `p.*` after its `.`) or an
+// `FFI(asm)` marker.
+// Rust: none (Jet-only pass)
+parser_low_level_tier_spelled: fn(tokens: [Token], tables: TokenTables) -> Bool Never! {
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
+        if kind == TOKEN_STAR {
+            if index == 0 -> return true
+            before: tokens[index - 1].kind
+            value_end: before == TOKEN_IDENT || before == TOKEN_RAW_STRING || before == TOKEN_STRING || before == TOKEN_INT || before == TOKEN_FLOAT || before == TOKEN_UNIT_NUMBER || before == TOKEN_CHAR || before == TOKEN_TRUE || before == TOKEN_FALSE || before == TOKEN_SELF || before == TOKEN_RPAREN || before == TOKEN_RBRACKET || before == TOKEN_RBRACE
+            if !value_end -> return true
+            next
+        }
+        if kind != TOKEN_IDENT -> next
+        name: token_decoded(tables, tokens[index])
+        if name == "uninit" || name == "Ptr" -> return true
+        if name == "asm" && index >= 2 && tokens[index - 1].kind == TOKEN_LPAREN && tokens[index - 2].kind == TOKEN_IDENT && token_decoded(tables, tokens[index - 2]) == "FFI" {
+            return true
+        }
+    }
+    false
 }
 
 // A qualified marker names its import through the alias's

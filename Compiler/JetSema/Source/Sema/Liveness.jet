@@ -2,7 +2,8 @@
 // local name the file never reads. The parser records which import names the
 // file spells outside its import declarations (`Program.used_import_names`),
 // so every spelled read counts, including impl heads (`impl Local.types.Named`,
-// ), `#run` bodies and interpolations. C headers stay outside
+// ), `#run` bodies and interpolations, and a `core.mem` import is read where
+// the file writes the low-level syntax it gates. C headers stay outside
 // liveness because importing a bridge can have link-time meaning even when no
 // Jet name is read; foreign bindings stay outside for the same reason. An
 // import that shadows a bare Core type is never unused: it rebinds that name
@@ -13,7 +14,6 @@ use jet_foundation.[
     symbol_table_key,
     Diagnostic,
     Func,
-    NameRows,
     Program,
     Span,
     TextEdit,
@@ -22,9 +22,6 @@ use jet_foundation.[
     core_bare_source_module,
     core_module_has_type,
     diagnostic_with_edit,
-    name_rows,
-    name_rows_get_text,
-    name_rows_set,
 ]
 
 // A verdict's diagnostic is None when the lint is already reported by the
@@ -146,37 +143,6 @@ sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name:
     diagnostic := sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
     if edit == .Val(fix) -> diagnostic = diagnostic_with_edit(diagnostic, fix)
     sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic, verdicts)
-}
-
-// An inline `#FFI(asm)` body is the `core.mem` import's reader: the import is
-// its discovery gate (E3102), so it stays live though no Jet name spells it.
-// The gate import is found the way `sema_function_header_inline_has_core_mem`
-// finds it.
-sema_liveness_inline_asm_gate_aliases: fn(module_row: SemaRegistrationModule, aliases: &[String]) Never! {
-    has_asm := false
-    loop function in module_row.functions {
-        if function.declaration.inline_foreign == .Val(inline) {
-            if sema_checked_ascii_lower(inline.lang) == "asm" -> has_asm = true
-        }
-    }
-    if !has_asm {
-        return
-    }
-    loop declaration in module_row.program.imports {
-        if declaration.kind == {
-            .Module(name, _) -> {
-                if name == "core.mem" -> aliases.push(declaration.alias)
-            }
-            .Unqualified(module_alias, _, items, _, _) -> {
-                loop item in items {
-                    if module_alias == "core.mem" || "{module_alias}.{item.original}" == "core.mem" {
-                        aliases.push(sema_registration_import_local(item))
-                    }
-                }
-            }
-            .File(_, _) -> {}
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------:
@@ -333,7 +299,6 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             if edge.source_module_identity != module_row.module_identity -> next
             if edge.foreign_binding == .Val(binding) -> foreign_aliases.push(binding.alias)
         }
-        sema_liveness_inline_asm_gate_aliases(module_row, foreign_aliases)
         sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.source_file, verdicts)
         sema_liveness_unused_bindings(modules[module_index].diagnostics, module_row.source_file, verdicts)
         loop function in module_row.functions {

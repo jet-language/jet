@@ -37,7 +37,7 @@ run: fn() {
     planned_rows: planned.collect() ?? panic("collect")
     focused: data.query(rows).filter(fn(t) { t.minutes >= 4.0 }).collect() ?? panic("filter")
     sorted: data.query(focused).sort_by(fn(t) { t.team }).collect() ?? panic("sort")
-    groups: data.query(sorted)
+    _: data.query(sorted)
         .group_by(fn(t) { t.team })
         .sum(fn(t) { t.minutes })
         .collect() ?? panic("group_sum")

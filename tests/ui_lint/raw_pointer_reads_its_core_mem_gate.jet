@@ -1,0 +1,17 @@
+// The raw pointer and the uninit binding below need `use core.mem` as their
+// discovery gate, so only the `files` import is unused.
+use {
+    core.files
+    core.mem
+}
+
+run: fn() {
+    cell: 41
+    #Unsafe("the local cell is live for this raw read") {
+        pointer: *cell
+        print(pointer.*)
+        n := Int{ uninit }
+        n = 1
+        print(n)
+    }
+}

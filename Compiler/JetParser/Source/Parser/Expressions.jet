@@ -28,7 +28,6 @@ use {
         PlaceAccess,
         RuleSite,
         Span,
-        Stmt,
         StrFormat,
         StrPart,
         TextEdit,
@@ -717,7 +716,7 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         body := if fields.fields.len() == 0 -> TypedLitBody.Empty else -> TypedLitBody.Fields{fields: fields.fields.move()}
         return ParsedExpr{expr: Expr.TypedLit{head: Val(head), body: body.move(), span: span, id: parser_node_id(state)}, span: span}
     }
-    open := parser_expect(state, TOKEN_LBRACE, "`{{` to open a typed literal")
+    parser_expect(state, TOKEN_LBRACE, "`{{` to open a typed literal")
     if parser_current_kind(state) == TOKEN_RBRACE {
         close := parser_bump(state)
         span := parser_cover(start, close.span)

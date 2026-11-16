@@ -17,7 +17,7 @@ run: fn() {
     #Unsafe("posix set_user_ids: the effective ID is set to the one it already is, and the out-of-range ID never reaches the kernel") {
         os.set_user_ids(effective: ids.effective) ?? panic("set_user_ids(effective:)")
         refused: if os.set_user_ids(real: 4294967295) == {
-            .Ok(ok) -> "accepted"
+            .Ok(_) -> "accepted"
             .Err(error) -> (if error == {
                 .InvalidInput(_) -> "InvalidInput"
                 .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "another error"
