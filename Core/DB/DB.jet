@@ -162,8 +162,9 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 }
 
 // A database operation's failure. `Failed` carries the engine's or the API's
-// message; `Exists` is `Table.add` finding a row that holds the key already;
-// `Denied` is a table's row policy refusing a write.
+// message; `Exists` is `Table.add` finding a row that holds the key already,
+// one the caller may read; `Denied` is a table's row policy refusing a write,
+// or `Table.add` finding the key in a row the caller may not read.
 #[Error, Equatable]
 DBError: enum {
     Failed(String)
@@ -1007,10 +1008,24 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         Ok(None)
     }
 
-    // Adds `row`, whose key no row may hold yet (else `Exists`).
+    // Adds `row`, whose key no row may hold yet. A taken key is `Exists`
+    // when the caller may read the row that holds it, and `Denied` when it
+    // may not, as a refused write is, so a key a client chose (such as an
+    // `app.new_id()`) tells it nothing of a row it can't see.
     add: fn(self, row: T) -[DB.Read, DB.Write]> T DBError! {
         allowed: table_allows<K, T>(self, row.copy(), Op.Insert) ?? return Err(err)
         if !allowed -> return Err(DBError.Denied)
+        if self.policy == .Val(_) {
+            cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
+            if table_stored<K, T>(self, cells) == {
+                .Val(stored) -> {
+                    seen: table_allows<K, T>(self, stored, Op.Read) ?? return Err(err)
+                    return Err(if seen -> DBError.Exists else -> DBError.Denied)
+                }
+                .None -> {}
+                .Err(failure) -> return Err(failure)
+            }
+        }
         table_write<K, T>(self, row, false)
     }
 

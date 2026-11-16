@@ -5501,6 +5501,7 @@ tasks never read or change the process registry. The module source is
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 | `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
+| `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
 | `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
 | `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
 | `maybe_caller() -> auth.AccountID?` | account | The account this task acts for: `None` for the system or no one. |
@@ -6551,7 +6552,7 @@ subquery from another table) is refused.
 | `open_memory() -[DB]> Store` | store | Open an in-memory database. |
 | `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
-| `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row (`DBError.Exists` when its key is held) or insert-or-replace one. |
+| `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) DBError! -[DB.Read, DB.Write]>` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Read every row the caller may read, in key order, as a `core.data` query. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
@@ -6639,7 +6640,10 @@ stored row, and a `put` over a stored row twice, on the stored row and on
 the new one; both must pass. A `put` under a new key is an insert. A row the
 policy refuses to read is never returned: `get` gives `None` and `query`
 leaves the row out. A refused write is `DBError.Denied`, and it writes
-nothing. The policy runs as the system and reads through a store on the
+nothing. An `add` whose key a row already holds is `DBError.Exists` only when
+the caller may read that row; when it may not, the `add` is `Denied`, as a
+refused write is, so a key a client chose tells it nothing of a row it
+can't see. The policy runs as the system and reads through a store on the
 same connection, so it sees the transaction's earlier writes. It runs before
 the write it judges, so a write cannot vouch for itself. An `app.live`
 binding runs as the caller that made it, whoever reads it, and two callers'
@@ -6679,8 +6683,9 @@ Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads
 preserve every byte, including empty blobs, without text conversion. `DBError`
 is an enum: `Failed(String)` retains the driver's message rather than exposing
-a raw engine pointer, `Exists` is a typed table's `add` meeting a held key,
-and `Denied` is a table's row policy refusing a write. `message()` is the
+a raw engine pointer, `Exists` is a typed table's `add` meeting a key held by
+a row the caller may read, and `Denied` is a table's row policy refusing a
+write, or an `add` meeting a key held by a row the caller may not read. `message()` is the
 text that `Display` and `Debug` show.
 
 Pool receipts remain opaque values produced by a pool. Their equality and

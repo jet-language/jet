@@ -23,6 +23,7 @@ use {
     core.net.ws.[WsConn]
     tasks: core.tasks
     core.tasks.[TaskID]
+    uuid: core.crypto.uuid
     time: core.time
     rt: jet.runtime.time
     rt_web: jet.runtime.web
@@ -293,6 +294,34 @@ CallError: enum {
 // `validate` check does.
 field_error: fn(at: String, reason: String) -> FieldError Never! {
     FieldError{path: at, reason: reason}
+}
+
+// A fresh UUIDv7, as lowercase text, made where it is called: the Unix
+// millisecond it was made, then 74 random bits. A client gives a row it
+// creates this ID, so a row made offline has its final ID at once, and IDs
+// made later sort after it. It stops the task when the system has no
+// random source.
+new_id: fn() -[Rand, Time]> String Never! {
+    clock := time.Clock.new(time.now_utc().to_unix_ms())
+    uuid.v7(clock) ?? panic("app.new_id: {err}")
+}
+
+#Test("a new ID is UUIDv7 text that names the millisecond it was made") {
+    before: time.now_utc().to_unix_ms()
+    first: new_id()
+    second: new_id()
+    after: time.now_utc().to_unix_ms()
+    assert(first != second)
+    assert_eq(first.len(), 36)
+    assert_eq(first.slice(14, 15), "7")
+    assert(first.slice(19, 20) == "8" || first.slice(19, 20) == "9" || first.slice(19, 20) == "a" || first.slice(19, 20) == "b")
+    assert_eq(uuid.parse(first) ?? panic("the ID parses"), first)
+    made := 0
+    loop b in "{first.slice(0, 8)}{first.slice(9, 13)}".bytes() {
+        digit: if b >= 97 -> Int{b} - 87 else -> Int{b} - 48
+        made = made * 16 + digit
+    }
+    assert(made >= before && made <= after)
 }
 
 // The largest reply a remote call reads.
