@@ -7,6 +7,7 @@ use {
     interface_sys: core.sys
     jet_cli.[jet_cli_driver_request]
     jet_driver.[
+        JET_DRIVER_CORE_INTERFACE_BYTES_PER_THREAD,
         JET_DRIVER_CORE_READY_BYTES_PER_THREAD,
         JetDriverAuthorizedSourceFile,
         JetDriverAuthorizedSourceRoot,
@@ -32,7 +33,7 @@ use {
         jet_driver_load,
         jet_driver_runtime_interface_sources,
     ]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CompilerTraceSink, Func, Item, Program, Span, compiler_threads_single]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CompilerThreads, CompilerTraceSink, Func, Item, Program, Span, compiler_threads_single]
     jet_sema.[SEMA_UNITS_CATALOG, sema_units_catalog_names, sema_units_source_mentions]
 }
 
@@ -478,6 +479,17 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
     }
     counted: [String]{"counters.load.core_fragments", "counters.load.core_fragment_bytes", "counters.load.core_held_parsed", "counters.load.core_bodies_restored"}
     loop name in counted { assert_eq(one.counters.get(name), many.counters.get(name)) }
+}
+
+#Test("the Core interface made on several threads is the bytes of one made on one") {
+    rows: interface_test_core_rows()
+    text_bytes := 0
+    loop row in rows -> text_bytes += row.source().bytes().len()
+    // Enough Core text for the interface to admit more than one thread.
+    assert(text_bytes >= 2 * JET_DRIVER_CORE_INTERFACE_BYTES_PER_THREAD)
+    one: jet_driver_core_interface_bytes(jet_driver_core_interface_units(interface_test_core_rows(), compiler_threads_single()))
+    many: jet_driver_core_interface_bytes(jet_driver_core_interface_units(rows, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}))
+    assert(one == many)
 }
 
 // The interface is part of the compiler: a lazy load whose ready parses
