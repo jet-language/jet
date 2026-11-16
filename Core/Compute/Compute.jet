@@ -23,9 +23,24 @@ package: {
 // ComputeError.Device rather than computed on the CPU.
 use {
     core: core
-    core.compute.[ComputeError, VJPRun]
+    core.compute.[VJPRun]
     autodiff.[ad_backward, ad_backward_seeded, ad_binary, ad_depth, ad_fill, ad_record, ad_tape, ad_unary]
     math: core.math
+}
+
+// The native compute provider reports a failure by its position.
+#Error
+ComputeError: enum {
+    Shape
+    RankMismatch
+    OutOfBounds
+    Device
+    Unsupported
+    Arithmetic
+    Singular
+    Index
+    Parse
+    Serialization
 }
 
 MAX_ELEMENTS: 16777216
