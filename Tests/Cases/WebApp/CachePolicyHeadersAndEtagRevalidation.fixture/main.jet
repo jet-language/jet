@@ -1,0 +1,64 @@
+// A Board mounted at /api whose `landing` replies a LandingView, which the
+// app graph caches `.Public` for ten minutes; `count` replies an Int, which
+// has no policy, and `mine` is signed-in. Each request below is answered by
+// one `serve_once`, and the program prints what a cache reads from it.
+use {
+    app
+    client: core.http.client
+    net: core.net
+    web: core.web
+}
+
+LandingView: struct {
+    title: String
+    open: Int
+}
+
+Board: struct {
+    name: String
+
+    #App.Public landing: fn(self) -> LandingView { LandingView{title: self.name.copy(), open: 3} }
+
+    #App.Public count: fn(self) -> Int { 7 }
+
+    #App.SignedIn mine: fn(self) -> Int { 1 }
+}
+
+// A response's status and the headers a cache reads.
+shown: fn(response: HTTPResponse) -> String {
+    etag: if response.header("etag") == None -> "none" else -> "set"
+    "{response.status} | cache-control: {response.header("cache-control") ?? "none"} | etag: {etag}"
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    _: app.new("Board").cache<LandingView>(.Public{max_age: 10min})
+    served: web.app().mount("/api", Board{name: "crew"})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+        served.serve_once(listener)
+    }
+    base: "http://{addr}/api"
+    posted: client.post("{base}/landing", "[]")
+    body: posted.text()
+    print("landing names its board: {body.contains("\"title\":\"crew\"")}")
+    etag: posted.header("etag") ?? ""
+    got: client.get("{base}/landing")
+    print("landing by GET: {got.status} | same etag: {(got.header("etag") ?? "") == etag}")
+    unchanged: client.request("GET", "{base}/landing").header("if-none-match", etag).send()
+    empty: unchanged.text()
+    print("landing by GET naming its etag: {unchanged.status} | body: {empty.bytes().len()} bytes")
+    changed: client.request("GET", "{base}/landing").header("if-none-match", "\"another\"").send()
+    print("landing by GET naming another etag: {changed.status}")
+    print("count by POST: {shown(client.post("{base}/count", "[]"))}")
+    refused: client.get("{base}/count")
+    print("count by GET: {refused.status} | allow: {refused.header("allow") ?? "none"}")
+    print("mine signed out: {shown(client.post("{base}/mine", "[]"))}")
+    serving.join()
+}

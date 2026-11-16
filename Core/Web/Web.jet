@@ -350,10 +350,17 @@ App: struct {
     // (sema lowers each here): `answer` decodes the posted JSON array of the
     // method's arguments, runs it, and gives the encoded reply. `limit` and
     // `window_ns` are the marker's `limit:` and `per:` (`AppRemote`).
-    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
+    // `reply` names the method's reply type, whose `.cache<V>` policy the
+    // call is answered under (`app_remote_reply`); a method whose reply type
+    // is cached `.Public` also answers GET `path`
+    // (`app_remote_get_response`).
+    __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply}
         app_traced(self, path, app_endpoint_method(path))
-        http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_remote_response(endpoint, request)) }), "", at)
+        table: app_table(self)
+        answers: http_server.__handler(fn(request: HTTPRequest) { Ok(if request.method == "GET" -> app_remote_get_response(endpoint, request) else -> app_remote_response(endpoint, request)) })
+        http_server.route_add(table, "POST", path, answers.copy(), "", at)
+        http_server.route_add(table, "GET", path, answers, "", at)
         self.copy()
     }
 
@@ -361,7 +368,7 @@ App: struct {
     // (sema lowers each here) as `__remote_public` does, for a signed-in
     // caller only (`app_signed_in_response`).
     __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
-        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns)}
+        endpoint: AppRemote{answer: answer, limit: app_remote_limit(limit, window_ns), reply: ""}
         app_traced(self, path, app_endpoint_method(path))
         http_server.route_add(app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
         self.copy()
@@ -1351,9 +1358,13 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
 }
 
 // One endpoint method of a mounted service; sema builds `answer` from it.
+// `reply` names the method's reply type, for its cache policy
+// (`app_remote_reply`); "" for a signed-in method, whose replies no one
+// keeps.
 priv AppRemote: struct {
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
     limit: AppRemoteLimit
+    reply: String
 }
 
 // An endpoint marker's `limit:`: at most `calls` calls from one caller in
@@ -1443,15 +1454,38 @@ priv app_limited: fn(wait_ns: Int) -> HTTPResponse Never! {
     refused.__with_header("retry-after", "{seconds}")
 }
 
-// A call of an endpoint method: 200 with its reply, or 422 with the field
-// errors (`app_invalid_json`) when the body is no JSON array of arguments
-// the method takes; a call past the endpoint's limit is answered 429 first.
-// The call is one transaction (`app_transacted`): a reply that
-// `__reply_err` made rolls it back. A call that carries an
+// A call of an endpoint method: 200 with its reply (`app_remote_reply`), or
+// 422 with the field errors (`app_invalid_json`) when the body is no JSON
+// array of arguments the method takes; a call past the endpoint's limit is
+// answered 429 first. The call is one transaction (`app_transacted`): a
+// reply that `__reply_err` made rolls it back. A call that carries an
 // `Idempotency-Key` header carries it as its request key, with the account
 // it acts for: the call's reply is kept under the key for 24 hours, and the
 // call sent again under the key is answered with the kept reply.
 priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    app_remote_call(endpoint, request, None)
+}
+
+// A GET of an `#App.Public` endpoint method, whose arguments are the JSON
+// array of the query's `args` field (none is `[]`), answered as
+// `app_remote_response` answers a POST. Only a method whose reply type is
+// cached `.Public` answers GET, as a read any cache may keep; any other is
+// refused 405 with `Allow: POST`, so a GET, which a link or an image sends
+// from any site, never runs a method that may write.
+priv app_remote_get_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if calls.reply_cache.policy(endpoint.reply) == .Val(.Public(_)) {
+        at: web_http.index_byte(request.path.bytes(), 63)
+        if at < 0 -> return app_remote_call(endpoint, request, Val("[]"))
+        fields: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's query is malformed: {err}"}}))
+        return app_remote_call(endpoint, request, Val(web_http.query_get(fields, "args") ?? "[]"))
+    }
+    refused: app_json(405, app_error_json("`{request.path}` answers POST: only a method whose reply type is cached `.Public` answers GET"))
+    refused.__with_header("allow", "POST")
+}
+
+// One call of `endpoint` (`app_remote_response`), whose JSON array of
+// arguments is `query`, or the request's body when None.
+priv app_remote_call: fn(endpoint: AppRemote, request: HTTPRequest, query: String?) -[Net, FS.Read]> HTTPResponse Never! {
     if app_remote_limited(endpoint.limit, app_remote_who(request)) == .Val(wait_ns) {
         return app_limited(wait_ns)
     }
@@ -1462,13 +1496,48 @@ priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, F
     account := ""
     if calls.maybe_caller() == .Val(who) -> account = who.raw()
     asked: if key == "" -> calls.CallRequest?{None} else -> Val(calls.CallRequest{account: account, key: key, at: request.__received})
-    text: request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
+    text := query ?? ""
+    if query == None {
+        text = request.text() ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
+    }
     tree: live_json.parse(text) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    policy: calls.reply_cache.policy(endpoint.reply)
     app_transacted(None, asked, fn() {
         reply: endpoint.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
         if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
-        (response: app_json(200, reply), commit: !app_reply_failed(reply))
+        (response: app_remote_reply(policy, request, reply), commit: !app_reply_failed(reply))
     })
+}
+
+// The 200 answer of a call whose reply is `reply`, under the policy of its
+// reply type (`.cache<V>`; None when it has none): `.Private` is
+// `Cache-Control: private, no-store`; `.Public(max_age)` is
+// `public, max-age=<whole seconds>` with an `ETag` that names the reply's
+// bytes, and a GET whose `If-None-Match` names that ETag is answered 304
+// with no body. A failed run's reply is kept by no one.
+priv app_remote_reply: fn(policy: calls.CachePolicy?, request: HTTPRequest, reply: String) -> HTTPResponse Never! {
+    answered: app_json(200, reply)
+    kept: policy ?? return answered
+    if kept == .Public(max_age) && !app_reply_failed(reply) {
+        etag: "\"{http_server.static_hash(reply.bytes())}\""
+        control: "public, max-age={max_age.ns /% 1000000000}"
+        if request.method == "GET" && http_server.etag_matches(request.header("if-none-match") ?? "", etag) {
+            fields := core.http.headers_set(core.http.headers(), "etag", etag)
+            fields = core.http.headers_set(fields, "cache-control", control)
+            return http_server.response_body(304, core.http.body_empty(), fields)
+        }
+        tagged: answered.__with_header("etag", etag)
+        return tagged.__with_header("cache-control", control)
+    }
+    answered.__with_header("cache-control", "private, no-store")
+}
+
+// A call of an `#App.SignedIn` endpoint method (`app_signed_in_call`). No
+// one keeps its answer, whatever its reply type's policy:
+// `Cache-Control: private, no-store`.
+priv app_signed_in_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    answered: app_signed_in_call(endpoint, request)
+    answered.__with_header("cache-control", "private, no-store")
 }
 
 // A call of an `#App.SignedIn` endpoint method, which runs, as
@@ -1477,7 +1546,7 @@ priv app_remote_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, F
 // session counts against its network address and is refused with 401,
 // which a Remote reads as `CallError.SignedOut`; the refusal is the same
 // whatever the session lacked.
-priv app_signed_in_response: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+priv app_signed_in_call: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     if app_session_account(request) == .Val(account) {
         calls.callers.begin_account(account)
         defer calls.callers.end()
@@ -1627,6 +1696,36 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     request.__received = at
     answer: http_server.__dispatch(table, request)
     "{answer.status} {answer.text() ?? "unreadable"}"
+}
+
+#Test("a public reply cached `.Public` carries its max-age and ETag and is answered 304 to a GET that names the ETag; no one keeps a `.Private` or signed-in reply") {
+    _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Public{max_age: 10min})
+    served: app().__remote_public("/api/cached", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0, "web-test.Cached")
+    table: app_table(served)
+    posted: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(posted.status, 200)
+    assert_eq(posted.header("cache-control"), Val("public, max-age=600"))
+    etag: posted.header("etag") ?? panic("a public reply carries no ETag")
+    got: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached?args=%5B%5D", web_http.body_empty(), web_http.headers()))
+    assert_eq(got.status, 200)
+    assert_eq(got.header("etag") ?? "", etag)
+    assert_eq(got.text() ?? "unreadable", "{{\"ok\":false}}")
+    asked: web_http.headers_set(web_http.headers(), "if-none-match", etag)
+    unchanged: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached", web_http.body_empty(), asked))
+    assert_eq(unchanged.status, 304)
+    assert_eq(unchanged.header("etag") ?? "", etag)
+    assert_eq(unchanged.text() ?? "unreadable", "")
+    _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Private)
+    kept: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(kept.header("cache-control"), Val("private, no-store"))
+    assert_eq(kept.header("etag"), String?{None})
+    refused: http_server.__dispatch(table, web_http.server_request("GET", "/api/cached", web_http.body_empty(), web_http.headers()))
+    assert_eq(refused.status, 405)
+    assert_eq(refused.header("allow"), Val("POST"))
+    signed: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0)
+    unsigned: http_server.__dispatch(app_table(signed), web_http.server_request("POST", "/api/me", web_http.body_text("[]"), web_http.headers()))
+    assert_eq(unsigned.status, 401)
+    assert_eq(unsigned.header("cache-control"), Val("private, no-store"))
 }
 
 // One webhook method of a mounted service: how its sender signs, the names
@@ -3077,7 +3176,7 @@ priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Ne
 }
 
 #Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
-    served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0)
+    served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0, "String")
     table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))

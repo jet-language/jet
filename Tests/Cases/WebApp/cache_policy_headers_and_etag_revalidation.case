@@ -1,0 +1,25 @@
+# `.cache<V>(policy)` on the app graph sets how the replies of the type `V`
+# may be kept. The fixture caches LandingView `.Public` for ten minutes, so its
+# public `landing` method is answered `public, max-age=600` with an ETag, by
+# POST and by GET alike, and a GET whose `If-None-Match` names the ETag is
+# answered 304 with no body. `count` replies a type with no policy: it carries
+# no cache headers and refuses GET with 405. A signed-in method's answer is
+# kept by no one, its refusal included. The probe leaves out the reply type.
+fixture: CachePolicyHeadersAndEtagRevalidation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: ~ "landing by POST: 200 | cache-control: public, max-age=600 | etag: set\n" # the policy's max_age, in seconds
+stdout: ~ "landing names its board: true\n"
+stdout: ~ "landing by GET: 200 | same etag: true\n" # the ETag names the reply's bytes
+stdout: ~ "landing by GET naming its etag: 304 | body: 0 bytes\n"
+stdout: ~ "landing by GET naming another etag: 200\n"
+stdout: ~ "count by POST: 200 | cache-control: none | etag: none\n" # no policy, no cache headers
+stdout: ~ "count by GET: 405 | allow: POST\n" # a GET runs only a cached read
+stdout: ~ "mine signed out: 401 | cache-control: private, no-store | etag: none\n"
+
+step: jet check probes/cache_needs_reply_type.jet
+exit: nonzero
+stderr: ~ "`.cache` expects exactly one type argument, got 0"
+stderr: ~ "cache_needs_reply_type.jet:4:"

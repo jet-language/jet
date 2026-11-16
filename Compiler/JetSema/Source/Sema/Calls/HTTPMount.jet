@@ -694,10 +694,13 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
 // `__remote_public`, an `#App.SignedIn` one through `__remote_signed_in`,
 // each with a handler that decodes each argument from the posted JSON array
 // and encodes the method's reply. Both take the endpoint `marker`'s rate
-// limit (`sema_app_endpoint_limit`). The generated code is the mount call's,
+// limit (`sema_app_endpoint_limit`); `__remote_public` also takes the name
+// of the method's reply type (`sema_app_reply_key`), whose `.cache<V>`
+// policy it answers under. The generated code is the mount call's,
 // at `span`: the marker may sit in another file, or outside the function
 // that mounts, and a generated handler is a lambda of that function.
 sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
     if !sema_app_mount_concrete(method) {
         diagnostics.push(sema_error("E2805", marker.span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
         return None
@@ -709,7 +712,14 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     calls: limit.pop() ?? panic("an endpoint limit has no count")
     member: if access == "SignedIn" -> "__remote_signed_in" else -> "__remote_public"
     answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, member, 1, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    sema_call_http_mux_source_call(mux, member, [TCallArg]{path, answer, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    if access == "SignedIn" {
+        return sema_call_http_mux_source_call(mux, member, [TCallArg]{path, answer, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    }
+    declared_return: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
+    replied: if declared_return == .Result(ok, _) -> ok else -> declared_return
+    key: sema_app_reply_key(graph, replied, method_module)
+    reply: sema_call_http_static_tree_arg(sema_call_http_core_string(key, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: key}}, span: span, id: AST_NODE_GENERATED}, span))
+    sema_call_http_mux_source_call(mux, member, [TCallArg]{path, answer, calls, window, reply}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
 }
 
 // Whether a mounted method `method` has read-only self, read parameters and

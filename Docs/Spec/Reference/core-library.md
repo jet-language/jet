@@ -5518,6 +5518,7 @@ tasks never read or change the process registry. The module source is
 | `endpoints<S>() -> [String]` | names | The methods of the service `S` that `#App.SignedIn` or `#App.Public` marks, in the order `S` declares them. A job, a schedule, a webhook, a signing key and an unmarked method are server-only and never listed. |
 | `new(title: String) -> App` | graph | Start the app graph titled `title`, with no screens. |
 | `graph.screen(path, view, signed_in: Bool = false) -> App` | graph | Add the screen `view` shows at `path` to the graph, and give back the graph. See below. |
+| `graph.cache<V>(policy: CachePolicy) -> App` | graph | Answer every `#App.Public` endpoint reply of type `V` under `policy`, and give back the graph. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -5806,6 +5807,22 @@ re-runs a live query, so a viewer list stays current. Asked outside a live
 binding's run, `presence` only reads the accounts present. A connection
 that closes does not end presence: the account stays present while its
 binding is registered. The state is checked as for `url_of` (E2821).
+
+`graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
+and the last call for a type holds. `CachePolicy` is `.Private` or
+`.Public{max_age: Duration}`. An `#App.Public` endpoint method whose reply
+type (its `Ok` type, for a method that returns a Result) is `V` is answered
+under the policy. `.Public{max_age}` answers a successful reply with
+`Cache-Control: public, max-age=<whole seconds>` and an `ETag` that names the
+reply's bytes. Such a method also answers GET at its address, its arguments
+the JSON array of the query's `args` field (none is `[]`), and a GET whose
+`If-None-Match` names the reply's ETag is answered 304 with no body. Every
+other endpoint method refuses GET with 405 and `Allow: POST`, so a GET, which
+any site can make a browser send, never runs a method that may write.
+`.Private` answers `Cache-Control: private, no-store`, as every answer of an
+`#App.SignedIn` method is answered, whatever its reply type's policy, and a
+reply type with no policy carries no cache headers. `.cache` without the one
+type argument is E0119.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

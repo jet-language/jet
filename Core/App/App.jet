@@ -1567,6 +1567,16 @@ App: struct {
         self.copy()
     }
 
+    // `.cache<V>(policy)` as the compiler lowers it: `reply` names `V` as
+    // an endpoint's reply type is named where it mounts, so each endpoint
+    // method that replies a `V` is answered under `policy`
+    // (`reply_cache.policy`). The last policy set for `V` holds.
+    __cache: fn<V>(self, reply: String, policy: CachePolicy) -> App Never! {
+        held := APP_CACHE.guard_edit()
+        held.value[reply.copy()] = policy
+        self.copy()
+    }
+
     // The address of the screen whose state is `V`, as the compiler lowers
     // `url_of(view)` and a push's `open:`. `names` are `V`'s fields, in
     // order, and `values` their address text (`__address_arg`). Each `:name`
@@ -1690,6 +1700,43 @@ priv AppScreen: struct {
 
 // The route set: the screen of each state, by the state's name.
 priv APP_ROUTES: Shared{[String:AppScreen]{}}
+
+// How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
+// `.Private` is kept by no one: `Cache-Control: private, no-store`, as
+// every `#App.SignedIn` reply is answered, whatever its type's policy.
+// `.Public(max_age)` lets any cache keep an `#App.Public` reply for
+// `max_age` (`Cache-Control: public, max-age=<seconds>`) and then
+// revalidate it with its `ETag`: a GET whose `If-None-Match` names the
+// reply's ETag is answered 304 with no body.
+CachePolicy: enum {
+    Private
+    Public(max_age: Duration)
+}
+
+// The cache policy of each reply type, by the name `__cache` was given.
+priv APP_CACHE: Shared{[String:CachePolicy]{}}
+
+// The cache policies core.web answers endpoint replies under.
+priv(package) reply_cache: module {
+    // The policy `.cache<V>` set for the reply type named `reply`; None when
+    // none was set.
+    policy: fn(reply: String) -> CachePolicy? Never! {
+        held: APP_CACHE.guard_read()
+        found: held.value.get(reply) ?? return None
+        Val(found.copy())
+    }
+}
+
+#Test("a reply type's cache policy is the last `.cache` set for it") {
+    assert(reply_cache.policy("app.CacheTestView") == None)
+    graph: new("Crew").__cache<RouteTestBoard>("app.CacheTestView", CachePolicy.Public{max_age: 10min})
+    assert_eq(graph.title, "Crew")
+    if reply_cache.policy("app.CacheTestView") == .Val(.Public(max_age)) -> assert(max_age == 10min) else {
+        panic("the public policy was not kept")
+    }
+    _: graph.__cache<RouteTestBoard>("app.CacheTestView", CachePolicy.Private)
+    assert(reply_cache.policy("app.CacheTestView") == .Val(.Private))
+}
 
 // A board's state, for the route-set test: its project is a path segment and
 // its filter the query.

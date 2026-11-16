@@ -198,6 +198,39 @@ sema_call_app_screen: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     SemaMethodSpecialCheck{handled: true, value: value}
 }
 
+SEMA_APP_CACHE: "__cache"
+
+// The name a reply type `ty` (resolved) goes by, seen from
+// `module_identity`, for `.cache<V>` and for each mounted `#App.Public`
+// endpoint (`sema_app_mount_endpoint`), so an endpoint that replies a `V`
+// answers under `V`'s policy: a nominal's identity, else its written form.
+sema_app_reply_key: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> String {
+    row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return type_name(ty)
+    graph.modules[row.module_index].nominals[row.row].identity_key.copy()
+}
+
+// `graph.cache<V>(policy)` on an `app.App`: lowers the call to
+// `graph.__cache<V>(key, policy)`, `key` naming `V` (`sema_app_reply_key`).
+sema_call_app_cache: fn(receiver: Expr, receiver_value: TExpr, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if type_args.len() != 1 {
+        diagnostics.push(sema_error("E0119", span, "`.cache` expects exactly one type argument, got {type_args.len()}", "`.cache<V>(policy)` sets how the replies of the type `V` may be kept", "write the reply type: `.cache<V>(.Public(max_age: 10min))`"))
+        return rejected
+    }
+    if args.len() != 1 {
+        diagnostics.push(sema_call_arity_diagnostic("cache", 1, args.len(), false, span))
+        return rejected
+    }
+    reply: sema_type_resolve_declared(graph, type_args[0], environment.module_identity)
+    registration: [CallArg]{
+        sema_app_arg(sema_app_text(sema_app_reply_key(graph, reply, environment.module_identity), span), AccessConvention.Read, span),
+        args[0].copy(),  // copy: the caller's argument list keeps the written policy
+    }
+    value: sema_expr_check_declared_method(receiver, receiver_value, SEMA_APP_CACHE, SEMA_APP_CACHE, span, [Type]{}, [Type]{reply}, registration, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
+
 // `alias.url_of(view)`, `alias.presence(view)` and
 // `alias.notify(to:, title:, body:, open: view)`, where `alias` names `app`.
 // Each argument is evaluated once, in the order written, into a hidden
