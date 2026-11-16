@@ -571,11 +571,14 @@ ws_accept_key: fn(key: I64) -> I64 {
 // leaving, so no connection is freed under a send; each connection's write
 // lock keeps a published frame whole beside its owner's own sends. A send
 // that fails leaves the connection's watches in place until its owner drops
-// it.
-// Hub40: lock0, topics8 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest
+// it. A topic whose last watching connection leaves is held as left until
+// app takes it (jet_web_live_left), so a binding no open connection watches
+// ends its account's presence; watching it again before then takes it back.
+// Hub56: lock0, topics8 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest
 // first), topic count16, watches24 (WS_HUB_MAX_WATCHES [connection, topic]
-// pairs), watch count32.
-WS_HUB_BYTES: I64{40}
+// pairs), watch count32, left40 (WS_HUB_MAX_WATCHES topic texts, each once),
+// left count48.
+WS_HUB_BYTES: I64{56}
 
 WS_HUB_TOPICS: I64{8}
 
@@ -584,6 +587,10 @@ WS_HUB_TOPIC_COUNT: I64{16}
 WS_HUB_WATCHES: I64{24}
 
 WS_HUB_WATCH_COUNT: I64{32}
+
+WS_HUB_LEFT: I64{40}
+
+WS_HUB_LEFT_COUNT: I64{48}
 
 WS_HUB_MAX_TOPICS: I64{2048}
 
@@ -602,6 +609,7 @@ ws_hub_root := I64{0}
     thread_zero(root, WS_HUB_BYTES)
     net_put(root, WS_HUB_TOPICS, jet_rt_alloc(WS_HUB_MAX_TOPICS * I64{16}, I64{8}))
     net_put(root, WS_HUB_WATCHES, jet_rt_alloc(WS_HUB_MAX_WATCHES * I64{16}, I64{8}))
+    net_put(root, WS_HUB_LEFT, jet_rt_alloc(WS_HUB_MAX_WATCHES * I64{8}, I64{8}))
     #Unsafe("runtime-init runs before any other thread exists") { ws_hub_root = root }
 }
 
@@ -642,9 +650,9 @@ ws_hub_watches: fn(root: I64, conn: I64, topic: I64) -> Bool {
 }
 
 // jet_web_live_watch: joined `conn` receives `topic`'s events from now on,
-// starting with its latest one. A connection that has not joined (a client
-// connection), an empty or oversized topic, or a full watch table watches
-// nothing.
+// starting with its latest one, and `topic` is no longer left. A connection
+// that has not joined (a client connection), an empty or oversized topic, or
+// a full watch table watches nothing.
 #Export(c) jet_web_live_watch: fn(conn: I64, topic: I64) {
     root: ws_hub_root
     if (root == I64{0}) {
@@ -660,6 +668,7 @@ ws_hub_watches: fn(root: I64, conn: I64, topic: I64) -> Bool {
         net_put(watches, count * I64{16}, conn)
         net_put(watches, count * I64{16} + I64{8}, jet_rt_string_clone(topic))
         net_put(root, WS_HUB_WATCH_COUNT, count + I64{1})
+        ws_hub_left_take(root, topic)
         topics: net_word(root, WS_HUB_TOPICS)
         at := I64{0}
         loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
@@ -672,7 +681,65 @@ ws_hub_watches: fn(root: I64, conn: I64, topic: I64) -> Bool {
     sync_mutex_unlock(root)
 }
 
-// Drops `conn`'s watches, keeping the others in order.
+// Whether a connection other than `conn` watches `topic`, among the `kept`
+// watches already compacted and those after `index` of `watched`. The
+// caller holds the hub lock.
+ws_hub_watched_by_other: fn(root: I64, conn: I64, topic: I64, kept: I64, index: I64, watched: I64) -> Bool {
+    watches: net_word(root, WS_HUB_WATCHES)
+    at := I64{0}
+    loop at < watched {
+        if (at == kept) { at = index + I64{1} }
+        if (at >= watched) { return false }
+        if (net_word(watches, at * I64{16}) != conn && jet_rt_string_eq(net_word(watches, at * I64{16} + I64{8}), topic)) {
+            return true
+        }
+        at += I64{1}
+    }
+    false
+}
+
+// Holds `topic`, whose last watching connection left, as left, taking it
+// over; a topic held already, or a full left table, drops it. The caller
+// holds the hub lock.
+ws_hub_left_add: fn(root: I64, topic: I64) {
+    left: net_word(root, WS_HUB_LEFT)
+    count: net_word(root, WS_HUB_LEFT_COUNT)
+    at := I64{0}
+    loop at < count {
+        if jet_rt_string_eq(net_word(left, at * I64{8}), topic) {
+            jet_rt_string_drop(topic)
+            return
+        }
+        at += I64{1}
+    }
+    if (count == WS_HUB_MAX_WATCHES) {
+        jet_rt_string_drop(topic)
+        return
+    }
+    net_put(left, count * I64{8}, topic)
+    net_put(root, WS_HUB_LEFT_COUNT, count + I64{1})
+}
+
+// `topic` is watched again, so it is no longer left. The caller holds the
+// hub lock.
+ws_hub_left_take: fn(root: I64, topic: I64) {
+    left: net_word(root, WS_HUB_LEFT)
+    count: net_word(root, WS_HUB_LEFT_COUNT)
+    at := I64{0}
+    loop at < count {
+        if jet_rt_string_eq(net_word(left, at * I64{8}), topic) {
+            jet_rt_string_drop(net_word(left, at * I64{8}))
+            last: count - I64{1}
+            net_put(left, at * I64{8}, net_word(left, last * I64{8}))
+            net_put(root, WS_HUB_LEFT_COUNT, last)
+            return
+        }
+        at += I64{1}
+    }
+}
+
+// Drops `conn`'s watches, keeping the others in order. Each topic no other
+// connection watches any more is left (ws_hub_left_add).
 ws_hub_leave: fn(conn: I64) {
     if (net_word(conn, WS_CONN_HUB) == I64{0}) {
         return
@@ -685,7 +752,10 @@ ws_hub_leave: fn(conn: I64) {
     index := I64{0}
     loop index < watched {
         if (net_word(watches, index * I64{16}) == conn) {
-            jet_rt_string_drop(net_word(watches, index * I64{16} + I64{8}))
+            topic: net_word(watches, index * I64{16} + I64{8})
+            if ws_hub_watched_by_other(root, conn, topic, kept, index, watched) {
+                jet_rt_string_drop(topic)
+            } else { ws_hub_left_add(root, topic) }
         } else {
             net_put(watches, kept * I64{16}, net_word(watches, index * I64{16}))
             net_put(watches, kept * I64{16} + I64{8}, net_word(watches, index * I64{16} + I64{8}))
@@ -696,6 +766,29 @@ ws_hub_leave: fn(conn: I64) {
     net_put(root, WS_HUB_WATCH_COUNT, kept)
     net_put(conn, WS_CONN_HUB, I64{0})
     sync_mutex_unlock(root)
+}
+
+// jet.runtime.web.live_left: the topics whose last watching connection
+// closed since the last call, one per line, oldest first except where a
+// re-watched topic was taken back; none left is "". They are no longer left.
+#Export(c) jet_web_live_left: fn() -> I64 {
+    out: jet_rt_string_builder_new()
+    root: ws_hub_root
+    if (root == I64{0}) { return jet_rt_string_builder_finish(out) }
+    sync_mutex_lock(root)
+    left: net_word(root, WS_HUB_LEFT)
+    count: net_word(root, WS_HUB_LEFT_COUNT)
+    at := I64{0}
+    loop at < count {
+        if (at != I64{0}) { jet_rt_string_builder_push(out, rt_static_text("\n")) }
+        topic: net_word(left, at * I64{8})
+        jet_rt_string_builder_push(out, topic)
+        jet_rt_string_drop(topic)
+        at += I64{1}
+    }
+    net_put(root, WS_HUB_LEFT_COUNT, I64{0})
+    sync_mutex_unlock(root)
+    jet_rt_string_builder_finish(out)
 }
 
 // Drops topic pair `at` of `count`, moving the later ones down.
