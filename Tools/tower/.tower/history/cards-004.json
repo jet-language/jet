@@ -103366,6 +103366,865 @@
       "completedAt": "2026-11-13T13:05:11.211Z",
       "questions": [],
       "retiredAt": "2026-11-16T13:05:11.375Z"
+    },
+    {
+      "id": "c0qe89cl",
+      "num": 5072,
+      "title": "Jet for all repo scripting: replace .mjs/.js/.sh/.py tooling with Jet; every missing capability is a gap card",
+      "body": "Owner directive 2026-10-20: everything done in the repo should be doable in Jet (Jet is a scripting language); non-Jet scripts are a gap.\n\nInventory at dev 2026-10-20 (git ls-files, excluding the Rust implementation, which goes with the Rust removal): .mjs 339 Tools + 166 Compiler + 92 tests; .sh 71 Tools + 30 tests; .py 57 Tools + 32 tests; .js 14 Tools + 13 tests + 12 Compiler; .ts 12 tests. C sources (190 Compiler, 43 Tools, 29 tests, 15 Examples) are FFI/runtime fixtures, not scripting; review separately.\n\nPlan:\n1. Classify every script: (a) dies with the Rust removal (Rust->Jet generators, parity checkers, cargo wrappers); (b) gates and harnesses the chain and receipts use (native-compiler.mjs assembly, fixture runners, preflight, phase-diff, census); (c) generators of Jet tables; (d) one-off migrations and codemods (delete); (e) perf/agent tooling.\n2. Delete (a) and (d) during the Rust removal and greenfield cleanup.\n3. Port (b) and (c) to Jet, gated by #5068 (multi-package jet build/test); assembly disappears once jet build Compiler/ works.\n4. Every capability a port needs that Jet lacks (process spawn/stream, JSON, regex, fs walk, hashing, parallel jobs) becomes a gap card and gets fixed in Jet, not worked around.\nMain scratch tooling ($JET_STATE_ROOT/scratch/Main/*.mjs, *.sh: chain, census, preflight, fmt-verify) is included in the same port.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e17",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Every criterion met (Main, 2026-11-13). c9 met on dev a2c72a353e: all 12 tool entries plus native-c-compiler pass parity for both programs. c63 met on dev e65b2f91bd. The card stays open only because ballot D-BROWSER-CDP-PAGE1 waits for the owner. With #6728 closed, every G4 card criterion is now met."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c63 part 1 landed: G4Ports-pbprog1 eeb01f3d4d (PortBars charges the real ported files). Part 2 (pbprog2: refuse undeclared driver imports and spawns, deterministic planted-speed test) is staged. Owner direction 2026-11-12: port only scripts with a live caller; dead, one-shot or retired-machinery scripts are deleted in retirement SUBs, and peer comparators get named exemptions."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Owner 2026-11-12 evening: G4 done means functional parity plus reasoning at least as easy as the original. Speed and size are not G4 criteria; they live in G11 (#6759 c6-c8, #6328 c30) or G13. The open criteria here already follow this: every switch and deletion is #6759 c6."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c20 progress 2026-11-12: selfhost run.mjs twin G4Ports-selfhost1 landed 0970c3af1f (entry selfhost-run). Its post-land gate ran on 0970c3af1f, because the directland line pick skipped the extra lines; that is fixed: PortBars --runs 3 parity PASS 16/16, reasoning PASS, kit 50/0, corpus 12/0, LaneCheck OK. enum_codec_bench.py twin G4Ports-ecb1b landed ab2d2ab82b: parity 15/15, reasoning PASS (review ReviewAddStructType, not the author; branches 163 vs 165), speed FAIL 18x, so the originals keep running. Stale site pages E3301, E3303-E3305 and E2512 left by 7706ebb026 were regenerated in 659388156a."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c20 progress 2026-11-12: dashboard.sh deleted (cd7ef750f7, not ported: dead since 09-30, no caller). selfhost run.mjs twin G4Ports-selfhost1 (entry selfhost-run) queued for direct land: parity 16/16, reasoning PASS 10/12 vs 5/12, speed FAIL 60.8x/5.4x (cold compile), so the original keeps running. Dev 9d07cd3da7 reverified sound after the lander lock bug (4/4 lines on an export)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 driver-lifecycle part landed 2026-11-12 (direct lands on seed-b13): G4Ports-dlc2 7a782fc2c6 and dlc3 afb333f2a0. PortBars --entry canvas-driver-lifecycle: parity 3/3 PASS, reasoning PASS (11/12 vs 3/12, branches 4 vs 4), speed FAIL 5.99x/5.77x, all compile (#6759 c8/c9), so the original keeps running. ScriptPairing now covers a library through its importers when every importer is paired or covered. c8 twins landed: psurf1b 09ef908f21, opt1 5854bdd479."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 (2026-11-12): the scenario.mjs port waits on `jet dev --canvas` (Front.jet:2786 refuses it as not built, card #6386; #5931 c6). Every scenario needs a live Canvas server, so no parity case can run until it exists. G4Ports-1 lands dlc2, then moves to c20."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 (2026-11-12): sourcemap parity entry and the live CDP breakpoint wait on #5201 web source maps (new criterion there); G4Ports-1 does the driver-lifecycle parity entry and the scenario.mjs port meanwhile."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c8: the live-reload and status twins (G4Ports-reload1, status1b) fail the reasoning bar under the reach rule (G4Ports-bars2), measured on stage1 plus each entry. run-live-reload is Jet 363 branches against the original 328, both depth 4. run-status is Jet 640 (depth 4) against 598 (depth 3). The twins own files are already smaller than the originals (LiveReload.jet 276 vs 309, Status.jet 574 vs 583); the gaps come from reached kit helpers and the drivers. Neither lands with a reasoning FAIL. ProcessTree (a /proc descendant walk, tree RSS, per-pid signal, wait-until-ended) is not covered by #3594 (D-CORE-PROCGROUP1 covers group placement and group kill only), so moving it to core.process would need an owner ballot. Both wait; G4Ports-1 moves to the performance-surface and optimization twins."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Gate clause of c7 (and part of c8) proved: G4Ports-gate1 landed 4f9510e351 (tested on f8c2e08e5c plus the patch, seed-b13). The run-publication entry parity case reports \"gate: 32 runs judged against Tools/gauntlet/measurement-manifest.json; twin output identical: yes\". PortBars run-publication: parity 3/3, reasoning PASS (10/12 vs 6/12, branches 803 vs 3124); speed recorded, 57.46x wall, 13.74x peak. kit test 42/0, corpus policy 12/0. c7 stays open for the 14 unpaired Tools/perf scripts (G5DevX-1) and the performance-surface twin gate case (G4Ports-1)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "G4 census (ScriptPairing --census on dev b63d6eca87; G4Ports-1's list in $JET_SCRATCH_ROOT/lanes/G4Ports/census-tools.tsv): 97 unpaired scripts under Tools/ outside Tools/tower. 33 are exempt: host assets (the VS Code extension.js and the tree-sitter grammar.js run in their hosts), test and fixture subjects, and peer programs. Tools/datetime_accuracy.py is exempt as an independent oracle subject, since Python's datetime checks Jet's core.time and a Jet port would make Jet check itself. Tools/perf (22 scripts) is c7 (G5DevX-1). Tools/agent has no unpaired script, so c9 needs only parity on its existing entries. The rest is c8 (gauntlet harness: B1-B4) and c20 (packaging, codemods, hosts, agent-eval: B5-B8), owned by G4Ports-1. 97 unpaired scripts outside Tools/ (tests/agent_workloads, Docs/audits, .agents/skills, Docs/research, tests/compiled_workloads, Docs/site) are outside this card's open criteria. No original is deleted until its twin passes the bars (#6759 c6)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c28 unblocked: its comptime read-surface ballot is ratified as D-EMBED-WALK1=A, and computed embed and find paths are on dev (tests/ui/comptime_embed_*computed*). Assigned to G4Ports-1 after #6768, the a0.0.45 group B reds and #6759 c1. c7 is G5DevX-1 (census done; perfport-0 deletes the dead selfhost and dashboard tools; asm-parity.mjs port in progress). Every switch in c7, c8, c9 and c20 still waits on the port bars, which #6759 (now G11) gates: a cold jet run peaks at 344-379 MB against 6.6-48 MB for the originals."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Owner rulings 2026-11-11 late: (1) no review needs a reviewer from a different model family; (2) a Jet twin must beat its original on wall time and peak memory, while source tokens are measured, reported and minimized but a twin above the original count still passes (a longer twin names its missing Core API or syntax in tool.token_gaps; clarity of reasoning outranks terseness); (3) hand-optimized machine code is the hill-climbing ceiling, not current work: until the owner opens it, a cell passes on the peer floor and its ceiling ratio is measured and reported. AGENTS.md records them (SUB Main-owner-rulings-1). c14's token clause (3) is superseded by this ruling."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c3 is not met. Lander3's meet-5072 run credited all 7 of its lines because each exits 0, but only 2 pass. Three are SKIP-HOST, with no Firefox or Chromium on the Lander host: core_browser_launch_drives_locked_firefox, _chromium, and jet_dev_canvas_lifecycle_exit_reuse_and_cleanup. Two are KNOWN-FAILING: the cdp_rejects_missing_capability_and_hostile_wire case (#5454, no last-owner drop cleanup in Core/Web/Browser.jet) and web_browser_source_map_cdp_jet_breakpoint (#6035, the web build emits no source map). c3 stays open until those three roots are fixed and the browser cases run on a host that has both engines."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "roots-sh token bar (ScriptAPI, 2026-11-11, after the 25r3..37r fmt restage on d8a82024a7): Jet 77 vs the original's 69, so the bar fails. A script plus module split counts 78, because PortBars counts imported modules. Script style counts 70, but E0620 refuses the 9 importers of a statements file. The 7 to 8 tokens left are fn headers, the use line and the checkout line, not a missing Core call. Closing it needs either a semantics change (importing a script-style file brings in its declarations only), which is a ballot candidate because the c180 rule makes script style and declarations-for-import exclusive today, or a new structural idea. The bar is not waived; the roots-sh entry stays failing with this gap named."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Ballot NEW-D-EDITOR-JS1 withdrawn 2026-11-11 after an adversarial rewrite (owner order: confusing or parallel ballots are redone, and questions an existing mechanism answers are decided rather than balloted). Decided: Keep the existing pairing rule without an editor-host exemption; port executable logic to Jet with the existing foreign-host boundary and generate required host artifacts reproducibly. It extends: origin/dev:Tools/agent/ScriptPairing.jet:99-110 is the canonical exemption list; :261 onward validates ordinary tool pairs. origin/dev:Compiler/Prelude/Effects.jet:71-98 includes FFI.JS. origin/dev:Tools/editors/vscode/package.json:16-18 names the JavaScript host entry; extension.js:9-13 imports host libraries. origin/dev:Tools/editors/tree-sitter/grammar.js:16-29 generates vocabulary, not the complete grammar. The full record is $JET_SCRATCH_ROOT/lanes/Main/ballots-v4/NEW-D-EDITOR-JS1/verdict.md. Withdrawal decides the direction; it does not mean the build is done."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t20 landed ScriptAPI-10 (97462b6d92..83b33f14dc), part (a) of c28: embed_file/embed_bytes/find take computed String paths and globs, the path law is judged on the value (E0957 quotes it), and every find is recorded as a glob row. c28 stays open for part (b), ScriptAPI-11 (the five Core-declaration tables built at compile time), which needs seed-t20. Its one red row (the command model -O row) also fails on the base, and G8Fix-17 fixes it."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t19 landed ScriptAPI-9 (0efcf91a49..97462b6d92): a Never call (process.fail, process.exit, user fns) fills a ?? fallback of any success type on O0/O1/O2, and CensusSnap2 and IntegLand4 use the form. c43 (the seed-bump half: converting the eprint+exit workarounds) can now be built on integ/seed-t19."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed ScriptAPI-4/5/6 (c36, c39, c31, c32 and c40 met), G8Fix-7b and 8b (the seed-tool halves of c37 and c38) and ScriptAPI-7 (c26b) (e75850d064..c2cecce162). c26 stays open: ScriptAPI-7's toolchain: embed breaks 4 selfhost_terminators jet_lexer cases (E0945 once a case copies JetFoundation out of the tree); ScriptAPI stages the fix-forward. c29, c37 and c38 close with the twins-adoption SUB."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t16a landed ScriptAPI-1 (c34), ScriptAPI-2 (c35), and the Core halves of G8Fix-7r (c37 and c29: String trim_newlines, first_lines, last_lines, has_line_prefix, has_line, tsv_records) and G8Fix-8 (c38: core.files list_dir(matching:), canonicalize, symlink(replace:), append and the rest) (8327f5ae47..e75850d064). c29, c37 and c38 stay open until the twins use them (the twins SUB after t17)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "G8Fix-5 lands in t16 without Tools/perf/read-into/memory.mjs: ScriptPairing refused it, since it has no Jet twin or gauntlet entry. The helper is saved unlanded as $JET_SCRATCH_ROOT/lanes/G8Fix/unlanded-memory.mjs. It may land only as a gauntlet pair."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t15a landed PerfLead-5072portcut (01b86931e7..8327f5ae47): the orchestrator twins share Roots.jet and run as `jet <file>`, and Jet tokens went from 27667 to 23774 with parity PASS on all nine. Also landed: the D-EMBED-WALK1 adversarial review (Docs/audits). PerfLead-5072c26b1r was dropped (closed_lists; see the earlier log), so c26 stays open. c15 stays open until each twin wins every bar. ScriptAPI-1/2 (c34, c35) ride t16."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~16:10, verbatim: \"remember for script performance we are targeting being approximately at hand optimized machine code level (as well as for regular programs). that work should go in the size/speed goal, not script. script goal should not have any speed size work\" Applied: #6087 and #6403 now belong to G11 (Speed and size) only, and #5072 c41 (peak RSS) moved to #6639. #6639 gains the machine-ceiling target for scripts. #5072's port bars still measure wall time and peak memory as switch bars (AGENTS.md), but the work that makes Jet faster or smaller is G11's."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c26 part b (PerfLead-5072c26b1r) was dropped from t15. With its conversions applied, the closed_lists guard fails: its hand-written `Effect` enum in EffectVocabulary.jet would be a new hand-written closed list (998 against a ceiling of 998) and would add two duplicate pairs (with Lang.jet Effect, 12 shared, and with BuildEffect, 8), while duplicates are at their ceiling of 352. Redesign: Effect has one hand-written home and the other is derived from it (Lang.jet Effect as the home, or the reverse), with no new guard ledger row. ForeignLanguage alone fits as a mirror row of Prelude FFI. Owner of the redo: G8Fix, after #6087 c2."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "ScriptAPI-1 (c34: PortBars checks and re-rank, AGENTS.md, ScriptPairing) and ScriptAPI-2 (c35: nine twins rewritten in the best Jet) are staged. Tokens went from 23774 to 14181 (-40%) against the originals' 7631 (1.86x; per entry 1.39x to 2.19x). Job parity passes on all nine, and wall time beats the original on every twin. Peak memory loses on 4 entries because of the runtime baseline (new criterion). Reasoning fails everywhere for want of review.json (new criterion). Each entry's remaining gap names its Core API criteria (c36-c40)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t14a landed PerfLead-5072c26a + c26afix (53805444ba..01b86931e7): c26 part a (toolchain: comptime inputs, E0945). c26 stays open for part b (c26b1r rides t15)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "D-EMBED-WALK1 is on the board (it unblocks c28). The draft recommends A; a different-family review added option E (computed embeds with literal globs) and recommends A only conditionally (E meets c28 with less change). The review gave 22 claim verdicts; the audit lands as Docs/audits/2026-11-10-embed-walk-review.md. Gaps under every option, for c28 to clear before the cutover: (1) jet run keeps a cached find-only program after its first match appears, because an empty find leaves no file-log record (ScriptCache.jet:530); (2) no lock record for a comptime find plus embed_file, and a build fn lock misses b.find and b.embed reads; (3) jet dev misses new non-.jet and toolchain: files (Host.jet:3718-3750); (4) Assemble rebase_embeds handles only literal embed_file; (5) no comptime value cache (about 3.3 s of CPU per compile for the 12 views against 1 s for the generator)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~13:40, verbatim: \"Also since we already measured, feel free to update all the scripts just to DO what we want them to do, not to match byte identical to the peers. That should help cut some bloat required to mimic exactly using jet native. Just write them with best possible jet.\" Applied: the measurement against the originals is recorded (the logs above and the PortBars runs of 2026-11-10). From now on each Jet tool is written in the best Jet that does the job, and its fixtures check the job (exit status, the files, commits and queue lines it produces, and the facts its report states), not byte-identical text from the original. Mimicry code (JS UTF-16 clipping, `\\s` collapse, Object.entries order, truthiness and template display, `$(...)` newline rules, unquoted word splitting) is deleted. c34 and c35 are edited to match."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~13:35, verbatim: \"I think most of those syntax wins already exist?? Like error propagation inferred effects element list literals all are already in jet. No implicit copies. My goal is to provide excellent APIs that cover most use cases so when syntax can't get shorter maybe logic can so that a long script could become a minor call to a corelib function or something.\" Applied: c35 is now the twins using existing terse Jet, not syntax ballots. c39 drops its syntax half. c40 adds whole-block Core calls. No syntax ballots are drafted for the token gap."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Main token attribution, 2026-11-10 ~13:40, over the nine twins with PerfLead-5072portcut applied (PortBars rules, tests excluded). The twins total 23773 tokens and the originals 7631. Helper fns re-implementing shell builtins: text 1425 (26 fns), file ops 1408 (22), command wrappers 1224 (20), print-and-exit 732 (20), JS emulation 299, version sort 241, roots 294. Inline: `??` arms 1368 (228), process.cmd chains 1072 (35), effect rows 1013 (121), files.* calls 904 (226), typed list literals 696 (174), .copy() 628 (157), term.eprint 483 (78), Never! 322 (161), use blocks 279. Script: $JET_STATE_ROOT/scratch/Main/tokfam.mjs and tokcat.mjs."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Owner instruction 2026-11-10 ~13:25, verbatim: \"For token count on scripts, we should get as close as we can with Jet and ways to get closer to competitors like syntax should be balloted. Other than syntax changes that is indicative of a gap in APIs which should be made to get us closer. Performance is the number one goal, tokens should be minimized/optimized but is not the main defining criteria\". Applied: c29-c33 are built without a ballot. New criteria cover the judge re-rank and the syntax ballots."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "PerfLead2 cut, 2026-11-10, on its t12 build with PortBars --runs 1. Parity passes on every fixture. tower-spec-apply 3314 to 2156 tokens (original 1273, so 1.69x where it was 2.60x); streamb10 873 to 464 (original 166, 2.80x where it was 5.26x); verify-rows 1325 to 1035 (original 181). The cuts: a sibling module Tools/agent/orchestrator/Roots.jet, no optional effect rows or Never annotations, and merged Dyn helpers. tower-spec-apply still spends tokens emulating JS behavior its fixtures pin (UTF-16 clip and length, \\\\s collapse, Object.entries order, truthiness). Ruling: a file with a `#!` line is a standalone script and can't import a sibling (E0603), so twins that use Roots drop the shebang and are run as `jet <file>`, which is how every twin is judged. All three bars still fail on tokens."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Syntax gaps from the same measurement are owner gates, kept for a ballot and not filed as criteria: S1 `!` error propagation (2 tokens per fallible call, 12 on streamb10; it overlaps the file-op gap), S2 a filtering loop with an else arm plus list concatenation (13), S3 an open-ended slice xs[2..] (7). Budget on streamb10: about 226 tokens with the four Core gaps, and 203 with S1-S3 as well, both above the 166 original. The token bar on shell originals is not winnable by porting alone."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "PerfLead2 measurement, 2026-11-10, with PortBars.jet's tokenizer. On the streamb10 shell entry the original is 166 tokens and the current Jet twin is 873. The tersest twin possible, with the roots code in a sibling module (a `use` of a parent path is E0602) and Core APIs that don't exist yet assumed (line predicates, process.fail/exec, a filtering loop, `!` propagation), is still 203. Bash `cp \"$a/x\" \"$b/x\"` is 3 tokens; files.copy plus its failure handling is at least 10. The other shell entries are at 3.3-7.3x; jetc-trace is at 1.13x (c22, ballot-held) and tower-spec-apply at 2.60x against .mjs. Main ruling: the bars stand, since they are owner gate criteria. tower-spec-apply is cut first, and each missing convenience is filed here as a Core API gap criterion, as c14 says."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Finding from the D-EMBED-TOOLCHAIN1 review: on a0.0.43, .jet/lock records no [[comptime_inputs]] rows for embed_file reads, against Docs/spec/spec.md:539. The CLI fills them only for generated sources (Compiler/JetCli/Source/Cli/InspectBuild.jet:267-275). Report: Docs/audits/2026-11-10-embed-toolchain-review.md, now linked from the ballot."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Port-bar judge first run (G6LeadB-7, not yet landed; dev c460ba91e5 + SUB, --runs 5): 0 of 10 tool entries pass. Parity 10/10; wall median lower on 9/10 (6 clean wins); tokens Jet/original 1.13x-7.32x on all 10; no review records yet. Full report with both sources and every measurement: Docs/audits/2026-11-10-port-bars-first-run.md (Tower docs)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t8c landed on dev 1e1492c924: PerfLead-c21 v2 (a8ed223e7f: the big-Int multiply plus the twin's to_fixed calling the exact fmt.decimal; 7 bignum goldens PASS) and PerfLead-c22 (047aa99de7: the typed twin, 1000 tokens against the original's 915; the gauntlet entry jetc-trace passes). c21 stays open until a quiet-core re-measure on the landed compiler (Dyn twin against node, plus a second program). c22 stays open on the token bar, which D-SCRIPT-LOCAL-CLOCK1 decides."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c17: the missing conveniences in the nine gauntlet entries where Jet uses more source tokens than Python (read from Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py} at dev 8a85d45051 by PortsLead). Each Gap is a candidate Core API (an owner gate: new public API is balloted before it is built); a Rewrite needs only an entry edit.\n\nRead from `Tools/gauntlet/entries/<entry>/{jet/run.jet,python/main.py}` at dev 8a85d45051.\nEach gap below is a candidate Core API gap card. A \"rewrite\" line means the API already exists and the\nentry should simply use it; that needs no card.\n\n## wordfreq (4.1x)\n- **Gap: whitespace tokens over bytes or text.** The Jet entry has a 20-line byte loop (ASCII whitespace\n  constants, token buffer, flush twice); Python uses `data.split()`. Wanted: `bytes.split_ws()` /\n  `text.words()`, a lazy iterator of whitespace-separated pieces. Core has `split_ws` in\n  core.text.parse, but not over `[U8]` or as an iterator.\n- **Gap: tally.** `counts[word] = (counts.get(word) ?? 0) + 1` is written by hand twice. Wanted:\n  `iter.tally() -> [T: Int]` (Counter) or `counts.bump(key)`.\n- **Rewrite:** `counts.top_n(20)` already exists (logreport uses it). It replaces `to_list` + `sort_by`\n  + the `shown` counter.\n\n## tensor-map-4k (1.8x)\n- **Gap: whole-tensor reduction.** `sum_axis(…, 0)` twice, then `get(total, [0])`. Wanted:\n  `compute.sum(t) -> Float`.\n- **Gap: infallible element-wise ops.** `full`, `add` and `get` each need `?? panic` even when the\n  shapes are literal and equal. Wanted: a shape-checked form that the compiler proves, or a panicking\n  variant for literal shapes.\n- **Gap: negative indices.** `get(mapped, [4095, 4095])` against Python's `mapped[-1, -1]`.\n\n## csvtransform (1.5x)\n- **Gap: several aggregates per group in one pass.** The entry runs two `group_by` queries (sum and\n  count) and then a nested linear search to join them. Wanted: `.group_by(k).agg(count(), sum(f))`\n  that yields one row per key.\n- **Gap: grouped result as a Map.** Wanted: `.to_map()` on a grouped query, so a join is `counts[key]`,\n  not a loop.\n\n## bulkrename (1.5x)\n- **Gap: regex full-match with typed captures.** The entry runs `is_match` and then `match` again,\n  then `Int.parse(match.group(1) ?? panic) ?? panic`. Wanted: `pattern.full_match(text)?.int(1)`.\n- **Language/ownership noise:** `(pattern.copy()).is_match(…)` inside the filter closure. A Regex used\n  read-only in a closure should not need a copy.\n- **Gap: zero-padded integer format spec.** `\"{index + 1}\".pad_start(4, \"0\")` against `{index:04}`.\n  Wanted: `{n:0>4}` / `{n:04}` in interpolation.\n- **Gap: enumerate from 1.** `loop (index, photo)` then `index + 1`.\n\n## regex-find-all-4mb (1.4x)\n- **Rewrite:** the task counts a literal; `text.count(\"struct\")` exists (core.text.parse `count`).\n  Using it drops the regex import and the `find_all` list.\n\n## tzreport (1.3x)\n- **Gap: infallible whole-unit duration.** `a.difference(b).in(.Minutes) ?? panic(\"gap\")` is used twice.\n  Wanted: `duration.whole_minutes() -> Int` (floor), with no error path for an in-range difference.\n- **Gap: a named-tuple return needs `return (…)` and a separate parse function.** Wanted:\n  `line.split_once(\"|\")` destructuring in a `map` lambda (`.map(((name, stamp)) -> …)`).\n\n## taskfile-cli (1.3x)\n- **Gap: in-place update of the first matching element.** The `done` arm rebuilds the whole list with a\n  `found` flag. Wanted: `tasks.find_mut(t -> t.id == id)` or `first_index_where`, plus field\n  assignment through it.\n- **Gap: read-or-default file decode.** `files.exists` + `files.read` + `json.decode<Store>`. Wanted:\n  `json.load<Store>(path, default: …)`.\n- **Gap: statically encodable JSON should not be fallible.** `json.to_string(…) ?? panic(…)` plus a\n  comment explaining why it cannot fail.\n\n## fft-4096 (1.2x)\n- **Gap: filled list / impulse constructor.** A 6-line loop builds `[1.0, 0.0 …]`. Wanted:\n  `[Float].filled(n, 0.0)` with index assignment, or `compute.zeros(n)` with `set`.\n- **Gap: complex view.** The output is interleaved `[re, im, …]` and indexed `2*i` / `2*i+1`. Wanted:\n  `spectrum.real()` / `spectrum.imag()` or a complex element type.\n\n## logreport (1.2x)\n- **Gap: bounded split with destructuring.** Three chained `split_once` calls with `?? panic` each.\n  Wanted: `(stamp, level, component, _) := line.split(\" \", limit: 4)` as a checked tuple.\n- **Gap: tally/default-0 increment.** The `bump` helper re-implements Counter (same as wordfreq).\n- **Gap: RFC 3339 → epoch ms in one call.** `parse_millis` exists only to chain `parse_rfc3339`,\n  `?? panic` and `to_unix_ms`.\n\n## Cross-cutting\n1. A tally/Counter API (wordfreq, logreport).\n2. Bounded split into a tuple (logreport, tzreport).\n3. Typed regex captures (bulkrename).\n4. Width/zero-pad format specs in interpolation (bulkrename).\n5. Multi-aggregate group_by and grouped `.to_map()` (csvtransform).\n6. Whole-unit duration accessors without an error path (tzreport).\n7. Element find-and-update (taskfile-cli).\n8. Whole-tensor reductions and negative indices in core.compute (tensor-map-4k, fft-4096).\n9. Infallible forms where the type proves success (json encode of a closed schema, literal-shape\n   tensor ops). This removes `?? panic` noise across entries."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-09) for c15: a named script that is already broken (prepush.sh and verify-batch.sh call a chain.sh that no longer exists) and has no live caller is deleted rather than paired, and c15 counts it done by removal; a live one is repointed to Tools/agent/Chain.jet and paired. lane-commit.sh is live and is paired."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-08 (asked by Main with the 2026-11-07 conflict note as context): keep the 2026-11-06 pairing model as written. A non-Jet original may live and run in the repository until its Jet twin wins every c14 bar, then stays only as the gauntlet entry's reference. This narrows philosophy priority 6 (Jet fills every role, no fallback tool) for repository tooling during a port, and it replaces the 2026-11-07 note that said c12-c15 would not be built as written. c12-c15 stand and are buildable. #6035 is done; its deletions stay, and the ruling applies to new tooling from now on."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 04:00: c12 is still blocked by the 2026-11-07 conflict, and G1Lead stopped it before committing. As written, a gauntlet entry.json names the original repo script, which conflicts with philosophy priority 6. A plain refuse-every-added-script gate (exempting browser JS) is a different rule whose scope the owner has not worded; it would also refuse new .mjs files under Tools/tower, the node-based Tower tooling. Owner: reword c12 to pick a rule and its exemptions."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 01:30, c17 finding from PortsLead-2 (details in $JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md). Nine Core API gaps make Jet use more source tokens than Python across the nine named gauntlet entries: (1) tally/Counter; (2) bounded split into a tuple; (3) typed regex captures; (4) zero-pad format spec; (5) multi-aggregate group_by and .to_map(); (6) whole-unit Duration accessors; (7) find-and-update; (8) whole-tensor sum and negative indices; (9) infallible forms where the type proves success. Each is public API, so it needs an owner ballot before code; cards wait for owner direction. Two rewrites need no new API (wordfreq via top_n, regex-find-all via text.count); PortsLead-2 does them now. c12-c15 stay blocked by the 2026-11-07 conflict note."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c7 evidence, not a close (PortsLead-2, ScriptBench full2 on bddfd21c0b's runner, g4/full2/cells.tsv: 810 cells, 321 win, 467 LOSS, 22 other; most cells NOISY because landings overlapped the run). w05 jet-bin loses to every peer (python 1.53, node 2.76, bun 5.35, deno 2.46, perl 3.14, ruby 1.20, lua 1.98, luajit 1.99; php 0.98 wall). w07 jet-bin wins 0.53-0.99 except php 1.12 and perl CPU 1.03. w10 jet-bin wins 0.21-0.72 except bun 1.20 and php 1.49; jet-run loses 1.1-7.9. w11 jet-bin wins 0.09-0.95 except bun 1.21/4.51; jet-run: python 0.94, node 1.04, bun 1.86, deno 1.46, ruby 1.15. A quiet-machine rerun is needed before any cell is judged."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "c7 progress (PortsLead-2): 4c36e83022 cuts the perf budget checker over to Tools/perf/budget/Check.jet (byte-identical to check.mjs on a real build trace across 4 flag sets; 6/0 unit tests). live-reload.mjs and the uncalled olevels/sweep.mjs, native-cells-baseline.mjs and test-source-compiler-gate.sh are deleted; git history keeps them. Next: ci-perf-check.sh and source-compiler-gate.sh, the gates. Parked: core-activation.mjs, which measures generated Rust and allocations through LD_PRELOAD, so its Jet form is a method question on #4275 c105; and jetc-trace/summarize.mjs, which waits on a Core local-zone API."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Conflict found 2026-11-07 (Main): c12-c15 keep a non-Jet original in the repository as each gauntlet entry's reference until its Jet twin wins the c14 bars. The owner's later ruling (Docs/spec/philosophy.md priority 6, dev acec3d1a06: Jet fills every role; a Core gap is fixed in Core, never with a fallback tool) and the #6035 c3 cutover delete those originals outright. Under the authority order the newer ruling wins, so c12-c15 are not built as written. A reference original may live only outside the repository (a pinned path in the entry manifest), and the bars in c14 stay as the comparison. Only this card's owner wording changes that."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 (later the same day): scripting performance and the full removal of non-Jet languages are G4 work, not G1/G2. #5072 returns to G4/e17 with criteria c12-c17 (pairing guard, AGENTS line, port bars, helper and runner pairs, Core API gaps from token losses) as its plan. Until then G1/G2 agents only prefer Jet for new tooling where practical; there is no guard and no pairing obligation."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 refinement: writing a script first in another language is allowed when its Jet twin follows; the pair is a gauntlet benchmark (capability, speed, ease of reasoning, terseness through library APIs that cover the common cases). Reference = the original language only. A port blocks until Jet wins every bar. Ease of reasoning = reviewer checklist plus measured proxies. c12-c15 reworded accordingly."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06: #5072 moves into G2 now (epoch e11, beside #4717). No new .mjs/.js/.cjs/.ts/.sh/.bash/.py may be added to the repository or to agent scratch, enforced by a LaneCheck guard. The only exceptions are browser-executed JS and Nix/flake files. The seed bootstrap gets no shell exception. Existing scripts get only small fixes until ported; a missing capability is a gap card here. Port order: agent tooling (commit, verify, land, chain), then test runners."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Moved from goal 1 (hand-off) to goal 4 (Best scripting language) on the owner's direction (2026-11-04): porting every repo tool to Jet is not a hand-off need, and G22 already says every repo script is Jet."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: jet-env may stay a bash bootstrap only temporarily, for machines without jet. With a jet binary present every tool runs through jet directly, and the environment setup moves into jet as Jet replaces Nix (#6564 c6)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Owner 2026-11-04: executed together with #6564 (fresh-clone hand-off). The lander, chain, suite, ballot validator and preflight move from out-of-repo .sh/.mjs straight into Tools/ as Jet programs."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "OWNER 2026-10-30 (verbatim): 'Javascript that runs in the browser is fine so long as we definitely plan to and will generate jets web backend from jet. Tools is in scope right now for perf gauntlet and tower. Rebuilding tower in jet rather than TS/JS will be the goal as a stress test for jet as a web domain language. the agent tooling should be converted to jet while ensuring that jet supports the needed functionality and builds it properly, cohesively and idiomatically where needed.' Browser JS generation is #5201's new criterion; the Tower rebuild has its own card; C7-C9 added here."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "OWNER 2026-10-30 (verbatim): 'why is there a Compiler/Bootstrap folder? It only has mjs files in it, but I want everything in cohesive idiomatic jet not javascript in random places'. Census at dev 216cac590b: 571 tracked .mjs/.js/.cjs/.ts files and 319 .py/.sh files. Under Compiler/ there are 72 JetRuntime/Tests, 33 Prelude/Web (browser runtime), 12+2 JetCanvas (browser assets), 11 JetBackend/Tests, 5 JetSema/Tests, 3 JetIR/Tests, 1 each in JetParser/JetDriver/JetCli Tests, and the 2 Compiler/Bootstrap generators. Jetpack/Bootstrap has 5."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5834 \"Core gap for #5072 script ports: Locale / collation\" (CardTrim 2026-10-28: single-root task step of map #5072 (Jet for all repo scripting: replace .mjs/.js/.sh/.py tooling); 1 criteria, 0 ratified decisions). Body: Core gap found by the #5072 script census (2026-10-23). A new Core API needs an owner ballot before implementation. - Missing: no locale or Intl API in Core. `Core/Time` has strftime only. No locale-aware string collation. - Needed by: `Tools/ci/weighted-shards.sh` (sort -k2 locale collation; already marked blocked in the census note). - Acceptance: `Core/Text` exposes a collation compare consistent with `LC_COLLATE=C` for ASCII and a named-locale compare for at least `en_US`; `weighted-shards` output identical to current sort output on the fixture set."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5833 \"Core gap for #5072 script ports: CDP (Chrome DevTools Protocol)\" (CardTrim 2026-10-28: single-root task step of map #5072 (Jet for all repo scripting: replace .mjs/.js/.sh/.py tooling); 1 criteria, 0 ratified decisions). Body: Core gap found by the #5072 script census (2026-10-23). A new Core API needs an owner ballot before implementation. - Missing: `Core/Web/Browser.jet` is WebDriver BiDi only; no raw CDP client or websocket-CDP session. - Needed by: `Tools/web-test/sourcemap.mjs`, `Tools/canvas-test/driver-lifecycle.mjs`, `Tools/canvas-test/scenario.mjs`. - Acceptance: launch Chromium with `--remote-debugging-port`, open a CDP websocket, send/receive JSON-RPC commands with id correlation and event subscription."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5832 \"Core gap for #5072 script ports: Parallel workers\" (CardTrim 2026-10-28: single-root task step of map #5072 (Jet for all repo scripting: replace .mjs/.js/.sh/.py tooling); 1 criteria, 0 ratified decisions). Body: Core gap found by the #5072 script census (2026-10-23). A new Core API needs an owner ballot before implementation. - Missing: `Core/Tasks` provides timers and receivers only; no worker pool, fork-join, or process-pool API. - Needed by: `Tools/agent/port/claim.mjs`, `Tools/agent-eval/domain-foundations/prim-distributed/pkg/bench_parallel.py`, and the `jobs` fan-out in `Tools/agent/goldens-census.mjs`. - Acceptance: bounded worker pool (N jobs, per-job timeout, collected exit status) with deterministic result order; cancellation on parent exit."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5831 \"Core gap for #5072 script ports: rlimit / rusage (process resource limits and usage)\" (CardTrim 2026-10-28: single-root task step of map #5072 (Jet for all repo scripting: replace .mjs/.js/.sh/.py tooling); 1 criteria, 0 ratified decisions). Body: Core gap found by the #5072 script census (2026-10-23). A new Core API needs an owner ballot before implementation. - Missing: no `getrlimit`/`setrlimit`/`getrusage` in `Core/Sys` (only `umask`, `setpgid`, `kill`). `Core/Process` exposes shell `ulimit` only. - Needed by: `Tools/gauntlet/harness/memory-safety-fuzz.mjs`, `Tools/perf/enum_codec_bench.py`, `Tools/perf/stream_bench.py`, `Tools/gauntlet/harness/timer.py`. - Acceptance: `Core/Sys` exposes get/set RLIMIT_{AS,CPU,NOFILE,CORE} and getrusage(RUSAGE_SELF/CHILDREN) with max-RSS, user and system time; tests cover the set/get round trip."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Destination: No .mjs/.sh/.py tooling remains.\nNotes: Batch SCRIPTPORT of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: each ported script runs under jet run with the same output. Order: #5831 #5832 #5833 #5834.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #5072 #5831 #5832 #5833 #5834 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan."
+        },
+        {
+          "at": "2026-10-20",
+          "by": "Main",
+          "text": "Inventory 2026-10-20, infrastructure only (benchmarks, peers, gauntlet and FFI excluded): 465 .mjs (Tools/agent 168, tests 117, Tower 59, JetBackend 52, JetRuntime generators), 83 .sh and 30 .py. Also the release chain kept in scratch (cycle.sh, selfhost-chain3.sh, census.sh, fixture-gate.sh, native-preflight.mjs). The ~82 .js files are mostly the browser runtime (product code, kept).\n\nProposed order (owner to confirm):\n1. #5068 `fn build` in Compiler/package.jet replaces sources.list, assemble.mjs, Jetpack/Bootstrap and the shell chains. `jet build Compiler/ --release` runs the stage-1/2/3 fixed-point proof in Jet.\n2. Generators become comptime: about 37 generated files become `prep` computations over their source data. Both the scripts and the committed outputs go, and with them the stale-generated-file failure class.\n3. The ~60 `--check` scripts become `fn test`/#Test; the fixture gate becomes `jet test tests/ui` (`--bless` to accept).\n4. `fn dev` for watch/rebuild/census loops.\n5. Long tail by area; Tower is its own project.\n\nFirst step: one collect-all census of the Core capabilities tooling needs (process spawn with output and exit status, directory walk and glob, JSON, hashing, timing); gaps are fixed in Core.\n\nSequence: after a0_007 and the Core identity fix (#5074)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #5831) Core gap for #5072 script ports: rlimit / rusage (process resource limits and usage): `Core/Sys` exposes get/set RLIMIT_{AS,CPU,NOFILE,CORE} and getrusage(RUSAGE_SELF/CHILDREN) with max-RSS, user and system time; tests cover",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 215fbac8cd (ToolsJet-3-C1b with ToolsJet-3): Core/Sys get/set rlimits CPU, AS, NOFILE, CORE, STACK and usage(.Program|.Children) user/system/peak_memory; 11 corpus witnesses; io/resource_limits golden PASS in wave 7.",
+          "at": "2026-10-31T08:45:40.683Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #5832) Core gap for #5072 script ports: Parallel workers: bounded worker pool (N jobs, per-job timeout, collected exit status) with deterministic result order; cancellation on parent exit.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ab6a338c69: release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). PASS: golden Examples/Systems/Process/ProcessRunAll and ProcessRunAllParentDeath at o0, o1 and o2.",
+          "at": "2026-11-08T06:12:43.711Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #5834) Core gap for #5072 script ports: Locale / collation: `Core/Text` exposes a compare consistent with `LC_COLLATE=C` for ASCII, and the en_US order (UCA over the CLDR root, D-TEXT-COLLATE1=A) through text.collate / text.collation_key; `weighted-shards` uses the byte order.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "String <, <=> and sort() compare bytes (Core/Text/Text.jet); text.collate and text.collation_key implement UCA over the CLDR 48 root. a0_037 candidate kit of 8447fc0cf4 (release run 2026-11-08 03:25-03:51; it failed only on the two corelib interrupt cases): cases text_unicode/collation-conformance PASS (every row of CollationTest_CLDR_NON_IGNORABLE_SHORT); golden Examples/Text/Unicode/Collation o0/o1/o2 PASS. Tools/ci/WeightedShards.jet #Test 'ties order by bytes, as LC_COLLATE=C does' PASS (G1Lead).",
+          "at": "2026-11-08T08:56:27.050Z"
+        },
+        {
+          "n": 5,
+          "text": "Compiler/Bootstrap is gone: generate-core-sources.mjs and fact-declarations.mjs are ported to Jet programs (or made unnecessary because the compiler reads the declarations directly), their generated outputs are byte-identical, and every caller (chain, gates, Tools/agent checks) runs the Jet version.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev abab9666d8: Compiler/Bootstrap deleted; generate-core-sources.mjs ported to Tools/agent/CoreSourceRows.jet (still on dev a2c72a353e); fact-declarations.mjs had no importer (the compiler parses facts in JetParser). git ls-tree a2c72a353e Compiler/Bootstrap is empty.",
+          "at": "2026-11-13T04:01:35.971Z"
+        },
+        {
+          "n": 6,
+          "text": "Compiler/ and Jetpack/ run no .mjs/.js/.cjs/.ts/.py/.sh outside browser-executed assets (Compiler/Prelude/Web runtime, JetCanvas assets): every Compiler/*/Tests and Jetpack/Bootstrap script is a Jet test or Jet program that the lane-check and chain run, switched over once its Jet twin wins the c14 port bars; an original survives only as its gauntlet entry's reference (c13).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main census of dev at 8447fc0cf4+: git ls-files Compiler Jetpack shows the only .mjs/.js/.cjs/.ts/.py/.sh/.bash files are browser-executed assets (31 under Compiler/Prelude/Web, 12 under Compiler/JetCanvas/Source/CanvasAssets). Every tracked file without an extension under Compiler/ and Jetpack/ was checked for a non-Jet shebang (bash/sh/python/node): 0 found. 47fbc5b2a5 deleted the last 44 dead node scripts, including the JetBackend and JetIR Tests runners.",
+          "at": "2026-11-08T08:13:53.405Z"
+        },
+        {
+          "n": 9,
+          "text": "Tools/agent is Jet: native-compiler, preflight and every gate the chain and receipts use, beyond the test and landing gates #6035 c68-c71 port, have Jet twins in gauntlet tool entries whose parity cases pass for both programs. Each Core capability they need is built properly in Core (cohesive, idiomatic, with examples and goldens), not worked around. jet-env stays only as the #6628 bootstrap for a machine with no jet. The switch to each twin is #6759 c6 (G11).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a2c72a353e: every c9 tool entry passes its parity cases for both programs with node Tools/gauntlet/harness/run.mjs --entry E --jet-bin seed-b14: batch10, census-snap2, integ-apply6, integ-land4, integrate10, lane-commit, roots-mjs, runtime-c-census, streamb10, tower-spec-apply, verify-rows (sweep-5072 line 13 on c367fdfe56), roots-sh (real worktree, d5b28c297b) and native-c-compiler (a2c72a353e, after the harness stopped JetEnv overriding a case's own env). Outs $JET_SCRATCH_ROOT/lanes/Lander/sweep-5072.out, c9-rerun.out, loop/out/direct-G5DevX2-harness-case-env/. The switch to each twin stays #6759 c6 (G11), as the criterion says.",
+          "at": "2026-11-13T04:00:54.589Z"
+        },
+        {
+          "n": 10,
+          "text": "Gap (found 2026-10-30 porting Compiler/Bootstrap): comptime embed_file in the JetFoundation and JetCli packages can read Compiler/Prelude/Core.jet, Effects.jet and Core/** without E0957 package escape, through a declared, checked read of the toolchain's own Core sources, so the compiler can read Core declarations directly instead of committing generated rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "origin/dev Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet:25 runs comptime embed_file(\"toolchain:Compiler/Prelude/Effects.jet\") and embed_file(\"toolchain:Core/Effects/Effects.jet\") inside JetFoundation with no E0957 (the c26 mechanism, b273a3f287). The compiler builds on every train since (seed-t22 is built from it). Sweep by G1Lead4, 2026-11-11.",
+          "at": "2026-11-11T12:35:00.195Z"
+        },
+        {
+          "n": 12,
+          "text": "Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools/gauntlet/entries/ names that script as its original and holds its Jet twin, the shared fixtures, the expected output and a parity check, all in the same commit. Exempt: browser-executed JS and Nix/flake files (owner 2026-11-06), and test or example subjects that a Jet case or example consumes (tests/cases, tests/fixtures, tests/run, tests/*/inputs, Examples) (owner 2026-11-08, Q26 A). A ScriptBench workload folder holding run.jet and expected.out counts as a pairing like a gauntlet entry. The exemptions live in one place in the guard. A planted unpaired script is refused with a message naming the file; a planted paired script, a planted browser asset and a planted test subject pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already true on dev c460ba91e5, run with the t9d-built compiler. Tools/agent/LaneCheck.jet:169 runs Tools/agent/ScriptPairing.jet --check, which refuses .mjs/.js/.cjs/.ts/.sh/.bash/.py files and extensionless non-Jet shebang scripts (SCRIPT_EXTENSIONS, shebang_interpreter), with the exemptions in one place (EXEMPTIONS: browser JS, Nix, test/example subjects) and ScriptBench workload folders (run.jet + expected.out) counting as a pairing. jet test Tools/agent/ScriptPairing.jet: 3 passed, 0 failed. The tests cover: a planted unpaired .mjs and a python-shebang file refused by name; a paired tool entry, a batch entry, a ScriptBench workload, a browser asset (Compiler/Prelude/Web/Core/Clock.js) and a test subject (tests/cases/port_python/input.py) pass; an entry missing its twin, fixtures or parity check is refused part by part.",
+          "at": "2026-11-10T12:37:41.994Z"
+        },
+        {
+          "n": 13,
+          "text": "AGENTS.md states the rule in plain prose: new tooling may be written first in another language and proven working, then its Jet twin is written and proven to give the same output; the pair is a gauntlet entry; the repository keeps running the original until the Jet twin wins every bar in the next criterion, and then switches to Jet and keeps the original only as the entry's reference.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed b4d5af115c on dev (an ancestor of origin/dev 6a06b917cb): AGENTS.md section 'Tooling in other languages' (line 93) states each clause in plain prose: tooling may be written first in another language and proven; then its Jet twin is written and proven to print the same output; the pair is a gauntlet entry (mode tool, tool.original and tool.jet); the repository keeps running the original until the Jet twin wins every port bar, then switches and keeps the original only as the entry's reference. Read by Main 2026-11-09.",
+          "at": "2026-11-09T21:18:07.453Z"
+        },
+        {
+          "n": 14,
+          "text": "Port bars, each judged per entry against the script's original language only (owner 2026-11-06): (1) identical output on the entry's fixtures; (2) Jet faster, with Jet/original below 1.00 in wall time and in peak memory; (3) Jet no longer, with Jet source tokens at or below the original's; (4) Jet easier to reason about: a fresh reviewer scores both on the fixed checklist (types visible at use, every failure path visible at the call, no hidden global or mutable state, data flows top to bottom, one obvious way per operation, effects such as files, network and processes visible), and Jet scores at least the original while its measured proxies (branch count, nesting depth, hand-written helpers that a library call would replace) are no worse. A port lands only when all four bars hold; until then the original keeps running and each lost bar is an open card (a speed loss on a performance card, a missing convenience as a Core API gap card on this card).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-7. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). The bars are encoded in the judge Tools/gauntlet/PortBars.jet (5/0) and ScriptPairing's switch-over detection (4/0); its first real run (Docs/audits/2026-11-10-port-bars-first-run.md) fails every entry, and each lost bar stays open on c7-c9, c19, c20 and c22.",
+          "at": "2026-11-10T16:28:43.700Z"
+        },
+        {
+          "n": 15,
+          "text": "The orchestrator's helpers (lane commit, batch verify with its run-to-run diff, prepush, and the Tower spec apply) are each a gauntlet pair under the port bars, and they move into Tools/agent/ as Jet once the Jet twin wins every bar.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G6Lead-c15tsa. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). Together with G6Lead-c15i10 and G6Lead-c15lc (landed in t3c, 63944380ec) and G6Lead-h1 (--jet-bin) in this train; the tower-spec-apply pair passes parity on both sides. The ScriptPairing --check line fails identically on origin/dev (no .git in the batch tree), so it is pre-existing.",
+          "at": "2026-11-10T05:06:36.423Z"
+        },
+        {
+          "n": 16,
+          "text": "The witness runners (Compiler/JetRuntime/Tests/run-alloc-cache-witness.mjs, run-tdigest-witness.mjs, run-alloc-observer-witness.mjs and the remaining #6594 c5 runners) are each paired with a Jet test row under the port bars and switch to Jet once it wins every bar.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "47fbc5b2a5 deleted the witness runners as dead node scripts: run-alloc-cache-witness, run-alloc-observer-witness, run-tdigest-witness, run-io-witness and the five run-ui-*-witness .mjs files under Compiler/JetRuntime/Tests. git ls-files on dev shows no witness runner left, so there is nothing to pair or switch.",
+          "at": "2026-11-08T08:14:04.307Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "Every existing gauntlet entry where Jet uses more source tokens than Python (wordfreq 4.1x, tensor-map-4k 1.8x, csvtransform 1.5x, bulkrename 1.5x, regex-find-all-4mb 1.4x, tzreport 1.3x, taskfile-cli 1.3x, fft-4096 1.2x, logreport 1.2x at 2026-11-06) has its missing conveniences named on this card, so that composing library calls rather than hand-written helpers closes the gap.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Named on this card in Main's log of 2026-11-09 (board commit 6ac96130f9 on master): nine Core API gaps (tally, bounded split into a tuple, typed regex captures, zero-pad format specs, multi-aggregate group_by with to_map, whole-unit durations, find-and-update, whole-tensor reductions and negative indices, infallible forms where the type proves success) plus three rewrites, per entry, from PortsLead's reading of the jet and python sources at dev 8a85d45051.",
+          "at": "2026-11-10T01:34:40.984Z"
+        },
+        {
+          "n": 18,
+          "text": "The Core conveniences named for c17 ($JET_SCRATCH_ROOT/lanes/PortsLead/c17-gaps.md, 2026-11-08) are built with no ballot, per the owner's instruction of 2026-11-10 that Core API gaps are built and only syntax goes to a ballot. Their names follow existing Core conventions. They are: (1) a tally (Counter) over an iterator; (3) regex full-match with typed captures; (4) width and zero-pad format specs in interpolation; (5) several aggregates per group in one pass and a grouped .to_map(); (6) whole-unit Duration accessors with no error path; (7) find-and-update of the first matching element; (8) whole-tensor reductions in core.compute; (9) infallible forms where the type proves success. For (6) and (9), `Duration.in` and the other whole-unit forms whose runtime never fails have a type with no error path, cut over at every caller in one change. The two rewrites that need no new API (counts.top_n in wordfreq, text.count in regex-find-all-4mb) are applied. Each of the nine entries then uses no more source tokens than its Python twin (c14 bar 3).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G4b on dev afca453b51 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 00:27. The conveniences are on dev: (1) counts() d0eba66902; (3) match_full with typed group reads e38f6aab22; (4) width and zero-pad specs, used in bulkrename; (5) group_by into a map of lists b8420fa37c; (6) and (9) Duration.in is a plain Int, cut over at every caller in aa75c9d6b7, cdda5a7803 and 8ec883c0c0; (7) position with a field write b8420fa37c; (8) compute.sum e38f6aab22. The top_n rewrite in wordfreq and the text.count rewrite in regex-find-all-4mb are applied. jet Tools/gauntlet/PortBars.jet --measure --entry E for all nine entries (rc 0), Jet tokens against the Python original: wordfreq 64/111, tensor-map-4k 83/95, csvtransform 133/144, bulkrename 132/133, regex-find-all-4mb 42/50, tzreport 134/185, taskfile-cli 288/299, fft-4096 140/178, logreport 235/237. Each Jet twin is at or below its original.",
+          "at": "2026-11-12T05:27:41.362Z"
+        },
+        {
+          "n": 19,
+          "text": "The Jetpack infrastructure scripts are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, Python or C. Tools/jetpack-infra (stage-index-cache.mjs/.sh, stage-toolchain.mjs/.sh, stage-trust-root.sh, test-index-cache.sh, test-toolchain-update.sh) and Tools/jetpack-nix-index/publish.sh are ported to Jetpack or Jet tools and deleted. (was #3590 c199)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed direct on dev as 7c1bbe3783 (G1Lead-4-c19a) and 25c70a5451 (G1Lead-4-c19b). Tools/jetpack-infra holds only StageIndexCache, StageToolchain, StageTrustRoot, TestIndexCache and TestToolchainUpdate (.jet), and Tools/jetpack-nix-index/Publish.jet replaces publish.sh. Every listed .sh and .mjs file is deleted. Lander2 ran every test line with the t22 compiler and all passed: the jet check lines, `jet test` StageToolchain (2 passed) and StageIndexCache (3 passed), and TestIndexCache, which ends with its proofs passing at exit 0. ScriptPairing --check passes on 25c70a5451.",
+          "at": "2026-11-11T11:36:06.486Z"
+        },
+        {
+          "n": 20,
+          "text": "Owner scope 2026-11-12 night: G4 ports the repository management tools to Jet: the landing, chain, census, lane-check, release, CI and board-adjacent gates and generators the repository runs to build, check, land and release itself (Tools/agent, Tools/release, Tools/ci, and the generators and gates they call). Each port is a gauntlet tool entry whose parity cases pass for the original and the twin, with reasoning no harder than the original. Everything else stays in its own language and is out of G4: editor extensions (Zed needs Rust, VS Code and tree-sitter need JS), Tools/perf, Tools/gauntlet, agent-eval, peer comparison programs, benchmark subjects, browser-executed assets, and the Tower app. Scripts with no live caller are deleted, not ported. Switching to the twins is #6759 c6 (G11). Proof: ScriptPairing --census lists no unpaired script under the in-scope directories.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 4add2b9357 (G4Ports-scope1) + 6cea1699f9 (agent-eval retire): Lander direct proof rc 0: jet check/test Tools/agent/ScriptPairing.jet; ScriptPairing --census: unpaired 0, nothing in scope outside Tools/agent|release|ci, retired rows gone; git grep for retired script paths -> no live reference",
+          "at": "2026-11-13T02:23:58.414Z"
+        },
+        {
+          "n": 21,
+          "text": "Found 2026-11-09 by the first tool port (Tools/perf/jetc-trace Summarize.jet against summarize.mjs, one 410041-byte trace, 7 runs): the Jet twin takes 124.0 ms against 54.3 ms although a hello program starts faster on jet (15.9 ms against 37.4 ms). The time is in per-line Dyn parsing and string building in loops. The general Core or codegen path is fixed so the twin's wall time is below the original's, and the gain is proven on a second program that uses the feature differently.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The general fixes (PerfLead-c24 exact decimal formatting, c0e6345125; PerfLead-c21 v2 Int multiply and Dyn path, a8ed223e7f) landed on dev 1e1492c924 (train t8c), measured with the t8c-built compiler. Twin Tools/perf/jetc-trace Summarize.jet (Dyn twin at a8ed223e7f) against summarize.mjs on the same 410041-byte trace, hyperfine -N, pinned to one CPU, 3 interleaved rounds of 30 runs. Jet t8c had wall median 56.67 ms, min 49.50 ms and mean CPU 53.58 ms; node had 63.84, 49.75 and 57.27 ms. Jet is below the original on median, min and CPU (Jet/node median 0.89), and task-clock was 48.79 ms against node 53.20 ms. Jet instructions:u went from 535.8M to 428.9M (-19.9%). Second program, Second.jet: wall median 14930.9 to 6505.7 ms (-56.4%) and 225.33G to 102.38G instructions:u (-54.6%), with the oracle digest matching. Outputs are identical to the node twin. Caveat: loadavg was 64-80 throughout (a release cut was running), so the interleaved, pinned rounds share the load; receipts are in $JET_SCRATCH_ROOT/lanes/PerfLead/out/c21-t8c/ (twin-r*.json, second-r*.json, counters.txt, load.txt).",
+          "at": "2026-11-10T13:14:31.930Z"
+        },
+        {
+          "n": 22,
+          "text": "Found 2026-11-09 by the same port: the Jet twin needed 3693 source tokens against 915. The twin reads the trace through the existing typed `json.decode<T>` (no new Dyn API: 1108 tokens on 2026-11-10), and :Fixed(N) is fixed by c24 (its ties already match JavaScript toFixed, per the owner ruling in the #4588 log). Every remaining Core gap between the twin and the original (the pad fills are known) is built under a ratified API ballot, and the twin then has at most the original tokens with identical output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ScriptAPI-65 landed as 9fc9ae6037 (on dev). The Lander intake line 3 (Tools/gauntlet/PortBars.jet --entry jetc-trace) printed parity PASS (2/2 cases do the job) and tokens PASS (Jet 1363 against 1393, Jet/original 0.98) with identical output, and token_gaps is empty. Speed and reasoning remain under c14 and c42.",
+          "at": "2026-11-12T02:21:39.254Z"
+        },
+        {
+          "n": 23,
+          "text": "Tools/gauntlet/harness/run.mjs loads \"mode\": \"tool\" entries and runs their parity cases: today loadEntries skips them and the full-scope validation fails with 'full corpus has skipped entries', so no tool pair can be gated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "849c2b9892 (ScriptLead-32, t2c, dev c057ea659d). On a copy of the landed t2c tree, the run was node Tools/gauntlet/harness/run.mjs --entry batch10 --jet-bin <t2c jet> --runs 1. It loaded the mode-tool entry (skipped: [], validation issues: []) and ran its parity cases on both sides; the results JSON has tools[0] = batch10 with original batch10.sh, jet Batch10.jet and per-case results. The cases themselves failed in that run only because the scripts call the PATH jet (seed a0_042), which cannot read the post-TLS Core (__core_crypto_md). That is an environment issue with the inner jet, not the loader.",
+          "at": "2026-11-10T02:44:13.762Z"
+        },
+        {
+          "n": 24,
+          "text": "core.text.fmt.decimal and the :Fixed(N) selector round the exact binary value, ties away from zero, with no negative zero, per the owner ruling of 2026-10-05 (#4588 log): 2.675 -> \"2.67\", 1.45 -> \"1.4\", 62.5 -> \"63\", 0.125 -> \"0.13\", -2.5 -> \"-3\", -0.0001 at 2 places -> \"0.00\". Today 2.675 gives \"2.68\" and 1.45 gives \"1.5\", because the float product is rounded. Proof: a golden on O0/O1/O2 and the web tier, through Core/Text/Fmt.jet float_fixed, the runtime TextFmt.jet jet_fmt_decimal and Values.js.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "PerfLead-c24 (c0e6345125) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS golden tests/run/TextUnicode/FixedRoundsTheExactBinaryValue on o0/o1/o2, and the web build of the same program run under node matches its .out; PASS golden FmtContract and CoreTextCalls.",
+          "at": "2026-11-10T12:14:15.457Z"
+        },
+        {
+          "n": 25,
+          "text": "D-EMBED-TOOLCHAIN1=A, first build step: `.jet/lock` records a `[[comptime_inputs]]` row with the SHA-256 of every file a build reads through embed_file or find, as Docs/spec/spec.md:539 says. Today, on a0.0.43, the CLI fills these rows only for generated sources (Compiler/JetCli/Source/Cli/InspectBuild.jet:267-275). A case builds a package with an embed and checks the row, then edits the file and checks that the digest changes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB PerfLead-5072c25. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). jet build records each embed_file/embed_bytes/find input's SHA-256 as a [[comptime_inputs]] lock row, and an edit replaces the digest; the PackageModel line reruns rc=0 with the built jetpack.",
+          "at": "2026-11-10T19:45:00.112Z"
+        },
+        {
+          "n": 26,
+          "text": "D-EMBED-TOOLCHAIN1=A, reads: embed_file and find take `toolchain:` paths, resolved against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else the nearest toolchain), with no built-in-copy fallback. Membership, root and glob authority is checked, and a read outside that tree is a new registered error with a UI snapshot. The result cache stays keyed by content.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0efcf91a49 (train t18b, 0a995af312..0efcf91a49), SUB ScriptAPI-7fix. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18b/REPORT.md). D-EMBED-TOOLCHAIN1=A: embed_file and find take toolchain: paths (ScriptAPI-7, landed in t17a). The fix-forward makes the 4 selfhost_terminators jet_lexer cases copy a whole toolchain tree and unset JET_TOOLCHAIN_ROOT; all 4 pass.",
+          "at": "2026-11-11T03:24:14.737Z"
+        },
+        {
+          "n": 27,
+          "text": "D-EMBED-TOOLCHAIN1=A, table cutover part 1 (the bootstrap half after c26; it builds with a seed cut from the train that lands c26). EffectVocabulary, the CoreSources effect source and ForeignLanguages are computed at build time from `toolchain:` reads, and their checked-in copies and generator modes are deleted. The Effect and ForeignLanguage enums stay authored as the one home of their names, and a comptime check against the derived list fails the build with a registered error naming any missing or extra name.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G4c on dev 967936a2e6 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 00:39, 8 of 8 lines rc 0. The work is on dev as b273a3f287 (c26b) and d7d1ae5f76 (G4Ports-27). EffectVocabulary.jet now computes EFFECT_VOCABULARY_ROWS at comptime from embed_file of toolchain:Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet and Core/Compiler/Meta.jet; ForeignLanguages checks its enum against the toolchain tree's FFI leaves; the generated copies and the enum_cases_text rewriter are deleted. The authored Effect and ForeignLanguage enums are checked against the derived lists at build time, and E3010 names a stray or missing name. Results: tests/guards/closed_lists.jet 145 passed, 0 failed; EffectRoots.jet 11 passed; Jetpack BuildEffect.jet 1 passed; CoreSourceRows.jet 6 passed and --check current; jet test Compiler --profile ui tests/ui/E3010_effect_subset_names_a_stray.jet PASS 1 with every other count 0; LaneCheck on Core/Compiler/Lang.jet, Tools/agent/LaneCheck.jet and Tools/agent/Land.jet each rc 0. b10 itself built from this source.",
+          "at": "2026-11-12T05:40:09.679Z"
+        },
+        {
+          "n": 29,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. A line-wise regex test on a String, such as `text.has_line(r\"^(a|b)\")`, with no separate compile, flags or failure step for a literal pattern (the pattern is checked at compile time). It saves 29 tokens (39 to 10).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0efcf91a49 (train t18b, 0a995af312..0efcf91a49), SUB ScriptAPI-8. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18b/REPORT.md). streamb10 uses census.has_line and has_line_prefix in place of two lines().any(...) lambdas: 339 -> 283 tokens, with 2/2 parity PASS.",
+          "at": "2026-11-11T03:24:15.748Z"
+        },
+        {
+          "n": 30,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. `process.exec(argv, env: …)`: run a child with inherited stdio and exit with its status, where a signal gives 128+n. It saves 57 tokens (71 to 14), the largest gap.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 4 of c30's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:27:58.745Z"
+        },
+        {
+          "n": 31,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. File operations a script can call without per-call failure handling where the original keeps going (copy, copy_dir, remove_all, create_dir_all, symlink, canonicalize). 3 tokens per call, 18 on streamb10. The design must square this with the reasoning bar's rule that every failure path is visible at the call (for example, a scoped best-effort mode that reports what failed), because a silent ignore would lose that bar.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). Scripts call the file operations without per-call failure handling, and the twins use them.",
+          "at": "2026-11-11T01:09:50.130Z"
+        },
+        {
+          "n": 32,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10 with PortBars.jet's tokenizer on the streamb10 entry (original 166 tokens, Jet twin 873; today's APIs plus the sibling Roots module would give about 333). Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot. `process.fail(code, message)`: print the message to stderr and exit with the code in one call. It saves 3 tokens per use.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). process.fail(code, message) prints to stderr and exits; the twins use it.",
+          "at": "2026-11-11T01:09:51.823Z"
+        },
+        {
+          "n": 33,
+          "text": "Core API gap from the port bars (c14), measured by PerfLead2 on 2026-11-10: a natural or version string order (the order of GNU `sort -V`) on lists of String. The verify-rows twin hand-writes it in about 350 tokens against an original of 181. Owner instruction 2026-11-10: API gaps like this one are built (no ballot); only syntax goes to a ballot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 4 of c33's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:27:59.638Z"
+        },
+        {
+          "n": 34,
+          "text": "Owner instruction 2026-11-10 ~13:25 (\"Performance is the number one goal, tokens should be minimized/optimized but is not the main defining criteria\"): the port judge (Tools/gauntlet/PortBars.jet) and the tool-pairing text in AGENTS.md rank performance first. The job (the same exit status, files, commits and stated facts, checked by each entry's fixtures, not byte-identical text), wall time and peak memory are the bars that decide a switch. Source tokens are measured and reported for every entry and driven as low as Jet allows: every remaining token gap names a Core API criterion on this card (built) or a syntax ballot. A token loss alone no longer blocks a switch. The reasoning bar stays.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB ScriptAPI-1. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). Tools/gauntlet/PortBars.jet runs each case's Jet `check` for the job, ranks wall time and peak memory as the switch bars and reports tokens; AGENTS.md's tool-pairing text says the same; ScriptPairing checks pass.",
+          "at": "2026-11-10T23:56:39.203Z"
+        },
+        {
+          "n": 35,
+          "text": "Owner instructions 2026-11-10 ~13:35 and ~13:40: every twin is rewritten in the best Jet that does the job, using the terse Jet that already exists, not ballots, and with no code that mimics the original's exact bytes (the fixtures check the job, as c34 says). A fallible call propagates automatically (no `??` arm where propagation is the meaning), effect rows are inferred (no written row on a private fn), list literals take their element type (`[\"a\", \"b\"]`, not `[String]{…}`), and `Never!` is written only where a public contract needs it. Implicit copies are out: `.copy()` stays where ownership needs it, and an API that returns an owned value removes it where it doesn't. A twin that still loses is reported with its remaining costs by construct, and each one is answered by a Core API (c36-c40). Measured by PortBars on all nine entries, with every entry's job fixtures passing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB ScriptAPI-2. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). The nine orchestrator twins are rewritten in the best Jet that does the job, with no mimicry of the originals' bytes, and each entry's check.jet verifies the job (exit status, files, commits, queue lines, stated facts). ALL SAME on every checked case; tokens went from 23774 to 14181.",
+          "at": "2026-11-10T23:56:40.275Z"
+        },
+        {
+          "n": 36,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): running a command and using its output costs 1224 tokens in 20 hand-written wrapper fns (git, runs, runs_quiet, output, quiet_output, status, into…), plus argv list literals at every call. Core gains one command spelling that takes the whole command line as a checked text value with `{…}` holes (each hole one argv element, never shell-split; a D-TEXTHEAD-HOLES1 text kind), with the result giving status, stdout with the trailing newline trimmed, and stdout lines, and a plain-call form for inherited stdio. Each twin drops its wrappers and argv lists. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-4. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). Core gains the command-and-output calls the twins hand-wrote (git/run/output wrappers); the twins use them, and the PortBars checks pass.",
+          "at": "2026-11-11T01:09:46.771Z"
+        },
+        {
+          "n": 37,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): shell-style text work costs 1425 tokens in 26 hand-written fns (chomp, words, first_lines, tail, lines_of, trim_tabs, is_blank, records, has_line_prefix…). Core String gains what they re-implement: trailing-newline trim, split on whitespace runs, first/last n lines, a line-prefix and line-regex test (with c29), and tab-separated field records. Each twin uses them instead. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0efcf91a49 (train t18b, 0a995af312..0efcf91a49), SUB ScriptAPI-8. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18b/REPORT.md). The nine twins use the landed String API (first_lines, last_lines, has_line_prefix, has_line, tsv_records) in place of hand-written code: 13334 -> 12933 tokens, with parity PASS on all nine.",
+          "at": "2026-11-11T03:24:16.770Z"
+        },
+        {
+          "n": 38,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): file operations that are one shell command cost 1408 tokens in 22 hand-written fns (readlink_f, link_sfn, append, size_of, batch_files, file_lists, tree_only…). Core files gains append, a size-or-none read, a glob list (`dir/*.files`), canonicalize (readlink -f), a replacing symlink (ln -sfn) and a filtered walk. Each twin uses them instead. Measured by PortBars on all nine entries, with no parity loss.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0efcf91a49 (train t18b, 0a995af312..0efcf91a49), SUB ScriptAPI-8. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18b/REPORT.md). The twins use the landed files API (read_or, list_dir with matching:, list_dir_or, symlink replace:, canonicalize, getsize) in place of relink, the `?? \"\"`/`?? []` arms and the hand-filtered listings, with parity PASS on all nine.",
+          "at": "2026-11-11T03:24:17.784Z"
+        },
+        {
+          "n": 39,
+          "text": "Core API gap from the port bars (owner instruction 2026-11-10: API gaps are built, no ballot). Main's token attribution over the nine orchestrator twins after PerfLead-5072portcut (23773 tokens against 7631 for the originals): failure handling costs 2583 tokens: 228 `??` arms (1368), 78 term.eprint calls (483) and 20 print-and-exit fns (732). The API half, with c31 and c32: process.fail, and read/list/stat forms that take the default in the call (`files.read_or(path, \"\")`), so a script states its fallback once per call without an arm. Automatic propagation already covers the rest (c35).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-5. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). process.fail and the failure-handling half are built and used by the twins in place of the print-and-exit fns.",
+          "at": "2026-11-11T01:09:48.334Z"
+        },
+        {
+          "n": 40,
+          "text": "Owner instruction 2026-11-10 ~13:35 (\"provide excellent APIs that cover most use cases so when syntax can't get shorter maybe logic can so that a long script could become a minor call to a corelib function\"): find the multi-line blocks that recur across the nine twins and the in-repo scripts (git status, diff, apply and commit sequences; the patch-and-land flow; tree comparison; TSV and report emission; lock and slot handling; retries with timeouts) and give each common one a Core call that does it whole, with a #Test, docs and a golden on O0/O1/O2. Each twin replaces its block with the call. Report, per entry, the tokens the block cost and what the call costs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB ScriptAPI-6. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). The multi-line blocks that recur across the twins and the in-repo scripts are single Core calls, and the twins use them.",
+          "at": "2026-11-11T01:09:53.479Z"
+        },
+        {
+          "n": 42,
+          "text": "Reasoning: every PortBars entry has its review.json record from a reviewer other than the twin's author, scored on the fixed checklist. The reasoning bar passes on every entry.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5, seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:52. jet Tools/gauntlet/PortBars.jet on dev 967936a2e6: reasoning PASS on all 26 entries then present. Rows 1-16 come from the full run and rows 17-26 from --entry --runs 1 on the same tree ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/portbars-c42/portbars.out and pb-c42rest/rows.tsv). Each entry has a review.json scored on the fixed checklist; Jet scores 7-12/12 against 4-7/12 for the original, with branches and nesting at or below the original's. The entries added later also pass reasoning: native-c-compiler (review by G5DevX-1, not its author, landed ff1876c82d; pb-c9 run, 9/12 against 5/12), and batch10 after G4Ports-c9b d86bc4f0e0 (36 against 36 branches). The reasoning bar is per entry in PortBars, so a new entry without a passing review fails the gate.",
+          "at": "2026-11-12T06:49:40.207Z"
+        },
+        {
+          "n": 43,
+          "text": "Seed-bump half of ScriptAPI-9 (the E0405 root fix, where a Never arm such as process.fail or process.exit fits every expected type). The admitted seed a0.0.43 rejects `x ?? process.exit(2)` on a Unit or String success and has no process.fail, so the tools it runs keep their eprint-and-exit workarounds until a seed that carries ScriptAPI-9 is admitted. In the same SUB as that seed bump, every such site is converted to `?? process.fail(code, message)`: CoreModuleCheck:60, UnicodeNameAsset:86, CompiledWorkloadPeerLauncherCheck:49, CompiledWorkloadPeerProbe:44, CompiledWorkloads:124, WeightedShards:144, jetc-trace/Summarize:152 and 167, CompilerPackages:111 and about 25 generator `run` `.Err -> eprint+exit` arms. The SUB shows a sweep census of 0 remaining sites.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "All split SUBs landed and proved: ScriptAPI-28r 2ffbf3b3f0, -29r a50e27cae5, -30r 82b409db6f, -32r e0ece99bb1, -33r a6f852bd72, -27r2 e5d1740151 (33/34, line 26 base red fixed by ScriptAPI-42 51cff63bae), -31r2 6a38f8cb29 (12/12), G1Lead-4-scaling-harness-cli 93b5d2e139 (18/18). The eprint-and-exit pairs are process.fail calls across Tools, Compiler tests, Core/Args, Jetpack/Bootstrap, Examples and tests.",
+          "at": "2026-11-11T19:40:23.783Z"
+        },
+        {
+          "n": 44,
+          "text": "D-SCRIPT-LOCAL-CLOCK1=A, the unbuilt part found by G1Lead4 on 2026-11-10 while porting c22: a format selector's number may be any Int expression, as in `{x:Pad(width)}` with `width` computed at run time, not only a literal. The parser, AST, sema, IR and formatter carry the expression, a non-Int argument is a registered error (UI snapshot), and a golden proves the same output on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 5 of c44's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:00.525Z"
+        },
+        {
+          "n": 45,
+          "text": "D-SCRIPT-LOCAL-CLOCK1=A, the unbuilt part found by G1Lead4 on 2026-11-10: host_zone and in_host_zone give the host time zone on web (Intl.DateTimeFormat().resolvedOptions().timeZone through the web host) and on Windows (the system zone mapped to its IANA name through the CLDR windowsZones table), with the same meaning as on Linux. The web case runs here. The Windows case is recorded as pending on milestone e13-m02-windows, never claimed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 2 of c45's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:01.446Z"
+        },
+        {
+          "n": 46,
+          "text": "PortBars review findings (Review1, a GPT-family reviewer, 2026-11-10, $JET_SCRATCH_ROOT/lanes/Review-1/portbars-summary.md): the nine review.json records are committed under their Tools/gauntlet/entries/<entry>/ directories. The three helper-bar failures are fixed: Batch10.overlaps and LaneCommit.overlaps become List.any/contains, and VerifyRows.count reads its field through core.encoding.json. The PortBars judge then passes the reasoning bar (helpers, branches, nesting) for all nine, which Main runs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 5 of c46's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:02.422Z"
+        },
+        {
+          "n": 47,
+          "text": "PortBars review finding (Review1, 2026-11-10): the lane-commit twin rolls back only on SIGINT, while the original rolls back on TERM, INT and HUP. The twin restores the same rollback on all three signals through a Core signal API (an API gap, built without a ballot under the 2026-11-10 owner instruction). A case sends each signal during a staged commit and shows the same rollback as the original. lane-commit does not switch until this passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 4 of c47's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:03.349Z"
+        },
+        {
+          "n": 48,
+          "text": "PortBars proxy parity, found by G1Lead4 on 2026-11-11: the bar-4 branch proxy counts Jet `??`, `&&`, `loop` and match arms, but not the equivalent JavaScript and shell forms (`?.`, `||` defaults, ternaries, callback branches, `&&`/`||` chains, case arms). Every tool entry fails it (scaling-generate 310 vs 148, lane-commit 86 vs 60, verify-rows 23 vs 6). The tokenizer counts each decision form the same way in every language, set by a table with a #Test per language, and the reasoning bar is never loosened. The SUB lists every entry before and after, and a different-family reviewer checks the table. Real gaps the measurement exposes stay the twin's problem: regex lookaround is a Core gap and is built, and a fn value taking a `&` parameter is checked against the ratified function-type rules and built, or balloted if it is new surface.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G1Lead-4-pbproxy3 landed on dev as d111ddfbfc (2026-11-11 09:12, direct). The PortBars bar-4 branch proxy counts each language's decision forms symmetrically (JavaScript ?., || defaults, ternaries and callbacks; shell &&/|| chains and case arms) alongside Jet's. PortBars tests pass 12/12, --measure matches dev on all 37 rows, and G8Scope's independent review PASS is in the SUB msg.",
+          "at": "2026-11-11T14:50:40.967Z"
+        },
+        {
+          "n": 49,
+          "text": "Core API gap from the PortBars proxy work (G1Lead4, 2026-11-11): core.text regex supports lookahead and lookbehind assertions ((?=...), (?!...), (?<=...), (?<!...)) and keeps its linear-in-the-text promise, one precomputed position table per lookaround. #Tests cover each form, plus nesting and the linear bound on adversarial input (time grows linearly as the input doubles). A golden passes on O0/O1/O2, and a scaling twin under Tools/perf uses it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G1Lead-4-lookaround2 landed on dev as 9f79de9f9d (2026-11-11 09:34, direct; its lines and every guard pass on the train compiler). core.text regex lookahead and lookbehind, positive and negative, through precomputed position tables. The Regex #Tests pass 4/4, covering each form, nesting and the linear bound, and the golden is cmp-equal at O0, O1 and O2.",
+          "at": "2026-11-11T14:50:37.861Z"
+        },
+        {
+          "n": 50,
+          "text": "core.process spawn refuses an argument or environment entry that contains a NUL byte with a typed error before exec, instead of passing a truncated string to the OS. This matches Python's Popen ValueError and closes a truncation hazard. A #Test covers arguments, the program path and environment keys and values, and the Timer twin drops its own NUL check (found by ScriptAPI, 2026-11-11).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 6 of c50's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:04.272Z"
+        },
+        {
+          "n": 51,
+          "text": "fmt.decimal prints a negative value that rounds to zero with its sign, \"-0.00\" for decimal(-0.001, 2), as Rust's {:.2}, JS toFixed and Python's :.2f all do. Decided by Main on 2026-11-11: every peer agrees, and the sign of an IEEE negative value is kept. A #Test pins it, and every existing golden whose output changes is updated in the same patch. Found by G1Lead4 on the scaling-report twin, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cfd1c48f01 (G1Lead-4-c51): jet test Core/Text/Fmt.jet 4 passed 0 failed; kernel_fmt.jet 1 passed; tests/run/TextUnicode/FmtContract.jet output equals its .out.",
+          "at": "2026-11-11T19:03:59.776Z"
+        },
+        {
+          "n": 52,
+          "text": "Core/Text/Fmt.jet's #Test for decimal(1.115, 2), which cites #4588, agrees with the ratified exact-binary rounding rule on this card: 1.115 is stored below 1.115, so \"1.11\" is right, and the test that fails on seed-t21 is what's wrong. Fix the test's expectation and pin a value whose exact binary is a true tie (found by G1Lead4, 2026-11-11).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cfd1c48f01 (G1Lead-4-c51): jet test Core/Text/Fmt.jet 4 passed 0 failed; decimal(1.115, 2) == \"1.11\" and the true tie 0.375 gives \"0.38\".",
+          "at": "2026-11-11T19:04:00.709Z"
+        },
+        {
+          "n": 53,
+          "text": "A typed Dyn read that fails reports the path it read (for example receipts/3/metrics/p50) and the expected and actual types. This is delivered by c59's path getters, which know the path at the call site, not by recording paths inside Dyn values (that would be an ABI change and a cost on every access). A #Test pins the message. It lands with c59, after the Core API ballot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "f85f3b3d29 (G1Lead-4-json): jet test Core/Encoding/Json.jet, 12 passed 0 failed; typed path read case passes.",
+          "at": "2026-11-11T18:55:24.662Z"
+        },
+        {
+          "n": 54,
+          "text": "PortBars' JavaScript tokenizer lexes regex literals, so a backtick inside a regex no longer opens a template string. run-cold-context.mjs:239 inverts code and strings for the rest of the file and undercounts the original (2311 tokens for 1288 lines). Every JS original is remeasured after the fix, and a #Test pins the case. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The lexer fix landed in G1Lead-4-pbproxy (dev 5bec2a64d3). Its pinning test landed in G8Scope-10 (dev 0822c1e57c): `jet test Tools/gauntlet/PortBars.jet` gives 10 passed with the t22 compiler (Lander2 directtest). Re-counted with regex literals lexed, the run-cold-context original is 10401 tokens, not 2647.",
+          "at": "2026-11-11T11:37:19.865Z"
+        },
+        {
+          "n": 55,
+          "text": "Core reads a POSIX shell environment file as `.` would source it, into a name-to-value map: assignment-only commands, export and readonly, +=, quoting, ~, $N, and ${NAME[:]-=+?word}. Today orchestrator/Roots.jet hand-writes about 330 lines of this. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G4a on dev afca453b51 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 00:25. The Core API is on dev as 7163419c75 and f54012639a: core.sys.env_text and env_file read assignment-only commands, export and readonly, +=, quoting, ~, $1-$9 and ${NAME[:]-=+?word}, pinned to bash 5 output. jet test Core/Sys/Sys.jet --filter env_text: 3 passed, 0 failed, 0 skipped. Tools/agent/orchestrator/Roots.jet is under 80 lines (42) and calls sys.env_file, so its hand-written reader is gone.",
+          "at": "2026-11-12T05:25:21.454Z"
+        },
+        {
+          "n": 56,
+          "text": "core.files gains lexical path normalize, join and resolve with the semantics of node's path.normalize, path.join and path.resolve: . and .. collapse, and a trailing slash is kept. Today files.join neither normalizes nor keeps the left side when the right side is absolute, and roots-mjs and run-cold-context hand-write node_normal, node_join and node_resolve. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b2 (seed-b2 at cfd1c48f01) deferred proofs pass: ScriptAPI-25r3 5ca71e0ae5 and ScriptAPI-26r3 eebd8d58af (files.normalize/join_all/resolve rows; the ScriptPorting golden prints each on O0/O1/O2).",
+          "at": "2026-11-11T19:15:30.263Z"
+        },
+        {
+          "n": 57,
+          "text": "Core has an environment read where empty means unset, and XDG base directories (cache, data and config homes honoring XDG_*_HOME, with the $HOME/.cache, .local/share and .config fallbacks). roots-sh, roots-mjs and run-cold-context each hand-write these. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b2 (seed-b2 at cfd1c48f01) deferred proofs pass: ScriptAPI-25r3 5ca71e0ae5, ScriptAPI-26r3 eebd8d58af and ScriptAPI-37r b59b017b8a (process.env_nonempty and sys.cache_dir/data_dir/config_dir; the 16 private env_or helpers are deleted).",
+          "at": "2026-11-11T19:15:31.213Z"
+        },
+        {
+          "n": 58,
+          "text": "Core has a Latin-1 bytes-to-String decode, a clamped list slice (out-of-range bounds clamp like JS subarray or a Python slice), and a leading-integer parse with parseInt semantics (leading whitespace, a sign and digits, None when there are no digits). runtime-c-census hand-writes latin1, part, js_space, trimmed_end and parse_int in about 60 lines. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b2 (seed-b2 at cfd1c48f01) deferred proofs pass: ScriptAPI-25r3 5ca71e0ae5 and ScriptAPI-26r3 eebd8d58af (text.decode_latin1, text.leading_int, collections.slice_clamped; the ScriptPorting golden prints each).",
+          "at": "2026-11-11T19:15:32.124Z"
+        },
+        {
+          "n": 59,
+          "text": "core.encoding.json has typed Dyn path getters: a string, integer, list or string list read at a path such as \"a/b/0\", with the path in the error. run-cold-context hand-writes str, integer, items and strings in about 100 lines, and this pairs with c53's error path. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Until it lands, the twin that needs this names the criterion in tool.token_gaps meanwhile. Found by G8Scope's token_gaps census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 1 of c59's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:05.384Z"
+        },
+        {
+          "n": 60,
+          "text": "Core API gap from the port bars (G1Lead4, 2026-11-11, runtime-allocator twin: 6760 tokens vs 1292, of which 3994 is a hand emulation of JSON.stringify and most of the rest is Dyn.Object pair lists standing in for JS object literals). core.encoding.json writes a value as JSON.stringify(value, null, indent) does: ECMAScript Number-to-String text (shortest round-trip, no trailing .0, the same exponent thresholds), objects in insertion order, and the same escapes and indentation. It also has a literal way to build an ordered Dyn object, extending the existing Dyn and JSON surface rather than adding a second JSON mechanism. Per the owner's instruction of 2026-11-10, Core API gaps are built with no ballot (only syntax goes to a ballot). The names follow existing Core conventions and extend the existing module. Proof: a Core #Test compares the output with node's on a fixture set covering integers, fractions, 1e21, -0, NaN and nested objects, and the runtime-allocator twin names this criterion in tool.token_gaps until it lands.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Proved on seed-b8 against dev d1e836eb70 in Lander3's meet-5072 run (loop/out/meet-5072, line map lines.tsv). All 1 of c60's proof lines exit 0; for every jet test line the summary shows PASS of at least 1 and no FAIL, KNOWN-FAILING, SKIP-HOST, REFUSED, ERROR or TIMEOUT. Main checked each summary.",
+          "at": "2026-11-12T00:28:06.283Z"
+        },
+        {
+          "n": 61,
+          "text": "Tools/gauntlet/PortBars.jet encodes the owner's 2026-11-11 token ruling: the tokens bar reports Jet and original counts and never fails an entry; a twin above the original count lists its missing Core API or syntax in tool.token_gaps, and the verdict line says so. A PortBars unit test proves an over-count twin that passes speed, memory, parity and reasoning gets a pass verdict.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G4Ports-61r landed on dev as d863fd7109, 2026-11-11 23:11, with Lander4's lines run on it: jet test Tools/gauntlet/PortBars.jet --filter \"a measured token count never fails the tokens bar\" (1 passed, 0 failed) and --filter \"a planted entry that wins every bar passes\" (1 passed, 0 failed; the planted over-count twin that wins speed, memory, parity and reasoning, with or without a named token gap, gets a pass verdict), plus LaneCheck of PortBars.jet and ScriptPairing.jet: CHECK OK.",
+          "at": "2026-11-12T04:13:29.417Z"
+        },
+        {
+          "n": 63,
+          "text": "PortBars judges the real port: for every tool entry, the reasoning proxies (branches, nesting, helpers) and the token count cover the code that does the job on each side, not only a thin driver. Either the entry names the real original and twin files (for canvas-scenario: scenario.mjs and run.mjs against Run.jet and Scenarios.jet), or PortBars follows in-tree imports and the in-tree programs a driver runs. Found 2026-11-12 by ReviewAddStructType on canvas-scenario, where the proxies count only the two drivers. Proof: a census of every tool entry listing the files charged to each side, with no entry whose charged files exclude its ported logic, and PortBars re-run on every entry whose charged set changed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e65b2f91bd (G5DevX2-portbars-programs2): PortBars check rc0, test 25/25; charged census of 63 tool-mode entries (126 sides) reports 0 sides charged only driver files or unmeasured; charged-set diff vs 98469bf0cf has one row (canvas-driver-lifecycle jet, Run.jet#driver_lifecycle); PortBars rerun on that entry: parity 3/3, reasoning PASS (11/12 vs 3/12), tokens PASS, speed FAIL 5.81x wall 3.70x peak (recorded). Out $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G5DevX2-portbars-programs2/",
+          "at": "2026-11-13T03:50:06.709Z"
+        },
+        {
+          "n": 64,
+          "text": "D-BROWSER-CDP-PAGE1=A is built (ratified 2026-11-13). BrowserPage.protocol(\"cdp\") returns a per-page BrowserProtocol (\"bidi\" is refused); goog:cdp.getSession joins the protocol allowlist behind the CDP check; sends carry the page session, which never leaves Core; subscribe yields only that page's events. BrowserEvent gains frame_line(), frame_column(), frame_function_hash() (Debugger.paused), source_map_url_hash() and url_hash() (Debugger.scriptParsed), and browser.fact_hash(text) is public. Proof: Core tests over a recorded CDP wire, and a live case on a host with Chromium, where SKIP-HOST counts as red.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built by dev 9e2dea13c0 (sweep2, landed in 45b10f8ef4..498ba80dd8). Proof on seed-b16 at dev 498ba80dd8: (1) Core tests over a recorded CDP wire, `jet test Core/Browser/Browser.jet`: 11 passed, 0 failed, including \"a CDP debugger event keeps its top frame and script facts as hashes and its session in Core\" and \"goog:cdp.getSession is allowed only where goog:cdp.sendCommand is\". (2) The live case on Chromium 152.0.7977.64 with chromedriver from the flake.lock nixpkgs (3ed67ec0a4), `jet test Compiler --profile=cases --filter=core_browser_page_cdp`: PASS tests/cases/browser_lock/core_browser_page_cdp_debugger_facts.case, SKIP-HOST 0.",
+          "at": "2026-11-13T21:10:48.607Z"
+        },
+        {
+          "n": 65,
+          "text": "The source-map check's live half has a Jet twin through D-BROWSER-CDP-PAGE1=A. It pauses a page at a breakpoint and reports the mapped Jet line, and its gauntlet entry passes PortBars parity and reasoning. It depends on #5201 c31 (web source maps).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev 37176be497 (G6Meta-5072c65b; Tools/web-test/SourceMapLive.jet plus the gauntlet entry source-map-live). Proof on seed-b16 at dev 37176be497, in the repo nix develop shell with flake.lock nixpkgs Chromium 152.0.7977.64 and chromedriver: `jet -A Tools/gauntlet/PortBars.jet --entry source-map-live` gives parity PASS 3/3 cases (the live case pauses a page at a breakpoint and reports the mapped Jet line) and reasoning PASS (checklist 11/12 against 3/12, branches 59 against 96, nesting 3 against 4); tokens PASS 2057 against 5708. Speed FAIL at 36.06x wall and 3.51x peak, which c65 does not require. The cause is the per-case cold compile (#5479 log); the original keeps running until speed passes.",
+          "at": "2026-11-13T21:37:25.385Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tooling",
+        "jet-everywhere",
+        "scripting",
+        "wayfinder:map"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-20T14:41:14.806Z",
+      "updated": "2026-11-13T21:37:36.763Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G4"
+      ],
+      "criteriaLastN": 65,
+      "completedAt": "2026-11-13T21:37:36.762Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T21:51:54.729Z"
     }
   ]
 }

@@ -27529,6 +27529,1889 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-08",
       "retiredAt": "2026-11-16T11:22:25.648Z"
+    },
+    {
+      "id": "D-CORE-RLIMIT1",
+      "cardId": "c0qe89cl",
+      "group": "stdlib",
+      "title": "Read and set this program's resource limits, and measure what a run used",
+      "situation": "A Jet program can cap a child's CPU time, memory and open files, but it cannot read or set its own limits. It cannot turn off crash core dumps or cap a child's stack. After a run it learns CPU seconds but never the peak memory used. This vote decides how limits and usage appear in Core. We recommend the child-limit names Jet already uses, for this program too, and one usage record.",
+      "gist": "How should a program read and set its own resource limits, and learn the CPU time and peak memory a run used?",
+      "lesson": "A resource limit is a ceiling the operating system enforces, such as 4 GB of memory or no core dump after a crash. Usage is what a run actually took: CPU time and the most memory it ever held. Under A both use Jet's usual units: Duration for time and Int bytes for memory.",
+      "explainer": "",
+      "story": "Ana's build tool runs 300 compiler jobs. It turns off core dumps once at start-up with `sys.set_core_file_limit(0, 0)`. After each job it prints `receipt.usage` peak memory in megabytes, so the job that grew to 9 GB is named in the report. The same code reads the same units on Linux and macOS.",
+      "inWild": "# Python: raw numbers per platform; ru_maxrss is KiB on Linux but bytes on macOS.\n# https://docs.python.org/3/library/resource.html\nimport resource\nresource.setrlimit(resource.RLIMIT_CORE, (0, 0))\nprint(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)\n// Go: per-child usage on the finished process.\n// https://pkg.go.dev/os#ProcessState.SysUsage\nusage := cmd.ProcessState.SysUsage().(*syscall.Rusage)",
+      "detail": "Today. ProcessSpec already carries child limits: .cpu_time_limit(Duration), .memory_limit(Int) and .open_file_limit(Int) (Docs/spec/reference/core-library.md:1915-1932). Memory sizes are Int bytes, as for .output_limit. The spawn path installs these as kernel limits in the child (Compiler/JetRuntime/Source/ProcessExecutionLimits.jet:2). It refuses a limit a target cannot enforce.\n\nsys.times() returns CPU seconds for this program and its finished children (Core/Sys/Sys.jet:447). Nothing reads peak memory, nothing reads or sets this program's own limits, and children get no core-file or stack limit. Probe usage_today.jet prints the five times values; no call prints memory.\n\nWho needs it. Tools/agent/cache/safe-jet.sh runs `ulimit -c 0` before every agent probe. release-compiler.mjs and s5-boundary.mjs wrap jobs in `prlimit --core=0 --stack=1073741824`. laneB and laneS read peak memory from the run. Card #5072 criterion 1 asks for get/set of AS, CPU, NOFILE and CORE, and getrusage with max RSS, user and system time.\n\nWhat A says. Each limit keeps the name its ProcessSpec builder already has. The call sys.memory_limit() reads this program's soft and hard values, and None means unlimited. The call sys.set_memory_limit(soft, hard) sets them, and children inherit them as the OS does.\n\nThe same pair exists for cpu_time, open_file, core_file and stack. ProcessSpec gains .core_file_limit and .stack_limit beside its three limits, with the same refusal rule. CPU time is a Duration and every size is Int bytes, the types the builders use today.\n\nOne ResourceUsage record carries user time, system time and peak memory. sys.usage(.Self) and sys.usage(.Children) read it for this program. ProcessReceipt.usage carries the exact figure for one child.\n\nUnits and portability. Linux reports peak memory in KiB and macOS in bytes. Python exposes the raw field, and its own documentation warns about the difference; psutil exists partly to normalise it. Jet converts once in Core, so peak_memory is bytes everywhere.\n\nMemory is the address-space limit on Linux, the limit ProcessSpec.memory_limit already sets. A target that cannot enforce a limit refuses with an IOError, never a silent no-op, as child limits do today. Windows has no per-process rlimits, so the setters refuse there. Usage works there through GetProcessTimes and the peak working set.\n\nPer-child usage. wait4 already returns the child's rusage on the native runtime (Compiler/JetRuntime/Source/HostProcess.jet:172). ProcessReceipt.usage copies numbers the kernel hands back. sys.usage(.Children) is the sum of all waited children, as the OS keeps it. The receipt field is the precise per-job number a pool needs.\n\nOption B mirrors the C interface, as Python's resource module does: integer RLIMIT_* and RUSAGE_* constants, the RLIM_INFINITY sentinel, and the raw ru_* record. Every caller must handle per-platform units and sentinels, which is the mistake Python's documentation has to warn about.\n\nOption C extends children only: the two new ProcessSpec limits and ProcessReceipt.usage, with no call for this program. It is smaller, but a program still cannot turn off its own core dumps or read its own peak memory. safe-jet.sh's `ulimit -c 0` would have no Jet form.\n\nResearch. Python resource (docs.python.org/3/library/resource.html) mirrors getrlimit, setrlimit and getrusage and documents the ru_maxrss unit split. Go returns per-child rusage from ProcessState.SysUsage (pkg.go.dev/os#ProcessState.SysUsage) and keeps setrlimit in syscall. Node exposes process.resourceUsage() for itself only, with maxRSS in KiB (nodejs.org/api/process.html#processresourceusage).\n\nRust std has neither; the rlimit crate wraps the raw calls. psutil normalises memory to bytes across platforms (psutil.readthedocs.io). Lesson: named limits and fixed units avoid the unit bugs, and per-child usage belongs on the finished child, as Go does.\n\nEffects. Reading is -[Env]>, like sys.cpu_count. Setting is -[Exec]>, the effect process.on_signal and process.exit use for changes to the running program.",
+      "options": [
+        {
+          "key": "A",
+          "name": "The ProcessSpec limit names, for this program too",
+          "detail": "Each limit keeps its ProcessSpec builder name. sys.memory_limit reads and sys.set_memory_limit sets this program's limit, and the same pair exists for the other four; children inherit them. ProcessSpec gains core-file and stack limits beside its existing three. ResourceUsage holds user time, system time and peak memory in bytes. sys.usage reads it for this program or its finished children, and every receipt carries its own child's figure.",
+          "technical": "```text\n// core.sys, this program; None = unlimited\nsys.cpu_time_limit() -[Env]> (soft: Duration?, hard: Duration?) IOError!\nsys.memory_limit() -[Env]> (soft: Int?, hard: Int?) IOError!       // bytes\nsys.open_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError!\n\nsys.core_file_limit() -[Env]> (soft: Int?, hard: Int?) IOError!    // bytes\nsys.stack_limit() -[Env]> (soft: Int?, hard: Int?) IOError!        // bytes\nsys.set_cpu_time_limit(soft: Duration?, hard: Duration?) -[Exec]> IOError!\n\nsys.set_memory_limit(soft: Int?, hard: Int?) -[Exec]> IOError!\n// likewise set_open_file_limit, set_core_file_limit, set_stack_limit\nenum UsageOf { Self, Children }\n\nstruct ResourceUsage { user: Duration, system: Duration, peak_memory: Int }   // bytes\nsys.usage(of: UsageOf{.Self}) -[Env]> ResourceUsage IOError!\n\nProcessReceipt.usage: ResourceUsage?   // from wait4; None when the OS reports nothing\nProcessSpec.core_file_limit(value: Int) -> ProcessSpec   // bytes\nProcessSpec.stack_limit(value: Int) -> ProcessSpec       // bytes\n```\n\nNames and types follow the existing ProcessSpec builders: Duration for time, Int bytes for sizes, as in .memory_limit and .output_limit. The kernel counts CPU time in whole seconds, so a fractional Duration rounds up. Raising a hard limit without privilege is IOError PermissionDenied.\n\nUnenforceable limits refuse with IOError, as child limits do today. Linux: prlimit64 and getrusage/wait4 syscalls (no C library, D-OS-FLOOR1). macOS: libSystem getrlimit/setrlimit/getrusage; memory refuses as for children. Windows: setters refuse; usage from GetProcessTimes and PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize.",
+          "code": "use core.sys as sys\nuse core.process as process\n\nfn run() IOError! -[Exec, Env, Time.Wait]> {\n    sys.set_core_file_limit(0, 0)                   // no core dumps from here on\n    print(sys.open_file_limit().soft ?? -1)         // e.g. 1024\n    spec :: process.cmd([\"jet\", \"build\"]).stack_limit(1 << 30)\n    receipt :: spec.run()\n    usage :: receipt.usage ?? return Ok(())\n    print(\"{usage.peak_memory /% 1_000_000} MB, {usage.user} user\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Mirror the C calls",
+          "detail": "Core exposes the C calls with integer RLIMIT_* and RUSAGE_* constants and the raw usage record, as Python's resource module does. Callers convert units and handle the unlimited sentinel themselves.",
+          "technical": "The calls are sys.getrlimit(resource: Int) -> (soft: Int, hard: Int) IOError! and sys.setrlimit(resource: Int, soft: Int, hard: Int) IOError!, with per-target constants. The usage call is sys.getrusage(who: Int) -> RUsage IOError!. It has ru_utime_us, ru_stime_us, ru_maxrss (KiB on Linux, bytes on macOS), and the remaining ru_* fields.",
+          "code": "use core.sys as sys\n\nfn run() IOError! -[Exec, Env]> {\n    sys.setrlimit(sys.RLIMIT_CORE, 0, 0)\n    usage :: sys.getrusage(sys.RUSAGE_CHILDREN)\n    print(usage.ru_maxrss)   // KiB on Linux, bytes on macOS\n}"
+        },
+        {
+          "key": "C",
+          "name": "Children only",
+          "detail": "ProcessSpec gains the core-file and stack limits and ProcessReceipt gains usage. There is no call that reads or sets this program's own limits or reads its own peak memory.",
+          "technical": "ProcessSpec.core_file_limit(value: Int) and ProcessSpec.stack_limit(value: Int) in bytes, and ProcessReceipt.usage: ResourceUsage? as in A. No core.sys additions.",
+          "code": "use core.process as process\n\nfn run() IOError! -[Exec, Time.Wait]> {\n    spec :: process.cmd([\"jet\", \"build\"]).core_file_limit(0)\n    receipt :: spec.run()\n    print(receipt.usage)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "resource mirrors the C calls; the docs warn that ru_maxrss units differ by platform. Source: https://docs.python.org/3/library/resource.html",
+          "code": "resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\nresource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss"
+        },
+        {
+          "lang": "Go",
+          "note": "The finished child carries its own usage. Source: https://pkg.go.dev/os#ProcessState.SysUsage",
+          "code": "usage := cmd.ProcessState.SysUsage().(*syscall.Rusage)"
+        },
+        {
+          "lang": "Node.js",
+          "note": "Usage for the running process only, maxRSS in KiB. Source: https://nodejs.org/api/process.html#processresourceusage",
+          "code": "process.resourceUsage().maxRSS"
+        },
+        {
+          "lang": "psutil",
+          "note": "Normalises memory to bytes across systems. Source: https://psutil.readthedocs.io",
+          "code": "psutil.Process().memory_info().rss"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A uses the limit names and units Jet's ProcessSpec builders already have, for this program and its children alike. Units never change between systems, and each job's exact usage is on its receipt.",
+        "gains": [
+          "Core dumps, stack and memory are capped from Jet.",
+          "Peak memory is bytes on every system.",
+          "Each job reports its own usage."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hands every caller the per-system units and sentinels that Python has to warn about."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves a program unable to limit or measure itself."
+          }
+        ],
+        "tradeoff": "Windows has no per-process limits, so the setters refuse there, as child limits already do."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/ToolsJet/ballots/probe. `jet run -A usage_today.jet` prints the five sys.times() values. Core has no call that reads peak memory or this program's limits.",
+      "surface": {
+        "gist": "How should a program read and set its own resource limits, and learn the CPU time and peak memory a run used?",
+        "lesson": "A resource limit is a ceiling the operating system enforces, such as 4 GB of memory or no core dump after a crash. Usage is what a run actually took: CPU time and the most memory it ever held. Under A both use Jet's usual units: Duration for time and Int bytes for memory.",
+        "trio": {
+          "current": {
+            "note": "A program can cap a child, but not itself, and learns no peak memory.",
+            "code": "spec :: process.cmd(argv).memory_limit(4_000_000_000)\nt :: sys.times()   // CPU seconds only"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "The finished child carries its own usage. See pkg.go.dev/os#ProcessState.SysUsage.",
+            "code": "cmd.Run()\nu := cmd.ProcessState.SysUsage().(*syscall.Rusage)\nfmt.Println(u.Maxrss)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "The ProcessSpec limit names, for this program too",
+            "gist": "The child-limit names Jet already has, for this program too; one usage record in Duration and bytes.",
+            "gains": [
+              "Same units on every system.",
+              "Per-job peak memory in the receipt.",
+              "Reuses the child-limit names Jet already has."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "sys.set_core_file_limit(0, 0)\nreceipt :: process.cmd([\"jet\", \"build\"]).stack_limit(1 << 30).run()\nprint(receipt.usage)   // user, system, peak_memory"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Mirror the C calls",
+            "gist": "Expose getrlimit, setrlimit and getrusage with the system's numbers.",
+            "gains": [
+              "Familiar to C and Python programmers.",
+              "Every platform field is reachable."
+            ],
+            "losses": [
+              "Units and sentinels differ by system."
+            ],
+            "proposed": {
+              "code": "sys.setrlimit(sys.RLIMIT_CORE, 0, 0)\nprint(sys.getrusage(sys.RUSAGE_CHILDREN).ru_maxrss)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Children only",
+            "gist": "Add core-file and stack limits and usage to child runs only.",
+            "gains": [
+              "Smallest change.",
+              "No new call on the running program."
+            ],
+            "losses": [
+              "A program cannot limit or measure itself."
+            ],
+            "proposed": {
+              "code": "receipt :: process.cmd([\"jet\", \"build\"]).core_file_limit(0).run()\nprint(receipt.usage)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A uses the limit names and units Jet's ProcessSpec builders already have, for this program and its children alike. Units never change between systems, and each job's exact usage is on its receipt.",
+          "gains": [
+            "Core dumps, stack and memory are capped from Jet.",
+            "Peak memory is bytes on every system.",
+            "Each job reports its own usage."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hands every caller the per-system units and sentinels that Python has to warn about."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves a program unable to limit or measure itself."
+            }
+          ],
+          "tradeoff": "Windows has no per-process limits, so the setters refuse there, as child limits already do."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Peak memory means different units on different systems.",
+          "attempts": [
+            "Expose the raw field and document the units: rejected, Python does this and callers still get it wrong."
+          ],
+          "result": "Core converts once; ResourceUsage.peak_memory is Int bytes everywhere, like .memory_limit."
+        },
+        {
+          "loss": "The children total cannot say which job used the memory.",
+          "attempts": [
+            "Diff sys.usage(.Children) around each run: rejected, it races when jobs run in parallel."
+          ],
+          "result": "Each ProcessReceipt carries its own child's usage from wait4."
+        },
+        {
+          "loss": "A limit that the system cannot enforce could look applied.",
+          "attempts": [
+            "Silently ignore unsupported limits: rejected, it hides a missing guard."
+          ],
+          "result": "Unenforceable limits refuse with an IOError, the rule child limits follow today."
+        },
+        {
+          "loss": "A second set of limit words beside the ProcessSpec builders.",
+          "attempts": [
+            "One ResourceLimit enum with Int values: rejected, CPU time would become bare seconds while .cpu_time_limit takes a Duration."
+          ],
+          "result": "Each sys limit pair reuses its ProcessSpec builder name and type; ProcessResourceLimit stays the receipt-side enum."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T15:16:17.782Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-CORE-PROCPOOL1",
+      "cardId": "c0qe89cl",
+      "group": "stdlib",
+      "title": "Run many commands at once, at most N at a time, and get every result back in order",
+      "situation": "A tool that runs 300 tests or builds has to start many programs, a few at a time. In Jet today that means hand-written tasks, channels and bookkeeping, and the result order, timeouts and clean-up after a crash are easy to get wrong. This vote decides what Core gives for it. We recommend one call that takes the commands and a number, and returns one result per command in the order given.",
+      "gist": "How should a program run many commands at most N at a time and collect every result in order?",
+      "lesson": "A worker pool runs a list of jobs with at most N running at once; when one finishes, the next starts. Under A this is one Core call. You get one result per command in the order you gave them, and if your program is stopped, the running commands are stopped too.",
+      "explainer": "",
+      "story": "Ben's checker runs 1,200 example programs with eight at a time. He writes `process.run_all(specs, jobs: 8)` and loops over the results, which come back in his list's order, so his report is the same on every run. When he presses Ctrl+C, the eight running examples stop with his checker and no orphan keeps running.",
+      "inWild": "# Python: a bounded pool; map keeps input order.\n# https://docs.python.org/3/library/concurrent.futures.html\nwith ThreadPoolExecutor(max_workers=8) as pool:\n    results = list(pool.map(lambda argv: subprocess.run(argv), jobs))\n# GNU parallel: -j bounds the jobs, --keep-order keeps input order.\nparallel -j 8 --keep-order ./check {} ::: examples/*",
+      "detail": "Today. Tasks run child processes in parallel: probe pool_today.jet runs ten 0.3 s commands across three task.all lanes in about 1.2 s. But task.all takes a fixed written block, so the number of workers is fixed in the source.\n\nA pool of N from a variable list needs dynamic task spawning with a work channel. A Sender cannot be copied (E0102 on `.clone()`), so each worker needs its own result channel. The caller must then rebuild the order by hand. Clean-up when the caller is cancelled or the program is stopped is left to each tool.\n\nWho needs it. The #5072 tool ports: compiler-diff, goldens-census, run-feature-examples, core-module-check, release-compiler, lost-work-audit and the s5 drivers all run bounded pools of child processes. Today they use Node promise pools or `xargs -P`. Card #5072 criterion 2 asks for a bounded pool, N jobs, per-job timeout, collected exit status, deterministic order, and cancellation on parent exit.\n\nWhat A says. process.run_all(specs, jobs) starts at most `jobs` children at once, starts the next spec when one finishes, and returns one Result per spec in the order given. A nonzero exit is an Ok receipt, as for spec.run(). A child that cannot start is an Err for that spec only; the other specs still run, so every failure is reported in one pass.\n\nEach spec keeps its own timeout, limits and output modes. A per-job timeout is spec.timeout(d), and output can go to its own file through the ratified file output mode (D-CORE-PROCFILE1=A). jobs defaults to the number of CPUs; below 1 is InvalidInput.\n\nClean-up. Core already puts every child in its own process group. The calling task may be cancelled: a race loser, a closing task.group, or an expired deadline block. The program may be stopped by a signal or an exit. In every case run_all kills each running child's group and reaps it before it returns or the program ends.\n\nOn Linux each child is also started with the parent-death signal, so even a parent killed with SIGKILL takes its children. On Windows each child sits in a Job Object that closes with the parent.\n\nBuilt on tasks. run_all is ordinary Jet in Core, with one task per slot inside a task.group. It follows the task and deadline rules already ratified and adds no runtime machinery beyond the clean-up hooks.\n\nOption B adds only a primitive: process.wait_any(children) returns the index and receipt of the first child to finish. Callers write the scheduling loop, ordering and clean-up themselves; each tool repeats the same 15 lines.\n\nOption C adds a general bounded parallel map to the task language, `task.map(items, limit: 8) { item -> ... }`, for any work, not just commands. It is new syntax across every tier, and command clean-up would still need A's kill rules.\n\nResearch. Python's ThreadPoolExecutor.map keeps input order and bounds workers (docs.python.org/3/library/concurrent.futures.html). GNU parallel's -j and --keep-order are the shell standard (gnu.org/software/parallel). Go's errgroup.SetLimit bounds goroutines but leaves order and process clean-up to the caller (pkg.go.dev/golang.org/x/sync/errgroup).\n\nRust futures' buffered(n) keeps order; buffer_unordered does not. xargs -P has no order, so outputs interleave and reports change run to run. Lesson: order must be the default, and clean-up must not depend on the caller.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One call: run_all",
+          "detail": "Core runs the specs at most `jobs` at a time and returns one Result per spec in input order. A nonzero exit is a receipt; a start failure is an error for that spec only. If the caller is cancelled or the program stops, running children are killed and reaped.",
+          "technical": "```text\nprocess.run_all(specs: [ProcessSpec], jobs: Int{sys.cpu_count()})\n    -[Exec, Time.Wait]> [Result<ProcessReceipt, IOError>] IOError!   // IOError only for jobs < 1\n```\nImplemented in Core/Process with one task per slot in a task.group. Per-spec timeout, limits and stream modes apply unchanged. Cancellation and exit hooks kill each running child's process group (SIGTERM, then SIGKILL after the spec's grace) and reap it. Linux children get PR_SET_PDEATHSIG; Windows children join a kill-on-close Job Object. An authority-bound spec keeps its Capture rule.",
+          "code": "use core.process as process\n\nfn run() IOError! -[Exec, Time.Wait]> {\n    specs :: names.map(n -> process.cmd([\"jet\", \"run\", n]).timeout(60s))\n    results :: process.run_all(specs, jobs: 8)\n    loop i in 0..<results.len() {\n        if results[i] == {\n            .Ok(r) -> print(\"{names[i]}: exit {r.code}\")\n            .Err(e) -> print(\"{names[i]}: did not start: {e}\")\n        }\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "A wait-for-any primitive",
+          "detail": "Core adds one call that waits for whichever child finishes first. The caller starts children, keeps the count under N, puts receipts back in order and kills children on cancellation.",
+          "technical": "process.wait_any(children: &[ProcessChild]) -[Time.Wait]> (index: Int, receipt: ProcessReceipt) IOError!; the finished child is removed from the list.",
+          "code": "use core.process as process\n\nfn run() IOError! -[Exec, Time.Wait]> {\n    running := [ProcessChild]{}\n    // start up to 8, then loop: wait_any, record, start the next...\n    done :: process.wait_any(&running)\n    print(done.receipt.code)\n}"
+        },
+        {
+          "key": "C",
+          "name": "A bounded map in the task language",
+          "detail": "The task language gains a bounded map with results in input order. Commands run through it like any other work.",
+          "technical": "Grammar: task.map(expr, limit: expr) { binding -> body } returning [T] or failing per D-CONC-FAIL1; parity across parser, sema, TIR, AOT, JIT, interpreter and web. Process kill-on-cancel rules still have to be specified for spec.run().",
+          "code": "fn run() -[Exec, Time.Wait]> {\n    receipts :: task.map(specs, limit: 8) { spec -> spec.run() }\n    print(receipts.len())\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Bounded workers; map keeps input order. Source: https://docs.python.org/3/library/concurrent.futures.html",
+          "code": "with ThreadPoolExecutor(max_workers=8) as pool:\n    results = list(pool.map(run, jobs))"
+        },
+        {
+          "lang": "GNU parallel",
+          "note": "-j bounds jobs; --keep-order keeps input order. Source: https://www.gnu.org/software/parallel/",
+          "code": "parallel -j 8 --keep-order ./check {} ::: examples/*"
+        },
+        {
+          "lang": "Go",
+          "note": "errgroup bounds goroutines; order and process clean-up are left to the caller. Source: https://pkg.go.dev/golang.org/x/sync/errgroup",
+          "code": "g.SetLimit(8)\ng.Go(func() error { return exec.Command(argv[0], argv[1:]...).Run() })"
+        },
+        {
+          "lang": "xargs",
+          "note": "-P runs jobs in parallel with no output order, so reports change between runs.",
+          "code": "ls examples | xargs -P 8 -n 1 ./check"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the pool every tool writes, done once in Core with the order, error collection and clean-up right. It adds no syntax and keeps each command's own timeout, limits and output.",
+        "gains": [
+          "Same report order on every run.",
+          "Every failing command is reported in one pass.",
+          "Stopping the tool stops its children."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves the scheduling loop, ordering and clean-up to every tool."
+          },
+          {
+            "key": "C",
+            "reason": "C adds syntax for a need that today is commands, and still needs A's clean-up rules."
+          }
+        ],
+        "tradeoff": "On macOS a parent killed with SIGKILL cannot take its children; every other exit or cancellation still stops them."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/ToolsJet/ballots/probe. `jet run -A pool_today.jet` prints [0, 1, 2, 3, 4, 0, 1, 2, 3, 4] and elapsed_s 1. Tasks run commands in parallel, but the three lanes are written into the source and the order is rebuilt by hand.",
+      "surface": {
+        "gist": "How should a program run many commands at most N at a time and collect every result in order?",
+        "lesson": "A worker pool runs a list of jobs with at most N running at once; when one finishes, the next starts. Under A this is one Core call. You get one result per command in the order you gave them, and if your program is stopped, the running commands are stopped too.",
+        "trio": {
+          "current": {
+            "note": "The worker count is fixed in the source, and order and clean-up are by hand.",
+            "code": "parts :: task.all {lane(0, 3, n), lane(1, 3, n), lane(2, 3, n)}\n// rebuild order: parts[i % 3][i / 3]"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "A bounded pool whose map keeps input order. See docs.python.org/3/library/concurrent.futures.html.",
+            "code": "with ThreadPoolExecutor(max_workers=8) as pool:\n    results = list(pool.map(run, jobs))"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One call: run_all",
+            "gist": "process.run_all(specs, jobs) returns one result per command, in order.",
+            "gains": [
+              "Order is the same on every run.",
+              "Every failure is reported.",
+              "Running children stop with the caller."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "results :: process.run_all(specs, jobs: 8)\n// one result per spec, in the order given"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A wait-for-any primitive",
+            "gist": "process.wait_any(children) returns the first child to finish.",
+            "gains": [
+              "Small addition.",
+              "Callers control scheduling."
+            ],
+            "losses": [
+              "Every tool writes its own loop and clean-up."
+            ],
+            "proposed": {
+              "code": "done :: process.wait_any(&running)\n// the caller schedules, orders and cleans up"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A bounded map in the task language",
+            "gist": "task.map(items, limit: N) runs any work N at a time.",
+            "gains": [
+              "Works for any work, not just commands."
+            ],
+            "losses": [
+              "New syntax on every tier.",
+              "Command clean-up still needs its own rules."
+            ],
+            "proposed": {
+              "code": "receipts :: task.map(specs, limit: 8) { spec -> spec.run() }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A is the pool every tool writes, done once in Core with the order, error collection and clean-up right. It adds no syntax and keeps each command's own timeout, limits and output.",
+          "gains": [
+            "Same report order on every run.",
+            "Every failing command is reported in one pass.",
+            "Stopping the tool stops its children."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves the scheduling loop, ordering and clean-up to every tool."
+            },
+            {
+              "key": "C",
+              "reason": "C adds syntax for a need that today is commands, and still needs A's clean-up rules."
+            }
+          ],
+          "tradeoff": "On macOS a parent killed with SIGKILL cannot take its children; every other exit or cancellation still stops them."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "One command that cannot start could hide the others' results.",
+          "attempts": [
+            "Fail the whole call on the first start error: rejected, the owner's collect-all rule needs every failure."
+          ],
+          "result": "Each spec gets its own Result; only jobs < 1 fails the call."
+        },
+        {
+          "loss": "Children could outlive a cancelled or crashed caller.",
+          "attempts": [
+            "Leave clean-up to the caller: rejected, it is the bug every hand-written pool has."
+          ],
+          "result": "Cancellation and exit kill and reap each child's process group; Linux adds the parent-death signal and Windows a kill-on-close Job Object."
+        },
+        {
+          "loss": "A pool-wide timeout would cut every job to the same limit.",
+          "attempts": [
+            "A timeout argument on run_all: rejected, jobs differ."
+          ],
+          "result": "Each spec keeps its own timeout; a deadline block around the call bounds the whole pool."
+        },
+        {
+          "loss": "Parallel output would interleave on the terminal.",
+          "attempts": [
+            "Buffer and replay all output: rejected, it hides progress and holds memory."
+          ],
+          "result": "Each spec keeps its output mode: Capture into its receipt, or a file of its own through the file output mode."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T15:16:20.059Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-TEXT-COLLATE1",
+      "cardId": "c0qe89cl",
+      "group": "stdlib",
+      "title": "Sort words the way people read them, the same on every machine",
+      "situation": "Jet sorts text by its bytes, so `Zulu` comes before `apple` and `éclair` comes after `zebra`. Tools that print sorted names for people, and code moved from JavaScript or Python that used a locale sort, need dictionary order. Asking the operating system gives a different order on each machine. This vote decides what Core gives; we recommend the Unicode standard's default order, which is also English order, fixed in Jet's own tables.",
+      "gist": "Should Core sort text in Unicode dictionary order, the same on every machine, and how?",
+      "lesson": "Collation is the rule for putting words in dictionary order: ignore case and accents first, then use them to break ties. Unicode publishes one default rule, and English uses it unchanged. Under A Jet ships that rule with its other Unicode tables, so a sort gives the same order everywhere.",
+      "explainer": "",
+      "story": "Chen's documentation tool lists 400 command flags. With byte order, `Zulu` comes before `apple` and every flag starting with `_` lands in the middle. He writes `&flags.sort_by(text.collate)` and gets `_x, apple, Banana, éclair, zebra, Zulu`, the order a JavaScript `localeCompare` sort gave, on his laptop and in CI.",
+      "inWild": "// JavaScript: localeCompare uses ICU's Unicode order; English has no tailoring.\n// https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String/localeCompare\nnames.sort((a, b) => a.localeCompare(b))\n# Python: a sort key; locale.strxfrm follows the host locale.\n# https://docs.python.org/3/library/locale.html#locale.strxfrm\nnames.sort(key=locale.strxfrm)",
+      "detail": "Today. String `<` and sort() compare UTF-8 bytes, which is code point order and exactly LC_COLLATE=C. Probe collate_today.jet prints [Banana, Zulu, _x, apple, zebra, éclair]. Node's localeCompare gives [_x, apple, Banana, éclair, zebra, Zulu]. GNU sort under LC_ALL=en_US.UTF-8 on the same machine gives [apple, Banana, éclair, _x, zebra, Zulu], because glibc ignores punctuation at the first level. So the host locale and ICU already disagree for English.\n\nWho needs it. Eight #5072 tool ports sort human-facing lists with JavaScript localeCompare: check-agent-doc-flags (ported with an ASCII stand-in), compiler-registries, core-conformance, core-coverage-census, run-feature-examples, test-corpora, native-route-records and classify-native-route-glue. Card #5072 criterion 4 asks for C order for ASCII and a named compare for en_US.\n\nReconciling ratified law. D-TEXTUNICODE1=A put Unicode algorithms in core.text and said locale collation is an i18n data problem, not v1 core. A keeps that line. It adds only the locale-independent Unicode default order: the Unicode Collation Algorithm with CLDR's root table.\n\nThat order is Unicode data, like the normalization and segmentation tables Jet already pins. Per-language rules, such as Swedish putting å after z, stay outside Core. CLDR's English collation has no tailoring, so root order is en and en_US order. C order stays the default `<` and sort().\n\nWhat A says. text.collate(a, b) returns an Ordering, like `<=>` and every sort_by comparator, so `&names.sort_by(text.collate)` works as written. text.collation_key(value) returns bytes whose plain byte order equals collate.\n\nA key lets the existing sort_by compute one key per item, as Python's strxfrm and ICU sort keys do. Equal keys mean equal text. After the three Unicode levels (letters, accents, case) a final level compares code points, so the order is total and every sort is deterministic.\n\nData and size. The table comes from CLDR's root allkeys file for Jet's pinned Unicode 17.0.0, vendored beside tests/data/unicode/ucd. The same checksum-verifying generator as the other Unicode assets produces it. Han and unassigned code points use the standard's computed weights, so they need no rows. The table joins a program only when it calls collate or collation_key, as the Unicode names table joins only programs that call text.inspect.\n\nOption B uses the host locale (strcoll and strxfrm under LC_COLLATE). Results differ per machine, as the probe shows, and Jet's Linux builds use no C library (D-OS-FLOOR1=A), so B would have to ship glibc's locale data anyway.\n\nOption C ships every CLDR locale's rules now: text.collate(a, b, locale: \"sv\"). It answers a wider question than the card asks, adds several megabytes of tailoring data and reverses D-TEXTUNICODE1's i18n line.\n\nResearch. ICU and CLDR are the reference implementations used by JavaScript Intl.Collator, Java, Android and Apple platforms (unicode.org/reports/tr10, cldr.unicode.org). Python's locale.strxfrm follows the host locale and differs between Linux and macOS. PostgreSQL moved from glibc to ICU collations after glibc 2.28 changed sort order and silently corrupted indexes (wiki.postgresql.org/wiki/Locale_data_changes). Rust's std has no collation; icu_collator is the ICU4X port. Lesson: pin the data to a Unicode version and never read the host's.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Unicode's default order, pinned",
+          "detail": "Core adds a compare and a sort key in the Unicode default order from Jet's pinned tables. Byte order stays the default `<` and sort(). Other languages' rules stay outside Core.",
+          "technical": "```text\ntext.collate(a: String, b: String) -> Ordering   // like <=>\ntext.collation_key(value: String) -> [U8]        // byte order == collate order\n```\nUCA (UTS #10) with the CLDR root table for Unicode 17.0.0. Variable weighting is non-ignorable, the CLDR default. Levels 1-3 are followed by an identical level on NFD code points. So collate is Equal only for canonically equivalent text. Implicit weights for Han and unassigned code points are computed. Asset generated by the Unicode table generator from vendored allkeys_CLDR.txt, verified by checksum, linked only when used.",
+          "code": "use core.text as text\n\nfn run() {\n    names := [\"zebra\", \"Banana\", \"éclair\", \"apple\", \"Zulu\", \"_x\"]\n    &names.sort_by(text.collate)\n    print(names)   // [_x, apple, Banana, éclair, zebra, Zulu]\n    print(text.collate(\"apple\", \"Banana\"))   // Less\n    &names.sort_by((n: String) -> text.collation_key(n))   // same order, one key per item\n}"
+        },
+        {
+          "key": "B",
+          "name": "The machine's locale",
+          "detail": "Core asks the operating system to compare under the current LC_COLLATE setting, as C's strcoll and Python's locale module do.",
+          "technical": "text.collate_host(a, b) -[Env]> Ordering and text.collation_key_host(value) -[Env]> [U8] via strcoll/strxfrm on Unix and CompareStringEx on Windows. Linux builds would need glibc locale data, against D-OS-FLOOR1=A.",
+          "code": "use core.text as text\n\nfn run() -[Env]> {\n    names := [\"zebra\", \"_x\", \"apple\"]\n    &names.sort_by((n: String) -> text.collation_key_host(n))\n    print(names)   // differs by machine and locale\n}"
+        },
+        {
+          "key": "C",
+          "name": "Every language now",
+          "detail": "Core ships the per-language rules from CLDR and takes a locale name. English uses the default order.",
+          "technical": "text.collate(a, b, locale: String{\"root\"}) -> Ordering and text.collation_key(value, locale) with all CLDR tailorings bundled; unknown locale is an error.",
+          "code": "use core.text as text\n\nfn run() {\n    names := [\"ö\", \"z\", \"a\"]\n    &names.sort_by((n: String) -> text.collation_key(n, locale: \"sv\"))\n    print(names)   // [a, z, ö]\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "localeCompare and Intl.Collator use ICU; English has no tailoring. Source: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator",
+          "code": "names.sort(new Intl.Collator('en').compare)"
+        },
+        {
+          "lang": "Python",
+          "note": "strxfrm follows the host locale, so order differs between systems. Source: https://docs.python.org/3/library/locale.html#locale.strxfrm",
+          "code": "names.sort(key=locale.strxfrm)"
+        },
+        {
+          "lang": "PostgreSQL",
+          "note": "A glibc update changed sort order and broke indexes; ICU collations pin the order. Source: https://wiki.postgresql.org/wiki/Locale_data_changes",
+          "code": "CREATE COLLATION und (provider = icu, locale = 'und');"
+        },
+        {
+          "lang": "Rust",
+          "note": "ICU4X provides the Unicode collator as a library. Source: https://docs.rs/icu_collator",
+          "code": "let c = Collator::try_new(locale, options)?;\nnames.sort_by(|a, b| c.compare(a, b));"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives people's dictionary order with no machine dependence. It is the Unicode standard's own rule, the one JavaScript and ICU use for English, so ported code keeps its output. Byte order stays the default.",
+        "gains": [
+          "Readable order for names and words.",
+          "Same order on every machine and every run.",
+          "Code moved from JavaScript keeps its output."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes the order depend on the machine, the failure that broke PostgreSQL indexes."
+          },
+          {
+            "key": "C",
+            "reason": "C ships megabytes of language rules the card does not need."
+          }
+        ],
+        "tradeoff": "Other languages' rules, such as Swedish å after z, stay in a later i18n package."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/ToolsJet/ballots/probe. `jet run collate_today.jet` prints [Banana, Zulu, _x, apple, zebra, éclair]. For comparison, Node localeCompare gives [_x, apple, Banana, éclair, zebra, Zulu] and `LC_ALL=en_US.UTF-8 sort` gives [apple, Banana, éclair, _x, zebra, Zulu].",
+      "surface": {
+        "gist": "Should Core sort text in Unicode dictionary order, the same on every machine, and how?",
+        "lesson": "Collation is the rule for putting words in dictionary order: ignore case and accents first, then use them to break ties. Unicode publishes one default rule, and English uses it unchanged. Under A Jet ships that rule with its other Unicode tables, so a sort gives the same order everywhere.",
+        "trio": {
+          "current": {
+            "note": "sort() compares bytes, so capitals and accents land out of dictionary order.",
+            "code": "names := [\"zebra\", \"Banana\", \"éclair\", \"apple\"]\n&names.sort()   // [Banana, apple, zebra, éclair]"
+          },
+          "wild": {
+            "lang": "JavaScript",
+            "note": "localeCompare uses the Unicode default order for English.",
+            "code": "names.sort((a, b) => a.localeCompare(b))\n// [apple, Banana, éclair, zebra]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Unicode's default order, pinned",
+            "gist": "text.collate and text.collation_key use the Unicode default order, which is English order.",
+            "gains": [
+              "Same order on every machine.",
+              "Matches JavaScript's localeCompare for English.",
+              "Works with the existing sort_by."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "&names.sort_by(text.collate)\n// [_x, apple, Banana, éclair, zebra, Zulu]"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The machine's locale",
+            "gist": "Sort by the operating system's current locale setting.",
+            "gains": [
+              "Matches the shell's sort on that machine."
+            ],
+            "losses": [
+              "Order differs between machines.",
+              "Needs the C library's locale data."
+            ],
+            "proposed": {
+              "code": "&names.sort_by((n: String) -> text.collation_key_host(n))\n// order depends on the machine"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Every language now",
+            "gist": "Ship every language's sorting rules and take a locale name.",
+            "gains": [
+              "Swedish, German and other rules are available now."
+            ],
+            "losses": [
+              "Megabytes of rule data.",
+              "Opens the whole i18n question now."
+            ],
+            "proposed": {
+              "code": "text.collation_key(n, locale: \"sv\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives people's dictionary order with no machine dependence. It is the Unicode standard's own rule, the one JavaScript and ICU use for English, so ported code keeps its output. Byte order stays the default.",
+          "gains": [
+            "Readable order for names and words.",
+            "Same order on every machine and every run.",
+            "Code moved from JavaScript keeps its output."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B makes the order depend on the machine, the failure that broke PostgreSQL indexes."
+            },
+            {
+              "key": "C",
+              "reason": "C ships megabytes of language rules the card does not need."
+            }
+          ],
+          "tradeoff": "Other languages' rules, such as Swedish å after z, stay in a later i18n package."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Locale collation was kept out of Core.",
+          "attempts": [
+            "Ship every language now: rejected, it reopens the i18n line."
+          ],
+          "result": "Only the locale-independent Unicode default enters Core; it is Unicode data like the tables already pinned. English has no tailoring, so it is also en_US order."
+        },
+        {
+          "loss": "Sorting with a compare function costs a table walk per comparison.",
+          "attempts": [
+            "Comparator-only API: rejected, n log n table walks."
+          ],
+          "result": "collation_key builds one byte key per item, and the existing sort_by compares bytes."
+        },
+        {
+          "loss": "Every program could pay for the table.",
+          "attempts": [
+            "Always link the table: rejected."
+          ],
+          "result": "The table joins a program only when it calls collate or collation_key, like the names table."
+        },
+        {
+          "loss": "Different strings could tie, making sort order unstable between runs.",
+          "attempts": [
+            "Stop at the three Unicode levels: rejected, ties would fall back to input order."
+          ],
+          "result": "A final code point level makes the order total; only canonically equivalent text compares equal."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T15:16:22.347Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-CORE-RLIMIT-NAME1",
+      "cardId": "c0qe89cl",
+      "group": "stdlib",
+      "title": "Name the \"this program\" case of sys.usage `.Program`; amends D-CORE-RLIMIT1",
+      "situation": "D-CORE-RLIMIT1 (ratified A) gives `sys.usage(of:)` two cases, written `enum UsageOf { Self, Children }`. A probe of that line failed with E0003, and it looked as if `Self` cannot name a case. It can: the error came from the commas, since Jet separates cases with spaces or new lines. The question left is only the word. We recommend `.Program`, because every other line of the ratified ballot already says \"this program\".",
+      "gist": "What should the \"this program\" case of `sys.usage(of:)` be called?",
+      "lesson": "`sys.usage(of:)` reports CPU time and peak memory, either for the running program or for its finished children. The case name is what a reader sees at the call, as in `sys.usage(of: .Program)`. `Self` already has a meaning in Jet: the type an `impl` block is about.",
+      "explainer": "",
+      "story": "Ana's build tool prints its own peak memory with `sys.usage(of: .Program)` and the children's with `sys.usage(of: .Children)`. A reader new to Jet reads both calls aloud and knows which is which without opening the docs. Nothing else in her code changes between the options.",
+      "inWild": "// C and Python name the case after the calling process\ngetrusage(RUSAGE_SELF, &usage);\nresource.getrusage(resource.RUSAGE_SELF)\n// Node.js has one call for the running program only\nprocess.resourceUsage().maxRSS",
+      "detail": "What the probes show. Probes of_self, of_program and of_current in $JET_SCRATCH_ROOT/lanes/MemDesign-3/probes/rlimit write `enum UsageOf { X Children }` and match on `.X`. All three print the same two lines on o0, o1 and o2. Probe kw_type shows the word `Type` works as a case too. The comma form, `enum UsageOf { Program, Children }`, fails with E0003 for every name (probe comma.jet).\n\nSo no parser change is needed for any option. ToolsJet's probe usage_of.jet failed because it copied the ratified technical text, which writes commas. Every option below corrects that text to `enum UsageOf { X Children }`, the form Core uses, for example `enum PathPlatform { Unix Windows }` in Core/Files/Runtime/KernelPathComponents.jet:6.\n\nWhy the word matters. In Jet, `Self` inside an `impl` block means that block's type. A case named `Self` gives the word a second meaning: inside `impl UsageOf`, `Self.Self` names the case of the type. Probe self_noimpl shows `.Self` and `UsageOf.Self` both work at a call. The parser accepts it; the question is how it reads.\n\nOther names. `.Program` matches the ratified text, which says \"this program\" for every limit and usage call. `.Current` is shorter, but it does not say current what: program, thread or task. C, Python and Go say `RUSAGE_SELF`, so `.Self` is familiar to C programmers.\n\nScope. Only the case name and the ratified text change. The calls, units and the rest of D-CORE-RLIMIT1 A stay as ratified. Nothing is built yet, so no code or test moves.\n\nReview. Author: Claude (MemDesign-3 lane). No fresh adversarial pass has run on this ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`.Program`",
+          "detail": "The two cases are `.Program` and `.Children`, so a call reads `sys.usage(of: .Program)`. The word matches the ratified text, which calls the running program \"this program\" throughout.\n\nBehavior change: none in code, since nothing is built. The ratified text changes from `enum UsageOf { Self, Children }` to `enum UsageOf { Program Children }`.",
+          "technical": "Amend D-CORE-RLIMIT1 A's technical block: `enum UsageOf { Program Children }` and `sys.usage(of: UsageOf{.Program}) -[Env]> ResourceUsage IOError!`. The Core implementation maps `.Program` to RUSAGE_SELF and `.Children` to RUSAGE_CHILDREN.",
+          "code": "enum UsageOf { Program Children }\n\nuse core.sys as sys\n\nfn run() IOError! -[Env]> {\n    mine :: sys.usage(of: .Program)\n    kids :: sys.usage(of: .Children)\n    print(\"{mine.peak_memory /% 1_000_000} MB here, {kids.user} in children\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep `.Self`",
+          "detail": "Keep the ratified word and fix only the commas, so the cases are `.Self` and `.Children`. This already parses and runs on every tier.\n\nThe word follows C's `RUSAGE_SELF`.",
+          "technical": "Amend D-CORE-RLIMIT1 A's technical block to `enum UsageOf { Self Children }`. No parser change.",
+          "code": "enum UsageOf { Self Children }\n\nuse core.sys as sys\n\nfn run() IOError! -[Env]> {\n    mine :: sys.usage(of: .Self)\n    kids :: sys.usage(of: .Children)\n    print(\"{mine.peak_memory /% 1_000_000} MB here, {kids.user} in children\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "`.Current`",
+          "detail": "Name the case `.Current`, so a call reads `sys.usage(of: .Current)`.\n\nIt avoids the second meaning of `Self` but does not say what is current.",
+          "technical": "Amend D-CORE-RLIMIT1 A's technical block to `enum UsageOf { Current Children }`.",
+          "code": "enum UsageOf { Current Children }\n\nuse core.sys as sys\n\nfn run() IOError! -[Env]> {\n    mine :: sys.usage(of: .Current)\n    kids :: sys.usage(of: .Children)\n    print(\"{mine.peak_memory /% 1_000_000} MB here, {kids.user} in children\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C",
+          "note": "`getrusage` takes RUSAGE_SELF or RUSAGE_CHILDREN. Source: man7.org/linux/man-pages/man2/getrusage.2.html.",
+          "code": "getrusage(RUSAGE_SELF, &usage);"
+        },
+        {
+          "lang": "Python",
+          "note": "The resource module copies the C names. Source: docs.python.org/3/library/resource.html.",
+          "code": "resource.getrusage(resource.RUSAGE_SELF)"
+        },
+        {
+          "lang": "Node.js",
+          "note": "One call, for the running program only. Source: nodejs.org/api/process.html#processresourceusage.",
+          "code": "process.resourceUsage()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "`.Program` says what is measured, in the words the ratified ballot already uses. `Self` keeps its one meaning in Jet, the type of an `impl` block.",
+        "gains": [
+          "A call reads aloud as what it measures.",
+          "`Self` keeps one meaning.",
+          "Matches the ratified ballot's wording."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives `Self` a second meaning, so `Self.Self` is legal inside `impl UsageOf`."
+          },
+          {
+            "key": "C",
+            "reason": "C's `.Current` does not say whether the program, thread or task is meant."
+          }
+        ],
+        "tradeoff": "Readers who know C's `RUSAGE_SELF` see a new word, which says plainly what it measures."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use $JET_SCRATCH_ROOT/discovery/base/latest/jet with JET_TOOLCHAIN_ROOT=$JET_SCRATCH_ROOT/lanes/MemDesign-3/export, a git archive of dev 70b441a147. From $JET_SCRATCH_ROOT/lanes/MemDesign-3/probes, run `./tiers.sh rlimit`. On none, basic and full alike, of_self, of_program and of_current print `this program` then `children`. kw_type prints `true`. comma.jet fails with E0003, found `,`.",
+      "surface": {
+        "gist": "What should the \"this program\" case of `sys.usage(of:)` be called?",
+        "lesson": "`sys.usage(of:)` reports CPU time and peak memory, either for the running program or for its finished children. The case name is what a reader sees at the call, as in `sys.usage(of: .Program)`. `Self` already has a meaning in Jet: the type an `impl` block is about.",
+        "trio": {
+          "current": {
+            "note": "The ratified text writes commas between cases, which Jet rejects with E0003 for any name.",
+            "code": "enum UsageOf { Self, Children }   // error[E0003]: Expected a name for a variant name, found `,`"
+          },
+          "wild": {
+            "lang": "C",
+            "note": "C names the case after the calling process.",
+            "code": "getrusage(RUSAGE_SELF, &usage);\ngetrusage(RUSAGE_CHILDREN, &usage);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`.Program`",
+            "gist": "Call it `.Program`, the word the ratified text already uses.",
+            "gains": [
+              "Reads aloud as what it measures: this program.",
+              "`Self` keeps its one meaning, the type of an `impl`.",
+              "Matches the ratified ballot's own wording."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "enum UsageOf { Program Children }\nmine :: sys.usage(of: .Program)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep `.Self`",
+            "gist": "Keep `.Self` as ratified; fix only the commas.",
+            "gains": [
+              "Familiar from C, Python and Go's `RUSAGE_SELF`."
+            ],
+            "losses": [
+              "`Self` gets a second meaning beside the type of an `impl`."
+            ],
+            "proposed": {
+              "code": "enum UsageOf { Self Children }\nmine :: sys.usage(of: .Self)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "`.Current`",
+            "gist": "Call it `.Current`.",
+            "gains": [
+              "Short, and `Self` keeps one meaning."
+            ],
+            "losses": [
+              "Does not say whether the program, thread or task is meant."
+            ],
+            "proposed": {
+              "code": "enum UsageOf { Current Children }\nmine :: sys.usage(of: .Current)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "`.Program` says what is measured, in the words the ratified ballot already uses. `Self` keeps its one meaning in Jet, the type of an `impl` block.",
+          "gains": [
+            "A call reads aloud as what it measures.",
+            "`Self` keeps one meaning.",
+            "Matches the ratified ballot's wording."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B gives `Self` a second meaning, so `Self.Self` is legal inside `impl UsageOf`."
+            },
+            {
+              "key": "C",
+              "reason": "C's `.Current` does not say whether the program, thread or task is meant."
+            }
+          ],
+          "tradeoff": "Readers who know C's `RUSAGE_SELF` see a new word, which says plainly what it measures."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A parser change to allow keywords as case names.",
+          "attempts": [
+            "Allow every keyword as a case name: not needed, the probes show `Self` and `Type` already work."
+          ],
+          "result": "No parser change under any option; only the commas in the ratified text are corrected."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T18:48:02.082Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-EMBED-TOOLCHAIN1",
+      "cardId": "c0qe89cl",
+      "group": "tooling",
+      "title": "Compiler packages read the toolchain's Core sources while building, through a toolchain: path prefix allowed only inside the toolchain tree",
+      "situation": "Jet's compiler needs facts from its own core library's source files, such as the list of effects. Today a script copies those facts into nine compiler files, about 1.2 MB, each stamped with a checksum. Every core edit means running the script again, and 509 commits since October touched those copies.\n\nThe compiler cannot read the core files itself while it is built. A build-time file read must name a path below the reading file, and the core library sits beside the compiler, not below it.\n\nWe recommend A: a toolchain: prefix names a file from the top of the Jet source tree, and only packages inside that tree may use it. Every other package keeps today's rule.",
+      "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
+      "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
+      "explainer": "Words used here. embed_file reads a file while building and makes its text a constant. The toolchain tree is the directory holding Core/ and Compiler/Prelude/. A generated file is one a script writes.",
+      "story": "Ivy adds an effect to Effects.jet. Under A, the next compiler build reads the file itself. No regenerate step, no SHA header to refresh, no stale table.",
+      "inWild": "// Rust reaches files above the crate with a path macro:\ninclude_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../core/effects.rs\"))",
+      "detail": "What this ballot decides. How a compiler package names a toolchain source at build time. The embed rules of D-CTIO1 and D-CTFIND1 otherwise stay.\n\nScope, measured on dev c460ba91e5. The generator Tools/agent/CoreSourceRows.jet writes twelve files (CoreSourceRows.jet:2908-2921). Nine are derived tables in compiler and Jetpack packages: 1,240,667 bytes, touched by 509 commits since 2026-10-01. The earlier draft counted only five of them, 279,898 bytes. CoreCallRows.jet alone is 895,709 bytes.\n\nWhat stays generated under every option. Core/EmbeddedSources.jet, the in-place rows of Core/Compiler/Lang.jet and Compiler/Prelude/Core.jet, and one section of the core-library reference. They are Core or docs, not compiler tables.\n\nProbes with the a0.0.43 compiler. A file beside the reader embeds. A path with .. is E0957 even inside one package, by design. The spellings core: and toolchain: are both E0955 today: A is not built. The ratified #run spelling is E0733, so the code shown uses today's comptime { } block.\n\nCost, measured. Embedding a 279 KB copy of Core.jet and counting its 116 module rows at build time adds 44 ms and 21 MB to a cold check. A cached check takes about 1 ms more. The whole generator takes 3.09 s and 414 MB today.\n\nStaleness, measured. A cached build notices an edit to the embedded file: the count went 116, then 117 after one added row, then 116 after the revert. The driver records each read's SHA-256 (JetDriver ComptimeInputs.jet:54-57) and the cache keys on it.\n\nA defect found. The spec says every embed records its SHA-256 in .jet/lock (spec.md:539). On a0.0.43 a package that embeds a file builds and runs, and no .jet/lock is written. A's first build criterion is that lock record.\n\nWhat A does. embed_file and find accept a toolchain: prefix, as in embed_file(\"toolchain:Compiler/Prelude/Effects.jet\"). The rest is a literal path from the toolchain root, with no .. and no absolute form, so E0957's rules still apply after the prefix.\n\nResolution. The prefix reads the tree the compile already takes Core from: JET_TOOLCHAIN_ROOT, else the nearest directory above the input that holds Core/ and Compiler/Prelude/ (Request.jet:300). So the tables always describe the Core the new compiler is compiled against. There is no built-in-copy fallback, so the jet binary does not grow.\n\nThe gate. The prefix is allowed only in a package whose directory lies inside that tree. Anywhere else it is a new registered error, so Core's file layout never becomes a public interface. When JET_TOOLCHAIN_ROOT names a different tree, the error names both directories.\n\nDerived rows. A pure copy, such as the effect source, is an embed and runs no code. Row tables are computed by a function over the embedded text, in the package that needs them. The generator keeps only its four non-compiler outputs.\n\nRatified decisions. A keeps D-CTFIND1 and D-CTFIND2 and adds no ambient name, so D-PRELUDE-LAW1 holds. It fits D-BUILD-COREUNIT1=A: Core stays one compiler-known unit. It amends D-CTIO1 by one sentence: for a package inside the toolchain tree, the project is that tree. The compiler workspace already treats it so, naming ../Examples and ../tests in Compiler/package.jet:43-47.\n\nPeers. Go's embed refuses .. and files outside the module; Zig refuses an embed outside the package path. Rust's include_str! reads any relative path. Go's own compiler keeps a checked-in generated builtin.go, which is D at scale.\n\nBeginner path. Nothing changes; ordinary packages never see the prefix. Expert path. A compiler author embeds the source and derives rows in Jet, with no generator step.\n\nOther options. B adds one workspace grant in Compiler/package.jet, toolchain_reads, listing globs; members inherit it. C gives Core a package.jet and makes it a path dependency. D keeps today's generated files. B still needs A's location check, or any package could write the grant.",
+      "options": [
+        {
+          "key": "A",
+          "name": "toolchain: prefix, gated by location",
+          "detail": "embed_file and find take toolchain: paths, allowed only inside the toolchain tree.",
+          "technical": "Prefix resolves against the tree the compile takes Core from (JET_TOOLCHAIN_ROOT, else nearest); no built-in-copy fallback. E0957 rules apply after the prefix; new registered error outside that tree. Covers the nine derived compiler and Jetpack tables. First criterion: each read's SHA-256 lands in .jet/lock, which a0.0.43 does not write yet. Cache keyed by content, as measured today. Amends D-CTIO1 by one sentence.",
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet, proposed (A):\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"toolchain:Compiler/Prelude/Effects.jet\") }\n// ...joined with Core/Effects/Effects.jet and Core/Compiler/Meta.jet, read the same way.\n// Today: toolchain: is E0955 (probe e03); #run, the ratified successor of comptime { }, is E0733 (probe e04)."
+        },
+        {
+          "key": "B",
+          "name": "One workspace grant",
+          "detail": "Compiler/package.jet lists toolchain_reads globs once; members inherit them, and embeds must match.",
+          "technical": "A's prefix plus a new manifest field on the workspace. Reads outside the globs stay E0957. A's location check is still needed, or any package could write the field.",
+          "code": "// Compiler/package.jet, proposed (B):\n//   toolchain_reads: [\"Compiler/Prelude/**\", \"Core/**\"]\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"toolchain:Compiler/Prelude/Effects.jet\") }"
+        },
+        {
+          "key": "C",
+          "name": "Core as a path dependency",
+          "detail": "Prelude gets a package.jet with an embeddable list; compiler packages depend on it.",
+          "technical": "deps: { jet_prelude: ../Prelude }; cross-package embed limited to declared files.",
+          "code": "// Compiler/JetCli/package.jet, proposed (C):\n//   deps: { jet_prelude: ../Prelude }\nJET_CLI_EFFECT_SOURCE: comptime { embed_file(\"jet_prelude/Effects.jet\") }"
+        },
+        {
+          "key": "D",
+          "name": "Keep generated files",
+          "detail": "CoreSourceRows.jet keeps writing the rows and literals.",
+          "technical": "No change.",
+          "code": "// Compiler/JetCli/Source/Cli/CoreSources.jet today (D):\n// Source SHA-256: b4561341...; generated, do not edit.\nJET_CLI_EFFECT_SOURCE: \"// The machine effects are written here...\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "include_str! takes any relative path, including ones above the crate.",
+          "code": "include_str!(\"../core/effects.rs\")"
+        },
+        {
+          "lang": "Go",
+          "note": "go:embed refuses .. and files outside the module, like E0957. Go's own compiler keeps a generated builtin.go.",
+          "code": "//go:embed effects.txt"
+        },
+        {
+          "lang": "Zig",
+          "note": "@embedFile outside the package path is an error; a build script adds other files by name.",
+          "code": "exe.root_module.addAnonymousImport(\"effects\", ...)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The compiler reads its own Core sources the way Core already does, and the copying of nine tables ends. Ordinary packages never gain access.",
+        "gains": [
+          "No regenerate step for the nine derived compiler tables.",
+          "One resolution rule for every toolchain read.",
+          "Core's layout stays private."
+        ],
+        "losses": [
+          {
+            "loss": "Derived rows cost build work after an edit to a file they read.",
+            "mitigation": "Measured at 44 ms for a 279 KB scan; the cache is keyed by content, so unchanged files cost about 1 ms."
+          },
+          {
+            "loss": "The permission is not visible in package.jet.",
+            "mitigation": "Every read spells toolchain: at its site, and the lock lists each read with its digest once that record is built."
+          },
+          {
+            "loss": "D-CTIO1's rule that embeds never leave the project gains one sentence.",
+            "mitigation": "For packages inside the toolchain tree, the project is that tree; every other package's rule is unchanged."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a manifest field and still needs A's location check."
+          },
+          {
+            "key": "C",
+            "reason": "C makes Core a dependency, against D-BUILD-COREUNIT1=A."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the regenerate churn: 509 commits in six weeks."
+          }
+        ],
+        "tradeoff": "A location-gated prefix, for compiler tables that never go stale."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotLead-3. Four claims failed and were fixed: the five-file scope, the unwritten lock, B's doubled paths and the unbuilt #run spelling. A passes with a 44 ms measured cost and the lock record as its first criterion."
+      },
+      "checkInstructions": "With the a0.0.43 compiler (dev c460ba91e5), run $JET_SCRATCH_ROOT/lanes/BallotLead/out/probe.sh on probes, probes/pkg, probes/pkg_ok and probes/cost. Run timeit.sh with COLD=1 on cost/c0_none.jet and cost/c1_derive.jet, then cost/stale.sh. Run census.sh and census2.sh from the dev worktree.",
+      "surface": {
+        "gist": "Should compiler packages embed the toolchain's Core sources through a toolchain: path prefix allowed only inside the toolchain tree?",
+        "lesson": "Jet's compiler needs facts from its own core library's source files. Today a script copies those facts into nine compiler files, and every core edit means running it again. This vote decides how the compiler can read those files directly while it is built.",
+        "trio": {
+          "current": {
+            "note": "A script copies Core's text into the compiler.",
+            "code": "// Source SHA-256: b4561341...; do not edit."
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Embeds stay inside the module.",
+            "code": "//go:embed effects.txt"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Prefix",
+            "gist": "toolchain: paths, inside the tree only.",
+            "gains": [
+              "No regenerate step for nine tables.",
+              "Layout stays private."
+            ],
+            "losses": [
+              "About 44 ms of build work after an edit."
+            ],
+            "proposed": {
+              "code": "embed_file(\"toolchain:Compiler/Prelude/Effects.jet\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Grant",
+            "gist": "One workspace grant in package.jet.",
+            "gains": [
+              "The permission shows in the manifest."
+            ],
+            "losses": [
+              "A new manifest field.",
+              "Still needs A's location check."
+            ],
+            "proposed": {
+              "code": "toolchain_reads: [\"Compiler/Prelude/**\", \"Core/**\"]"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Dependency",
+            "gist": "Depend on a Prelude package.",
+            "gains": [
+              "Reuses deps."
+            ],
+            "losses": [
+              "Core becomes a dependency."
+            ],
+            "proposed": {
+              "code": "deps: { jet_prelude: ../Prelude }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Generated",
+            "gist": "Keep the copying script.",
+            "gains": [
+              "No compiler change."
+            ],
+            "losses": [
+              "509 commits of churn in six weeks."
+            ],
+            "proposed": {
+              "code": "jet Tools/agent/CoreSourceRows.jet --write"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The compiler reads Core the way Core does, and the copying ends.",
+          "gains": [
+            "No regenerate step for nine tables.",
+            "Layout stays private."
+          ],
+          "losses": [
+            {
+              "loss": "Build work after an edit.",
+              "mitigation": "Measured at 44 ms; cached by each read file's content."
+            },
+            {
+              "loss": "One exception to the project rule.",
+              "mitigation": "Only for packages inside the toolchain tree."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A new field that still needs A's check."
+            },
+            {
+              "key": "C",
+              "reason": "Core becomes a dependency."
+            },
+            {
+              "key": "D",
+              "reason": "Regenerate churn."
+            }
+          ],
+          "tradeoff": "A gated prefix, for tables that never go stale."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T03:47:10.613Z",
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "Derived rows cost build-time work.",
+          "attempts": [
+            "Key the cache by each read file's content; measured working on a0.0.43 (116, 117, 116 across an edit and a revert).",
+            "Split copies from derivations: a pure copy such as the effect source is an embed that runs no code; only row tables evaluate."
+          ],
+          "result": "Reduced. Up to about 3 s of cold work after an edit to a read file, against 3.09 s of manual generator time plus a commit today."
+        },
+        {
+          "option": "A",
+          "loss": "The permission is not visible in package.jet.",
+          "attempts": [
+            "List every read with its digest in .jet/lock; a0.0.43 writes no embed rows, so this becomes A's first build criterion.",
+            "Make each read self-describing: every site spells toolchain:, so one search lists all reads, as Go's go:embed lines do."
+          ],
+          "result": "Reduced. The permission stays a location rule, stated by the registered error."
+        },
+        {
+          "option": "A",
+          "loss": "D-CTIO1 gains an exception.",
+          "attempts": [
+            "Confine it to packages inside the toolchain tree.",
+            "Define the toolchain tree as those packages' project, as Compiler/package.jet already does for its test corpora."
+          ],
+          "result": "Reduced to one amended sentence; no other package's rule changes."
+        },
+        {
+          "option": "A",
+          "loss": "The first draft claimed the regenerate step ends, but covered five of twelve outputs.",
+          "attempts": [
+            "Widen A's scope to all nine derived compiler and Jetpack tables.",
+            "Name the four outputs that stay generated: EmbeddedSources, two in-place Core rewrites and one doc section."
+          ],
+          "result": "Removed as an overclaim; the gain now names its exact scope."
+        },
+        {
+          "option": "B",
+          "loss": "Each path is written twice.",
+          "attempts": [
+            "One glob grant instead of one entry per file.",
+            "Put the grant on the workspace so members inherit it."
+          ],
+          "result": "Removed. B's remaining cost is a public manifest field that still needs A's location check."
+        },
+        {
+          "option": "D",
+          "loss": "Regenerate churn and header conflicts.",
+          "attempts": [
+            "Run --write inside the land train.",
+            "Drop the SHA headers so merges stop conflicting."
+          ],
+          "result": "Not removed. Every Core edit still rewrites and commits up to 1.24 MB of tables."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Compiler packages reading Core sources: measurements and adversarial review",
+          "path": "Docs/audits/2026-11-10-embed-toolchain-review.md",
+          "note": "Generated-table census (nine tables, 1.24 MB, 509 commits), probes on a0.0.43, build cost, cache staleness, the missing lock record, peers."
+        },
+        {
+          "title": "Go embed rules (no .., nothing outside the module)",
+          "url": "https://github.com/golang/go/blob/master/src/embed/embed.go"
+        },
+        {
+          "title": "Rust include_str! (path relative to the current file)",
+          "url": "https://doc.rust-lang.org/std/macro.include_str.html"
+        },
+        {
+          "title": "Zig: embed of file outside package path is an error",
+          "url": "https://github.com/ziglang/zig/blob/master/src/Sema.zig"
+        },
+        {
+          "title": "Go's compiler keeps a generated builtin.go",
+          "url": "https://github.com/golang/go/blob/master/src/cmd/compile/internal/typecheck/builtin.go"
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-SCRIPT-LOCAL-CLOCK1",
+      "cardId": "c0qe89cl",
+      "group": "other",
+      "title": "Give Core the host's time zone, and let format selectors take a computed number",
+      "situation": "Jet aims for scripts that are no longer than the tools they replace. A trace viewer written for Node has 915 words, and the shortest faithful Jet version has 1000. Most of the gap is a header that shows the time of day.\n\nNode asks the machine for its time zone in one call, while each Jet script must find the zone by hand. A smaller part is that a padded column cannot take its width from the data. Unpadded hours are already decided, so this ballot asks only about the zone and computed widths.",
+      "gist": "Should Core tell a program the machine's time zone, and should format selectors accept a computed number?",
+      "lesson": "A time zone turns an instant into a wall-clock time. The host zone is the one the machine is set to. A script that shows the time to a person wants it, while a program that must print the same everywhere names its zone.",
+      "explainer": "Today a Jet script finds the host zone itself. It reads the TZ variable, else the system zone link, else it uses UTC. Even with the decided unpadded-hour code, that lookup costs the twin 29 words, and every such script repeats it.\n\nUnder A, time.host_zone() returns the machine's zone, and an instant's in_host_zone() shows it there. Both declare that they read the environment and files, as zone(name) already does. The header becomes one interpolation.\n\nThe host rule is the one glibc and Go use. An unset TZ means the system setting, and an empty TZ means UTC. A set TZ loses one leading colon, then names a zone, or a zone file when it starts with a slash. Anything that does not resolve gives the zone named UTC.\n\nUnder A, every selector number may also be any Int expression: Pad, PadLeft, Fixed, Grouped, Sci, Percent and Hex. A negative number acts as zero. So a column as wide as its longest entry uses the selector, as fixed columns already do.\n\nB adds the zone but keeps literal selector numbers. C adds only host_zone(), so callers write in_zone(time.host_zone()). D adds nothing and leaves the twin at 942 words.",
+      "story": "Lee ports a watch-mode trace viewer from Node. Its header shows the wall-clock time, and the Jet version needs a zone lookup by hand to print 6:09:27 AM. Under A the header is one interpolation, and the column sized by the data is one selector.",
+      "inWild": "// JavaScript: the host's zone and locale\nnew Date().toLocaleTimeString()            // \"6:09:27 AM\" in en-US\n\n# Python 3 on glibc\ndatetime.now().astimezone().strftime(\"%-I:%M:%S %p\")\n\n// Go: time.Local is TZ, else the system zone file, else UTC\ntime.Now().Format(\"3:04:05 PM\")\n\n// Java: Local types are zone-free, so the host zone is systemDefault\nZonedDateTime.now(ZoneId.systemDefault())\n\n// Python: computed widths in a format spec\nf\"{kind:<{width}} {count:>7}\"",
+      "detail": "Counts are whitespace-separated words, the gauntlet's source metric. The original viewer has 915. Compact.jet, the twin built from existing forms, has 1000. Projected.jet, with the A spellings, has 908. B gives 912 and C gives 908. The review's variants are in the lane's probes/lc/counts folder.\n\nThe no-pad flag is not on this ballot. The ratified one-percent-code ruling already gives every numeric code the GNU flag, so %-I prints 6. With that flag and nothing else, the twin has 942 words, and that is D.\n\nFrom 942, the host zone saves 30 words and the computed width saves 4. Computed widths alone give 938. So the zone is the part that closes the gap, and the width supplies the slack.\n\nDev does not have the flag yet. On the t6c compiler, format and strftime copy %-I through as text, and format_checked refuses it. The twin reaches its count only after that ratified work lands, under every option.\n\nSelectors today. {word:Pad(width)} and {x:Fixed(digits)} are refused with 'Expected width inside :Pad( )'. The parser's one number reader serves all seven numbered selectors, so A widens them together. The IR builder already passes the number as an operand of the helper call. A literal stays a constant, so existing output does not change.\n\nThe change touches the parser's number reader, the selector's tree node, the source formatter, the tree dump and the IR builder. Every tier runs that IR, so the tiers agree, as the selector ruling requires. The pad helpers already treat a zero or negative width as no padding, and a probe confirms it.\n\nZones today. zone(name) refuses a leading colon and any absolute path, and knows no POSIX rule string. The twin's hand rule picks the system zone when TZ is empty, but Node, glibc and Go use UTC. A uses UTC there, so the twin matches the original in one more case.\n\nLimits common to every option. A POSIX rule string in TZ gives UTC, where glibc and Node honor it. Day and month names are English, where Node follows the host locale. Selector padding counts characters, not terminal columns.\n\nA Core defect the review found, outside this ballot. zone(name) reads a TZif table but not the rule footer at its end. So New York shows standard time in July 2045, where Node and date show daylight time. The fix needs a POSIX rule reader, and TZ rule strings would then work for free.\n\nCensus on dev. Ten lines in eight files pass a computed width to a pad call, mostly package-tool tables. Selector numbers appear on 103 lines in 36 files, all literals. Four lines call in_zone, and one reads the system zone link by hand.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Host zone and computed selector numbers",
+          "detail": "Add time.host_zone() -[Env, FS.Read]> Zone and DateTime.in_host_zone() -[Env, FS.Read]> ZonedDateTime. Let every selector number take any Int expression.",
+          "technical": "host_zone() applies the host rule, then zone(name) or a direct zone-file read. in_host_zone() is in_zone(host_zone()). Web asks the browser's Intl zone, and Windows maps its zone setting to the IANA name with the CLDR table. Selector numbers parse as expressions, check as Int and run after the value. The twin projects to 908.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind:Pad(width)} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "B",
+          "name": "Host zone; selector numbers stay literal",
+          "detail": "A without computed selector numbers. Columns sized by the data keep writing pad_end(width, \" \").",
+          "technical": "The twin projects to 912 of 915, three words of slack. The selector parser does not change.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind.pad_end(width, \" \")} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "C",
+          "name": "Host zone function only, plus computed selector numbers",
+          "detail": "Add time.host_zone() and computed selector numbers, with no in_host_zone() shortcut. Callers write in_zone(time.host_zone()).",
+          "technical": "One fewer method on DateTime. The count equals A's, 908, because a dotted chain is one word. The longer chain is what most callers would write.",
+          "code": "print(\"{esc}[2J{esc}[H{time.now().in_zone(time.host_zone()).format(\"%-I:%M:%S %p\")}  {path}\")\nlines.push(\"{row.kind:Pad(width)} {count:PadLeft(7)}\")"
+        },
+        {
+          "key": "D",
+          "name": "No new Core; keep finding the zone by hand",
+          "detail": "Scripts keep the TZ and system-link lookup. With the decided no-pad flag it is a 29-word function. The twin stays at 942 against 915.",
+          "technical": "No API is added. Every script that shows local time repeats the lookup, and the hand rule picks the system zone for an empty TZ, unlike its peers.",
+          "code": "name := (sys.get(\"TZ\") ?? \"\").remove_prefix(\":\")\nif name == \"\" -> name = (files.read_link(\"/etc/localtime\") ?? \"\").split_once(\"zoneinfo/\")?.after ?? \"UTC\"\ntime.now().in_zone(time.zone(name) ?? time.utc()).format(\"%-I:%M:%S %p\")\nlines.push(\"{row.kind.pad_end(width, \" \")} {count:PadLeft(7)}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "Date methods use the host zone. toLocaleTimeString also uses the host locale, so its text varies by machine. This is the original's spelling.",
+          "code": "new Date().toLocaleTimeString()"
+        },
+        {
+          "lang": "Go",
+          "note": "time.Local is TZ, else the system zone file, else UTC, and an empty TZ is UTC. That is A's rule. Layouts spell the unpadded hour as 3.",
+          "code": "time.Now().Format(\"3:04:05 PM\")"
+        },
+        {
+          "lang": "Java",
+          "note": "LocalDate and LocalTime are zone-free, as Jet's are, so the host zone is named systemDefault rather than local.",
+          "code": "ZonedDateTime.now(ZoneId.systemDefault())"
+        },
+        {
+          "lang": "Rust (chrono)",
+          "note": "Local::now() reads the host zone. %-I is the GNU no-pad flag Jet has already adopted.",
+          "code": "chrono::Local::now().format(\"%-I:%M:%S %p\")"
+        },
+        {
+          "lang": "Python",
+          "note": "astimezone() with no argument uses the host zone. Format specs take computed widths.",
+          "code": "datetime.now().astimezone().strftime(\"%-I:%M:%S %p\")\nf\"{kind:<{width}}\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Showing the clock in the machine's zone is ordinary script work, and every peer does it in one call. Jet already has zones and patterns, and lacks only the host lookup. A computed column width is the normal table case, and the selector path already passes its number at run time.",
+        "gains": [
+          "The twin projects to 908 of 915 words.",
+          "One host rule for every script, the same as glibc and Go, including an empty TZ.",
+          "Columns sized by the data use the selector form, and so do computed decimal places.",
+          "The names avoid Local, which Jet's zone-free LocalDate and LocalTime already use."
+        ],
+        "losses": [
+          {
+            "loss": "in_host_zone() output depends on the machine. This cannot be removed, because it is the feature.",
+            "mitigation": "Its effects say so. Tests set TZ through the test kit's environment overlay, and code that must not vary names its zone."
+          },
+          {
+            "loss": "A misspelled TZ quietly gives UTC, as in glibc, Go and Node.",
+            "mitigation": "The zone's name then reads UTC, so a caller can check it. zone(name) returns the error for callers who want one."
+          },
+          {
+            "loss": "Windows needs a table from its zone names to IANA names.",
+            "mitigation": "It is the CLDR table that ICU and .NET use, shipped and updated with the embedded zone data."
+          },
+          {
+            "loss": "A computed width can be very large and build a very long string.",
+            "mitigation": "pad_end accepts the same widths today, so the selector adds no new case."
+          },
+          {
+            "loss": "908 leaves 7 words of slack.",
+            "mitigation": "It is measured on the real twin, and the gauntlet's source row catches a regression."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It saves the parser change but leaves 3 words of slack and keeps the longer pad call for columns sized by the data."
+          },
+          {
+            "key": "C",
+            "reason": "Same count, but callers write the longer in_zone(time.host_zone()) chain for the commonest case."
+          },
+          {
+            "key": "D",
+            "reason": "The twin stays at 942, each script repeats the lookup, and the hand rule mishandles an empty TZ."
+          }
+        ],
+        "tradeoff": "Two names and one parser widening close the gap. The cost that cannot be removed is that host time differs between machines, which is what was asked for."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotFix. BallotFix, which did not write this ballot, probed every claim with the t6c compiler on dev 76955986d0 and re-measured each option's word count. It dropped the already-ratified no-pad flag, fixed the empty-TZ and zone-path rules, renamed away from Local and widened every numbered selector together."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/lc run. Expected: l01 gives E0003 on Pad(width), and l02 prints %-I as text while format_checked refuses it. l03 pads nothing for widths 0 and -3. l04 refuses the colon form, the path form and the rule string, and l06 shows 07:00 for July 2045.\n\nRun probes/lc/tz.sh for the hand rule against Node under six TZ values. Empty TZ differs: the hand rule gives 06:09:27 and Node gives 11:09:27. Run wc -w on probes/lc/counts: A 908, B 912, C 908, DFlag 942, DPad 938. Then run Tools/agent/ballots/Validate.jet on this payload.\n\nAcceptance under A: TZ unset, empty, with a colon, as a path, unknown, and with no system link. Every selector with a computed, zero and negative number on O0, O1, O2 and web. The twin at or below 915 words with both fixtures identical.",
+      "surface": {
+        "gist": "Should Core tell a program the machine's time zone, and should format selectors accept a computed number?",
+        "lesson": "The Jet twin's last extra words are a hand-written host-zone lookup and two pad calls. Peers spell each in one call.",
+        "trio": {
+          "current": {
+            "note": "942 words with the decided no-pad flag; 29 of them find the host zone by hand.",
+            "code": "name := (sys.get(\"TZ\") ?? \"\").remove_prefix(\":\")\ntime.now().in_zone(time.zone(name) ?? time.utc()).format(\"%-I:%M:%S %p\")"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Host zone by the same rule; unpadded hour in the layout.",
+            "code": "time.Now().Format(\"3:04:05 PM\")"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Host zone and computed selector numbers",
+            "gist": "host_zone(), in_host_zone() and :Pad(width).",
+            "gains": [
+              "Projects to 908 of 915."
+            ],
+            "losses": [
+              "Host-dependent output, marked by effects."
+            ],
+            "proposed": {
+              "code": "{time.now().in_host_zone().format(\"%-I:%M:%S %p\")}\n{row.kind:Pad(width)}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Host zone only",
+            "gist": "A, but selector numbers stay literal.",
+            "gains": [
+              "No parser change."
+            ],
+            "losses": [
+              "Projects to 912; 3 words of slack."
+            ],
+            "proposed": {
+              "code": "{row.kind.pad_end(width, \" \")}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Zone function only",
+            "gist": "host_zone() and computed numbers, no in_host_zone().",
+            "gains": [
+              "One fewer method."
+            ],
+            "losses": [
+              "Longer chain at every call."
+            ],
+            "proposed": {
+              "code": "{time.now().in_zone(time.host_zone()).format(\"%-I:%M:%S %p\")}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "No new Core",
+            "gist": "Keep the hand-written lookup.",
+            "gains": [
+              "No new API."
+            ],
+            "losses": [
+              "The twin stays at 942."
+            ],
+            "proposed": {
+              "code": "local_clock()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Peers read the host clock in one call. Jet lacks only the host lookup and a computed width.",
+          "gains": [
+            "Closes the count at 908 of 915 with identical output."
+          ],
+          "losses": [
+            {
+              "loss": "Output depends on the host zone, which cannot be removed.",
+              "mitigation": "Env and FS.Read effects mark it, and tests pin TZ."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Less slack, longer pad call."
+            },
+            {
+              "key": "C",
+              "reason": "Longer chain for the common case."
+            },
+            {
+              "key": "D",
+              "reason": "The twin stays at 942."
+            }
+          ],
+          "tradeoff": "Two small peer-standard additions against one host-dependent call."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T11:49:53.484Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-EMBED-WALK1",
+      "cardId": "c0qe89cl",
+      "group": "tooling",
+      "title": "Build-time reads of walked and data-named files",
+      "situation": "Card #5072 c28 moves five generated Core-declaration tables into build-time code. That code must read files named by a directory walk or by another file's text. On a0.0.43, find returns paths, but embed_file and embed_bytes accept literals only (E0957). A parent import outside a script's authorized root also fails (E0602).\n\nWe recommend A: accept build-time String arguments for the existing reads and find, without widening their file authority. E is the smaller change: computed embeds, literal globs. Both cover c28. The ratified toolchain: direction stands; neither proposal works on the seed yet.",
+      "gist": "Should existing build-time reads accept computed paths, and should find accept computed globs too?",
+      "lesson": "Jet can embed files while compiling. Today their paths must be literals. A table builder needs to read files named by a walk or by another file. This vote picks that read rule. Recording every read in .jet/lock is required but not working on the seed.",
+      "explainer": "A build-time read is embed_file or embed_bytes inside #run. find(glob) returns sorted paths. A data-named read gets its path from another file. toolchain: is the ratified prefix for compiler packages reading toolchain sources. Proposed examples use #run; seed probes use comptime. The lock is a required output, not an access grant or a sandbox.",
+      "story": "Lee keeps recipes in Markdown files. Under A she writes loop path in find(\"recipes/*.md\") -> embed_file(path). A new file joins the next build's table. The same code works under E, whose glob stays literal. A path outside the existing authority is rejected.",
+      "inWild": "// Zig: a constant-string value, not necessarily a source literal.\nconst text = @embedFile(name);\n// Go: literal bounds, then computed reads inside the embedded FS.\n//go:embed recipes/*.md\nvar recipes embed.FS",
+      "detail": "A amends D-CTIO1's literal clause and the literal-glob restriction. E changes only the embeds. Neither reopens D-EMBED-TOOLCHAIN1=A. Relative paths remain relative to the embedding file, not the package root. toolchain: keeps its ratified authority check. No absolute path, parent component, symlink escape or ambient file API is enabled.\n\nIndependent seed runs confirm E0957 for computed text, bytes and find arguments; sorted results; empty matches; and E0955 for invalid UTF-8 text and symlinks. b.find and b.embed already accept computed String values. The former's literal-only diagnostic is misleading, not an AST literal check.\n\nThe traced generator input set has 284 files (19.4 MB), including 42 runtime units and 13 syntax files. Literal-embed adaptations produced matching hashes for CoreCallRows and all twelve views. These are host-only probes, not the five-table package cutover or a cross-target proof. The report records cold-build costs; no option has an end-to-end implementation benchmark.\n\nImplementation is more than deleting sema's literal check. Today's typed host call stores a String and IR emits ConstText. Sema must check a build-time String expression and own the evaluated path-law check. IR lowers checked operations; the rooted host transport remains the security backstop. Preserve the Core-reader authority boundary rather than silently granting Core find.\n\nAll options need per-read digests, sorted glob membership including empty results, correct invalidation and watches, and target/toolchain-aware identity. Reusing bytes is a proposed bounded evaluation snapshot, not an existing cache. Key it by root, embedding directory and normalized path. Detect concurrent changes rather than mixing different file versions. Lock diffs show reads after execution; untrusted builds still need external isolation.\n\nThe option examples are same-derivation sketches: core_source_rows, pick and core_call_records stand for shared parser work, not new APIs. The complete executable derivation probes use literal embeds because the seed cannot implement any proposed option. The generated baseline stays until the chosen mechanism, shared parser and all cutover proofs pass.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Computed embeds and globs",
+          "detail": "embed_file, embed_bytes and find accept build-time String values. Apply the existing path law to the value. No new name.",
+          "technical": "Sema checks the argument type, phase and common normalized path law, including evaluated values. Typed calls and IR carry the argument expression instead of ConstText. Evaluation invokes sema-owned validation before rooted transport. E0957 quotes a rejected value; E0955 covers read or UTF-8 failure. Beginner: existing literal embeds. Expert: data-derived paths and globs. The complete record, watch and snapshot contract in the report applies.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Content globs",
+          "detail": "embed_files(glob) returns [(path: String, text: String)]; embed_files_bytes(glob) returns [(path: String, bytes: [U8])]. Patterns and scalar embeds stay literal-only.",
+          "technical": "Two names need D-PRELUDE-LAW1 admission. Both bulk calls must use the same canonical reader and path law, not duplicate file policy (I8). A static bound is a real review benefit. Data-named reads select from a superset. Invalid UTF-8 fails the text call with E0955; bytes require no UTF-8. Sorted results and empty matches follow find. Beginner: scalar embed, then a content glob. Expert: choose a bounded source set.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: embed_files(\"toolchain:Core/*/Runtime/**/*.jet\")\n    sources: embed_files(\"toolchain:Core/**/*.jet\")\n    owned: loop row in core_source_rows(core) -> pick(sources, \"toolchain:{row.path}\")\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Computed reads bounded by find",
+          "detail": "Computed embeds must match a literal find already executed in the same evaluation. Literal embeds keep their existing authority.",
+          "technical": "Track normalized matched identities, not bare path spellings. Reject an unmatched computed read with E0957. This adds authority state and call-order dependence, not another reader. Beginner: literal embeds. Expert: run a bounding find before computed reads. The example's Core bound may include files it never uses. Reusing bytes can remove repeated I/O but not the order rule.",
+          "code": "CORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    bound: find(\"toolchain:Core/**/*.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Declared input ceiling",
+          "detail": "package.jet declares comptime_inputs globs. Computed reads and walks must stay inside that ceiling; literals retain today's rule. Reading code is A's.",
+          "technical": "A new manifest key contributes to package identity. Reject values outside the ceiling with E0957. The ceiling is distinct from the actual read set and need not change for every new file. Beginner: literal embeds need no field. Expert: choose a narrow ceiling. Costs: another authority surface, manifest maintenance, and wider restrictions if authors use broad roots to avoid maintenance.",
+          "code": "// Compiler/JetFoundation/package.jet, proposed field:\ncomptime_inputs: [\"toolchain:Compiler/Prelude/*\", \"toolchain:Core/**\", \"toolchain:Compiler/JetFoundation/Data/Syntax/*\"]\n\nCORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        },
+        {
+          "key": "E",
+          "name": "Computed embeds; literal globs",
+          "detail": "embed_file and embed_bytes accept build-time String values. find keeps its literal-only argument. This covers the same c28 program as A.",
+          "technical": "Use A's checked expression, rooted reader and recording contract for embeds without widening find's source restriction. Beginner: existing literal embeds. Expert: data-named embeds work directly; a data-named walk needs a broad literal find and filtering. This is the smallest semantic expansion the traced generator requires. It does not add C's matched-set requirement.",
+          "code": "// Identical to A for this program: its globs are already literal.\nCORE_CALLS: #run {\n    core: embed_file(\"toolchain:Compiler/Prelude/Core.jet\")\n    units: loop path in find(\"toolchain:Core/*/Runtime/**/*.jet\") -> (path: path, text: embed_file(path))\n    owned: loop row in core_source_rows(core) -> (path: row.path, text: embed_file(\"toolchain:{row.path}\"))\n    core_call_records(core, units, owned) ?? panic(err.message)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "The implementation resolves a constant-string value and rejects an embed outside the module path. This is a source comparison, not a local Zig execution.",
+          "code": "const text = @embedFile(name);"
+        },
+        {
+          "lang": "Go",
+          "note": "Literal package-relative patterns bound an embed.FS. Computed names read inside it. Patterns exclude parent components and symlinks; empty matches fail. Source comparison only.",
+          "code": "//go:embed recipes/*.md\nvar recipes embed.FS\ntext, err := recipes.ReadFile(\"recipes/\" + name)"
+        },
+        {
+          "lang": "Cargo",
+          "note": "A build script is a cached host program. It can derive table literals directly, not only emit include_str! calls. Authors declare invalidation paths. Source comparison only.",
+          "code": "// build.rs\nprintln!(\"cargo::rerun-if-changed=recipes\");\n// Read, derive, and write the table under OUT_DIR."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps one value-argument rule across existing operations and matches the computed-value build host. E is equally sufficient for c28 and changes less. Prefer A for consistency, not because these tables prove a need for computed globs. This recommends a direction, not implementation approval.",
+        "gains": [
+          "One argument rule for literal, walked and data-named paths.",
+          "No new ambient name.",
+          "No superset read is required just to authorize a computed embed."
+        ],
+        "losses": [
+          {
+            "loss": "Shared blocker under A-E: an empty find-only program is cached by jet run and misses its first added member.",
+            "mitigation": "Reproducer: probes/empty_glob.sh. Record and revalidate empty membership before cache reuse; c25 and the cutover must cover this."
+          },
+          {
+            "loss": "Data-named reads are not visible from source alone before execution.",
+            "mitigation": "Required lock rows expose the set after a successful build. They are not a pre-execution allowlist; untrusted builds need external isolation."
+          },
+          {
+            "loss": "Wrong computed paths fail during evaluation rather than literal checking.",
+            "mitigation": "Sema owns language checking; the host independently enforces file authority. Codegen only lowers checked operations."
+          },
+          {
+            "loss": "Ratified literal rules, their tests and explanations change.",
+            "mitigation": "Update every affected caller and test in one cutover, including positive computed-path and negative computed-escape cases."
+          },
+          {
+            "loss": "Glob tracking, bootstrap authority and target parity remain unproven for the proposed mechanism.",
+            "mitigation": "Require the report's acceptance matrix before cutover. Do not describe planned fixes as shipped behavior."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A real static bound and useful bulk operation, but two names and possible superset reads. Sharing policy can satisfy I8; the toolchain ballot does not ban B."
+          },
+          {
+            "key": "C",
+            "reason": "A real source ceiling, but mutable authority state and a call-order rule."
+          },
+          {
+            "key": "D",
+            "reason": "A useful manifest ceiling, but another policy surface. The ceiling and actual reads are different facts, not duplication by definition."
+          },
+          {
+            "key": "E",
+            "reason": "Equally sufficient and smaller for c28. A avoids differing rules for computed paths and globs; that consistency gain is not a performance claim."
+          }
+        ],
+        "tradeoff": "Uniform computed arguments, in return for learning the actual read set after execution. E offers a smaller change."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: EmbedWalkReview; independent seed probes and matched-output derivations corrected b.find, constant-only IR, repeated reads, lock and I8 claims, and added option E; see the audit for unproven cutover requirements."
+      },
+      "checkInstructions": "Run w01-w08, w05_glob_add.sh, probes/review.sh, probes/lifecycle.sh and probes/empty_glob.sh with a0.0.43. Empty-glob run returns 0/0/0 across first addition/removal, while build returns 0/1/0. This blocks every option's cutover.\n\nFrom the pinned dev tree run census.sh, cost/trace.sh, cost/sum.sh and cost/mk.sh, then c0-c4 and cost/cost_time.sh. A-E are proposed sketches, not runnable implementations. The report gives the required cutover matrix. Validate with jet Tools/agent/ballots/Validate.jet <payload>.",
+      "surface": {
+        "gist": "Should embeds accept computed paths, and should find accept computed globs too?",
+        "lesson": "Today file paths must be literal. Table builders need paths from walks and data. This vote changes the read rule, not file authority. The required lock recording is not working yet.",
+        "trio": {
+          "current": {
+            "note": "A found path is refused.",
+            "code": "loop p in find(\"in/*.txt\") -> embed_file(p) // E0957"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "A constant-string value.",
+            "code": "const text = @embedFile(name);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Computed paths and globs",
+            "gist": "Accept computed arguments on existing calls.",
+            "gains": [
+              "One rule, no new names."
+            ],
+            "losses": [
+              "Reads known after execution."
+            ],
+            "proposed": {
+              "code": "embed_file(path)\nfind(glob)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Content globs",
+            "gist": "Literal globs return paths and content.",
+            "gains": [
+              "A visible static bound."
+            ],
+            "losses": [
+              "Two new names."
+            ],
+            "proposed": {
+              "code": "embed_files(\"recipes/*.md\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Found paths only",
+            "gist": "A prior literal find bounds computed reads.",
+            "gains": [
+              "Source-level ceiling."
+            ],
+            "losses": [
+              "An order rule."
+            ],
+            "proposed": {
+              "code": "bound: find(\"recipes/**\")\nembed_file(path) // must match bound"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Declared ceiling",
+            "gist": "The manifest bounds computed reads.",
+            "gains": [
+              "Authority visible before execution."
+            ],
+            "losses": [
+              "Another policy surface."
+            ],
+            "proposed": {
+              "code": "comptime_inputs: [\"recipes/**\"]"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Computed embeds only",
+            "gist": "Read computed paths; keep find patterns literal.",
+            "gains": [
+              "Covers c28 with less change."
+            ],
+            "losses": [
+              "Computed globs still refused."
+            ],
+            "proposed": {
+              "code": "embed_file(path) // find stays literal"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One value rule across existing calls. E covers these tables equally well with less change.",
+          "gains": [
+            "No new names.",
+            "File authority stays bounded."
+          ],
+          "losses": [
+            {
+              "loss": "Reads seen after execution.",
+              "mitigation": "Lock diffs aid review, not isolation."
+            },
+            {
+              "loss": "Implementation gaps remain.",
+              "mitigation": "Require sema checks, recording, watches and target parity before cutover."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A real bound, but two names."
+            },
+            {
+              "key": "C",
+              "reason": "Adds an order rule."
+            },
+            {
+              "key": "D",
+              "reason": "Adds manifest policy."
+            },
+            {
+              "key": "E",
+              "reason": "Smaller change; less uniform argument rules."
+            }
+          ],
+          "tradeoff": "Uniform arguments, not a proved speedup."
+        }
+      },
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "No source-only bound for data-derived reads.",
+          "attempts": [
+            "Require a prior literal find: C gives a ceiling but adds an order rule.",
+            "Declare an input ceiling: D gives pre-execution review but adds manifest policy."
+          ],
+          "result": "Not removed by A. Lock diffs help after execution; external isolation remains necessary for untrusted builds."
+        },
+        {
+          "option": "A",
+          "loss": "Repeated read and hash work.",
+          "attempts": [
+            "Reuse a bounded per-evaluation byte snapshot keyed by full authority identity.",
+            "Keep independent reads and reject changed inputs rather than mixing versions."
+          ],
+          "result": "Implementation choice still open. The existing log stores no reusable bytes; no removed-cost claim is made."
+        },
+        {
+          "option": "A",
+          "loss": "Assemble cannot discover computed package-relative assets with a text scan.",
+          "attempts": [
+            "For toolchain reads, retain the selected toolchain and prove assembled-package membership.",
+            "For package-relative assets, use checked input identities rather than guessing paths from text."
+          ],
+          "result": "Open acceptance requirement. JET_TOOLCHAIN_ROOT alone does not prove authorization, and not every option needs the same staging implementation."
+        },
+        {
+          "option": "B",
+          "loss": "Two new public names.",
+          "attempts": [
+            "One mode-taking name reduces names but adds a mode.",
+            "Implement bulk and scalar operations over one reader to avoid duplicated policy."
+          ],
+          "result": "Public surface cost remains; I8 compliance is possible, not automatically forbidden."
+        },
+        {
+          "option": "C",
+          "loss": "Order-dependent matched-set authority.",
+          "attempts": [
+            "Predeclare the bound independently of execution: becomes a declaration policy like D.",
+            "Reuse matched bytes: removes extra reads, not the order rule."
+          ],
+          "result": "Remains. A typed bound could remove ambient order state but would require a separately specified API."
+        },
+        {
+          "option": "D",
+          "loss": "Another authority surface in package.jet.",
+          "attempts": [
+            "Infer it from find calls: becomes C and loses manifest review.",
+            "Default to all already-authorized files: becomes A and loses the narrow ceiling."
+          ],
+          "result": "Remains. A broad stable ceiling lowers maintenance but weakens restriction."
+        },
+        {
+          "option": "E",
+          "loss": "Different argument rules for find and embeds.",
+          "attempts": [
+            "Allow computed globs as well: becomes A.",
+            "Filter a broad literal find: preserves E but reads a superset."
+          ],
+          "result": "Remains for data-named walks. The c28 example does not incur it."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Build-time walked-file reads: independent adversarial review",
+          "path": "Docs/audits/2026-11-10-embed-walk-review.md",
+          "note": "Independent seed probes and matched-output adapted derivations; host-only costs and unproven cutover requirements are stated separately."
+        },
+        {
+          "title": "Zig @embedFile",
+          "url": "https://ziglang.org/documentation/master/#embedFile"
+        },
+        {
+          "title": "Zig embed implementation",
+          "url": "https://github.com/ziglang/zig/blob/master/src/Sema.zig"
+        },
+        {
+          "title": "Go embed rules",
+          "url": "https://github.com/golang/go/blob/master/src/embed/embed.go"
+        },
+        {
+          "title": "Cargo build scripts",
+          "url": "https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed"
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T19:14:17.698Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
+    },
+    {
+      "id": "D-BROWSER-CDP-PAGE1",
+      "cardId": "c0qe89cl",
+      "group": "other",
+      "title": "How a Jet tool sends Chrome debugger commands to one page and reads where it paused",
+      "situation": "Card #5072 moves repo tooling from Node to Jet. The Jet twin of the source-map check must pause a page at a breakpoint and report the line where it stopped. Jet's browser library can send Chrome DevTools Protocol (CDP) commands, but only to the browser as a whole, never to one page. Its events keep only a name and a few network facts, so a pause carries no line. The live half of the check therefore cannot move to Jet today. This vote decides how a Jet tool reaches one page's debugger and reads where it paused. We recommend A: a CDP handle for one page, plus named debugger facts on events.",
+      "gist": "How should a Jet tool send Chrome debugger commands to one page and read where the page paused?",
+      "lesson": "A browser library can hand events to a program as raw protocol data or as a fixed set of named facts. Raw data serves every later need, but carries page content past the library's redaction. Named facts stay small and safe, but each new need is a new accessor.",
+      "explainer": "CDP is Chrome's debugging protocol. A command such as Debugger.enable goes to one target, usually a page, through that page's session. An event such as Debugger.paused comes back with JSON params. A pause lists the call frames, each with a function name and a 0-based line.\n\nJet's browser library, core.web.browser, speaks WebDriver BiDi to the browser. Chromium's BiDi server passes CDP through a command named goog:cdp.sendCommand. The library's protocol(\"cdp\") handle uses it, but sends no session, so its commands reach the browser rather than a page.\n\nThe library turns each event into a BrowserEvent. It keeps the event's kind and named facts: request id, request method, status code, and url_hash. A hash is a fixed-length fingerprint of the text, so the URL itself is not stored. A program can compare a hash with the hash of a string it already knows.\n\nThe beginner path is a test that opens a page with page.goto, finds elements with page.get_by_role and clicks them, and reads page.text(). It needs no protocol, and it is the same in every option. The expert path is a tool that needs a CDP feature the library does not wrap. Every option changes only the expert path.",
+      "story": "The source-map check serves a built web app and finds the generated app.js line that the source map assigns to a Jet statement. It sets a breakpoint there, loads the page and waits for the pause. It checks that the top frame is render, jet_main or empty. It prints the paused line plus one, and whether Chrome reported app.js.map. Each option writes that live half as one function, live(port, line). The map decoding is plain Jet in every option and is not shown.",
+      "inWild": "Puppeteer gives each page its own CDP session with page.createCDPSession(). session.send runs a command, and session.on hands raw event params to the program. Playwright's context.newCDPSession(page) works the same way, on Chromium only. Both pass raw JSON to the program and redact nothing. Selenium 4 sends CDP commands through chromedriver with execute_cdp_cmd and reads no events that way. These outside facts were not re-checked for this ballot.",
+      "detail": "Commands today. BrowserProtocol.send in Core/Web/Browser.jet (line 579) sends goog:cdp.sendCommand with a method and params and no session. The BiDi handle refuses every goog:cdp method (line 573), and so does Browser.subscribe for goog:cdp events (line 216). So no hand-built command can reach a page's debugger. That chromium-bidi takes the page session as a field beside method and params is [INFERENCE] from its schema, not run live.\n\nEvents today. __cdp_event_facts (line 1177) keeps only the request id, request method, url_hash and status. A #Test near line 1993 pins that a Debugger.paused event has every fact empty. Docs/spec/architecture.md says the trace never holds payloads and events carry named facts. Command replies are not redacted: send returns the full reply JSON (lines 575 and 580).\n\nLimits today. The event queue holds 256 events and drops the oldest first (C_EVENT_LIMIT, line 1058). The trace holds 8 KiB and also drops the oldest first. Every script the library runs in the page also fires Debugger.scriptParsed, so a long session can push out the event a tool wants.\n\nHashes today. browser.fact_hash is not public. A probe calling browser.fact_hash(\"app.js.map\") fails with E1004, core.web.browser has no item fact_hash. So no caller can compare url_hash with a known URL today. The hash is 64-bit FNV-1a. It keeps strings out of logs, but anyone who guesses a string can confirm it.\n\nNavigation. page.goto waits for the load to complete (line 339). A breakpoint that fires during the load blocks it, so goto would time out first. Every option navigates with CDP Page.navigate, which returns at once, as the original did.\n\nThe original is Tools/web-test/sourcemap.mjs before commit 70532ccd85. It used its own CDP pipe in Tools/canvas-test/driver.mjs, attached to the page with a flattened session. It printed pausedGeneratedLine and scriptParsedMapUrl. It asserted the paused line is within one of the expected line, and the function name is render, jet_main or empty.\n\nEdge cases. A closed page: the page handle in A and B checks page_live (line 1366) before every send and returns closed. A pause left open blocks the page, so each program resumes before it closes. Frames from another site in an iframe run in their own target, which the page session does not reach; this is a stated limit. Sharing the session chromedriver itself uses for the page is [INFERENCE] and is the build card's first live proof.\n\nMigration. No code uses this surface yet. The only caller is the source-map twin under card #5072. Option D restores the deleted Node file.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A CDP handle for one page, and named debugger facts on events",
+          "gist": "page.protocol(\"cdp\") sends to that page. A pause and a parsed script add named facts to the event; nothing else of the event is kept.",
+          "detail": "New public items, six in all. BrowserPage.protocol(kind) returns a BrowserProtocol for that page, and accepts only \"cdp\". \"bidi\" is refused, because BiDi commands already name their page, and a second BiDi handle would be a second way to send them (I8).\n\nOn first use the handle asks chromedriver for the page's session with goog:cdp.getSession. That method joins the protocol allowlist (C_BIDI_2024_11) behind the same CDP check as goog:cdp.sendCommand. Every send then carries the session, which never leaves Core. Its subscribe names this page, so next_event yields only this page's events.\n\nBrowserEvent gains frame_line(), frame_column() and frame_function_hash(), from the top frame of Debugger.paused. It also gains source_map_url_hash() from Debugger.scriptParsed, and url_hash() is filled from that event's url. browser.fact_hash(text) becomes public, so a program can compare any hash fact with a string it knows.\n\nThe beginner path does not change. Each further debugger fact, such as scope values or other frames, needs its own ballot.",
+          "code": "use {\n    browser: core.web.browser\n    core.web.browser.[BrowserError]\n}\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) BrowserError! {\n    b: browser.launch(\"chromium\")\n    page: b.context().page()\n    // New: a CDP handle whose commands and events belong to this page only.\n    cdp: page.protocol(\"cdp\")\n    cdp.subscribe(\"Debugger.scriptParsed\")\n    cdp.subscribe(\"Debugger.paused\")\n    _: cdp.send(\"Debugger.enable\", \"{{}}\")\n    _: cdp.send(\"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\")\n    // CDP navigation returns at once; page.goto would wait for a load the pause blocks.\n    _: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\")\n    // New: browser.fact_hash is the hash events already use for url_hash.\n    map: browser.fact_hash(\"app.js.map\")\n    names: [browser.fact_hash(\"render\"), browser.fact_hash(\"jet_main\"), browser.fact_hash(\"\")]\n    saw_map := false\n    loop {\n        event: cdp.next_event(browser.timeout(20000))\n        // New: named facts read from the event; nothing else of it is kept.\n        if event.kind() == \"Debugger.scriptParsed\" && event.source_map_url_hash() == map -> saw_map = true\n        if event.kind() != \"Debugger.paused\" -> next\n        if !names.contains(event.frame_function_hash()) -> return Err(BrowserError{kind: \"protocol\"})\n        _: cdp.send(\"Debugger.resume\", \"{{}}\")\n        b.close()\n        return Ok((paused_line: event.frame_line() + 1, saw_map: saw_map))\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "A CDP handle for one page, and the raw debugger event",
+          "gist": "page.protocol(\"cdp\") sends to that page. A debugger event carries its raw params as JSON text, which the tool decodes into its own struct.",
+          "detail": "BrowserPage.protocol(\"cdp\") is the same as in A.\n\nBrowserEvent gains payload(), the event's CDP params as JSON text. It is filled only for Debugger events and is never written to the trace. A payload over 64 KiB arrives empty, and payload_truncated() says so. The cap matters because the queue counts events, not bytes, and a pause with deep scopes can run to tens of KiB.\n\nThe tool decodes the text with json.parse and decode into structs it declares with #Rename(.Camel). That decode was probed and runs. Two accessors serve every debugger field, now and later.\n\nThe cost is the event rule: events stop being named facts for one protocol domain. A second domain that asks for raw events, such as network bodies, then has no principled refusal.",
+          "code": "use {\n    browser: core.web.browser\n    json: core.encoding.json\n    core.encoding.[EncodingError]\n    core.web.browser.[BrowserError]\n}\n\n#Rename(.Camel)\nLocation: struct { line_number: Int }\n#Rename(.Camel)\nCallFrame: struct { function_name: String, location: Location }\n#Rename(.Camel)\nPaused: struct { call_frames: [CallFrame] }\n#Rename(.Camel)\nScriptParsed: struct { source_map_url: String? }\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) (BrowserError | EncodingError | [FieldError])! {\n    b: browser.launch(\"chromium\")\n    page: b.context().page()\n    // New: a CDP handle whose commands and events belong to this page only.\n    cdp: page.protocol(\"cdp\")\n    cdp.subscribe(\"Debugger.scriptParsed\")\n    cdp.subscribe(\"Debugger.paused\")\n    _: cdp.send(\"Debugger.enable\", \"{{}}\")\n    _: cdp.send(\"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\")\n    // CDP navigation returns at once; page.goto would wait for a load the pause blocks.\n    _: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\")\n    saw_map := false\n    loop {\n        event: cdp.next_event(browser.timeout(20000))\n        // New: the raw params of a Debugger event, as JSON text, never traced.\n        if event.kind() == \"Debugger.scriptParsed\" && (json.parse(event.payload()).decode<ScriptParsed>().source_map_url ?? \"\") == \"app.js.map\" -> saw_map = true\n        if event.kind() != \"Debugger.paused\" -> next\n        top: json.parse(event.payload()).decode<Paused>().call_frames[0]\n        if ![\"render\", \"jet_main\", \"\"].contains(top.function_name) -> return Err(BrowserError{kind: \"protocol\"})\n        _: cdp.send(\"Debugger.resume\", \"{{}}\")\n        b.close()\n        return Ok((paused_line: top.location.line_number + 1, saw_map: saw_map))\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "The tool speaks CDP itself over a WebSocket",
+          "gist": "No Core change. The tool starts the pinned Chromium, connects with core.net.ws and writes its own small CDP client, as the original did in Node.",
+          "detail": "The tool finds the pinned Chromium with browser.locked(\"chromium\") and starts it with --remote-debugging-port=0. It reads the port from the DevToolsActivePort file and connects with ws.connect. It then attaches to a page and matches replies to commands by id. The whole program below type-checks today on the dev compiler.\n\nThe tool can read every field. But it is a second CDP client beside Core's checked one, and other ported tools would copy it. It skips the protocol check, the trace and the redaction. The public WsConn.recv has no timeout, so a hung browser hangs the tool. The tool must start, poll and stop Chromium itself.",
+          "code": "use {\n    browser: core.web.browser\n    files: core.files\n    json: core.encoding.json\n    process: core.process\n    time: core.time\n    ws: core.net.ws\n    core.encoding.[EncodingError]\n    core.net.ws.[WsConn, WsError]\n    core.web.browser.[BrowserError]\n}\n\n#Rename(.Camel)\nEnvelope: struct { id: Int?, method: String? }\n#Rename(.Camel)\nCreateResult: struct { target_id: String }\nCreated: struct { result: CreateResult }\n#Rename(.Camel)\nAttachResult: struct { session_id: String }\nAttached: struct { result: AttachResult }\n#Rename(.Camel)\nLocation: struct { line_number: Int }\n#Rename(.Camel)\nCallFrame: struct { function_name: String, location: Location }\n#Rename(.Camel)\nPaused: struct { call_frames: [CallFrame] }\nPausedMessage: struct { params: Paused }\n#Rename(.Camel)\nScriptParsed: struct { source_map_url: String? }\nScriptMessage: struct { params: ScriptParsed }\n\n// Sends one command and returns its reply; events that arrive first are kept in order.\ncommand: fn(conn: WsConn, call: Int, session: String, method: String, params: String, events: &[String]) -> String (WsError | EncodingError | [FieldError])! {\n    target: if session == \"\" -> \"\" else -> \",\\\"sessionId\\\":\\\"{session}\\\"\"\n    conn.send_text(\"{{\\\"id\\\":{call},\\\"method\\\":\\\"{method}\\\",\\\"params\\\":{params}{target}}}\")\n    loop {\n        text: conn.recv().text() ?? next\n        if (json.parse(text).decode<Envelope>().id ?? -1) == call -> return Ok(text)\n        events.push(text)\n    }\n}\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) (BrowserError | IOError | WsError | EncodingError | [FieldError])! {\n    // The pinned Chromium from .jet/lock, launched by the tool itself.\n    chromium: browser.locked(\"chromium\")\n    profile: files.temp_dir(\"jet-cdp-\")\n    child := process.cmd([String]{chromium.binary(), \"--headless=new\", \"--remote-debugging-port=0\", \"--user-data-dir={profile}\", \"about:blank\"}).spawn()\n    loop !files.exists(\"{profile}/DevToolsActivePort\") -> time.sleep(time.duration_ms(50))\n    listening: files.read(\"{profile}/DevToolsActivePort\").lines()\n    conn: ws.connect(\"ws://127.0.0.1:{listening[0]}{listening[1]}\")\n    events := [String]{}\n    created: json.parse(command(conn, 1, \"\", \"Target.createTarget\", \"{{\\\"url\\\":\\\"about:blank\\\"}}\", events)).decode<Created>()\n    attached: json.parse(command(conn, 2, \"\", \"Target.attachToTarget\", \"{{\\\"targetId\\\":\\\"{created.result.target_id}\\\",\\\"flatten\\\":true}}\", events)).decode<Attached>()\n    page: attached.result.session_id\n    _: command(conn, 3, page, \"Debugger.enable\", \"{{}}\", events)\n    _: command(conn, 4, page, \"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\", events)\n    _: command(conn, 5, page, \"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\", events)\n    saw_map := false\n    at := 0\n    loop {\n        // recv has no timeout: a hung browser hangs here.\n        if at == events.len() -> events.push(conn.recv().text() ?? \"{{}}\")\n        text: events[at].copy()\n        at += 1\n        method: json.parse(text).decode<Envelope>().method ?? \"\"\n        if method == \"Debugger.scriptParsed\" && (json.parse(text).decode<ScriptMessage>().params.source_map_url ?? \"\") == \"app.js.map\" -> saw_map = true\n        if method != \"Debugger.paused\" -> next\n        top: json.parse(text).decode<PausedMessage>().params.call_frames[0]\n        if ![\"render\", \"jet_main\", \"\"].contains(top.function_name) -> return Err(BrowserError{kind: \"protocol\"})\n        _: command(conn, 6, page, \"Debugger.resume\", \"{{}}\", events)\n        child.kill().drop(\"the check is done\")\n        return Ok((paused_line: top.location.line_number + 1, saw_map: saw_map))\n    }\n}\n\nrun: fn() {\n    found: live(8080, 12) ?? return\n    print(\"{found.paused_line} {found.saw_map}\")\n}"
+        },
+        {
+          "key": "D",
+          "name": "Defer: keep the live half in Node",
+          "gist": "No new API. Restore sourcemap.mjs for the live half; the Jet twin keeps only the static half.",
+          "detail": "The deleted Node file comes back beside Tools/web-test/SourceMap.jet. The Jet twin checks the static half: the fetches, the map decoding and the wasm section. Criterion c3 of card #5072 stays open on this ballot.\n\nA stand-in that runs page script, such as reading new Error().stack, is not an option. No page script can see a debugger pause or Chrome's scriptParsed event, so it would print the same line while testing something else.",
+          "code": "// The live half stays in Node, as Tools/web-test/sourcemap.mjs had it before 70532ccd85.\nimport { CdpDriver } from \"../canvas-test/driver.mjs\";\n\nconst driver = await new CdpDriver().launch();\ntry {\n  const session = driver.pageSession;\n  await driver.send(\"Debugger.enable\", {}, session);\n  let sawMapUrl = false;\n  const parsed = driver.waitForEvent(\"Debugger.scriptParsed\", session, 20000)\n    .then((p) => { if (p.sourceMapURL === \"app.js.map\") sawMapUrl = true; });\n  await driver.send(\"Debugger.setBreakpointByUrl\",\n    { urlRegex: \".*app\\\\.js(\\\\?.*)?$\", lineNumber: line, columnNumber: 0 }, session);\n  const pausedPromise = driver.waitForEvent(\"Debugger.paused\", session, 20000);\n  await driver.send(\"Page.navigate\", { url: `http://127.0.0.1:${port}/click/` }, session);\n  const frame = (await pausedPromise).callFrames[0];\n  await parsed;\n  if (![\"render\", \"jet_main\", \"\"].includes(frame.functionName)) throw new Error(frame.functionName);\n  await driver.send(\"Debugger.resume\", {}, session);\n  console.log(JSON.stringify({ pausedGeneratedLine: frame.location.lineNumber + 1, scriptParsedMapUrl: sawMapUrl }));\n} finally {\n  await driver.close();\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A is the only option that reaches the page through Core's one checked CDP handle while events stay named facts. The twin prints the original's two fields: the paused line from frame_line(), and the map flag by comparing hashes.",
+        "gains": [
+          "Commands reach the page, and no session id or payload reaches the caller",
+          "Events stay named facts, and the trace stays free of page content",
+          "A public fact_hash also lets programs compare the existing url_hash"
+        ],
+        "losses": [
+          {
+            "loss": "Six new public items: one method, four event accessors and fact_hash.",
+            "mitigation": "Each answers one need the original had. The accessors are documented together as the debugger group, apart from the network facts."
+          },
+          {
+            "loss": "Each further debugger fact, such as scope values or other frames, needs its own ballot.",
+            "mitigation": "Option B stays available as a later ballot if real tools need many such facts. One ballot per fact keeps each addition reviewed."
+          },
+          {
+            "loss": "fact_hash lets a program match a string, but gives no secrecy.",
+            "mitigation": "The docs say so plainly. The hash's job is keeping strings out of the trace and logs, which it still does."
+          },
+          {
+            "loss": "BrowserEvent stays one flat struct that grows a field per fact.",
+            "mitigation": "Unset facts are empty, as network facts are on a pause today. Splitting the struct would break next_event for every caller."
+          },
+          {
+            "loss": "Sharing chromedriver's own page session with the debugger is unproven.",
+            "mitigation": "The build card's first proof is a live run of A's program against the gauntlet fixture, before any other work."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B ends the rule that events carry named facts, for one domain at first. The next domain that asks for raw events then has no principled refusal."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a second CDP client that skips the protocol check, the trace and the redaction. Its recv has no timeout, and other tools would copy it."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps Node for this check and leaves card #5072's criterion open, so the move to Jet stays unfinished."
+          }
+        ],
+        "tradeoff": "Events stay named facts and the trace stays clean. In exchange, every new debugger fact is a small reviewed addition."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewAddStructType. Checked against Core/Web/Browser.jet and probes, the draft had a private fact_hash, a goto that times out mid-pause, and an asserted function name. Repairs: public fact_hash, Page.navigate, no page BiDi handle (I8), a 64 KiB cap on B, and the own-client and defer options."
+      },
+      "checkInstructions": "Read BrowserProtocol.send, subscribe and next_event, __cdp_event_facts and its #Test, and page_live in Core/Web/Browser.jet. Read the browser automation section of Docs/spec/architecture.md. Read the original with git show 70532ccd85^:Tools/web-test/sourcemap.mjs.\n\nProbes ran with $JET_SCRATCH_ROOT/lanes/Main/integ/seed-b13/jet and JET_TOOLCHAIN_ROOT set to the dev worktree .agent-worktrees/Main-dev-collectall.\n\nfact_hash: a one-file program calling browser.fact_hash(\"app.js.map\") fails with E1004.\ntoday: launch, context().page(), protocol(\"cdp\"), subscribe, send, next_event and kind all check.\ndecode: B's #Rename(.Camel) structs decode a sample Debugger.paused payload and print the line and function.\nown_cdp: option C's whole program passes jet check.\n\nA's and B's new items are proposed and unbuilt, so their programs do not check today. No live browser run was made; sharing chromedriver's page session is the build card's first proof. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "How should a Jet tool send Chrome debugger commands to one page and read where it paused?",
+        "lesson": "Events can carry raw protocol data or a fixed set of named facts. Raw data serves every later need but carries page content past redaction. Named facts stay small and safe, but each new need is a new accessor.",
+        "trio": {
+          "current": {
+            "note": "The only CDP handle belongs to the whole browser, and a pause event carries no line.",
+            "code": "b: browser.launch(\"chromium\")\npage: b.context().page()\n// The only CDP handle belongs to the whole browser; no page has one.\ncdp: b.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n// Sent with no page session, so it reaches the browser, not the page.\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// An event keeps its kind and a few network facts; a pause keeps no line.\nprint(event.kind())"
+          },
+          "wild": {
+            "lang": "JavaScript (Puppeteer)",
+            "note": "Each page gets its own CDP session, and events arrive as raw JSON.",
+            "code": "const cdp = await page.createCDPSession();\nawait cdp.send(\"Debugger.enable\");\ncdp.on(\"Debugger.paused\", (event) => {\n  const frame = event.callFrames[0];\n  console.log(frame.location.lineNumber + 1, frame.functionName);\n});\nawait cdp.send(\"Page.navigate\", { url });"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Page handle and named facts",
+            "gist": "A page's CDP handle; a pause adds its line and a hashed function name.",
+            "gains": [
+              "Events stay named facts with no page content",
+              "fact_hash also lets programs compare existing URL hashes"
+            ],
+            "losses": [
+              "Six new public items",
+              "Each further debugger fact needs its own ballot"
+            ],
+            "proposed": {
+              "code": "// New: a CDP handle for this page only.\ncdp: page.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\n_: cdp.send(\"Debugger.setBreakpointByUrl\", breakpoint)\n_: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// New: named facts from the pause; the rest of the event is dropped.\npaused_line: event.frame_line() + 1\nin_render: event.frame_function_hash() == browser.fact_hash(\"render\")\n_: cdp.send(\"Debugger.resume\", \"{{}}\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Page handle and raw event",
+            "gist": "A page's CDP handle; a debugger event carries its raw JSON.",
+            "gains": [
+              "Every debugger field, now and later, from two accessors"
+            ],
+            "losses": [
+              "Events stop being named facts for one domain",
+              "Other domains will ask for raw events too"
+            ],
+            "proposed": {
+              "code": "// New: a CDP handle for this page only.\ncdp: page.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\n_: cdp.send(\"Debugger.setBreakpointByUrl\", breakpoint)\n_: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// New: the event's raw JSON, decoded into the tool's own struct.\ntop: json.parse(event.payload()).decode<Paused>().call_frames[0]\npaused_line: top.location.line_number + 1\nin_render: top.function_name == \"render\"\n_: cdp.send(\"Debugger.resume\", \"{{}}\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The tool's own CDP client",
+            "gist": "No Core change; the tool starts Chromium and speaks CDP over a WebSocket.",
+            "gains": [
+              "No new Core API",
+              "The tool can read every field"
+            ],
+            "losses": [
+              "A second CDP client that skips checks and redaction",
+              "No receive timeout, so a hung browser hangs the tool"
+            ],
+            "proposed": {
+              "code": "// The tool starts the pinned Chromium and speaks CDP itself.\nchild := process.cmd([String]{chromium.binary(), \"--remote-debugging-port=0\", \"--user-data-dir={profile}\"}).spawn()\nconn: ws.connect(\"ws://127.0.0.1:{listening[0]}{listening[1]}\")\n// Its own helper sends {\"id\", \"method\", \"params\", \"sessionId\"} and matches replies.\n_: command(conn, 3, page, \"Debugger.enable\", \"{{}}\", events)\n_: command(conn, 4, page, \"Debugger.setBreakpointByUrl\", breakpoint, events)\n_: command(conn, 5, page, \"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\", events)\n// recv has no timeout: a hung browser hangs the tool.\ntext: conn.recv().text() ?? \"\"\ntop: json.parse(text).decode<PausedMessage>().params.call_frames[0]\npaused_line: top.location.line_number + 1\nin_render: top.function_name == \"render\""
+            }
+          },
+          {
+            "key": "D",
+            "name": "Defer",
+            "gist": "Keep the live half in Node for now.",
+            "gains": [
+              "Nothing is built before the owner chooses"
+            ],
+            "losses": [
+              "Node stays for this check",
+              "Card #5072's criterion stays open"
+            ],
+            "proposed": {
+              "code": "// The live half stays in Node, beside the Jet static half.\nconst driver = await new CdpDriver().launch();\nconst session = driver.pageSession;\nawait driver.send(\"Debugger.enable\", {}, session);\nawait driver.send(\"Debugger.setBreakpointByUrl\", breakpoint, session);\nconst pausedPromise = driver.waitForEvent(\"Debugger.paused\", session, 20000);\nawait driver.send(\"Page.navigate\", { url }, session);\nconst frame = (await pausedPromise).callFrames[0];\nconst pausedLine = frame.location.lineNumber + 1;\nconst inRender = frame.functionName === \"render\";\nawait driver.send(\"Debugger.resume\", {}, session);"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reaches the page through Core's one checked CDP handle, and events stay named facts. The twin prints the original's paused line and map flag.",
+          "gains": [
+            "Commands reach the page",
+            "No session id or payload reaches the caller",
+            "URL hashes become comparable"
+          ],
+          "losses": [
+            {
+              "loss": "Six new public items.",
+              "mitigation": "Each answers one need the original had, and the docs group them."
+            },
+            {
+              "loss": "Each further debugger fact needs a ballot.",
+              "mitigation": "B stays open as a later ballot if many facts are needed."
+            },
+            {
+              "loss": "fact_hash matches strings but gives no secrecy.",
+              "mitigation": "The docs say so; it still keeps strings out of the trace."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Events stop being named facts, and other domains will follow."
+            },
+            {
+              "key": "C",
+              "reason": "A second CDP client that skips checks, with no receive timeout."
+            },
+            {
+              "key": "D",
+              "reason": "Node stays, and the card's criterion stays open."
+            }
+          ],
+          "tradeoff": "Events stay named facts, but each new debugger fact is a small reviewed addition."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T02:31:52.786Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13",
+      "retiredAt": "2026-11-16T21:51:54.730Z"
     }
   ]
 }
