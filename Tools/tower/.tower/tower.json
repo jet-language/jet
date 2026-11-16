@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108452,
+    "rev": 108453,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -104707,6 +104707,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T05:56:37.035Z"
+        },
+        {
+          "n": 16,
+          "text": "I8/I9 one evaluator: Jetpack's EnvModel evaluates no compile-time value itself; every module value it reads (literals, names, list, struct, enum and map values, calls and operators) comes from the compiler's evaluation through the compiler service, so the environment, system, image and fleet consumers see the value the build sees. Today EnvModel is a partial second evaluator (found by PrecompiledCore-4 on dev a1c3325a65):\n- calls already go to the compiler (Jetpack/EnvModel/Source/ModuleEval/CompilerService.jet:77);\n- literals and names are evaluated in ComputedFields.jet:131-181, with no type check and no field defaults (E1333 for map keys);\n- its own dependency graph and cycle check report E0338 at the name span, where the compiler reports at the value (:207-253);\n- its own I/O gate gives E3402 by builtin name, where the compiler gives E3410 (:57-71);\n- it collects only #run module values as globals, where the compiler builds every module value (ModuleEval.jet:165-182).\nProof: cases rows where a typed struct with field defaults, a map value, a cycle and an I/O-reading value each give the same value or the same diagnostic (code and span) through jet build and through the EnvModel consumer, plus a git grep showing ComputedFields.jet no longer evaluates expressions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T06:52:19.337Z"
         }
       ],
       "refs": [],
@@ -104721,9 +104730,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T06:05:27.678Z",
+      "updated": "2026-11-16T06:52:19.337Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 16
     },
     {
       "id": "c0n7zpy3",
@@ -221272,6 +221281,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T06:52:19.337Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07ywjvi",
+      "note": "#16 I8/I9 one evaluator: Jetpack's EnvModel evaluates no compile"
+    },
     {
       "at": "2026-11-16T06:50:35.565Z",
       "by": "Main",
