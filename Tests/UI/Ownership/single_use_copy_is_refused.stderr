@@ -1,0 +1,17 @@
+Error [jet.CopyNotSupported]: `Lease` can't be copied
+  --> Tests/UI/Ownership/single_use_copy_is_refused.jet:11:41
+    |
+ 11 | copy_value: fn(lease: Lease) -> Lease { lease.copy() }
+    |                                         ^^^^^^^^^^
+ Why: `Lease` is `#SingleUse`: it carries one duty that has to be done exactly once, and a copy would let that duty be done twice
+ Fix: Move it instead with `.move()`; a second one has to come from wherever this one came from
+More: jet-lang.dev/e/E0211
+
+Error [jet.CopyNotSupported]: `Holder` can't be copied
+  --> Tests/UI/Ownership/single_use_copy_is_refused.jet:13:45
+    |
+ 13 | copy_holder: fn(holder: Holder) -> Holder { holder.copy() }
+    |                                             ^^^^^^^^^^^
+ Why: It holds a `#SingleUse` value, which carries one duty that has to be done exactly once, and a copy would let that duty be done twice
+ Fix: Move it instead with `.move()`; a second one has to come from wherever this one came from
+More: jet-lang.dev/e/E0211

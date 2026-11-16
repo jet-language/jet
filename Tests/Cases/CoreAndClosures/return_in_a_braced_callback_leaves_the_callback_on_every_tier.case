@@ -1,0 +1,19 @@
+# A `return` inside a braced callback passed to a generic `map` leaves the
+# callback, not `run`, and the program prints the same on every tier.
+fixture: ReturnInABracedCallbackLeavesTheCallbackOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "1 20 3\nsmall,big,big\n20\nafter\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "1 20 3\nsmall,big,big\n20\nafter\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "1 20 3\nsmall,big,big\n20\nafter\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "1 20 3\nsmall,big,big\n20\nafter\n"

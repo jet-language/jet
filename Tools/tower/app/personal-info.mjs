@@ -1,8 +1,8 @@
 // #6564 c5: personal and machine information never enters the board or a
 // committed file. This rule table serves Tower: `tower redact` rewrites the
 // stored board, and store.mutate refuses a write that adds a match.
-// Tools/agent/LaneCheck.jet builds the same rules in Jet for its checkout
-// guard and for Tools/release/Publish.jet (`--patterns`); a change here
+// Tools/Agent/LaneCheck.jet builds the same rules in Jet for its checkout
+// guard and for Tools/Release/Publish.jet (`--patterns`); a change here
 // changes it there.
 //
 // The rules come from the machine running Tower, so this file holds no
@@ -11,7 +11,7 @@
 // names its neutral replacement, so a redaction keeps the text's meaning.
 // Two more rules hold for every machine: the dev tool roots. Tools read their
 // state from $JET_STATE_ROOT and their queues and locks from $JET_RUN_ROOT
-// (Tools/agent/roots.sh), so no committed file names one machine's copy.
+// (Tools/Agent/roots.sh), so no committed file names one machine's copy.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';

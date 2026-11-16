@@ -1,0 +1,14 @@
+# A proof artifact is written only through real project directories
+# (proof-replay-decisions.md): a symlinked `.jet/proofs` refuses with E3614.
+fixture: ProveRejectsAnUnsafeProofArtifactPathWithE3614.fixture
+requires: os:unix
+mkdir: .jet
+mkdir: elsewhere
+symlink: "{work}/elsewhere" .jet/proofs
+step: jet prove main.jet
+limit: time=120
+exit: 1
+stdout: empty
+# The reserved E3614 copy (D-JPROOF1=A).
+stderr: = ../../CLI/prove_artifact_unsafe_e3614.txt
+entries: elsewhere recursive = 0 # nothing was written through the link

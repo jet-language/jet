@@ -1,0 +1,24 @@
+# core.files' FileReader and FileWriter, core.term's binary cursor
+# (`Reader.over`) and standard input implement the Prelude Reader and
+# Writer. One generic `drain` reads each to its end through `read_into`, and
+# one generic `pipe` copies a file into a FileWriter through `read_bytes`,
+# `write_bytes` and `flush`. The cursor and standard input also read through
+# their own `read_bytes`, `read` and `read_into`, and FileWriter writes
+# through `write_bytes` and its own `write_all`, called on the named type.
+# The cursor refuses a zero limit. Each tier prints the same lines.
+fixture: CoreByteSourcesMeetThePreludeReaderAndWriter.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out
+step: jet run -O1 run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out
+step: jet run -O2 run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out

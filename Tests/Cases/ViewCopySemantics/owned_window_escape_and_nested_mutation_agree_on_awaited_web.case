@@ -1,0 +1,11 @@
+# PORT tests/view_copy_semantics.rs:328-335.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: OwnedWindowEscapeAndNestedMutationAgreeOnAwaitedWeb.fixture
+step: jet build --target=web run.jet
+exit: 0
+copy: run.mjs .jet/build/run.mjs
+copy: package.json .jet/build/package.json
+step: node run.mjs
+cwd: .jet/build
+exit: 0
+stdout: = OwnedWindowEscapeAndNestedMutationAgreeOnAwaitedWeb.fixture/expected.out

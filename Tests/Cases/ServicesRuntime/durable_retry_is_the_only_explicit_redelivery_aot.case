@@ -1,0 +1,6 @@
+# tests/services_runtime.rs::DurableRetryIsTheOnlyExplicitRedeliveryAOT: the original's literal expectations.
+fixture: DurableRetryIsTheOnlyExplicitRedeliveryAOT/Input
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write run.jet
+exit: 0 # tests/services_runtime.rs:1628 assert_eq!
+stdout: = "first:once\nduplicate:rejected\nretry:once\n" # tests/services_runtime.rs:1629 assert_eq!

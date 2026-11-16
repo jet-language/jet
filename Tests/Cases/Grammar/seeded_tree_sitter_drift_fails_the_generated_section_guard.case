@@ -1,0 +1,21 @@
+# Original tests/grammar.rs:125-142; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+fixture: SeededTreeSitterDriftFailsTheGeneratedSectionGuard.fixture
+copy: {root}/Tests/Cases/Grammar/Support.fixture/Section.jet oracle/run.jet
+copy: {root}/Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json Tools/Editors/Vscode/Syntaxes/jet.tmLanguage.json
+copy: {root}/Tools/Editors/jet.tmGrammar Tools/Editors/jet.tmGrammar
+copy: {root}/Tools/Editors/TreeSitter/grammar.js Tools/Editors/TreeSitter/grammar.js
+copy: {root}/Tools/Editors/Zed/languages/jet/highlights.scm Tools/Editors/Zed/languages/jet/highlights.scm
+copy: Tools/Editors/TreeSitter/grammar.js original.js
+step: jet self devtools grammars
+exit: 0
+step baseline: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/TreeSitter/grammar.js
+exit: 0
+copy: original.js Tools/Editors/TreeSitter/grammar.js
+step: jet run --allow=FS.Read,FS.Write seed
+exit: 0
+step: jet run --allow=Env,FS.Read oracle
+env: S5_FILE={work}/Tools/Editors/TreeSitter/grammar.js
+exit: 0
+stdout: != baseline

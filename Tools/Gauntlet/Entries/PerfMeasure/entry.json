@@ -1,0 +1,523 @@
+{
+  "name": "perf-measure",
+  "mode": "tool",
+  "description": "The compile-throughput measurement library Tools/Perf/Throughput/measure.mjs (with parseCounters, which it re-exports from Tools/Perf/Scaling/Harness.mjs) and its Jet twin, the Measure module of the jet_perf_kit package (Tools/Perf/Kit/Source/Measure.jet), #5072 c7, each run by a driver that prints one export's result: readTrace of a live stream (a partial last row, a padded row, rows that are not JSON) and of a closed array; every completed-trace refusal (identity, stream, row, JSON, process identity, schema, window, time order, span category and balance) and the accepted trace; phaseTable (phase spans by name == cat, threads keyed by their text so 1 and \"1\" share spans, unions across threads, items summed the JavaScript way, integer-like kinds first in the JSON object, unclosed kinds, a NaN offset) over sampled CPU; cpuAt before, between, on equal and after samples; parseCounters (both line forms, CRLF, nested counters, an empty phase, a counter summed over lines) and its refusals; sampleTree of a live process tree; runMeasured of `true` under the GNU time it finds on PATH; runMeasured past a 300 ms timeout, which kills the whole measured tree (a background writer never writes); and the constants SAMPLE_MS and GNU_TIME (the sampling interval and the GNU time path, which must exist). The original driver is Tools/Gauntlet/Harness/Drivers/perf-measure.mjs, so the census counts measure.mjs as covered by this entry.",
+  "tool": {
+    "original": "Tools/Gauntlet/Harness/Drivers/perf-measure.mjs",
+    "jet": "Tools/Gauntlet/Entries/PerfMeasure/Driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {
+        "args": [
+          "trace",
+          "live.trace"
+        ],
+        "expected": "Expected/trace-live.out"
+      },
+      {
+        "args": [
+          "trace",
+          "closed.trace"
+        ],
+        "expected": "Expected/trace-closed.out"
+      },
+      {
+        "args": [
+          "trace",
+          "empty.trace"
+        ],
+        "expected": "Expected/trace-empty.out"
+      },
+      {
+        "args": [
+          "trace",
+          "absent.trace"
+        ],
+        "exit": 1,
+        "expected": "Expected/trace-missing.out"
+      },
+      {
+        "args": [
+          "phases",
+          "live.trace",
+          "samples.json",
+          "0"
+        ],
+        "expected": "Expected/phases-live.out"
+      },
+      {
+        "args": [
+          "phases",
+          "live.trace",
+          "samples.json",
+          "--offset",
+          "-12345.5"
+        ],
+        "expected": "Expected/phases-offset.out"
+      },
+      {
+        "args": [
+          "phases",
+          "live.trace",
+          "samples.json",
+          "x"
+        ],
+        "expected": "Expected/phases-nan.out"
+      },
+      {
+        "args": [
+          "phases",
+          "done.trace",
+          "none.json",
+          "1000"
+        ],
+        "expected": "Expected/phases-done.out"
+      },
+      {
+        "args": [
+          "phases",
+          "empty.trace",
+          "samples.json",
+          "0"
+        ],
+        "expected": "Expected/phases-empty.out"
+      },
+      {
+        "args": [
+          "cpu",
+          "samples.json",
+          "--times",
+          "-5,0,50000,100000,350000,1300000,1650000,5000000,NaN"
+        ],
+        "expected": "Expected/cpu.out"
+      },
+      {
+        "args": [
+          "cpu",
+          "none.json",
+          "5,-5"
+        ],
+        "expected": "Expected/cpu-none.out"
+      },
+      {
+        "args": [
+          "cpu",
+          "late.json",
+          "0.25,1,2"
+        ],
+        "expected": "Expected/cpu-late.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "ok.json"
+        ],
+        "expected": "Expected/strict-ok.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "failed.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-failed.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "exit-text.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-exit-text.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "pid-zero.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-pid-zero.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "pid-float.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-pid-float.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "reversed.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-reversed.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done.trace",
+          "unsafe.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-unsafe.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-unterminated.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-unterminated.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-inline.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-inline.out"
+      },
+      {
+        "args": [
+          "strict",
+          "live.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-live.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-not-row.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-not-row.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-malformed.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-malformed.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-two-starts.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-two-starts.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-no-start.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-no-start.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-pid.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-pid.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-pid-text.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-pid-text.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-early.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-early.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-anchor-float.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-anchor-float.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-tid.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-tid.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-name.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-name.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-ph.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-ph.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-late.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-late.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-ts-float.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-ts-float.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-meta-ts.trace",
+          "ok.json"
+        ],
+        "expected": "Expected/strict-meta-ts.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-meta-text.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-meta-text.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-order.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-order.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-cat.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-cat.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-orphan.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-orphan.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-mismatch.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-mismatch.out"
+      },
+      {
+        "args": [
+          "strict",
+          "done-open.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-open.out"
+      },
+      {
+        "args": [
+          "strict",
+          "absent.trace",
+          "ok.json"
+        ],
+        "exit": 1,
+        "expected": "Expected/strict-missing.out"
+      },
+      {
+        "args": [
+          "counters",
+          "counters.txt"
+        ],
+        "expected": "Expected/counters.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-none.txt"
+        ],
+        "expected": "Expected/counters-none.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-negative.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-negative.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-infinite.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-infinite.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-text.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-text.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-array.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-array.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-null.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-null.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-phase.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-phase.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-phase-null.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-phase-null.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-bare.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-bare.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-joined.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-joined.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-colon-space.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-colon-space.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-cr.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-cr.out"
+      },
+      {
+        "args": [
+          "counters",
+          "c-syntax.txt"
+        ],
+        "exit": 1,
+        "expected": "Expected/counters-syntax.out"
+      },
+      {
+        "args": [
+          "tree"
+        ],
+        "expected": "Expected/tree.out"
+      },
+      {
+        "args": [
+          "run"
+        ],
+        "expected": "Expected/run.out"
+      },
+      {
+        "args": [
+          "timeout"
+        ],
+        "expected": "Expected/timeout.out"
+      },
+      {
+        "args": [
+          "constants"
+        ],
+        "expected": "Expected/constants.out"
+      }
+    ]
+  }
+}

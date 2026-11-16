@@ -1,0 +1,12 @@
+Error [jet.BindingTypeMismatch]: This needs U8, but the value is Int
+  --> Tests/UI/number_name_write_conflict.jet:8:18
+    |
+  8 |     count = line.len()
+    |                  ^^^
+  --> Tests/UI/number_name_write_conflict.jet:7:17
+    |
+  7 |     print(take8(count))
+    |                 ^^^^^ this use makes `count` a U8
+ Why: The value here does not have the type required by this declaration
+ Fix: Convert it with `checked(U8{value}) ?? fallback`; the conversion is `None` when the value doesn't fit in U8
+More: jet-lang.dev/e/E0108

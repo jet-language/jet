@@ -64,7 +64,7 @@ test('docs reads never create or migrate files', () => {
 
   const index = docs.listDocs(dataDir);
   assert.equal(index.scratch.body, '');
-  assert.match(docs.showDoc(dataDir, 'Docs/proposals/idea.md').body, /hello/);
+  assert.match(docs.showDoc(dataDir, 'Docs/Proposals/idea.md').body, /hello/);
   assert.equal(docs.showScratchPad(dataDir).body, '');
 
   assert.deepEqual(readdirSync(join(proj, 'Docs')).sort(), beforeDocs);
@@ -78,7 +78,7 @@ test('docs reads never create or migrate files', () => {
 test('docs: add/show/update/delete under Docs/', () => {
   const { dataDir, proj } = projectLayout();
   const n = docs.addDoc(dataDir, { section: 'research', title: 'Hello World', body: 'body text' });
-  assert.equal(n.path, 'Docs/research/hello-world.md');
+  assert.equal(n.path, 'Docs/Research/hello-world.md');
   assert.ok(existsSync(join(proj, n.path)));
   assert.match(docs.showDoc(dataDir, n.path).body, /body text/);
   docs.updateDoc(dataDir, n.path, { body: 'updated\n' });
@@ -146,7 +146,7 @@ test('AGENTS editor rejects symlinked and hard-linked policy files', t => {
 
 test('docs: path escape rejected; only Docs/*.md writable', () => {
   const { dataDir } = projectLayout();
-  const prev = docs.showDoc(dataDir, 'Docs/proposals/idea.md');
+  const prev = docs.showDoc(dataDir, 'Docs/Proposals/idea.md');
   assert.match(prev.body, /hello/);
   assert.throws(() => docs.showDoc(dataDir, 'secret.md'), /Docs/);
   assert.throws(() => docs.showDoc(dataDir, '../secret.md'), /docs|path/);
@@ -294,8 +294,8 @@ test('docs: four categories omit legacy dirs and README navigation; delete remov
   assert.deepEqual(index.sections.map(section => section.id), ['spec', 'audits', 'research', 'proposals']);
   const allPaths = index.sections.flatMap(section => section.files.map(file => file.path));
   for (const path of [
-    'Docs/spec/philosophy.md', 'Docs/audits/security.md',
-    'Docs/research/study.md', 'Docs/proposals/idea.md',
+    'Docs/Spec/philosophy.md', 'Docs/Audits/security.md',
+    'Docs/Research/study.md', 'Docs/Proposals/idea.md',
   ]) assert.ok(allPaths.includes(path));
   for (const path of [
     'Docs/README.md', 'Docs/plans/old-plan.md', 'Docs/reference/old-reference.md',

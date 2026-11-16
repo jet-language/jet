@@ -1,0 +1,14 @@
+# Value arms and inclusive range arms choose the same answer in a
+# `#Target(JS)` function and a `#Export(wasm)` function: the built page prints
+# each for 0 to 20, across both range edges.
+requires: tool:node
+fixture: WebValueAndRangeArmTablesEmitOnJSAndWasm.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_value_and_range_arm_tables_emit_on_js_and_wasm.stdout.expected

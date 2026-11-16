@@ -1,0 +1,20 @@
+# A task capture moved into a call that takes it inside the task body checks clean,
+# and the captured value closes exactly once on every tier.
+fixture: ATaskCapturePassedToATakingCallInItsBodyClosesOnce.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = a_task_capture_passed_to_a_taking_call_in_its_body_closes_once.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = a_task_capture_passed_to_a_taking_call_in_its_body_closes_once.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = a_task_capture_passed_to_a_taking_call_in_its_body_closes_once.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = a_task_capture_passed_to_a_taking_call_in_its_body_closes_once.out

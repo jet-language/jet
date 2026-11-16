@@ -13,7 +13,7 @@ description: >-
 Jet's goal is to be the **ONLY programming language anyone ever needs**, at every
 level, for every domain, at any time, in any scenario, for every level of
 expertise. Every mining run serves that goal, aligned with
-`Docs/spec/philosophy.md`: guide people to learn and become better programmers
+`Docs/Spec/philosophy.md`: guide people to learn and become better programmers
 while writing better, safer, more performant code that is easier to reason about
 and maintain. Read that document for ranked trade-offs; this purpose does not
 replace it or authorize another strategy document.
@@ -37,7 +37,7 @@ claim, or to already-covered (with the Jet ref) or out-of-scope (with a specific
 reason). Fill a segment × lane matrix with claim IDs or concrete
 segment-specific reasons. `scripts/check_coverage.mjs` validates all of it,
 reports ledger/claim densities, flags thin segments for written justification,
-fails until `Docs/spec/reference/prior-art.md` lists every mined source and
+fails until `Docs/Spec/Reference/prior-art.md` lists every mined source and
 names the run, and must exit 0 before hand-in. Exhaustiveness covers the
 declared corpus, not an unbounded linked-source crawl. Never silently narrow a
 broad request, hide findings behind a cap, or stop at attractive language
@@ -85,7 +85,7 @@ Normal mining retains its method-owned Tower obligations **only after alignment
 and independent review**. Explicit report-only is read-only with respect to
 Tower; chat-only remains chat-only. Repository publication requires permission,
 with one standing exception the owner ordered: every mining run, in every mode,
-adds its sources to `Docs/spec/reference/prior-art.md` (see hand-in below).
+adds its sources to `Docs/Spec/Reference/prior-art.md` (see hand-in below).
 Workers never write Tower: return reviewed payloads to the orchestrator for
 supported CLI publication and readback. A recommendation does not authorize coding.
 
@@ -94,7 +94,7 @@ supported CLI publication and readback. A recommendation does not authorize codi
 Read it in the exact checkout, read-only: Tower's read commands
 (`node Tools/tower/tower.mjs`) for decisions, ballots, cards and phases;
 `git log` and `git diff` of dev against master and of named worktrees;
-`Docs/research/` and `Docs/proposals/`; and the registry spellings in
+`Docs/Research/` and `Docs/Proposals/`; and the registry spellings in
 `Compiler/JetFoundation/Data/Syntax/Spellings.jet`. Read the latest owner
 direction separately, then relevant winning decisions and acceptance terms.
 A source you did not read is **unknown**, not absence. Retrieval is not
@@ -115,15 +115,15 @@ supersede a decision.
 Check the source registry before costly retrieval:
 
 ```sh
-Tools/agent/JetEnv.jet python3 .agents/skills/mine-for-jet-v3/scripts/check_sources.py \
-  --registry Docs/spec/reference/prior-art.md 'SOURCE_URL'
+Tools/Agent/JetEnv.jet python3 .agents/skills/mine-for-jet-v3/scripts/check_sources.py \
+  --registry Docs/Spec/Reference/prior-art.md 'SOURCE_URL'
 ```
 
 The existing checker conventions remain: `new`, `tracked`, `duplicate-input`;
 exit 3 for duplicate/unapproved tracked input; exit 4 for untracked
 `--verify-tracked`. Explicit approved reruns use `--allow-rerun CONTENT_ID`
 (the source ID when there is no content selector).
-Report links in `Docs/research/` are leads, not proof of body review.
+Report links in `Docs/Research/` are leads, not proof of body review.
 Tracked does not mean fully mined; new does not prove never mined. Preserve
 historical source IDs separately from content selectors, revision and subresource.
 Never silently remap historical identities. Playlist expansion needs explicit scope.
@@ -149,13 +149,13 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    program. Audience and multi-source lanes remain conditional; no mandatory
    real-user study. Before
    hand-in, add the run's section to the Source index of
-   `Docs/spec/reference/prior-art.md` in the checkout you hand in
+   `Docs/Spec/Reference/prior-art.md` in the checkout you hand in
    ([output](references/output.md#prior-art-registry)): every source with an
    http(s) `ref` gets a row, and the section names the `run_id`. Hand in only
    when the gate passes; it fails on a missing row or run ID:
 
    ```sh
-   Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+   Tools/Agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
    ```
 
 2. Obtain the **required fresh-context reviewer** after extraction/dedupe and

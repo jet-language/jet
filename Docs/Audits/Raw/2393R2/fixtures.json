@@ -1,0 +1,174 @@
+{
+  "schema_version": "2393-r2-fixtures-v1",
+  "card": 2393,
+  "run_id": "2393-r2",
+  "task_contract_sha256": "cb2caf281817a10a711bd8f4a5eb8c060092de9cb4cbb109c322c84505f0d7a4",
+  "description": "Exact task and fixture bytes reused from the sealed 2393-r1 contracts and the durable #2419 T4 hostile-input matrix. This file is a preregistration fixture record, not participant evidence.",
+  "argv_semantics": "Each argv array contains process arguments after the executable name. T2 display_argv preserves the contract's conceptual tool prefix.",
+  "tasks": [
+    {
+      "task": "T1",
+      "name": "string-heavy configuration parsing",
+      "behavior": "Read the first argv path. Parse section headers, quoted key=value fields, and one-level inherits. Print resolved sections in source order and fields in first-appearance order as section.key=value. Reject duplicate keys with non-zero exit, no stdout, and an error naming the field and section.",
+      "argv": [["records.cfg"], ["records-failure.cfg"]],
+      "expected": {
+        "success_stdout": "base.name=Ada\nbase.role=admin\ndev.name=Ada\ndev.role=reviewer\n",
+        "failure": { "exit_nonzero": true, "stdout": "", "stderr_contains": ["duplicate", "base"] }
+      },
+      "files": {
+        "success": {
+          "path": "records.cfg",
+          "content": "[base]\nname = \"Ada\"\nrole = \"admin\"\n[dev]\ninherits = \"base\"\nrole = \"reviewer\"\n",
+          "sha256": "ee94d1752927f4ab0a806d44e0c6a86d0dbeefc8319b9a9749a352df0192ad96"
+        },
+        "failure": {
+          "path": "records-failure.cfg",
+          "content": "[base]\nname = \"Ada\"\nname = \"Grace\"\n",
+          "sha256": "5f470f3a38a1ee5281e8be64f308c514c816934be4ee8bfc865f362ceee372d9"
+        }
+      }
+    },
+    {
+      "task": "T2",
+      "name": "typed CLI dispatch",
+      "behavior": "Dispatch list/ls, inspect, and remove/rm once to a typed command value. Accept --json, --format text|json, and --dry-run. Unknown commands and missing values exit non-zero with no stdout.",
+      "argv": [
+        ["ls", "--json", "alpha"],
+        ["inspect", "alpha", "--format", "text"],
+        ["rm", "alpha", "--dry-run"],
+        ["unknown", "alpha"]
+      ],
+      "display_argv": [
+        "tool ls --json alpha",
+        "tool inspect alpha --format text",
+        "tool rm alpha --dry-run",
+        "tool unknown alpha"
+      ],
+      "expected": {
+        "success_stdout": [
+          "list name=alpha format=json dry_run=false\n",
+          "inspect name=alpha format=text dry_run=false\n",
+          "remove name=alpha format=text dry_run=true\n"
+        ],
+        "failure": { "exit_nonzero": true, "stdout": "", "stderr_contains": ["unknown"] }
+      }
+    },
+    {
+      "task": "T3",
+      "name": "store and journal state",
+      "behavior": "Read the first argv path. Replay put|key|value and delete|key| records in order. Preserve first insertion order, update duplicate puts without moving a key, and remove deleted keys. Unknown record kinds or malformed fields exit non-zero with no stdout.",
+      "argv": [["journal.log"], ["journal-failure.log"]],
+      "expected": {
+        "success_stdout": "beta=2\ngamma=3\n",
+        "failure": { "exit_nonzero": true, "stdout": "", "stderr_contains": ["rename"] }
+      },
+      "files": {
+        "success": {
+          "path": "journal.log",
+          "content": "put|alpha|1\nput|beta|2\ndelete|alpha|\nput|gamma|3\n",
+          "sha256": "c0be3627cf698f6347e73622e6adff709be786a899da47881702e0724ccb18aa"
+        },
+        "failure": {
+          "path": "journal-failure.log",
+          "content": "put|beta|2\nrename|beta|4\n",
+          "sha256": "205f8fee930d23bba64a6d419c730216a513bd516e455046df25395448729cba"
+        }
+      }
+    },
+    {
+      "task": "T4",
+      "name": "deterministic wire output",
+      "behavior": "Read the first argv path. Parse named name, count, and note fields into a typed report. Emit one canonical JSON object with key order count,name,note, escaped controls and quotes, and exactly one trailing newline.",
+      "argv": [["report.tsv"]],
+      "expected": {
+        "success_stdout": "{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}\n"
+      },
+      "files": {
+        "success": {
+          "path": "report.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\n",
+          "sha256": "a9a0e89c7cd8d98eba7885756b010829b88b2890728d4ad8f2ff177faec35d9e"
+        }
+      },
+      "failure_cases": [
+        {
+          "path": "truncated.tsv",
+          "content": "name\tAda\ncount\t2\nnote\n",
+          "sha256": "b25dd204cc57b6c1c95956e2c85b4d00ebc40602c9c22265eb5d55a152e2299b",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["malformed TSV row", "expected exactly two tab-separated fields"]
+          }
+        },
+        {
+          "path": "empty-key.tsv",
+          "content": "name\tAda\ncount\t2\n\tbad\n",
+          "sha256": "30f67d4949ed4bf840a9bfd9330fcb2f4837ea09dc0a1e98b369543fa83bd147",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["empty TSV key", "each row needs a named report field"]
+          }
+        },
+        {
+          "path": "extra-column.tsv",
+          "content": "name\tAda\ncount\t2\nnote\tline \"one\"\textra\n",
+          "sha256": "fef58b7ef1f8e35ca0c717ab26c3a70619fd014ac36678a98257f14eff6aeba8",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["malformed TSV row", "expected exactly two tab-separated fields"]
+          }
+        },
+        {
+          "path": "unknown-key.tsv",
+          "content": "name\tAda\ncount\t2\nstatus\tready\n",
+          "sha256": "e59410b546ddc08b6b1b451bfdcfc0e62d1185626087acf8ef9475cded0e9466",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["unknown TSV key", "only name, count, and note are valid report fields"]
+          }
+        },
+        {
+          "path": "duplicate-key.tsv",
+          "content": "name\tAda\ncount\t2\ncount\t3\nnote\tline \"one\"\n",
+          "sha256": "0b5d05e5a1539a5260b0c2f010daeee14eecdb86e7c6160451077615036c3612",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["duplicate TSV key", "each report field must appear once"]
+          }
+        },
+        {
+          "path": "invalid-count.tsv",
+          "content": "name\tAda\ncount\tnope\nnote\tline \"one\"\n",
+          "sha256": "5f833c7c3776d4d645d82e80ab59cc9d5b6f962927ab9d9506baa1094636559c",
+          "line": 2,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["invalid count value", "count must be a decimal integer"]
+          }
+        },
+        {
+          "path": "missing-required-key.tsv",
+          "content": "name\tAda\ncount\t2\n",
+          "sha256": "54a7b16c6418c4b305b88ca3b6182cf3f01ada33b4f45a3759ed6e56248ea142",
+          "line": 3,
+          "expected_failure": {
+            "exit_nonzero": true,
+            "stdout": "",
+            "stderr_contains": ["missing required TSV key", "report needs name, count, and note"]
+          }
+        }
+      ]
+    }
+  ]
+}

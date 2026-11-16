@@ -34,14 +34,14 @@ Start with [`Basics/Hello.jet`](Basics/Hello.jet), then
 [`Basics/FirstHour.jet`](Basics/FirstHour.jet) and the
 [`Basics/Onboarding/`](Basics/Onboarding/) project, which is the next step
 after `jet new`. The complete `new` → `run` → `check` → `test` → `fix` →
-`explain` workflow is in the [first-hour guide](../Docs/spec/guides/first-hour.md).
+`explain` workflow is in the [first-hour guide](../Docs/Spec/Guides/first-hour.md).
 
 Regression and crash-reproducer programs do not live here; they are in
-[`tests/run`](../tests/run/) and [`tests/cases`](../tests/cases/).
+[`Tests/Run`](../Tests/Run/) and [`Tests/Cases`](../Tests/Cases/).
 
 ## Run an example
 
-Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/JetEnv.jet jet`):
+Use the admitted compiler (`jet` on your `PATH`, or `Tools/Agent/JetEnv.jet jet`):
 
 ```sh
 jet run Examples/Basics/Hello.jet
@@ -59,13 +59,13 @@ It runs each golden at every optimization level: `O0` is `jet run`, and
 binary (same stdin, arguments and working directory). `-O0`
 narrows a run to the first, `--filter=Basics/` to one area.
 
-The suite reads the central known-failing ledger (`tests/known-failing.tsv`)
+The suite reads the central known-failing ledger (`Tests/known-failing.tsv`)
 and a `# KNOWN-FAILING` header in an example's `.case`. An owned failure
 reports `KNOWN-FAILING`; an owned example that passes reports
 `UNEXPECTED-PASS` and fails the run until its row is removed.
 
 For the contributor workflow around the executable and its environment, see
-[`AGENTS.md`](../AGENTS.md) and [`Tools/agent/JetEnv.jet`](../Tools/agent/JetEnv.jet).
+[`AGENTS.md`](../AGENTS.md) and [`Tools/Agent/JetEnv.jet`](../Tools/Agent/JetEnv.jet).
 
 ## Layout and goldens
 
@@ -110,7 +110,7 @@ gzip sample, declares `repo-cwd: <reason>` once, before any steps, in its
 `.case`. The testkit then runs the built program from the root of its staged
 source copy, which keeps the repository layout, instead of from the project
 directory. The checkout is never written, and `file:` assertions stay relative
-to the project. Only goldens take the header; a `tests/cases` case refuses it.
+to the project. Only goldens take the header; a `Tests/Cases` case refuses it.
 
 Examples that depend on environment or process identity should print checked
 relationships instead of raw paths or process IDs. For example,
@@ -142,26 +142,26 @@ first and keep an expert sibling only when the manual form still teaches
 something important.
 
 A lesson explains a mechanism, not merely that a work item closed. Programs
-kept only as evidence that a card closed belong in `tests/run` or
-`tests/cases`.
+kept only as evidence that a card closed belong in `Tests/Run` or
+`Tests/Cases`.
 
 ## Current-law teaching manifest
 
 This finite manifest ties eight teaching sources to the rule each shows, the
-[syntax decisions](../Docs/spec/syntax-decisions.md) entries that make that
+[syntax decisions](../Docs/Spec/syntax-decisions.md) entries that make that
 rule normative, the checked-in UI or golden snapshot, and a command that runs
 the same source.
 
 | Source | Rule it demonstrates | Normative decisions | UI/snapshot check | Command |
 | --- | --- | --- | --- | --- |
 | [`Basics/LoopForms.jet`](Basics/LoopForms.jet) | One `loop` keyword covers infinite, conditional, source, list-pair, map-pair and index-only loops, inclusive and exclusive ranges, strides and countdowns, and eager value-position collection; `next` advances the source and `break` leaves. | S19 loops (D-LOOP-HEADER2, D-LOOP-ADVANCE2, D-LOOPEVAL1, D-COMPREHENSION1, D-LOOP-COMMA1, D-LOOP-IN1), D-LOOP-SUBJECT1, S22/S72 ranges with D-RANGE-EXCL1 and D-RANGE-BACKWARD1, S23 loop control | [`Basics/LoopForms.out`](Basics/LoopForms.out) | `jet run Examples/Basics/LoopForms.jet` |
-| [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | While a loop reads `nums`, its body may not change `nums`; E0507 asks for one intent: a separate result, a fixed snapshot, or an explicit work queue. The recorded repair [`list_loop_mutate.fixed.jet`](../tests/ui/list_loop_mutate.fixed.jet) is the legal form: a fixed index domain computed once. | S19 (the source is evaluated once and read for the whole body, D-LOOPEVAL1); E0507 `jet.CollectionChangedWhileRead` | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `jet check tests/ui/list_loop_mutate.jet` |
+| [`Tests/UI/list_loop_mutate.jet`](../Tests/UI/list_loop_mutate.jet) | While a loop reads `nums`, its body may not change `nums`; E0507 asks for one intent: a separate result, a fixed snapshot, or an explicit work queue. The recorded repair [`list_loop_mutate.fixed.jet`](../Tests/UI/list_loop_mutate.fixed.jet) is the legal form: a fixed index domain computed once. | S19 (the source is evaluated once and read for the whole body, D-LOOPEVAL1); E0507 `jet.CollectionChangedWhileRead` | [`Tests/UI/list_loop_mutate.stderr`](../Tests/UI/list_loop_mutate.stderr) | `jet check Tests/UI/list_loop_mutate.jet` |
 | [`ErrorsAndEffects/Errors/Errors.jet`](ErrorsAndEffects/Errors/Errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern table are distinct routes. | S7 propagation, S34 failure-returning return, S71 `??` fallback, D-FAIL-MODEL1, D-FAIL-CARRIER1, S68 `if` arm tables | [`ErrorsAndEffects/Errors/Errors.out`](ErrorsAndEffects/Errors/Errors.out) | `jet run Examples/ErrorsAndEffects/Errors/Errors.jet` |
-| [`tests/ui/fallible_entry_unhandled.jet`](../tests/ui/fallible_entry_unhandled.jet) | An unmarked fallible call propagates only into a caller whose failure type it can reach. A `#Error` failure reaches the default `Err` of a `run` that names no failure type by its text, but this `ParseError` holds a function and has no text, so E2402 rejects the call. The recorded repair [`fallible_entry_unhandled.fixed.jet`](../tests/ui/fallible_entry_unhandled.fixed.jet) recovers locally with `??`. | S7 propagation, S71 `??` fallback, D-FAIL-CONV1; E2402 `jet.MissingErrorConversion` | [`tests/ui/fallible_entry_unhandled.stderr`](../tests/ui/fallible_entry_unhandled.stderr) | `jet check tests/ui/fallible_entry_unhandled.jet` |
+| [`Tests/UI/fallible_entry_unhandled.jet`](../Tests/UI/fallible_entry_unhandled.jet) | An unmarked fallible call propagates only into a caller whose failure type it can reach. A `#Error` failure reaches the default `Err` of a `run` that names no failure type by its text, but this `ParseError` holds a function and has no text, so E2402 rejects the call. The recorded repair [`fallible_entry_unhandled.fixed.jet`](../Tests/UI/fallible_entry_unhandled.fixed.jet) recovers locally with `??`. | S7 propagation, S71 `??` fallback, D-FAIL-CONV1; E2402 `jet.MissingErrorConversion` | [`Tests/UI/fallible_entry_unhandled.stderr`](../Tests/UI/fallible_entry_unhandled.stderr) | `jet check Tests/UI/fallible_entry_unhandled.jet` |
 | [`ErrorsAndEffects/Errors/TypedErrorFamilies.jet`](ErrorsAndEffects/Errors/TypedErrorFamilies.jet) | One declared `impl Target.From(Source)` rail changes only the error carrier and preserves the success payload. | D-FAIL-CONV1, S7 propagation, S71 `??` fallback | [`ErrorsAndEffects/Errors/TypedErrorFamilies.out`](ErrorsAndEffects/Errors/TypedErrorFamilies.out) | `jet run Examples/ErrorsAndEffects/Errors/TypedErrorFamilies.jet` |
-| [`tests/ui/error_family_missing_conversion.jet`](../tests/ui/error_family_missing_conversion.jet) | A plain fallible call propagates into a different error family only through a declared conversion; without `impl AppErr.From(FileErr)`, E2404 rejects `read_config(path)` inside `load`. The recorded repair [`error_family_missing_conversion.fixed.jet`](../tests/ui/error_family_missing_conversion.fixed.jet) declares that conversion and checks clean. | D-FAIL-CONV1, S7 propagation; E2404 `jet.ErrorNotPropagatable` | [`tests/ui/error_family_missing_conversion.stderr`](../tests/ui/error_family_missing_conversion.stderr) | `jet check tests/ui/error_family_missing_conversion.jet` |
+| [`Tests/UI/error_family_missing_conversion.jet`](../Tests/UI/error_family_missing_conversion.jet) | A plain fallible call propagates into a different error family only through a declared conversion; without `impl AppErr.From(FileErr)`, E2404 rejects `read_config(path)` inside `load`. The recorded repair [`error_family_missing_conversion.fixed.jet`](../Tests/UI/error_family_missing_conversion.fixed.jet) declares that conversion and checks clean. | D-FAIL-CONV1, S7 propagation; E2404 `jet.ErrorNotPropagatable` | [`Tests/UI/error_family_missing_conversion.stderr`](../Tests/UI/error_family_missing_conversion.stderr) | `jet check Tests/UI/error_family_missing_conversion.jet` |
 | [`Memory/ScopeGuard.jet`](Memory/ScopeGuard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | S63 / D-SHAPE-RESOURCE1 / D-SHAPE-RESOURCE2 resource cleanup, S7 propagation, S71 `??` fallback | [`Memory/ScopeGuard.out`](Memory/ScopeGuard.out) | `jet run Examples/Memory/ScopeGuard.jet` |
-| [`tests/ui/scope_guard_discarded.jet`](../tests/ui/scope_guard_discarded.jet) | A `ScopeGuard` left as a bare statement is dropped at once, so E0419 rejects it. The recorded repair [`scope_guard_discarded.fixed.jet`](../tests/ui/scope_guard_discarded.fixed.jet) binds it, so the callback runs when the scope exits. | S63 resource cleanup; E0419 `jet.MustUseIgnored` | [`tests/ui/scope_guard_discarded.stderr`](../tests/ui/scope_guard_discarded.stderr) | `jet check tests/ui/scope_guard_discarded.jet` |
+| [`Tests/UI/scope_guard_discarded.jet`](../Tests/UI/scope_guard_discarded.jet) | A `ScopeGuard` left as a bare statement is dropped at once, so E0419 rejects it. The recorded repair [`scope_guard_discarded.fixed.jet`](../Tests/UI/scope_guard_discarded.fixed.jet) binds it, so the callback runs when the scope exits. | S63 resource cleanup; E0419 `jet.MustUseIgnored` | [`Tests/UI/scope_guard_discarded.stderr`](../Tests/UI/scope_guard_discarded.stderr) | `jet check Tests/UI/scope_guard_discarded.jet` |
 
 [`Basics/StructCallWord.jet`](Basics/StructCallWord.jet) demonstrates
 fixed-width FNV results in record fields, direct and wrapper calls, and record
@@ -187,7 +187,7 @@ collection API.
 a top-level `.jet` with its `.out` beside it: expense report, support queue,
 inventory reorder, dispatch, failure, finite state, ownership, and wire output.
 Each opens with the anti-pattern it replaces and the rule it follows. The case
-[`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
+[`Tests/Cases/SuiteGoldens/user_story_suite_matches_expected_output.case`](../Tests/Cases/SuiteGoldens/user_story_suite_matches_expected_output.case)
 runs each with `jet run` and compares stdout byte for byte.
 
 ## Related executable contracts

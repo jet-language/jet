@@ -1,0 +1,27 @@
+# `mem.copy<U8>(to, from, count)` moves the bytes as if through a buffer at
+# every count from 0 through 199 and at counts around the runtime's short
+# classes, its 64-byte steps and its string move threshold, with the target
+# 0 to 70 bytes below or above the source: overlapping either way or
+# disjoint. The 8 bytes on each side of the target stay untouched. Every
+# tier and the web build agree.
+fixture: ARawByteMoveMatchesABufferedMoveAtEverySizeAndOverlap.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "moves 29469 wrong 0\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "moves 29469 wrong 0\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "moves 29469 wrong 0\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "moves 29469 wrong 0\n"
+end when

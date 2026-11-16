@@ -31,7 +31,7 @@ friction may be acceptable when labeled. Advisory rows never gate a result.
 
 ## Report
 
-Write one table-led scoreboard under `Docs/audits/` through the
+Write one table-led scoreboard under `Docs/Audits/` through the
 project-approved non-serve CLI. Honor the requested format; use HTML only when
 the owner explicitly asks for HTML or an interactive page. Show matrix cells
 × metrics with observed wins, losses, and failures. Put losses and

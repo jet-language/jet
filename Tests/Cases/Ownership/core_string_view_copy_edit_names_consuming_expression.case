@@ -1,0 +1,13 @@
+fixture: CoreStringViewCopyEditNamesConsumingExpression
+step: jet check main.jet
+exit: nonzero
+stderr: = CoreStringViewCopyEditNamesConsumingExpression.stderr
+step: jet fix --dry-run main.jet
+stdout: = CoreStringViewCopyEditNamesConsumingExpression.diff
+file: main.jet = CoreStringViewCopyEditNamesConsumingExpression.original
+step: jet fix main.jet
+file: main.jet = CoreStringViewCopyEditNamesConsumingExpression.fixed
+step: jet check main.jet
+exit: 0
+step: jet run main.jet
+stdout: = CoreStringViewCopyEditNamesConsumingExpression.out

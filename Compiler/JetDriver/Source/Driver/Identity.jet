@@ -332,7 +332,7 @@ JetDriverCompileRequest: struct {
     prelude_entry: Bool{false}
     // The entry is a root the toolchain writes to reach Core itself: `jet
     // check Core`'s and the Core library's one import of each public Core
-    // module (JetCli jet_cli_core_check_source), and `jet test` of a Core
+    // module (JetCLI jet_cli_core_check_source), and `jet test` of a Core
     // source's import of its module. It imports as a Core source does, so
     // jet_builtins loads for it (Loader.jet `importer_core`), whatever path
     // the root was written to.
@@ -344,14 +344,14 @@ JetDriverCompileRequest: struct {
     // `jet check Core`: every declaration of each loaded Core module loads
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
     every_core_body: Bool{false}
-    // The Core library's check (JetCli CoreLibrary.jet): with every Core
+    // The Core library's check (JetCLI CoreLibrary.jet): with every Core
     // body checked, sema also writes the Core seal, each Core function's
     // summary a bound program may take for its reach (JetSema CoreSeal.jet),
     // as JetDriverLoweringInputs.core_seal.
     core_seal: Bool{false}
     // A traced run with per-function spans whose Core is the Core built
     // into this jet: the keys of the Core functions the Core facts seal
-    // (JetCli Host.jet jet_cli_core_facts), and each other Core function's
+    // (JetCLI Host.jet jet_cli_core_facts), and each other Core function's
     // key with, at the same position, the reason it is not sealed (JetIR
     // BuildCore.jet IR_CORE_EXCLUSIONS), which the driver counts the Core
     // demand's checks against (JetSema CoreDemand.jet
@@ -369,19 +369,19 @@ JetDriverCompileRequest: struct {
     // internal problem (BodyComptime.jet jet_driver_recheck_differences).
     recheck_verify: Bool{false}
     // A `jet check` whose host ends the process with the result still held
-    // (JetCli Host.jet jet_cli_compile_check with `finish`): the check's
+    // (JetCLI Host.jet jet_cli_compile_check with `finish`): the check's
     // compile state moves into the result (JetDriverCompileResult.held)
     // rather than dropping as the stages return, so the process exit hands
     // the state back to the kernel and nothing walks it.
     hold_check_state: Bool{false}
-    // A native build (JetCli Request.jet jet_cli_compile_executable), the
+    // A native build (JetCLI Request.jet jet_cli_compile_executable), the
     // runtime library build (jet_cli_runtime_library) and the Core library's
     // check (CoreLibrary.jet jet_cli_core_checked): the compile state the
     // lowering inputs leave behind drops on a detached task (Pipeline.jet
     // jet_driver_release_aside) while the host builds IR, not on the
     // compile's thread as the stages return.
     release_state_aside: Bool{false}
-    // `jet test` of a Core source: the Core row path (`Core/Encoding/Cbor.jet`)
+    // `jet test` of a Core source: the Core row path (`Core/Encoding/CBOR.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),
     // with Core's privileges. Every declaration of each loaded Core module
@@ -942,11 +942,11 @@ JetDriverCompileResult: struct {
     // libraries, inline C bodies), read by the host's C link closure.
     foreign_link: JetDriverForeignLinkFacts{jet_driver_foreign_link_empty()}
     // The request's trace sink, handed back by the host's compile
-    // (JetCli Request.jet `jet_cli_compile_prepared`) so the host's own
+    // (JetCLI Request.jet `jet_cli_compile_prepared`) so the host's own
     // phases after it (the native backend route) trace through the same sink.
     trace_sink: CompilerTraceSink?{None}
     // The request's compiler threads, handed back by the host's compile
-    // (JetCli Request.jet `jet_cli_compile_prepared`) so the native backend
+    // (JetCLI Request.jet `jet_cli_compile_prepared`) so the native backend
     // route after it compiles on the same threads.
     compiler_threads: CompilerThreads{compiler_threads_single()}
     // The entry package's member files that declare a top-level `run: fn`,
@@ -962,7 +962,7 @@ JetDriverCompileResult: struct {
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
     command_record: [U8]{[U8]{}}
     // Every comptime input the compile read (`embed_file`, `embed_bytes`,
-    // `find`), in read order, when the host logged them (JetCli Request.jet
+    // `find`), in read order, when the host logged them (JetCLI Request.jet
     // jet_cli_compile_executable): the `jet build` store key and `jet dev`'s
     // change test cover each, so editing one rebuilds.
     comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
@@ -971,9 +971,9 @@ JetDriverCompileResult: struct {
     held: JetDriverHeldState?{None}
     // Whether the compile's Core is the Core this jet was built with: the
     // jet carries its runtime image and no toolchain tree's Core differs
-    // (JetCli Request.jet jet_cli_compile_executable). Only then is its Core
+    // (JetCLI Request.jet jet_cli_compile_executable). Only then is its Core
     // the code the runtime image carries, so only then does the native route
-    // bind its Core calls there (JetCli Host.jet).
+    // bind its Core calls there (JetCLI Host.jet).
     core_built_in: Bool{false}
     // The first pass of a program with a root `#loop` over a module value
     // computed while building (JetSema UserTemplates.jet

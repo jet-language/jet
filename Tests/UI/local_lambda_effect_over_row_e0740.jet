@@ -1,0 +1,9 @@
+// A local lambda's effect is checked against the caller's row: calling a
+// printing lambda from a `-[FS.Read]>` function names `IO`, and nothing else.
+wide: fn() -[FS.Read]> Int {
+    step: fn() { print("escaped") }
+    step()
+    1
+}
+
+run: fn() { print(wide()) }

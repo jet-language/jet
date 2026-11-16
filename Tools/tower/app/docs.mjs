@@ -18,10 +18,10 @@ const SCRATCH_FILE = `${SCRATCH_ID}.md`;
 export const OWNER_GUIDANCE_PATH = 'AGENTS.md';
 
 export const SECTIONS = [
-  { id: 'spec', label: 'Spec', dir: `${DOCS_DIR}/spec` },
-  { id: 'audits', label: 'Audits', dir: `${DOCS_DIR}/audits` },
-  { id: 'research', label: 'Research', dir: `${DOCS_DIR}/research` },
-  { id: 'proposals', label: 'Proposals', dir: `${DOCS_DIR}/proposals` },
+  { id: 'spec', label: 'Spec', dir: `${DOCS_DIR}/Spec` },
+  { id: 'audits', label: 'Audits', dir: `${DOCS_DIR}/Audits` },
+  { id: 'research', label: 'Research', dir: `${DOCS_DIR}/Research` },
+  { id: 'proposals', label: 'Proposals', dir: `${DOCS_DIR}/Proposals` },
 ];
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/i;

@@ -1,0 +1,8 @@
+Error [jet.ImmutableAssignment]: `hits` is module state, so a function can't change it directly
+  --> Tests/UI/module_write_from_fn_is_e0111.jet:11:5
+    |
+ 11 |     hits += 1
+    |     ^^^^
+ Why: Every task sees module state, and two plain writes at once can lose one
+ Fix: Keep it in a `Shared` holder (`hits: Shared{Count{value: 0}}`, written `hits.value += 1`); code that needs a raw word writes it inside `#Unsafe("reason") { … }`
+More: jet-lang.dev/e/E0111

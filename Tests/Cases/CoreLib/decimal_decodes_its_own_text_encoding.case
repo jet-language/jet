@@ -1,0 +1,21 @@
+# Decimal decodes from the text it encodes to, so a value round-trips
+# through Dyn and a typed CSV column (every cell is text) decodes to Decimal,
+# as the web tier's typed decimal decode already does. Text that is not a
+# decimal and other Dyn kinds still report the field failure.
+fixture: DecimalDecodesItsOwnTextEncoding.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run main.jet
+exit: 0
+stdout: = decimal_decodes_its_own_text_encoding.out
+step: jet run -O0 main.jet
+exit: 0
+stdout: == default
+step: jet run -O2 main.jet
+exit: 0
+stdout: == default
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: == default

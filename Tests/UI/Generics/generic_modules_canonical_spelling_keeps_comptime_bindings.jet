@@ -1,0 +1,24 @@
+BASE: #run 40
+
+cache: module<K>(capacity: Int) {
+    COMPUTED_SIZE: #run { BASE + capacity }
+
+    Entry: struct {
+        items: [K#capacity]
+    }
+
+    size: fn() -> Int { COMPUTED_SIZE }
+}
+
+x: cache<Int>(64)
+
+plain_template: module<K> {
+    identity: fn(value: K) -> K { value }
+}
+
+plain: plain_template<Int>
+
+run: fn() {
+    print(x.size())
+    print(plain.identity(7))
+}

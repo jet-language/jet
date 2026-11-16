@@ -1,0 +1,24 @@
+# The KeyBy fix cuts its text from the source at byte offsets: the method
+# head and body around the renamed `equal`, the indent and the field type. A
+# comment of dashes, quotes and a degree sign above the type puts multi-byte
+# characters before all of them, and the fix still writes the text the file
+# holds there, so the edited file checks and the fix applies.
+fixture: KeyByFixReadsSourceTextAfterMultibyteCharacters.fixture
+env: NO_COLOR=1
+step refused: jet check run.jet
+exit: 1
+stderr: ~ "`Reading` writes its own `Equatable`" # refused as a Map key before the fix
+step fix: jet fix run.jet
+exit: 0
+stderr: ~ "run.jet: applied 1 fix" # the edit checks
+stderr: !~ "rolled back" # no text cut mid-character or shifted
+file: run.jet ~ "// Readings — two in one ten-degree band — are equal: “warm” is 20–29°." # the comment stays
+file: run.jet ~ "\n    impl KeyBy {\n        Key: Int\n\n        key: fn(self) -> Int { self.celsius }\n    }\n" # the indent and the field type, cut whole
+file: run.jet ~ "\n    equal_by_rule: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }\n}\n" # the method head and body around the new name
+file: run.jet !~ "impl Equatable" # the written equality is gone
+step again: jet fix run.jet
+exit: 0
+stderr: ~ "run.jet: no changes made" # a second fix changes nothing
+step run: jet run run.jet
+exit: 0
+stdout: = "keys: 2\n"

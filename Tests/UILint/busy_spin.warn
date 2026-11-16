@@ -1,0 +1,8 @@
+Warning [jet.SharedBusyWait]: This unbounded loop polls `Shared` state without waiting
+  --> Tests/UILint/busy_spin.jet:9:15
+    |
+  9 |     loop flag.ready == false {
+    |               ^^^^^^^^^^^^^^
+ Why: An empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress
+ Fix: Wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly
+More: jet-lang.dev/e/L0207

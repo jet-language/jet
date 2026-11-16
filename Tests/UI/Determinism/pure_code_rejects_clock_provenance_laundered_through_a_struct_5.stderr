@@ -1,0 +1,21 @@
+Error [jet.NondeterminismInPureEval]: `Clock copy` is non-deterministic and cannot appear in a pure evaluation.
+  --> Tests/UI/Determinism/pure_code_rejects_clock_provenance_laundered_through_a_struct_5.jet:5:58
+    |
+  5 | copy_box: fn(value: BoxedClock) -[]> BoxedClock { return value.copy() }
+    |                                                          ^^^^^^^^^^
+ Why: Pure evaluation must produce the same result on every machine.
+ Fix: Remove this call, or remove the enclosing function's explicit empty effect bound.
+ Denial: pure
+ Call chain: Clock copy
+More: jet-lang.dev/e/E3403
+
+Error [jet.NondeterminismInPureEval]: `Clock formatting` is non-deterministic and cannot appear in a pure evaluation.
+  --> Tests/UI/Determinism/pure_code_rejects_clock_provenance_laundered_through_a_struct_5.jet:7:56
+    |
+  7 | show_box: fn(value: BoxedClock) -[]> String { return "{value:Debug}" }
+    |                                                        ^^^^^
+ Why: Pure evaluation must produce the same result on every machine.
+ Fix: Remove this call, or remove the enclosing function's explicit empty effect bound.
+ Denial: pure
+ Call chain: Clock formatting
+More: jet-lang.dev/e/E3403

@@ -2,7 +2,7 @@ use files: core.files
 
 #Test("mkdir links rename permissions truncate and poke run as kit actions from real case text") {
     root: cases_test_root("filesystem-actions")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/source"), "ABCDE")
     kit_exec_write(files.join(directory, "changed.out"), "AxBDE")
     kit_exec_write(files.join(directory, "short.out"), "Ax")
@@ -18,7 +18,7 @@ use files: core.files
 
 #Test("file size relations and sha256 compare metadata and bytes without UTF-8 conversion") {
     root: cases_test_root("filesystem-metadata")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "abc")
     source: "fixture: tree\nstep: printf ready\nfile: value size = 3\nfile: value size >= 3 # original predicate\nfile: value size <= 3 # original predicate\nfile: value size < 4 # original predicate\nfile: value size > 2 # original predicate\nfile: value sha256 = \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\n"
     assert_eq(cases_test_advanced(root, "metadata", source).verdict.status, "PASS")
@@ -31,7 +31,7 @@ use files: core.files
 
 #Test("await file uses a bounded readiness deadline while children remain genuinely concurrent") {
     root: cases_test_root("filesystem-await")
-    kit_exec_write(files.join(root, "tests/cases/group/ready.out"), "ready")
+    kit_exec_write(files.join(root, "Tests/Cases/group/ready.out"), "ready")
     source: "spawn peer: jet -c 'printf ready > ready.tmp; mv ready.tmp ready'\nawait: file ready timeout 2s\nfile: ready = ready.out\nwait: peer\nstderr: empty\n"
     assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "deadline", "await: file absent timeout 20ms\n").verdict.status, "FAIL")
@@ -46,7 +46,7 @@ use files: core.files
 
 #Test("entries filters names first entry and filesystem captures share real directory observations") {
     root: cases_test_root("filesystem-entries")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/one.tmp"), "one")
     kit_exec_write(files.join(directory, "tree/two.tmp"), "two")
     kit_exec_write(files.join(directory, "tree/.tmp"), "hidden")
@@ -64,7 +64,7 @@ use files: core.files
 
 #Test("optional byte captures distinguish absent files empty files and unequal binary values") {
     root: cases_test_root("filesystem-optional-bytes")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     files.create_dir_all(files.join(directory, "tree")) ?? panic("optional bytes fixture")
     files.write_bytes(files.join(directory, "tree/binary"), [U8{0}, U8{255}]) ?? panic("binary fixture")
     kit_exec_write(files.join(directory, "tree/empty"), "")
@@ -79,7 +79,7 @@ use files: core.files
 
 #Test("capture text lines after markers and file JSON selectors execute through case text") {
     root: cases_test_root("filesystem-capture-text")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     cr: "\r"
     kit_exec_write(files.join(directory, "input.txt"), "first{cr}\nTOKEN= chosen \nlast\n")
     kit_exec_write(files.join(directory, "text.out"), "first{cr}\nTOKEN= chosen \nlast")
@@ -98,7 +98,7 @@ use files: core.files
 
 #Test("directory names relations ignore file contents but detect renamed entries") {
     root: cases_test_root("filesystem-names-relation")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/left/a"), "alpha")
     kit_exec_write(files.join(directory, "tree/right/a"), "different")
     source: "fixture: tree\nstep: printf ready\nfile: left names = [\"a\"]\nfile: left names == right\nchmod: left/a 0600\nfile: left first mode = 0600\nfile: left first size = 5\n"
@@ -110,7 +110,7 @@ use files: core.files
 
 #Test("literal write append exact RHS and explicit spaced snapshots preserve real case bytes") {
     root: cases_test_root("filesystem-literals")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "space name.out"), "a\nb\n")
     source: "write: value = \"a\\n\"\nappend: value \"b\\n\"\nfile: value = \"a\\nb\\n\"\nfile: value = path \"space name.out\"\nstep: cat value\nstdout: = path \"space name.out\"\nstdout: = \"a\\nb\\n\"\nfile: missing !is-file\nfile: missing !is-dir\nwrite: {{tmp}}/owned = \"temporary\"\nfile: {{tmp}}/owned = \"temporary\"\nstep: jet -c 'printf %s \"$TMPDIR\"'\nstdout: = \"{{tmp}}\"\nsleep: 1ms\n"
     assert_eq(cases_test_advanced(root, "exact", source).verdict.status, "PASS")
@@ -134,7 +134,7 @@ use files: core.files
 
 #Test("tree captures sorted lossy concatenation and child-is-file entry selection use real cases") {
     root: cases_test_root("filesystem-tree-captures")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/data/a"), "A")
     files.write_bytes(files.join(directory, "tree/data/b"), [U8{255}]) ?? panic("write invalid UTF-8 fixture")
     source: "fixture: tree\ncapture: joined = concat-files data sorted\ncap:joined: = \"A�\"\ncapture: before = tree-contents data recursive\ncapture: same = tree-contents data recursive\ncap:before: = {{cap:same}}\nwrite: data/a = \"changed\"\ncapture: after = tree-contents data recursive\ncap:before: != {{cap:after}}\nmkdir: choices/absent\nmkdir: choices/valid\nwrite: choices/valid/needle = \"x\"\ncapture: found = first-entry choices child-is-file \"needle\"\nfile: {{cap:found}}/needle = \"x\"\n"
@@ -177,7 +177,7 @@ use files: core.files
 
 #Test("fixture filesystem and captured values can be asserted before the first process") {
     root: cases_test_root("filesystem-preprocess-assertions")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
     kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"ready\":true}}")
     loop assertion in
@@ -199,7 +199,7 @@ use files: core.files
 
 #Test("assertions after an unselected setup action keep their own guard and owner") {
     root: cases_test_root("filesystem-assertion-guards")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
     source: "fixture: tree\nwhen os not-a-host: mkdir: absent\nfile: absent absent\nfile: value = \"ready\"\nwhen os not-a-host\nfile: value = \"wrong\"\nend when\nfile: value = \"ready\"\n"
     assert_eq(kit_steps_parse_case(source).error, "")
@@ -209,7 +209,7 @@ use files: core.files
 }
 
 // The Jet corpus runner checks a Jet adapter's scratch with the assertion block
-// in tests/cases/agent_workloads/{equivalent_adapters_complete_declared_tasks,
+// in Tests/Cases/AgentWorkloads/{equivalent_adapters_complete_declared_tasks,
 // structured_data_database_http_production_paths_handle_success_and_hostile_inputs}.case;
 // `shape` is that block for the scratch `s` and the artifact `process_batch`.
 // Both declared shapes pass; each residue added to a passing shape fails it.

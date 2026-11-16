@@ -1,7 +1,7 @@
 // Card #457 — `tower lint`: rule-based durability sweeper over the live
 // board. Each rule is its own function returning findings [{rule, ref, msg}];
 // `lint()` aggregates them. Read-only — never mutates the store. The
-// Docs/spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
+// Docs/Spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
 import { ballotGaps, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 

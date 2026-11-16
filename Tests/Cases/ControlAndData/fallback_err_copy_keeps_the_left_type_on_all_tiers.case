@@ -1,0 +1,41 @@
+# A `??` fallback that hands back a value built from `err.copy()` keeps the
+# left side's type: the rows it binds answer their methods and bind their
+# patterns. A method the rows lack is reported against `[Fact]`; a fallback,
+# a pattern subject or a `?? next` label that fails reports its own fault once,
+# with no unknown-name report for the names bound after it. Same on every tier.
+fixture: FallbackErrCopyKeepsTheLeftTypeOnAllTiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = fallback_err_copy_keeps_the_left_type_on_all_tiers.stdout.expected
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: == default
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == default
+step method_o0: jet run method_error.jet
+exit: 1
+stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
+stderr: ~ "This `List` value has no instance method named `zz`" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
+stderr: !~ "[jet.UnknownName]" # `fact` is bound
+step method_o1: jet run -O1 method_error.jet
+exit: 1
+stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
+stderr: !~ "[jet.UnknownName]" # `fact` is bound
+step method_o2: jet run -O2 method_error.jet
+exit: 1
+stderr: ~ "`zz` isn't a method on this value" # the method is looked up on the kept `[Fact]`
+stderr: ~ "1 problem found" # the fault is reported once
+stderr: !~ "[jet.UnknownName]" # `fact` is bound
+step bind_o0: jet run pattern_bind.jet
+exit: 1
+stderr: = fallback_err_copy_keeps_the_left_type_on_all_tiers.pattern_bind.stderr
+step bind_o1: jet run -O1 pattern_bind.jet
+exit: 1
+stderr: = fallback_err_copy_keeps_the_left_type_on_all_tiers.pattern_bind.stderr
+step bind_o2: jet run -O2 pattern_bind.jet
+exit: 1
+stderr: = fallback_err_copy_keeps_the_left_type_on_all_tiers.pattern_bind.stderr

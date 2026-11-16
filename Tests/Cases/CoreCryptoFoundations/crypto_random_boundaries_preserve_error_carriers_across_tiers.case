@@ -1,0 +1,11 @@
+# Random-token and range boundaries return their typed Length errors, and the constant-time comparisons agree, on every tier; the fixture's package grants Rand.
+fixture: CryptoRandomBoundariesPreserveErrorCarriersAcrossTiers/Input
+step: jet run run.jet
+exit: 0 # tests/core_crypto_foundations.rs:8 assert_tiers_agree
+stdout: = "hex:length\nurl:length\ntrue\ntrue\nrange:length\nrange:wide\ntrue\nfalse\nfalse\ntrue\nfalse\n" # tests/core_crypto_foundations.rs:8 assert_tiers_agree
+step o1: jet run -O1 run.jet
+exit: 0
+stdout: = "hex:length\nurl:length\ntrue\ntrue\nrange:length\nrange:wide\ntrue\nfalse\nfalse\ntrue\nfalse\n"
+step o2: jet run -O2 run.jet
+exit: 0
+stdout: = "hex:length\nurl:length\ntrue\ntrue\nrange:length\nrange:wide\ntrue\nfalse\nfalse\ntrue\nfalse\n"

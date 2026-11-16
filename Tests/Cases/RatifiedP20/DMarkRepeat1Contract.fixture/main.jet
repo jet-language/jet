@@ -1,0 +1,12 @@
+// D-MARK-REPEAT1: Pre, Post and Allow are repeatable; each copy keeps its own meaning.
+#[Pre(x > 0, "x is positive"), Pre(x < 100, "x is small"), Post(result > x, "result grows"), Post(result > 1, "result is big")]
+double: fn(x: Int) -> Int { x * 2 }
+
+Invoice: struct {
+    #[Allow(jet.FloatMoney, "the first reason"), Allow(jet.FloatMoney, "the second reason")] price: Float
+}
+
+run: fn() {
+    print(double(2))
+    print(Invoice{price: 1.5}.price)
+}

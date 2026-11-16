@@ -1,0 +1,19 @@
+Resource: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+consume: fn(r: &&Resource) {
+    print("took {r.name}")
+    close(r)
+}
+
+run: fn() {
+    resource := Resource{name: "resource"}
+    defer close(resource)
+    consume(resource)
+    print("after")
+}

@@ -25,7 +25,7 @@ Keep the all-parts seed's public Core imports current, including `core.db.sql`;
 otherwise a newly exposed source-owned boundary is absent from the error census.
 
 The separate candidate build requires read-only generator checks and a frontend
-check of the complete compiler package graph (`jet check Compiler/JetCli`),
+check of the complete compiler package graph (`jet check Compiler/JetCLI`),
 using the fresh release verifier. A file-local parse receipt does not establish
 that the compiler packages resolve their current APIs; inspect nested diagnostics,
 not just the transport's top-level `ok` flag. Migrate callers to retained current
@@ -37,7 +37,7 @@ failure rows; typed traps are failure evidence, not a green compiler.
 
 Keep build output outside the repository on disk-backed storage. Give each
 checkout exclusive ownership of its Cargo target; shared binaries do not imply
-shared writable build targets. Configure external targets through `Tools/agent/JetEnv.jet`.
+shared writable build targets. Configure external targets through `Tools/Agent/JetEnv.jet`.
 Bound disk and memory use before starting work, account for peak allocations,
 and reclaim idle output promptly after integration. Never remove source,
 protected evidence, or artifacts still in use to make room for another job.
@@ -45,7 +45,7 @@ Forward a collected child's complete diagnostic buffer synchronously before
 throwing on failure. An asynchronous pipe write followed by an uncaught exception
 can truncate the last diagnostics; a partial log is not a collect-all census.
 
-`Tools/agent/JetEnv.jet` preserves caller-selected Cargo wrappers; it does not
+`Tools/Agent/JetEnv.jet` preserves caller-selected Cargo wrappers; it does not
 select sccache. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
 contract.
@@ -75,7 +75,7 @@ IP24/socket56 projections copy only the fixed carrier bytes; they allocate
 nothing and transfer no owner. Source-owned record fields require their exact
 native provider; never reinterpret a host/port record as a socket56 carrier.
 Reviewed narrow-parameter widening (`masked_word_parameters` in
-`Tools/agent/RuntimeGenerators.jet`) is symbol/position
+`Tools/Agent/RuntimeGenerators.jet`) is symbol/position
 specific and requires that parameter's current `.bit_and` mask in the export
 body. Comments, strings and unrelated functions are not mask evidence. Return
 values, output slots and every unlisted symbol keep the strict physical ABI.
@@ -112,8 +112,8 @@ the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
 Core catalog changes also require the canonical structure registry and Core
-row projections. Regenerate them with `jet Tools/agent/CoreSourceRows.jet`,
-which `jet Tools/agent/CoreSurfaceLedger.jet --write` runs (the structure registry is edited
+row projections. Regenerate them with `jet Tools/Agent/CoreSourceRows.jet`,
+which `jet Tools/Agent/CoreSurfaceLedger.jet --write` runs (the structure registry is edited
 directly); `CoreRecordRows.jet` and the `CORE_ENUM_PAYLOAD_ROWS` of
 `CoreEnumPayloadRows.jet` are authored by hand.
 Refreshing the surface ledger alone does not keep the assembled compiler's
@@ -153,7 +153,7 @@ in that same allowlisted case/dependency cache namespace; report it separately
 as `allowedFfiQueries`, not a crate build. Never admit a Rust fallback for
 compiling the Jet program. Preserve PASS cases without an observed command
 marker as an explicit category without inferring why the marker is absent.
-The cutover suite composes the same native runner commands as `Tools/agent/VerifyFull.jet`
+The cutover suite composes the same native runner commands as `Tools/Agent/VerifyFull.jet`
 after its formal closeout prefix, without adding a skip-closeout option.
 Report qualified formal proof composition and milestone closeout separately
 as `NOT MET — deferred per owner #59`; stage equivalence and passing suites

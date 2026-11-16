@@ -1,0 +1,8 @@
+Error [jet.CallerWithoutSignedInPath]: `app.caller()` is reached from `Crew.whoever`, which acts for no signed-in account.
+  --> Tests/UI/web_app_caller_without_signed_in_path.jet:11:14
+    |
+ 11 |     who: app.caller()
+    |              ^^^^^^
+ Why: `app.caller()` gives the signed-in account, so it is accepted only on a path that starts at an `#App.SignedIn` method or inside `app.as_caller`; an `#App.Public` method, a webhook, a job, a schedule, a spawned task and the program's own entry act for no account. The path: Crew.whoever → owner_name → app.caller().
+ Fix: Read `app.maybe_caller()` and handle `None`, mark the method that starts the path `#App.SignedIn`, or in a test run the call inside `app.as_caller(account, …)`.
+More: jet-lang.dev/e/E2815

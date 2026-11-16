@@ -1,0 +1,18 @@
+# `impl Pair<T: Priced>.Describe` makes a `Pair<T>` `Describe`
+# only where `T` is `Priced`, and inside `describe` `T` is `Priced`. A
+# `Pair<Apple>` calls it directly and meets a `Describe` bound; inside a
+# function with `U: Priced`, a `Pair<U>` meets the condition through `U`'s
+# bound. The inherent `impl Pair<T: Priced>` adds `cents` under the same
+# condition. Each tier prints the same lines.
+fixture: ConditionalImplAppliesWhereItsBoundsHold.fixture
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+exit: 0
+stdout: = conditional_impl_applies_where_its_bounds_hold.out
+step: jet run -O1 run.jet
+exit: 0
+stdout: = conditional_impl_applies_where_its_bounds_hold.out
+step: jet run -O2 run.jet
+exit: 0
+stdout: = conditional_impl_applies_where_its_bounds_hold.out

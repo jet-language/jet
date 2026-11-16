@@ -1,0 +1,6 @@
+# tests/services_runtime.rs::TreeDurableSendDuringDrainIsRejectedBeforeAdmissionAOT: the original's literal expectations.
+fixture: TreeDurableSendDuringDrainIsRejectedBeforeAdmissionAOT/Input
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write run.jet
+exit: 0 # tests/services_runtime.rs:1692 assert_eq!
+stdout: = "direct:rejected\nhandoff:2\npending:rejected\n" # tests/services_runtime.rs:1693 assert_eq!

@@ -1,0 +1,17 @@
+# A live binding's re-run that an invalidation overtakes (a write commits
+# after the re-run read and before it stored its result) stores that result
+# but leaves the binding stale, so the next read runs the source again and
+# the older value is never kept as current. Same output on o0/o1/o2.
+fixture: LiveRerunOvertakenByAnInvalidationStaysStale.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_rerun_overtaken_by_an_invalidation_stays_stale.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

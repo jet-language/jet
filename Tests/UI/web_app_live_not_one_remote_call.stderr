@@ -1,0 +1,8 @@
+Error [jet.LiveNotOneRemoteCall]: This `app.live` closure is not one call of an `app.Remote` endpoint: `held` is a `Crew`, not an `app.Remote`.
+  --> Tests/UI/web_app_live_not_one_remote_call.jet:9:24
+    |
+  9 |     _: app.live(fn() { held.lookup(1) })
+    |                        ^^^^
+ Why: A live query is keyed by the endpoint it calls and that call's encoded arguments, so its subscription, its cache and the readers that share it all name that one call; a closure that does anything else has no such key.
+ Fix: Make the closure's whole body one call, `remote.method(args)`, where `remote` names an `app.Remote<S>`, `method` is an `#App.SignedIn` or `#App.Public` method of `S`, and each argument's type derives `Encode` and `Decode`; or pass a named source, `app.live(source, args…)`.
+More: jet-lang.dev/e/E2816

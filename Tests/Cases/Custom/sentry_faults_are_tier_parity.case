@@ -1,0 +1,104 @@
+# Port of tests/tir_unsafe_and_runtime.rs::sentry_faults_are_tier_parity; original guest source preserved.
+fixture: Fixtures/SentryFaultsAreTierParity
+step: jet run unsafe_sentries_provenance/unsafe_sentries_provenance.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0801]" # original predicate
+stderr: ~ "unsafe_sentries_provenance.jet:" # original predicate
+stderr: ~ "The pointer is outside the allocation provenance" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet build unsafe_sentries_provenance/unsafe_sentries_provenance.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0801]" # original predicate
+stderr: ~ "unsafe_sentries_provenance.jet:" # original predicate
+stderr: ~ "The pointer is outside the allocation provenance" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet run unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_quarantine.jet:" # original predicate
+stderr: ~ "storage after its lifetime ended" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet build unsafe_sentries_quarantine/unsafe_sentries_quarantine.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_quarantine.jet:" # original predicate
+stderr: ~ "storage after its lifetime ended" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet run unsafe_sentries_alignment/unsafe_sentries_alignment.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # original predicate
+stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
+stderr: ~ "misaligned raw `read`" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
+stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+step: jet build unsafe_sentries_alignment/unsafe_sentries_alignment.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # original predicate
+stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
+stderr: ~ "misaligned raw `read`" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
+stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+step: jet run unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # the report around the code carries the faulting address, which varies with ASLR
+stderr: ~ "unsafe_sentries_misaligned_list.jet:7:15, in #Unsafe gate" # the faulting read's line and column
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x" # the faulting address varies with ASLR
+stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: !~ "R0801" # the fault is not misread as an extent fault
+step: jet build unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # the report around the code carries the faulting address, which varies with ASLR
+stderr: ~ "is not aligned to 8 bytes." # the faulting address varies with ASLR
+stderr: !~ "R0801" # the fault is not misread as an extent fault
+# Sentries are a development-tier watch: a plain release build runs the read unwatched
+# (the same split as Examples/Memory/Unsafe/UnsafeSentries.o2.out), so the misaligned
+# little-endian read of `1, 2` at byte offset 1 prints 2 << 56.
+step: jet build --release unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+step: built
+exit: 0
+stdout: ~ "144115188075855872" # the misaligned read of `1, 2` at offset 1 is 2 << 56
+stderr: !~ "Runtime fault" # no sentry watches a plain release read
+step: jet run unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_expired_stack.jet:" # original predicate
+stderr: ~ "owning Jet frame expired" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet build unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_expired_stack.jet:" # original predicate
+stderr: ~ "owning Jet frame expired" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet run unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_expired_recursive_stack.jet:" # original predicate
+stderr: ~ "owning Jet frame expired" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+step: jet build unsafe_sentries_expired_recursive_stack/unsafe_sentries_expired_recursive_stack.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0802]" # original predicate
+stderr: ~ "unsafe_sentries_expired_recursive_stack.jet:" # original predicate
+stderr: ~ "owning Jet frame expired" # original predicate
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate

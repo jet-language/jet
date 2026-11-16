@@ -1,0 +1,8 @@
+Warning [jet.SharedGuardLongScope]: `Shared.guard_edit()` keeps its lock through a long lexical scope
+  --> Tests/UILint/Ownership/shared_guard_long_scope_has_lock_order_lint.jet:3:17
+    |
+  3 |     guard: cell.guard_edit()
+    |                 ^^^^^^^^^^
+ Why: The guard releases at scope exit, so later statements and nested guard acquisitions run while this lock is held
+ Fix: Move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order
+More: jet-lang.dev/e/L0206

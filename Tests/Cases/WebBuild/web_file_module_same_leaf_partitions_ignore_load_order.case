@@ -1,0 +1,20 @@
+# HAND-PORT tests/web_build.rs:3672-3726 web_file_module_same_leaf_partitions_ignore_load_order
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original import orders and sibling sources preserved with the exact stdout; the retired JS emitter's text predicates retire (app.js is now the wasm loader).
+requires: tool:node
+fixture: WebFileModuleSameLeafPartitionsIgnoreLoadOrder.fixture
+env: NO_COLOR=1
+step: jet build --target web order0/main.jet
+exit: 0
+file: order0/.jet/build/app.wasm is-file
+step: node app.js
+cwd: order0/.jet/build
+exit: 0
+stdout: = web_file_module_same_leaf_partitions_ignore_load_order.stdout.expected
+step: jet build --target web order1/main.jet
+exit: 0
+file: order1/.jet/build/app.wasm is-file
+step: node app.js
+cwd: order1/.jet/build
+exit: 0
+stdout: = web_file_module_same_leaf_partitions_ignore_load_order.stdout.expected

@@ -1,0 +1,14 @@
+# `jet inspect structure --core` prints the toolchain's Core catalog. It
+# compiles nothing, so it runs in a folder with no package.jet, where the
+# Core tools (CoreSurfaceLedger, CoreModuleCheck, LaneCheck, LibcCensus,
+# RuntimeEffectRows) ask for it.
+env: NO_COLOR=1
+step: jet inspect structure --core
+exit: 0
+stdout: ~ "bootstrap:" # the catalog's bootstrap section, printed with no package.jet
+stdout: ~ "root types:" # the catalog's root types line
+step: jet inspect structure --core --json
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\"," # one jet.status/v1 envelope
+json: stdout doc $.core.modules #>= 1
+json: stdout doc $.core.calls #>= 1

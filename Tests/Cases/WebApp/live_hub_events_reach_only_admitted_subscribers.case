@@ -1,0 +1,20 @@
+# The WebSocket live hub sends a live event only to connections whose handler
+# watches the binding it names. Alice and Bob each watch their own live query,
+# read under their own row policy; a third route upgrades and watches nothing.
+# Alice's write reaches only Alice and Bob's only Bob; the event names the
+# binding and carries no source or key; the latest event is replayed only to
+# a connection that starts watching its binding, never on upgrade; and the
+# route that watches nothing receives no live event. Same output on o0/o1/o2.
+fixture: LiveHubEventsReachOnlyAdmittedSubscribers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = live_hub_events_reach_only_admitted_subscribers.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

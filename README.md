@@ -1,4 +1,4 @@
-<p align="center"><img src="./Docs/assets/jetlang.png" width="120" alt="Jet" /></p>
+<p align="center"><img src="./Docs/Assets/jetlang.png" width="120" alt="Jet" /></p>
 
 <h1 align="center">Jet</h1>
 
@@ -191,7 +191,7 @@ flight:
 - **Speed and size** that beat every peer language and match hand-written
   machine code on each measured workload.
 
-The [philosophy](Docs/spec/philosophy.md) explains what Jet optimizes for and
+The [philosophy](Docs/Spec/philosophy.md) explains what Jet optimizes for and
 how it breaks ties.
 
 ## Build Jet yourself
@@ -209,10 +209,10 @@ gh release download "$TAG" --repo jet-language/jet --pattern "jet-$TAG-linux-x64
 (cd ../release && sha256sum -c "jet-$TAG-linux-x64.tar.gz.sha256")
 mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed
 ../seed/jet build Compiler        # jet, its runtime and IDENTITY built in
-export PATH="$PWD/Compiler/JetCli/.jet/build:$PATH"
+export PATH="$PWD/Compiler/JetCLI/.jet/build:$PATH"
 ```
 
-[The bootstrap guide](Docs/spec/contributing/bootstrap.md) covers the full
+[The bootstrap guide](Docs/Spec/Contributing/bootstrap.md) covers the full
 self-host chain and older releases.
 
 ## Contribute
@@ -234,11 +234,11 @@ read [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues through
 
 ## Learn more
 
-- [First hour with Jet](Docs/spec/guides/first-hour.md)
+- [First hour with Jet](Docs/Spec/Guides/first-hour.md)
 - [Examples](Examples/README.md)
-- [Fixing compiler errors](Docs/spec/guides/diagnostic-recovery.md)
-- [Core library reference](Docs/spec/reference/core-library.md)
-- [Language specification](Docs/spec/spec.md)
+- [Fixing compiler errors](Docs/Spec/Guides/diagnostic-recovery.md)
+- [Core library reference](Docs/Spec/Reference/core-library.md)
+- [Language specification](Docs/Spec/spec.md)
 
 ## License
 

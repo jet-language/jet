@@ -1,0 +1,17 @@
+// core-conformance: core.data.inner_join
+use data: core.data
+
+LeftRow: struct {
+    key: String
+}
+
+RightRow: struct {
+    key: String
+}
+
+run: fn() {
+    left: [LeftRow]{LeftRow{key: "a"}, LeftRow{key: "b"}}
+    right: [RightRow]{RightRow{key: "b"}}
+    joined: data.inner_join(left, right, fn(left_row) { left_row.key }, fn(right_row) { right_row.key }) ?? panic("join")
+    print(joined.len())
+}

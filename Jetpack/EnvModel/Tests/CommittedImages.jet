@@ -6,7 +6,7 @@ use {
 }
 
 envmodel_test_committed_images: fn(root: String) {
-    base: files.join(root, "tests/fixtures/jetpack-typed")
+    base: files.join(root, "Tests/Fixtures/JetpackTyped")
     source: files.read(files.join(base, "image.jet")) ?? panic("read committed OCI image fixture")
     plan: envmodel_evaluate_env(source, base) ?? panic("committed OCI image evaluates")
     assert_eq(plan.images.len(), 1)
@@ -21,7 +21,7 @@ envmodel_test_committed_images: fn(root: String) {
 }
 
 envmodel_test_committed_environment_image: fn(root: String) {
-    base: files.join(root, "tests/fixtures/jetpack-typed")
+    base: files.join(root, "Tests/Fixtures/JetpackTyped")
     source: files.read(files.join(base, "environment_image.jet")) ?? panic("read committed environment image fixture")
     plan: envmodel_evaluate_env(source, base) ?? panic("committed environment image evaluates")
     assert_eq(plan.images.len(), 1)

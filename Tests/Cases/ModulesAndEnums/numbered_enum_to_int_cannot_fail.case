@@ -1,0 +1,11 @@
+# A numbered enum's generated `to_int` reads a case number, which can't fail,
+# so a `Never!` caller uses it bare. The generated method is no candidate of
+# the failure solve, so it once kept the default `Err!` route and every such
+# caller was refused with "`to_int()` fails with `Err`".
+fixture: NumberedEnumToIntCannotFail.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run main.jet
+exit: 0
+stdout: = "3\n9\n"

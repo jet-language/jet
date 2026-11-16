@@ -1,0 +1,12 @@
+# Default fix selection requires Safe + BehaviorPreserving; --all must still offer no edit for non-cloneable E0120.
+fixture: OwnershipCopyEditGradeTracksCloneability/Safe
+step: jet check main.jet
+exit: nonzero
+stderr: = OwnershipCopyEditGradeTracksCloneability.safe.stderr
+step: jet fix --dry-run main.jet
+stdout: = OwnershipCopyEditGradeTracksCloneability.safe.diff
+file: main.jet = OwnershipCopyEditGradeTracksCloneability.safe.original
+step: jet fix main.jet
+file: main.jet = OwnershipCopyEditGradeTracksCloneability.safe.fixed
+step: jet check main.jet
+exit: 0

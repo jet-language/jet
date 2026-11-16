@@ -1,0 +1,14 @@
+# A parent larger than its children's memory limit runs many limited children;
+# none of them reads as having reached its limit.
+requires: os-name:linux
+requires: tool:sh
+fixture: MemoryLimitSamplesTheChildOnlyAfterItLeavesTheParentsImage.fixture
+step default: jet run run.jet
+exit: 0
+stdout: = memory_limit_samples_the_child_only_after_it_leaves_the_parents_image.out
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default

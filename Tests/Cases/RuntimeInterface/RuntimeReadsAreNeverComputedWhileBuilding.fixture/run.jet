@@ -1,0 +1,26 @@
+package: {
+    name: "runtime_reads_at_run_time"
+    authority: { allow: [Env, IO] }
+}
+
+use {
+    app
+    compute: core.compute
+    files: jet.runtime.files
+    host: core.ui.host
+    tasks: core.tasks
+}
+
+// The same reads as local values: each runs when the program does.
+run: fn() {
+    profile: compute.profile_f32_strict()
+    caps: host.capabilities()
+    stats: app.live_stats()
+    id: tasks.current_task()
+    family: files.os_family()
+    print(profile.contains("vector_width="))
+    print(caps.facts.len())
+    print(stats.starts_with("LiveStats("))
+    print("{id}".starts_with("task "))
+    print(family == "unix" || family == "windows")
+}

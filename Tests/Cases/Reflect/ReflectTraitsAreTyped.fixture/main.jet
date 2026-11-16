@@ -1,0 +1,74 @@
+// A type's implemented traits are its TypeInfo's typed `traits` list: each
+// TraitInfo names the trait and lists the methods the implementation gives.
+// A marker body, a `#run` value, ordinary code and fn build read the same
+// TraitInfo for `Square`'s `Shape`, its written trait.
+Shape: trait {
+    area: fn(self) -> Int
+    corners: fn(self) -> Int
+}
+
+Holder: struct {}
+
+Traits: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            first: target.reflect().traits[0]
+            seen: "{target.name} implements {first.name} ({first.methods.len()} methods)"
+            impl Holder {
+                from_marker: fn() -> String { #{seen} }
+            }
+        }
+    }
+}
+
+#Traits
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+
+        corners: fn(self) -> Int { 4 }
+    }
+}
+
+Circle: struct {
+    radius: Int
+}
+
+implements: fn(info: TypeInfo, name: String) -> Bool {
+    loop implemented in info.traits {
+        if implemented.name == name -> return true
+    }
+    false
+}
+
+shape: fn(info: TypeInfo) -> String {
+    loop implemented in info.traits {
+        if implemented.name == "Shape" {
+            return "{info.name} implements Shape ({implemented.methods.len()} methods)"
+        }
+    }
+    "{info.name} does not implement Shape"
+}
+
+PREPARED: #run shape(Square.reflect())
+
+build: fn(b: Build) {
+    loop info in b.program.types() {
+        if info.name == "Square" -> b.contribute("traits", shape(info))
+    }
+}
+
+run: fn() {
+    print("marker: {Holder.from_marker()}")
+    print("prepared: {PREPARED}")
+    print("program: {shape(Square.reflect())}")
+    print("build: {#build.settings.traits}")
+    print("circle: {shape(Circle.reflect())}")
+    print("Square implements Shape: {implements(Square.reflect(), "Shape")}")
+    print("Circle implements Shape: {implements(Circle.reflect(), "Shape")}")
+    print("area {Square{side: 3}.area()}")
+}

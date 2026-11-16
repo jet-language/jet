@@ -1,0 +1,52 @@
+# A marked body crosses module, package and Core boundaries. `core.math.abs`
+# (Core) and `geom.gap` (the `geom` dependency) are `#Inline(Always)`. Each of
+# their calls in `app` is spliced into the caller on every tier, and
+# `Int.abs()` is one of them. `jet inspect choices` lists each call as
+# inlined, and the image holds neither function: an uninlined call links
+# `core_math_abs__<hash>` or `geom_gap`. The precompiled Core record keeps no
+# marked function (its facts row reads `inline_always`), so the program
+# builds the body and inlines it.
+fixture: InlineAlwaysCrossesPackageAndCoreBoundaries.fixture
+env: NO_COLOR=1
+step o0: jet inspect choices -O0 main.jet
+cwd: app
+exit: 0
+stdout: ~ "main.jet:10 in distance: abs inlined: marked #Inline(Always)" # the Core function at O0
+stdout: ~ "main.jet:12 in magnitude: abs inlined: marked #Inline(Always)" # the same function through `Int.abs()`
+stdout: ~ "main.jet:14 in spread: gap inlined: marked #Inline(Always)" # the dependency's function
+step o1: jet inspect choices -O1 main.jet
+cwd: app
+exit: 0
+stdout: ~ "main.jet:10 in distance: abs inlined: marked #Inline(Always)" # the Core function at O1
+stdout: ~ "main.jet:12 in magnitude: abs inlined: marked #Inline(Always)" # the same function through `Int.abs()`
+stdout: ~ "main.jet:14 in spread: gap inlined: marked #Inline(Always)" # the dependency's function
+step o2: jet inspect choices -O2 main.jet
+cwd: app
+exit: 0
+stdout: ~ "main.jet:10 in distance: abs inlined: marked #Inline(Always)" # the Core function at O2
+stdout: ~ "main.jet:12 in magnitude: abs inlined: marked #Inline(Always)" # the same function through `Int.abs()`
+stdout: ~ "main.jet:14 in spread: gap inlined: marked #Inline(Always)" # the dependency's function
+step build_o0: jet build -O0 main.jet
+cwd: app
+exit: 0
+file: app/.jet/build/main !~ "core_math_abs" # no Core abs function in the O0 image
+file: app/.jet/build/main !~ "geom_gap" # nor the dependency's gap
+step run_o0: {work}/app/.jet/build/main
+exit: 0
+stdout: = "7 5 3 3\n"
+step build_o1: jet build -O1 main.jet
+cwd: app
+exit: 0
+file: app/.jet/build/main !~ "core_math_abs" # none at O1
+file: app/.jet/build/main !~ "geom_gap" # either
+step run_o1: {work}/app/.jet/build/main
+exit: 0
+stdout: = "7 5 3 3\n"
+step build_o2: jet build -O2 main.jet
+cwd: app
+exit: 0
+file: app/.jet/build/main !~ "core_math_abs" # none at O2
+file: app/.jet/build/main !~ "geom_gap" # either
+step run_o2: {work}/app/.jet/build/main
+exit: 0
+stdout: = "7 5 3 3\n"

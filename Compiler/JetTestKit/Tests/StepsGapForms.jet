@@ -2,7 +2,7 @@ use files: core.files
 
 #Test("apply-edits uses published spans descending byte offsets across multiple files") {
     root: cases_test_root("gap-apply-edits")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "edits"), "{{\"fix_edits\":[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"long\"}},{{\"file\":\"two\",\"span\":{{\"start\":0,\"end\":2}},\"new_text\":\"é\"}},{{\"file\":\"one\",\"span\":{{\"start\":4,\"end\":5}},\"new_text\":\"Z\"}}]}}")
     prefix: "write: one = \"ABCDE\"\nwrite: two = \"xy!\"\n"
     source: "{prefix}step: cat\nstdin: edits\napply-edits: stdout doc $.fix_edits\nfile: one = \"AlongDZ\"\nfile: two = \"é!\"\n"
@@ -16,7 +16,7 @@ use files: core.files
 
 #Test("apply-edits rejects invalid overlapping and non-boundary spans with FAIL") {
     root: cases_test_root("gap-invalid-edits")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     rows: [
         "[{{\"file\":\"one\",\"span\":{{\"start\":0,\"end\":99}},\"new_text\":\"x\"}}]",
         "[{{\"file\":\"one\",\"span\":{{\"start\":3,\"end\":2}},\"new_text\":\"x\"}}]",
@@ -53,7 +53,7 @@ use files: core.files
 
 #Test("build-target tokens precisely refuse the seam but quoted normalizer text stays literal") {
     root: cases_test_root("gap-build-target")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "template"), "{{jet-build-target}}")
     sources: [
         "step: printf '%s' {{jet-build-target}}\n",

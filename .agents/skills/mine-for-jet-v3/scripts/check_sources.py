@@ -78,7 +78,7 @@ def _canonical_url(identity: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("urls", nargs="+")
-    parser.add_argument("--registry", default="Docs/spec/reference/prior-art.md")
+    parser.add_argument("--registry", default="Docs/Spec/Reference/prior-art.md")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--allow-rerun", action="append", default=[], metavar="SOURCE", type=content_id)
     mode.add_argument("--verify-tracked", action="store_true")

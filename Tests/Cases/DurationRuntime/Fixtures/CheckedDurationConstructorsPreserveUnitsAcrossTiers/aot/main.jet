@@ -1,0 +1,13 @@
+run: fn() {
+    fractional: Duration.seconds(1.5) ?? panic("fractional duration")
+    whole: Duration.milliseconds(1500) ?? panic("whole duration")
+    exact: Duration.nanoseconds(4611686018427387904) ?? panic("exact duration")
+    print(fractional.in(.Milliseconds))
+    print(whole.in(.Seconds))
+    print(exact.in(.Nanoseconds))
+    _overflow: Duration.hours(9223372036854775807) ?? {
+        print("overflow")
+        return
+    }
+    print("unexpected duration")
+}

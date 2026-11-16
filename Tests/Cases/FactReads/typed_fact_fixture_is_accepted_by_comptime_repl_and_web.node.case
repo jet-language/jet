@@ -1,0 +1,19 @@
+# HAND-PORT tests/fact_reads.rs:319-325 helper43-95 typed_fact_fixture_is_accepted_by_comptime_repl_and_web NODE branch
+# PENDING-KIT; original generated JS execution, not a repo helper / no NODE-DEBT.
+# JetIR web target: a web build writes beside its entry as `jet build` does (Examples/features/reflection/.jet/build), not in the working directory.
+requires: tool:node
+fixture: TypedFactFixtureIsAcceptedByComptimeReplAndWeb.fixture
+env: NO_COLOR=1
+# The web page prints what `jet run` prints. The fixture's own golden is
+# typed_fact_fixture_matches_aot_default_and_interpreter's to pin.
+step native: jet run Examples/features/reflection/fact_reads.jet
+exit: 0
+stdout: nonempty # the bytes are compared against the web page below; the native golden is the other case's
+step: jet build --target=web Examples/features/reflection/fact_reads.jet
+exit: 0
+file: Examples/features/reflection/.jet/build/app.wasm is-file
+step: node app.js
+cwd: Examples/features/reflection/.jet/build
+exit: 0
+stdout: == native
+stderr: empty

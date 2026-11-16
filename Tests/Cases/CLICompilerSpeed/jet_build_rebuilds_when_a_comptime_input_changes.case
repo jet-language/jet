@@ -1,0 +1,23 @@
+# Claim: every jet build compiles; no stored binary stands in for an unchanged rebuild
+# Claim: editing only the file a comptime block reads (no .jet source changes) gives a binary with the new bytes
+fixture: JetBuildRebuildsWhenAComptimeInputChanges.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --verbose
+exit: 0 # cold build
+stderr: ~ "[build] cache off -> every build compiles live" # cold build compiles
+step: .jet/build/main
+exit: 0 # cold binary runs
+stdout: = "first build\n" # cold binary embeds data.txt
+step: jet build main.jet --verbose
+exit: 0 # unchanged rebuild
+stderr: ~ "[build] cache off -> every build compiles live" # unchanged rebuild compiles again
+stderr: !~ "[build] cache hit" # and reuses no stored binary
+copy: variants/edited.txt data.txt
+step: jet build main.jet --verbose
+exit: 0 # rebuild after editing the comptime input
+stderr: ~ "[build] cache off -> every build compiles live" # edited input rebuilds
+step: .jet/build/main
+exit: 0 # rebuilt binary runs
+stdout: = "edited input\n" # rebuilt binary embeds the edited bytes

@@ -1,0 +1,54 @@
+// A record or enum that holds a `#SingleUse` value owes its duty as the value
+// does: each holder below is dropped with its duty undone (E0140). Moving
+// the holder, or the field that holds the duty, out discharges it.
+use core.mem
+
+#SingleUse Lease: struct {
+    name: String
+}
+
+Holder: struct {
+    lease: Lease
+    count: Int
+}
+
+Nested: struct {
+    inner: Holder
+}
+
+Slot: enum {
+    Empty
+    Held(lease: Lease)
+
+    label: fn(self) -> String { "slot" }
+}
+
+BlockHolder: struct {
+    block: mem.Block
+}
+
+acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
+
+finish: fn(lease: &&Lease) {
+    #Unsafe("the lease's job is done by hand here") { consume(lease) }
+}
+
+finish_holder: fn(holder: &&Holder) { finish(holder.lease.move()) }
+
+block_size: fn(block: &&mem.Block) -> Int {
+    holder: BlockHolder{block: block}
+    holder.block.size()
+}
+
+run: fn() {
+    holder: Holder{lease: acquire("record"), count: 1}
+    nested: Nested{inner: Holder{lease: acquire("nested"), count: 2}}
+    slot: Slot.Held{lease: acquire("payload")}
+    print(holder.count + nested.inner.count)
+    print(slot.label())
+    moved: Holder{lease: acquire("moved"), count: 3}
+    finish_holder(moved)
+    emptied: Holder{lease: acquire("emptied"), count: 4}
+    finish(emptied.lease.move())
+    print(emptied.count)
+}

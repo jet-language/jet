@@ -1,0 +1,70 @@
+use {
+    app
+    core.reactive.loadable.[Loadable]
+    core.time
+}
+
+#Error
+CountError: enum {
+    NoProject
+}
+
+Tasks: struct {
+    count: Int
+    runs: Int
+    busy: Bool
+}
+
+TASKS: Shared{Tasks{count: 1, runs: 0, busy: true}}
+
+// One run's read of the tasks. While the table is busy, another request
+// commits a new task right after every read, as a writer loop does.
+read_tasks: fn() -> Tasks {
+    tasks := TASKS.guard_edit()
+    tasks.value.runs += 1
+    read: tasks.value.copy()
+    if read.busy -> tasks.value.count += 1
+    read
+}
+
+// Every run of the source while the table is busy is overtaken by the
+// write's invalidation of the project's count.
+task_count: fn(project: String) -[DB.Read]> Int CountError! {
+    if project == "" -> return Err(CountError.NoProject)
+    read: read_tasks()
+    if read.busy -> app.invalidate(task_count, "jet")
+    read.count
+}
+
+shown: fn(state: Loadable<Int, CountError>) -> String {
+    if state == {
+        .Loaded(value) -> "loaded {value}"
+        .Failed(reason) -> if reason == {
+            .NoProject -> "failed: no project"
+        }
+        .Idle | .Loading -> "pending"
+    }
+}
+
+runs: fn() -> Int {
+    tasks := TASKS.guard_edit()
+    tasks.value.runs
+}
+
+stop_writes: fn() {
+    tasks := TASKS.guard_edit()
+    tasks.value.busy = false
+}
+
+run: fn() {
+    count: app.live(task_count, "jet")
+    last := "pending"
+    loop _ in 0..<50 -> last = shown(app.state(count))
+    // Two overtaken runs, then the stale 2 is held instead of a run per read.
+    print("50 reads under sustained writes: runs {runs()}, last read {last}")
+    stop_writes()
+    time.sleep(150ms)
+    // The hold has ended: this read runs the source, which nothing overtakes.
+    print("after the writes stop and the hold ends: {shown(app.state(count))}, runs {runs()}")
+    print("read again: {shown(app.state(count))}, runs {runs()}")
+}

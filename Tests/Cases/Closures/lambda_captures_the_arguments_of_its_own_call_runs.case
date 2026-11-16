@@ -1,0 +1,13 @@
+# A call may pass read parameters as arguments and also capture them in a
+# lambda it passes: `with_lock<Bool>(repo, entry.name, () -> write_locked(repo,
+# entry))` needs no copies first, on every tier.
+fixture: LambdaCapturesTheArgumentsOfItsOwnCallRuns.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "written\n"
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "written\n"

@@ -1,0 +1,473 @@
+===== cap/jet/new-web.log
+created demo/
+  package.jet
+  run.jet
+  .gitignore
+next: cd demo && jet dev
+
+
+===== cap/jet/help-dev.log
+jet dev — Watch and run a program; optionally open Canvas or a local app
+
+  jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]
+  --gc-trace                   Record bounded automatic GC-promotion evidence
+  --json                       Emit machine-readable facts or diagnostics
+  --quiet                      Suppress non-error status output
+  --color                      Color: auto | always | never
+  --output                     Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
+  -p                           Pick a workspace member by name
+  --restart                    Always rerun from scratch after a save
+  --swap                       Hot-swap compatible edits and restart after type changes
+  --watch                      Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
+  --canvas                     Open the full Canvas IDE over this dev session
+  --app                        Select a checked local-app function
+  --share                      Select local-app sharing authority: loopback or lan
+  --canvas-host                With --canvas, bind host (loopback by default)
+  --canvas-port                With --canvas, bind an explicit port
+  --canvas-transport           With --canvas, select the named transport
+  --canvas-authority           With --canvas, select loopback or remote authority
+  --canvas-audit               With --canvas, enable request/rebuild audit output
+  --token                      Require a bearer token for the session
+  --offline                    Reuse only cached signed toolchain and package data
+  --fixtures                   Use an explicit fixture bundle
+  --gate                       Allow one audited gate as --gate name=allow
+  --target                     Select a target (triple, board.<name>, or named database target)
+  --env                        Select one declared env.<name> module
+  --preset                     Select one declared environment preset
+  --no-capture                 Disable automatic replay capture for this session
+  --release                    Optimize for release
+  --profile                    How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+  --optimize                   How hard to optimize: none, basic or full
+  --bounds                     What a failed bounds check does: fatal, report or off
+  --debug-info                 Whether the image carries DWARF debug info: true, false or split
+  --small                      Favor a smaller binary by keeping inlining to the O1 limits: true or false
+  --inline                     Which calls the optimizer inlines: auto, always_marked or off
+  --backtrace                  What a fault report shows of the stack: full, brief or off
+  --dead-code                  Whether the image keeps the package's unreached functions: remove or keep
+  --checked-alloc              Build with the checked memory allocator, which stops at a bad free or a write after free: true or false
+  --write-generated            Whether fn build's generated sources are written to .jet/generated/: off or on
+  --output-dir                 The directory jet build writes its executables to ("" is .jet/build)
+  --libs                       More C libraries the native link resolves foreign symbols against
+  --link-args                  More native link inputs: -L<dir>, -l<name> or a .a archive path
+  --os                         The operating system the image runs on: linux, macos, windows, web or freestanding
+  --min-os                     The oldest OS version the image runs on ("" is none)
+  --set                        Set one declared package setting as key=value
+  --threads                    Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads
+  --show-default               Use and report the stock default
+  --record                     Record a named replay as --record=<name>
+
+
+===== cap/jet/dev-app-1.log
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+Error [E0003]: Expected a call, binding, assignment, or `return`, found a piece of quoted text
+  --> RUN/work/jet/app/run.jet:4:27
+    |
+  4 | fn greeting() -> String { "hello v2" 
+    |                           ^^^^^^^^^^
+ Why: Inside a function body, write a call, binding, assignment, or `return`
+ Fix: e.g. print("hello") or x :: 1
+More: jet-lang.dev/e/E0003
+
+Error [E0003]: Expected a call, binding, assignment, or `return`, found the keyword `fn`
+  --> RUN/work/jet/app/run.jet:6:1
+    |
+  6 | fn home() -> WebPage { web.page("Probe", "<link rel=\"stylesheet\" href=\"/assets/app.css\"><main><h1 id=\"msg\">{greeting()}</h1></main>") }
+    | ^^
+ Why: Inside a function body, write a call, binding, assignment, or `return`
+ Fix: e.g. print("hello") or x :: 1
+More: jet-lang.dev/e/E0003
+
+Error [E0003]: Expected a call, binding, assignment, or `return`, found the keyword `fn`
+  --> RUN/work/jet/app/run.jet:8:1
+    |
+  8 | fn about() -> WebPage { web.page("About", "<main><p>about</p></main>") }
+    | ^^
+ Why: Inside a function body, write a call, binding, assignment, or `return`
+ Fix: e.g. print("hello") or x :: 1
+More: jet-lang.dev/e/E0003
+
+Error [E0003]: Expected a call, binding, assignment, or `return`, found the keyword `fn`
+  --> RUN/work/jet/app/run.jet:10:1
+    |
+ 10 | fn run() {
+    | ^^
+ Why: Inside a function body, write a call, binding, assignment, or `return`
+ Fix: e.g. print("hello") or x :: 1
+More: jet-lang.dev/e/E0003
+
+Error [E0083]: `{` opened on line 4 is never closed
+  --> RUN/work/jet/app/run.jet:4:25
+    |
+  4 | fn greeting() -> String { "hello v2" 
+    |                         ^
+  --> RUN/work/jet/app/run.jet:18:2
+    |
+ 18 | }
+    |  ^ the end of the file comes before the closing `}`
+ Why: Every `{` needs a matching `}`, but the end of the file came first
+ Fix: Add `}` where the block ends
+More: jet-lang.dev/e/E0083
+
+5 problems found
+run `jet explain E0003` to learn more
+
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+Error [E0113]: This value is Int (a whole number), but `greeting` returns String
+  --> RUN/work/jet/app/run.jet:4:27
+    |
+  4 | fn greeting() -> String { 42 }
+    |                           ^^
+ Why: `greeting` declares String as its result, so the value it hands back must be String
+ Fix: Put the value in text with interpolation: "{value}"
+More: jet-lang.dev/e/E0113
+
+1 problem found
+run `jet explain E0113` to learn more
+
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+jet dev: change detected, rebuilding
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+Stop [E3001]: `panic: boom in greeting`
+  --> run.jet:4 in greeting
+    |
+4 | fn greeting() -> String { panic("boom in greeting") }
+    |                           ^^^^^
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+jet dev: change detected, rebuilding
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+
+
+===== cap/jet/dev-throw.log
+jet dev: watching RUN/work/jet/app-throw (Ctrl-C to stop)
+Stop [E3001]: `panic: boom in about`
+  --> run.jet:8 in about
+    |
+8 | fn about() -> WebPage { panic("boom in about") }
+    |                         ^^^^^
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+
+===== cap/jet/dev-s2-conflict.log
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+Stop [E3001]: `panic: web app could not listen on 127.0.0.1:5312: HTTP I/O failed during bind on `127.0.0.1:5312` failed: tcp listen failed: Address in use (os error 98)`
+  --> <corelib>/Core/Web/Web.jet:405 in __app_serve
+      |
+405 |     server :: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
+      |                                                                                ^^^^^
+locals: port = 5312
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+
+===== cap/jet/dev-keys-tty.log
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+hroq^C
+
+
+===== cap/jet/dev-devport.log
+jet dev: in-process hot reload isn't available yet; restarting the program on each change
+internal compiler error: the Jet backend failed on `RUN/work/jet/app-devport/dev.jet`: 1 compiler fault:
+  ir.object object: -: entry function dev must take no parameters and return nothing
+This is a bug in jet, NOT in your program. Please report it,
+attaching your source file.
+jet dev: watching RUN/work/jet/app-devport (Ctrl-C to stop)
+
+
+===== cap/jet/dev-dev_context.log
+internal compiler error: the Jet backend failed on `RUN/work/jet/dev_context/dev.jet`: 1 compiler fault:
+  ir.object object: -: entry function dev must take no parameters and return nothing
+This is a bug in jet, NOT in your program. Please report it,
+attaching your source file.
+jet dev: watching RUN/work/jet/dev_context (Ctrl-C to stop)
+
+
+===== cap/jet/dev-demo-1.log
+jet dev: watching RUN/work/jet/demo (Ctrl-C to stop)
+
+
+===== cap/jet/dev-target-web-demo.log
+Error [E2104]: `jet run --target` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.
+More: jet-lang.dev/e/E2104
+
+
+===== cap/jet/run-demo.log
+
+
+===== cap/jet/build-web-demo.log
+
+
+===== cap/jet/dev-ref-1.log
+jet dev: watching RUN/work/jet/ref (Ctrl-C to stop)
+Stop [E3001]: `panic: id field`
+  --> run.jet:160 in render_snapshot
+      |
+160 |     form1 :: forms.field(form0, "id", "Int", true) ?? panic("id field")
+      |                                                       ^^^^^
+locals: id = 41, stale_generation = 2
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001
+
+
+===== cap/jet/flag_port.log
+Error [E2105]: Can't securely read the file `5317`
+ Why: Jet could not complete the named file, tool, or operating-system operation
+ Fix: Check the spelling, or run jet from the folder that contains it
+More: jet-lang.dev/e/E2105
+
+
+===== cap/jet/flag_bogus.log
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+
+
+===== cap/jet/flagdev___open.log
+jet dev: watching RUN/work/jet/app (Ctrl-C to stop)
+
+
+===== cap/jet/flagdev___swap.log
+Error [E2104]: `jet run --swap` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.
+More: jet-lang.dev/e/E2104
+
+
+===== cap/jet/flagdev___canvas.log
+Error [E2104]: `jet dev` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.
+More: jet-lang.dev/e/E2104
+
+
+===== cap/jet/flagdev___app_run___share_lan.log
+Error [E2104]: `jet dev` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.
+More: jet-lang.dev/e/E2104
+
+
+===== cap/vite/session/session.log
+  VITE v8.3.5  ready in 109 ms
+
+  ➜  Local:   http://localhost:5401/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+h
+
+  Shortcuts
+  press r + enter to restart the server
+  press u + enter to show server url
+  press o + enter to open in browser
+  press c + enter to clear console
+  press q + enter to quit
+^C
+
+
+===== cap/vite/session/conflict.log
+Port 5401 is in use, trying another one...
+
+  VITE v8.3.5  ready in 123 ms
+
+  ➜  Local:   http://localhost:5402/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+
+
+===== cap/next/session/session.log
+▲ Next.js 16.4.5 (Turbopack)
+- Local:         http://localhost:5410
+- Network:       http://192.168.0.77:5410
+✓ Ready in 193ms
+✓ Running next.config.ts took 22ms
+- Cache Components enabled
+- Partial Prefetching enabled
+
+ GET / 200 in 213ms (next.js: 116ms, application-code: 98ms)
+ GET /nope 404 in 201ms (next.js: 182ms, application-code: 19ms)
+h
+ GET / 200 in 21ms (next.js: 0.8ms, application-code: 20ms)
+^C
+⠙
+
+
+===== cap/next/session/conflict.log
+⨯ Failed to start server
+Error: listen EADDRINUSE: address already in use :::5410
+    at new Promise (<anonymous>) {
+  code: 'EADDRINUSE',
+  errno: -98,
+  syscall: 'listen',
+  address: '::',
+  port: 5410
+}
+
+⠙
+
+
+===== cap/astro/session/session.log
+12:00:57 [vite] connected.
+12:00:57 [types] Generated 0ms
+12:00:57 [vite] connected.
+ astro  v7.4.5 ready in 160 ms
+┃ Local    http://localhost:5420/
+┃ Network  use --host to expose
+12:00:57 watching for file changes...
+12:00:58 [200] / 12ms
+12:01:01 [404] /nope 3ms
+h
+  Press s + enter to sync content layer
+  Press o + enter to open in browser
+  Press q + enter to quit
+12:01:17 [200] / 2ms
+^C
+
+
+===== cap/astro/session/conflict.log
+Another astro dev server is already running.
+
+  URL:  http://localhost:5420
+  PID:  76299
+
+Run `astro dev stop` to stop it, or use `astro dev --force` to replace it.
+  Location:
+    RUN/work/inc/astro-app/node_modules/astro/dist/cli/dev/index.js:182:10
+  Stack trace:
+    at dev (file://RUN/work/inc/astro-app/node_modules/astro/dist/cli/dev/index.js:182:10)
+    at async cli (file://RUN/work/inc/astro-app/node_modules/astro/dist/cli/index.js:212:3)
+⠙
+
+
+===== cap/rsbuild/session/session.log
+Rsbuild v2.3.1
+
+  ➜  Local:    http://localhost:5430/
+  ➜  Network:  use --host to expose
+  ➜  press h + enter to show shortcuts
+
+start   build started...
+ready   built in 0.05s
+h
+
+  Shortcuts:
+  c + enter  clear console
+  o + enter  open in browser
+  q + enter  quit process
+  r + enter  restart server
+  u + enter  show urls
+
+^C
+
+
+===== cap/rsbuild/session/conflict.log
+Rsbuild v2.3.1
+
+  ➜  Local:    http://localhost:5431/
+  ➜  Network:  use --host to expose
+  ➜  press h + enter to show shortcuts
+
+info    port 5430 is in use, using port 5431.
+start   build started...
+ready   built in 0.06s
+
+
+===== cap/parcel/session/session.log
+⠋ Building index.html...
+⠙ Building index.html...
+⠹ Building runtime.js...
+⠸ Building index.js...
+⠼ Building index.js...
+Server running at http://localhost:5440
+⠋ Building index.js...
+✨ Built in 375ms
+⠙
+
+
+===== cap/parcel/session/conflict.log
+Error: Port "5440" could not be used
+    at normalizeOptions (RUN/work/inc/parcel-app/node_modules/parcel/lib/cli.js:432:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run (RUN/work/inc/parcel-app/node_modules/parcel/lib/cli.js:266:17)
+⠙
+
+
+===== cap/bun/session/session.log
+$ bun --hot src/index.ts
+🚀 Server running at http://localhost:5450/
+Bundled page in 33ms: src/index.html
+h
+^C
+
+
+===== cap/bun/session/conflict.log
+$ bun --hot src/index.ts
+1 | import { serve } from "bun";
+2 | import index from "./index.html";
+3 | 
+4 | const server = serve({
+                   ^
+error: Failed to start server. Is port 5450 in use?
+ syscall: "listen",
+   errno: 0,
+    code: "EADDRINUSE"
+
+      at RUN/work/inc/bun-app/src/index.ts:4:16
+      at loadAndEvaluateModule (2:1)
+
+
+===== cap/deno/session/session.log
+Watcher Process started.
+deno serve: Listening on http://0.0.0.0:5460/
+h
+^CWatcher Waiting for graceful termination...
+
+
+===== cap/deno/session/conflict.log
+Watcher Process started.
+error: Uncaught (in promise) AddrInUse: Address already in use (os error 98)
+    at listen (ext:deno_net/01_net.js:594:35)
+    at serveInner (ext:deno_http/00_serve.ts:963:18)
+    at Object.serve (ext:deno_http/00_serve.ts:879:12)
+    at ext:deno_http/00_serve.ts:1126:12
+    at ext:runtime_main/js/99_main.js:813:13
+Watcher Process failed. Restarting on file change...
+
+
+===== cap/bun/throw.log
+$ bun --hot src/index.ts
+🚀 Server running at http://localhost:5451/
+21 |       },
+22 |     },
+23 | 
+24 |     "/api/hello/:name": async req => {
+25 |       const name = req.params.name;
+26 |       if (name === "boom") throw new Error("boom in handler");
+                                          ^
+error: boom in handler
+      at /api/hello/:name (RUN/work/inc/bun-throw/src/index.ts:26:38)
+GET - /api/hello/boom failed
+21 |       },
+22 |     },
+23 | 
+24 |     "/api/hello/:name": async req => {
+25 |       const name = req.params.name;
+26 |       if (name === "boom") throw new Error("boom in handler");
+                                          ^
+error: boom in handler
+      at /api/hello/:name (RUN/work/inc/bun-throw/src/index.ts:26:38)
+GET - /api/hello/boom failed
+
+

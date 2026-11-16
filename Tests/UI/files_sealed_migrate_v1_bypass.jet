@@ -1,0 +1,11 @@
+// D-CRYPTO-ENVELOPE2=A: historical file migration remains expert-only.
+use {
+    crypto: core.crypto
+    sealed: core.files.sealed
+}
+
+run: fn() {
+    key: [U8]{}
+    recipient: crypto.X25519SecretKey.new_random() ?? return
+    _: sealed.migrate_v1(key, Path.from("old.jetc"), [recipient.public_key()], Path.from("new.jetc"))
+}

@@ -1,5 +1,5 @@
-// `jet build Compiler/`: the toolchain. The `jet` executable is JetCli's run
-// entry, compiled with every package it depends on (JetCli/package.jet lists
+// `jet build Compiler/`: the toolchain. The `jet` executable is JetCLI's run
+// entry, compiled with every package it depends on (JetCLI/package.jet lists
 // them). The `prelude-sources` and `lexer-keywords` steps first regenerate
 // the sources that copy or project other sources (Toolchain/PreludeSources.jet,
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
@@ -13,29 +13,29 @@
 // Registry/RuntimeInterface.jet) disagrees with the one the runtime source
 // renders. The same step checks
 // Core and the Prelude once, with jet-bare, and builds the Core library
-// below from that check (JetCli CoreLibrary.jet). The `core-embed` step then
+// below from that check (JetCLI CoreLibrary.jet). The `core-embed` step then
 // writes `jet`, the same executable with each runtime file and jet's own
-// identity added as parts it maps at load (JetCli RuntimeEmbed.jet), and
+// identity added as parts it maps at load (JetCLI RuntimeEmbed.jet), and
 // that identity to IDENTITY beside it for the tools that name a jet without
 // running it. So jet reads no runtime or identity file: only jet-bare reads
 // jet-runtime/. jet-bare has no runtime image, so the runtime step can't run
 // Core code at compile time: every
 // Core module value must be a constant the compiler folds, and one that
-// calls Core code is E0643 here (Core/Ui Draw.jet's built-in face is a
+// calls Core code is E0643 here (Core/UI Draw.jet's built-in face is a
 // `#Memo` function for this). The pack carries no C or libc: a program's C
-// closure links the musl sysroot of jet's C toolchain pack (JetCli
+// closure links the musl sysroot of jet's C toolchain pack (JetCLI
 // ForeignLink.jet). The Core library (jet_core.o, core.exports, core.facts,
 // core.seal, core.threads: jet's embedded Core as global symbols, which of
 // them a bound program may take as sealed, and what it may know of them
 // unchecked) lands here too: the image links its
 // object beside the runtime, and jet carries the object and its lists as
 // parts, by which a `jet run` binds its Core calls to the image's Core code,
-// or to the object's in a full link (JetCli Host.jet). So do
+// or to the object's in a full link (JetCLI Host.jet). So do
 // core.interface, each embedded Core unit's load rows and function body
 // spans (JetDriver CoreInterface.jet), and core.bodies, the Prelude's
 // function checks as the Core library's check left them (JetSema
 // CoreBodies.jet), which jet carries as parts too.
-RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
+RUNTIME_DIR: "JetCLI/.jet/build/jet-runtime"
 
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o",
@@ -93,7 +93,7 @@ build: fn(b: Build) -[Exec, FS]> {
         keywords.file(b.folder("JetFoundation/Data/Syntax"), flag: "--syntax=")
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
-        bare: b.add_executable("jet-bare", ["JetCli/run.jet"], [prelude, keywords])
+        bare: b.add_executable("jet-bare", ["JetCLI/run.jet"], [prelude, keywords])
         pack: b.add_executable("runtime-pack", ["Toolchain/RuntimePack.jet"], [])
         runtime: b.run("runtime", b.host(pack), ["Exec", "FS"])
         runtime.arg("pack")
@@ -118,8 +118,8 @@ build: fn(b: Build) -[Exec, FS]> {
         embed.arg(RUNTIME_DIR)
         loop file in RUNTIME_FILES -> embed.reads("{RUNTIME_DIR}/{file}")
         embed.reads("{RUNTIME_DIR}/IDENTITY")
-        embed.output("JetCli/.jet/build/jet")
-        embed.output("JetCli/.jet/build/IDENTITY")
+        embed.output("JetCLI/.jet/build/jet")
+        embed.output("JetCLI/.jet/build/IDENTITY")
         embed.timeout(10min)
         toolchain: b.add_install("toolchain", [], [runtime, embed], [bare])
         b.default(toolchain)

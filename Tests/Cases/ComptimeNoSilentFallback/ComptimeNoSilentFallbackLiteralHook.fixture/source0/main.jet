@@ -1,0 +1,29 @@
+Small: struct {
+    value: Int
+
+    impl Literal.Int {
+        #run from_literal: fn(value: Int) -> Small {
+            if value > 100 -> panic("too big for Small")
+            Small{value: value * 2}
+        }
+    }
+}
+
+Cents: struct {
+    amount: Int
+
+    impl Literal.Float {
+        #run from_literal: fn(digits: String) -> Cents {
+            parts: digits.split(".").to_list()
+            whole: Int.parse(parts[0]) ?? 0
+            fraction: if parts.len() > 1 -> Int.parse(parts[1]) ?? 0 else -> 0
+            Cents{amount: whole * 100 + fraction}
+        }
+    }
+}
+
+show: fn(small: Small) -> Int { small.value }
+
+amount_of: fn(cents: Cents) -> Int { cents.amount }
+
+run: fn() { print("{show(25)} {amount_of(12.50)}") }

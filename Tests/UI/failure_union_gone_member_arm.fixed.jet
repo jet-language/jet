@@ -1,0 +1,38 @@
+// @all_diags
+// `parse_age` fails with its own `Empty` case and with a plain message, so
+// its failures are the open union `Err | ParseAgeError`. `LookupError` is a
+// failure type, but nothing `parse_age` does fails with it, so an arm for it
+// never runs: L0304 in a value table and in a statement table, each with an
+// edit that deletes the arm.
+#Error
+LookupError: enum {
+    Missing
+}
+
+parse_age: fn(raw: String) -> Int {
+    if raw == "" -> return Err(.Empty)
+    if raw == "x" -> return Err("odd input")
+    42
+}
+
+describe: fn(raw: String) -> String {
+    shown: if parse_age(raw) == {
+        .Ok(n) -> "age {n}"
+        .Err(.Empty) -> "empty"
+        .Err(_) -> "failed"
+    }
+    "[{shown}]"
+}
+
+report: fn(raw: String) {
+    if parse_age(raw) == {
+        .Ok(n) -> { print("age {n}") }
+        .Err(.Empty) -> { print("empty") }
+        .Err(_) -> print("failed")
+    }
+}
+
+run: fn() {
+    print(describe("x"))
+    report("")
+}

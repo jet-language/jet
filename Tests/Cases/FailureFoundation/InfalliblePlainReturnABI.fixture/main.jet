@@ -1,0 +1,79 @@
+use process: core.process
+
+Report: struct {
+    title: String
+    lines: [String]
+}
+
+build: fn(title: String, rows: [String]) -> Report { Report{title: title, lines: rows} }
+
+load: fn(n: Int) -> [String] {
+    out := [String]{}
+    loop i in 0..<n -> out.push("row {i}")
+    out
+}
+
+plain: fn(n: Int) -> Int { n + 1 }
+
+through_plain: fn(n: Int) -> Int { plain(n) * 2 }
+
+fib: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    fib(n - 1) + fib(n - 2)
+}
+
+fails: fn(n: Int) -> Int {
+    if n > 5 -> return Err("too many")
+    n
+}
+
+passes_up: fn(n: Int) -> Int { fails(n) + 1 }
+
+passes_up_twice: fn(n: Int) -> Int { passes_up(n) + 1 }
+
+countdown: fn(n: Int) -> Int {
+    if n > 100 -> return Err("too deep")
+    if n == 0 -> return 0
+    countdown(n - 1)
+}
+
+pinned: fn(n: Int) -> Int Err! { n }
+
+handled: fn(n: Int) -> Int { fails(n) ?? 0 }
+
+apply: fn(f: fn(Int) -> Int, x: Int) -> Int { f(x) }
+
+apply_plain: fn(f: fn(Int) -> Int Never!, x: Int) -> Int { f(x) }
+
+Shape: trait {
+    area: fn(self) -> Int Never!
+    checked_area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int Never! { self.side * self.side }
+
+        checked_area: fn(self) -> Int {
+            if self.side < 0 -> return Err("negative side")
+            self.side * self.side
+        }
+    }
+}
+
+measure: fn(shape: Shape) -> Int { shape.area() }
+
+checked_measure: fn(shape: Shape) -> Int { shape.checked_area() }
+
+run: fn() {
+    n: process.args().len()
+    report: build("report", load(n + 2))
+    print("{report.title} {report.lines.len()}")
+    print("{plain(n)} {through_plain(n)} {fib(n + 10)}")
+    print("{fails(n) ?? -1} {passes_up(n) ?? -1} {passes_up_twice(n + 9) ?? -1}")
+    print("{countdown(n + 3) ?? -1} {countdown(n + 101) ?? -1} {pinned(n) ?? -1} {handled(n + 9)}")
+    print("{apply(fn(x: Int) -> Int { x + 1 }, n) ?? -1} {apply_plain(fn(x: Int) -> Int Never! { x * 3 }, n + 1)}")
+    print("{measure(Square{side: 3})} {checked_measure(Square{side: 2}) ?? -1} {checked_measure(Square{side: -2}) ?? -1}")
+}

@@ -1,0 +1,13 @@
+# A call through a function value in an executable build is sealed to every
+# function the program takes as a value and every lambda it writes with the
+# call's argument count (Effects/Checks.jet sema_effect_stack_seal). The
+# report names that set once each, in text order, whatever order the program
+# takes the values in: quoted functions, then the lambdas.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: ordered.jet = "triple: fn(value: Int) -> Int {\n    value * 3\n}\n\ndouble: fn(value: Int) -> Int {\n    value * 2\n}\n\nadd_one: fn(value: Int) -> Int {\n    value + 1\n}\n\napply: fn(f: fn(Int) -> Int, value: Int) -> Int {\n    f(value)\n}\n\nrun: fn() -[!Mem.Stack(above: 64)]> {\n    _ := apply(triple, 1)\n    _ := apply(double, 2)\n    _ := apply(fn(value: Int) -> Int { value - 1 }, 3)\n    _ := apply(add_one, 4)\n    _ := apply(triple, 5)\n}\n"
+step: jet check ordered.jet
+exit: nonzero
+stderr: ~ "may take " # the sealed call path has a bound, above the tiny limit
+stderr: ~ "-> ordered.apply (" # the deepest path runs through the call in `apply`
+stderr: ~ "calls through values sealed to `ordered.add_one`, `ordered.double`, `ordered.triple`, a lambda in ordered.run)" # each target once, in text order

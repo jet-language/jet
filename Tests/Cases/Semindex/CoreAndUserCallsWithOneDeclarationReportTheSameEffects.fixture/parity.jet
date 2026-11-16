@@ -1,0 +1,13 @@
+use core.files
+
+// Core's `files.exists` and a user function with the same declaration.
+user_exists: fn(path: String | Path) -[FS]> Bool Never! { files.exists(path) }
+
+core_caller: fn() -[FS]> Bool Never! { files.exists("probe") }
+
+user_caller: fn() -[FS]> Bool Never! { user_exists("probe") }
+
+main: fn() -[FS]> {
+    _: core_caller()
+    _: user_caller()
+}

@@ -1,0 +1,10 @@
+#!/bin/sh
+# A stand-in for `jet build [--release] .`: it assembles the program
+# $FAKE_JET_PROGRAM (default hello.S, beside this script) into .jet/build/run,
+# the binary asm-parity reads, whatever the mode.
+set -e
+here=$(dirname "$0")
+mkdir -p .jet/build
+as -o .jet/build/run.o "$here/${FAKE_JET_PROGRAM:-hello.S}"
+ld -o .jet/build/run .jet/build/run.o
+rm .jet/build/run.o

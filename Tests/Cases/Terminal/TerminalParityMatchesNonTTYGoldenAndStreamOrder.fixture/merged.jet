@@ -1,0 +1,25 @@
+// Runs `$JET run --quiet terminal.jet` (`--release` when the first argument
+// is `release`) on this program's stdin with the child's stderr merged into
+// its stdout: `.stderr(.Stdout)` gives the child one descriptor for both, so
+// the bytes arrive in the order it wrote them. Prints them as they arrived and
+// exits with the child's code.
+package: {
+    name: "terminal_parity_merged"
+    authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    process: core.process
+    term: core.term
+}
+
+run: fn() {
+    argv := [String]{process.env_get("JET") ?? "jet", "run", "--quiet"}
+    if (process.args().get(0) ?? "") == "release" -> argv.push("--release")
+    argv.push("terminal.jet")
+    receipt: process.run_spec(process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Stdout)) ?? panic("merged run failed: {err}")
+    out := term.stdout()
+    out.write(receipt.output) ?? panic("merged output write failed")
+    out.flush() ?? panic("merged output flush failed")
+    process.exit(receipt.code)
+}

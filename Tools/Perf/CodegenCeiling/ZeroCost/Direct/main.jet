@@ -1,0 +1,166 @@
+// The direct spelling of the zero-cost pair (Tools/Perf/CodegenCeiling.jet):
+// Kernel/main.jet with each call of its kernel's owners written in place,
+// as the raw operations and the index checks the owners' methods hold. Each
+// function below runs its loops in its own body and is called through a
+// function value, so it keeps its own symbol; `run` also loops in its own
+// body. The program is its own kernel file.
+use mem: core.mem
+
+#CLI
+Args: struct {
+    n: Int
+}
+
+WORDS: 1024
+
+ROUNDS: 64
+
+PAGE_BYTES: 65536
+
+// Allocate, write, read and free: one block of 1 to 64 words per turn.
+churn: fn(n: Int) -> Int {
+    total := I64{0}
+    loop i in 0..<n {
+        count: 1 + i.bit_and(63)
+        #Unsafe("each index is checked against the block's `count` words, and the block is released once, at the end of the turn") {
+            bytes: mem.alloc_raw(count * 8, 8) ?? panic("no memory")
+            words: bytes.cast<I64>()
+            first: 0
+            last: count - 1
+            if first < 0 || first >= count -> panic("word {first} is outside {count}")
+            mem.volatile_write(words.offset(first), I64{i})
+            if last < 0 || last >= count -> panic("word {last} is outside {count}")
+            mem.volatile_write(words.offset(last), I64{count})
+            if first < 0 || first >= count -> panic("word {first} is outside {count}")
+            read_first: words.offset(first).*
+            if last < 0 || last >= count -> panic("word {last} is outside {count}")
+            total = wrapping(total + read_first + words.offset(last).*)
+            mem.free_raw(bytes)
+        }
+    }
+    Int{total}
+}
+
+// Resize: one word appended per turn, the block doubling when full.
+grow: fn(n: Int) -> Int {
+    total := I64{0}
+    #Unsafe("each index is checked against the block's `count` words, and each block is released once") {
+        bytes := mem.alloc_raw(4 * 8, 8) ?? panic("no memory")
+        count := 4
+        used := 0
+        loop i in 0..<n {
+            if used == count {
+                fresh: mem.alloc_raw(count * 2 * 8, 8) ?? panic("no memory")
+                mem.copy<I64>(fresh.cast<I64>(), bytes.cast<I64>(), count)
+                mem.free_raw(bytes)
+                bytes = fresh
+                count *= 2
+            }
+            if used < 0 || used >= count -> panic("word {used} is outside {count}")
+            mem.volatile_write(bytes.cast<I64>().offset(used), I64{i})
+            used += 1
+        }
+        words: bytes.cast<I64>()
+        loop at in 0..<used {
+            if at < 0 || at >= count -> panic("word {at} is outside {count}")
+            total = wrapping(total + words.offset(at).*)
+        }
+        mem.free_raw(bytes)
+    }
+    Int{total}
+}
+
+// Fill, compare, copy and read whole blocks.
+scan: fn(n: Int) -> Int {
+    total := I64{0}
+    #Unsafe("both blocks hold WORDS words, each index is below WORDS, and each block is released once, at the end") {
+        a_bytes: mem.alloc_raw(WORDS * 8, 8) ?? panic("no memory")
+        b_bytes: mem.alloc_raw(WORDS * 8, 8) ?? panic("no memory")
+        a: a_bytes.cast<I64>()
+        b: b_bytes.cast<I64>()
+        mem.fill<I64>(b, I64{0}, WORDS)
+        loop pass in 0..<n {
+            mem.fill<I64>(a, I64{pass}, WORDS)
+            at: pass.bit_and(WORDS - 1)
+            if at < 0 || at >= WORDS -> panic("word {at} is outside {WORDS}")
+            mem.volatile_write(a.offset(at), I64{-1})
+            same := true
+            loop word in 0..<WORDS {
+                if a.offset(word).* != b.offset(word).* {
+                    same = false
+                    break
+                }
+            }
+            if same -> total = wrapping(total + 1)
+            mem.copy<I64>(b, a, WORDS)
+            same = true
+            loop word in 0..<WORDS {
+                if a.offset(word).* != b.offset(word).* {
+                    same = false
+                    break
+                }
+            }
+            if same -> total = wrapping(total + 1)
+            loop word in 0..<WORDS -> total = wrapping(total + b.offset(word).*)
+        }
+        mem.free_raw(a_bytes)
+        mem.free_raw(b_bytes)
+    }
+    Int{total}
+}
+
+// The atomic word: add, load, compare-exchange and store.
+tally: fn(n: Int) -> Int {
+    word: Atomic<I64>.new(0)
+    total := I64{0}
+    loop _ in 0..<n {
+        loop round in 0..<ROUNDS {
+            total = wrapping(total + word.add(I64{round.bit_and(31)}))
+            seen: word.load()
+            if word.compare_exchange(seen, wrapping(seen + 1)) -> total = wrapping(total + 1)
+        }
+        word.store(0)
+    }
+    Int{total}
+}
+
+// Map, write, read and unmap fresh pages.
+pages: fn(n: Int) -> Int {
+    total := I64{0}
+    loop i in 0..<n {
+        region: mem.Region.reserve(PAGE_BYTES) ?? panic("no mapping")
+        count: PAGE_BYTES /% 8
+        #Unsafe("each index is checked against the mapping's `count` words, and the region stays mapped until its close") {
+            words: mem.Ptr<I64>.from_addr(region.address())
+            last: count - 1
+            at: i.bit_and(last)
+            if at < 0 || at >= count -> panic("word {at} is outside {count}")
+            mem.volatile_write(words.offset(at), I64{i})
+            if last < 0 || last >= count -> panic("word {last} is outside {count}")
+            mem.volatile_write(words.offset(last), I64{last})
+            if at < 0 || at >= count -> panic("word {at} is outside {count}")
+            read_at: words.offset(at).*
+            if last < 0 || last >= count -> panic("word {last} is outside {count}")
+            total = wrapping(total + read_at + words.offset(last).*)
+        }
+        close(region)
+    }
+    Int{total}
+}
+
+NAMES: [String]{"churn", "grow", "scan", "tally", "pages"}
+
+run: fn(args: Args) {
+    work: [fn(Int) -> Int]{churn, grow, scan, tally, pages}
+    loop index in 0..<work.len() -> print("{NAMES[index]} {work[index](args.n)}")
+    count: if args.n > 0 -> args.n else -> 1
+    total := I64{0}
+    #Unsafe("the block holds `count` words, each index is below `count`, and the block is released once, at the end") {
+        bytes: mem.alloc_raw(count * 8, 8) ?? panic("no memory")
+        words: bytes.cast<I64>()
+        mem.fill<I64>(words, I64{3}, count)
+        loop at in 0..<count -> total = wrapping(total + words.offset(at).*)
+        print("run {total}")
+        mem.free_raw(bytes)
+    }
+}

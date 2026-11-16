@@ -16,13 +16,13 @@ use {
 
 HERE: "Compiler/JetRuntime/Tests"
 
-KAT: "tests/data/unicode/NormalizationTest.txt"
+KAT: "Tests/Data/Unicode/NormalizationTest.txt"
 
 KAT_SHA256: "5019ffd530751a741900c849c0e010332f142a3612234639bd200b82138a87db"
 
 KAT_ROWS: 20034
 
-POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+POLICY: "Compiler/JetCLI/Source/CLI/native-c-policy.tsv"
 
 Policy: struct {
     flags: [String]
@@ -74,7 +74,7 @@ load_policy: fn(root: String) -> Policy {
 }
 
 // `$CC` (default `cc`) with `args` and the policy flags, as
-// Tools/packaging/NativeCCompiler.jet runs it.
+// Tools/Packaging/NativeCCompiler.jet runs it.
 native_cc: fn(policy: Policy, args: [String]) -> ProcessSpec {
     removed: policy.removed
     spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)

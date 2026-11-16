@@ -1,0 +1,18 @@
+# core.encoding.json parse has one meaning, its Jet body. decode, loads and
+# load call parse from inside the module and run the same body an outside
+# caller of parse gets, so all four spellings agree on values and on error
+# text, on every tier.
+fixture: CoreJSONMembersCallTheirOwnJetBodiesInsideTheModuleOnEveryTier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = core_json_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = core_json_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = core_json_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out

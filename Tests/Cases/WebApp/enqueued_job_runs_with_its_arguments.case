@@ -1,0 +1,18 @@
+# `app.enqueue(fn() { self.job(args) })` checks and builds at every
+# optimization level, for a job that takes arguments and can fail and for
+# one that takes none. Queued outside any call's transaction, each job runs
+# at once, on a task of its own, with the arguments `enqueue` was given.
+fixture: EnqueuedJobRunsWithItsArguments.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "added 7\nnote 7: added 7\ntick\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "added 7\nnote 7: added 7\ntick\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "added 7\nnote 7: added 7\ntick\n"

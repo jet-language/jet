@@ -1,0 +1,13 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("no copy of the pointer is read after the block is released") {
+        if mem.alloc_raw(16, 8) == .Val(bytes) {
+            kept: bytes.cast<Int>()
+            mem.fill(kept, 6, 2)
+            print(kept.offset(1).*)
+            mem.free_raw(bytes)
+            print(kept.*)
+        }
+    }
+}

@@ -1,0 +1,23 @@
+# app.field_error(at:, reason:) in a method returns a FieldError whose path
+# names a field of a decoded argument. The Crew's add_task refuses a draft
+# whose assignee is no member, at `assignee`, and a step with no title, at
+# `steps[{index}].title`: the client prints each refusal's path and reason.
+# The probe writes paths that name no field of its draft argument: a
+# misspelled field, a field a step does not have and an index into a field
+# that is no list. Each is E2813, which lists the fields the path can name.
+fixture: FieldErrorPathIsChecked.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check probes/unknown_path.jet
+exit: nonzero
+stderr: ~ "`app.field_error` path `asignee` names no field of an argument." # the misspelled field
+stderr: ~ "unknown_path.jet:11:66" # at the misspelled path
+stderr: ~ "can name `title`, `assignee`, `steps`." # the fix lists the draft's fields
+stderr: ~ "].name` names no field of an argument." # a field a step does not have
+stderr: ~ "unknown_path.jet:13:64" # at the step's path
+stderr: ~ "at the step that failed it can name `title`." # the fix lists the step's fields
+stderr: ~ "`app.field_error` path `title[0]` names no field of an argument." # an index into a String
+stderr: ~ "unknown_path.jet:15:61" # at the indexed path
+step: jet run client/main.jet
+exit: 0
+stdout: = "added with 1 steps\nassignee: Pick someone in this project.\nsteps[1].title: Give the step a title.\n"

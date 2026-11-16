@@ -1,0 +1,20 @@
+# Claim: every jet build compiles; no stored binary stands in for an unchanged rebuild
+# Claim: adding only the package's hot-text.list, which orders the image's text (no .jet source changes), gives a rebuilt binary that runs
+fixture: JetBuildRebuildsWhenTheHotTextListChanges.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --verbose
+exit: 0 # cold build
+stderr: ~ "[build] cache off -> every build compiles live" # cold build compiles
+step: jet build main.jet --verbose
+exit: 0 # unchanged rebuild
+stderr: ~ "[build] cache off -> every build compiles live" # unchanged rebuild compiles again
+stderr: !~ "[build] cache hit" # and reuses no stored binary
+copy: variants/hot-text.list hot-text.list
+step: jet build main.jet --verbose
+exit: 0 # rebuild after adding the hot-text list
+stderr: ~ "[build] cache off -> every build compiles live" # the list rebuilds
+step: .jet/build/main
+exit: 0 # rebuilt binary runs
+stdout: = "laid out\n" # rebuilt binary prints

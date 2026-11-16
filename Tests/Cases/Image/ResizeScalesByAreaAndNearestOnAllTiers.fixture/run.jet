@@ -1,0 +1,28 @@
+// A decoded JPEG scales down and up by area average and by nearest pixel,
+// and a translucent pair averages by alpha; every tier prints the same
+// pixels.
+use {
+    files: core.files
+    image: core.image
+}
+
+words: fn(picture: image.Image) -> String {
+    hash := 0
+    loop byte in picture.pixels -> hash = (hash * 31 + Int{byte}) % 1000000007
+    "{picture.width}x{picture.height} {hash}"
+}
+
+run: fn() {
+    limits: image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 400000}
+    photo: image.decode(files.read_bytes("photo.jpg") ?? panic("read photo.jpg"), limits) ?? panic("decode photo.jpg")
+    print("area down {words(image.resize(photo, 5, 3, .Area, limits) ?? panic("area down"))}")
+    print("area up {words(image.resize(photo, 23, 21, .Area, limits) ?? panic("area up"))}")
+    print("nearest down {words(image.resize(photo, 5, 3, .Nearest, limits) ?? panic("nearest down"))}")
+    pair: image.Image{width: 2, height: 1, pixels: [U8]{255, 0, 0, 0, 0, 255, 0, 255}}
+    blended: image.resize(pair, 1, 1, .Area, limits) ?? panic("blend")
+    print("translucent pair {blended.pixels[0]} {blended.pixels[1]} {blended.pixels[2]} {blended.pixels[3]}")
+    if image.resize(photo, 400, 400, .Area, image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 1000}) == {
+        .Ok(_) -> { print("over budget: resized") }
+        .Err(error) -> { print("over budget: {error:Debug}") }
+    }
+}

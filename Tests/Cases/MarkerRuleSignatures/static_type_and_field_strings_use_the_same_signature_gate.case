@@ -1,0 +1,27 @@
+# tests/marker_rule_signatures.rs::static_type_and_field_strings_use_the_same_signature_gate at tests/marker_rule_signatures.rs:651; hand-port
+# Claim: valid static Rename strings and a `tag: .Field("kind")` key produce no E0930 (tests/marker_rule_signatures.rs:664)
+# Claim: an Int-valued `tag: .Field` key on an enum yields E0930 and no E2409 (tests/marker_rule_signatures.rs:671-682)
+# The tag key (the retired #Discriminant's string) is written as one string
+# literal: `tag: .Field(…)` with any other argument is E0930.
+# Claim: Int-valued Rename on struct field yields E0930 and no E2409 (tests/marker_rule_signatures.rs:671-682)
+# Claim: Int-valued Rename on enum variant yields E0930 and no E2409 (tests/marker_rule_signatures.rs:671-682)
+# Not ported: Rust asserts E0930 exactly once per source; CLI pins E0930 presence only
+fixture: StaticTypeAndFieldStringsUseTheSameSignatureGate.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:664 no E0930
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:664 no E0930
+step: jet check enum_tag/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:671-682
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:671-682
+stderr: !~ "E2409" # tests/marker_rule_signatures.rs:671-682
+step: jet check struct_field/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:671-682
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:671-682
+stderr: !~ "E2409" # tests/marker_rule_signatures.rs:671-682
+step: jet check variant/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:671-682
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:671-682
+stderr: !~ "E2409" # tests/marker_rule_signatures.rs:671-682

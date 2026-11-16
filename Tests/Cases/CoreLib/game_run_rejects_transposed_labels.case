@@ -1,0 +1,6 @@
+# Port of tests/corelib_parts/runtime.rs::game_run_rejects_transposed_labels; original source unchanged.
+# PENDING-GRAMMAR: JSON membership filter, batch-four.
+fixture: Fixtures/GameRunRejectsTransposedLabels
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code in ["E0764","E0768","E0769"]] #>= 1 # original predicate plus E0768 PositionalAfterLabel, the code a positional argument after a labelled one now gets

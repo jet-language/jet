@@ -1,0 +1,24 @@
+// Pool elements hold the same `Shared` material. A write through one element's
+// field (`scene[left].material.color = ...`) edits the cell, so every element
+// holding it sees the change, as a write through a copied handle does.
+Material: struct {
+    color: String
+}
+
+SceneNode: struct {
+    name: String
+    material: Shared<Material>
+}
+
+run: fn() {
+    paint := Shared{Material{color: "red"}}
+    scene := Pool<SceneNode>.new()
+    left: scene.add(SceneNode{name: "left", material: paint.copy()})
+    right: scene.add(SceneNode{name: "right", material: paint.copy()})
+    scene[left].material.color = "blue"
+    print("right is {scene[right].material.color}")
+    left_paint: scene[left].material.copy()
+    left_paint.color = "green"
+    print("right is {scene[right].material.color}")
+    print("paint is {paint.color}")
+}

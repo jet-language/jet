@@ -1,0 +1,27 @@
+# `app.enqueue` takes one call of an `#App.Job` method of the service, on
+# `self`, as a closure: `app.enqueue(fn() { self.send(to) })`. Its arguments
+# are evaluated and encoded at the call, so each must be in its place and of a
+# type that derives `Encode` and `Decode`. The fixture's first two closures
+# are such calls; each of the others is E2817, naming what the closure is
+# instead.
+fixture: EnqueueTakesOneJobCall.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "This `app.enqueue` call does not queue one call of an `#App.Job` method of its service: its closure takes parameters." # a closure with a parameter
+stderr: ~ "main.jet:20:21" # at that closure
+stderr: ~ "of its service: its closure's body is not one call." # a body of two statements
+stderr: ~ "main.jet:21:21" # at that closure
+stderr: ~ "of its service: its closure's body is not a method call on `self`." # a call of a plain function
+stderr: ~ "main.jet:25:21" # at that closure
+stderr: ~ "of its service: its call of `send` is not on `self`." # a call on another value of the service
+stderr: ~ "main.jet:26:28" # at the receiver
+stderr: ~ "of its service: `Mailer.count` is not an `#App.Job` method." # an unmarked method
+stderr: ~ "main.jet:27:33" # at the method
+stderr: ~ "of its service: parameter `hook` of `Mailer.hooked` has the type" # an argument with no encoding
+stderr: ~ "main.jet:28:40" # at the argument
+stderr: ~ "of its service: arguments follow its closure, but its one call gives them." # an argument after the closure
+stderr: ~ "main.jet:29:48" # at that argument
+stderr: ~ "of its service: it is not in a method of a service, so no `self` names one." # a closure outside a method
+stderr: ~ "main.jet:36:36" # at `self`
+stderr: ~ "8 problems found" # one per wrong closure

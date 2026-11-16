@@ -1,0 +1,79 @@
+# `mem.list_append(values, from, count)` grows a List by the `count` Ts at a
+# raw pointer, and `mem.list_copy(to, values, start, count)`
+# moves `values[start..<start + count]` out to one, each as one move of their
+# bytes, for Ints and Strings, on every tier. A count of zero appends or
+# copies nothing; a negative append count answers false and leaves the List
+# as it was. A List appends its own elements: they move before their old
+# buffer goes, so doubling it four times keeps every element. Each
+# precondition holds the run: the sentry checks the whole raw range before
+# any byte moves, so an append reading or a copy writing one Int past its
+# storage is a located R0801 fault, and a copy range that is not inside the
+# List stops as a slice of it does.
+fixture: ARawListAppendAndCopyMoveWholeRanges.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "true true false [9, 1, 2, 3, 4, 5]\n1 3 4 5 5\n48 1 2 3\nstart left right start right\n"
+end when
+step appendnone: jet run -O0 past_append.jet
+exit: 70
+stdout: = "0\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past_append.jet:9:" # the fault is located at the append's line
+stderr: ~ "raw `list_append` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int read overruns
+step appendfull: jet run -O2 past_append.jet
+exit: 70
+stdout: = "0\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past_append.jet:9:" # the fault is located at the append's line
+stderr: ~ "raw `list_append` outside" # the gate's audit text follows
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int read overruns
+step copynone: jet run -O0 past_copy.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past_copy.jet:9:" # the fault is located at the copy's line
+stderr: ~ "raw `list_copy` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 0 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int write overruns
+step copyfull: jet run -O2 past_copy.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past_copy.jet:9:" # the fault is located at the copy's line
+stderr: ~ "raw `list_copy` outside" # the gate's audit text follows
+stderr: ~ "(16 bytes) and runs past its end" # the tuple's two Ints, which the three-Int write overruns
+step outside: jet run -O0 outside.jet
+exit: nonzero
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 3 items from 2 to 4 (exclusive)`" # the slice stop line without the source suffix
+step: jet run -O2 outside.jet
+exit: == outside
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == outside # the slice stop line without the source suffix
+step negative: jet run -O0 negative.jet
+exit: nonzero
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): = "Stop [E3001]: `panic: can't slice 3 items from 1 to 0 (exclusive)`" # a negative count is a range that runs backward
+step: jet run -O2 negative.jet
+exit: == negative
+stdout: empty
+stderr.filter(~ "Stop [E3001]:").line(0).split(" — ", 0): == negative # the slice stop line without the source suffix

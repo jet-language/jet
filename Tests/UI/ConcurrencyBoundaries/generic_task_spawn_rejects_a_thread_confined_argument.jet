@@ -1,0 +1,10 @@
+keep: fn<T>(c: T) -> Int { 1 }
+
+spawn_with: fn<T>(c: &&T) -> Int {
+    t: task keep(c)
+    t.join() ?? 0
+}
+
+share: fn(cell: &&Cell<Int>) -> Int { spawn_with(cell) }
+
+run: fn() {}

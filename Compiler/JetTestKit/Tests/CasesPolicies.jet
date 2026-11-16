@@ -60,7 +60,7 @@ use {
     // A grandchild past the bound fails the step, and the whole tree stops:
     // the 20 s sleep would otherwise hold the step open past its time limit.
     root: cases_test_root("resident-tree-limit")
-    kit_exec_write(files.join(root, "tests/cases/group/tree/grow.sh"), "awk 'BEGIN {{ s = \"a\"; while (length(s) < 134217728) s = s s; system(\"sleep 20\") }}'\ntrue\n")
+    kit_exec_write(files.join(root, "Tests/Cases/group/tree/grow.sh"), "awk 'BEGIN {{ s = \"a\"; while (length(s) < 134217728) s = s s; system(\"sleep 20\") }}'\ntrue\n")
     cases_test_source(root, "grow", "fixture: tree\nstep: jet -c 'sh grow.sh; true'\nlimit: time=10 resident=65536\n")
     context: cases_test_context(root, files.join(root, "scratch"))
     outcome: kit_cases_run(cases_test_entry("grow"), context)[0]
@@ -93,7 +93,7 @@ use {
     assert_eq(kit_steps_version("jet\n"), None)
     assert_eq(kit_steps_version("Jet 1.2.3\n"), None)
     root: cases_test_root("version-normalization")
-    kit_exec_write(files.join(root, "tests/cases/group/version.out"), "jet VERSION\nWelcome to Jet! (VERSION) 9.8.7\n")
+    kit_exec_write(files.join(root, "Tests/Cases/group/version.out"), "jet VERSION\nWelcome to Jet! (VERSION) 9.8.7\n")
     cases_test_source(root, "version", "normalize: version\nstep: jet -c 'echo \"jet a0.0.43-dev+29517f5447\"; echo \"Welcome to Jet! (a0.0.43) 9.8.7\"'\nstdout: = version.out\n")
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.version = "a0.0.43"
@@ -119,7 +119,7 @@ use {
 
 #Test("case JSON assertions read stdout stderr and staged files through the shared checker") {
     root: cases_test_root("json-streams-files")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/doc.json"), "{{\"a\":1,\"b\":true,\"records\":[{{\"kind\":\"runtime\",\"claim\":\"E3001\",\"extra\":2}}]}}")
     kit_exec_write(files.join(directory, "tree/records.json"), "{{\"name\":\"needle\",\"mean_ns\":1}}\n{{\"mean_ns\":1.5,\"name\":\"needle\"}}\n")
     cases_test_source(root, "doc", "fixture: tree\nstep: jet -c 'cat doc.json; cat records.json >&2'\njson: stdout doc $.a = 1\njson: stdout doc $.b : bool # original predicate\njson: stdout doc $.records has {{\"kind\":\"runtime\",\"claim\":\"E3001\"}}\njson: stderr ndjson $ #= 2\njson: stderr ndjson $[*].name = \"needle\"\njson: stderr ndjson $[*].mean_ns : number # measured duration varies\njson: file doc.json doc $.records #= 1\n")
@@ -132,7 +132,7 @@ use {
 
 #Test("environment argv tokens use step values final unsets and empty-value defaults") {
     root: cases_test_root("argv-environment")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "set.out"), "step")
     kit_exec_write(files.join(directory, "unset.out"), "fallback")
     kit_exec_write(files.join(directory, "base.out"), "1")
@@ -149,7 +149,7 @@ use {
 
 #Test("typed JSON normalization attaches only to its step and preserves semantic assertions") {
     root: cases_test_root("json-normalizer-attachment")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/doc.json"), "{{ \"elapsed\" : 1.25, \"fixed\":true }}\n")
     kit_exec_write(files.join(directory, "normalized.out"), "{{ \"elapsed\" : \"<<number>>\", \"fixed\":true }}\n")
     kit_exec_write(files.join(directory, "plain.out"), "plain\n")
@@ -172,7 +172,7 @@ use {
 // not a timeout, well inside the 120 s deadline; kit_exec_run turns that wait
 // failure into an ERROR row. The corpus runner's own bound,
 // `stdout+stderr: len <= 1048576` beside `limit: time=120`
-// (tests/cases/agent_workloads), fails an adapter that writes 2000000 bytes.
+// (Tests/Cases/AgentWorkloads), fails an adapter that writes 2000000 bytes.
 #Test("process output limit fails closed") {
     started: time.instant()
     child := process.cmd(["/bin/sh", "-c", "yes x"]).stdout(.Capture).stderr(.Capture).timeout(120s).output_limit(1048576).spawn() ?? panic("spawn: {err}")

@@ -1,8 +1,0 @@
-Error [jet.ServerOnlyMethodMarkedEndpoint]: `send` is marked `#App.Job`, which keeps it on the server, and `#App.SignedIn`, which makes it an endpoint.
-  --> tests/ui/web_app_job_marked_endpoint.jet:4:16
-    |
-  4 |     #[App.Job, App.SignedIn]
-    |                ^^^^^^^^^^^^
- Why: A job runs after the call that queued it commits, as the system; a schedule runs on its clock, as the system; a webhook runs for a sender that signs its deliveries; a signing key gives the key that checks them. Only the server runs each, so no client may call one through `app.Remote`.
- Fix: Remove `#App.SignedIn` from `send`, and give clients an endpoint method of their own; it can queue a job with `app.enqueue`.
-More: jet-lang.dev/e/E2819

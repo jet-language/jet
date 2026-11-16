@@ -1,0 +1,36 @@
+use core.mem
+
+// The byte fill at each edge of its size classes and at every offset into a
+// 64-byte line: a fill writes its byte to exactly its range, and the guard
+// bytes on both sides keep theirs.
+SIZES: [Int]{0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 191, 192, 255, 256, 1000, 2047, 2048, 2049, 5000}
+
+GUARD: 64
+
+LARGEST: 5000
+
+run: fn() {
+    room: GUARD + 64 + LARGEST + GUARD
+    fills := 0
+    wrong := 0
+    #Unsafe("every fill and read stays inside the block's `room` bytes, and the block is freed once after them") {
+        block: mem.alloc_raw(room, 64) ?? panic("no memory")
+        loop size in SIZES {
+            loop offset in 0..<64 {
+                mem.fill<U8>(block, U8{238}, room)
+                start: GUARD + offset
+                value: U8{(size + offset) % 200 + 1}
+                to: block.byte_offset(start)
+                mem.fill<U8>(to, value, size)
+                end: start + size + GUARD
+                loop at in 0..<end {
+                    expected: if at >= start && at < start + size -> value else -> U8{238}
+                    if block.byte_offset(at).* != expected -> wrong += 1
+                }
+                fills += 1
+            }
+        }
+        mem.free_raw(block)
+    }
+    print("{fills} fills, {wrong} wrong")
+}

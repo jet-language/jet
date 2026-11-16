@@ -4,7 +4,7 @@ set -euo pipefail
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 jet=${JET:-jet}
 cmake=${CMAKE_COMMAND:-cmake}
-toolchain=${JET_TOOLCHAIN_FILE:-"$root/../../../../../Tools/foreign-build-hosts/cmake/JetToolchain.cmake"}
+toolchain=${JET_TOOLCHAIN_FILE:-"$root/../../../../../Tools/ForeignBuildHosts/Cmake/JetToolchain.cmake"}
 work=$(mktemp -d "jet-ffi-guest.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 

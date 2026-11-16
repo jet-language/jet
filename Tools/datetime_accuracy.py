@@ -26,11 +26,11 @@ from zoneinfo import ZoneInfo, reset_tzpath
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VECTOR_PATH = ROOT / "tests/fixtures/datetime_accuracy.tsv"
+VECTOR_PATH = ROOT / "Tests/Fixtures/datetime_accuracy.tsv"
 SOURCE_PATHS = {
-    "epoch_parse": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyEpochParse.jet",
-    "civil_arithmetic": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyCivilArithmetic.jet",
-    "zones": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyZones.jet",
+    "epoch_parse": ROOT / "Tests/Run/CoreTimeFoundations/DateTimeAccuracyEpochParse.jet",
+    "civil_arithmetic": ROOT / "Tests/Run/CoreTimeFoundations/DateTimeAccuracyCivilArithmetic.jet",
+    "zones": ROOT / "Tests/Run/CoreTimeFoundations/DateTimeAccuracyZones.jet",
 }
 GOLDEN_PATHS = {batch: path.with_suffix(".out") for batch, path in SOURCE_PATHS.items()}
 
@@ -60,7 +60,7 @@ SELECTED_ARITHMETIC_ZONES = [
 def configure_shared_tzpath() -> str:
     """Make Python use the committed TZif root that Jet can read everywhere."""
 
-    path = ROOT / "Core/Time/tzdb"
+    path = ROOT / "Core/Time/Tzdb"
     reset_tzpath([str(path)])
     if not (path / "Australia/Lord_Howe").is_file():
         raise RuntimeError(f"bundled TZif database is missing {path / 'Australia/Lord_Howe'}")

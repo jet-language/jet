@@ -1,0 +1,8 @@
+Error [jet.EnqueueNotOneJobCall]: This `app.enqueue` call does not queue one call of an `#App.Job` method of its service: its call of `send` is not on `self`.
+  --> Tests/UI/web_app_enqueue_not_one_job_call.jet:8:28
+    |
+  8 |         app.enqueue(fn() { other.send("ann") })
+    |                            ^^^^^
+ Why: A queued job is stored in its call's transaction as the job's name and its arguments, encoded where `enqueue` is called, and runs after the call commits, again after a failure; only one call of a job method with codable arguments can be stored and run again so.
+ Fix: Make the closure's whole body one call, `self.method(args)`, in a method of the service, where `method` is marked `#App.Job` and each argument's type derives `Encode` and `Decode`.
+More: jet-lang.dev/e/E2817

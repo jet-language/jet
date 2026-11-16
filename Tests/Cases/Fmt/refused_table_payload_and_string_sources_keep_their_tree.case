@@ -1,0 +1,39 @@
+# Sources that `jet fmt` refused because the formatted text read as a
+# different program now format with the same syntax tree:
+# - a guarded table arm (`.X(a) && a > 1 -> …`) keeps the table, and a guard
+#   that tests another value prints that test in full;
+# - a value table in an `else` arm stays a table;
+# - a named payload in an `if` condition keeps `.Value(value: x)`;
+# - a table arm block that ends in `return` gets no empty value line;
+# - an arrow `if` in an interpolation hole stays unbraced;
+# - a bare `{"\\d"}` body keeps its escaped backslash;
+# - `Option<Int?>` keeps that spelling;
+# - a long arrow loop body that opens with `(` keeps the arrow.
+# Small sources are copied whole. receipt, review, consent and relations are
+# the refused part of large compiler sources. Exit 0 is the same-tree check,
+# and the second run checks idempotency.
+fixture: RefusedTablePayloadAndStringSourcesKeepTheirTree/Input
+step: jet fmt consent.jet declarations.jet guards.jet options.jet payloads.jet receipt.jet regex_groups.jet regex_literals.jet relations.jet review.jet
+exit: 0
+file: consent.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/consent.out
+file: declarations.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/declarations.out
+file: guards.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/guards.out
+file: options.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/options.out
+file: payloads.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/payloads.out
+file: receipt.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/receipt.out
+file: regex_groups.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/regex_groups.out
+file: regex_literals.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/regex_literals.out
+file: relations.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/relations.out
+file: review.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/review.out
+step: jet fmt consent.jet declarations.jet guards.jet options.jet payloads.jet receipt.jet regex_groups.jet regex_literals.jet relations.jet review.jet
+exit: 0
+file: consent.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/consent.out
+file: declarations.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/declarations.out
+file: guards.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/guards.out
+file: options.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/options.out
+file: payloads.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/payloads.out
+file: receipt.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/receipt.out
+file: regex_groups.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/regex_groups.out
+file: regex_literals.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/regex_literals.out
+file: relations.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/relations.out
+file: review.jet = RefusedTablePayloadAndStringSourcesKeepTheirTree/review.out

@@ -1,0 +1,32 @@
+# `#Codable` options: `only:` picks one direction, `.Skip` and `.Flatten` are
+# field forms, `unknown: .Deny` refuses unlisted keys (with and without
+# `published`), and `tag:` sets an enum's case form (`.Field("kind")`, `.None`,
+# or the default outer key); a distinct type codes as its base with no option.
+# Each option runs the same at every tier; a misplaced option is E0930.
+fixture: CodableOptionsContract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = codable_options_contract.stdout.expected
+stderr: empty
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = codable_options_contract.stdout.expected
+stderr: empty
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = codable_options_contract.stdout.expected
+stderr: empty
+step encode_only: jet check encode_only/main.jet
+exit: 1
+stderr: ~ "Decode" # `only: .Encode` derives no decoder
+step misuse: jet check misuse/main.jet
+exit: 1
+stderr: ~ "`.Skip` is a field form of `#Codable`" # a field form written on a type
+stderr: ~ "`tag:` applies to enums only" # a struct has no cases to tag
+stderr: ~ "`tag: .Field(…)` needs its key as one string" # the key is missing
+stderr: ~ "`#Codable` on a field takes `.Skip` or `.Flatten`" # a type option written on a field
+stderr: ~ "jet-lang.dev/e/E0930" # one registered code

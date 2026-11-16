@@ -1,0 +1,23 @@
+# A named function whose function-typed parameter takes the implicit `Err`
+# contract fills a field whose function type's parameter cannot fail.
+# The converting closure (IR ir_fn_widen) passes each argument
+# on through the same adapter, so a non-failing lambda or named function
+# widens into the failing form `read_callback` reads. Both a generic field
+# (`Holder<fn(Int) -> Int>`) and a written one (`Direct`) call through.
+fixture: FnValueWidensItsFunctionArgumentsOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "42\n82\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "42\n82\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "42\n82\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "42\n82\n"

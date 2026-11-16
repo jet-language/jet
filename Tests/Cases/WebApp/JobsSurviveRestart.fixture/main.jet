@@ -1,0 +1,171 @@
+// A board whose `add` queues two jobs: `note`, which writes a note and gets
+// two more runs after a first that fails, and `doomed`, which always fails
+// and gets one more. Its `leap_day` schedule counts its runs in the store.
+//
+// `-- queue` serves the board, so the schedule's latest leap day runs, adds,
+// and stops the process once each job's first run failed, as the server is
+// going down, before either runs again. The store keeps both jobs, each
+// recording its failed run. `-- serve` serves the board again: once the jobs'
+// rows are no longer held, the server takes them. `note` runs its second run,
+// which writes the note; `doomed` runs its last, fails, and runs no more. The
+// schedule's run is recorded in the store, so the restart doesn't run it
+// again.
+use {
+    app
+    db: core.db
+    process: core.process
+    time: core.time
+    web: core.web
+}
+
+#Codable
+Note: struct {
+    id: Int
+    text: String
+}
+
+#Codable
+Count: struct {
+    name: String
+    runs: Int
+}
+
+#Error
+BoardError: enum {
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
+    store.table("notes", key: fn(note: Note) { note.id })
+}
+
+counts_in: fn(store: db.Store) -> db.Table<String, Count> {
+    store.table("counts", key: fn(count: Count) { count.name })
+}
+
+// The schedule's runs counted so far.
+leap_runs: fn(store: db.Store) -[DB.Read]> Int BoardError! {
+    if counts_in(store).get("leap_day") == {
+        .Val(count) -> Ok(count.runs)
+        .None -> Ok(0)
+        .Err(failure) -> Err(BoardError.Failed(failure.message()))
+    }
+}
+
+// Note `id`'s text, or "none".
+note_text: fn(store: db.Store, id: Int) -> String {
+    if notes_in(store).get(id) == {
+        .Val(found) -> found.text
+        .None -> "none"
+        .Err(failure) -> "unreadable: {failure.message()}"
+    }
+}
+
+cell_of: fn(cell: Shared<Int>) -> Int { cell.guard_read().value }
+
+cell_bump: fn(cell: Shared<Int>) {
+    held := cell.guard_edit()
+    held.value += 1
+}
+
+Board: struct {
+    store: db.Store
+    // Whether this server is going down, so a job's run fails.
+    going_down: Bool
+    // Each job's runs in this process.
+    note_runs: Shared<Int>
+    doomed_runs: Shared<Int>
+
+    // Queues `note` and `doomed`.
+    #App.Public add: fn(self) -> Int BoardError! {
+        _: notes_in(self.store).put(Note{id: 1, text: "added"}) ?? return Err(BoardError.Failed(err.message()))
+        app.enqueue(fn() { self.note(7, "after the restart") })
+        app.enqueue(fn() { self.doomed(8) })
+        Ok(1)
+    }
+
+    // Writes note `id`; a run fails while the server is going down.
+    #App.Job(retries: 2) note: fn(self, id: Int, text: String) -> Int BoardError! {
+        cell_bump(self.note_runs)
+        if self.going_down -> return Err(BoardError.Failed("the server is going down"))
+        _: notes_in(self.store).put(Note{id: id, text: text}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(id)
+    }
+
+    // Fails every run.
+    #App.Job(retries: 1) doomed: fn(self, id: Int) -> Int BoardError! {
+        cell_bump(self.doomed_runs)
+        Err(BoardError.Failed("job {id} always fails"))
+    }
+
+    // Counts a run, at midnight UTC on each leap day.
+    #App.Every(cron: "0 0 29 2 *") leap_day: fn(self) -> Int BoardError! {
+        runs: (leap_runs(self.store) ?? return Err(err)) + 1
+        _: counts_in(self.store).put(Count{name: "leap_day", runs: runs}) ?? return Err(BoardError.Failed(err.message()))
+        Ok(runs)
+    }
+}
+
+// Serves `board` on a task of its own; serving starts its schedule and
+// takes the jobs' rows no server holds.
+serve_board: fn(board: &&Board) {
+    server: web.app().mount(board).bind("127.0.0.1:0") ?? panic("bind the board")
+    serving: task { server.serve() }
+    serving.detach()
+}
+
+// Queues the jobs through `board`: whether its call committed.
+add_jobs: fn(board: app.Remote<Board>) -> Bool Never! {
+    _: board.add() ?? return false
+    true
+}
+
+queue: fn() {
+    store: db.open("board.db")
+    note_runs: Shared{0}
+    doomed_runs: Shared{0}
+    serve_board(Board{store: store.copy(), going_down: true, note_runs: note_runs.copy(), doomed_runs: doomed_runs.copy()})
+    if !add_jobs(app.remote(Board{store: store.copy(), going_down: true, note_runs: note_runs.copy(), doomed_runs: doomed_runs.copy()})) {
+        panic("the add commits")
+    }
+    loop _ in 0..<1000 {
+        if cell_of(note_runs) > 0 && cell_of(doomed_runs) > 0 && (leap_runs(store) ?? 0) > 0 {
+            break
+        }
+        time.sleep(10ms)
+    }
+    // Each failed run is recorded on its row as it ends; the next runs
+    // wait half a second.
+    time.sleep(200ms)
+    print("queued; note runs: {cell_of(note_runs)}, doomed runs: {cell_of(doomed_runs)}, leap day runs: {leap_runs(store) ?? 0}")
+    process.exit(0)
+}
+
+restart: fn() {
+    store: db.open("board.db")
+    note_runs: Shared{0}
+    doomed_runs: Shared{0}
+    serve_board(Board{store: store.copy(), going_down: false, note_runs: note_runs.copy(), doomed_runs: doomed_runs.copy()})
+    loop _ in 0..<3000 {
+        if note_text(store, 7) != "none" && cell_of(doomed_runs) > 0 -> break
+        time.sleep(10ms)
+    }
+    // A job with runs left would be taken again once its row's time passed.
+    time.sleep(7000ms)
+    print("note 7: {note_text(store, 7)}")
+    print("note runs: {cell_of(note_runs)}, doomed runs: {cell_of(doomed_runs)}, leap day runs: {leap_runs(store) ?? 0}")
+}
+
+run: fn() {
+    if process.args().contains("queue") -> queue() else -> restart()
+}

@@ -468,7 +468,7 @@ thread_rlimit_soft: fn(resource: I64) -> I64 {
 // Nothing writes the rlimit, so a child process inherits the user's. A task
 // group that needs more asks for it (`task.group g(stack: bytes)`, Fiber.jet
 // fiber_stack_class); the compiler asks for 192 MiB on its compile group
-// (JetCli Host.jet JET_CLI_COMPILE_STACK_BYTES).
+// (JetCLI Host.jet JET_CLI_COMPILE_STACK_BYTES).
 thread_stack_bytes: fn() -> I64 {
     soft: thread_rlimit_soft(I64{3})
     thread_stack_capped(if (soft < THREAD_STACK_DEFAULT) -> THREAD_STACK_DEFAULT else if (soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft)

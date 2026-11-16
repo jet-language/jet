@@ -1,0 +1,13 @@
+# A dependency's package effect is a kind of its parent: the app may call
+# `audit.record`, and a function that denies `Log` may not.
+fixture: Fixtures/DependencyEffect
+env: NO_COLOR=1
+step: jet check main.jet
+cwd: app
+exit: 0
+copy: invalid-main.jet app/main.jet
+step: jet check main.jet
+cwd: app
+exit: nonzero
+stderr: ~ "E0749" # denying the parent denies the dependency's kind of it
+stderr: ~ "`quiet` reaches a function whose row names a kind of `Log`" # the report names the denier and the parent

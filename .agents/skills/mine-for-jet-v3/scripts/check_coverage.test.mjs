@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { scratchRoot } from '../../../../Tools/agent/roots.mjs';
+import { scratchRoot } from '../../../../Tools/Agent/roots.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { check, main, merge, registryErrors, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';

@@ -1,0 +1,267 @@
+{
+  "status": "required",
+  "schema": "gauntlet-axis-memory-safety-fuzz-v1",
+  "metric": "memory_safety_findings",
+  "corpus": {
+    "path": "fuzz-input.bin",
+    "generator": "xorshift32-v1",
+    "seed": 9001,
+    "case_count": 10,
+    "bytes_per_case": 16
+  },
+  "budget": {
+    "wall_timeout_ms": 5000,
+    "cpu_seconds": 5,
+    "memory_mb": 256
+  },
+  "oracle": {
+    "algorithm": "memory-safety-case-summary-v1",
+    "output": ""
+  },
+  "fairness": [
+    "same generated input file"
+  ],
+  "runners": [
+    {
+      "id": "wrong",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "wrong.sh",
+          "target": "wrong.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "wrong.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "asan",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "asan.sh",
+          "target": "asan.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "asan.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "asan again",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "asan-again.sh",
+          "target": "asan-again.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "asan-again.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "crash",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "crash.sh",
+          "target": "crash.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "crash.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "compile-bad",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "good.sh",
+          "target": "good.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        },
+        {
+          "source": "compile-bad.sh",
+          "target": "compile-bad.sh"
+        }
+      ],
+      "compile": [
+        "sh",
+        "compile-bad.sh"
+      ],
+      "run": [
+        "sh",
+        "good.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "compile-warn",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "good.sh",
+          "target": "good.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        },
+        {
+          "source": "compile-warn.sh",
+          "target": "compile-warn.sh"
+        }
+      ],
+      "compile": [
+        "sh",
+        "compile-warn.sh",
+        "{jet_bin}"
+      ],
+      "run": [
+        "sh",
+        "good.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "tamper",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "tamper.sh",
+          "target": "tamper.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "tamper.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    },
+    {
+      "id": "quiet-fail",
+      "language": "sh",
+      "tools": [
+        "sh-tool"
+      ],
+      "files": [
+        {
+          "source": "quiet-fail.sh",
+          "target": "quiet-fail.sh"
+        },
+        {
+          "source": "oracle.txt",
+          "target": "oracle.txt"
+        }
+      ],
+      "run": [
+        "sh",
+        "quiet-fail.sh"
+      ],
+      "evidence": {
+        "kind": "sanitizer",
+        "patterns": [
+          "ERROR: AddressSanitizer",
+          "runtime error:"
+        ]
+      }
+    }
+  ]
+}

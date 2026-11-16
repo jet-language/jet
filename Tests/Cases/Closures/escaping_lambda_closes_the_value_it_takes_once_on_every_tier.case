@@ -1,0 +1,21 @@
+# A returned lambda takes the Close value it captures (it can't be cloned):
+# the variable gives it up, so it neither closes nor drops it when the
+# function returns, each call writes the lambda's own value, and the
+# lambda's release closes it once after the last call, on every tier.
+fixture: EscapingLambdaClosesTheValueItTakesOnceOnEveryTier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "1\n2\ndone\nclosed after 2\n"
+stderr: = ""
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "1\n2\ndone\nclosed after 2\n"
+stderr: = ""
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "1\n2\ndone\nclosed after 2\n"
+stderr: = ""

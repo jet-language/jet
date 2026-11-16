@@ -1,0 +1,19 @@
+# Defect 3: `get` of a missing key on a grouped `[String: [Int]]` and on a plain
+# `[String: Int]` is None, so `!= None` is false and `== None` is true, while a present key is not None, at O0, O1
+# and O2.
+fixture: Fixtures/MapMissingKeyGetIsNoneOnEveryTier
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = map_missing_key_get_is_none_on_every_tier.out
+stderr: empty
+step: jet run -O1 main.jet
+exit: 0
+stdout: = map_missing_key_get_is_none_on_every_tier.out
+stderr: empty
+step: jet run -O2 main.jet
+exit: 0
+stdout: = map_missing_key_get_is_none_on_every_tier.out
+stderr: empty

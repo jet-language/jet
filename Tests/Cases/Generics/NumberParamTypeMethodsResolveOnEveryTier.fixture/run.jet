@@ -1,0 +1,45 @@
+// `Inline<2>` is an instance of a type with a number parameter. Its trait and
+// own methods resolve through the type argument, a body reads `N` as the
+// instance's number, and `[Int#N]` indexes with a runtime bounds check.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Inline: struct<N: Int> {
+    items: [Int#N]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+
+    at: fn(self, i: Int) -> Int { self.items[i] }
+
+    width: fn(self) -> Int { N }
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+measure: fn<S: Store>(s: S) -> Int { s.count() }
+
+both: fn<N: Int>(s: Inline<N>) -> Int { s.count() + s.at(0) + N }
+
+run: fn() {
+    small: Inline<2>{items: [Int#2]{1, 2}}
+    big: Heap{items: [1, 2, 3]}
+    wide: Inline<4>{items: [Int#4]{5, 6, 7, 8}}
+    print(small.count())
+    print(big.count())
+    print(small.at(1))
+    print(wide.at(3))
+    print(small.width())
+    print(measure(small))
+    print(measure(big))
+    print(both(small))
+    print(both(wide))
+}

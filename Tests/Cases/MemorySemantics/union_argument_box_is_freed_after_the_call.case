@@ -1,0 +1,17 @@
+# The union box a read argument is lent to is freed after each call
+# without dropping the lent value: a million calls with a lent String and a
+# lent Directory keep the resident set within 8 MB on O0, O1 and O2.
+fixture: UnionArgumentBoxIsFreedAfterTheCall.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+limit: time=120
+exit: 0
+stdout: = "1000000 lent calls: total 49000000, the boxes freed\n"
+step: jet run -O1 main.jet
+limit: time=120
+exit: 0
+stdout: = "1000000 lent calls: total 49000000, the boxes freed\n"
+step: jet run -O2 main.jet
+limit: time=120
+exit: 0
+stdout: = "1000000 lent calls: total 49000000, the boxes freed\n"

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { empty, TowerError } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import { readGauntletStandings, tableStandings } from '../app/gauntlet-standings.mjs';
-import { readTable, recordEntry, tablePath, writeTable } from '../../gauntlet/harness/table.mjs';
+import { readTable, recordEntry, tablePath, writeTable } from '../../Gauntlet/Harness/table.mjs';
 import { gauntletDetail, gauntletRunText, gauntletStandingsText, projectGauntletStandings, renderGauntletDetail, renderGauntletStandings } from '../app/ui/gauntlet.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/gauntlet-results.json', import.meta.url));

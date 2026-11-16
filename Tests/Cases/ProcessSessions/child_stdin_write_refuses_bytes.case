@@ -1,0 +1,6 @@
+# ProcessStdin.write takes only text. Given [U8] it is refused at check time,
+# and the fix names write_bytes, the write that takes bytes.
+fixture: ChildStdinWriteRefusesBytes.fixture
+step: jet check run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code in ["E0112"]][?fix~="write_bytes"] #>= 1

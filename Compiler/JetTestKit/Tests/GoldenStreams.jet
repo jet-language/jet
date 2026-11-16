@@ -14,7 +14,7 @@ kit_test_golden_run: fn(stdout: String, stderr: String, code: Int) -> KitRun {
 
 kit_test_golden_fixture: fn(name: String) -> String {
     root: sys.current_dir() ?? panic("fixture checkout root: {err}")
-    files.join(root, "Compiler/JetTestKit/Tests/Fixtures/golden/{name}")
+    files.join(root, "Compiler/JetTestKit/Tests/Fixtures/Golden/{name}")
 }
 
 kit_test_golden_scratch: fn(label: String) -> String {
@@ -50,7 +50,7 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
     assert_eq(kit_golden_failure_exit("Examples/ErrorsAndEffects/Errors/FatalExit", "entry report\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "Error [jet.InvalidConstructionField]: missing fields\n"), Val(1))
     assert_eq(kit_golden_failure_exit("Examples/unknown", "unregistered report\n"), None)
-    assert_eq(kit_golden_failure_exit("tests/run/FailureFoundation/MintedFailureLeavesRun", "Error: NotFound(zed) (type: FindError)\n"), Val(1))
+    assert_eq(kit_golden_failure_exit("Tests/Run/FailureFoundation/MintedFailureLeavesRun", "Error: NotFound(zed) (type: FindError)\n"), Val(1))
 }
 
 // The CLI double is a Jet script: its children's PATH leads with the
@@ -250,13 +250,13 @@ kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {
     kit_exec_write(files.join(root, "Examples/topic/package/nested/run.jet"), "run: fn() {{}}\n")
     kit_exec_write(files.join(root, "Examples/topic/workspace/workspace.jet"), "workspace {{}}\n")
     kit_exec_write(files.join(root, "Examples/topic/workspace/member/run.jet"), "run: fn() {{}}\n")
-    kit_exec_write(files.join(root, "tests/run/Ownership/case.jet"), "run: fn() {{}}\n")
-    entries: kit_golden_discover(root, ["Examples", "tests/run"])
+    kit_exec_write(files.join(root, "Tests/Run/Ownership/case.jet"), "run: fn() {{}}\n")
+    entries: kit_golden_discover(root, ["Examples", "Tests/Run"])
     assert_eq(entries.len(), 5)
     ids: entries.map(fn(entry) { entry.path })
     assert(kit_expect_named(ids, "Examples/topic/flat.jet"))
     assert(kit_expect_named(ids, "Examples/topic/project/run.jet"))
-    assert(kit_expect_named(ids, "tests/run/Ownership/case.jet"))
+    assert(kit_expect_named(ids, "Tests/Run/Ownership/case.jet"))
     // A flat C or C++ file is an entry, its streams under its stem.
     loop entry in entries {
         if entry.path == "Examples/topic/Native.c" {

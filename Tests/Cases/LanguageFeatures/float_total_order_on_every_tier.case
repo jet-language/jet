@@ -1,0 +1,20 @@
+# Float is Comparable by IEEE 754 totalOrder (owner Q21 = A):
+# sorting, `<=>`, `.compare`, list max/min, a generic Comparable bound and a
+# derived #Comparable agree on every tier, and plain `<` stays IEEE.
+fixture: FloatTotalOrderOnEveryTier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n2.5\ntrue\ntrue\ntrue\ntrue\nlow\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n2.5\ntrue\ntrue\ntrue\ntrue\nlow\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n2.5\ntrue\ntrue\ntrue\ntrue\nlow\n"
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\nfalse\n2.5\ntrue\ntrue\ntrue\ntrue\nlow\n"

@@ -169,7 +169,7 @@ trap_defect_exit: fn(status: I64) {
 
 // The one door of every runtime stop and defect (#6725): each routine that
 // reports, publishes or ends the process calls it before any of that, and
-// tests/guards/runtime_stop_door.jet holds every JetRuntime routine to it.
+// Tests/Guards/runtime_stop_door.jet holds every JetRuntime routine to it.
 // Served comptime code (ComptimeServe.jet) reports the stop to the compiler
 // here as `kind` and its words (JetBackend Image/ComptimeWire.jet: 1 a
 // message's bytes and length, 2 shift (count, count unsigned, bits, and in
@@ -501,10 +501,10 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 }
 
 // core.rt.__coded_stop(code, message): a Core library stop carrying its
-// registered diagnostic code (Core/Http/Server.jet E2804/E2805). The caller
+// registered diagnostic code (Core/HTTP/Server.jet E2804/E2805). The caller
 // renders the row's `what` into `message`; the Why/Fix footer is generated
 // from the same registry row. The exit status is the one coded_stops gives
-// the code (Tools/agent/RuntimeGenerators.jet): 70, the program-side stop,
+// the code (Tools/Agent/RuntimeGenerators.jet): 70, the program-side stop,
 // unless it names another. A task body publishes the raw message. A code
 // with no generated footer is a Jet defect: the host form, exit 101.
 #Export(c) jet_rt_coded_stop: fn(code: I64, message: I64) {

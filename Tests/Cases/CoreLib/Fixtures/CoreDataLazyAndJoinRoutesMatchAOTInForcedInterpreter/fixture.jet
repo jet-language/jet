@@ -1,0 +1,32 @@
+use data: core.data
+
+LeftRow: struct {
+    key: String
+    value: Int
+}
+
+RightRow: struct {
+    key: String
+    owner: String
+}
+
+run: fn() {
+    left: [LeftRow]{LeftRow{key: "a", value: 1}, LeftRow{key: "b", value: 2}}
+    right: [RightRow]{RightRow{key: "b", owner: "Ada"}, RightRow{key: "c", owner: "Lin"}}
+    query: data.query(left)
+        .filter(fn(row) { row.value > 1 })
+        .sort_by(fn(row) { row.key })
+    collected: query.collect() ?? panic("collect")
+    print(collected.len())
+    print(query.plan()[2])
+    joined: data.inner_join(left, right, fn(row) { row.key }, fn(row) { row.key }) ?? panic("join")
+    print(joined.len())
+    lefted: data.left_join(left, right, fn(row) { row.key }, fn(row) { row.key }) ?? panic("left")
+    print(lefted.len())
+    loop pair in lefted {
+        if pair.right == {
+            Val(_) -> { print("hit") }
+            None -> print("miss")
+        }
+    }
+}

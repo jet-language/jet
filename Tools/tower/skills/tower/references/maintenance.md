@@ -53,7 +53,7 @@ commit.
 done cards without criteria or integration evidence, claims idle for three or
 more days, events without `by`, decisions that fail the ballot-ready gate,
 stale drafts, and dangling `blockedBy` references. `jet Tools/tower/Board.jet
-lint --docs` checks `Docs/spec/**` for card and decision IDs with no live or
+lint --docs` checks `Docs/Spec/**` for card and decision IDs with no live or
 historical record. Exit code one means findings exist; repair them or raise the applicable
 ballot. Do not clear the board to hide a finding.
 

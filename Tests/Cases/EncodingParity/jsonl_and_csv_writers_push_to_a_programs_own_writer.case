@@ -1,0 +1,20 @@
+# jsonl.writer and csv.writer are generic over the Prelude `Writer`. A
+# program's own byte sink, printing what reached it at each flush, shows that
+# a flush first writes the LF or CRLF the last record still holds, so the
+# sink ends on a whole record; a sink whose writes fail surfaces as an IO
+# EncodingError whose cause keeps the IOError's OS code and its errno kind.
+# Each tier prints the same lines.
+fixture: JSONLAndCSVWritersPushToAProgramsOwnWriter.fixture
+step: jet check run.jet
+exit: 0
+step: jet run -O0 run.jet
+exit: 0
+stdout: = jsonl_and_csv_writers_push_to_a_programs_own_writer.out
+step: jet run -O2 run.jet
+exit: 0
+stdout: = jsonl_and_csv_writers_push_to_a_programs_own_writer.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = jsonl_and_csv_writers_push_to_a_programs_own_writer.out

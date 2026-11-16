@@ -39,7 +39,7 @@
 //   JETPACK_BOOTSTRAP_TEST_AREAS   comma-separated tests.list sections whose claims run
 //   JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1  dependency sections read HEAD's manifests and bytes
 //   JETPACK_WORKER                 the scratch directory's writer name (default lead)
-//   JET_BIN                        the jet that runs Tools/agent/CompilerPackages.jet
+//   JET_BIN                        the jet that runs Tools/Agent/CompilerPackages.jet
 //                                  (default: $JET, else the jet on PATH)
 //
 // `areas` answers from `areas.list`, which declares each area's direct
@@ -90,7 +90,7 @@ MANIFESTS: [String]{"sources.list", "tests.list"}
 // Shared dependencies reference canonical Compiler/ sources in this checkout.
 ALLOWED_PREFIXES: [String]{"Jetpack/", "Compiler/"}
 
-COMPILER_PACKAGES: "Tools/agent/CompilerPackages.jet"
+COMPILER_PACKAGES: "Tools/Agent/CompilerPackages.jet"
 
 // The packages whose `use <package>.[names]` or `use <package>.name` lines the
 // unit blanks: it is one namespace.
@@ -232,7 +232,7 @@ env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
     }
 }
 
-// The state root of Tools/agent/roots.sh.
+// The state root of Tools/Agent/roots.sh.
 state_root: fn() -> String {
     given: process.env_get("JET_STATE_ROOT") ?? ""
     if given != "" -> return given
@@ -286,7 +286,7 @@ Embeds: struct {
 }
 
 // Assemble the unit `config` names into its scratch directory. `members` are
-// the compiler's library member files (Tools/agent/CompilerPackages.jet
+// the compiler's library member files (Tools/Agent/CompilerPackages.jet
 // sources), for the compiler-slice check.
 assemble: fn(config: Config, members: [String]) -> Assembled Err! {
     embeds := Embeds{copies: [String]{}, targets: [String:String]{}}
@@ -1185,7 +1185,7 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
 // --- compiler slice ----------------------------------------------------------------
 
 // The compiler's library member files (a package's entry, its root run.jet,
-// is not part of a slice): Tools/agent/CompilerPackages.jet sources of the
+// is not part of a slice): Tools/Agent/CompilerPackages.jet sources of the
 // checkout `repo`, run by `tool_jet()` in this script's working directory
 // with the tree as an explicit `--root`.
 compiler_members: fn(root: String, repo: String) -> [String] Err! {
@@ -1990,7 +1990,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
 
 #Test("a source outside Jetpack/ and Compiler/ or in another area's section is refused") {
     root: area_fixture()
-    put(root, "Tools/packaging/other.jet", "other: fn() {{}}\n")
+    put(root, "Tools/Packaging/other.jet", "other: fn() {{}}\n")
     store: "Jetpack/Store/Source/Fixture.jet"
     cli: "Jetpack/CLI/Source/Fixture.jet"
     manifests: [String]{
@@ -2150,7 +2150,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
 compiler_fixture: fn(items: String) -> String {
     root: normalize_join("/", files.mkdtemp("jetpack-compiler-slice") ?? panic("a temporary directory cannot be made: {err}"))
     fixture: [String]{
-        "Compiler/JetCli/package.jet",
+        "Compiler/JetCLI/package.jet",
         "name: \"jet-cli\"\n",
         // Prelude source held in a raw string: its `Err: struct` declares nothing.
         "Compiler/JetSema/Source/Derives.jet",
@@ -2169,7 +2169,7 @@ compiler_fixture: fn(items: String) -> String {
 
 #Test("a raw string's text and an enum's own variants name no dependency") {
     root: compiler_fixture("Marker: enum {{\n    Plain\n    Export, Named(String)\n}}\nfront_marker: fn() -> Marker {{ Marker.Export }}\nfront_error: fn(message: String) -> Err {{ Err{{message: message}} }}\nNOTE: `calls wasm_size() with \"quotes\" and // slashes`\n")
-    // The fixture's members as Tools/agent/CompilerPackages.jet sources lists them.
+    // The fixture's members as Tools/Agent/CompilerPackages.jet sources lists them.
     members: [String]{"Compiler/JetFront/Source/Items.jet", "Compiler/JetSema/Source/Derives.jet", "Compiler/JetWasm/Source/Module.jet"}
     assert_eq(slice_drift(root, members).join("\n"), "")
     files.remove_all(root) ?? ()

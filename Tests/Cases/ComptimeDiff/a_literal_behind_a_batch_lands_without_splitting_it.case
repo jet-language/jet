@@ -1,0 +1,12 @@
+# A literal constant checked while a comptime batch waits lands at its turn
+# (JetDriver Pipeline.jet jet_driver_comptime_run), so a later constant that
+# names it joins the same batch instead of evaluating the batch early: SIX and
+# EIGHT build into one program and run in one child.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "double: fn(n: Int) -> Int {\n    n * 2\n}\n\nSIX: double(3)\nFOUR: 4\nEIGHT: double(FOUR)\n\nrun: fn() {\n    print(\"{SIX} {EIGHT}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "6 8\n"
+stderr: ~ "# comptime.programs_built = 1\n" # one build for SIX and EIGHT; FOUR landed with no evaluation
+stderr: ~ "comptime.build SIX, EIGHT (main.jet)" # the batch's build span names both

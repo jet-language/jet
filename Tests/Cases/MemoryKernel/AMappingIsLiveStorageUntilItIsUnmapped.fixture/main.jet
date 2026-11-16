@@ -1,0 +1,26 @@
+// A region's fresh pages are live storage for the memory sentry from reserve
+// to close: a checked raw copy into a block of them passes.
+use core.mem
+
+// Keeps the block this program claims; a block is single use.
+Shelf: struct {
+    blocks: [mem.Block]
+}
+
+run: fn() {
+    shelf := Shelf{blocks: [mem.Block]{}}
+    region := mem.Region.reserve(8192) ?? panic("reserve")
+    block: region.claim(24, 8) ?? panic("claim")
+    values := [Int]{3, 4, 5}
+    #Unsafe("the block holds three Ints of the open region's fresh pages") {
+        to: mem.Ptr<Int>.from_addr(block.address())
+        mem.list_copy<Int>(to, values, 0, 3)
+        print("{to.*} {to.offset(1).*} {to.offset(2).*}")
+    }
+    shelf.blocks.push(block)
+    region.close()
+    print("{shelf.blocks.len()} block kept")
+    #Unsafe("the shelf's block was claimed from the closed region, and nothing reads it again") {
+        consume(shelf)
+    }
+}

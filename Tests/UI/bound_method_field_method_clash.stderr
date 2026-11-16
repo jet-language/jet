@@ -1,0 +1,8 @@
+Error [jet.FieldMethodClash]: `crew.tell` names both a field and a method `tell`
+  --> Tests/UI/bound_method_field_method_clash.jet:16:23
+    |
+ 16 |     each([1, 2], crew.tell)
+    |                       ^^^^
+ Why: Where a function type is expected, a method read without parentheses passes the method with `crew` bound, and a field read passes the field's value; with both, the read could silently switch from one to the other
+ Fix: Write `fn(x) { crew.tell(x) }` to pass the method, or `fn(x) { crew.tell.call(x) }` to pass the field
+More: jet-lang.dev/e/E0950

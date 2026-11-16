@@ -8,9 +8,9 @@ source and the complete diff; blessing is not a way to hide a red behavior.
 
 - Keep the row in
   `Compiler/Prelude/Diagnostics.jet`; the registry and consumers
-  project that row. Use `Docs/spec/diagnostics.md` for the What/Why/Fix,
+  project that row. Use `Docs/Spec/diagnostics.md` for the What/Why/Fix,
   structured-fix, coverage, and cross-tier contract.
-- Keep the matching fixture and snapshot under `tests/ui/` or `tests/ui_lint/`.
+- Keep the matching fixture and snapshot under `Tests/UI/` or `Tests/UILint/`.
   The report must retain the actionable span, registered code, structured
   fields, and no raw backend error. Check `jet explain <CODE>` on the same
   canonical row.
@@ -23,8 +23,8 @@ For example, a single UI fixture uses its repository-relative filter, and
 `-u` blesses exactly the rows that filter selects:
 
 ```sh
-jet test Compiler --profile ui tests/ui/arg_type_mismatch.jet
-jet test Compiler --profile ui tests/ui/arg_type_mismatch.jet -u
+jet test Compiler --profile ui Tests/UI/arg_type_mismatch.jet
+jet test Compiler --profile ui Tests/UI/arg_type_mismatch.jet -u
 ```
 
 Use the admitted native compiler named by `JET` before any `jet explain`,
@@ -34,7 +34,7 @@ status mirror.
 
 ## Executable goldens
 
-Use `Docs/spec/contributing/examples.md` and the relevant example under
+Use `Docs/Spec/Contributing/examples.md` and the relevant example under
 `Examples/`. Run the exact example criterion through a fresh binary; when the
 criterion applies to both execution forms, prove `jet run` and
 `jet run --release`, then update only its matching file under

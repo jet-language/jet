@@ -1,0 +1,20 @@
+# A method read without parentheses where a function type is expected passes
+# the method with its receiver bound: as a call argument (`each(ids,
+# ada.tell)`, `self.tell` inside a method), a struct field, a list element and
+# a return value, through a field path (`team.lead.tell`), and with a computed
+# receiver evaluated once at the read (`hired("Lin").tell` hires once for two
+# calls). Before the rule the read was E0302 "`Crew` has no field `tell`".
+fixture: BoundMethodValuePassesAsFn.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "Ada hears about task 1\nAda hears about task 2\nuser/Bo-site\nuser/Bo-api\n2\nCy hears about task 7\ndeploy: Dee hears about task 9\nEve hears about task 5\nFay hears about task 5\nKai hears about task 4\nLu hears about task 6\nhired Lin\nLin hears about task 3\nLin hears about task 4\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "Ada hears about task 1\nAda hears about task 2\nuser/Bo-site\nuser/Bo-api\n2\nCy hears about task 7\ndeploy: Dee hears about task 9\nEve hears about task 5\nFay hears about task 5\nKai hears about task 4\nLu hears about task 6\nhired Lin\nLin hears about task 3\nLin hears about task 4\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "Ada hears about task 1\nAda hears about task 2\nuser/Bo-site\nuser/Bo-api\n2\nCy hears about task 7\ndeploy: Dee hears about task 9\nEve hears about task 5\nFay hears about task 5\nKai hears about task 4\nLu hears about task 6\nhired Lin\nLin hears about task 3\nLin hears about task 4\n"

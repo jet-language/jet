@@ -1,0 +1,9 @@
+// `embed_file` and `find` read `FS.Read`, so a function whose row leaves it
+// out is refused like any other read.
+notes: fn() -[IO]> String { embed_file("notes.txt") }
+
+pages: fn() -[IO]> [String] { find("pages/*.md") }
+
+build: fn(b: Build) { print("{notes()} {pages().len()}") }
+
+run: fn() { print("offline") }

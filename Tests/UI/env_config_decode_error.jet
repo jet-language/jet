@@ -1,0 +1,18 @@
+// @run_cli
+package: {
+    name: "env_config_decode_error"
+    authority: { allow: [Env] }
+}
+
+use env: core.sys
+
+#Codable(only: .Decode)
+Settings: struct {
+    port: Int
+}
+
+run: fn() {
+    env.set("APP_PORT", "not-an-int")
+    settings: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"]) ?? panic("config: {err}")
+    panic("invalid config unexpectedly accepted: {settings.port}")
+}

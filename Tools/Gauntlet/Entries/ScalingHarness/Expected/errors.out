@@ -1,0 +1,38 @@
+Receipt: <case>/work/receipt.json
+small-fns[single]/errors N=1 FAILED compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/1 (counter-only; time/RSS not gated)
+small-fns[single]/errors N=2 FAILED compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/2 (counter-only; time/RSS not gated)
+small-fns[single]/errors N=4 FAILED compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/4 (counter-only; time/RSS not gated)
+schema: "jet.scaling-gate/v3"
+mode: "counters"
+jobs: 1
+memoryMax: "20G"
+timeoutS: 1800
+stopAfterS: null
+passed: false
+target: {lines: 1000000, seconds: 10}
+compilers: [{kind: "command", label: "errors", template: "sh ../../../fake.sh errors {n} {trace}"}]
+workDir: "<case>/work"
+buildRoot: "<case>/build"
+FAIL "small-fns[single]/errors: baseline: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/1"
+FAIL "small-fns[single]/errors: N=2: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/2"
+FAIL "small-fns[single]/errors: N=4: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/4"
+== series
+shape: "small-fns"
+layout: "single"
+compiler: "errors"
+mode: "counters"
+kind: "stress"
+dimension: "small functions"
+ladder: [2, 4]
+done: true
+truncated: null
+floors: null
+projection: null
+profile: null
+profilePoint: null
+baseline: n=1 x=1 code_lines=6 source_sha256="7f8af1b0b18acb97d28b314679faec9e0401dbdc31d3d33c5703ebff76ff331b" ok=false exit=1 problems=["compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/1"] open_phases=[] timeout_phase=null dir="<case>/work/errors/small-fns-single/1" counter.parse.tokens=3 counter.sema.check.cache.hits=1 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=100 diagnostics=2 trace.parse.items=1 trace.parse.spans=1
+point: n=2 x=2 code_lines=11 source_sha256="6d8aa812b22941e6d65a60b12f0ba87497d9a6c509730d38747133faedfe6cb2" ok=false exit=1 problems=["compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/2"] open_phases=[] timeout_phase=null dir="<case>/work/errors/small-fns-single/2" counter.parse.tokens=6 counter.sema.check.cache.hits=2 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=200 diagnostics=2 trace.parse.items=2 trace.parse.spans=1
+point: n=4 x=4 code_lines=22 source_sha256="2f2f59123f2a5b5bfa7c6bab6978f2f11755740dc103cab76e7e07bd5ecf8240" ok=false exit=1 problems=["compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/4"] open_phases=[] timeout_phase=null dir="<case>/work/errors/small-fns-single/4" counter.parse.tokens=12 counter.sema.check.cache.hits=4 counter.sema.check.cache.misses=0 counter.sema.check.scope_lookups=400 diagnostics=2 trace.parse.items=4 trace.parse.spans=1
+failure: {kind: "compile", text: "baseline: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/1"}
+failure: {kind: "compile", text: "N=2: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/2"}
+failure: {kind: "compile", text: "N=4: compile failed (exit 1, 2 errors); see <case>/work/errors/small-fns-single/4"}

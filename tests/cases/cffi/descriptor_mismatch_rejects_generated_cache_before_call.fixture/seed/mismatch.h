@@ -1,1 +1,0 @@
-int ping(int value);

@@ -1,0 +1,26 @@
+pick: fn(rows: [Int], at: Int) -> Int { rows[at] }
+
+failure_text: fn(failure: TaskFailure) -> String {
+    if failure == {
+        .Panicked(reason) -> reason
+        .DeadlineBlown -> "deadline"
+        .Cancelled -> "cancelled"
+    }
+}
+
+middle: fn(rows: [Int]) -> Int {
+    found := 0
+    task.group inner {
+        picked: task pick(rows, 3)
+        found = picked.join() ?? panic(failure_text(err))
+    }
+    found
+}
+
+run: fn() {
+    rows: [Int]{7}
+    task.group outer {
+        whole: task middle(rows)
+        print(whole.join() ?? panic(failure_text(err)))
+    }
+}

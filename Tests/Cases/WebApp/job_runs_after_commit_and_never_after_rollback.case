@@ -1,0 +1,11 @@
+# `app.enqueue(fn() { self.notify(args) })` in an `#App.SignedIn` method
+# keeps the job's call in the method's transaction, in the store's
+# `__jet_jobs` outbox. An `add` that is refused after it queued its notice
+# rolls back, so the notice never runs; one that commits runs it after the
+# commit, as the system and in a call of its own. The notice fails its first
+# run and runs again after the backoff, then writes its note.
+fixture: JobRunsAfterCommitAndNeverAfterRollback.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = job_runs_after_commit_and_never_after_rollback.stdout.expected

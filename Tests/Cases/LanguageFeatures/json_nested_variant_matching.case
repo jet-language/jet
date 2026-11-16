@@ -1,0 +1,12 @@
+# tests/tir_language_features.rs::JSONNestedVariantMatching, under the strict untyped decode: the port is a JSON number, so it matches `.Number` (a quoted "8080" would stay `.Text`), natively and in the web build under node
+requires: tool:node
+fixture: JSONNestedVariantMatching/Input
+step: jet run run.jet
+exit: 0 # tests/tir_language_features.rs:872 assert_eq!
+stdout: = "8081\napi\n" # tests/tir_language_features.rs:873 assert_eq!
+step: jet build --target=web run.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "8081\napi\n" # the web build prints what the native run prints

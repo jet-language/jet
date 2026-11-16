@@ -1,0 +1,303 @@
+#!/usr/bin/env jet
+// The zero-cost proof of the memory kernel in one command. First the codegen
+// half: `CodegenCeiling.jet --zero-cost` holds the kernel arm's machine code
+// to the direct arm's at -O1 and -O2. Then the timed half: both arms of the
+// pair (Tools/Perf/CodegenCeiling/ZeroCost, the manifest's
+// `zero_cost_pairs` row) built with `--release` at -O1 and at -O2, each run
+// TRIALS times through the gauntlet's launcher
+// (Tools/Gauntlet/Harness/launch.c), the arms alternating which runs first.
+// Per level and per metric (wall time, user-mode cycles, peak memory) it
+// takes kernel/direct of the upper medians and the shared harness's paired
+// bootstrap interval of that ratio
+// (Tools/Gauntlet/Harness/performance-surface.mjs). A metric is a loss when
+// the interval's lower bound is above 1: the kernel arm is slower or bigger
+// beyond noise. The command exits 0 only when the codegen half passes and no
+// metric is a loss. `--output` writes the receipt as JSON. It is a timed
+// measurement: run it alone, on the reference machine.
+//
+// usage (from the repository root; needs objdump, nm, and cc unless
+// JET_GAUNTLET_LAUNCHER names a launcher built from launch.c):
+//   jet Tools/Perf/ZeroCostPair.jet [--jet PATH] [--n N] [--trials T] [--output FILE]
+// The default compiler is Tools/Agent/JetEnv.jet's `jet`.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    regex: core.regex
+    stats: core.math.stats
+    sys: core.sys
+}
+
+PAIR: "Tools/Perf/CodegenCeiling/ZeroCost"
+
+LAUNCH: "Tools/Gauntlet/Harness/launch.c"
+
+JET_ENV: "Tools/Agent/JetEnv.jet"
+
+ARMS: [String]{"kernel", "direct"}
+
+ARM_FILES: [[String]]{[String]{"package.jet", "kernel.jet", "main.jet"}, [String]{"main.jet"}}
+
+LEVELS: [String]{"-O1", "-O2"}
+
+// Each run's argument: about a fifth of a second of memory work per run.
+DEFAULT_N: "20000"
+
+// The shared harness's paired trials and bootstrap.
+DEFAULT_TRIALS: "100"
+
+BOOTSTRAP_RESAMPLES: 10000
+
+BOOTSTRAP_SEED: 2977
+
+BOOTSTRAP_LOWER_RANK: 250
+
+BOOTSTRAP_UPPER_RANK: 9750
+
+// One timed run, from the launcher's report.
+Run: struct {
+    wall_ns: Int
+    cycles: Int
+    peak_kb: Int
+}
+
+Metric: struct {
+    kernel_median: Int
+    direct_median: Int
+    ratio: Float
+    lower95: Float
+    upper95: Float
+    verdict: String
+}
+
+Level: struct {
+    level: String
+    trials: Int
+    wall_ns: Metric
+    cycles_u: Metric?
+    peak_rss_kb: Metric
+    kernel_wall_ns: [Int]
+    direct_wall_ns: [Int]
+}
+
+Host: struct {
+    platform: String
+    release: String
+    arch: String
+    cpu_model: String?
+    cpu_count: Int
+}
+
+Receipt: struct {
+    schema: String
+    pair: String
+    n: Int
+    codegen: String
+    levels: [Level]
+    host: Host
+    generated_command: String
+    verdict: String
+}
+
+fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "zero-cost pair: {message}") }
+
+argument: fn(argv: [String], name: String, fallback: String) -> String {
+    loop at in 0..<argv.len() {
+        if argv[at] == name {
+            return if at + 1 < argv.len() -> argv[at + 1].copy() else -> fail("{name} needs a value")
+        }
+    }
+    fallback.copy()
+}
+
+count: fn(text: String, name: String) -> Int {
+    value: Int.parse(text) ?? fail("{name} is not a number: {text}")
+    if value <= 0 -> fail("{name} must be above 0")
+    value
+}
+
+// One arm built at one level into `dir`, its binary.
+build: fn(root: String, jet: [String], arm: Int, level: String, dir: String) -> String {
+    files.create_dir_all(dir) ?? fail("{dir}: {err}")
+    loop file in ARM_FILES[arm] {
+        source: files.read(files.join(root, "{PAIR}/{ARMS[arm]}/{file}")) ?? fail("{PAIR}/{ARMS[arm]}/{file}: {err}")
+        files.write(files.join(dir, file), source) ?? fail("{dir}/{file}: {err}")
+    }
+    argv := jet.copy()
+    argv.extend([String]{"build", "--release", level, "main.jet"})
+    built: process.cmd(argv).cwd(dir).run() ?? fail("{argv.join(" ")}: {err}")
+    binary: files.join(dir, ".jet/build/main")
+    if !built.success || !files.exists(binary) {
+        fail("{ARMS[arm]} {level} does not build:\n{built.output}{built.errors}")
+    }
+    binary
+}
+
+// The launcher's report of one run: its `end` line (exit code, wall ns,
+// first stdout ns, peak KiB, user us, system us, exec errno) and its
+// `cycles` line (-1 when the counter could not open).
+run_of: fn(report: String) -> Run {
+    end := [String]{}
+    cycles := -1
+    loop line in report.split("\n") {
+        fields: line.split(" ").to_list()
+        if fields[0] == "end" -> end = fields
+        if fields[0] == "cycles" && fields.len() == 2 -> cycles = Int.parse(fields[1]) ?? -1
+    }
+    if end.len() != 8 -> fail("the launcher's report has no end line:\n{report}")
+    if end[1] != "0" || end[7] != "0" -> fail("a timed run exited {end[1]} (exec errno {end[7]})")
+    Run{wall_ns: Int.parse(end[2]) ?? fail("wall time {end[2]}"), cycles: cycles, peak_kb: Int.parse(end[4]) ?? fail("peak {end[4]}")}
+}
+
+// One timed run of `binary`, which must print `expected`.
+timed: fn(launch: String, report: String, binary: String, n: String, expected: String) -> Run {
+    ran: process.cmd([String]{launch, report, binary, "--n", n}).run() ?? fail("{binary}: {err}")
+    if ran.output != expected {
+        fail("{binary} --n {n} printed other output than its pair:\n{ran.output}")
+    }
+    run_of(files.read(report) ?? fail("{report}: {err}"))
+}
+
+// The shared harness's paired index bootstrap of median(kernel) /
+// median(direct): a 32-bit linear congruential draw seeded with
+// BOOTSTRAP_SEED picks each resample's indices; the bounds are nearest ranks.
+metric: fn(kernel: [Int], direct: [Int]) -> Metric {
+    state := BOOTSTRAP_SEED
+    ratios := [Float]{}
+    loop _ in 0..<BOOTSTRAP_RESAMPLES {
+        picked_kernel := [Int]{}
+        picked_direct := [Int]{}
+        loop _ in 0..<kernel.len() {
+            state = (state * 1664525 + 1013904223) %% 4294967296
+            selected: state * kernel.len() /% 4294967296
+            picked_kernel.push(kernel[selected])
+            picked_direct.push(direct[selected])
+        }
+        kernel_median: stats.median_high_int(picked_kernel) ?? fail("no samples")
+        direct_median: stats.median_high_int(picked_direct) ?? fail("no samples")
+        ratios.push(Float.from_int(kernel_median) / Float.from_int(direct_median))
+    }
+    ratios.sort()
+    lower: ratios[BOOTSTRAP_LOWER_RANK - 1]
+    upper: ratios[BOOTSTRAP_UPPER_RANK - 1]
+    kernel_median: stats.median_high_int(kernel) ?? fail("no samples")
+    direct_median: stats.median_high_int(direct) ?? fail("no samples")
+    verdict: if {
+        lower > 1.0 -> "loss"
+        upper < 1.0 -> "win"
+        else -> "even"
+    }
+    Metric{kernel_median: kernel_median, direct_median: direct_median, ratio: Float.from_int(kernel_median) / Float.from_int(direct_median), lower95: lower, upper95: upper, verdict: verdict}
+}
+
+// Both arms at one level, TRIALS paired runs, the kernel first on even
+// trials.
+level_of: fn(launch: String, scratch: String, kernel: String, direct: String, level: String, n: String, trials: Int) -> Level {
+    report: files.join(scratch, "report")
+    expected: process.cmd([String]{direct, "--n", n}).run() ?? fail("{direct}: {err}")
+    if !expected.success -> fail("direct {level} --n {n} exited {expected.code}")
+    kernel_runs := [Run]{}
+    direct_runs := [Run]{}
+    loop trial in 0..<trials {
+        if trial %% 2 == 0 -> kernel_runs.push(timed(launch, report, kernel, n, expected.output))
+        direct_runs.push(timed(launch, report, direct, n, expected.output))
+        if trial %% 2 == 1 -> kernel_runs.push(timed(launch, report, kernel, n, expected.output))
+    }
+    kernel_wall: kernel_runs.map(fn(run) { run.wall_ns })
+    direct_wall: direct_runs.map(fn(run) { run.wall_ns })
+    counted: kernel_runs.all(fn(run) { run.cycles >= 0 }) && direct_runs.all(fn(run) { run.cycles >= 0 })
+    Level{
+        level: level.copy(),
+        trials: trials,
+        wall_ns: metric(kernel_wall, direct_wall),
+        cycles_u: if counted -> Val(metric(kernel_runs.map(fn(run) { run.cycles }), direct_runs.map(fn(run) { run.cycles }))) else -> None,
+        peak_rss_kb: metric(kernel_runs.map(fn(run) { run.peak_kb }), direct_runs.map(fn(run) { run.peak_kb })),
+        kernel_wall_ns: kernel_wall,
+        direct_wall_ns: direct_wall,
+    }
+}
+
+cpu_model: fn() -> String? {
+    found: regex.match(Regex{"model name\s*:\s*(.*)"}, files.read("/proc/cpuinfo") ?? "") ?? return None
+    Val(found.groups[0].copy())
+}
+
+line_of: fn(name: String, metric: Metric) -> String {
+    "{name} kernel {metric.kernel_median} direct {metric.direct_median} ratio {metric.ratio} [{metric.lower95}, {metric.upper95}] {metric.verdict}"
+}
+
+// The launcher JET_GAUNTLET_LAUNCHER names, as the gauntlet's timer takes it,
+// else one built into `scratch` from launch.c with `cc`.
+launcher: fn(root: String, scratch: String) -> String {
+    if sys.get("JET_GAUNTLET_LAUNCHER") == .Val(built) && built != "" -> return built
+    path: files.join(scratch, "launch")
+    cc: process.cmd([String]{"cc", "-O2", "-o", path, files.join(root, LAUNCH)}).run() ?? fail("cannot build the launcher from {LAUNCH}: {err}")
+    if !cc.success -> fail("cannot build the launcher from {LAUNCH}:\n{cc.output}{cc.errors}")
+    path
+}
+
+run: fn() {
+    argv: process.args()
+    root: files.cwd() ?? fail("cannot read the working directory: {err}")
+    if !files.exists(files.join(root, PAIR)) -> fail("run this from the repository root")
+    given: argument(argv, "--jet", "")
+    jet: if given == "" -> [String]{files.join(root, JET_ENV), "jet"} else -> [String]{given}
+    n_text: argument(argv, "--n", DEFAULT_N)
+    n: count(n_text, "--n")
+    trials: count(argument(argv, "--trials", DEFAULT_TRIALS), "--trials")
+    output: argument(argv, "--output", "")
+    check := jet.copy()
+    check.extend([String]{"Tools/Perf/CodegenCeiling.jet", "--zero-cost"})
+    if given != "" -> check.extend([String]{"--jet", given})
+    checked: process.cmd(check).cwd(root).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? fail("{check.join(" ")}: {err}")
+    codegen: if checked.success -> "pass" else -> "fail"
+    scratch_dir: files.temp_dir("zero-cost-pair") ?? fail("cannot make a scratch directory: {err}")
+    scratch: scratch_dir.path
+    launch: launcher(root, scratch)
+    levels := [Level]{}
+    loss := false
+    loop level in LEVELS {
+        kernel: build(root, jet, 0, level, files.join(scratch, "kernel{level}"))
+        direct: build(root, jet, 1, level, files.join(scratch, "direct{level}"))
+        measured: level_of(launch, scratch, kernel, direct, level, n_text, trials)
+        print("{level} {line_of("wall_ns", measured.wall_ns)}")
+        if measured.cycles_u == .Val(cycles) -> print("{level} {line_of("cycles_u", cycles)}")
+        print("{level} {line_of("peak_rss_kb", measured.peak_rss_kb)}")
+        if measured.wall_ns.verdict == "loss" || measured.peak_rss_kb.verdict == "loss" {
+            loss = true
+        }
+        if measured.cycles_u == .Val(cycles) && cycles.verdict == "loss" -> loss = true
+        levels.push(measured)
+    }
+    verdict: if codegen == "pass" && !loss -> "pass" else -> "fail"
+    receipt: Receipt{
+        schema: "jet.perf.zero-cost-pair.v1",
+        pair: PAIR,
+        n: n,
+        codegen: codegen,
+        levels: levels,
+        host: Host{platform: sys.name(), release: sys.release(), arch: sys.arch(), cpu_model: cpu_model(), cpu_count: sys.cpu_count()},
+        generated_command: "jet Tools/Perf/ZeroCostPair.jet --n {n} --trials {trials}",
+        verdict: verdict.copy(),
+    }
+    if output != "" {
+        files.write(output, "{json.to_string_pretty(receipt) ?? fail("the receipt: {err}")}\n") ?? fail("{output}: {err}")
+    }
+    print("zero-cost pair: {verdict} (codegen {codegen})")
+    if verdict != "pass" -> process.exit(1)
+}
+
+#Test("a launcher report gives a run's wall time, cycles and peak") {
+    run: run_of("start 12 5\ncycles 900\nend 0 2500 -1 4096 10 2 0\n")
+    assert_eq(run.wall_ns, 2500)
+    assert_eq(run.cycles, 900)
+    assert_eq(run.peak_kb, 4096)
+}
+
+#Test("a kernel arm slower in every trial is a loss, an even one is not") {
+    direct: loop at in 0..<100 -> 1000 + at %% 7
+    slower: loop at in 0..<100 -> 1100 + at %% 7
+    assert_eq(metric(slower, direct).verdict, "loss")
+    assert_eq(metric(direct, direct).verdict, "even")
+    assert_eq(metric(direct, slower).verdict, "win")
+}

@@ -1,0 +1,12 @@
+// Inside a lambda handed to a helper, does `?? return` leave the lambda or the enclosing function?
+fn apply<T, U>(value: T, step: fn(T) -> U) -> U { step(value) }
+
+fn port(text: String) -> Int {
+    n :: apply<String, Int>(text, (s: String) -> Int.parse(s) ?? return -1)
+    n + 1000
+}
+
+fn run() {
+    print(port("80"))
+    print(port("x"))
+}

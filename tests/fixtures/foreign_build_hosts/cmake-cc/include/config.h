@@ -1,1 +1,0 @@
-#define JET_CC_FIXTURE 1

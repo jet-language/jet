@@ -1,0 +1,34 @@
+# `jet debug` builds the program's native O0 image and runs it under Jet's
+# own debugger, which reads the image's Jet line table and DWARF. A
+# breakpoint on a Jet line stops there with the `<- here` caret, `print`
+# reads a Jet local in Jet terms, the backtrace names only Jet frames, and
+# the program runs on to its end. The same session runs with nothing on
+# PATH, and on an image `jet build -O0` built, debugged as it is against the
+# source its line table names.
+fixture: NativeBreakpointReadsAJetLocal.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: native_breakpoint_reads_a_jet_local.stdin
+exit: 0
+stdout: ~ "Breakpoint set  prog.jet:2" # `break 2` confirms the Jet line
+stdout: ~ "Breakpoint hit  prog.jet:2  in double()" # the stop names the Jet file, line and function
+stdout: ~ "2 |     y: x * 2        <- here" # the stop shows the Jet source line with its caret
+stdout: ~ "(Jet) print x\nx = 0\n" # the first call's argument
+stdout: ~ "#0  double()  at prog.jet:2\n#1  run()  at prog.jet:8\n" # Jet frames only
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:2  in double()" # the second call stops again
+stdout: ~ "count 2\nProgram finished\n" # the program's own output, then the end of the session
+stdout: !~ ".rs:" # no generated Rust anywhere
+step: jet debug prog.jet
+env: PATH={work}/no-tools
+stdin: native_breakpoint_reads_a_jet_local.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:2  in double()" # no debugger on PATH: Jet's own stops at the line
+stdout: ~ "count 2\nProgram finished\n" # and runs the program to its end
+step: jet build -O0 prog.jet
+exit: 0
+step: jet debug .jet/build/prog
+stdin: native_breakpoint_reads_a_jet_local.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:2  in double()" # a built image stops at the Jet line
+stdout: ~ "2 |     y: x * 2        <- here" # with the source its line table names
+stdout: ~ "count 2\nProgram finished\n" # and runs the program to its end

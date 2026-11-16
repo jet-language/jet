@@ -1,0 +1,12 @@
+use time: core.time
+
+// A copy of an aggregate that holds a Manual clock forks that clock too: the
+// copied list's clock ticks on its own and the original list's stays put.
+run: fn() {
+    original: time.Clock.new(0)
+    clocks: [time.Clock]{original}
+    copied := clocks.copy()
+    assert_eq(copied[0].advance(2), 2)
+    assert_eq(clocks[0].now(), 0)
+    print("forked")
+}

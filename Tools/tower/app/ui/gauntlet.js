@@ -1,6 +1,6 @@
 // ---- Gauntlet standings ------------------------------------------------------
-// The Gauntlet page shows the gauntlet table (Tools/gauntlet/harness/table.mjs):
-// its rows as a `standings` section (Tools/gauntlet/harness/standings.mjs)
+// The Gauntlet page shows the gauntlet table (Tools/Gauntlet/Harness/table.mjs):
+// its rows as a `standings` section (Tools/Gauntlet/Harness/standings.mjs)
 // over the grid the server plans from the entries' manifests (Tower
 // app/gauntlet-standings.mjs), filled in as the harness measures. Every comparison entry is a
 // row of the grid and Jet, every standings peer and the hand-written asm
@@ -579,7 +579,7 @@ export function renderGauntletStandings(view) {
   const modes = `<p class="gauntlet__policy gauntlet__modes">${view.groups.map((group) => `<span><strong>${esc(group.label)}</strong> judges ${esc(group.peers.join(', ') || 'no peer')}: ${esc(group.what)}.</span>`).join(' ')}</p>`;
   if (view.planned) {
     return `<section class="standings" aria-label="Gauntlet standings">${runLine}${modes}
-    ${view.entries.length ? gridHtml(view) : '<div class="empty">No comparison entries in Tools/gauntlet/entries.</div>'}
+    ${view.entries.length ? gridHtml(view) : '<div class="empty">No comparison entries in Tools/Gauntlet/entries.</div>'}
   </section>`;
   }
   const { summary } = view;

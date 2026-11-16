@@ -263,7 +263,7 @@ pkg_test_code_suites: fn(source: String) -> [String] Never! {
 
 // Whether a test.jet sets a `jet test` setting: a `<t>.<setting>(` call on
 // a `<t>: Test` parameter, whose name is a setting row. Only such a test.jet
-// runs `jet test`'s plan step (JetCli TestSettingLayers.jet).
+// runs `jet test`'s plan step (JetCLI TestSettingLayers.jet).
 pkg_test_sets_settings: fn(source: String) -> Bool Never! {
     lexed: lex(source.bytes())
     tokens: lexed.tokens
@@ -341,11 +341,11 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 }
 
 #Test("test profiles carry a baseline and any setting row") {
-    profiles: pkg_parse_test_profiles(`ui: TestProfile{ suites: [ui], jobs: 8, memory: 12gib, filter: "tests/ui/E01", shard: 2/4, opt_in: true, results: "ui.json", list: true, baseline: "baseline.tsv" }`) ?? panic(err.message())
+    profiles: pkg_parse_test_profiles(`ui: TestProfile{ suites: [ui], jobs: 8, memory: 12gib, filter: "Tests/UI/E01", shard: 2/4, opt_in: true, results: "ui.json", list: true, baseline: "baseline.tsv" }`) ?? panic(err.message())
     profile: profiles[0]
     assert_eq(test_settings_get(profile.settings, "jobs") ?? "", "8")
     assert_eq(test_settings_get(profile.settings, "memory") ?? "", "{12 * 1073741824}")
-    assert_eq(test_settings_get(profile.settings, "filter") ?? "", "tests/ui/E01")
+    assert_eq(test_settings_get(profile.settings, "filter") ?? "", "Tests/UI/E01")
     assert_eq(test_settings_get(profile.settings, "shard") ?? "", "2/4")
     assert_eq(test_settings_get(profile.settings, "opt_in") ?? "", "true")
     assert_eq(test_settings_get(profile.settings, "results") ?? "", "ui.json")
@@ -357,16 +357,16 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 }
 
 #Test("stock suites name a golden, ui or cases corpus, and tests is built in") {
-    suites: pkg_parse_test_suites(`golden: TestSuite{ golden_corpus: "tests/golden" }, ui: TestSuite{ ui_corpus: "tests/ui" }, cases: TestSuite{ cases_corpus: "tests/cases" }`) ?? panic(err.message())
+    suites: pkg_parse_test_suites(`golden: TestSuite{ golden_corpus: "tests/golden" }, ui: TestSuite{ ui_corpus: "Tests/UI" }, cases: TestSuite{ cases_corpus: "Tests/Cases" }`) ?? panic(err.message())
     assert_eq(suites.len(), 3)
     assert_eq(suites[0].name, "golden")
     assert_eq(suites[0].corpus, "tests/golden")
     assert_eq(suites[0].kind.as_str(), "golden")
     assert_eq(suites[1].kind.as_str(), "ui")
     assert_eq(suites[2].kind.as_str(), "cases")
-    assert_eq(suites[2].corpus, "tests/cases")
-    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ lint_corpus: "tests/ui" }`), "test suite `ui` has an unknown field `lint_corpus` (allowed: golden_corpus, ui_corpus, cases_corpus)")
-    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ ui_corpus: "tests/ui", cases_corpus: "tests/cases" }`), "test suite `ui` declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus")
+    assert_eq(suites[2].corpus, "Tests/Cases")
+    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ lint_corpus: "Tests/UI" }`), "test suite `ui` has an unknown field `lint_corpus` (allowed: golden_corpus, ui_corpus, cases_corpus)")
+    assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ ui_corpus: "Tests/UI", cases_corpus: "Tests/Cases" }`), "test suite `ui` declares more than one corpus; a suite is one golden_corpus, ui_corpus or cases_corpus")
     assert_eq(pkg_test_suites_refusal(`ui: TestSuite{ }`), "test suite `ui` needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")
     assert_eq(pkg_test_suites_refusal(`tests: TestSuite{ golden_corpus: "t" }`), "test suite `tests` is built in: it is every #Test of the package, so `suites:` can't declare it")
 }

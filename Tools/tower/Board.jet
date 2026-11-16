@@ -1,7 +1,7 @@
 #!/usr/bin/env jet
 // Tower's board reads in Jet (#6676): the read-only `show` and `list` verbs
 // that gates use, answering with the JSON the Tower CLI prints for them, and
-// the Docs/spec reference lint (`lint --docs`, #457), whose one home this is.
+// the Docs/Spec reference lint (`lint --docs`, #457), whose one home this is.
 // Usage (from the repository root):
 //   jet Tools/tower/Board.jet card show REF [--json] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet card list --json [--data DIR|FILE]
@@ -1118,7 +1118,7 @@ docs_default: fn(place: Place) -> String Never! {
 // `lint --docs`: the findings as Tower prints them, and how many there are.
 lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings: Int) Failure! {
     if request.words.len() != 1 || !request.flags.has_key("docs") {
-        return Err(fail("E_USAGE", "Tools/tower/Board.jet lints only `lint --docs` (the Docs/spec reference scan); `tower lint` runs the board rules"))
+        return Err(fail("E_USAGE", "Tools/tower/Board.jet lints only `lint --docs` (the Docs/Spec reference scan); `tower lint` runs the board rules"))
     }
     docs: request.flags.get("docs-root") ?? docs_default(place)
     found: docs_findings(place, docs) ?? return Err(err)
@@ -1132,7 +1132,7 @@ lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings
 }
 
 // Card and decision IDs cited under `docs`/spec that have no live or archived
-// Tower record, one finding per ID listing every `Docs/spec/...:LINE` citing it.
+// Tower record, one finding per ID listing every `Docs/Spec/...:LINE` citing it.
 docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
     live: load_live(place) ?? return Err(err)
     archive: load_archive(place, ArchiveKeep.Index) ?? return Err(err)
@@ -1146,7 +1146,7 @@ docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
     known_decisions := [String:Bool]{}
     loop decision in live.decisions -> known_decisions[decision.id.copy()] = true
     loop decision in archive.decisions -> known_decisions[decision.id.copy()] = true
-    spec: "{docs}/spec"
+    spec: "{docs}/Spec"
     paths := [String]{}
     if files.is_dir(spec) -> spec_files(spec, paths) ?? return Err(err)
     cards := Citations{order: [String]{}, slots: [String:Int]{}, locations: [[String]]{}}
@@ -1482,14 +1482,14 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(hex_commit("0123456789ABCDEF0123456789abcdef01234567"), false)
 }
 
-#Test("board lints Docs/spec references the way tower lint --docs did") {
+#Test("board lints Docs/Spec references the way tower lint --docs did") {
     place: fixture_place("lint", fixture_history())
     docs: "{place.dir}/project/Docs"
-    files.create_dir_all("{docs}/spec/nested") ?? panic("fixture: {err}")
-    files.write("{docs}/spec/law.md", "Card #7 and #99 cite D-OPEN, D-MISSING1 and D-XXX.\nNo context here: #95.\nIssue `#98` stays code; D-Lower, xD-NOPE and D-AB_C are no IDs; D-OLD is archived.\n") ?? panic("fixture: {err}")
-    files.write("{docs}/spec/nested/more.md", "cards #99 and #0100 and D-MISSING1\n") ?? panic("fixture: {err}")
-    files.write("{docs}/spec/.hidden.md", "card #55 D-HIDDEN\n") ?? panic("fixture: {err}")
-    files.write("{docs}/spec/skip.rs", "card #53 D-SKIPPED\n") ?? panic("fixture: {err}")
+    files.create_dir_all("{docs}/Spec/nested") ?? panic("fixture: {err}")
+    files.write("{docs}/Spec/law.md", "Card #7 and #99 cite D-OPEN, D-MISSING1 and D-XXX.\nNo context here: #95.\nIssue `#98` stays code; D-Lower, xD-NOPE and D-AB_C are no IDs; D-OLD is archived.\n") ?? panic("fixture: {err}")
+    files.write("{docs}/Spec/nested/more.md", "cards #99 and #0100 and D-MISSING1\n") ?? panic("fixture: {err}")
+    files.write("{docs}/Spec/.hidden.md", "card #55 D-HIDDEN\n") ?? panic("fixture: {err}")
+    files.write("{docs}/Spec/skip.rs", "card #53 D-SKIPPED\n") ?? panic("fixture: {err}")
     request: parse_request([String]{"lint", "--docs", "--docs-root", docs, "--json"}) ?? panic("request: {err.message}")
     linted: lint_request(request, place) ?? panic("lint: {err.message}")
     assert_eq(linted.findings, 3)
@@ -1500,9 +1500,9 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(
         shown,
         [String]{
-            "spec-card-ref-missing|#99|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites #99, but Tower has no card record",
+            "spec-card-ref-missing|#99|Docs/Spec/law.md:1, Docs/spec/nested/more.md:1 cites #99, but Tower has no card record",
             "spec-card-ref-missing|#0100|Docs/spec/nested/more.md:1 cites #0100, but Tower has no card record",
-            "spec-decision-ref-missing|D-MISSING1|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites D-MISSING1, but Tower has no decision record",
+            "spec-decision-ref-missing|D-MISSING1|Docs/Spec/law.md:1, Docs/spec/nested/more.md:1 cites D-MISSING1, but Tower has no decision record",
         },
     )
     bare: parse_request([String]{"lint", "--docs", "--docs-root", "{place.dir}/none"}) ?? panic("request: {err.message}")

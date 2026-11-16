@@ -56,7 +56,7 @@ use {
 
 #Test("env lines expand against earlier effective values and env-words expand to separate argv words") {
     root: cases_test_root("host-environment")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "environment.out"), "base:next\nalpha\nbeta\n")
     source: "env: VALUE=base\nstep: printf '%s\\\\n' {{env:VALUE}} {{env-words:WORDS|alpha beta}}\nenv: VALUE={{env:VALUE}}:next\nstdout: = environment.out\n"
     assert_eq(cases_test_advanced(root, "effective", source).verdict.status, "PASS")
@@ -119,7 +119,7 @@ use {
 
 #Test("free-port tokens in a write template are reserved in the case's one probe run") {
     root: cases_test_root("host-template-ports")
-    kit_exec_write(files.join(root, "tests/cases/group/port.template"), "{{free-port:templated}}")
+    kit_exec_write(files.join(root, "Tests/Cases/group/port.template"), "{{free-port:templated}}")
     cases_test_source(root, "template", "write: port.txt port.template\nstep: cat port.txt\nstdout: is-u32 # a port\n")
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.jet = cases_test_real_jet("for the free-port self-test")
@@ -313,7 +313,7 @@ use {
 
 #Test("modifiers inherit their exact process branch without rerunning its probe") {
     root: cases_test_root("host-modifier-branch-owner")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/nested/value"), "ready")
     source: "fixture: tree\nwhen probe sh -c 'test ! -f selected && touch selected': step: cat value\nwhen probe sh -c 'test ! -f selected && touch selected': cwd: nested\nwhen probe sh -c 'test ! -f selected && touch selected': env: VALUE=selected\nstdout: = \"ready\"\n"
     plan: kit_steps_parse_case(source)
@@ -346,7 +346,7 @@ use {
 
 #Test("platform capture branches retain identity through nested guards and fresh loop scopes") {
     root: cases_test_root("host-capture-platform-join")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "ready")
     source: "fixture: tree\nwhen os-name {kit_steps_host_name()}\ncapture: chosen = text file value\nend when\nwhen os-name not-a-host\ncapture: chosen = text file absent\nend when\ncap:chosen: = \"ready\"\n"
     assert_eq(kit_steps_parse_case(source).error, "")

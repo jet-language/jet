@@ -1,0 +1,829 @@
+#!/usr/bin/env jet
+// The script-pairing guard and the script census.
+//
+// Repository-management tooling is Jet: the scripts under SCOPE, the agent
+// tools, the release and the CI programs, with the landing, chain, census,
+// lane-check and release gates and generators that live there. New tooling
+// there may be written first in another language, but it lands paired: a
+// change that adds a script in another language (a .mjs, .js, .cjs, .ts,
+// .sh, .bash or .py file, or an extensionless file whose `#!` line names an
+// interpreter other than jet) under SCOPE is refused unless a gauntlet entry
+// under Tools/Gauntlet/Entries/ pairs it with its Jet twin in the same
+// change. A script anywhere else (an editor extension, the gauntlet, perf,
+// packaging, agent-eval, peer programs, test and benchmark subjects) is out
+// of scope: it stays in the language its host needs. Nix files are not
+// scripts by this rule.
+//
+// A tool entry (`"mode": "tool"`) pairs a script: it names the script as
+// `tool.original` and its Jet twin as `tool.jet`, and holds the shared
+// fixtures (`tool.fixtures`, a directory in the entry, when the tool reads
+// any) and the parity check: `tool.cases`, each the `args` both programs
+// run with (and, when given, the `env` variables they run under and the
+// `exit` code both must give, 0 otherwise) and the `expected` output file
+// in the entry. A case with a `check` (a Jet program in the entry) proves
+// the job: run with `jet` in the case directory after each program, with
+// the path of a file holding the program's output, it prints the facts the
+// job left (files, commits, queue lines, the facts the report states), and
+// that print must be `expected` byte for byte; a case without one compares
+// the programs' own output byte for byte. `tool.token_gaps`, when given,
+// names what closes the twin's token gap (Core API criteria such as
+// "#5072 c36", syntax ballots such as "D-SH-RUN1"), and `tool.programs`,
+// when a side is a driver, the repository programs it runs, which the
+// port-bar judge measures as part of that side, a `path#definition` naming
+// the definition the driver's mode of a many-mode program runs
+// (Tools/Gauntlet/Harness/run.mjs runs each program in a fresh copy of the
+// fixtures; `--entry NAME` runs one entry). Only the entries whose original
+// or twin is in SCOPE are held to being complete.
+// A script no entry pairs is covered by its importers when every in-scope
+// tool script that imports it by a relative path, directly or through other
+// importers, is paired or covered: its job is part of each importer's, so it
+// is replaced only when all of them are; until then the census names the
+// importers that are not. A test script (`*.test.mjs`) is covered when each
+// script it imports relatively is paired or covered, and counts with those
+// entries, not as an unpaired tool or an importer.
+// The tool entries are the one home of which Jet program replaces which
+// script; the census is computed from the tree on demand and never stored.
+//
+// A tool entry switches over when its original moves into the entry's own
+// directory, kept there only as the reference its twin is judged against.
+// The original keeps running until its entry passes the port-bar judge
+// (JUDGE, Tools/Gauntlet/PortBars.jet: the job, wall time and peak memory
+// decide, beside the reasoning bar; tokens are reported, never failing), so
+// `--check` runs that judge on each switched entry the change touches (a
+// file in the entry or its Jet twin) and refuses the change while the entry
+// loses a bar.
+//
+// Usage (from the repository root):
+//   jet Tools/Agent/ScriptPairing.jet --check [--base REV]
+//     the guard: every script added under SCOPE since REV (default HEAD),
+//     staged, unstaged or untracked, is paired or covered, every in-scope
+//     tool entry is complete, and every switched entry the change touches
+//     passes the port-bar judge. Exits 0 when clean, 65 naming each
+//     refusal, 64 when it cannot run.
+//   jet Tools/Agent/ScriptPairing.jet --census
+//     every script in another language in the checkout, one
+//     `path<TAB>class<TAB>pair` row each (class: paired, covered, unpaired
+//     or out of scope; pair: the entry and the Jet twin, the entries that
+//     cover it, or the importers that keep it unpaired), then the counts.
+use {
+    json: core.encoding.json
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+ENTRIES_ROOT: "Tools/Gauntlet/Entries"
+
+// The repository-management tooling the rule holds to Jet.
+SCOPE: [String]{"Tools/Agent/", "Tools/Release/", "Tools/CI/"}
+
+SCRIPT_EXTENSIONS: [String]{".mjs", ".js", ".cjs", ".ts", ".sh", ".bash", ".py"}
+
+// `#!` interpreters that are Nix, which the rule exempts.
+NIX_INTERPRETERS: [String]{"nix", "nix-shell"}
+
+PAIRING_RULE: "write its Jet twin and a gauntlet entry (Tools/Gauntlet/Entries/<name>/entry.json, \"mode\": \"tool\") that names it as `tool.original`, the twin as `tool.jet`, its fixtures and its `tool.cases` with expected output, in the same change (AGENTS.md, Tooling in other languages)"
+
+// The port-bar judge a switched entry must pass.
+JUDGE: "Tools/Gauntlet/PortBars.jet"
+
+// The names of a test script, which counts with what it imports.
+TEST_SUFFIXES: [String]{".test.mjs", ".test.js"}
+
+#Error
+PairingError: struct {
+    message: String
+}
+
+pairing_fail: fn(message: String) -> PairingError Never! {
+    PairingError{message: "script-pairing: {message}"}
+}
+
+// What the rule makes of one file: a Jet program, a file that is no
+// script, a script outside SCOPE, or a script the rule holds.
+FileClass: enum {
+    Jet
+    Other
+    OutOfScope
+    Script
+}
+
+// A script the entries pair: the entry and the Jet twin.
+Pair: struct {
+    entry: String
+    twin: String
+}
+
+// A tool entry's original and the pair it gives.
+Pairing: struct {
+    path: String
+    pair: Pair
+}
+
+// One relative import between two in-scope tool scripts: `from` imports
+// `to`.
+Link: struct {
+    from: String
+    to: String
+}
+
+// How the entries cover a script no entry pairs: the entries that do, and
+// what keeps it uncovered (the importers that are neither paired nor
+// covered, or a test's imports that are not).
+Coverage: struct {
+    entries: [String]
+    missing: [String]
+}
+
+// Every pairing the in-scope tool entries make, the imports between the
+// in-scope tool scripts, and the problems of incomplete in-scope tool
+// entries.
+Entries: struct {
+    pairings: [Pairing]
+    links: [Link]
+    problems: [String]
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+text_field: fn(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+base_name: fn(path: String) -> String Never! {
+    split: path.rpartition("/")
+    if split.sep == "" -> return path.copy()
+    split.tail.copy()
+}
+
+// Whether the file name has no extension: no dot after its first byte.
+extensionless: fn(path: String) -> Bool Never! {
+    name: base_name(path)
+    name.len() > 0 && !name.slice(1, name.len()).contains(".")
+}
+
+// The interpreter a `#!` line names: the program's base name, or for
+// `env` the first word that is not a flag or a VAR=value assignment.
+// "" when `first_line` is not a `#!` line.
+shebang_interpreter: fn(first_line: String) -> String Never! {
+    if !first_line.starts_with("#!") -> return ""
+    words := [String]{}
+    loop word in first_line.slice(2, first_line.len()).trim().split(" ").to_list() {
+        if word.trim() != "" -> words.push(word.trim())
+    }
+    if words.len() == 0 -> return ""
+    program: base_name(words[0])
+    if program != "env" -> return program
+    loop word in words.slice(1, words.len()) {
+        if word.starts_with("-") || word.contains("=") -> next
+        return base_name(word)
+    }
+    ""
+}
+
+// Whether the rule holds `path` to being paired.
+in_scope: fn(path: String) -> Bool Never! { SCOPE.any(fn(root) { path.starts_with(root) }) }
+
+// The class of `path`; `first_line` is its first line, read only for an
+// extensionless file.
+file_class: fn(path: String, first_line: String) -> FileClass Never! {
+    if path.ends_with(".jet") -> return .Jet
+    if !SCRIPT_EXTENSIONS.any(fn(extension) { path.ends_with(extension) }) {
+        if !extensionless(path) -> return .Other
+        interpreter: shebang_interpreter(first_line)
+        if interpreter == "" || interpreter == "jet" || NIX_INTERPRETERS.contains(interpreter) {
+            return .Other
+        }
+    }
+    if in_scope(path) -> .Script else -> .OutOfScope
+}
+
+// The first line of an extensionless file under `repo` (at most 256 bytes),
+// else "".
+first_line_of: fn(repo: String, path: String) -[FS]> String Never! {
+    if !extensionless(path) -> return ""
+    head: files.read_at(files.join(repo, path), 0, 256) ?? return ""
+    String.from_bytes_lossy(head).partition("\n").head.copy()
+}
+
+// The class of the file `path` under `repo`.
+class_of: fn(repo: String, path: String) -[FS]> FileClass Never! {
+    file_class(path, first_line_of(repo, path))
+}
+
+// The relative imports (`from './lib.mjs'`, or a literal `import('./lib.mjs')`)
+// of the JavaScript file `path`, as paths in the checkout; none for another
+// file.
+js_imports: fn(repo: String, path: String) -[FS]> [String] Never! {
+    out := [String]{}
+    if !path.ends_with(".mjs") && !path.ends_with(".js") -> return out
+    text: files.read(files.join(repo, path)) ?? return out
+    dir: files.dirname(path)
+    statement := ""
+    loop line in text.lines() {
+        trimmed: line.trim()
+        if statement == "" && !trimmed.starts_with("import ") {
+            loaded: trimmed.partition("import(").tail.trim()
+            if !trimmed.starts_with("//") && (loaded.starts_with("'") || loaded.starts_with("\"")) {
+                specifier: loaded.slice(1, loaded.len()).partition(loaded.slice(0, 1)).head
+                if specifier.starts_with(".") -> out.push(files.normalize("{dir}/{specifier}"))
+            }
+            next
+        }
+        statement = "{statement} {trimmed}".trim()
+        quoted: statement.partition(" from ").tail.trim()
+        if !quoted.starts_with("'") && !quoted.starts_with("\"") {
+            if statement.contains(";") -> statement = ""
+            next
+        }
+        specifier: quoted.slice(1, quoted.len()).partition(quoted.slice(0, 1)).head
+        statement = ""
+        if specifier.starts_with(".") -> out.push(files.normalize("{dir}/{specifier}"))
+    }
+    out
+}
+
+// The names of the directories in `repo`/`root`, in name order.
+subdirectories: fn(repo: String, root: String, found: &Entries) -[FS]> [String] Never! {
+    names := [String]{}
+    if !files.is_dir(files.join(repo, root)) -> return names
+    listed: files.list_dir(files.join(repo, root)) ?? {
+        found.problems.push("{root} cannot be listed: {err}")
+        return names
+    }
+    loop item in listed {
+        if item.is_dir -> names.push(item.name.copy())
+    }
+    names.sort()
+    names
+}
+
+// The pairings and problems of the in-scope tool entries under
+// `repo`/ENTRIES_ROOT, in name order, and the links between the in-scope
+// tool scripts of `paths` (the checkout's files).
+read_entries: fn(repo: String, paths: [String]) -[FS]> Entries Never! {
+    found := Entries{pairings: [Pairing]{}, links: [Link]{}, problems: [String]{}}
+    loop name in subdirectories(repo, ENTRIES_ROOT, found) {
+        text: files.read(files.join(repo, "{ENTRIES_ROOT}/{name}/entry.json")) ?? next
+        tree: json.parse(text) ?? next
+        if text_field(tree, "mode") == "tool" -> tool_entry(repo, name, tree, found)
+    }
+    loop path in paths {
+        if test_script(path) || class_of(repo, path) != .Script -> next
+        loop taken in js_imports(repo, path) {
+            found.links.push(Link{from: path.copy(), to: taken.copy()})
+        }
+    }
+    found
+}
+
+// Records the pairing an in-scope tool entry makes, or each part it lacks.
+tool_entry: fn(repo: String, name: String, tree: Dyn, found: &Entries) -[FS]> () {
+    dir: "{ENTRIES_ROOT}/{name}"
+    tool: field(tree, "tool")
+    original: text_field(tool, "original")
+    twin: text_field(tool, "jet")
+    // A switched entry's original sits in the entry, so its twin decides.
+    if !in_scope(original) && !in_scope(twin) {
+        return
+    }
+    problems := [String]{}
+    if text_field(tree, "name") != name -> problems.push("its `name` is not `{name}`")
+    original_class: class_of(repo, original)
+    if {
+        original == "" -> problems.push("it names no `tool.original`")
+        !files.is_file(files.join(repo, original)) -> {
+            problems.push("its original `{original}` does not exist")
+        }
+        original_class == .Jet || original_class == .Other -> {
+            problems.push("its original `{original}` is not a script in another language")
+        }
+    }
+    if {
+        !twin.ends_with(".jet") -> problems.push("its `tool.jet` is not a Jet program")
+        !files.is_file(files.join(repo, twin)) -> {
+            problems.push("its Jet twin `{twin}` does not exist")
+        }
+    }
+    fixtures: text_field(tool, "fixtures")
+    if fixtures != "" && !files.is_dir(files.join(repo, "{dir}/{fixtures}")) {
+        problems.push("its fixtures `{dir}/{fixtures}` are not a directory")
+    }
+    cases: array_field(tool, "cases")
+    if cases.len() == 0 -> problems.push("it has no `tool.cases` parity check")
+    loop index in 0..<cases.len() {
+        case: cases[index]
+        args_listed := false
+        if field(case, "args") == .Array(listed) -> args_listed = listed.len() >= 0
+        if !args_listed -> problems.push("case {index + 1} has no `args` array")
+        expected: text_field(case, "expected")
+        if {
+            expected == "" -> problems.push("case {index + 1} names no `expected` output")
+            !files.is_file(files.join(repo, "{dir}/{expected}")) -> {
+                problems.push("case {index + 1}'s expected output `{dir}/{expected}` does not exist")
+            }
+        }
+        check: text_field(case, "check")
+        if check != "" && (!check.ends_with(".jet") || !files.is_file(files.join(repo, "{dir}/{check}"))) {
+            problems.push("case {index + 1}'s check `{dir}/{check}` is not a Jet program")
+        }
+    }
+    loop known in found.pairings {
+        if original != "" && known.path == original {
+            problems.push("`{original}` is already the original of entry `{known.pair.entry}`")
+        }
+    }
+    if problems.len() > 0 {
+        found.problems.push("tool entry `{dir}`: {problems.join("; ")}")
+        return
+    }
+    found.pairings.push(Pairing{path: original.copy(), pair: Pair{entry: name.copy(), twin: twin.copy()}})
+}
+
+// The pair of `path`: the tool entry naming it as its original.
+pair_of: fn(entries: Entries, path: String) -> Pair? Never! {
+    loop known in entries.pairings {
+        if known.path == path -> return Val(known.pair.copy())
+    }
+    None
+}
+
+// Whether `coverage` covers its script: an entry covers it and nothing is
+// missing.
+covered: fn(coverage: Coverage) -> Bool Never! {
+    coverage.entries.len() > 0 && coverage.missing.len() == 0
+}
+
+// Whether `path` names a test script.
+test_script: fn(path: String) -> Bool Never! {
+    TEST_SUFFIXES.any(fn(suffix) { path.ends_with(suffix) })
+}
+
+// How the entries cover the script `path` without pairing it: a test
+// script by what it imports, any other by its importers.
+covering: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
+    if test_script(path) -> return test_coverage(repo, entries, path)
+    importer_coverage(entries, path)
+}
+
+// The in-scope tool scripts that import `path` directly.
+importers_of: fn(entries: Entries, path: String) -> [String] Never! {
+    out := [String]{}
+    loop link in entries.links {
+        if link.to == path && !out.contains(link.from) -> out.push(link.from.copy())
+    }
+    out
+}
+
+// How its importers cover the library `path`: every in-scope tool script
+// that imports it, directly or through other importers, must be reached,
+// that is paired, or imported only by reached scripts (a least fixed
+// point, so an import cycle that nothing paired imports reaches nothing).
+// The entries are the pairs of the paired importers; each importer left
+// unreached is missing.
+importer_coverage: fn(entries: Entries, path: String) -> Coverage Never! {
+    closure := importers_of(entries, path)
+    at := 0
+    loop at < closure.len() {
+        current: closure[at].copy()
+        at += 1
+        loop importer in importers_of(entries, current) {
+            if importer != path && !closure.contains(importer) -> closure.push(importer.copy())
+        }
+    }
+    names := [String]{}
+    reached := [String]{}
+    loop importer in closure {
+        pair: pair_of(entries, importer) ?? next
+        reached.push(importer.copy())
+        if !names.contains(pair.entry) -> names.push(pair.entry.copy())
+    }
+    grown := true
+    loop grown {
+        grown = false
+        loop importer in closure {
+            if reached.contains(importer) -> next
+            above: importers_of(entries, importer)
+            ready := above.len() > 0
+            loop name in above {
+                if !reached.contains(name) -> ready = false
+            }
+            if !ready -> next
+            reached.push(importer.copy())
+            grown = true
+        }
+    }
+    names.sort()
+    missing := [String]{}
+    loop importer in closure {
+        if !reached.contains(importer) -> missing.push(importer.copy())
+    }
+    Coverage{entries: names, missing: missing}
+}
+
+// The entries of the scripts the test script `path` imports, in name
+// order, and each import that is neither paired nor covered.
+test_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
+    names := [String]{}
+    missing := [String]{}
+    loop taken in js_imports(repo, path) {
+        own: if pair_of(entries, taken) == .Val(pair) -> Coverage{entries: [String]{pair.entry.copy()}, missing: [String]{}} else -> importer_coverage(entries, taken)
+        if !covered(own) {
+            missing.push(taken.copy())
+            next
+        }
+        loop name in own.entries {
+            if !names.contains(name) -> names.push(name.copy())
+        }
+    }
+    names.sort()
+    Coverage{entries: names, missing: missing}
+}
+
+// The refusal for each added path that is an in-scope script neither
+// paired nor covered, then every incomplete in-scope tool entry.
+refusals: fn(repo: String, added: [String], entries: Entries) -[FS]> [String] Never! {
+    out := [String]{}
+    loop path in added {
+        if class_of(repo, path) != .Script || pair_of(entries, path) != None -> next
+        coverage: covering(repo, entries, path)
+        if covered(coverage) -> next
+        detail: if coverage.missing.len() > 0 -> " (missing: {coverage.missing.join(", ")})" else -> ""
+        out.push("{path}: a script in another language with no gauntlet pair{detail}; {PAIRING_RULE}")
+    }
+    loop problem in entries.problems -> out.push(problem.copy())
+    out
+}
+
+// Whose repository a git read sees.
+// - Caller: the caller's, as git finds it: its GIT_DIR, GIT_INDEX_FILE and
+//   GIT_WORK_TREE when exported, which a checkout with no `.git` of its own
+//   (a land tree) needs.
+// - Own: the repository at `repo` alone, whatever the caller exports.
+GitScope: enum {
+    Caller
+    Own
+}
+
+git_lines: fn(repo: String, args: [String], scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    argv := [String]{"git", "-c", "core.quotepath=off"}
+    argv.extend(args.copy())
+    receipt: git_command(repo, argv, scope).output_limit(268435456).run() ?? return Err(pairing_fail("git cannot start: {err}"))
+    if receipt.code != 0 || receipt.signal != None {
+        return Err(pairing_fail("{argv.join(" ")} failed ({receipt.code}): {receipt.errors.trim()}"))
+    }
+    lines := [String]{}
+    loop line in receipt.output.lines() {
+        if line != "" -> lines.push(line.copy())
+    }
+    Ok(lines)
+}
+
+// `argv`, a git command, run in `repo` on the repository `scope` names.
+git_command: fn(repo: String, argv: [String], scope: GitScope) -> process.ProcessSpec {
+    spec: process.cmd(argv).cwd(repo)
+    if scope == {
+        .Caller -> spec
+        .Own -> spec.env_remove("GIT_DIR").env_remove("GIT_INDEX_FILE").env_remove("GIT_WORK_TREE")
+    }
+}
+
+// The files added since `base`, staged, unstaged or untracked; a rename is
+// not an addition.
+added_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    added: git_lines(repo, [String]{"diff", "--name-only", "--find-renames", "--diff-filter=A", base, "--"}, scope) ?? return Err(err)
+    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
+    out := added.copy()
+    loop path in untracked {
+        if !out.contains(path) -> out.push(path.copy())
+    }
+    out.sort()
+    Ok(out)
+}
+
+// Every file changed since `base`, staged, unstaged or untracked; a rename
+// is both of its paths.
+changed_files: fn(repo: String, base: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    changed: git_lines(repo, [String]{"diff", "--name-only", "--no-renames", base, "--"}, scope) ?? return Err(err)
+    untracked: git_lines(repo, [String]{"ls-files", "--others", "--exclude-standard"}, scope) ?? return Err(err)
+    out := changed.copy()
+    loop path in untracked {
+        if !out.contains(path) -> out.push(path.copy())
+    }
+    out.sort()
+    Ok(out)
+}
+
+// The tool entries `changed` touches whose original sits in the entry's own
+// directory: the entries that switched over to their Jet twin.
+switched_entries: fn(entries: Entries, changed: [String]) -> [String] Never! {
+    out := [String]{}
+    loop known in entries.pairings {
+        dir: "{ENTRIES_ROOT}/{known.pair.entry}/"
+        if !known.path.starts_with(dir) || out.contains(known.pair.entry) -> next
+        if changed.any(fn(path) { path.starts_with(dir) || path == known.pair.twin }) {
+            out.push(known.pair.entry.copy())
+        }
+    }
+    out
+}
+
+// The refusal for each of `names` that loses a port bar, with the bars it
+// loses as JUDGE reports them.
+judge_refusals: fn(repo: String, names: [String]) -[Env, Exec, Time.Wait]> [String] Never! {
+    jet: process.env_get("JET") ?? "jet"
+    out := [String]{}
+    loop name in names {
+        command: "{JUDGE} --entry {name}"
+        receipt: process.cmd([String]{jet.copy(), files.join(repo, JUDGE), "--repo", repo.copy(), "--entry", name.copy()}).cwd(repo).output_limit(268435456).run() ?? {
+            out.push("tool entry `{ENTRIES_ROOT}/{name}` switches to its Jet twin, but `{command}` cannot start: {err}")
+            next
+        }
+        if receipt.code == 0 && receipt.signal == None -> next
+        lost := [String]{}
+        loop line in receipt.output.lines() {
+            cells: line.split("\t").to_list()
+            if cells.len() == 4 && cells[0] == name && cells[1] != "verdict" && cells[2] == "FAIL" {
+                lost.push("{cells[1]}: {cells[3]}")
+            }
+        }
+        why: if lost.len() > 0 -> lost.join("; ") else -> "it exited {receipt.code}: {receipt.errors.trim()}"
+        out.push("tool entry `{ENTRIES_ROOT}/{name}` switches to its Jet twin before it wins every port bar (`{command}`): {why}; the original keeps running until it does")
+    }
+    out
+}
+
+// Every file of the checkout, tracked or untracked and not ignored.
+checkout_files: fn(repo: String, scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {
+    listed: git_lines(repo, [String]{"ls-files", "--cached", "--others", "--exclude-standard"}, scope) ?? return Err(err)
+    out := listed.copy()
+    out.sort()
+    Ok(out)
+}
+
+// The census rows: every script in another language, its class and pair.
+census_rows: fn(repo: String, paths: [String], entries: Entries) -[FS]> [String] Never! {
+    rows := [String]{}
+    loop path in paths {
+        if !files.is_file(files.join(repo, path)) -> next
+        class: class_of(repo, path)
+        if class == {
+            .OutOfScope -> { rows.push("{path}\tout of scope\t") }
+            .Script -> {
+                pair: pair_of(entries, path) ?? {
+                    coverage: covering(repo, entries, path)
+                    row: if {
+                        covered(coverage) -> "{path}\tcovered\t{coverage.entries.join(" ")}"
+                        coverage.missing.len() > 0 -> "{path}\tunpaired\tmissing: {coverage.missing.join(" ")}"
+                        else -> "{path}\tunpaired\t"
+                    }
+                    rows.push(row)
+                    next
+                }
+                rows.push("{path}\tpaired\t{pair.entry} {pair.twin}")
+            }
+            .Jet | .Other -> next
+        }
+    }
+    rows
+}
+
+CENSUS_CLASSES: [String]{"paired", "covered", "unpaired", "out of scope"}
+
+census_counts: fn(rows: [String]) -> String Never! {
+    parts := [String]{}
+    loop name in CENSUS_CLASSES {
+        count := 0
+        loop row in rows {
+            if row.partition("\t").tail.partition("\t").head == name -> count += 1
+        }
+        parts.push("{name} {count}")
+    }
+    "scripts {rows.len()}: {parts.join(", ")}"
+}
+
+// The checkout holding this tool, else the working directory.
+repo_root: fn() -[Env, FS]> String Never! {
+    tool: "/Tools/Agent/ScriptPairing.jet"
+    script: sys.executable()
+    if script.ends_with(tool) -> return script.removesuffix(tool)
+    files.cwd() ?? "."
+}
+
+usage: fn() -[Exec, IO]> Never {
+    process.fail(64, "usage: jet Tools/Agent/ScriptPairing.jet --check [--base REV] | --census")
+}
+
+run: fn() {
+    args: process.args()
+    repo: repo_root()
+    if args.len() == 1 && args[0] == "--census" {
+        paths: checkout_files(repo, .Caller) ?? process.fail(64, err.message)
+        rows: census_rows(repo, paths, read_entries(repo, paths))
+        loop row in rows -> print(row)
+        print(census_counts(rows))
+        return
+    }
+    if args.len() == 0 || args[0] != "--check" -> usage()
+    base: if args.len() == 3 && args[1] == "--base" -> args[2].copy() else -> "HEAD"
+    if args.len() != 1 && args.len() != 3 -> usage()
+    added: added_files(repo, base, .Caller) ?? process.fail(64, err.message)
+    changed: changed_files(repo, base, .Caller) ?? process.fail(64, err.message)
+    entries: read_entries(repo, checkout_files(repo, .Caller) ?? process.fail(64, err.message))
+    refused := refusals(repo, added, entries)
+    refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
+    if refused.len() == 0 {
+        print("script pairing: ok ({added.len()} added file(s))")
+        return
+    }
+    process.fail(65, refused.map(fn(line) { "script-pairing: {line}" }).join("\n"))
+}
+
+#Test("a script is named by its extension or a non-Jet `#!` line; Nix is no script; only SCOPE is held to the rule") {
+    assert(file_class("Tools/Agent/run.mjs", "") == .Script)
+    assert(file_class("Tools/Release/run.py", "") == .Script)
+    assert(file_class("Tools/CI/types.d.ts", "") == .Script)
+    assert(file_class("Tools/Agent/Orchestrator/lane-commit.sh", "") == .Script)
+    assert(file_class("Tools/Gauntlet/Harness/run.mjs", "") == .OutOfScope)
+    assert(file_class("Tools/Editors/Zed/install.sh", "") == .OutOfScope)
+    assert(file_class("Docs/Site/Assets/site.js", "") == .OutOfScope)
+    assert(file_class("Tools/agentx/run.sh", "") == .OutOfScope)
+    assert(file_class("Tools/Agent/Run.jet", "#!/usr/bin/env -S jet -A") == .Jet)
+    assert(file_class("Tools/Agent/run", "#!/usr/bin/env -S jet -A") == .Other)
+    assert(file_class("Tools/Agent/run", "#!/usr/bin/env python3") == .Script)
+    assert(file_class("Tools/Agent/run", "#!/bin/sh") == .Script)
+    assert(file_class("Tools/x/run", "#!/bin/sh") == .OutOfScope)
+    assert(file_class("Tools/Agent/run", "#!/usr/bin/env nix-shell") == .Other)
+    assert(file_class("Tools/Agent/flake.nix", "") == .Other)
+    assert(file_class("Tools/Agent/README", "plain text") == .Other)
+    assert(file_class("Tools/Agent/data.tsv", "#!/bin/sh") == .Other)
+    assert_eq(shebang_interpreter("#!/usr/bin/env FOO=1 -S node --flag"), "node")
+    assert_eq(shebang_interpreter("#! /bin/bash -e"), "bash")
+    assert_eq(shebang_interpreter("// not a shebang"), "")
+    assert(extensionless(".envrc") && extensionless("a/b/run") && !extensionless("a/b.c/run.sh"))
+}
+
+// A scratch checkout with one commit, for the planted cases; its git sees it
+// alone, as the planted reads (GitScope.Own) do.
+planted_repo: fn() -[Env, Exec, FS, Time.Wait]> String Never! {
+    dir: files.mkdtemp("script-pairing") ?? panic("a temporary directory cannot be made: {err}")
+    files.write("{dir}/README.md", "planted\n") ?? panic("{dir}: {err}")
+    steps: [[String]]{
+        [String]{"git", "init", "-q"},
+        [String]{"git", "add", "README.md"},
+        [String]{"git", "-c", "user.name=planted", "-c", "user.email=planted@example.invalid", "commit", "-q", "-m", "base"},
+    }
+    loop argv in steps {
+        receipt: git_command(dir, argv, .Own).run() ?? panic("git cannot start: {err}")
+        assert_eq(receipt.code, 0)
+    }
+    dir
+}
+
+plant: fn(dir: String, path: String, text: String) -[FS]> () {
+    files.create_dir_all(files.dirname(files.join(dir, path))) ?? panic("{path}: {err}")
+    files.write(files.join(dir, path), text) ?? panic("{path}: {err}")
+}
+
+#Test("a planted unpaired in-scope script is refused by name; a paired one passes; scripts and entries out of scope are only counted") {
+    dir: planted_repo()
+    plant(dir, "Tools/Agent/stray/report.mjs", "console.log(1)\n")
+    plant(dir, "Tools/Release/fetch", "#!/usr/bin/env python3\nprint(1)\n")
+    plant(dir, "Tools/CI/count.py", "print(3)\n")
+    plant(dir, "Tools/CI/Count.jet", "run: fn() {{ print(3) }}\n")
+    plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/CI/count.py\", \"jet\": \"Tools/CI/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"args\": [], \"expected\": \"expected/plain.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/count/fixtures/input.txt", "3\n")
+    plant(dir, "{ENTRIES_ROOT}/count/fixtures/fake-git.sh", "#!/bin/sh\necho 3\n")
+    plant(dir, "{ENTRIES_ROOT}/count/expected/plain.out", "3\n")
+    // An incomplete entry pairing a script out of scope: not held to the rule.
+    plant(dir, "Tools/Perf/far.py", "print(2)\n")
+    plant(dir, "{ENTRIES_ROOT}/far/entry.json", "{{\"name\": \"far\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/Perf/far.py\", \"jet\": \"Tools/Perf/Far.jet\"}}}}\n")
+    plant(dir, "Compiler/JetCanvas/Source/CanvasAssets/JS/clock.js", "export const now = () => 0;\n")
+    plant(dir, "Tests/Cases/port_python/input.py", "print(4)\n")
+    added: added_files(dir, "HEAD", .Own) ?? panic(err.message)
+    assert(added.contains("Tools/Agent/stray/report.mjs") && added.contains("Compiler/JetCanvas/Source/CanvasAssets/JS/clock.js"))
+    listed: checkout_files(dir, .Own) ?? panic(err.message)
+    entries: read_entries(dir, listed)
+    refused: refusals(dir, added, entries)
+    assert_eq(refused.len(), 2)
+    assert(refused[0].starts_with("Tools/Agent/stray/report.mjs: a script in another language with no gauntlet pair; "))
+    assert(refused[1].starts_with("Tools/Release/fetch: a script in another language with no gauntlet pair; "))
+    rows: census_rows(dir, listed, entries)
+    assert(rows.contains("Tools/CI/count.py\tpaired\tcount Tools/CI/Count.jet"))
+    assert(rows.contains("Tools/Agent/stray/report.mjs\tunpaired\t"))
+    assert(rows.contains("{ENTRIES_ROOT}/count/fixtures/fake-git.sh\tout of scope\t"))
+    assert(rows.contains("Tools/Perf/far.py\tout of scope\t"))
+    assert(rows.contains("Compiler/JetCanvas/Source/CanvasAssets/JS/clock.js\tout of scope\t"))
+    assert(rows.contains("Tests/Cases/port_python/input.py\tout of scope\t"))
+    assert_eq(census_counts(rows), "scripts 7: paired 1, covered 0, unpaired 2, out of scope 4")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a library its in-scope importers cover: every script that imports it, directly or through others, is paired or covered; a test counts with its imports") {
+    dir: planted_repo()
+    plant(dir, "Tools/Agent/one/one.mjs", "import {{ solo }} from './solo.mjs';\nimport {{ shared }} from '../common/shared.mjs';\nimport {{ mid }} from './mid.mjs';\n")
+    plant(dir, "Tools/Agent/one/One.jet", "run: fn() {{ print(1) }}\n")
+    plant(dir, "{ENTRIES_ROOT}/one/entry.json", "{{\"name\": \"one\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/Agent/one/one.mjs\", \"jet\": \"Tools/Agent/one/One.jet\", \"cases\": [{{\"args\": [], \"expected\": \"expected/plain.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/one/expected/plain.out", "1\n")
+    // Imported only by a paired original, and by a script out of scope,
+    // which does not count; its test counts with it.
+    plant(dir, "Tools/Agent/one/solo.mjs", "export const solo = 1;\n")
+    plant(dir, "Tools/Agent/one/solo.test.mjs", "import {{ solo }} from './solo.mjs';\n")
+    plant(dir, "Tools/Gauntlet/Harness/user.mjs", "await import('../../agent/one/solo.mjs');\n")
+    // Imported by the paired original and by one unpaired script.
+    plant(dir, "Tools/Agent/common/shared.mjs", "export const shared = 1;\n")
+    plant(dir, "Tools/Agent/loose/loose.mjs", "import {{ shared }} from '../common/shared.mjs';\n")
+    // A two-level chain under the paired original.
+    plant(dir, "Tools/Agent/one/mid.mjs", "import {{ deep }} from './deep.mjs';\nexport const mid = 1;\n")
+    plant(dir, "Tools/Agent/one/deep.mjs", "export const deep = 1;\n")
+    // A cycle nothing paired imports, and a test of it.
+    plant(dir, "Tools/Agent/ring/a.mjs", "import {{ b }} from './b.mjs';\nexport const a = 1;\n")
+    plant(dir, "Tools/Agent/ring/b.mjs", "import {{ a }} from './a.mjs';\nexport const b = 1;\n")
+    plant(dir, "Tools/Agent/ring/a.test.mjs", "import {{ a }} from \"./a.mjs\";\n")
+    listed: checkout_files(dir, .Own) ?? panic(err.message)
+    entries: read_entries(dir, listed)
+    assert_eq(js_imports(dir, "Tools/Agent/one/one.mjs"), [String]{"Tools/Agent/one/solo.mjs", "Tools/Agent/common/shared.mjs", "Tools/Agent/one/mid.mjs"})
+    assert_eq(js_imports(dir, "Tools/Gauntlet/Harness/user.mjs"), [String]{"Tools/Agent/one/solo.mjs"})
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), entries)
+    assert_eq(refused.len(), 5)
+    assert(refused[0].starts_with("Tools/Agent/common/shared.mjs: a script in another language with no gauntlet pair (missing: Tools/Agent/loose/loose.mjs); "))
+    assert(refused[1].starts_with("Tools/Agent/loose/loose.mjs: a script in another language with no gauntlet pair; "))
+    assert(refused[2].starts_with("Tools/Agent/ring/a.mjs: a script in another language with no gauntlet pair (missing: Tools/Agent/ring/b.mjs); "))
+    assert(refused[3].starts_with("Tools/Agent/ring/a.test.mjs: a script in another language with no gauntlet pair (missing: Tools/Agent/ring/a.mjs); "))
+    assert(refused[4].starts_with("Tools/Agent/ring/b.mjs: a script in another language with no gauntlet pair (missing: Tools/Agent/ring/a.mjs); "))
+    rows: census_rows(dir, listed, entries)
+    assert(rows.contains("Tools/Agent/one/one.mjs\tpaired\tone Tools/Agent/one/One.jet"))
+    assert(rows.contains("Tools/Agent/one/solo.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/Agent/one/solo.test.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/Agent/one/mid.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/Agent/one/deep.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/Agent/common/shared.mjs\tunpaired\tmissing: Tools/Agent/loose/loose.mjs"))
+    assert(rows.contains("Tools/Gauntlet/Harness/user.mjs\tout of scope\t"))
+    assert_eq(census_counts(rows), "scripts 11: paired 1, covered 4, unpaired 5, out of scope 1")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("an in-scope tool entry missing its twin, fixtures or parity check is refused part by part") {
+    dir: planted_repo()
+    plant(dir, "Tools/Agent/count/count.py", "print(3)\n")
+    plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/Agent/count/count.py\", \"jet\": \"Tools/Agent/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"expected\": \"expected/plain.out\", \"check\": \"check.sh\"}}]}}}}\n")
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), read_entries(dir, checkout_files(dir, .Own) ?? panic(err.message)))
+    assert_eq(refused.len(), 2)
+    assert(refused[0].starts_with("Tools/Agent/count/count.py: a script in another language with no gauntlet pair; "))
+    assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/Agent/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist; case 1's check `{ENTRIES_ROOT}/count/check.sh` is not a Jet program")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a tool entry whose original moved into its own directory has switched over, and a change to it asks the port-bar judge") {
+    entries: Entries{
+        pairings: [Pairing]{
+            Pairing{path: "{ENTRIES_ROOT}/count/count.py", pair: Pair{entry: "count", twin: "Tools/Agent/Count.jet"}},
+            Pairing{path: "Tools/Agent/sum.py", pair: Pair{entry: "sum", twin: "Tools/Agent/Sum.jet"}},
+        },
+        links: [Link]{},
+        problems: [String]{},
+    }
+    assert_eq(switched_entries(entries, [String]{"README.md", "Tools/Agent/count.py"}), [String]{})
+    assert_eq(switched_entries(entries, [String]{"{ENTRIES_ROOT}/count/count.py", "Tools/Agent/count.py"}), [String]{"count"})
+    assert_eq(switched_entries(entries, [String]{"Tools/Agent/Count.jet"}), [String]{"count"})
+    assert_eq(switched_entries(entries, [String]{"Tools/Agent/Sum.jet", "{ENTRIES_ROOT}/sum/entry.json"}), [String]{})
+}
+
+#Test("a planted read sees its own checkout under an exported GIT_DIR, GIT_INDEX_FILE and GIT_WORK_TREE; a caller read follows them") {
+    decoy: planted_repo()
+    plant(decoy, "Tools/decoy/fetch.py", "print(0)\n")
+    bare: files.mkdtemp("script-pairing-tree") ?? panic("a temporary directory cannot be made: {err}")
+    names: ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"]
+    saved: names.map(fn(name) { sys.get(name) })
+    sys.set("GIT_DIR", "{decoy}/.git")
+    sys.set("GIT_INDEX_FILE", "{decoy}/.git/index")
+    sys.set("GIT_WORK_TREE", decoy)
+    dir: planted_repo()
+    plant(dir, "Tools/stray/report.mjs", "console.log(1)\n")
+    added: added_files(dir, "HEAD", .Own) ?? [String]{err.message}
+    listed: checkout_files(dir, .Own) ?? [String]{err.message}
+    followed: added_files(bare, "HEAD", .Caller) ?? [String]{err.message}
+    loop index in 0..<names.len() {
+        if saved[index] == {
+            .Val(value) -> { sys.set(names[index], value) }
+            .None -> sys.unset(names[index]) ?? false
+        }
+    }
+    assert_eq(added, [String]{"Tools/stray/report.mjs"})
+    assert_eq(listed, [String]{"README.md", "Tools/stray/report.mjs"})
+    assert_eq(followed, [String]{"Tools/decoy/fetch.py"})
+    loop path in [dir, decoy, bare] -> files.remove_all(path) ?? ()
+}

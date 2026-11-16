@@ -42,7 +42,7 @@ use {
 // their memory claims fit the corpus pool's budget. A run claims half again
 // its last measured peak; a run never measured claims PACKAGE_MEMORY, 11 GiB:
 // most package runs' `jet` peaks at 6.5 to 7.7 GiB resident and
-// Compiler/JetCli/Tests at 12.6, so a 24 GiB scope starts two unmeasured runs
+// Compiler/JetCLI/Tests at 12.6, so a 24 GiB scope starts two unmeasured runs
 // and any two fit it at their peaks together.
 PACKAGE_JOBS: 4
 
@@ -51,26 +51,26 @@ PACKAGE_JOBS_MAX: 8
 PACKAGE_MEMORY: 11811160064
 
 // The trees whose packages a `packages` run tests, from the checkout:
-// tests/guards holds the repository guard packages (the top package,
+// Tests/Guards holds the repository guard packages (the top package,
 // core_declarations, corpus_ast, dyn_surface, impl_placement and
 // package_manifests).
-PACKAGE_TREES: [String]{"Compiler", "Jetpack", "tests/guards"}
+PACKAGE_TREES: [String]{"Compiler", "Jetpack", "Tests/Guards"}
 
 // The trees the row COVERAGE_ROW lists #Tests in: PACKAGE_TREES and all of
 // tests/, less TEST_INPUT_TREES.
-COVERAGE_TREES: [String]{"Compiler", "Jetpack", "tests"}
+COVERAGE_TREES: [String]{"Compiler", "Jetpack", "Tests"}
 
 // The trees under tests/ whose .jet files are another suite's inputs (case
 // and agent-workload sources, UI and CLI diagnostic snapshots, goldens,
 // conformance witnesses, fuzz corpora): a #Test there is input text, not a
 // test some package owes a run.
-TEST_INPUT_TREES: [String]{"tests/agent_workloads", "tests/cases", "tests/cli", "tests/conformance", "tests/fuzz", "tests/run", "tests/ui", "tests/ui_lint"}
+TEST_INPUT_TREES: [String]{"Tests/AgentWorkloads", "Tests/Cases", "Tests/CLI", "Tests/Conformance", "Tests/Fuzz", "Tests/Run", "Tests/UI", "Tests/UILint"}
 
 // The packages the compiler assembles from their sources instead of building
 // them as packages, so they have no standalone `jet test`: the bootstrap chain
 // links JetRuntime's sources.list into the native runtime library, and the
 // `registries` profile runs its Test registries as assembled standalone files
-// (Tools/agent/CompilerRegistries.jet). The compiler embeds Prelude's sources
+// (Tools/Agent/CompilerRegistries.jet). The compiler embeds Prelude's sources
 // through the generated registry files; Prelude has no #Test. A `packages` run
 // reports each as a skipped row.
 ASSEMBLED_PACKAGES: [String]{"Compiler/JetRuntime", "Compiler/Prelude"}
@@ -88,15 +88,15 @@ JETPACK_ENGINE_SCRATCH: "Jetpack/Bootstrap/.jet/test"
 BUILD_STACK: 1073741824
 
 // Where `jet build Compiler` leaves the `jet` executable, from the checkout.
-BUILD_OUTPUT: "Compiler/JetCli/.jet/build"
+BUILD_OUTPUT: "Compiler/JetCLI/.jet/build"
 
 // Held for each suite's builds: selfhost and perf share BUILD_OUTPUT, and
 // `full` runs them side by side.
-BUILD_LOCK: "Compiler/JetCli/.jet/test-build.lock"
+BUILD_LOCK: "Compiler/JetCLI/.jet/test-build.lock"
 
 // Where selfhost keeps its s2 and s3 compilers, from the checkout: beside
 // BUILD_OUTPUT on the same file system, so each built `jet` moves by rename.
-SELFHOST_STAGES: "Compiler/JetCli/.jet/selfhost"
+SELFHOST_STAGES: "Compiler/JetCLI/.jet/selfhost"
 
 // The SPEED-500K milestone column the self-compile is held to.
 PERF_COLUMN: "225K"
@@ -183,7 +183,7 @@ failure_line: fn(text: String) -> String {
 // `tests` suite doesn't run, `<package>: <test>`, from `jet test <package>`.
 // The `tests` suite runs the workspace members; this suite runs everything
 // else: each member's `Tests` package, the tool packages beside the members,
-// every Jetpack package, the tests/guards packages, and the Jetpack engine
+// every Jetpack package, the Tests/Guards packages, and the Jetpack engine
 // areas that have no package (jetpack_engine_rows). A package whose tests
 // didn't run (one that doesn't compile, say) is the failing row `<package>`.
 // Fixture packages are test data, not packages under test; an
@@ -425,7 +425,7 @@ jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
 // <claim>`: Assemble.jet joins every implementation file and the claims of
 // JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it as one batch;
 // a claim that changes the environment or working directory runs alone in its
-// own process (JetCli NativeTests.jet). JET_BIN names the jet under test; process
+// own process (JetCLI NativeTests.jet). JET_BIN names the jet under test; process
 // claims run the engine named by JETPACK_BIN, the caller's, else the hosted
 // engine `prep` built; `build_failure` says why that build left no engine.
 // A unit that didn't run to its summary is the failing row `Jetpack engine`.
@@ -791,7 +791,7 @@ test_names: fn(text: String) -> [String] {
 // run (kit_exec_select_runs), each with the filter as its `--filter` when the
 // child can apply it (run_filter). CORE_LEVELS copies the `optimize` row's
 // values in JetFoundation/Source/Registry/BuildOptions.jet, which a script
-// can't import; tests/guards/closed_lists.jet fails when the two differ.
+// can't import; Tests/Guards/closed_lists.jet fails when the two differ.
 CORE_LEVELS: [String]{"O0", "O1", "O2"}
 
 core_rows: fn(rows: TestRows) {
@@ -873,7 +873,7 @@ core_rows: fn(rows: TestRows) {
 // internal compiler error), whatever its row expects. Under a filter only the
 // selected rows report; a selected run row checks its program and runs every
 // level, so it has the first level to compare with.
-FUZZ_CORPUS: "tests/fuzz/sema"
+FUZZ_CORPUS: "Tests/Fuzz/Sema"
 
 FUZZ_REFUSED: "invalid"
 
@@ -1250,7 +1250,7 @@ digest: fn(path: String) -> String {
 
 // ---------------------------------------------------------------------------
 // perf: a cold self-compile by the jet under test, traced, held to the
-// PERF_COLUMN budget of Tools/perf/budget/check. One row per budget row
+// PERF_COLUMN budget of Tools/Perf/Budget/check. One row per budget row
 // (`phase <id> <phase>`) and per counter row (`unit <id> <counter>`).
 perf_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
@@ -1273,8 +1273,8 @@ perf_rows: fn(rows: TestRows) {
         return
     }
     rows.pass("self-compile")
-    checked: jet_command(setup, setup.jet, [String]{"run", "Tools/perf/budget/check/run.jet", "--", trace, "--column", PERF_COLUMN}).run() ?? {
-        rows.fail("budget", "couldn't run Tools/perf/budget/check: {err}")
+    checked: jet_command(setup, setup.jet, [String]{"run", "Tools/Perf/Budget/Check/run.jet", "--", trace, "--column", PERF_COLUMN}).run() ?? {
+        rows.fail("budget", "couldn't run Tools/Perf/Budget/Check: {err}")
         return
     }
     table := ""

@@ -1,0 +1,14 @@
+# Claim: `jet run --verbose -A` prints one stderr line listing the
+# effects the program uses; without `--verbose` the line is absent.
+fixture: RunVerboseAllowAllListsTheEffectsUsed.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step verbose: jet run --verbose -A spawn.jet
+exit: 0
+stdout: = "child ran: true\n"
+stderr: = "jet run: effects used: Exec, IO\n"
+step plain: jet run -A spawn.jet
+exit: 0
+stdout: = "child ran: true\n"
+stderr: = ""

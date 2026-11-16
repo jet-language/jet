@@ -14,7 +14,7 @@ use files: core.files
 
 #Test("case binary file relations and copies preserve every byte including non UTF8") {
     root: cases_test_root("relations-files")
-    tree: files.join(root, "tests/cases/group/tree")
+    tree: files.join(root, "Tests/Cases/group/tree")
     files.create_dir_all(tree) ?? panic("binary tree")
     files.write_bytes(files.join(tree, "first.bin"), [U8{0}, U8{255}, U8{1}]) ?? panic("first bytes")
     files.write_bytes(files.join(tree, "same.bin"), [U8{0}, U8{255}, U8{1}]) ?? panic("same bytes")
@@ -61,10 +61,10 @@ use files: core.files
 
 #Test("case remove handles files trees and reports missing paths") {
     root: cases_test_root("relations-remove")
-    tree: files.join(root, "tests/cases/group/tree/nested")
+    tree: files.join(root, "Tests/Cases/group/tree/nested")
     files.create_dir_all(tree) ?? panic("remove tree")
     kit_exec_write(files.join(tree, "value"), "bytes")
-    kit_exec_write(files.join(root, "tests/cases/group/tree/file"), "bytes")
+    kit_exec_write(files.join(root, "Tests/Cases/group/tree/file"), "bytes")
     cases_test_source(root, "remove", "fixture: tree\nremove: file\nfile: file absent\nremove: nested\nfile: nested absent\n")
     cases_test_source(root, "missing", "remove: missing\n")
     context: cases_test_context(root, files.join(root, "scratch"))
@@ -76,10 +76,10 @@ use files: core.files
 
 #Test("case steps apply cwd step env and final unset independently") {
     root: cases_test_root("relations-environment")
-    tree: files.join(root, "tests/cases/group/tree/nested")
+    tree: files.join(root, "Tests/Cases/group/tree/nested")
     files.create_dir_all(tree) ?? panic("cwd tree")
     kit_exec_write(files.join(tree, "value"), "nested")
-    kit_exec_write(files.join(root, "tests/cases/group/nested.out"), "nested")
+    kit_exec_write(files.join(root, "Tests/Cases/group/nested.out"), "nested")
     cases_test_source(root, "cwd", "fixture: tree\nstep: jet -c 'cat value'\ncwd: nested\nstdout: = nested.out\n")
     cases_test_source(root, "env", "env: CASE_SCOPE=case\nstep: jet -c '[ \"$CASE_SCOPE\" = case ] && [ \"$JET_STORE_DIR\" = \"$1\" ] && [ -z \"${{JET_RECEIPT_BYPASS+x}}\" ]' scenario {{work}}/one\nenv: JET_STORE_DIR={{work}}/one\nunset: JET_RECEIPT_BYPASS\nstep: jet -c '[ \"$CASE_SCOPE\" = case ] && [ \"$JET_STORE_DIR\" = \"$1\" ] && [ \"$JET_RECEIPT_BYPASS\" = 1 ]' scenario {{work}}/two\nenv: JET_STORE_DIR={{work}}/two\n")
     context: cases_test_context(root, files.join(root, "scratch"))
@@ -91,7 +91,7 @@ use files: core.files
 
 #Test("expected snapshots resolve beside the case first, then inside the staged fixture") {
     root: cases_test_root("relations-snapshots")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "tree/value"), "inside")
     kit_exec_write(files.join(directory, "tree/inside.out"), "inside")
     kit_exec_write(files.join(directory, "tree/shadowed.out"), "wrong")

@@ -3,7 +3,7 @@ use files: core.files
 #Test("MachineOutput original literal status report browser envelopes and every action payload pass through cases") {
     // Only registered compiler rows need its public projection.
     root: cases_test_root("machine-originals")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     report: "{{\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0001\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\"}}"
     status: "{{\"schema\":\"jet.status/v1\",\"action\":\"facts\",\"ok\":true,\"reports\":[],\"facts\":[]}}"
     kit_exec_write(files.join(directory, "records.txt"), "{status}\n{report}\n")
@@ -63,7 +63,7 @@ use files: core.files
 
 #Test("MachineOutput report status nested edits and no-fix reasons are validated not just schema matched") {
     root: cases_test_root("machine-validation")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     report: "\"schema\":\"jet.report/v3\",\"moment\":\"compile\",\"severity\":\"error\",\"code\":\"E0001\",\"what\":\"what\",\"why\":\"why\",\"fix\":\"fix\""
     edit: "{{\"file\":\"a.jet\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"x\",\"safety\":\"safe\"}}"
     loop kind in ["behavior", "design", "ambiguous"] {

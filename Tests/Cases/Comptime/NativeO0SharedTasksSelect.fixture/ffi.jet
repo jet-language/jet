@@ -1,0 +1,17 @@
+package: {
+    name: "ffi_at_build"
+    authority: { allow: [FFI, IO, Mem.Alloc] }
+}
+
+#[Unsafe("the scalar ABI contract matches the C definition"), FFI(c)]
+add: fn(a: Int, b: Int) -> Int {
+    """int64_t add(int64_t a, int64_t b) { return a + b; }"""
+}
+
+c_sum: fn() -> Int {
+    #Unsafe("call the audited inline C contract") { add(20, 22) }
+}
+
+C_SUM: #run c_sum()
+
+run: fn() { print(C_SUM) }

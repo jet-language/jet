@@ -1,0 +1,214 @@
+#!/usr/bin/env jet
+// Debugger latency: the time `jet debug` takes to its first stop and per
+// step, against LLDB driving the same O0 image the same way.
+// Usage (from the repository root):
+//   jet Tools/Perf/DebugLatency/Main.jet [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R]
+// Defaults: the `jet` and `lldb` on PATH, 2000 functions, 20 steps, 5 runs.
+//
+// It writes a package whose program has N small functions, and whose `run`
+// calls each in turn one line at a time, to a temporary directory, and
+// builds its O0 image the way `jet debug` does (`jet build -O0
+// --output-dir`). Then it times, each the median of R runs:
+//   - build: that build again, warm;
+//   - jet debug, first stop: `jet debug --break prog.jet:L prog.jet` with
+//     an empty stdin, which continues from the first stop to the program's
+//     end (its last N - K calls are cheap), from the start to its exit. It
+//     builds the image itself, so it includes a warm build;
+//   - jet debug, per step: the same with K `n` lines first; the extra time
+//     over the first stop, per step;
+//   - lldb, first stop: `lldb -b` on the built image with `breakpoint set`,
+//     `run` and `continue`;
+//   - lldb, per step: the same with K `next` commands before `continue`.
+// L is the line of the first call in `run`. It prints one tab-separated row
+// per measure in milliseconds, after a header row naming the program's size.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+    time: core.time
+}
+
+LatencyOptions: struct {
+    jet: String
+    lldb: String
+    functions: Int
+    steps: Int
+    runs: Int
+}
+
+LatencyRuns: struct {
+    build: Int
+    debug_stop: Int
+    debug_steps: Int
+    lldb_stop: Int
+    lldb_steps: Int
+}
+
+usage: fn() -[IO]> Int Never! {
+    term.eprint("usage: jet Tools/Perf/DebugLatency/Main.jet [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R]")
+    2
+}
+
+// The package the program builds in: it only prints.
+LATENCY_PACKAGE: "name: \"debug_latency\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO] }}\n"
+
+// The program: N functions of five lines each (the last one blank), then
+// `run`, which calls each in turn.
+latency_program: fn(functions: Int) -> String Never! {
+    lines := [String]{}
+    loop index in 0..<functions {
+        lines.push("f_{index}: fn(x: Int) -> Int {{")
+        lines.push("    y: x + {index}")
+        lines.push("    y % 1000")
+        lines.push("}}")
+        lines.push("")
+    }
+    lines.push("run: fn() {{")
+    lines.push("    total := 0")
+    loop index in 0..<functions -> lines.push("    total = f_{index}(total)")
+    lines.push("    print(\"{{total}}\")")
+    lines.push("}}")
+    lines.push("")
+    lines.join("\n")
+}
+
+// The line of the first call in `run` (latency_program).
+latency_break_line: fn(functions: Int) -> Int Never! { 5 * functions + 3 }
+
+// The middle of `values` in order.
+latency_median: fn(values: [Int]) -> Int Never! {
+    if values.len() == 0 -> return 0
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+// The milliseconds `argv` takes, run in `work` with `input` as its whole
+// stdin and its output dropped, or the reason it failed.
+latency_time: fn(argv: [String], work: String, input: String) -[Exec, Time, Time.Wait]> Int Err! {
+    watch: time.start()
+    child: process.cmd(argv).cwd(work).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err("{argv[0]} did not start: {err}")
+    child.stdin.write(input) ?? return Err("{argv[0]} took no input: {err}")
+    child.stdin.close()
+    receipt: child.wait() ?? return Err("{argv[0]} did not finish: {err}")
+    elapsed: time.elapsed(watch).ns /% 1000000
+    if !receipt.success {
+        return Err("`{argv.join(" ")}` failed with {receipt.code}: {receipt.errors}")
+    }
+    Ok(elapsed)
+}
+
+// The median of `runs` timings of `argv`.
+latency_median_time: fn(argv: [String], work: String, input: String, runs: Int) -[Exec, Time, Time.Wait]> Int Err! {
+    times := [Int]{}
+    loop _ in 0..<runs -> times.push(latency_time(argv, work, input) ?? return Err(err))
+    Ok(latency_median(times))
+}
+
+// The LLDB argv that stops at `line` of prog.jet in `image`, takes `steps`
+// steps over, and continues to the program's end.
+latency_lldb_argv: fn(lldb: String, image: String, line: Int, steps: Int) -> [String] Never! {
+    argv := [String]{lldb, "-b", "-o", "breakpoint set --file prog.jet --line {line}", "-o", "run"}
+    loop _ in 0..<steps {
+        argv.push("-o")
+        argv.push("next")
+    }
+    argv.push("-o")
+    argv.push("continue")
+    argv.push(image.copy())
+    argv
+}
+
+latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Time.Wait]> LatencyRuns Err! {
+    files.write(files.join(work, "package.jet"), LATENCY_PACKAGE) ?? return Err("couldn't write the package: {err}")
+    files.write(files.join(work, "prog.jet"), latency_program(options.functions)) ?? return Err("couldn't write the program: {err}")
+    out_dir: files.join(work, "out")
+    build: [String]{options.jet, "build", "-O0", "--output-dir={out_dir}", "prog.jet"}
+    // The first build fills the build cache; the timed ones are warm.
+    _: latency_time(build, work, "") ?? return Err(err)
+    line: latency_break_line(options.functions)
+    debug: [String]{options.jet, "debug", "--break", "prog.jet:{line}", "prog.jet"}
+    image: files.join(out_dir, "prog")
+    nexts: "n\n".repeat(options.steps)
+    Ok(
+        LatencyRuns{
+            build: latency_median_time(build, work, "", options.runs) ?? return Err(err),
+            debug_stop: latency_median_time(debug, work, "", options.runs) ?? return Err(err),
+            debug_steps: latency_median_time(debug, work, nexts, options.runs) ?? return Err(err),
+            lldb_stop: latency_median_time(latency_lldb_argv(options.lldb, image, line, 0), work, "", options.runs) ?? return Err(err),
+            lldb_steps: latency_median_time(latency_lldb_argv(options.lldb, image, line, options.steps), work, "", options.runs) ?? return Err(err),
+        },
+    )
+}
+
+// The report's rows: per step is the extra time of K steps over the first
+// stop, over K.
+latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
+    debug_step: (runs.debug_steps - runs.debug_stop) /% options.steps
+    lldb_step: (runs.lldb_steps - runs.lldb_stop) /% options.steps
+    [String]{
+        "# {options.functions} functions, {options.steps} steps, median of {options.runs} runs, milliseconds",
+        "measure\tjet_debug\tlldb",
+        "build\t{runs.build}\t-",
+        "first_stop\t{runs.debug_stop}\t{runs.lldb_stop}",
+        "per_step\t{debug_step}\t{lldb_step}",
+    }
+}
+
+debug_latency: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    args: process.args()
+    options := LatencyOptions{jet: process.which("jet") ?? "jet", lldb: process.which("lldb") ?? "lldb", functions: 2000, steps: 20, runs: 5}
+    at := 0
+    loop at < args.len() {
+        if at + 1 >= args.len() -> return usage()
+        value: args[at + 1]
+        if args[at] == {
+            "--jet" -> options.jet = value.copy()
+            "--lldb" -> options.lldb = value.copy()
+            "--functions" -> options.functions = Int.parse(value) ?? return usage()
+            "--steps" -> options.steps = Int.parse(value) ?? return usage()
+            "--runs" -> options.runs = Int.parse(value) ?? return usage()
+            else -> return usage()
+        }
+        at += 2
+    }
+    if options.functions < 1 || options.steps < 1 || options.steps > options.functions || options.runs < 1 {
+        return usage()
+    }
+    work: files.temp_dir("jet-debug-latency") ?? {
+        term.eprint("debug latency: couldn't make a work directory: {err}")
+        return 1
+    }
+    runs: latency_measure(options, work.path) ?? {
+        term.eprint("debug latency: {err.message} (the program is in {work.path})")
+        return 1
+    }
+    files.remove_all(work.path).drop("a work directory left behind is only disk")
+    loop row in latency_rows(options, runs) -> print(row)
+    0
+}
+
+run: fn() {
+    code: debug_latency()
+    if code != 0 -> process.exit(code)
+}
+
+#Test("the break line is the first call in run") {
+    program: latency_program(3)
+    lines: program.split("\n").to_list()
+    assert_eq(lines[latency_break_line(3) - 1], "    total = f_0(total)")
+    assert_eq(lines[latency_break_line(3) + 1], "    total = f_2(total)")
+    assert_eq(lines[0], "f_0: fn(x: Int) -> Int {{")
+    assert_eq(lines[latency_break_line(3) + 3], "}}")
+}
+
+#Test("the package allows only printing") {
+    assert_eq(LATENCY_PACKAGE.split("\n").to_list()[2], "authority: {{ allow: [IO] }}")
+}
+
+#Test("per step is the extra time of the steps over the first stop") {
+    options: LatencyOptions{jet: "jet", lldb: "lldb", functions: 10, steps: 4, runs: 1}
+    rows: latency_rows(options, LatencyRuns{build: 300, debug_stop: 900, debug_steps: 1300, lldb_stop: 400, lldb_steps: 480})
+    assert_eq(rows[3], "first_stop\t900\t400")
+    assert_eq(rows[4], "per_step\t100\t20")
+}

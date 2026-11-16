@@ -1,0 +1,12 @@
+// A case with a payload is more than a number, so a payload enum has no
+// backing type and no generated `from_int`.
+#Layout(U8)
+Reply: enum {
+    Empty = 0
+    Text(body: String)
+}
+
+run: fn() {
+    reply: Reply.from_int(0) ?? Reply.Empty
+    print(reply == Reply.Empty)
+}

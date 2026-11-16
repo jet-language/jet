@@ -25,8 +25,8 @@ cases_test_real_jet: fn(purpose: String) -> String {
 }
 
 cases_test_entry: fn(name: String) -> KitEntry {
-    path: "tests/cases/group/{name}.case"
-    KitEntry{path: path, expected: path, project: "tests/cases/group", suite: "cases", mode: ""}
+    path: "Tests/Cases/group/{name}.case"
+    KitEntry{path: path, expected: path, project: "Tests/Cases/group", suite: "cases", mode: ""}
 }
 
 cases_test_source: fn(root: String, name: String, text: String) {
@@ -37,29 +37,29 @@ cases_test_source: fn(root: String, name: String, text: String) {
     root: cases_test_root("discovery")
     cases_test_source(root, "z", "step: printf z\n")
     cases_test_source(root, "a", "step: printf a\n")
-    kit_exec_write(files.join(root, "tests/cases/deeper/group/b.case"), "step: printf b\n")
-    kit_exec_write(files.join(root, "tests/cases/.hidden/hidden.case"), "step: printf hidden\n")
-    kit_exec_write(files.join(root, "tests/run/not-a-case.case"), "step: printf ignored\n")
-    kit_exec_write(files.join(root, "tests/cases/group/a.out"), "a")
+    kit_exec_write(files.join(root, "Tests/Cases/deeper/group/b.case"), "step: printf b\n")
+    kit_exec_write(files.join(root, "Tests/Cases/.hidden/hidden.case"), "step: printf hidden\n")
+    kit_exec_write(files.join(root, "Tests/Run/not-a-case.case"), "step: printf ignored\n")
+    kit_exec_write(files.join(root, "Tests/Cases/group/a.out"), "a")
     context: cases_test_context(root, files.join(root, "scratch"))
     entries: kit_cases_discover(context)
-    assert_eq(entries.map(fn(entry) { entry.path }), ["tests/cases/deeper/group/b.case", "tests/cases/group/a.case", "tests/cases/group/z.case"])
+    assert_eq(entries.map(fn(entry) { entry.path }), ["Tests/Cases/deeper/group/b.case", "Tests/Cases/group/a.case", "Tests/Cases/group/z.case"])
     assert_eq(entries[1].suite, "cases")
-    assert_eq(entries[1].project, "tests/cases/group")
+    assert_eq(entries[1].project, "Tests/Cases/group")
     assert_eq(kit_cases_collect(root, "missing").len(), 0)
     kit_exec_write(files.join(root, "Compiler/JetTestKit/retired-with-rust.tsv"), "# source-id and owner reason\ntests/cases/group/a.case\tRetired with Rust: fixture compiler dependency.\nCompiler/JetBackend/Tests/Fragments.fixture/FrontFeed.jet\tRetired with Rust: differential oracle.\n")
-    assert_eq(kit_cases_retired(root), ["tests/cases/group/a.case"])
+    assert_eq(kit_cases_retired(root), ["Tests/Cases/group/a.case"])
     active: kit_cases_discover(context)
-    assert_eq(active.map(fn(entry) { entry.path }), ["tests/cases/deeper/group/b.case", "tests/cases/group/z.case"])
+    assert_eq(active.map(fn(entry) { entry.path }), ["Tests/Cases/deeper/group/b.case", "Tests/Cases/group/z.case"])
     // The raw discovery still accounts for the retired authored file; only the
     // canonical active corpus excludes the explicitly retired ID.
-    assert_eq(kit_cases_collect(root, "tests/cases").len(), 3)
+    assert_eq(kit_cases_collect(root, "Tests/Cases").len(), 3)
     files.remove_all(root) ?? panic("remove discovery scratch")
 }
 
 #Test("cases stage fixture state and execute sequential steps with files and stdin") {
     root: cases_test_root("execution")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     // Programs are authored at runtime, never discovered as kit modules.
     kit_exec_write(files.join(directory, "tree/main.jet"), "run: fn() {{ print(\"fixture\") }}\n")
     kit_exec_write(files.join(directory, "tree/state/receipt.txt"), "authored\n")
@@ -79,7 +79,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
 
 #Test("cases expand environment tokens and normalize paths before exact comparison") {
     root: cases_test_root("tokens")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "paths.out"), "{{work}}\n{{root}}\n{{scratch}}\n")
     cases_test_source(root, "tokens", "env: LOCATION={{work}}\nstep: jet -c 'printf \"%s\\\\n\" \"$LOCATION\" \"$1\" \"$2\"' scenario {{root}} {{scratch}}\nstdout: = paths.out\nstderr: empty\n")
     context: cases_test_context(root, files.join(root, "scratch"))
@@ -90,7 +90,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
 
 #Test("cases run each row with its own HOME, JET_HOME and XDG roots under its scratch") {
     root: cases_test_root("home")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     probe: "probe-{process.current_pid()}"
     kit_exec_write(files.join(directory, "home.out"), "{{scratch}}/home\n{{scratch}}/home/.jet\n{{scratch}}/home/.config\n{{scratch}}/home/.cache\n{{scratch}}/home/.local/share\n{{scratch}}/home/.local/state\nplanted\n")
     cases_test_source(root, "home", "step: jet -c 'printf \"%s\\\\n\" \"$HOME\" \"$JET_HOME\" \"$XDG_CONFIG_HOME\" \"$XDG_CACHE_HOME\" \"$XDG_DATA_HOME\" \"$XDG_STATE_HOME\" && mkdir -p \"$HOME/.jet\" && printf \"planted\\\\n\" > \"$HOME/.jet/{probe}\" && cat \"$JET_HOME/{probe}\"'\nstdout: = home.out\nstderr: empty\n")
@@ -143,7 +143,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
 
 #Test("cases preserve exact mismatch nonzero exit and stop after a failing step") {
     root: cases_test_root("failure")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "expected.out"), "wanted\n")
     cases_test_source(root, "failure", "step: jet -c 'printf wrong'\nstdout: = expected.out\nstep: jet -c 'touch should-not-exist'\n")
     cases_test_source(root, "nonzero", "step: jet -c 'exit 7'\nexit: nonzero\nstdout: empty\nstderr: empty\n")
@@ -160,7 +160,7 @@ cases_test_source: fn(root: String, name: String, text: String) {
 
 #Test("cases one-of accepts exact alternatives and named blessing writes exact snapshots") {
     root: cases_test_root("bless")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "first.out"), "first")
     kit_exec_write(files.join(directory, "second.out"), "second")
     cases_test_source(root, "alternatives", "step: jet -c 'printf second'\nstdout: one-of first.out second.out # host-dependent result\n")

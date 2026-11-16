@@ -1,0 +1,20 @@
+# A returned trait value (a new one, a move parameter handed back, one
+# in an Option, either arm of an `if`) is its caller's to end, and one the
+# caller discards ends at once. Each payload's `Shared` context is released
+# once on every tier.
+fixture: TraitValuesFreeAtTheirLastOwnerWhenReturned.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_returned.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_returned.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_returned.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = trait_values_free_at_their_last_owner_when_returned.out

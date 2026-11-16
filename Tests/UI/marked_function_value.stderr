@@ -1,0 +1,26 @@
+Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `x` is `&`
+  --> Tests/UI/marked_function_value.jet:17:26
+    |
+ 17 |     hooks: Hooks{on_int: bump, on_text: consume}
+    |                          ^^^^
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `bump` would drop the `&` its parameter declares
+ Fix: Call `bump` directly, mark the parameter in the function type (`fn(&T)`), or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227
+
+Error [jet.MarkedFunctionValue]: `consume` can't be used as a function value because its parameter `s` is `&&`
+  --> Tests/UI/marked_function_value.jet:17:41
+    |
+ 17 |     hooks: Hooks{on_int: bump, on_text: consume}
+    |                                         ^^^^^^^
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `consume` would drop the `&&` its parameter declares
+ Fix: Call `consume` directly, mark the parameter in the function type (`fn(&&T)`), or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227
+
+Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `x` is `&`
+  --> Tests/UI/marked_function_value.jet:18:15
+    |
+ 18 |     call_with(bump)
+    |               ^^^^
+ Why: A function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `bump` would drop the `&` its parameter declares
+ Fix: Call `bump` directly, mark the parameter in the function type (`fn(&T)`), or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227

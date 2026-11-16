@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-jet=${JET:-"$root/../../../../Tools/agent/JetEnv.jet"}
+jet=${JET:-"$root/../../../../Tools/Agent/JetEnv.jet"}
 cc=${CC:-cc}
 cxx=${CXX:-c++}
 rustc=${RUSTC:-rustc}

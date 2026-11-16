@@ -16,7 +16,7 @@ const fresh = () => {
   return openStore(dir);
 };
 
-const AUDIT = { title: 'Port bars, first run', path: 'Docs/audits/2026-11-10-port-bars-first-run.md', note: 'Every tool twin measured.' };
+const AUDIT = { title: 'Port bars, first run', path: 'Docs/Audits/2026-11-10-port-bars-first-run.md', note: 'Every tool twin measured.' };
 const SOURCE = { title: 'RFC 9106', url: 'https://www.rfc-editor.org/rfc/rfc9106' };
 
 test('normalizeReports keeps a Tower doc or an https source, each with a title', () => {
@@ -38,7 +38,7 @@ test('normalizeReports refuses anything that is not a titled Tower doc or https 
   for (const [report, message] of refused)
     assert.throws(() => normalizeReports([report]), message, JSON.stringify(report));
   assert.throws(() => normalizeReports([AUDIT, AUDIT]), /linked twice/);
-  assert.throws(() => normalizeReports('Docs/audits/a.md'), /must be a list/);
+  assert.throws(() => normalizeReports('Docs/Audits/a.md'), /must be a list/);
 });
 
 test('a ballot stores, replaces and clears its reports through add and update', () => {

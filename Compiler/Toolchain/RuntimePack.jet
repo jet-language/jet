@@ -24,7 +24,7 @@
 // Core library's check left them, JetSema CoreBodies.jet),
 // which the image links beside the runtime and the pack does not. A `jet
 // run` whose Core is the Core built into jet binds its Core calls to the
-// image's Core code, or to jet_core.o's in a full link (JetCli Host.jet). Jet's
+// image's Core code, or to jet_core.o's in a full link (JetCLI Host.jet). Jet's
 // linker binds those objects alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and no `nm`: the step reads
 // the symbol tables of every object it makes itself and refuses
@@ -35,17 +35,17 @@
 //
 // The pack carries no C, libc or compiler runtime archive, and the step runs
 // no C compiler or archiver. A program's C closure takes libc from jet's C
-// toolchain pack (Compiler/JetCli ForeignLink.jet).
+// toolchain pack (Compiler/JetCLI ForeignLink.jet).
 //
 // The pack's files land in OUT, and OUT/native.key holds its content
 // identity. FILE gets JET's identity, `jet@<JET_VERSION>#<sha256 of JET>`:
 // the version JET names in `jet --version --json` (its `release`) and the
 // bytes JET lowers the runtime under. The step declares each file, so the
 // build publishes the pack and IDENTITY in jet-runtime/, where jet-bare reads
-// the pack, and the `core-embed` step adds them to jet as parts (JetCli
+// the pack, and the `core-embed` step adds them to jet as parts (JetCLI
 // RuntimeEmbed.jet), which checks that IDENTITY names the jet that lowered
 // the runtime. The release gate holds provenance.json's compilerSha256 to
-// that part (Tools/release Gate.jet).
+// that part (Tools/Release Gate.jet).
 //
 // `unit` writes the runtime's one-namespace unit, OUT/unit.jet, and its
 // OUT/package.jet, then prints OUT/unit.jet: each sources.list source after a
@@ -552,7 +552,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     library: files.join(work, "library")
     _ := compose_unit(tool.root, library, [String]{})
     prefix: files.join(work, "jet_runtime_jet")
-    // The Core code library (JetCli CoreLibrary.jet): every non-generic Core
+    // The Core code library (JetCLI CoreLibrary.jet): every non-generic Core
     // function as a global symbol, which the image links beside the runtime.
     core: files.join(work, "jet_core")
     pack: files.join(work, "jet_runtime.pack.o")
@@ -695,7 +695,7 @@ check_core_library: fn(core: String, out: String) {
     if core_threads_unexported(core_text, core_threads) {
         fail("Core thread receipt names a symbol the Core exports lack")
     }
-    // A Core root the library left out (JetCli CoreLibrary.jet writes one
+    // A Core root the library left out (JetCLI CoreLibrary.jet writes one
     // `{prefix}.skipped` row per failure) fails the pack, the rows kept in OUT
     // as core.skipped: a skipped root would make its callers fall back
     // silently.

@@ -5,11 +5,11 @@ root holds `coverage.json`, `ledger.json` and `claims.json` (and, after review,
 `recall-audit.json`). The gate is:
 
 ```sh
-Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+Tools/Agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs "$CAPTURE_ROOT"
 ```
 
 Hand-in requires exit 0. Publication additionally requires `--audit` exit 0.
-The gate also reads the prior-art registry (`Docs/spec/reference/prior-art.md`,
+The gate also reads the prior-art registry (`Docs/Spec/Reference/prior-art.md`,
 or `--registry PATH`): it must name the `run_id` and list every source whose
 `ref` is an http(s) URL ([output](output.md#prior-art-registry)). A `ref` is the
 source URL, or `local:PATH` for the run's own captures.
@@ -65,7 +65,7 @@ timestamps in claim `locator`s (a shard starting at 1:00:00 never writes
 stay unique across shards. Join and re-check before hand-in:
 
 ```sh
-Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs \
+Tools/Agent/JetEnv.jet node .agents/skills/mine-for-jet-v3/scripts/check_coverage.mjs \
   --merge "$CAPTURE_ROOT/shard-a" "$CAPTURE_ROOT/shard-b" --out "$CAPTURE_ROOT/merged"
 ```
 

@@ -1,0 +1,20 @@
+# `#App.Webhook` makes a method of a mounted service answer POST on its path
+# for a sender that signs each delivery. The fixture's GitHub webhook has a
+# signing key only for the `jet` project. A delivery signed with that key
+# runs. One signed with another key, and one for a project whose signing-key
+# method gives None, are answered 401 before the body is decoded. A signed body
+# the webhook's event can't take is answered 422. A webhook with no
+# `signature:` rule is refused at its marker.
+fixture: WebhookWithoutAKeyAnswers401.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: ~ "200 {\"ok\":\"jet: opened\"}\n" # the signed delivery runs
+stdout: ~ "401 {\"error\":\"`/hooks/github/jet` takes only deliveries signed with its key\"}\n" # a delivery signed with another key
+stdout: ~ "401 {\"error\":\"`/hooks/github/other` takes only deliveries signed with its key\"}\n" # no key for the project
+stdout: ~ "422 {\"invalid\":[{\"path\":\"/1/action\"" # the signed body has no `action`
+
+step: jet check probes/no_signature.jet
+exit: nonzero
+stderr: ~ "no_signature.jet:8:6" # at the `#App.Webhook` marker, which lacks `signature:`

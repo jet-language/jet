@@ -1,0 +1,21 @@
+// The program's entry runs a scheduled tick: no one signed in to start it.
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    #App.Public whoever: fn(self) -> String {
+        if app.maybe_caller() == .Val(who) -> who.raw() else -> "anyone"
+    }
+}
+
+tick: fn() -> String {
+    who: app.caller()
+    "tick for {who}"
+}
+
+run: fn() {
+    _: web.app().mount(Crew{})
+    loop _ in 0..<3 { print(tick()) }
+}

@@ -33,7 +33,7 @@ use {
 
 #Test("recv reads lines, frames and raw bytes and close reports only the unread remainder") {
     root: cases_test_root("session-recv")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "one.json"), "{{\"id\":1}}")
     kit_exec_write(files.join(directory, "two.json"), "{{\"id\":2}}")
     lines: "session peer line: cat\nsend peer: \"one\"\nsend peer: \"two\"\nrecv peer line until = \"two\" timeout 5s\nstdout: = \"one\\ntwo\\n\"\nsend peer: \"three\"\nrecv peer timeout 5s\nstdout: = \"three\\n\"\nsend peer: \"rest\"\nclose peer\nstdout: = \"rest\\n\"\n"
@@ -88,7 +88,7 @@ use {
 
 #Test("a stdin file reaches the step as its exact bytes, invalid UTF-8 included") {
     root: cases_test_root("stdin-bytes")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     files.create_dir_all(directory) ?? panic("create stdin bytes case directory")
     files.write_bytes(files.join(directory, "input.bin"), [U8]{U8{102}, U8{255}, U8{10}}) ?? panic("write stdin bytes")
     source: "step: jet -c 'od -An -tx1'\nstdin: input.bin\nstdout: = \" 66 ff 0a\\n\"\n"
@@ -98,7 +98,7 @@ use {
 
 #Test("content-length frames use UTF-8 byte counts and file payloads expand capture tokens") {
     root: cases_test_root("session-content-length")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "payload.txt"), "{{cap:word}}")
     source: "step: printf '%s' é\ncapture: word = text stdout\nsession peer content-length: cat\nsend peer: payload.txt\nclose peer\nstdout: = \"Content-Length: 2\\r\\n\\r\\né\"\n"
     // A failed frame length must be visible as a real exact-output failure.
@@ -110,7 +110,7 @@ use {
 
 #Test("session stdin null closes immediately and wait preserves joined output for labelled relations") {
     root: cases_test_root("session-stdin")
-    directory: files.join(root, "tests/cases/group")
+    directory: files.join(root, "Tests/Cases/group")
     kit_exec_write(files.join(directory, "input.txt"), "initial")
     source: "session peer raw: cat\nstdin: input.txt\nclose peer\nstdout: = \"initial\"\nstep compare: printf initial\nstdout: == peer\nsession eof raw: cat\nstdin: null\nwait eof timeout 1s\nstdout: empty\n"
     assert_eq(cases_test_advanced(root, "input", source).verdict.status, "PASS")

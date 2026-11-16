@@ -1,0 +1,12 @@
+// @programmable_build
+// @cli_build
+// A compile session (`b.compiler(output)`, a second compile's too) isn't made
+// over an option that weakens checking.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["workspace_compiler_after_unchecked_option.jet"], [])
+    b.pin(.bounds, .Report)
+    _ := b.compiler(app)
+    b.default(app)
+}
+
+run: fn() { print(2) }
