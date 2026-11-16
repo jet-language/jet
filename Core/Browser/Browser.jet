@@ -1915,32 +1915,41 @@ glob_match: fn(pattern: [U8], value: [U8]) -> Bool Never! {
 }
 
 // The engine's endpoint: `JET_BROWSER_<ENGINE>_ENDPOINT`, else
-// `JET_BROWSER_ENDPOINT`; only ws:// and wss:// are accepted.
-test_endpoint: fn(engine: String) -[Env]> String BrowserError! {
+// `JET_BROWSER_ENDPOINT`; only ws:// and wss:// are accepted. None when
+// neither is set: the test launches the engine its lock pins.
+test_endpoint: fn(engine: String) -[Env]> String? BrowserError! {
     env: core.sys.__startup_env()
-    endpoint: env_value(env, "JET_BROWSER_{engine.to_upper()}_ENDPOINT") ?? env_value(env, "JET_BROWSER_ENDPOINT") ?? ""
-    if endpoint.starts_with("ws://") || endpoint.starts_with("wss://") -> return Ok(endpoint)
+    endpoint: env_value(env, "JET_BROWSER_{engine.to_upper()}_ENDPOINT") ?? env_value(env, "JET_BROWSER_ENDPOINT") ?? return Ok(None)
+    if endpoint.starts_with("ws://") || endpoint.starts_with("wss://") -> return Ok(Val(endpoint))
     Err(BrowserError{kind: "transport"})
 }
 
-// Connects the engine's locked profile, opens an isolated context and page,
-// and subscribes to the console and network events a report records. A
-// failed page open closes the context and browser it opened.
-begin_named: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Env, FS, IO, Net, Time]> BrowserTestFixture BrowserError! {
+// Connects the engine's locked profile at its configured endpoint, or
+// launches the locked engine when no endpoint is configured, opens an
+// isolated context and page, and subscribes to the console and network
+// events a report records. A failed page open closes the context and
+// browser it opened.
+begin_named: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserTestFixture BrowserError! {
     entry: locked(engine)
-    endpoint: test_endpoint(engine)
-    p: profile(if entry.protocol.starts_with("bidi-") -> entry.protocol else -> "bidi-2025.5")
-    b: connect_profile(endpoint, p, config.timeout)
+    if test_endpoint(engine) == .Val(endpoint) {
+        return fixture_open(connect_profile(endpoint, profile(if entry.protocol.starts_with("bidi-") -> entry.protocol else -> "bidi-2025.5"), config.timeout))
+    }
+    fixture_open(launch(engine))
+}
+
+priv fixture_open: fn(b: Browser) -[Net, Time]> BrowserTestFixture BrowserError! {
     context: b.context()
     page: context.page() ?? {
-        _: context.close()
-        _: b.close()
+        // The page's failure is the one reported; closing is best effort.
+        context.close() ?? ()
+        b.close() ?? ()
         return Err(err)
     }
-    // An older profile may lack an optional event; the queue keeps the rest.
+    // An older profile or engine may lack an optional event; the queue
+    // keeps the rest.
     loop event in
         ([String]{"log.entryAdded", "network.beforeRequestSent", "network.responseStarted", "network.fetchError", "browsingContext.consoleMessage"}) {
-        _: b.subscribe(event)
+        b.subscribe(event) ?? ()
     }
     Ok(BrowserTestFixture{__browser: b, __context: context, __page: page})
 }

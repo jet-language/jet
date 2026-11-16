@@ -5519,7 +5519,12 @@ stored result stands in for a run. `--docs` selects checked documentation exampl
 `--profile=<name>` select the corresponding test-run behavior. Browser claims
 use `--browser=<engines>`, `--browser-retries=<n>`,
 `--browser-reporter=<text|json|html>`, `--browser-ui`, `--browser-visual`, and
-`--browser-trace`.
+`--browser-trace`. `jet test --browser-scaffold=<name>` runs no test: it
+creates the project `<name>` as `jet new` does, with an app that `jet dev`
+serves, a `browser-tests.conf` naming its browsers and that `jet dev` server
+(reused when it is already serving, else started for the run), and a first
+passing browser test. A test opens only a browser `.jet/lock` pins, so the
+next step is `jetpack browser lock <engine>`, then `jet test`.
 
 A package names test profiles in `package.jet`, and `--profile=<name>` or
 `defaults: { test: <name> }` selects one. Test and build profiles share one
