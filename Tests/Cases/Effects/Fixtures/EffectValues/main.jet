@@ -1,0 +1,17 @@
+Bucket: struct {
+    name: String
+    size: Int
+}
+
+impl Bucket.Effect {}
+
+upload: fn() -[Bucket{name: "photos", size: 2}]> {}
+
+again: fn() -[Bucket{size: 2, name: "photos"}]> { upload() }
+
+sync: fn() -[Bucket]> { again() }
+
+run: fn() {
+    sync()
+    print("synced")
+}

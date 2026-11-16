@@ -777,11 +777,15 @@ impl Ledger.Effect {
     names := [String]{}
     loop item in program.items {
         if item == {
-            .Struct(definition) -> names.push("struct {definition.name}")
-            .Enum(definition) -> names.push("enum {definition.name}")
-            .EffectDecl(declaration) -> names.push("effect {declaration.name} {declaration.irreversible}")
+            .Struct(definition) -> { names.push("struct {definition.name}") }
+            .Enum(definition) -> { names.push("enum {definition.name}") }
+            .EffectDecl(declaration) -> {
+                names.push("effect {declaration.name} {declaration.irreversible}")
+            }
             .Impl(definition) -> names.push("impl {definition.type_name}")
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> names.push("other")
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
+                names.push("other")
+            }
         }
     }
     assert_eq(names, [String]{"struct Audit", "effect Audit false", "enum Ledger", "effect Ledger true", "effect Ledger.Read false", "effect Ledger.Post true"})
@@ -829,4 +833,19 @@ impl Audit.Effect {
     )
     elsewhere.items[0] == .Impl(kept) ?? panic("a block whose type is declared elsewhere stays an impl")
     assert_eq(kept.type_name, "Audit")
+}
+
+#Test("an_effect_value_row_entry_reads_into_the_row") {
+    source: `put: fn() -[Bucket{name: "photos", size: -2, open: true}, !Bucket{name: "logs"}]> {}
+`
+    effects: parser_test_function(parser_test_program(source), "put").declared_effects ?? panic("the written row")
+    assert_eq((loop entry in effects -> entry.name), [String]{`Bucket{name: "photos", size: -2, open: true}`, `!Bucket{name: "logs"}`})
+    assert_eq(source.slice(effects[0].span.start..<effects[0].span.end), `Bucket{name: "photos", size: -2, open: true}`)
+    assert_eq(parser_test_stable(source), source)
+    twice: parser_test_diagnostic(parser_test_errors(`put: fn() -[Bucket{name: "a", name: "b"}]> {}`), "E0119")
+    assert(twice.what.contains("gives the field `name` twice"))
+    computed: parser_test_diagnostic(parser_test_errors(`put: fn() -[Bucket{name: label}]> {}`), "E0119")
+    assert(computed.what.contains("`name` in `Bucket{{…}}` needs a literal value"))
+    empty: parser_test_diagnostic(parser_test_errors(`put: fn() -[Bucket{}]> {}`), "E0119")
+    assert(empty.what.contains("`Bucket{{}}` gives no value"))
 }

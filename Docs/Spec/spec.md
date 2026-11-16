@@ -2647,6 +2647,31 @@ two packages may each declare an `Audit` kind of `Log` without clashing, and
 a function whose row names `audit.Audit` and that reaches `billing.Audit` is
 E0759 unless its row also names `billing.Audit` or `Log`.
 
+A library effect that is a struct with fields has *values*. A row may name
+one value by giving every field a literal, `-[Bucket{name: "photos"}]>`, and
+the bare type `-[Bucket]>` names every value (D-EFFTYPE-MODVALUE1):
+
+```jet
+Bucket: struct {
+    name: String
+
+    impl Effect {}
+}
+
+upload: fn() -[Bucket{name: "photos"}]> {}
+
+sync: fn() -[Bucket]> { upload() }
+```
+
+A value covers only itself: a function whose row names values of an effect,
+and not the bare effect, may reach only those values, so `upload` calling
+`sync` (every value) or a `Bucket{name: "logs"}` function is E0740. The
+field order doesn't matter. Each field is a `String`, `Int` or `Bool` and
+gets one plain text, integer, `true` or `false` literal; a field left out,
+one the effect doesn't declare, a literal of another type, or a value of a
+Prelude effect is E0119. Denying a value denies the bare effect, which names
+every value, and denying the bare effect denies every value (E0749).
+
 `Panic` and `Mem` are deny-only rows. `Panic` can be named in a prohibition but
 cannot be granted by an authority, positive effect ceiling, or package budget.
 Memory events such as `Mem.Alloc` and `Mem.Rc` remain visible to diagnostics

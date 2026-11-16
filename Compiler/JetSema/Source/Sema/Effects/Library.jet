@@ -20,18 +20,35 @@
 // `Audit`. A row naming a kind allows only that kind of its parent: an
 // `-[audit.Audit]>` function that reaches another kind of `Log` it doesn't
 // name, and whose row doesn't name `Log` itself, is E0759.
+//
+// A struct effect with fields has values: `-[Bucket{name: "photos"}]>` names
+// only that value, and the bare `-[Bucket]>` names every value. A function
+// whose row names values of an effect, and not the bare effect, may reach
+// only those values (E0740); every field gets a literal of its type (E0119).
 use jet_foundation.[
     EFFECT_VOCABULARY_LEAVES,
     EFFECT_VOCABULARY_ROOTS,
     Diagnostic,
+    EffectValueField,
     Item,
     ModuleCap,
     NamedSpan,
     Span,
+    Type,
     authority_is_deny_only,
     diagnostic_with_rights,
+    effect_value_base,
+    effect_value_fields,
+    effect_value_is_valued,
     sema_effect_covers,
+    type_name,
 ]
+
+// A field of a struct effect, which a value of the effect gives a literal.
+SemaLibraryEffectField: struct {
+    name: String
+    ty: Type
+}
 
 SemaLibraryEffect: struct {
     package_identity: String
@@ -45,6 +62,8 @@ SemaLibraryEffect: struct {
     // The effects it is a kind of, nearest first: each package effect's
     // token, then the open Prelude effect the chain ends at.
     ancestors: [String]{[String]{}}
+    // A struct effect's fields, in declaration order.
+    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}}
     // E0758 for its parent, reported once by the declaring module.
     problem: Diagnostic?{None}
 }
@@ -52,13 +71,15 @@ SemaLibraryEffect: struct {
 // One name a module may write for a library effect, and the kernel effects
 // it stands for. `token` names the effect, or the case, the same way in
 // every module: the declaring package's identity, `/`, then the name as that
-// package writes it (`Query`, `Query.Read`). `ancestors` are the effects a
-// package effect is a kind of (SemaLibraryEffect.ancestors).
+// package writes it (`Query`, `Query.Read`), and for a value its fields in
+// declaration order (`Bucket{name: "photos"}`). `ancestors` are the effects
+// a package effect is a kind of (SemaLibraryEffect.ancestors).
 SemaLibraryEffectName: struct {
     written: String
     kernel: [String]
     token: String
     ancestors: [String]
+    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}}
 }
 
 // A `!` entry of a function row that names a library effect or a case.
@@ -117,7 +138,8 @@ sema_library_effect_collect: fn(effects: &[SemaLibraryEffect], package_identity:
                 if sema_library_effect_declared(items, definition.name) {
                     parent := NamedSpan?{None}
                     if definition.effect_impl == .Val(declared) -> parent = declared.parent
-                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent})
+                    fields: loop field in definition.fields -> SemaLibraryEffectField{name: field.name, ty: field.ty}
+                    effects.push(SemaLibraryEffect{package_identity: package_identity, module_index: module_index, name: definition.name, cases: [String]{}, kernel: sema_library_effect_kernel_list(definition.cap), parent: parent, fields: fields})
                 }
             }
             .Enum(definition) -> {
@@ -253,7 +275,7 @@ sema_library_effect_check_parents: fn(effects: [SemaLibraryEffect], module_index
 sema_library_effect_add_names: fn(names: &[SemaLibraryEffectName], prefix: String, declared: SemaLibraryEffect) Never! {
     token: "{declared.package_identity}/{declared.name}"
     // copy: each name keeps its own kernel and ancestors.
-    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy()})
+    names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}", kernel: declared.kernel.copy(), token: token, ancestors: declared.ancestors.copy(), fields: declared.fields.copy()})
     loop case_name in declared.cases {
         names.push(SemaLibraryEffectName{written: "{prefix}{declared.name}.{case_name}", kernel: declared.kernel.copy(), token: "{token}.{case_name}", ancestors: [String]{}})  // copy: as above.
     }
@@ -283,12 +305,116 @@ sema_library_effect_view: fn(effects: [SemaLibraryEffect], source: SemaRegistrat
 }
 
 // The library effect a written name stands for, or None when `written`
-// names no library effect this module sees.
+// names no library effect this module sees or a value it can't hold
+// (sema_library_effect_value_problem). A value's token gives its fields in
+// declaration order, so two spellings of one value name one effect.
 sema_library_effect_find: fn(view: [SemaLibraryEffectName], written: String) -> SemaLibraryEffectName? Never! {
+    base: effect_value_base(written)
     loop name in view {
-        if name.written == written -> return Val(name.copy())
+        if name.written != base -> next
+        if base == written -> return Val(name.copy())
+        value: sema_library_effect_value(name.fields, written) ?? return None
+        found := name.copy()
+        found.written = written.copy()
+        found.token = "{name.token}{value}"
+        return Val(found)
     }
     None
+}
+
+// The fields of the value `written` in declaration order, `{a: 1, b: 2}`,
+// or None when it leaves a field out, names one the effect lacks, or gives
+// one a literal of another type.
+sema_library_effect_value: fn(fields: [SemaLibraryEffectField], written: String) -> String? Never! {
+    given: effect_value_fields(written)
+    if given.len() != fields.len() -> return None
+    pairs := [String]{}
+    loop field in fields {
+        literal: loop entry in given {
+            if entry.name == field.name {
+                break entry.value
+            }
+        } ?? return None
+        if sema_library_effect_literal_kind(literal) != sema_library_effect_field_kind(field.ty) {
+            return None
+        }
+        pairs.push("{field.name}: {literal}")
+    }
+    Val("{{{pairs.join(", ")}}}")
+}
+
+// The literal a field of type `ty` holds in an effect value, worded for a
+// report (a text, an integer, a `true` or `false`), or "" for a type no
+// literal spells.
+sema_library_effect_field_kind: fn(ty: Type) -> String Never! {
+    if ty == Type.String -> return "a text"
+    if ty == Type.Int -> return "an integer"
+    if ty == Type.Bool -> return "a `true` or `false`"
+    ""
+}
+
+// The kind of a literal the parser spells back in an effect value, worded
+// as sema_library_effect_field_kind words it.
+sema_library_effect_literal_kind: fn(literal: String) -> String Never! {
+    if literal.starts_with("\"") -> return "a text"
+    if literal == "true" || literal == "false" -> return "a `true` or `false`"
+    "an integer"
+}
+
+// E0119 for a value row entry `written` at `span` that names an effect this
+// module sees but no value of it: a Prelude effect, an effect without
+// fields, a field left out or unknown, or a literal of another type. None
+// when `written` holds no value, or names no effect at all (the caller's
+// unknown-effect report).
+sema_library_effect_value_problem: fn(view: [SemaLibraryEffectName], written: String, span: Span) -> Diagnostic? Never! {
+    if !effect_value_is_valued(written) -> return None
+    base: effect_value_base(written)
+    if sema_effect_parse_name(base) != None {
+        return Val(sema_error("E0119", span, "the Prelude effect `{base}` has no values", "a value names one value of a package's struct effect with fields; a Prelude effect is written bare or with a scope", "write `{base}`"))
+    }
+    declared: loop name in view {
+        if name.written == base {
+            break name
+        }
+    } ?? return None
+    if declared.fields.len() == 0 {
+        return Val(sema_error("E0119", span, "`{base}` has no fields, so `{written}` names no value of it", "a value gives each field of a struct effect a literal; `{base}` declares none", "write `{base}`, or one of its cases if it is an enum"))
+    }
+    given: effect_value_fields(written)
+    loop entry in given {
+        field: loop candidate in declared.fields {
+            if candidate.name == entry.name {
+                break candidate
+            }
+        } ?? return Val(sema_error("E0119", span, "`{base}` has no field `{entry.name}`", "a value gives the fields `{base}` declares", "give the fields of `{base}`: {sema_library_effect_field_list(declared.fields)}"))
+        wanted: sema_library_effect_field_kind(field.ty)
+        if wanted == "" {
+            return Val(sema_error("E0119", span, "the field `{field.name}` of `{base}` is a `{type_name(field.ty)}`, which no effect value holds", "an effect value is fixed when the program is checked, so its fields are `String`, `Int` or `Bool` literals", "make `{field.name}` a `String`, `Int` or `Bool`, or name every value with `{base}`"))
+        }
+        if sema_library_effect_literal_kind(entry.value) != wanted {
+            return Val(sema_error("E0119", span, "`{entry.name}` in `{written}` needs {wanted} literal", "the field `{field.name}` of `{base}` is a `{type_name(field.ty)}`", "write {wanted} literal for `{entry.name}`"))
+        }
+    }
+    loop field in declared.fields {
+        if !sema_library_effect_value_gives(given, field.name) {
+            return Val(sema_error("E0119", span, "`{written}` leaves out the field `{field.name}`", "a value names one value of `{base}`, so it gives every field", "add `{field.name}: …`, or write `{base}` for every value"))
+        }
+    }
+    None
+}
+
+// Whether a value's `given` fields name the field `name`.
+sema_library_effect_value_gives: fn(given: [EffectValueField], name: String) -> Bool Never! {
+    loop entry in given {
+        if entry.name == name -> return true
+    }
+    false
+}
+
+// The fields of a struct effect as `name: Type`, for a fix.
+sema_library_effect_field_list: fn(fields: [SemaLibraryEffectField]) -> String Never! {
+    shown: loop field in fields -> "`{field.name}: {type_name(field.ty)}`"
+    shown.join(", ")
 }
 
 // `e0756`: a function whose row names a library effect reaches a kernel
@@ -344,7 +470,7 @@ sema_library_effect_check_list: fn(items: [Item], name: String, cap: ModuleCap?,
 
 // The library effects each node reaches: those its own row names with the
 // effects they are kinds of, and every one a function it can call reaches.
-// Empty rows when no node denies one and no row names a kind.
+// Empty rows when no node denies one and no row names a kind or a value.
 sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> SemaLibraryEffectReach Never! {
     ancestry := [String:[String]]{}
     loop node in nodes {
@@ -356,13 +482,18 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
         }
     }
     any_kind: ancestry.len() > 0
+    any_value: loop node in nodes {
+        if node.rare == .Val(rare) && rare.library_rows.any(fn(row) { effect_value_is_valued(row.token) }) {
+            break true
+        }
+    } ?? false
     any_denial: loop node in nodes {
         if node.rare == .Val(rare) && rare.library_denials.len() > 0 {
             break true
         }
     } ?? false
     reached := (loop _ in nodes -> [String]{})
-    if !any_denial && !any_kind {
+    if !any_denial && !any_kind && !any_value {
         return SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
     }
     pending := [SemaEffectPending]{}
@@ -392,12 +523,12 @@ sema_library_effect_reach: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> Sema
     SemaLibraryEffectReach{reached: reached, ancestry: ancestry}
 }
 
-// `e0749`: a function that denies a library effect, or one of its cases,
-// reaches a function whose row names it, one of its cases, a kind of it, or
-// (for a denied case) the whole effect; or a function that denies a Prelude
-// effect reaches one whose row names a kind of it, and its body does not
-// already reach the denied effect itself (sema_effect_check_node reports
-// that). `solved` is the node's solved row.
+// `e0749`: a function that denies a library effect, one of its cases or
+// one of its values reaches a function whose row names it, one of its cases
+// or values, a kind of it, or (for a denied case or value) the whole effect;
+// or a function that denies a Prelude effect reaches one whose row names a
+// kind of it, and its body does not already reach the denied effect itself
+// (sema_effect_check_node reports that). `solved` is the node's solved row.
 sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], solved: [String], diagnostics: &[Diagnostic]) {
     rare: node.rare ?? SEMA_EFFECT_NODE_NO_RARE
     loop denial in rare.library_denials {
@@ -405,8 +536,9 @@ sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], s
         loop token in reached {
             hit: if {
                 token == denied.token -> denied.written.copy()
-                token.starts_with("{denied.token}.") -> "{denied.written}{token.slice(denied.token.len(), token.len())}"
+                token.starts_with("{denied.token}.") || token.starts_with("{denied.token}{{") -> "{denied.written}{token.slice(denied.token.len(), token.len())}"
                 denied.token.starts_with("{token}.") -> denied.written.slice(0, denied.written.len() - (denied.token.len() - token.len()))
+                denied.token.starts_with("{token}{{") -> effect_value_base(denied.written)
                 else -> next
             }
             diagnostic: sema_error("E0749", denial.span, "`{node.name}` reaches the library effect `{hit}`, which it prohibits with `-[!{denied.written}]>`", "a `-[!{denied.written}]>` row means the function and every callee it can reach must not use `{denied.written}`; a function uses a library effect when its row names the effect or one of its cases", "remove the call that introduces `{hit}`, or drop the `-[!{denied.written}]>` prohibition")
@@ -442,7 +574,8 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
     roots := [String]{}
     loop row in rare.library_rows {
         sema_effect_set_add(named, row.token)
-        sema_effect_set_add(own, row.token)
+        // A value's other values are sema_library_effect_check_values's.
+        sema_effect_set_add(own, effect_value_base(row.token))
         loop ancestor in row.ancestors {
             sema_effect_set_add(own, ancestor)
             if !ancestor.contains("/") -> sema_effect_set_add(roots, ancestor)
@@ -452,7 +585,7 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
         return
     }
     loop token in reached {
-        if !token.contains("/") || own.contains(token) -> next
+        if !token.contains("/") || own.contains(effect_value_base(token)) -> next
         ancestors: reach.ancestry.get(token) ?? next
         if ancestors.len() == 0 -> next
         root: ancestors[ancestors.len() - 1]
@@ -467,7 +600,7 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
         if written_root -> next
         kinds: loop row in rare.library_rows -> row.written
         shown: sema_effect_show(kinds)
-        parts: token.split("/").to_list()
+        parts: effect_value_base(token).split("/").to_list()
         leaf: parts[parts.len() - 1]
         // A package declares one effect per name, so a kind named like one of
         // the row's kinds is another package's.
@@ -482,4 +615,50 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
         diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
         return
     }
+}
+
+// `e0740`: a function whose row names values of a struct effect, and not
+// the bare effect, reaches another value of it, or a function whose row
+// names the bare effect, which stands for every value.
+sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
+    rare: node.rare ?? return
+    values := [SemaLibraryEffectName]{}
+    loop row in rare.library_rows {
+        if effect_value_is_valued(row.token) -> values.push(row.copy())  // copy: the node keeps its row.
+    }
+    if values.len() == 0 {
+        return
+    }
+    loop token in reached {
+        if !token.contains("/") -> next
+        base: effect_value_base(token)
+        written_base: sema_library_effect_value_written(values, base) ?? next
+        if sema_library_effect_row_names(rare.library_rows, base) || sema_library_effect_row_names(rare.library_rows, token) {
+            next
+        }
+        hit: "{written_base}{token.slice(base.len(), token.len())}"
+        shown: sema_effect_show(loop row in values -> row.written)
+        reach: if hit == written_base -> "every value of `{written_base}`" else -> "another value of `{written_base}`"
+        span: node.row_span ?? node.name_span
+        diagnostic: sema_error("E0740", span, "`{node.name}` uses the effect `{hit}`, which its signature doesn't allow", "the signature names `{shown}`, and a value of an effect covers only itself, so it doesn't cover {reach}", "add `{hit}` to `{node.name}`'s row, write `{written_base}` to allow every value, or stop calling the function that uses `{hit}`")
+        diagnostics.push(diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None))
+        return
+    }
+}
+
+// The written type of the first value in `values` whose effect's token is
+// `base` (`Bucket` for `Bucket{name: "photos"}`), or None.
+sema_library_effect_value_written: fn(values: [SemaLibraryEffectName], base: String) -> String? Never! {
+    loop row in values {
+        if effect_value_base(row.token) == base -> return Val(effect_value_base(row.written))
+    }
+    None
+}
+
+// Whether one of `rows` names the token `token`.
+sema_library_effect_row_names: fn(rows: [SemaLibraryEffectName], token: String) -> Bool Never! {
+    loop row in rows {
+        if row.token == token -> return true
+    }
+    false
 }

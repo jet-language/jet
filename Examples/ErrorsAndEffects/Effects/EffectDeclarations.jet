@@ -20,13 +20,30 @@ impl Ledger.Effect {
     irreversible: fn(self) -> Bool { self == .Post }
 }
 
+// A struct effect with fields has values. `upload` names one bucket, so it
+// may touch only `photos`; `sync` names `Bucket` bare, every bucket, so it
+// may call `upload`, while `upload` could not call `sync`.
+Bucket: struct {
+    name: String
+}
+
+impl Bucket.Effect {}
+
 audit: fn() -[Audit]> {}
 
 post: fn() -[Ledger.Post]> {}
+
+upload: fn() -[Bucket{name: "photos"}]> {}
+
+sync: fn() -[Bucket]> {
+    upload()
+}
 
 run: fn() {
     audit()
     print("audited")
     post()
     print("posted")
+    sync()
+    print("synced")
 }

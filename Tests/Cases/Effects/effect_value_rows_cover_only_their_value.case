@@ -1,0 +1,30 @@
+# A struct effect with fields has values: `-[Bucket{name: "photos", size: 2}]>`
+# names only that value, in any field order, and the bare `-[Bucket]>` names
+# every value. A value row may reach only its own value; each field gets one
+# literal of its type, and a Prelude effect has no values.
+fixture: Fixtures/EffectValues
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: ~ "synced" # the bare row covers the value, and one value covers itself in another field order
+step census: jet explain effects main.jet:10
+exit: 0
+stdout: ~ '-[Bucket{size: 2, name: "photos"}]>' # the census reports the value as written
+copy: bare-callee.jet main.jet
+step bare: jet check main.jet
+exit: nonzero
+stderr: ~ "E0740" # a value doesn't cover the bare effect
+stderr: ~ "`upload` uses the effect `Bucket`, which its signature doesn't allow" # the report names the bare effect the call reaches
+stderr: ~ "doesn't cover every value of `Bucket`" # and why the value doesn't cover it
+copy: denied-value.jet main.jet
+step denied: jet check main.jet
+exit: nonzero
+stderr: ~ "E0749" # denying a value denies the bare effect, which names every value
+stderr: ~ '`quiet` reaches the library effect `Bucket`, which it prohibits with `-[!Bucket{name: "photos", size: 2}]>`' # the report names the denied value
+copy: bad-values.jet main.jet
+step values: jet check main.jet
+exit: nonzero
+stderr: ~ '`Bucket{name: "photos"}` leaves out the field `size`' # a value gives every field
+stderr: ~ '`size` in `Bucket{name: "photos", size: "2"}` needs an integer literal' # of its field's type
+stderr: ~ "`Bucket` has no field `region`" # and only the fields the effect declares
+stderr: ~ "Prelude effect `Log` has no values" # a Prelude effect is written bare or with a scope

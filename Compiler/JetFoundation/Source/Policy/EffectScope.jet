@@ -52,6 +52,62 @@ effect_scope_argument_valid: fn(scope: String) -> Bool Never! {
     true
 }
 
+// One field of an effect value (`name: "photos"` in `Bucket{name:
+// "photos"}`): the field's name and its literal as written back, a quoted
+// text, an integer, `true` or `false`.
+EffectValueField: struct {
+    name: String
+    value: String
+}
+
+// Whether `name` is a value row entry, an effect type with its fields'
+// values (`Bucket{name: "photos"}`). A value names only that value of the
+// effect; the bare type (`Bucket`) names every value.
+effect_value_is_valued: fn(name: String) -> Bool Never! {
+    name.ends_with("}}") && name.contains("{{")
+}
+
+// The effect type a value row entry names (`Bucket` for `Bucket{name:
+// "photos"}`), or `name` itself when it holds no value.
+effect_value_base: fn(name: String) -> String Never! {
+    parts: name.split_once("{{") ?? return name.copy()
+    parts.before.copy()
+}
+
+// The fields of a value row entry in written order, read back from the
+// spelling the parser gives it: `field: literal` pairs joined by `, `. A
+// text literal holds no quote or backslash (effect_value_text_valid), so a
+// `, ` inside quotes is the text's own.
+effect_value_fields: fn(name: String) -> [EffectValueField] Never! {
+    fields := [EffectValueField]{}
+    if !effect_value_is_valued(name) -> return fields
+    parts: name.split_once("{{") ?? return fields
+    inner: parts.after.slice(0..<parts.after.len() - 1)
+    bytes: inner.bytes()
+    quoted := false
+    start := 0
+    loop index in 0..<bytes.len() + 1 {
+        if index < bytes.len() {
+            if bytes[index] == (U8{34}) -> quoted = !quoted
+            if quoted || bytes[index] != (U8{44}) -> next
+        }
+        pair: inner.slice(start..<index).trim()
+        start = index + 1
+        split: pair.split_once(":") ?? next
+        fields.push(EffectValueField{name: split.before.trim().copy(), value: split.after.trim().copy()})
+    }
+    fields
+}
+
+// A text literal an effect value can hold: free of the quote and backslash
+// a written row could not spell back, and of control bytes.
+effect_value_text_valid: fn(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        if byte == (U8{34}) || byte == (U8{92}) || byte < (U8{32}) -> return false
+    }
+    true
+}
+
 // The paths that `FS.Read("<path>")` rights among the canonical `rights`
 // confine a run's reads to, in order: the run may read those files and
 // directories and nothing else. A grant written as a `jet run --allow` row

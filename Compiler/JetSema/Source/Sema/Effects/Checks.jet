@@ -46,6 +46,7 @@ use jet_foundation.[
     effect_scope_of_argument,
     effect_scope_published_effect,
     effect_scope_split,
+    effect_value_is_valued,
     FnBody,
     Func,
     SharedLifetime,
@@ -867,7 +868,9 @@ sema_effect_set_union: fn(target: &[String], values: [String]) -> Bool Never! {
 }
 
 sema_effect_parse_name: fn(name: String) -> String? {
-    if name == "" || name.starts_with("..") -> return None
+    // A value (`Bucket{name: "photos"}`) names a package's struct effect
+    // (Library.jet), never a Prelude one.
+    if name == "" || name.starts_with("..") || effect_value_is_valued(name) -> return None
     base := name
     scoped: effect_scope_split(name)
     if scoped.scope == .Val(scope) {
@@ -2565,12 +2568,13 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
             if prohibited && node.prohibition_span == None {
                 node.prohibition_span = Val(entry.span)
             }
-            raw := entry.name
-            if prohibited {
-                pieces: entry.name.split("!").to_list()
-                if pieces.len() > 1 -> raw = pieces[1]
-            }
+            // A value's text may hold a `!` of its own.
+            raw: if prohibited -> entry.name.slice(1, entry.name.len()) else -> entry.name
             effect_name: sema_effect_parse_name(raw) ?? {
+                if sema_library_effect_value_problem(library, raw, entry.span) == .Val(problem) {
+                    diagnostics.push(problem)
+                    next
+                }
                 // A library effect admits the kernel effects it lists; a
                 // denial of it is checked over the library effects reached.
                 library_name: sema_library_effect_find(library, raw) ?? {
@@ -6322,6 +6326,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         // result instead of a partially updated function list.
         sema_library_effect_check_denials(nodes[node_index], library_reach.reached[node_index], solved[node_index], function_diagnostics)
         sema_library_effect_check_kinds(nodes[node_index], library_reach, library_reach.reached[node_index], function_diagnostics)
+        sema_library_effect_check_values(nodes[node_index], library_reach.reached[node_index], function_diagnostics)
         if pure_reached.len() > 0 {
             pure_nodes.push(node_index)
             pure_rows.push(pure_reached)

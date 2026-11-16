@@ -80,6 +80,7 @@ use {
         diagnostic_with_structured_edit,
         effect_scope_argument_valid,
         effect_scope_name,
+        effect_value_text_valid,
         marker_hook_of_declaration,
         marker_registered,
         marker_registered_accepts_arguments,
@@ -102,6 +103,7 @@ use {
         TOKEN_DOT_DOT_DOT,
         TOKEN_EOF,
         TOKEN_EQ,
+        TOKEN_FALSE,
         TOKEN_FLOAT,
         TOKEN_GT,
         TOKEN_HASH,
@@ -138,6 +140,7 @@ use {
         TOKEN_SLASH,
         TOKEN_STAR,
         TOKEN_STRING,
+        TOKEN_TRUE,
         TOKEN_UNIFIED_ARROW,
         Token,
     ]
@@ -1383,9 +1386,10 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
 }
 
 // An effect path `ident (.ident)*`, with an optional argument: a bounded
-// memory denial (`Mem.Alloc(above: N)`, `Mem.Stack(above: N)`), or a scope
+// memory denial (`Mem.Alloc(above: N)`, `Mem.Stack(above: N)`), a scope
 // string naming a folder, a host or a device (`FS.Read("templates/")`,
-// `Net("api.example.com")`). `Mem.Stack` is only ever bounded.
+// `Net("api.example.com")`), or a value of the effect type
+// (`Bucket{name: "photos"}`). `Mem.Stack` is only ever bounded.
 parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "for an effect name")
     name := parser_value(state, first)
@@ -1395,6 +1399,9 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         segment: parser_expect_name(state, "for an effect path segment after `.`")
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
+    }
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        return parser_effect_value_name(state, name, first.span.start)
     }
     if !parser_memory_bounded(name) && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
@@ -1445,6 +1452,64 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
 // The memory denials an `above: Bytes` argument bounds.
 parser_memory_bounded: fn(name: String) -> Bool Never! {
     name == "Mem.Alloc" || name == "Mem.Stack"
+}
+
+// A value of the effect type `base` in a row (`Bucket{name: "photos"}`),
+// from its `{`: each field once with a literal, spelled back as
+// `field: literal` pairs joined by `, `. The entry names only that value; the
+// bare type names every value.
+parser_effect_value_name: fn(state: &JetParserState, base: String, start: Int) -> NamedSpan {
+    open: parser_bump(state)
+    fields := [String]{}
+    names := [String]{}
+    loop parser_current_kind(state) != TOKEN_RBRACE && !parser_aborting(state) {
+        label: parser_expect_name(state, "for a field of the effect value")
+        field: parser_value(state, label)
+        if names.contains(field) {
+            parser_add_fatal_code(state, "E0119", label.span, "`{base}{{…}}` gives the field `{field}` twice", "an effect value gives each field of the effect type one value", "remove the second `{field}: …`")
+            return NamedSpan{name: base, span: Span{start: start, end: label.span.end}}
+        }
+        parser_expect(state, TOKEN_COLON, "`:` after the effect value's field name")
+        value: parser_effect_value_literal(state, base, field) ?? return NamedSpan{name: base, span: Span{start: start, end: label.span.end}}
+        fields.push("{field}: {value}")
+        names.push(field)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        parser_expect(state, TOKEN_COMMA, "`,` between the effect value's fields")
+    }
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the effect value")
+    span: Span{start: start, end: close.span.end}
+    if fields.len() == 0 && !parser_aborting(state) {
+        parser_add_fatal_code(state, "E0119", Span{start: open.span.start, end: close.span.end}, "`{base}{{}}` gives no value", "an effect value gives each field of the effect type a value; the bare type names every value", "write `{base}` for every value, or give its fields (`{base}{{name: \"photos\"}}`)")
+    }
+    NamedSpan{name: "{base}{{{fields.join(", ")}}}", span: span}
+}
+
+// One field's literal in an effect value, spelled back: a plain quoted text,
+// an integer, `true` or `false`. None after a fatal report.
+parser_effect_value_literal: fn(state: &JetParserState, base: String, field: String) -> String? {
+    token: parser_current(state)
+    if token.kind == TOKEN_STRING && parser_interpolations(state, token) == 0 {
+        _ := parser_take_text(state, false)
+        text: parser_value(state, token)
+        if !effect_value_text_valid(text) {
+            parser_add_fatal_code(state, "E0119", token.span, "the text of `{field}` in `{base}{{…}}` holds a quote, a backslash or a control character", "an effect value is spelled back into rows and reports as written, so its text is plain", "write `{field}` without quotes, backslashes or control characters")
+            return None
+        }
+        return Val("\"{text}\"")
+    }
+    if token.kind == TOKEN_TRUE || token.kind == TOKEN_FALSE {
+        parser_bump(state)
+        return Val(if token.kind == TOKEN_TRUE -> "true" else -> "false")
+    }
+    negative: token.kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_INT
+    if token.kind == TOKEN_INT || negative {
+        if negative -> parser_bump(state)
+        number: parser_bump(state)
+        amount: parser_integer(state, number) ?? 0
+        return Val(if negative -> "-{amount}" else -> "{amount}")
+    }
+    parser_add_fatal_code(state, "E0119", token.span, "`{field}` in `{base}{{…}}` needs a literal value", "an effect value is fixed when the program is checked, so each field holds a plain text, an integer, `true` or `false`", "write a literal, such as `{field}: \"photos\"`")
+    None
 }
 
 // Rust `type_starts_here`, with the `#Tag Type` value-tag prefix.
