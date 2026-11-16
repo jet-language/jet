@@ -789,7 +789,8 @@ everywhere.
 Structs and enums carry data; methods attach behavior. A struct literal is
 `Type{field: value}` or an expected-type-inferred `{field: value}`. Enum values
 use `Type.Variant`; labeled payloads use `Type.Variant{label: value}` rather
-than call parentheses. Every labeled field appears exactly once, in any order.
+than call parentheses, and a grouped leaf keeps its group in the head
+(`Type.Group.Leaf{label: value}`). Every labeled field appears exactly once, in any order.
 Pattern tests use `==`. Optional values use `T?`,
 `Val(value)`, and `None`. `None` needs an expected optional type, such as a
 return, field, or argument type; `Val(value)` uses that type to check its
