@@ -1,7 +1,7 @@
 // The ballot's `check_fast`: the tag is on the list's elements. A read
 // `expected[i]` carries it, so the early return on it is masked, not a
 // real branch.
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 #Scrub(Key) reveal_flag: fn(value: #Key Bool) -> Bool { value }
 
@@ -19,4 +19,12 @@ run: fn() {
     differ: reveal_flag(check_fast(key, [U8]{1, 9, 3}))
     short: reveal_flag(check_fast(key, [U8]{1, 2}))
     print("check {same} {differ} {short}")
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

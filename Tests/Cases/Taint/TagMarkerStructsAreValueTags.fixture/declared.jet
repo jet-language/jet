@@ -1,0 +1,17 @@
+use process: core.process
+
+// A value tag is a field-less struct whose `impl Marker` block names
+// `sites: [.TypeUse]`; its own `#FX(!Exec)` row denies the process sink.
+#FX(!Exec)
+Account: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
+
+account_name: fn() -> #Account String { "Ada" }
+
+run: fn() {
+    receipt: process.cmd(["echo", account_name()]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
+}

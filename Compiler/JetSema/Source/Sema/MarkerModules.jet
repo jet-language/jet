@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TagDef, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -524,7 +524,7 @@ sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identit
 // The applied-rule argument menus, as Rust RULE_ARG_DECLARATIONS reads them:
 // Core.rows's core.compiler.lang `types { … }` leaves, with `Effect` naming the
 // canonical effect declaration roots (Rust EFFECT_ROOTS: the undotted rows of
-// the pinned Prelude effect module) and `TaintKind` the builtin taint tags.
+// the pinned Prelude effect module).
 sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TAppliedRuleArgumentMenu]? {
     effect_index: sema_registration_module_index(graph, graph.canonical_effect_module_identity) ?? return None
     effect_roots := [String]{}
@@ -533,7 +533,7 @@ sema_marker_module_argument_menus: fn(graph: SemaRegistrationGraph) -> [TApplied
             effect_roots.push(declaration.name)
         }
     }
-    foundation_core_argument_menus(effect_roots, sema_taint_builtin_tag_names())
+    foundation_core_argument_menus(effect_roots)
 }
 
 // The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
@@ -830,6 +830,22 @@ sema_marker_module_prelude_decls: fn() -> [MarkerDecl] {
         if item == .MarkerDecl(declaration) -> declarations.push(declaration)
     }
     declarations
+}
+
+// The value tags of the one marker vocabulary source (`Input`, `PII`,
+// `Secret`, `Credential`), as the parser reads each tag struct.
+// SEMA_PRELUDE_TAGS (PreludeRows.jet) is what this returns, written by
+// Compiler/Toolchain/PreludeRows.
+sema_marker_module_prelude_tags: fn() -> [TagDef] {
+    parsed: parse_generated_source(MARKER_SOURCE.bytes())
+    if parsed.diagnostics.len() > 0 {
+        panic("Prelude/Markers.jet does not parse: {parsed.diagnostics[0].what}")
+    }
+    tags := [TagDef]{}
+    loop item in parsed.program.items {
+        if item == .Tag(declaration) -> tags.push(declaration)
+    }
+    tags
 }
 
 // The Prelude marker declared as `name` in the one marker vocabulary source,

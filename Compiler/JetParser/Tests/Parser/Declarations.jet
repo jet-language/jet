@@ -86,8 +86,59 @@ run: fn() {}
         assert(param.value != None)
     }
     loop site in MARKER_SOURCE_SITES {
+        // A struct marked only at type uses is a value tag, not a marker rule.
+        if site == "TypeUse" -> next
         _: marker_test_decl("Uses: struct {{ impl Marker {{ sites: [.{site}] }} }}\nrun: fn() {{}}\n")
     }
+}
+
+#Test("a_type_use_marker_struct_is_a_value_tag_denying_its_fx_row") {
+    program: parser_test_program(
+        `#FX(!Net, !Log)
+Audited: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        from: [Net, store.read]
+        timing: .Fixed
+    }
+}
+run: fn() {}
+`,
+    )
+    program.items[0] == .Tag(audited) ?? panic("a type-use marker struct is a value tag")
+    assert_eq(audited.name, "Audited")
+    denied := [String]{}
+    loop entry in audited.deny -> denied.push(entry.name)
+    assert_eq(denied, [String]{"Net", "Log"})
+    sources := [String]{}
+    loop entry in audited.from -> sources.push(entry.name)
+    assert_eq(sources, [String]{"Net", "store.read"})
+    timing: audited.timing ?? panic("the tag writes its timing")
+    assert_eq(timing.name, "Fixed")
+    loop item in program.items {
+        if item == .Struct(_) -> panic("a value tag declares no struct type")
+    }
+    nothing: parser_test_errors(
+        `Risk: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
+run: fn() {}
+`,
+    )
+    assert_eq(parser_test_diagnostic(nothing, "E0734").what, "The tag `Risk` denies no destination")
+    ceiling: parser_test_errors(
+        `#FX(!Exec, Net)
+Risk: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
+run: fn() {}
+`,
+    )
+    assert_eq(parser_test_diagnostic(ceiling, "E0734").what, "`Net` in the tag `Risk`'s `#FX` row is a ceiling, not a denial")
 }
 
 #Test("fact_plane_struct_parses_its_law_columns") {
@@ -224,7 +275,7 @@ run: fn() {}
         }
     }
     assert(!decl.params[0].variadic && decl.params[1].value != None && decl.params[2].variadic)
-    assert_eq(MARKER_SOURCE_SITES.len(), 20)
+    assert_eq(MARKER_SOURCE_SITES.len(), 21)
 }
 
 #Test("a_marker_struct_holds_a_group_or_a_template") {

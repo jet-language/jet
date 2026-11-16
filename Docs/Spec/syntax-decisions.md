@@ -3170,9 +3170,11 @@ source location. `.origin()` and `.@track_origin` are retired. Runtime output
 is possible only when ordinary comptime folding produces the value; no runtime
 metadata channel exists.
 
-**D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
-methods and dispatches) and `tag` (declares an erased dataflow fact and its
-policy). A tag requires a nonempty `deny` list and may declare `from`. Methods
+**D-QUAL2 — Tag vs trait** *(amended by D-TAG-MARKER1=A)*: exactly two
+qualifier kinds — `trait` (has methods and dispatches) and the value tag
+(declares an erased dataflow fact and its policy). A value tag is a field-less
+struct whose `impl Marker` block names `sites: [.TypeUse]`; its own `#FX(!…)`
+row is its nonempty denial list, and it may declare `from`. Fields or methods
 on a tag are E0732; tag where dispatch is expected is E0731. **D-QUAL4**:
 type-position value tags use a direct prefix, such as `#PII String`.
 
@@ -3905,7 +3907,7 @@ tag and returns an untagged value. Bare `sanitizer` remains E0059 with this fix.
 `#Credential T` attaches the Prelude credential tag through the shared fact
 lattice. Credential facts spread by dataflow and may not reach `print`, `log`,
 or serialization sinks (E0722); `#Scrub(Credential)` is the exact audited strip
-point. Other tags follow their declared `deny` and optional `from` policy.
+point. Other tags follow their own `#FX(!…)` denials and optional `from` policy.
 
 **D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `-[]>` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`

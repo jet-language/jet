@@ -32,18 +32,18 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">The tag `{tag}` declares a method `{method}`, but tags have no methods.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches.</p>
+<p class="diag-copy why" data-registry-field="why">A value tag is a field-less struct that erases at runtime; only a `trait` carries methods and dispatches.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Make `{tag}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag}` a marker tag.</p>
+<p class="diag-copy fix" data-registry-field="fix">Make `{tag}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag}` a value tag.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0732</code>: <code>Tests/UI/tag_with_method.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E0732</code>: <code>Tests/UI/tag_marker_with_method.stderr</code>.</p>
 <pre class="diag">Error [jet.MethodInTag]: The tag `Reviewed` declares a method `review`, but tags have no methods
-  --&gt; Tests/UI/tag_with_method.jet:5:5
+  --&gt; Tests/UI/tag_marker_with_method.jet:6:5
     |
-  5 |     review: fn(self) -&gt; Int
+  6 |     review: fn(self) -&gt; Int { 1 }
     |     ^^^^^^
- Why: A `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches
- Fix: Make `Reviewed` a `trait` if `review` should dispatch, or remove the method to keep `Reviewed` a marker tag
+ Why: A value tag is a field-less struct that erases at runtime; only a `trait` carries methods and dispatches
+ Fix: Make `Reviewed` a `trait` if `review` should dispatch, or remove the method to keep `Reviewed` a value tag
 More: jet-lang.dev/e/E0732
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

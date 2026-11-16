@@ -6,14 +6,14 @@ use {
     jet_foundation.[Diagnostic, SemaNameCase, TAppliedRule, TAppliedRuleArgKind, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, foundation_core_argument_menus, rule_arg_declaration, sema_casing_has_case]
     jet_lexer.[lex, lex_generated]
     jet_parser.[jet_format_source, parse_generated_source, parse_source]
-    jet_sema.[SEMA_PRELUDE_MARKER_RULES, SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog, sema_taint_builtin_tag_names]
+    jet_sema.[SEMA_PRELUDE_MARKER_RULES, SemaScopeMembersMarkerRegistry, SemaScopeMembersMarkerRule, sema_comptime_reflection_marker_rule, sema_marker_rules_build_catalog, sema_scope_members_registry_add_applied_catalog]
 }
 
 // The applied-rule catalog the checker builds (MarkerModules.jet
 // `sema_marker_module_check`). The effect menu is seeded with the roots the
 // placeholders need; the Rust walk read EFFECT_ROOTS the same way.
 mrc_catalog: fn() -> TAppliedRuleCatalog {
-    menus: foundation_core_argument_menus(["IO", "FS"], sema_taint_builtin_tag_names()) ?? panic("the applied-rule argument menus must build")
+    menus: foundation_core_argument_menus(["IO", "FS"]) ?? panic("the applied-rule argument menus must build")
     sema_marker_rules_build_catalog(SEMA_PRELUDE_MARKER_RULES, menus) ?? panic("the applied-rule catalog must build")
 }
 
@@ -98,7 +98,7 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
         }
         "Function" -> {
             if marker.starts_with("#Scrub") {
-                return Val("X: tag {{ deny: [IO] }}\n{marker} helper: fn(raw: #X String) -[]> String {{ return raw.copy() }}\n\nrun: fn() {{\n}}\n")
+                return Val("#FX(!IO)\nX: struct {{\n    impl Marker {{\n        sites: [.TypeUse]\n    }}\n}}\n{marker} helper: fn(raw: #X String) -[]> String {{ return raw.copy() }}\n\nrun: fn() {{\n}}\n")
             }
             if marker.starts_with("#Undo") {
                 return Val("inverse: fn() {{}}\n#[Unsafe(\"coverage\"), FFI(c), Undo(inverse)]\nhelper: fn() {{\n    \"\"\"void helper(void) {{}}\"\"\"\n}}\n\nrun: fn() {{\n}}\n")

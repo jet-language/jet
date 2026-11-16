@@ -1,4 +1,4 @@
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 plain: fn(k: U64) -> U64 {
     if k == (U64{0}) -> return U64{1}
@@ -10,4 +10,12 @@ forward: fn(k: #Key U64) -> U64 { plain(k) }
 run: fn() {
     value: forward(U64{9})
     print("ran")
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

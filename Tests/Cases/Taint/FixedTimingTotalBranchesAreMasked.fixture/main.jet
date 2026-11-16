@@ -1,6 +1,6 @@
 // Branches on a `timing: .Fixed` value whose arms are total are masked:
 // both arms run and the result is selected with no jump.
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 #Scrub(Key) reveal: fn(value: #Key U64) -> U64 { value }
 
@@ -42,4 +42,12 @@ run: fn() {
     print("same {reveal_flag(same(#Key U64{6}, U64{6}))} {reveal_flag(same(#Key U64{6}, U64{7}))}")
     print("grade {reveal(grade(#Key U64{1}))} {reveal(grade(#Key U64{6}))} {reveal(grade(#Key U64{50}))} {reveal(grade(#Key U64{500}))}")
     print("small {reveal_byte(small(#Key U8{3}))} {reveal_byte(small(#Key U8{200}))}")
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

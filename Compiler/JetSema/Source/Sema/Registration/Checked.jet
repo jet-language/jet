@@ -3571,7 +3571,7 @@ sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: Se
         return
     }
     if state.tags.get(trait_name) != None {
-        diagnostics.push(sema_error("E0731", span, "`{trait_name}` is a tag, but an `impl` block needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{trait_name}` as a `trait` with the method(s) it should provide"))
+        diagnostics.push(sema_error("E0731", span, "`{trait_name}` is a tag, but an `impl` block needs a trait", "a value tag is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{trait_name}` as a `trait` with the method(s) it should provide"))
         return
     }
     if !sema_checked_coherence_trait_known(graph, module_row, state, owner_name, trait_name, span, diagnostics) {
@@ -3719,7 +3719,7 @@ sema_checked_coherence_impl: fn(graph: SemaRegistrationGraph, module_row: SemaRe
 sema_checked_coherence_derives: fn(state: SemaCheckedCoherence, derives: [NamedSpan], diagnostics: &[Diagnostic]) {
     loop request in derives {
         if state.tags.get(request.name) != None {
-            diagnostics.push(sema_error("E0731", request.span, "`{request.name}` is a tag, but `derive` needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{request.name}` as a `trait` with the method(s) it should provide"))
+            diagnostics.push(sema_error("E0731", request.span, "`{request.name}` is a tag, but `derive` needs a trait", "a value tag is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{request.name}` as a `trait` with the method(s) it should provide"))
         }
     }
 }

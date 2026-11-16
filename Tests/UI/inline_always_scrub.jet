@@ -1,4 +1,4 @@
-PII: tag { deny: [Exec] }
+// `PII`, a value tag, is declared at the end of the file.
 
 // E1016: a `#Scrub` routine stays a call, so `#Inline(Always)` cannot expand it.
 #[Inline(Always), Scrub(PII)]
@@ -8,3 +8,10 @@ redact: fn(value: #PII String) -> String {
 }
 
 run: fn() { print(redact(#PII #Input "secret")) }
+
+#FX(!Exec)
+PII: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}

@@ -1,0 +1,10 @@
+use process: core.process
+
+// `Secret` is a Prelude tag struct; its `#FX(!DB, !Exec, !Net)` row denies
+// the process sink with no declaration in this file.
+api_key: fn() -> #Secret String { "k-123" }
+
+run: fn() {
+    receipt: process.cmd(["echo", api_key()]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
+}

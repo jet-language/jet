@@ -1,6 +1,6 @@
 use process: core.process
 
-Stored: tag { from: [Store.read], deny: [Exec] }
+// `Stored`, a value tag from `Store.read`, is declared at the end of the file.
 
 Store: struct {
     value: String
@@ -11,4 +11,12 @@ Store: struct {
 run: fn() {
     store := Store{value: "Ada"}
     process.run(["echo", store.read()]) ?? return Err("test")
+}
+
+#FX(!Exec)
+Stored: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        from: [Store.read]
+    }
 }

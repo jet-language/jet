@@ -1,7 +1,13 @@
 // A total helper takes a `timing: .Fixed` value in an untagged parameter: its
 // body only combines the value with operators that cannot stop, so the call
 // is checked through it, accepted, and runs the same at every tier.
-Key: tag { deny: [Exec], timing: .Fixed }
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
+}
 
 #Scrub(Key) reveal: fn(value: #Key U64) -> U64 { value }
 

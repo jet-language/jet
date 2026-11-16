@@ -3,7 +3,13 @@
 // start before `run` prints anything.
 use sys: core.sys
 
-Key: tag { deny: [Exec], timing: .Fixed }
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
+}
 
 #Scrub(Key) reveal: fn(value: #Key U64) -> U64 { value }
 

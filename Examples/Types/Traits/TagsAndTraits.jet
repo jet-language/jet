@@ -2,9 +2,21 @@
 //
 // Tags mark intent on values (`#Reviewed String`) and erase at runtime —
 // the value is still a plain String. Traits add methods you actually call.
-Reviewed: tag { deny: [Net] }
+// A tag is a field-less struct whose `impl Marker` block names
+// `sites: [.TypeUse]`; its `#FX(!…)` row lists where its values may not go.
+#FX(!Net)
+Reviewed: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 
-Internal: tag { deny: [DB] }
+#FX(!DB)
+Internal: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 
 Greeter: trait {
     greet: fn(self) -> String
@@ -43,11 +55,26 @@ run: fn() {
 // `#TagName T` is a value-tag qualifier in type position.
 // The tag documents intent (e.g., "this string is untrusted") without
 // changing the runtime type — the underlying value is still a plain T.
-Raw: tag { deny: [DB] }
+#FX(!DB)
+Raw: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 
-Locale: tag { deny: [Net] }
+#FX(!Net)
+Locale: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 
-Sanitized: tag { deny: [Log] }
+#FX(!Log)
+Sanitized: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
+}
 
 tag_score: fn(rating: #Raw Int) -> Int { rating * 2 }
 

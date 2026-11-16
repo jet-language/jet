@@ -3,7 +3,12 @@ complete: module<T>(count: Int, label: String) {
 
     COMPTIME_VALUE: #run { count + 1 }
 
-    Marked: tag { deny: [Net] }
+    #FX(!Net)
+    Marked: struct {
+        impl Marker {
+            sites: [.TypeUse]
+        }
+    }
 
     Reveal: trait {
         reveal: fn(self) -> T

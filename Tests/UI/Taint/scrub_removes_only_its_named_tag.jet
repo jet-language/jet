@@ -1,10 +1,17 @@
 use process: core.process
 
-PII: tag { deny: [Exec] }
+// `PII`, a value tag, is declared at the end of the file.
 
 #Scrub(PII) redact: fn(value: #PII String) -> String { value }
 
 run: fn() {
     value := redact(#PII #Input "secret")
     process.run(["echo", value]) ?? return Err("test")
+}
+
+#FX(!Exec)
+PII: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
 }

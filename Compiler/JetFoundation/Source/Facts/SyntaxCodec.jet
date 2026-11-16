@@ -8251,12 +8251,13 @@ body_codec_put_rulesite: fn(out: &BodyCodecOut, value: RuleSite) Never! {
         .Test -> { body_codec_put_tag(out, 16) }
         .Operation -> { body_codec_put_tag(out, 17) }
         .Text -> { body_codec_put_tag(out, 18) }
-        .Arm -> body_codec_put_tag(out, 19)
+        .Arm -> { body_codec_put_tag(out, 19) }
+        .TypeUse -> body_codec_put_tag(out, 20)
     }
 }
 
 body_codec_get_rulesite: fn(bytes: [U8], input: &BodyCodecIn) -> RuleSite Never! {
-    position: body_codec_get_tag(bytes, input, 20, 0)
+    position: body_codec_get_tag(bytes, input, 21, 0)
     if position == {
         1 -> RuleSite.File
         2 -> RuleSite.Module
@@ -8277,6 +8278,7 @@ body_codec_get_rulesite: fn(bytes: [U8], input: &BodyCodecIn) -> RuleSite Never!
         17 -> RuleSite.Operation
         18 -> RuleSite.Text
         19 -> RuleSite.Arm
+        20 -> RuleSite.TypeUse
         else -> RuleSite.Package
     }
 }

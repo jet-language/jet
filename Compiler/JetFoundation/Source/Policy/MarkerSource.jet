@@ -27,6 +27,7 @@ MARKER_SOURCE_SITES: [String]{
     "Operation",
     "Text",
     "Arm",
+    "TypeUse",
 }
 
 // `MarkerScope` in Core/Prelude/Prelude.jet (the type of `Marker.scopes`), by
@@ -299,7 +300,8 @@ marker_source_struct_name: fn(member: String) -> String? Never! {
 
 // One marker type: the fields are the rule's parameters and the
 // `impl Marker` settings are its facts. None for a struct that is not a
-// marker, or a marker that is a group rather than a rule.
+// marker, a marker that is a group rather than a rule, or a value tag
+// (`sites: [.TypeUse]`), which the parser reads as a tag.
 marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never! {
     context: "{name}: struct"
     fields := [String]{}
@@ -343,10 +345,11 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
                 companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], context)})
             }
             "group" -> group = true
+            "from" | "timing" | "protects" -> {}
             else -> panic("unknown marker setting `{key}` in {context}")
         }
     }
-    if group -> return None
+    if group || sites.contains("TypeUse") -> return None
     params := [TAppliedRuleParameter]{}
     variadic := TAppliedRuleArgKind?{None}
     variadic_source_type := String?{None}

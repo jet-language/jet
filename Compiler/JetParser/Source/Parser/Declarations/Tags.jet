@@ -1,133 +1,171 @@
-use {
-    jet_foundation.[
-        Item,
-        NamedSpan,
-        Span,
-        TagDef,
-    ]
-    jet_lexer.[
-        TOKEN_COLON,
-        TOKEN_COMMA,
-        TOKEN_DOT,
-        TOKEN_EOF,
-        TOKEN_KW_FN,
-        TOKEN_KW_TAG,
-        TOKEN_LBRACE,
-        TOKEN_LBRACKET,
-        TOKEN_RBRACE,
-        TOKEN_RBRACKET,
-        TOKEN_SEMI,
-    ]
-}
+use jet_foundation.[
+    Expr,
+    MarkerDecl,
+    NamedSpan,
+    Span,
+    StructDef,
+    TagDef,
+    expr_span,
+]
 
-parser_tag_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_KW_TAG
-}
-
-parser_parse_tag_policy: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
-    start: parser_bump(state)
-    name: parser_expect_name(state, "after `tag`")
-    deny := [NamedSpan]{}
+// A value tag is a field-less struct whose `impl Marker` block has
+// `sites: [.TypeUse]`: it marks a value's type (`#CardNumber String`) and
+// declares no marker rule. Its denials are its own `#FX(!…)` row. `from`
+// names the effects or functions whose results carry it, and `timing` and
+// `protects` are cases of core.compiler.lang TagTiming and TagProtects. The
+// parser returns the tag in place of the struct; None: the struct is no tag.
+parser_tag_struct: fn(state: &JetParserState, value: StructDef) -> TagDef? {
+    declaration: value.marker ?? return None
+    if !parser_tag_sites(state, value.name, declaration) -> return None
     from := [NamedSpan]{}
     timing := NamedSpan?{None}
     protects := NamedSpan?{None}
-    if parser_current_kind(state) != TOKEN_LBRACE {
-        tag_name: parser_value(state, name)
-        parser_tag_error(state, name.span, "tag `{tag_name}` needs a policy body", "a tag declares a dataflow fact, including where that fact is denied", "write `{tag_name}: tag {{ deny: [Effect] }}`")
-        return Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: tag_name, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, name.span)}}
-    }
-    parser_expect(state, TOKEN_LBRACE, "`{{` before a tag policy")
-    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
-        parser_skip_semicolons(state)
-        if parser_current_kind(state) == TOKEN_RBRACE -> break
-        // A tag is a marker that erases at runtime; only a trait has methods.
-        if parser_current_kind(state) == TOKEN_KW_FN {
-            parser_bump(state)
-            method: parser_expect_name(state, "after `fn`")
-            tag_name: parser_value(state, name)
-            method_name: parser_value(state, method)
-            parser_add_error_code(state, "E0732", method.span, "the tag `{tag_name}` declares a method `{method_name}`, but tags have no methods", "a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches", "make `{tag_name}` a `trait` if `{method_name}` should dispatch, or remove the method to keep `{tag_name}` a marker tag")
-            parser_sync_top(state)
-            return Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, method.span)}}
-        }
-        field: parser_expect_name(state, "for a tag policy field")
-        parser_expect(state, TOKEN_COLON, "after a tag policy field")
-        if parser_value(state, field) == {
-            "deny" -> {
-                values: parser_tag_path_list(state)
-                if deny.len() > 0 {
-                    parser_tag_error(state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
-                }
-                deny = values
+    loop setting in declaration.params {
+        written: setting.value ?? next
+        if setting.name == {
+            "$sites" -> {}
+            "$from" -> from = parser_tag_from(state, value.name, written)
+            "$timing" -> {
+                timing = parser_tag_case(state, value.name, "timing", written, "Free", "Fixed")
             }
-            "from" -> {
-                values: parser_tag_path_list(state)
-                if from.len() > 0 {
-                    parser_tag_error(state, field.span, "tag `from` is repeated", "each tag policy field is declared once", "keep one `from: [...]` field")
-                }
-                from = values
-            }
-            "timing" -> {
-                value: parser_tag_case(state, "timing", "Free", "Fixed")
-                if timing != None {
-                    parser_tag_error(state, field.span, "tag `timing` is repeated", "each tag policy field is declared once", "keep one `timing: .Free` or `timing: .Fixed` field")
-                }
-                timing = value
-            }
-            "protects" -> {
-                value: parser_tag_case(state, "protects", "Secrecy", "Integrity")
-                if protects != None {
-                    parser_tag_error(state, field.span, "tag `protects` is repeated", "each tag policy field is declared once", "keep one `protects: .Secrecy` or `protects: .Integrity` field")
-                }
-                protects = value
+            "$protects" -> {
+                protects = parser_tag_case(state, value.name, "protects", written, "Secrecy", "Integrity")
             }
             else -> {
-                _ := parser_tag_path_list(state)
-                parser_tag_error(state, field.span, "unknown tag policy field", "tag bodies contain deny and from paths, and the timing and protects cases", "write `deny: [...]`, `from: [...]`, `timing: .Fixed` or `protects: .Integrity`")
+                key: setting.name.slice(1, setting.name.len())
+                parser_tag_error(state, setting.name_span, "the tag `{value.name}` sets `{key}`", "a value tag's `impl Marker` block holds only `sites`, `from`, `timing` and `protects`", "remove `{key}: …`")
             }
         }
-        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
-            parser_bump(state)
+    }
+    parser_tag_repeats(state, value)
+    if declaration.group != None || declaration.body != None {
+        parser_tag_error(state, value.name_span, "the tag `{value.name}` has a marker group or template", "a value tag marks a type use and expands to nothing", "remove `group: …` and `expand: fn …` from its `impl Marker` block")
+    }
+    parser_tag_members(state, value)
+    Val(TagDef{is_pub: value.is_pub, is_package_pub: value.is_package_pub, name: value.name, name_span: value.name_span, deny: parser_tag_denials(state, value), from: from, span: value.span, timing: timing, protects: protects})
+}
+
+// Whether the marker's `sites` name `.TypeUse`; another site beside it is
+// E0734, since a value tag is written only at a type use.
+parser_tag_sites: fn(state: &JetParserState, name: String, declaration: MarkerDecl) -> Bool {
+    loop setting in declaration.params {
+        if setting.name != "$sites" -> next
+        written: setting.value ?? return false
+        elements: parser_tag_list(written) ?? return false
+        type_use := false
+        loop element in elements {
+            if element == .EnumLit(_, variant, _, _, _, _, _) {
+                if variant == "TypeUse" -> type_use = true
+            }
+        }
+        if !type_use -> return false
+        loop element in elements {
+            if element == .EnumLit(_, variant, _, _, _, _, _) {
+                if variant == "TypeUse" -> next
+            }
+            parser_tag_error(state, expr_span(element), "the tag `{name}` names another site beside `.TypeUse`", "a value tag is written only at a type use (`#{name} String`)", "write `sites: [.TypeUse]`, and declare a separate marker for the other sites")
+        }
+        return true
+    }
+    false
+}
+
+// The tag's `#FX` row: each `!Effect` entry is a destination it denies. A
+// ceiling entry, or a row with no denial, is E0734.
+parser_tag_denials: fn(state: &JetParserState, value: StructDef) -> [NamedSpan] {
+    deny := [NamedSpan]{}
+    if value.cap == .Val(cap) {
+        loop entry in cap.entries {
+            if entry.name.starts_with("!") {
+                // The destination's span leaves out the `!`, so a fix that
+                // respells it keeps the denial.
+                deny.push(NamedSpan{name: entry.name.slice(1, entry.name.len()), span: Span{start: entry.span.start + 1, end: entry.span.end}})
+                next
+            }
+            parser_tag_error(state, entry.span, "`{entry.name}` in the tag `{value.name}`'s `#FX` row is a ceiling, not a denial", "a value tag's `#FX` row lists the destinations its values may not reach; a tag grants no effects", "write `!{entry.name}` to deny it, or remove it")
         }
     }
-    close: parser_expect(state, TOKEN_RBRACE, "`}}` after a tag policy")
     if deny.len() == 0 {
-        parser_tag_error(state, name.span, "a tag needs at least one denied destination", "an empty tag policy has no enforceable effect", "add a path to `deny: [...]`")
+        parser_tag_error(state, value.name_span, "the tag `{value.name}` denies no destination", "a value tag's denials are its own `#FX(!…)` row, and a tag that denies nothing has no policy to enforce", "write the destinations it may not reach above it: `#FX(!Net) {value.name}: struct {{ … }}`")
     }
-    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span), timing: timing, protects: protects}}
+    deny
 }
 
-parser_tag_path_list: fn(state: &JetParserState) -> [NamedSpan] {
-    parser_expect(state, TOKEN_LBRACKET, "`[` before tag policy paths")
-    paths := [NamedSpan]{}
-    loop parser_current_kind(state) != TOKEN_RBRACKET && parser_current_kind(state) != TOKEN_EOF {
-        first: parser_expect_name(state, "in a tag policy path")
-        path := parser_value(state, first)
-        end := first.span
-        loop parser_current_kind(state) == TOKEN_DOT {
-            parser_bump(state)
-            part: parser_expect_name(state, "after `.` in a tag policy path")
-            path = "{path}.{parser_value(state, part)}"
-            end = part.span
+// `from: [Effect, module.function, …]`: the sources whose results carry the
+// tag, as written; sema resolves them (E0735).
+parser_tag_from: fn(state: &JetParserState, name: String, written: Expr) -> [NamedSpan] {
+    from := [NamedSpan]{}
+    elements: parser_tag_list(written) ?? {
+        parser_tag_error(state, expr_span(written), "`from` on the tag `{name}` is not a list", "`from` lists the effects or functions whose results carry the tag", "write `from: [Effect, module.function]`")
+        return from
+    }
+    loop element in elements {
+        if parser_marker_ident_path(element) == .Val(path) {
+            from.push(NamedSpan{name: path, span: expr_span(element)})
+            next
         }
-        paths.push(NamedSpan{name: path, span: parser_cover(first.span, end)})
-        if parser_current_kind(state) == TOKEN_COMMA -> parser_bump(state) else -> break
+        parser_tag_error(state, expr_span(element), "a `from` entry on the tag `{name}` is not an effect or function path", "`from` lists the effects or functions whose results carry the tag", "write an effect such as `Net` or a path such as `store.read`")
     }
-    parser_expect(state, TOKEN_RBRACKET, "`]` after tag policy paths")
-    paths
+    from
 }
 
-// `timing: .Free | .Fixed` or `protects: .Secrecy | .Integrity`: the case of
-// core.compiler.lang's TagTiming or TagProtects. Another name is E0734.
-parser_tag_case: fn(state: &JetParserState, field: String, first: String, second: String) -> NamedSpan? {
-    dot: parser_expect(state, TOKEN_DOT, "`.` before the tag `{field}` case")
-    case_token: parser_expect_name(state, "after `.` in the tag `{field}` case")
-    case_name: parser_value(state, case_token)
-    if case_name != first && case_name != second {
-        parser_tag_error(state, case_token.span, "`.{case_name}` is not a tag `{field}` case", "a tag's `{field}` is `.{first}` or `.{second}`", "write `{field}: .{first}` or `{field}: .{second}`")
-        return None
+// The entries of a `[…]` setting, or None for another value.
+parser_tag_list: fn(written: Expr) -> [Expr]? {
+    if written == .ListLit(elements, _, _) -> return Val(elements)
+    None
+}
+
+// `timing: .Free | .Fixed` or `protects: .Secrecy | .Integrity`; another
+// value is E0734.
+parser_tag_case: fn(state: &JetParserState, name: String, field: String, written: Expr, first: String, second: String) -> NamedSpan? {
+    if written == .EnumLit(_, variant, _, _, leading_dot, span, _) {
+        if leading_dot && (variant == first || variant == second) {
+            return Val(NamedSpan{name: variant, span: span})
+        }
     }
-    Val(NamedSpan{name: case_name, span: parser_cover(dot.span, case_token.span)})
+    parser_tag_error(state, expr_span(written), "`{field}` on the tag `{name}` is not `.{first}` or `.{second}`", "a tag's `{field}` is a case of core.compiler.lang's Tag{parser_tag_case_type(field)}", "write `{field}: .{first}` or `{field}: .{second}`")
+    None
+}
+
+parser_tag_case_type: fn(field: String) -> String Never! {
+    if field == "timing" -> "Timing" else -> "Protects"
+}
+
+// A tag struct reaches no sema impl check, so a setting given twice is E0937
+// here, in the words sema uses for any impl.
+parser_tag_repeats: fn(state: &JetParserState, value: StructDef) {
+    seen := [String]{}
+    loop block in value.trait_impls {
+        loop constant in block.constants {
+            if seen.contains(constant.name) {
+                parser_add_error_code(state, "E0937", constant.name_span, "the impl gives the constant `{constant.name}` twice", "an implementation has one value for each trait constant", "remove one `{constant.name}: …`")
+            }
+            seen.push(constant.name.copy())
+        }
+    }
+}
+
+// A value tag erases at runtime: a field, a method or a type parameter has
+// no value to belong to (E0732).
+parser_tag_members: fn(state: &JetParserState, value: StructDef) {
+    loop field in value.fields {
+        parser_add_error_code(state, "E0732", field.name_span, "the tag `{value.name}` declares a field `{field.name}`, but tags have no fields", "a value tag is a field-less struct that erases at runtime; only a type with values carries fields", "remove the field, or declare a separate struct for the data")
+    }
+    loop method in value.methods {
+        parser_tag_method_error(state, value.name, method.name, method.name_span)
+    }
+    loop block in value.trait_impls {
+        loop method in block.methods {
+            parser_tag_method_error(state, value.name, method.name, method.name_span)
+        }
+    }
+    if value.type_params.len() > 0 {
+        parser_add_error_code(state, "E0732", value.name_span, "the tag `{value.name}` declares type parameters, but tags have no fields", "a value tag is a field-less struct that erases at runtime, so a type parameter has nothing to type", "remove the type parameters")
+    }
+}
+
+parser_tag_method_error: fn(state: &JetParserState, name: String, method: String, span: Span) {
+    parser_add_error_code(state, "E0732", span, "the tag `{name}` declares a method `{method}`, but tags have no methods", "a value tag is a field-less struct that erases at runtime; only a `trait` carries methods and dispatches", "make `{name}` a `trait` if `{method}` should dispatch, or remove the method to keep `{name}` a value tag")
 }
 
 parser_tag_error: fn(state: &JetParserState, span: Span, what: String, why: String, fix: String) {

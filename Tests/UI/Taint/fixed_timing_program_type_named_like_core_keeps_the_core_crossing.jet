@@ -1,6 +1,6 @@
 use net: core.net
 
-Key: tag { deny: [Exec], timing: .Fixed, from: [Net] }
+// `Key`, a fixed-timing value tag from Net, is declared at the end of the file.
 
 // A program type named like the Core type `getservbyname` builds its error
 // from, with a fixed-tagged field and a method named like its fields: a walk
@@ -16,4 +16,13 @@ NetErrorDetail: struct {
 lookup: fn() -[Net, Time.Wait]> Int NetError! {
     host: net.gethostbyname("example.com")
     net.getservbyname(host)
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+        from: [Net]
+    }
 }

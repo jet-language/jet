@@ -347,7 +347,7 @@ use the same names.
 | --- | --- | --- |
 | `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
 | `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound`, `OverflowMode` | enum | Inlining, publication scope, parallel-kernel, representation, memoization, and fixed-width overflow choices |
-| `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, field naming, proof obligations, policy, and taint values |
+| `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting` | enum | Effect roots, field naming, proof obligations, and policy values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
 
 For example, `#Inline` accepts an imported enum value or a dot literal:

@@ -1,6 +1,14 @@
-Key: tag { deny: [Exec], timing: .Fixed }
+// `Key`, a fixed-timing value tag, is declared at the end of the file.
 
 audit: fn(key: (#Key U8)?) {
     k: key ?? U8{1}
     if k == (U8{0}) -> print("zero key")
+}
+
+#FX(!Exec)
+Key: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        timing: .Fixed
+    }
 }

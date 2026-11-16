@@ -1,10 +1,18 @@
 use process: core.process
 
-Untrusted: tag { from: [source], deny: [Exec] }
+// `Untrusted`, a value tag from `source`, is declared at the end of the file.
 
 source: fn() -> String { "untrusted" }
 
 run: fn() {
     value := source()
     process.run(["echo", value]) ?? return Err("test")
+}
+
+#FX(!Exec)
+Untrusted: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        from: [source]
+    }
 }

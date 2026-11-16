@@ -1040,16 +1040,32 @@ Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
 including before the first call. The shared Prelude owns eviction and counters;
 emitters only marshal the checked function identity, argument key, and bound.
 
-`Name: tag { deny: [Net] }` declares an erased dataflow fact and its policy.
-`deny` is required and nonempty; `from` is optional. Direct `#Name` tags attach
-to values, fields, parameters, and returns. `#Scrub(Name)` removes exactly that
-tag. Tags have no methods: a method in a tag body is E0732, and using a tag
-where dispatch or method attachment is expected is E0731. Tag names are
-PascalCase. Prelude declares `Input`, `PII`, `Secret`, and `Credential`
-(D-QUAL2, D-TAG-SURFACE1, D-CASING1).
+A value tag is a field-less struct whose `impl Marker` block names
+`sites: [.TypeUse]`; it declares an erased dataflow fact and its policy. Its
+denials are its own `#FX(!…)` row, which is required, names at least one
+destination and holds no ceiling entry (E0734):
 
-A tag body may also write `timing: .Free | .Fixed` and `protects: .Secrecy |
-.Integrity` (core.compiler.lang `TagTiming`, `TagProtects`). Left out, they are
+```jet
+#FX(!Net)
+Audited: struct {
+    impl Marker {
+        sites: [.TypeUse]
+        from: [Net]
+    }
+}
+```
+
+`from` is optional and lists the effects or functions whose results carry the
+tag; an unknown `#FX(!…)` destination or `from` entry is E0735. Direct `#Name`
+tags attach to values, fields, parameters, and returns. `#Scrub(Name)` removes
+exactly that tag. Tags have no fields or methods: a field or method in a tag
+struct is E0732, and using a tag where dispatch or method attachment is
+expected is E0731. Tag names are PascalCase. Prelude declares `Input`, `PII`,
+`Secret`, and `Credential` as tag structs (D-QUAL2, D-TAG-MARKER1, D-CASING1).
+
+A tag's `impl Marker` block may also write `timing: .Free | .Fixed` and
+`protects: .Secrecy | .Integrity` (core.compiler.lang `TagTiming`,
+`TagProtects`). Left out, they are
 `.Free` and `.Secrecy`; `Secret` is `.Fixed` and `Input` is `.Integrity`. A
 `.Fixed` value must not decide a branch, a loop, a `&&` or `||` right side, an
 index, a slice bound, a division, a shift amount, an exponent, an allocation

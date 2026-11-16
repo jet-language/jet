@@ -1,0 +1,14 @@
+# A value tag is a field-less struct whose `impl Marker` block names
+# `sites: [.TypeUse]`, and its own `#FX(!…)` row lists the destinations it
+# denies. A declared tag struct and the Prelude's built-in `Secret` both stop a
+# tagged value at the process sink (E0721), and a scrubbed value passes.
+fixture: TagMarkerStructsAreValueTags.fixture
+env: NO_COLOR=1
+step: jet check --json declared.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0721"] #= 1
+step: jet check --json builtin.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0721"] #= 1
+step: jet check --json scrubbed.jet
+exit: 0

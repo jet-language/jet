@@ -47,7 +47,6 @@ use {
         Stmt,
         STATE_ARROW_LABEL,
         StructDef,
-        TagDef,
         TestDef,
         TextEdit,
         TraitConstDecl,
@@ -256,10 +255,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_protocol(state, modifiers)
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
-        parser_tag_decl_ahead(state) -> {
-            value: parser_parse_tag_policy(state, modifiers)
-            return ParsedItemOrImport{item: Val(value), handled: true}
-        }
         parser_migration_ahead(state) -> {
             value: parser_parse_migration(state)
             return ParsedItemOrImport{item: Val(Item.Migration{value: value}), handled: true}
@@ -319,9 +314,13 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value: parser_parse_struct(state, modifiers)
-            // A fact plane's struct declares the plane alone.
+            // A fact plane's struct declares the plane alone, and a value
+            // tag's struct the tag alone.
             if value.fact == .Val(declaration) {
                 return ParsedItemOrImport{item: Val(Item.FactDecl{value: declaration}), handled: true}
+            }
+            if parser_tag_struct(state, value) == .Val(declaration) {
+                return ParsedItemOrImport{item: Val(Item.Tag{value: declaration}), handled: true}
             }
             return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companions: parser_type_companions(value.marker, value.effect_impl)}
         }
@@ -338,10 +337,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_EFFECT -> {
             parser_refuse_effect_word(state)
             return ParsedItemOrImport{item: None, handled: true}
-        }
-        token.kind == TOKEN_KW_TAG -> {
-            value: parser_parse_tag_decl(state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.Tag{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(state)), handled: true}
     }
@@ -3064,29 +3059,4 @@ parser_impl_os_target: fn(state: &JetParserState, markers: [Marker]) -> String? 
         }
     }
     None
-}
-
-parser_parse_tag_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> TagDef {
-    start: parser_bump(state)
-    name: parser_expect_name(state, "after `tag`")
-    deny := [NamedSpan]{}
-    from := [NamedSpan]{}
-    end := name.span
-    if {
-        parser_current_kind(state) == TOKEN_LBRACE -> {
-            parser_bump(state)
-            loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
-                keyword: parser_expect_name(state, "in a tag declaration")
-                target: parser_expect_name(state, "after a tag declaration clause")
-                item := NamedSpan{name: parser_value(state, target), span: target.span}
-                if parser_value(state, keyword) == "deny" -> deny.push(item.copy())
-                if parser_value(state, keyword) == "from" -> from.push(item)
-                parser_finish_statement(state)
-            }
-            close: parser_expect(state, TOKEN_RBRACE, "`}}` after tag declaration")
-            end = close.span
-        }
-        else -> parser_finish_statement(state)
-    }
-    TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, end)}
 }

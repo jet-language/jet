@@ -125,7 +125,7 @@ parser_colon_word: fn(kind: Int) -> Bool Never! {
 
 // The declaration keywords a colon head may carry.
 parser_colon_head_keyword: fn(kind: Int) -> Bool Never! {
-    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_EFFECT
 }
 
 // The head kind of a `#loop` or `#if` statement.
@@ -137,7 +137,7 @@ PARSER_COLON_HEAD_COMPTIME_BLOCK: -2
 parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_STRUCT || head == TOKEN_KW_ENUM -> return PARSER_COLON_FRAME_SHAPE
     if head == TOKEN_KW_MODULE -> return PARSER_COLON_FRAME_MODULE
-    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN || head == TOKEN_KW_TAG || head == TOKEN_KW_EFFECT {
+    if head == TOKEN_KW_IMPL || head == TOKEN_KW_TRAIT || head == TOKEN_KW_EXTERN || head == TOKEN_KW_EFFECT {
         return PARSER_COLON_FRAME_CONTAINER
     }
     if head == PARSER_COLON_HEAD_COMPTIME_BLOCK && (frame == PARSER_COLON_FRAME_MODULE || frame == PARSER_COLON_FRAME_CONTAINER) {

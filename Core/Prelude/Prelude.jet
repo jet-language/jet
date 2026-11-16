@@ -325,7 +325,11 @@ CheckedItem: enum {
 // fixed marker stack (`group: #[…]`, which takes no settings), a companion
 // rule (`companion: [Rule, .Site]`) and the `expand: fn(self, target: Target)`
 // template. A package marker can't set `inherits`, `resolution` or `scopes`:
-// only Jet's own markers change how the compiler checks code.
+// only Jet's own markers change how the compiler checks code. A value tag is
+// a field-less marker struct with `sites: [.TypeUse]`: its `#FX(!…)` row is
+// what its values may not reach, and only its block also takes `from` (the
+// effects or functions whose results carry it), `timing` (a TagTiming case)
+// and `protects` (a TagProtects case), from core.compiler.lang.
 Marker: trait {
     // Where the marker may be written.
     sites: [Site]
@@ -341,7 +345,8 @@ Marker: trait {
     scopes: [MarkerScope]{[]}
 }
 
-// A place a marker is written.
+// A place a marker is written. `TypeUse` is a type where it is used, which a
+// value tag marks (`#CardNumber String`).
 Site: enum {
     Package
     File
@@ -363,6 +368,7 @@ Site: enum {
     Operation
     Text
     Arm
+    TypeUse
 }
 
 // A match arm, after its body (`1 -> { a() } #Through`).

@@ -1,6 +1,6 @@
 use process: core.process
 
-PII: tag { deny: [Exec] }
+// `PII`, a value tag, is declared at the end of the file.
 
 Row: struct {
     secret: #PII String
@@ -9,4 +9,11 @@ Row: struct {
 run: fn() {
     row := Row{secret: "Ada"}
     process.run(["echo", row.secret]) ?? return Err("test")
+}
+
+#FX(!Exec)
+PII: struct {
+    impl Marker {
+        sites: [.TypeUse]
+    }
 }
