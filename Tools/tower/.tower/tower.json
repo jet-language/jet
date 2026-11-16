@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6981,
-    "rev": 109925,
+    "rev": 109950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -114108,48 +114108,48 @@
         },
         {
           "n": 4,
-          "text": "The #1076 restart policy (limit, window, backoff) works for services on the self-hosted toolchain, with its Rust-era acceptance tests ported. Proof: `jet test Compiler --profile cases --filter service/restart_policy_`.",
+          "text": "The #1076 restart policy (limit, window, backoff) works for services on the self-hosted toolchain, with its Rust-era acceptance tests ported. Proof: `jet test Compiler --profile cases --filter Service/restart_policy_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:59.765Z"
+          "at": "2026-11-16T13:14:43.356Z"
         },
         {
           "n": 5,
-          "text": "A task group can carry the same restart policy: a worker that fails 3 times is restarted 3 times, and a 4th failure inside the window fails the group with a report naming the worker and its last failure. Proof: `jet test Compiler --profile cases --filter concurrency/group_restart_policy`.",
+          "text": "A task group can carry the same restart policy: a worker that fails 3 times is restarted 3 times, and a 4th failure inside the window fails the group with a report naming the worker and its last failure. Proof: `jet test Compiler --profile cases --filter Concurrency/group_restart_policy`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:59.765Z"
+          "at": "2026-11-16T13:14:44.281Z"
         },
         {
           "n": 6,
-          "text": "Cancelling a supervised group stops restarts and joins every worker, so no worker outlives the group. Proof: `jet test Compiler --profile cases --filter concurrency/group_cancel_stops_restarts`.",
+          "text": "Cancelling a supervised group stops restarts and joins every worker, so no worker outlives the group. Proof: `jet test Compiler --profile cases --filter Concurrency/group_cancel_stops_restarts`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:59.765Z"
+          "at": "2026-11-16T13:14:45.195Z"
         },
         {
           "n": 7,
-          "text": "The ratified core.jobs typed queue methods (enqueue, delay, claim, acknowledge and the rest) and the job error lifecycle check and run through one owner. Proof: `jet test Compiler --profile golden --filter jobs/typed_queue_lifecycle`, deterministic on O0, O1 and O2.",
+          "text": "The ratified core.jobs typed queue methods (enqueue, delay, claim, acknowledge and the rest) and the job error lifecycle check and run through one owner. Proof: `jet test Compiler --profile golden --filter Jobs/TypedQueueLifecycle`, deterministic on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:37:59.765Z"
+          "at": "2026-11-16T13:14:46.103Z"
         },
         {
           "n": 8,
-          "text": "A cancel that arrives while a Close runs is held until the close finishes and is delivered at the next wait, as Docs/spec/core-library-native-contract.md says. In the case, the close signals the parent on entry, the parent cancels the task, and the close then waits on a channel; the output is 'close worker: finished', then 'worker: cancelled'. On 301567cec7 the cancel cut the close's wait on run and --release. Proof: `jet test Compiler --profile cases --filter task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier` passes on every tier, and its known-failing row is removed. (was #5989 c18)",
+          "text": "A cancel that arrives while a Close runs is held until the close finishes and is delivered at the next wait, as Docs/Spec/core-library-native-contract.md says. In the case, the close signals the parent on entry, the parent cancels the task, and the close then waits on a channel; the output is 'close worker: finished', then 'worker: cancelled'. On 301567cec7 the cancel cut the close's wait on run and --release. Proof: `jet test Compiler --profile cases --filter TaskControlTiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier` passes on every tier, and its known-failing row is removed. (was #5989 c18)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:15.561Z"
+          "at": "2026-11-16T13:14:47.040Z"
         }
       ],
       "refs": [],
@@ -114163,7 +114163,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:59.765Z",
-      "updated": "2026-11-16T13:14:42.085Z",
+      "updated": "2026-11-16T13:14:47.040Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -114188,21 +114188,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter atomics/d_atomic_width1_contract` on O0, O1 and O2.",
+          "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter Atomics/d_atomic_width1_contract` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:38:00.697Z"
+          "at": "2026-11-16T13:14:47.982Z"
         },
         {
           "n": 2,
-          "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
+          "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter Atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:38:00.697Z"
+          "at": "2026-11-16T13:14:48.910Z"
         }
       ],
       "refs": [],
@@ -114216,8 +114216,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:00.697Z",
-      "updated": "2026-11-15T04:38:00.697Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T13:14:48.910Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ndv80x",
@@ -114240,12 +114240,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every Core function that calls a user callback takes a failure type parameter `E`, and a `Never` callback, a single-failure callback and a union with an API-owned failure each propagate unchanged. Proof: `jet test Compiler --profile cases --filter callbacks/d_callback_err1_contract`, and a guard over Core's public signatures finds no callback parameter without its `E`.",
+          "text": "Every Core function that calls a user callback takes a failure type parameter `E`, and a `Never` callback, a single-failure callback and a union with an API-owned failure each propagate unchanged. Proof: `jet test Compiler --profile cases --filter Callbacks/d_callback_err1_contract`, and a guard over Core's public signatures finds no callback parameter without its `E`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:38:01.643Z"
+          "at": "2026-11-16T13:14:49.978Z"
         }
       ],
       "refs": [],
@@ -114259,8 +114259,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:01.643Z",
-      "updated": "2026-11-15T04:38:01.643Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T13:14:49.978Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c05nw9a0",
@@ -114283,21 +114283,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-FILES-SCOPE1=A: trusted scripts keep direct fs calls, while restricted code derives one opaque scope from Authority and uses the familiar methods on it; folder and host narrowing hold, and a derived Authority escaping through a loop header or step is refused. Proof: `jet test Compiler --profile cases --filter authority/d_files_scope1_contract`.",
+          "text": "D-FILES-SCOPE1=A: trusted scripts keep direct fs calls, while restricted code derives one opaque scope from Authority and uses the familiar methods on it; folder and host narrowing hold, and a derived Authority escaping through a loop header or step is refused. Proof: `jet test Compiler --profile cases --filter Authority/d_files_scope1_contract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:51.033Z"
         },
         {
           "n": 2,
-          "text": "D-FOUND-SANDBOX1=A: a sandbox guest declares the imports it needs, the host lends an Authority value tightened to a folder or host, and a missing grant fails before any side effect. Proof: `jet test Compiler --profile cases --filter authority/d_found_sandbox1_contract`.",
+          "text": "D-FOUND-SANDBOX1=A: a sandbox guest declares the imports it needs, the host lends an Authority value tightened to a folder or host, and a missing grant fails before any side effect. Proof: `jet test Compiler --profile cases --filter Authority/d_found_sandbox1_contract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:52.126Z"
         },
         {
           "n": 3,
@@ -114310,21 +114310,21 @@
         },
         {
           "n": 4,
-          "text": "Errors, spec pages and examples call the package kind sandbox, and wasm appears only where it names the browser instruction set. Proof: `jet test tests/guards --filter sandbox_package_kind_word`.",
+          "text": "Errors, spec pages and examples call the package kind sandbox, and wasm appears only where it names the browser instruction set. Proof: `jet test Tests/Guards --filter sandbox_package_kind_word`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:53.182Z"
         },
         {
           "n": 5,
-          "text": "No plugin spelling remains as a package-kind word in Compiler, Jetpack, Docs/spec or Examples (on dev 6a06b917cb, PackageViews.jet:238, architecture.md:1878 and syntax-decisions.md:3975 still said plugin or core.plugin). Proof: `jet test tests/guards --filter sandbox_package_kind_word` ratchets to zero.",
+          "text": "No plugin spelling remains as a package-kind word in Compiler, Jetpack, Docs/Spec or Examples (on dev 6a06b917cb, PackageViews.jet:238, architecture.md:1878 and syntax-decisions.md:3975 still said plugin or core.plugin). Proof: `jet test Tests/Guards --filter sandbox_package_kind_word` ratchets to zero.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:54.151Z"
         },
         {
           "n": 6,
@@ -114337,57 +114337,57 @@
         },
         {
           "n": 7,
-          "text": "The sandbox guest and host enforce a declared, resource-scoped FS.Read: reads inside the root work and reads outside it are really denied. Proof: `jet test Compiler --profile golden --filter Foundations/sandbox_fs_read`, with a guest build.",
+          "text": "The sandbox guest and host enforce a declared, resource-scoped FS.Read: reads inside the root work and reads outside it are really denied. Proof: `jet test Compiler --profile golden --filter Foundations/SandboxFSRead`, with a guest build.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:55.101Z"
         },
         {
           "n": 8,
-          "text": "A Component guest exports a typed Codable record-list function, and the host consumes it with no scalar-only substitute. Proof: `jet test Compiler --profile cases --filter authority/sandbox_record_list_export`.",
+          "text": "A Component guest exports a typed Codable record-list function, and the host consumes it with no scalar-only substitute. Proof: `jet test Compiler --profile cases --filter Authority/sandbox_record_list_export`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:56.042Z"
         },
         {
           "n": 9,
-          "text": "The direct host FileScope API and every O0, O1, O2 and compile-time path call the one canonical resource, no-follow and IOError policy. Proof: `jet test Compiler --profile cases --filter authority/file_scope_policy_`, with a denial case per tier.",
+          "text": "The direct host FileScope API and every O0, O1, O2 and compile-time path call the one canonical resource, no-follow and IOError policy. Proof: `jet test Compiler --profile cases --filter Authority/file_scope_policy_`, with a denial case per tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:56.951Z"
         },
         {
           "n": 10,
-          "text": "The sandbox foundation runs with a generated guest snapshot, goldens on every applicable tier and a service execution case. Proof: `jet test Compiler --profile golden --filter Foundations/sandbox_` and `jet test Compiler --profile cases --filter authority/sandbox_service_execution`.",
+          "text": "The sandbox foundation runs with a generated guest snapshot, goldens on every applicable tier and a service execution case. Proof: `jet test Compiler --profile golden --filter Foundations/Sandbox` and `jet test Compiler --profile cases --filter Authority/sandbox_service_execution`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:57.891Z"
         },
         {
           "n": 11,
-          "text": "tests/run/Foundations/Capabilities passes as a run case: a sandbox build target produces guest/build/capability_guest.wasm, the host loads it, and the compiler reads its Component interface. Proof: `jet test Compiler --profile cases --filter Foundations/Capabilities` passes, and its row leaves tests/known-failing.tsv.",
+          "text": "Tests/Run/Foundations/Capabilities passes as a run case: a sandbox build target produces guest/build/capability_guest.wasm, the host loads it, and the compiler reads its Component interface. Proof: `jet test Compiler --profile cases --filter Foundations/Capabilities` passes, and its row leaves Tests/known-failing.tsv.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:52.537Z"
+          "at": "2026-11-16T13:14:58.831Z"
         },
         {
           "n": 12,
-          "text": "The sandbox package kind has a syntax-registry row and a golden, spelled `target: sandbox` (D-ONCE-SANDBOX1=A retired `target: plugin`; D-PLUGIN1, D-DEP-WASM1). Proof: `jet test tests/guards --filter syntax_registry` and `jet test Compiler --profile golden --filter Modules/Packages/SandboxMathKit`.",
+          "text": "The sandbox package kind has a syntax-registry row and a golden, spelled `target: sandbox` (D-ONCE-SANDBOX1=A retired `target: plugin`; D-PLUGIN1, D-DEP-WASM1). Proof: `jet test Tests/Guards --filter syntax_registry` and `jet test Compiler --profile golden --filter Modules/Packages/SandboxMathKit`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:57:39.725Z"
+          "at": "2026-11-16T13:14:59.755Z"
         },
         {
           "n": 13,
@@ -114409,39 +114409,39 @@
         },
         {
           "n": 15,
-          "text": "Each of the four authority-boundary defects the 2026-09-01 review found (effect-fact snapshot TOCTOU and fail-open reload; path-following source, manifest and lock authority writes; a grant persisted before its receipt commit; a split-authority or lost-update receipt append) is mapped to a done card with file:line evidence, or fixed with a case. Proof: the mapping table is in Docs/audits/security-closure-2026-09-02.md, and each fix has `jet test Compiler --profile cases --filter authority/` coverage. (was #1387 c21)",
+          "text": "Each of the four authority-boundary defects the 2026-09-01 review found (effect-fact snapshot TOCTOU and fail-open reload; path-following source, manifest and lock authority writes; a grant persisted before its receipt commit; a split-authority or lost-update receipt append) is mapped to a done card with file:line evidence, or fixed with a case. Proof: the mapping table is in Docs/Audits/security-closure-2026-09-02.md, and each fix has `jet test Compiler --profile cases --filter Authority/` coverage. (was #1387 c21)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:16.645Z"
+          "at": "2026-11-16T13:15:00.690Z"
         },
         {
           "n": 16,
-          "text": "D-AUTHORITY-ROOTS1=A: the closed root table has thirteen roots (the ratified ten plus FFI, Browser and Secret), and the language roots are leaves of FFI (FFI.Go, FFI.Java, FFI.Lua, FFI.Py, FFI.Octave and the rest); a retired flat language root is refused. Proof: `jet test Compiler --profile cases --filter authority/d_authority_roots1_contract`. (was #4268 c1)",
+          "text": "D-AUTHORITY-ROOTS1=A: the closed root table has thirteen roots (the ratified ten plus FFI, Browser and Secret), and the language roots are leaves of FFI (FFI.Go, FFI.Java, FFI.Lua, FFI.Py, FFI.Octave and the rest); a retired flat language root is refused. Proof: `jet test Compiler --profile cases --filter Authority/d_authority_roots1_contract`. (was #4268 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:17.642Z"
+          "at": "2026-11-16T13:15:01.624Z"
         },
         {
           "n": 17,
-          "text": "D-AUTHORITY-WORD1=A: no user-facing surface uses the word capability for permissions; errors and devtools say write access, effects or authority, according to the thing described (D-ABILITY-NAME2). Proof: `jet test tests/guards --filter no_capability_word` and `jet test Compiler --profile cases --filter authority/d_authority_word1_contract` (the devtools unavailable reason and projection). (was #4268 c2)",
+          "text": "D-AUTHORITY-WORD1=A: no user-facing surface uses the word capability for permissions; errors and devtools say write access, effects or authority, according to the thing described (D-ABILITY-NAME2). Proof: `jet test Tests/Guards --filter no_capability_word` and `jet test Compiler --profile cases --filter Authority/d_authority_word1_contract` (the devtools unavailable reason and projection). (was #4268 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:18.976Z"
+          "at": "2026-11-16T13:15:02.544Z"
         },
         {
           "n": 18,
-          "text": "The strict conformance gate leaves the checkout's `.jet/secrets-audit` untouched (the sink stays outside the tracked tree). Proof: `jet test tests/guards --filter secrets_audit_sink_location`. (was #4268 c45)",
+          "text": "The strict conformance gate leaves the checkout's `.jet/secrets-audit` untouched (the sink stays outside the tracked tree). Proof: `jet test Tests/Guards --filter secrets_audit_sink_location`. (was #4268 c45)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:18:20.034Z"
+          "at": "2026-11-16T13:15:03.528Z"
         }
       ],
       "refs": [],
@@ -114455,7 +114455,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:52.537Z",
-      "updated": "2026-11-16T01:18:20.034Z",
+      "updated": "2026-11-16T13:15:03.528Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -114480,21 +114480,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`). Proof: `jet test Compiler --profile cases --filter tags/d_qual4_contract`.",
+          "text": "D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`). Proof: `jet test Compiler --profile cases --filter Tags/d_qual4_contract`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:53.816Z"
+          "at": "2026-11-16T13:15:04.832Z"
         },
         {
           "n": 2,
-          "text": "D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Compiler --profile cases --filter tags/d_taint1_contract` and `jet test Compiler --profile ui --filter taint_denied_sink_`.",
+          "text": "D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Compiler --profile cases --filter Tags/d_taint1_contract` and `jet test Compiler --profile ui --filter taint_denied_sink_`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:40:53.816Z"
+          "at": "2026-11-16T13:15:06.357Z"
         },
         {
           "n": 3,
@@ -114518,8 +114518,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:53.816Z",
-      "updated": "2026-11-15T04:40:53.816Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-16T13:15:06.358Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c02z1dax",
@@ -114560,12 +114560,12 @@
         },
         {
           "n": 3,
-          "text": "`SQL.raw` and `HTML.raw` are the only ways to build these values from runtime text, and the audit listing lists every `.raw` call in a package. Proof: `jet test Compiler --profile golden --filter audit/raw_text_calls_listing`.",
+          "text": "`SQL.raw` and `HTML.raw` are the only ways to build these values from runtime text, and the audit listing lists every `.raw` call in a package. Proof: `jet test Compiler --profile golden --filter Audit/RawTextCallsListing`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T04:47:08.958Z"
+          "at": "2026-11-16T13:15:07.467Z"
         },
         {
           "n": 4,
@@ -114598,7 +114598,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:47:08.958Z",
-      "updated": "2026-11-16T01:18:21.060Z",
+      "updated": "2026-11-16T13:15:07.467Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -219957,6 +219957,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:15:07.467Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02z1dax",
+      "note": "#3: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: `SQL.raw` and `HTML.raw` are the only ways to build these values from runtime text, and the audit listing lists every `.raw` call in a package. Proof: `jet test Compiler --profile golden --filter audi"
+    },
+    {
+      "at": "2026-11-16T13:15:06.358Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qtfr3u",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-TAINT1=A: tag facts propagate through branches, containers and calls, denied sinks refuse a tagged value with a registered error, and only a checked `#Scrub(Tag)` removes a tag. Proof: `jet test Com"
+    },
+    {
+      "at": "2026-11-16T13:15:04.832Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qtfr3u",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-QUAL4=A: a value tag in type position parses directly before the type (`#PII String`). Proof: `jet test Compiler --profile cases --filter tags/d_qual4_contract`."
+    },
+    {
+      "at": "2026-11-16T13:15:03.528Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#18: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The strict conformance gate leaves the checkout's `.jet/secrets-audit` untouched (the sink stays outside the tracked tree). Proof: `jet test tests/guards --filter secrets_audit_sink_location`. (was #4"
+    },
+    {
+      "at": "2026-11-16T13:15:02.544Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#17: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-AUTHORITY-WORD1=A: no user-facing surface uses the word capability for permissions; errors and devtools say write access, effects or authority, according to the thing described (D-ABILITY-NAME2). Pr"
+    },
+    {
+      "at": "2026-11-16T13:15:01.624Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#16: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-AUTHORITY-ROOTS1=A: the closed root table has thirteen roots (the ratified ten plus FFI, Browser and Secret), and the language roots are leaves of FFI (FFI.Go, FFI.Java, FFI.Lua, FFI.Py, FFI.Octave "
+    },
+    {
+      "at": "2026-11-16T13:15:00.690Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#15: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Each of the four authority-boundary defects the 2026-09-01 review found (effect-fact snapshot TOCTOU and fail-open reload; path-following source, manifest and lock authority writes; a grant persisted "
+    },
+    {
+      "at": "2026-11-16T13:14:59.755Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#12: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The sandbox package kind has a syntax-registry row and a golden, spelled `target: sandbox` (D-ONCE-SANDBOX1=A retired `target: plugin`; D-PLUGIN1, D-DEP-WASM1). Proof: `jet test tests/guards --filter "
+    },
+    {
+      "at": "2026-11-16T13:14:58.831Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#11: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: tests/run/Foundations/Capabilities passes as a run case: a sandbox build target produces guest/build/capability_guest.wasm, the host loads it, and the compiler reads its Component interface. Proof: `j"
+    },
+    {
+      "at": "2026-11-16T13:14:57.892Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#10: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The sandbox foundation runs with a generated guest snapshot, goldens on every applicable tier and a service execution case. Proof: `jet test Compiler --profile golden --filter Foundations/sandbox_` an"
+    },
+    {
+      "at": "2026-11-16T13:14:56.951Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#9: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The direct host FileScope API and every O0, O1, O2 and compile-time path call the one canonical resource, no-follow and IOError policy. Proof: `jet test Compiler --profile cases --filter authority/fil"
+    },
+    {
+      "at": "2026-11-16T13:14:56.042Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A Component guest exports a typed Codable record-list function, and the host consumes it with no scalar-only substitute. Proof: `jet test Compiler --profile cases --filter authority/sandbox_record_lis"
+    },
+    {
+      "at": "2026-11-16T13:14:55.101Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The sandbox guest and host enforce a declared, resource-scoped FS.Read: reads inside the root work and reads outside it are really denied. Proof: `jet test Compiler --profile golden --filter Foundatio"
+    },
+    {
+      "at": "2026-11-16T13:14:54.151Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: No plugin spelling remains as a package-kind word in Compiler, Jetpack, Docs/spec or Examples (on dev 6a06b917cb, PackageViews.jet:238, architecture.md:1878 and syntax-decisions.md:3975 still said plu"
+    },
+    {
+      "at": "2026-11-16T13:14:53.182Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Errors, spec pages and examples call the package kind sandbox, and wasm appears only where it names the browser instruction set. Proof: `jet test tests/guards --filter sandbox_package_kind_word`."
+    },
+    {
+      "at": "2026-11-16T13:14:52.126Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-FOUND-SANDBOX1=A: a sandbox guest declares the imports it needs, the host lends an Authority value tightened to a folder or host, and a missing grant fails before any side effect. Proof: `jet test C"
+    },
+    {
+      "at": "2026-11-16T13:14:51.033Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c05nw9a0",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-FILES-SCOPE1=A: trusted scripts keep direct fs calls, while restricted code derives one opaque scope from Authority and uses the familiar methods on it; folder and host narrowing hold, and a derived"
+    },
+    {
+      "at": "2026-11-16T13:14:49.978Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ndv80x",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Every Core function that calls a user callback takes a failure type parameter `E`, and a `Never` callback, a single-failure callback and a union with an API-owned failure each propagate unchanged. Pro"
+    },
+    {
+      "at": "2026-11-16T13:14:48.910Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07qvm0k",
+      "note": "#2: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter atomics/cas_aba_witness`, plus the orig"
+    },
+    {
+      "at": "2026-11-16T13:14:47.982Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07qvm0k",
+      "note": "#1: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden "
+    },
+    {
+      "at": "2026-11-16T13:14:47.040Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#8: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A cancel that arrives while a Close runs is held until the close finishes and is delivered at the next wait, as Docs/spec/core-library-native-contract.md says. In the case, the close signals the paren"
+    },
+    {
+      "at": "2026-11-16T13:14:46.103Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#7: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The ratified core.jobs typed queue methods (enqueue, delay, claim, acknowledge and the rest) and the job error lifecycle check and run through one owner. Proof: `jet test Compiler --profile golden --f"
+    },
+    {
+      "at": "2026-11-16T13:14:45.195Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#6: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: Cancelling a supervised group stops restarts and joins every worker, so no worker outlives the group. Proof: `jet test Compiler --profile cases --filter concurrency/group_cancel_stops_restarts`."
+    },
+    {
+      "at": "2026-11-16T13:14:44.281Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#5: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: A task group can carry the same restart policy: a worker that fails 3 times is restarted 3 times, and a 4th failure inside the window fails the group with a report naming the worker and its last failu"
+    },
+    {
+      "at": "2026-11-16T13:14:43.356Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sbl400",
+      "note": "#4: TitleCase cutover (#6733, ba783d11b9): paths and filters renamed; was: The #1076 restart policy (limit, window, backoff) works for services on the self-hosted toolchain, with its Rust-era acceptance tests ported. Proof: `jet test Compiler --profile cases --filter service"
+    },
     {
       "at": "2026-11-16T13:14:42.085Z",
       "by": "Main",
