@@ -5888,7 +5888,15 @@ push opens a state the same way: `app.notify(to:, title:, body:, open:
 state)` sends the notice to each device `to` registered, with
 `url_of(state)` as the address a tap opens. `app.go(state)` opens the
 screen of `state` at that address: it runs the screen's view with the state
-the address makes, and the screen is then the current one.
+the address makes, and the screen is then the current one. Each push has a
+key: inside a job's run, a webhook's call or a scheduled run, a hash of the
+run's key, `to` and the address, 32 base64url characters; elsewhere, a fresh
+one. It goes out as APNs's `apns-collapse-id`, as FCM's
+`android.notification.tag` on a message with no collapse key, and as Web
+Push's `Topic` header and the notification's `tag`. So a retried run sends
+each push with the key it had before, whatever order its query gives the
+rows in, and the repeat replaces the earlier copy; two pushes of one run
+never share a key.
 `app.current<BoardView>()` gives the current screen's state, made back from
 its address, when it is a `BoardView`, and None otherwise or before a
 screen opens. A value that is no struct declared outside Core is E2821

@@ -1,0 +1,18 @@
+# Each push a job sends has a key of its own, made from the run's key, the
+# recipient and the state the push opens, and hashed to 32 base64url
+# characters, within each service's limit. app.notify passes it on as:
+# - APNs's `apns-collapse-id`;
+# - FCM's `android.notification.tag`, on a message with no collapse key;
+# - Web Push's `Topic` header and the notification's `tag`.
+# A retried run sends each push again with the same key even when its query
+# gives the rows in another order, so a repeat replaces its earlier copy.
+# Two sends of one run never share a key. The push services are fakes
+# inside the process, and the push settings are package-private to Core, so
+# the case runs the Core/Web #Test that drives two runs of one job through
+# them.
+env: NO_COLOR=1
+step: jet test {root}/Core/Web/Web.jet --filter "a job's retried run repeats each push's key in any row order, and two sends never share a key"
+timeout: 1800s
+exit: 0
+stdout: ~ "1 passed, 0 failed" # each service saw the first run's keys again, in the retry's order
+stderr: !~ "internal compiler error" # the run doesn't crash the compiler
