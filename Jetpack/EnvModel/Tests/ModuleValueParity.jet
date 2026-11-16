@@ -3,10 +3,11 @@
 // the one evaluator, in the same dependency order with the same provenance,
 // and a permuted copy of the revision plans identically (#4276 c39).
 use {
-    jet_env_model.[FleetPlan, OptionPlan, envmodel_evaluate_env, envmodel_evaluate_source]
+    jet_env_model.[FleetPlan, OptionPlan, envmodel_evaluate_env, envmodel_evaluate_source, envmodel_find_jet_binary]
     jet_foundation.[CtValue]
     jet_pkg_model.[EntryContribution, FactValue]
     files: core.files
+    process: core.process
 }
 
 // `PORT` comes from a pure helper and feeds every consumer; `label` and
@@ -64,6 +65,57 @@ PORT: #run { base_port() + 1 }
 
 base_port: fn() -> Int { 8000 }
 `
+
+// Module values with and without `#run`, as a program and an environment
+// both declare them. The compiler computes every immutable module value
+// while building, so the environment reads the same ones.
+MODULE_VALUES_PLAIN_AND_RUN: `
+base_port: fn() -> Int { 8000 }
+
+BASE: base_port()
+STEP: 2
+PORT: #run { BASE + STEP }
+LABEL: "web-{PORT}"
+`
+
+// The program that prints them, and the environment fields and image that
+// read them.
+MODULE_VALUES_PRINTED: `
+run: fn() { print("{BASE} {STEP} {PORT} {LABEL}") }
+`
+
+MODULE_VALUES_CONSUMED: `
+dev: module { env.dev: Env{ base: BASE, step: STEP, port: PORT, label: LABEL } }
+
+image.server: module { from: packages.app, expose: [STEP, BASE, PORT] }
+`
+
+// What `run` prints when `jet run` builds `source` as a program.
+module_values_as_the_program_prints_them: fn(source: String) -[FS, Env, Exec, Time.Wait]> String {
+    dir: envmodel_test_fresh_dir("module-value-program")
+    program: files.join(dir, "main.jet")
+    files.write(program, source) ?? panic("write the program")
+    child: process.cmd([String]{envmodel_find_jet_binary(), "run", program}).stdout(.Capture).stderr(.Capture).spawn() ?? panic("start jet run: {err}")
+    receipt: child.wait() ?? panic("await jet run: {err}")
+    assert(receipt.code == 0, receipt.errors)
+    files.remove_all(dir) ?? panic("remove the program")
+    receipt.output.trim()
+}
+
+#Test("module_values_with_and_without_run_match_the_program") {
+    assert_eq(module_values_as_the_program_prints_them("{MODULE_VALUES_PLAIN_AND_RUN}{MODULE_VALUES_PRINTED}"), "8000 2 8002 web-8002")
+    dir: envmodel_test_oci_base_dir("module-value-plain")
+    source: "{MODULE_VALUES_PLAIN_AND_RUN}{MODULE_VALUES_CONSUMED}"
+    plan: envmodel_evaluate_env(source, dir) ?? panic("the revision plans: {err.diagnostic.what}")
+    assert_eq(plan.images[0].expose, [Int]{2, 8000, 8002})
+    modules: envmodel_evaluate_source(source, dir) ?? panic("the revision evaluates")
+    entry: modules[0].entries[0].entry
+    assert_eq(envmodel_test_setting_value(entry, "base"), Val(FactValue.Text{value: "8000"}))
+    assert_eq(envmodel_test_setting_value(entry, "step"), Val(FactValue.Text{value: "2"}))
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8002"}))
+    assert_eq(envmodel_test_setting_value(entry, "label"), Val(FactValue.Text{value: "web-8002"}))
+    files.remove_all(dir) ?? return
+}
 
 #Test("module_value_consumers_read_one_value_in_one_order") {
     dir: envmodel_test_oci_base_dir("module-value-parity")

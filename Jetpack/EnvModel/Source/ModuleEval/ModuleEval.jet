@@ -157,17 +157,18 @@ envmodel_collect_funcs: fn(items: [Item]) -> [String:Func] Never! {
     funcs
 }
 
-// Resolve module-level immutable comptime values before any namespace field
-// runs. Module fields are allowed to use these values, but they must enter
-// through the same dependency, purity, and deterministic-value path as
-// sibling fields. In particular, a self-reference is a real cycle, not an
-// unresolved-name fallback.
+// Resolve the module values before any namespace field runs: every immutable
+// `NAME: value`, with or without `#run`, as the compiler computes every one
+// while building. Module fields are allowed to use these values, but they
+// must enter through the same dependency, purity, and deterministic-value
+// path as sibling fields. In particular, a self-reference is a real cycle,
+// not an unresolved-name fallback.
 envmodel_collect_comptime_globals: fn(items: [Item], scope: ModuleEvalScope, environment_globals: [String:CtValue]) -> [String:CtValue] EnvModelEvalError! {
     definitions := [String:NamedFieldExpr]{}
     loop item in items {
         if item == {
             .Const(definition) -> {
-                if definition.is_comptime {
+                if !definition.mutable {
                     definitions[definition.name.removeprefix(COMPTIME_MARK)] = NamedFieldExpr{span: definition.name_span, expr: definition.value}
                 }
             }
