@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110475,
+    "rev": 110487,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32,8 +32,7 @@
         "radar:e14",
         "radar:e11",
         "board-ideas",
-        "radar:e3",
-        "radar-sq"
+        "radar:e3"
       ]
     },
     "completionCursor": "2026-11-16T22:38:39.064Z"
@@ -74190,8 +74189,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T14:30:49.195Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-16T22:39:27.539Z",
+      "updatedBy": "owner",
       "criteriaLastN": 6
     },
     {
@@ -85322,8 +85321,8 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:32.073Z",
-      "updated": "2026-11-16T14:35:41.461Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-16T22:40:58.695Z",
+      "updatedBy": "owner",
       "criteriaLastN": 8
     },
     {
@@ -99438,12 +99437,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "An app.Upload streams to storage. A body over the api's max_upload gets 413 before it is read, and kit.file_button reports progress. Proof: `jet test Compiler --profile cases --filter WebApp/upload_over_the_limit_is_413_before_it_is_read`.",
+          "text": "An app.Upload streams to storage, and a body over the api's max_upload gets 413 before it is read. Proof: `jet test Compiler --profile cases --filter WebApp/upload_over_the_limit_is_413_before_it_is_read`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:05:33.921Z"
+          "at": "2026-11-16T22:54:19.827Z"
         },
         {
           "n": 2,
@@ -99490,7 +99489,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-16T20:50:11.187Z",
+      "updated": "2026-11-16T22:54:19.827Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -100138,6 +100137,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:13:27.221Z"
+        },
+        {
+          "n": 9,
+          "text": "(moved from #6831 c2; it needs kit.Form from c1) A FieldError from the server shows beside its field in kit.form, the same as a validate failure. Proof: `jet test Compiler --profile cases --filter WebApp/server_field_error_shows_beside_the_field`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T22:53:29.504Z"
+        },
+        {
+          "n": 10,
+          "text": "(moved from #6813 c1) kit.file_button uploads through app.Upload and reports progress as the body streams. Proof: a golden or case that shows the progress events of one upload.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T22:54:22.328Z"
         }
       ],
       "refs": [],
@@ -100148,9 +100165,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-16T13:05:53.678Z",
+      "updated": "2026-11-16T22:54:22.328Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 10
     },
     {
       "id": "c0429qak",
@@ -101064,15 +101081,6 @@
           "at": "2026-11-14T22:57:42.227Z"
         },
         {
-          "n": 2,
-          "text": "A FieldError from the server shows beside its field in kit.form, the same as a validate failure. Proof: `jet test Compiler --profile cases --filter WebApp/server_field_error_shows_beside_the_field`.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:11.711Z"
-        },
-        {
           "n": 3,
           "text": "One canonical owner does typed-field traversal, override precedence and field-error paths for generated and hand-written codecs (D-ONE-CODECS1=A), and decode returns the accumulated [FieldError] list (D-VALIDATE-DECODE1=B); aliases, rename, skip, read-only fields, constraints, variants, enums, time values, custom context and generic targets are covered. Proof: `jet test Compiler --profile golden --filter Serde/CodecOverridePrecedence` and `--filter serde/codec_field_errors` on O0, O1 and O2. (was #3236 c4)",
           "status": "open",
@@ -101090,7 +101098,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:37.165Z",
-      "updated": "2026-11-16T20:46:59.319Z",
+      "updated": "2026-11-16T22:53:33.194Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -104761,11 +104769,11 @@
         {
           "n": 14,
           "text": "Every nested guard package under Tests/Guards runs in the census through GUARD_PACKAGES in Tools/Agent/Land.jet and passes on dev, including ImplPlacement (87 impls outside their type's body on 7300cf5099) and CorpusAST (5 failures on 7300cf5099: EncodingEETF codable-structural site, examples_have_no_redundant_grouping_parentheses, the failure syntax detector and the failure surface). Proof: `jet test Tests/Guards/ImplPlacement` and `jet test Tests/Guards/CorpusAST` pass, and both names are in GUARD_PACKAGES.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T17:56:46.779Z"
+          "evidence": "p229 batch compiler (dev 8c9859caba), commit 5bccda1582: jet test Tests/Guards/ImplPlacement PASS and jet test Tests/Guards/CorpusAST PASS; both names are in GUARD_PACKAGES in Tools/Agent/Land.jet, and the p229, p230 and p231 censuses ran them clean.",
+          "at": "2026-11-16T22:53:13.431Z"
         }
       ],
       "refs": [],
@@ -104779,7 +104787,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T22:20:41.854Z",
+      "updated": "2026-11-16T22:53:13.431Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -105747,7 +105755,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -105756,6 +105764,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Every remaining criterion is met; c12 (warm coverage per screen) moved to #6981, the D-WARM-SET1 ballot it waited on."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -105898,15 +105911,6 @@
           "at": "2026-11-15T06:47:27.327Z"
         },
         {
-          "n": 12,
-          "text": "Warm coverage per screen (sync review gap G10): the build reports, for each screen, which of its live reads are in the warm set and which are not, and a check fails a screen marked offline that reads anything outside it. Proof: a case with one covered and one uncovered screen, and the check's output for each. (was #3709 c27)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:14:24.645Z"
-        },
-        {
           "n": 13,
           "text": "Test-host network abilities (sync review gap G64): the app test host can disconnect a client from the server and restore it mid-test, deterministically, so offline, catch-up and replay cases run without real network faults. Proof: a case that disconnects, writes on both sides, restores, and checks the merged state. (was #3709 c28)",
           "status": "met",
@@ -105937,9 +105941,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T20:45:56.597Z",
+      "updated": "2026-11-16T22:53:26.086Z",
       "updatedBy": "Main",
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-16T22:53:26.086Z"
     },
     {
       "id": "c0ems7zb",
@@ -119193,7 +119198,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After D-WARM-SET1 is ratified, build its outcome (moved from #6868 c12, which waited only on this ballot): Warm coverage per screen (sync review gap G10): the build reports, for each screen, which of its live reads are in the warm set and which are not, and a check fails a screen marked offline that reads anything outside it. Proof: a case with one covered and one uncovered screen, and the check's output for each. (was #3709 c27)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T22:53:16.189Z"
+        }
+      ],
       "refs": [
         "6868"
       ],
@@ -119206,8 +119221,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T13:20:56.548Z",
-      "updated": "2026-11-16T13:30:33.420Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-16T22:53:16.189Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     },
     {
       "id": "c0zekkja",
@@ -215467,8 +215483,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-16T14:35:18.868Z"
+      "status": "ratified",
+      "created": "2026-11-16T14:35:18.868Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-16"
     },
     {
       "id": "D-PREDICT-PIN1",
@@ -215662,8 +215680,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-16T14:35:19.813Z"
+      "status": "ratified",
+      "created": "2026-11-16T14:35:19.813Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-16"
     }
   ],
   "questions": [
@@ -218190,6 +218210,17 @@
       "status": "open",
       "answer": "",
       "created": "2026-11-16T13:30:33.420Z"
+    },
+    {
+      "id": "q0ou36st",
+      "cardId": "c06he0ee",
+      "decisionId": "D-GUARD-LINT1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I don’t think this aligns with the research you did earlier today on use of nuns. Make sure it does",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-16T22:39:27.539Z"
     }
   ],
   "ideas": [
@@ -219022,6 +219053,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T22:54:24.981Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0yvmuru",
+      "note": "Closest-first: #6868 closed, #6857 c14 met, blocked halves moved, workers re-aimed"
+    },
+    {
+      "at": "2026-11-16T22:54:22.328Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00xuadc",
+      "note": "#10 (moved from #6813 c1) kit.file_button uploads through app.Up"
+    },
+    {
+      "at": "2026-11-16T22:54:19.827Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pg5tj9",
+      "note": "#1: Owner closure-first split: the kit.file_button progress half moved to #6821, which owns the kit views.; was: An app.Upload streams to storage. A body over the api's max_upload gets 413 before it is read, and kit.file_button reports progress. Proof: `jet test Compiler --profile cases --filter WebApp/upload_ov"
+    },
+    {
+      "at": "2026-11-16T22:53:33.194Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0exjsbx",
+      "note": "#2: Needs kit.Form (#6821 c1); moved to #6821, which owns the form.; was [open]: A FieldError from the server shows beside its field in kit.form, the same as a validate failure. Proof: `jet test Compiler --profile cases --filter WebApp/server_field_error_shows_beside_the_field`."
+    },
+    {
+      "at": "2026-11-16T22:53:29.504Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00xuadc",
+      "note": "#9 (moved from #6831 c2; it needs kit.Form from c1) A FieldErro"
+    },
+    {
+      "at": "2026-11-16T22:53:26.086Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00cqn1l",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-16T22:53:19.115Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c00cqn1l",
+      "note": "#12: Waits only on the D-WARM-SET1 ballot; moved to the ballot card #6981, which owns the decision and its build.; was [open]: Warm coverage per screen (sync review gap G10): the build reports, for each screen, which of its live reads are in the warm set and which are not, and a check fails a screen marked offline that reads "
+    },
+    {
+      "at": "2026-11-16T22:53:16.189Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ozl5j4",
+      "note": "#1 After D-WARM-SET1 is ratified, build its outcome (moved from"
+    },
+    {
+      "at": "2026-11-16T22:53:13.431Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-16T22:40:58.695Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PREDICT-PIN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-16T22:40:58.694Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PREDICT-JOB1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-16T22:39:27.539Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0ou36st",
+      "note": ""
+    },
     {
       "at": "2026-11-16T22:38:39.064Z",
       "by": "owner",
@@ -224055,6 +224170,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0yvmuru",
+      "title": "Closest-first: #6868 closed, #6857 c14 met, blocked halves moved, workers re-aimed",
+      "body": "Owner order, 17:50: closest-to-complete cards first, bigger SUBs, faster landing. It is recorded as a standing order in the Main lane's order file.\n\nDone at once: #6868 closed (c12, warm coverage per screen, moved to its D-WARM-SET1 ballot card #6981). #6857 c14 met (ImplPlacement and CorpusAST in the census, passing on p229-p231). #6831 c2 (server field errors in kit.Form) and #6813 c1's kit.file_button progress half moved to #6821, which owns the kit views.\n\nStaffing. G6: IfHole sends #6857 c5 and c6 together (brace layout stage 2 and the repository sweep); DeclTypes sends #6857 c7 (syntax rows and spec text), then #6847 c12 and c14. G9: Speed-3-3 sends #6863 (closes in p232), #6813 c1 (413 before read; closes the card), #6815 c2 (offline reload) and #6818 c1 (Linux native session). #6979 c1's inline census proofs run in p233.\n",
+      "by": "Main",
+      "created": "2026-11-16T22:54:24.981Z",
+      "sections": []
+    },
     {
       "id": "briefing073b2t0",
       "title": "p229/p230 landed: #6864 closed; brace-only records met (#6857 c3/c4); jet new generators",
