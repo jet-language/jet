@@ -1644,8 +1644,9 @@ needs a declared conversion (E2402). A catch-all `.Err(e)` arm over a union
 that holds `Err` binds `e` the same way, as an `Err`; over a union without
 `Err`, `e` is the union. An arm `.Err(.T(…))` for a type `T` that is not
 a member of the union can never match, since nothing that fails with `T`
-reaches the value any more. It is the lint L0304, the table is checked
-without it, and its edit deletes the arm. A name that is no type stays E0305.
+reaches the value any more. It is the tidy error L0304, which fails
+`jet check` and `jet build` but never `jet run`; the table is checked without
+it, and its edit deletes the arm. A name that is no type stays E0305.
 
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:

@@ -6506,12 +6506,13 @@ GoneFailureArm: struct {
         code: "L0304"
         meaning: "An `.Err(.Member(…))` arm for a failure type that can no longer reach its subject"
         severity: .Lint
+        tier: .Tidy
         lint_name: "gone_failure_arm"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
 
-        what: fn(self) -> String { "This arm names a failure type its subject can no longer fail with (lint)" }
+        what: fn(self) -> String { "This arm names a failure type its subject can no longer fail with" }
 
         why: fn(self) -> String {
             "A failure union holds only the failure types that can still reach it, so an arm for any other type never runs"

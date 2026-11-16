@@ -1,0 +1,31 @@
+// @all_diags
+// `load` fails only with its own `Empty` case and with a plain message, so
+// its failures are the open union `Err | LoadError`. `LookupError` is a
+// failure type nothing `load` does fails with, so its arm can never arrive:
+// L0304, a tidy error whose edit deletes the arm, which `jet check` lists
+// and fails on. `Vanished` names no type at all, so its arm stays E0305.
+#Error
+LookupError: enum {
+    Missing
+}
+
+load: fn(raw: String) -> Int {
+    if raw == "" -> return Err(.Empty)
+    if raw == "x" -> return Err("odd input")
+    42
+}
+
+report: fn(raw: String) {
+    if load(raw) == {
+        .Ok(n) -> { print("loaded {n}") }
+        .Err(.LookupError(_)) -> { print("no such record") }
+        .Err(.Vanished(_)) -> { print("vanished") }
+        .Err(.Empty) -> { print("empty") }
+        .Err(_) -> print("failed")
+    }
+}
+
+run: fn() {
+    report("x")
+    report("")
+}
