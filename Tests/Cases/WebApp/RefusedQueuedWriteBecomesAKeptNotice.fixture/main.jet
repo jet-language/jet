@@ -1,0 +1,156 @@
+// A phone on a device that queues (`app.new(…).offline(.Queue)`), with no
+// screen: its refused writes have no control to sit beside, so each joins
+// the app's notice list, which outlasts a restart.
+//
+// The first run reads tasks 1 and 2 at version 1, then the test host cuts
+// the phone off (`app.disconnect`) and the phone edits task 1, edits it
+// again on top of its own first edit (so against the version that edit
+// makes, 2), and edits task 2, and the run ends with the three edits
+// queued. The second run, after a restart, finds them in the device store.
+// Meanwhile the desk edited task 1 twice, so the server holds it at version
+// 3. Once the phone's link is back, the queue replays each edit with the
+// version it was made against: the server refuses both edits of task 1 as
+// `Conflict`, each with its own notice, and commits the edit of task 2. The
+// third run, after another restart, still lists both notices: a notice is
+// kept until it is dismissed.
+//
+// The server's store is in memory, so each run seeds it as the server kept
+// it.
+use {
+    app
+    db: core.db
+    net: core.net
+    sys: core.sys
+    web: core.web
+}
+
+#Codable
+Card: struct {
+    id: Int
+    title: String
+    version: Int
+}
+
+#Error
+BoardError: enum {
+    Missing(Int)
+    Conflict(Int)
+    Failed(String)
+    Unreachable(String)
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Card> {
+    store.table("tasks", key: fn(task: Card) { task.id })
+}
+
+Board: struct {
+    store: db.Store
+
+    // Retitles task `id`, made against its version `version`: `.Conflict`
+    // with the task's version when the task has changed since.
+    #App.Public edit: fn(self, id: Int, version: Int, title: String) BoardError! {
+        tasks: tasks_in(self.store)
+        task: if tasks.get(id) == {
+            .Val(found) -> found
+            .None -> {
+                return Err(BoardError.Missing(id))
+            }
+            .Err(failure) -> {
+                return Err(BoardError.Failed(failure.message()))
+            }
+        }
+        if task.version != version -> return Err(BoardError.Conflict(task.version))
+        _: tasks.put(Card{id: id, title: title, version: version + 1}) ?? return Err(BoardError.Failed(err.message()))
+        Ok()
+    }
+
+    // Task `id`.
+    #App.Public card: fn(self, id: Int) -> Card BoardError! {
+        if tasks_in(self.store).get(id) == {
+            .Val(task) -> Ok(task)
+            .None -> Err(BoardError.Missing(id))
+            .Err(failure) -> Err(BoardError.Failed(failure.message()))
+        }
+    }
+}
+
+// What a failed call gave, as text.
+said: fn(failure: BoardError) -> String {
+    if failure == {
+        .Missing(id) -> "task {id} is missing"
+        .Conflict(version) -> "task changed: version {version}"
+        .Failed(why) -> "failed: {why}"
+        .Unreachable(why) -> "unreachable: {why}"
+    }
+}
+
+// Task `id` as `board` reads it.
+shown: fn(board: app.Remote<Board>, id: Int) -> String {
+    task: board.card(id) ?? return said(err)
+    "{task.title} (version {task.version})"
+}
+
+// The device's queue and notice list.
+show: fn() {
+    print("pending: {app.pending()}")
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}
+
+// A server on the case's port that answers `sends` calls, over a store that
+// holds task 1 at `first` and task 2 at version 1; its address.
+serve: fn(first: Card, sends: Int) -> String {
+    store: db.open_memory()
+    tasks: tasks_in(store)
+    _: tasks.put(first) ?? panic("seed 1")
+    _: tasks.put(Card{id: 2, title: "ship", version: 1}) ?? panic("seed 2")
+    served: web.app().mount("/api", Board{store: store.copy()})
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen")
+    serving: task {
+        loop _ in 0..<sends { served.serve_once(server) ?? panic("serve") }
+    }
+    serving.detach()
+    "http://127.0.0.1:{port}/api"
+}
+
+run: fn() {
+    _: app.new("Crew").offline(.Queue)
+    if app.pending() == 0 && app.notices().len() > 0 {
+        print("after the second restart")
+        show()
+        return
+    }
+    if app.pending() > 0 {
+        print("after restart")
+        show()
+        // The desk's two edits of task 1, the phone's three queued edits,
+        // and the desk's two reads.
+        address: serve(Card{id: 1, title: "plan", version: 1}, 7)
+        desk: app.remote_at<Board>(address, client: "desk")
+        if desk.edit(1, 1, "desk plan") == .Err(failure) -> print("desk edit: {said(failure)}")
+        if desk.edit(1, 2, "desk plan v3") == .Err(failure) -> print("desk edit: {said(failure)}")
+        app.reconnect("phone")
+        print("phone reconnected")
+        show()
+        print("desk reads: {shown(desk, 1)}; {shown(desk, 2)}")
+        return
+    }
+    address: serve(Card{id: 1, title: "plan", version: 1}, 2)
+    phone: app.remote_at<Board>(address, client: "phone")
+    print("phone reads: {shown(phone, 1)}; {shown(phone, 2)}")
+    app.disconnect("phone")
+    if phone.edit(1, 1, "plan v2") == .Err(failure) -> print("edit 1: {said(failure)}")
+    if phone.edit(1, 2, "plan v3") == .Err(failure) -> print("edit 1 again: {said(failure)}")
+    if phone.edit(2, 1, "ship it") == .Err(failure) -> print("edit 2: {said(failure)}")
+    print("first run")
+    show()
+}
