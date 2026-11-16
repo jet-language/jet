@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107875,
+    "rev": 107900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97986,39 +97986,39 @@
         },
         {
           "n": 14,
-          "text": "(was #4260 c32)",
+          "text": "D-ARCH-ADVICE1=A: semantic review offers optional advice on request, each suggestion names the source facts behind it, and complexity stays separate from architecture judgment. Proof: `jet test Compiler --profile cases --filter review/advice_names_its_facts`. (was #4260 c32)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:41.405Z"
+          "at": "2026-11-16T01:13:01.201Z"
         },
         {
           "n": 15,
-          "text": "(was #4260 c33)",
+          "text": "D-BIG-DIAGDIFF1=A: `jet review --diagnostics` writes a jet.diagnostic-review/v1 object, with paired checked-input identities, side validity and completeness, and issue relations (new, existing, resolved, unknown). It matches only proven common occurrences, never the same code, prose or position alone. Plain semantic review is unchanged. Proof: `jet test Compiler --profile cases --filter review/diagnostics_compare_`. (was #4260 c33)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:40:42.385Z"
+          "at": "2026-11-16T01:13:02.206Z"
         },
         {
           "n": 16,
-          "text": "(was #6425 c7)",
+          "text": "Each of the 157 census rows ($JET_SCRATCH_ROOT/lanes/CoverPort/out/report5-nodiag.tsv) reports its expected diagnostic from sema and passes as a ui row; any row whose expectation contradicts the spec is re-recorded against the spec, with a citation Proof: once c8 checks the census in, `jet test tests/guards --filter ui_nodiag_census` reports zero MISSING rows and `jet test Compiler --profile ui` passes those rows. (was #6425 c7)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:22.039Z"
+          "at": "2026-11-16T01:13:03.225Z"
         },
         {
           "n": 17,
-          "text": "(was #6425 c8)",
+          "text": "The no-diagnostic census is checked in and runs as a guard, and every MISSING row is fixed or carded with nothing silently dropped. Proof: `jet test tests/guards --filter ui_nodiag_census`. (was #6425 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:23.076Z"
+          "at": "2026-11-16T01:13:04.213Z"
         }
       ],
       "refs": [],
@@ -98032,7 +98032,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:02:07.487Z",
-      "updated": "2026-11-16T01:12:59.908Z",
+      "updated": "2026-11-16T01:13:04.213Z",
       "updatedBy": "Main",
       "criteriaLastN": 17
     },
@@ -98730,66 +98730,66 @@
         },
         {
           "n": 17,
-          "text": "(was #3548 c52)",
+          "text": "A hello program with five unused Core imports (including core.archive) and the plain hello both build and run from one identified source, and the imported variant has no unresolved Core call (each archive call resolves to a Core body or a registered provider leaf). Proof: `jet test Compiler --profile cases --filter unused_core_imports_build` on O0, O1 and O2. (was #3548 c52)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:38:57.253Z"
+          "at": "2026-11-16T01:13:05.180Z"
         },
         {
           "n": 18,
-          "text": "(was #5910 c39)",
+          "text": "Hello compile cost: `jet build` compiles hello in under 0.12 s cold and 0.10 s warm with peak compile memory under 35 MB, and the default hello binary starts in under 0.28 ms (binary size against peers is #6328 c3; linking only reached Core is #6328 c2). Proof: `jet test Compiler --profile cases --filter compile_budget/hello_build_and_start`. (was #5910 c39)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:27.475Z"
+          "at": "2026-11-16T01:13:06.166Z"
         },
         {
           "n": 19,
-          "text": "(was #5910 c46)",
+          "text": "Imports load on demand (Jai and Go style): a program loads, checks and links only the modules it imports, including a comptime-conditional `use`, so an unused import adds no binary bytes (frozen #4565 holds the Core boundary half). Proof: `jet test Compiler --profile cases --filter imports/demand_loaded_modules`. (was #5910 c46)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:28.411Z"
+          "at": "2026-11-16T01:13:07.104Z"
         },
         {
           "n": 20,
-          "text": "(was #6328 c22)",
+          "text": "Core and Prelude ship precompiled inside the jet binary: checked interfaces and machine code produced when jet is built, part of the toolchain identity and immutable (no runtime cache, nothing to invalidate). `jet run` reads, scans and re-checks no Core or Prelude source: strace -c of `jet run hello.jet` shows no statx/openat/getdents64 on the toolchain tree, and the cold user time for hello is spent on the user code. One meaning on o0/o1/o2 (I9). Proof: a committed `strace -c` receipt of `jet run hello.jet` and `jet test Compiler --profile golden` on O0, O1 and O2. (was #6328 c22)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:42:31.821Z"
+          "at": "2026-11-16T01:13:08.038Z"
         },
         {
           "n": 21,
-          "text": "(was #6527 c10)",
+          "text": "Cold script cost: `jet file.jet` for a script importing core.process compiles and runs from cold, with no reuse, in less wall time and peak memory than the original tool it replaces. Today (ScriptAPI-2, PortBars outputs, 2026-11-11) b4 pays 1.1-1.6 s and 355-388 MB per run, against originals of 37-1700 ms and 5.8-57 MB, so all 7 measured tool twins fail the speed and memory bars (e.g. census-snap2 21086 ms / 422 MB vs 1117 ms / 47.5 MB). Acceptance: a per-phase CPU and peak-RSS breakdown of that script on the batch compiler names each root (parse/import/sema/lowering/emit/link of Core modules the script does not reach, eager whole-module work, arena sizing); each root is fixed in the general path and proven on a second script; the PortBars speed and memory bars pass on the census-snap2 and roots-mjs entries with cold compile counted. Reuse is not the fix: the standing order counts cold compile time. Proof: `jet Tools/gauntlet/PortBars.jet` speed and memory bars for census-snap2 and roots-mjs, cold compile counted. (was #6527 c10)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:41.732Z"
+          "at": "2026-11-16T01:13:09.054Z"
         },
         {
           "n": 22,
-          "text": "(was #6639 c4)",
+          "text": "Peak memory: a small Jet tool's peak RSS is no higher than its original's on every PortBars entry. ScriptAPI-2 measured Jet at about 19-21 MB against bash's 7-12 MB on batch10, integrate10, streamb10 and verify-rows, and the cost is the runtime's baseline, not the twins. The fix goes in the general mechanism (runtime start-up, reserved heap or arena sizing, and eagerly mapped tables), and is proven on a second small program. PortBars shows peak memory PASS on all nine. Part 1 (ScriptAPI-3, image layout locality and the build key; it rides t16) took the warm small-script peak from 15.5 MB to 7.1-7.5 MB, and batch10, integrate10 and streamb10 still lose (11.8 against 10.6 MB, 12.9 against 8.6, 10.6 against 8.6), while verify-rows ties. Proof: `jet Tools/gauntlet/PortBars.jet` shows peak memory PASS on all nine entries. (was #6639 c4)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:44:45.805Z"
+          "at": "2026-11-16T01:13:10.161Z"
         },
         {
           "n": 23,
-          "text": "(was #6639 c5)",
+          "text": "An uncached `jet file.jet` (a fresh cache dir: compile from cold, link and run from memory) beats python3 and node on wall time and peak memory, with no script cache, result cache or incremental state serving the run. Measured 2026-11-11 with GNU time on hello world (seed-t21): uncached `jet hello.jet` takes 30 ms and 36-40 MB, a script-cache hit 20-30 ms and 8.7-10.7 MB, the built O1 binary 0 ms and 256 KB, python3 10 ms and 13.1 MB, node 20 ms and 60 MB. Name where the uncached 30 ms and 37 MB go (front end, sema, lowering, emission, link, runtime start), fix them in those general mechanisms toward the 30M lines/s compile target, and prove it on hello world and on a repository tool twin. Proof: a committed GNU time receipt for hello and a repository tool twin, with the phase breakdown. (was #6639 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:44:46.815Z"
+          "at": "2026-11-16T01:13:11.231Z"
         }
       ],
       "refs": [],
@@ -98800,7 +98800,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T00:44:46.815Z",
+      "updated": "2026-11-16T01:13:11.231Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
     },
@@ -99237,12 +99237,12 @@
         },
         {
           "n": 6,
-          "text": "(was #6418 c146)",
+          "text": "On O0, the `jet dev` step budget (E2202), `jet debug` (E2203) and the REPL (E1802) each have a working Jet implementation or an owner-ratified retirement. Proof: `jet test Compiler --profile ui --filter E2202` (and the same for E2203 and E1802) shows the working path, or the decision ID is cited. (was #6418 c146)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:12.328Z"
+          "at": "2026-11-16T01:13:12.253Z"
         }
       ],
       "refs": [],
@@ -99253,7 +99253,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-16T00:43:12.328Z",
+      "updated": "2026-11-16T01:13:12.253Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -100394,12 +100394,12 @@
         },
         {
           "n": 7,
-          "text": "(was #5910 c62)",
+          "text": "jet check of one Compiler file stays under 1 GB peak RSS. Today the command jet check Compiler/JetCli/Source/Cli/InspectBuild.jet peaks at 10.65 GB and takes 30.9 s on plain dev b9687be981 (probe g12d-devck, GNU time maxrss 10,654,668 kB). Proof: the same command on the dev tip reports a maxrss under 1,048,576 kB, with its wall time reported. (was #5910 c62)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:29.370Z"
+          "at": "2026-11-16T01:13:13.237Z"
         }
       ],
       "refs": [],
@@ -100410,7 +100410,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-16T00:41:29.370Z",
+      "updated": "2026-11-16T01:13:13.237Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -100675,12 +100675,12 @@
         },
         {
           "n": 5,
-          "text": "(was #6328 c29)",
+          "text": "Per-function code size: no Core or generated function carries code its callers cannot reach or expansion a hand-written version would not. Measured by Main on seed-b13, 2026-11-12, default jet build: core_encoding_json_parse_string 21,323 B, __core_encoding_stream_jcs_number 37,759 B, core_regex_scan 35,189 B, unit_unicode_upper_mapping and lower_mapping 28-29 KB each, and MemorySafetyFuzz_run_memory_safety_fuzz_axis 58,080 B. A dated breakdown names, for each function over 4 KB in the tool-twin binaries, what the bytes are (inlined callees, unrolled loops, tables as code, checks) and the general codegen or Core rule that shrinks it; each fix shows the gain on two programs. Proof: the committed dated per-function breakdown, each fix with its two-program receipt. (was #6328 c29)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:42:35.362Z"
+          "at": "2026-11-16T01:13:14.227Z"
         }
       ],
       "refs": [],
@@ -100691,7 +100691,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:56.559Z",
-      "updated": "2026-11-16T00:42:35.362Z",
+      "updated": "2026-11-16T01:13:14.227Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -101466,93 +101466,93 @@
         },
         {
           "n": 5,
-          "text": "(was #5950 c1)",
+          "text": "D-INSTALL1 is ratified and the install page documents only the channel it picks. Proof: `jet test tests/guards --filter install_page_single_channel`. D-INSTALL1 is on Main's ballot list (2026-11-15). (was #5950 c1)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:34.393Z"
+          "at": "2026-11-16T01:13:15.292Z"
         },
         {
           "n": 6,
-          "text": "(was #5950 c2)",
+          "text": "On a clean Linux x86-64 container with no Nix and no Jet, the documented install command installs `jet`, and `jet new hello && cd hello && jet run` prints the greeting; the release gate runs this on every release. Proof: the release gate's committed install receipt for the release. (was #5950 c2)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:35.335Z"
+          "at": "2026-11-16T01:13:16.278Z"
         },
         {
           "n": 7,
-          "text": "(was #5950 c3)",
+          "text": "`nix run github:<org>/jet -- --version` prints the release version: flake.nix exports `packages.<system>.default` built from the pinned seed release asset (D-SEED-DIST1=A). Proof: `nix flake show` lists `packages.x86_64-linux.default`, and the release receipt records the `--version` output. (was #5950 c3)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:36.274Z"
+          "at": "2026-11-16T01:13:17.341Z"
         },
         {
           "n": 8,
-          "text": "(was #5950 c4)",
+          "text": "The install page is generated from the tested install script, so no page names an install command the release gate does not run. Proof: `jet test tests/guards --filter install_page_generated`. (was #5950 c4)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:37.213Z"
+          "at": "2026-11-16T01:13:18.479Z"
         },
         {
           "n": 9,
-          "text": "(was #5950 c5)",
+          "text": "The installed `jet` runs `jet run hello.jet` with JET_TOOLCHAIN_ROOT and JET_COMPILER_IDENTITY unset, because Core ships inside the binary or the install root. Proof: `jet test Compiler --profile cases --filter install/runs_without_toolchain_env`. (was #5950 c5)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:38.145Z"
+          "at": "2026-11-16T01:13:19.559Z"
         },
         {
           "n": 10,
-          "text": "(was #5950 c7)",
+          "text": "The same one-line install works on macOS arm64 and Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both. Proof: the release gate's committed install receipts for both hosts (parked by the owner's standing order on macOS and Windows; 2026-11-09 log). (was #5950 c7)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:39.222Z"
+          "at": "2026-11-16T01:13:20.771Z"
         },
         {
           "n": 11,
-          "text": "(was #5950 c8)",
+          "text": "A freestanding aarch64 program runs under QEMU in the release gate and prints its expected output. Proof: the release gate's committed receipt of the QEMU run (waits for hosted CI, which returns with a pinned native seed release; owner ruling 2026-11-08). (was #5950 c8)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:40.381Z"
+          "at": "2026-11-16T01:13:21.806Z"
         },
         {
           "n": 12,
-          "text": "(was #5950 c12)",
+          "text": "The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported beginner host, and each runs as documented. Proof: `jet test Compiler --profile cases --filter onboarding/beginner_path_`. (was #5950 c12)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:41.421Z"
+          "at": "2026-11-16T01:13:22.868Z"
         },
         {
           "n": 13,
-          "text": "(was #5950 c13)",
+          "text": "A missing entry, an ambiguous project, an unsupported host, an install failure, invalid code and offline state each give a registered error with a tested next step; retired entry layouts get no migration (owner order 2026-11-06), so the case's legacy-layout step is removed. Proof: `jet test Compiler --profile cases --filter onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts` with its known-failing row removed. (was #5950 c13)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:42.606Z"
+          "at": "2026-11-16T01:13:23.838Z"
         },
         {
           "n": 14,
-          "text": "(was #5950 c14)",
+          "text": "A published toolchain channel lists per-platform releases with digests; `jet self` resolves, verifies, installs beside the running binary and swaps; a corrupt or mismatched release is refused with a registered error; the keyless tier needs an explicit override. Proof: `jet test Compiler --profile cases --filter self_update/`. (was #5950 c14)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:41:44.266Z"
+          "at": "2026-11-16T01:13:24.793Z"
         }
       ],
       "refs": [],
@@ -101563,7 +101563,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-16T00:41:44.266Z",
+      "updated": "2026-11-16T01:13:24.793Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -102354,12 +102354,12 @@
         },
         {
           "n": 7,
-          "text": "(was #6552 c37)",
+          "text": "Examples/features/ui/reactive_observable.jet shows same-value notification, derived order and disposal with no version-cap loss. Proof: `jet test Compiler --profile golden --filter ui/reactive_observable` on O0, O1, O2 and web. (was #6552 c37)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T00:43:52.662Z"
+          "at": "2026-11-16T01:13:25.861Z"
         },
         {
           "n": 8,
@@ -102379,7 +102379,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-16T00:43:53.787Z",
+      "updated": "2026-11-16T01:13:25.861Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -224498,6 +224498,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:13:25.861Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00xuadc",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6552 c37)"
+    },
+    {
+      "at": "2026-11-16T01:13:24.793Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c14)"
+    },
+    {
+      "at": "2026-11-16T01:13:23.838Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#13: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c13)"
+    },
+    {
+      "at": "2026-11-16T01:13:22.868Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#12: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c12)"
+    },
+    {
+      "at": "2026-11-16T01:13:21.806Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#11: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c8)"
+    },
+    {
+      "at": "2026-11-16T01:13:20.771Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#10: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c7)"
+    },
+    {
+      "at": "2026-11-16T01:13:19.559Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#9: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c5)"
+    },
+    {
+      "at": "2026-11-16T01:13:18.479Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#8: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c4)"
+    },
+    {
+      "at": "2026-11-16T01:13:17.341Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c3)"
+    },
+    {
+      "at": "2026-11-16T01:13:16.278Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c2)"
+    },
+    {
+      "at": "2026-11-16T01:13:15.292Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0s5hn28",
+      "note": "#5: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5950 c1)"
+    },
+    {
+      "at": "2026-11-16T01:13:14.227Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0b3gyq2",
+      "note": "#5: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6328 c29)"
+    },
+    {
+      "at": "2026-11-16T01:13:13.237Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0x3j5om",
+      "note": "#7: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5910 c62)"
+    },
+    {
+      "at": "2026-11-16T01:13:12.253Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0gy2j07",
+      "note": "#6: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6418 c146)"
+    },
+    {
+      "at": "2026-11-16T01:13:11.231Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#23: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6639 c5)"
+    },
+    {
+      "at": "2026-11-16T01:13:10.161Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#22: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6639 c4)"
+    },
+    {
+      "at": "2026-11-16T01:13:09.054Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#21: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6527 c10)"
+    },
+    {
+      "at": "2026-11-16T01:13:08.038Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#20: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6328 c22)"
+    },
+    {
+      "at": "2026-11-16T01:13:07.104Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#19: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5910 c46)"
+    },
+    {
+      "at": "2026-11-16T01:13:06.166Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#18: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #5910 c39)"
+    },
+    {
+      "at": "2026-11-16T01:13:05.180Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ssy5wy",
+      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #3548 c52)"
+    },
+    {
+      "at": "2026-11-16T01:13:04.213Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#17: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c8)"
+    },
+    {
+      "at": "2026-11-16T01:13:03.225Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#16: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #6425 c7)"
+    },
+    {
+      "at": "2026-11-16T01:13:02.207Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#15: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4260 c33)"
+    },
+    {
+      "at": "2026-11-16T01:13:01.201Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pmy5fy",
+      "note": "#14: Restore the text the board-cleanup move dropped; copied from the source criterion; was: (was #4260 c32)"
+    },
     {
       "at": "2026-11-16T01:12:59.908Z",
       "by": "Main",
