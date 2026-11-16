@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6978,
-    "rev": 108312,
+    "nextNum": 6979,
+    "rev": 108324,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60878,6 +60878,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30: plan steps 2-5 move to G11 and are not worked now; precompiled Core (step 1) is finished first, then the goal chain G6 G9 G5 G3 G10 G7 G11. Moved out: the type-ID switch (c7 S3.3) is #6978 under G6; ownership keyed by ids is #6066 (G10). Finished SUBs still land: c7-shared-ids (p198), x64-tables-per-function and ownership-symbol-ids (p199). Parked work kept for G11, nothing lost: $JET_SCRATCH_ROOT/lanes/Main/parked-g11/Speed-3-2-taskgraph-src.patch, -taskgraph-test.patch and -tree.patch (CompilerTaskGraph scheduler, step 0 of c6); $JET_SCRATCH_ROOT/lanes/Speed-3/parked/runtime-unit-leads.patch; $JET_SCRATCH_ROOT/lanes/MemKernel-6/subs/parked/s4d-reached.patch (c8); the hand-off contract IRFunctionHandoff{key, module, order, body} agreed by MemKernel-6 and Speed-3-2; worktree diffs saved at $JET_SCRATCH_ROOT/lanes/Main/wtsave/."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "CHECK-IN 17:30 (06:00 deadline): 31.7% total, +1.5 since 17:05. Moved: #5479 c2, whose 19 over-budget phase roots are filed as c12-c30 (the table and owners SUB is queued). Landed: nothing new. The p192 census held 4 SUBs within 2 minutes (a Core declarations check, a control-variable guard, 2 rebase conflicts); all 4 are fixed and resubmitted, and p192b is running with the other 6 (Core binding for in-tree runs, the door/s3 stack, sema.failure on threads). Next cycle p193 has 7: the #6759 c9 interface read (about -13 MB per compile), the c9 receipt, effects on threads (c17/c18), the c2 table, door-fix-r3, and 2 regression fixes. Trajectory: back-loaded until the cycles start landing the step 1-2 SUBs; steps 3-4 (c7, c8) are the critical path."
@@ -61601,7 +61606,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-16T01:16:18.698Z",
+      "updated": "2026-11-16T01:33:10.838Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -68953,6 +68958,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T01:11:43.151Z"
+        },
+        {
+          "n": 19,
+          "text": "The ownership checker is keyed by ids (SymbolID and the Interner's ids), not key text, and this card's checker rework is designed on those ids (owner order 2026-11-15: ownership-by-ids moved here from #5479 c7). The first step, PrecompiledCore-4-ownership-symbol-ids, lands with byte-identical `jet check Compiler` diagnostics. Proof: that check plus a µs/line receipt against p196.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:33:08.631Z"
         }
       ],
       "refs": [
@@ -68966,12 +68980,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-16T01:11:43.151Z",
+      "updated": "2026-11-16T01:33:08.631Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 19
     },
     {
       "id": "c0810bga",
@@ -120511,6 +120525,56 @@
       "updated": "2026-11-15T21:17:59.640Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
+    },
+    {
+      "id": "c05hrwee",
+      "num": 6978,
+      "title": "Types are interned TypeIDs: one Interner for names and hash-consed types, threaded through sema, registration and IR",
+      "body": "Owner order 2026-11-15 ~20:30: the type-representation switch is G6's first step, done before G6 adds new type forms (const generics, reflection, generation) so they are written once on the new model. Moved from #5479 c7 (its S3.3 part). Groundwork landed or landing: the shared Name/TypeID model (c7-shared-ids, p198). The switch is a multi-part set (s33 parts 1..N, each clean under jet check against the parts before it); the mechanical threading of `types: &Interner` (about 740 checker signatures, about 10k Type sites) is done by a throwaway codemod whose command is in each part's message; semantic changes are hand edits. Owner: GoalsA-1-4.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Sema, registration and IR represent every type as a TypeID from one Interner (hash-consed, with worker-local ids merged deterministically for parallel phases); the `Type` enum survives only as the interned row form, and no checker carries a parallel Type tree. Proof: the s33 set lands on dev; `jet check Compiler` diagnostics are byte-identical before and after; `jet test Compiler --profile ui` and `--profile golden` show no new failures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:33:04.211Z"
+        },
+        {
+          "n": 2,
+          "text": "The switch's speed is measured, not assumed: a self-compile receipt before and after the set reports CPU-µs/line and wall time (expected -15 to -25 µs/line). Proof: the two receipts on this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-16T01:33:06.314Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T01:32:51.109Z",
+      "updated": "2026-11-16T01:33:06.314Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -224535,6 +224599,90 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T01:33:10.838Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T01:33:08.631Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#19 The ownership checker is keyed by ids (SymbolID and the Inte"
+    },
+    {
+      "at": "2026-11-16T01:33:06.314Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05hrwee",
+      "note": "#2 The switch's speed is measured, not assumed: a self-compile "
+    },
+    {
+      "at": "2026-11-16T01:33:04.211Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05hrwee",
+      "note": "#1 Sema, registration and IR represent every type as a TypeID f"
+    },
+    {
+      "at": "2026-11-16T01:32:51.111Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c05hrwee",
+      "note": "Types are interned TypeIDs: one Interner for names and hash-consed types, threaded through sema, registration and IR"
+    },
+    {
+      "at": "2026-11-16T01:32:02.690Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G11",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:32:00.248Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G7",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:31:57.764Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G10",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:31:55.325Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G3",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:31:52.785Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G5",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:31:50.064Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G9",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
+      "at": "2026-11-16T01:31:47.720Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G6",
+      "note": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 ord"
+    },
+    {
       "at": "2026-11-16T01:20:28.842Z",
       "by": "Main",
       "action": "card.criteria-edit",
@@ -230401,6 +230549,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "OWNER ORDER 2026-11-15 ~12:50 (REQUIRED; supersedes every earlier ordering): finish work in this order: (1) precompiled Core (#6328 c22, c41, c42; #6759 c9, c10), (2) memory kernel (#6842, done 2026-11-14), (3) speed plan steps 1-5 of #5479's plan, (4) G6, (5) G9, then G5, G3, G10, G7, G11. One agent starts on each of items 1-5; when an item is done its agent joins the first unfinished item in the order (snowball). ALL speed and size work other than speed plan steps 1-5 belongs to G11, done last."
@@ -230417,7 +230570,7 @@
         }
       ],
       "created": "2026-11-04T18:09:46.919Z",
-      "updated": "2026-11-15T17:44:51.669Z",
+      "updated": "2026-11-16T01:31:55.325Z",
       "updatedBy": "Main"
     },
     {
@@ -230483,6 +230636,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "OWNER ORDER 2026-11-15 ~13:10: one goal agent slot does Jet's native debugger, profiler and perf (G5: #6730 jet debug, #4632 jet perf, #6918 debug info, #6841, #6919), native only with no lldb, gdb or Linux perf dependency. The G9 slot (GoalsB-5-2) takes it after its returned fixes; G9 is unstaffed until an agent snowballs past G6."
@@ -230514,7 +230672,7 @@
         }
       ],
       "created": "2026-11-04T18:09:41.788Z",
-      "updated": "2026-11-15T18:34:43.521Z",
+      "updated": "2026-11-16T01:31:52.785Z",
       "updatedBy": "Main"
     },
     {
@@ -230523,6 +230681,11 @@
       "body": "Markers, diagnostics, effects, facts and derives are ordinary types with Core traits; markers can sit in bodies; reflection, generation and const generics are complete; Core declares its own host leaves. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is fourth.\n\nMerged from the former Jai-parity goal: Jet does everything Jai does: safe by default, with expert opt-outs.",
       "status": "active",
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -230565,7 +230728,7 @@
         }
       ],
       "created": "2026-11-04T18:09:26.984Z",
-      "updated": "2026-11-15T17:44:48.885Z",
+      "updated": "2026-11-16T01:31:47.720Z",
       "updatedBy": "Main"
     },
     {
@@ -230574,6 +230737,11 @@
       "body": "Package roots, typed configuration and environment ownership are closed, and Jet with Jetpack replaces Nix: native packages translated from Nixpkgs, environments, one-command install, a registry with short-lived publish identities, and FFI v3 packaging of foreign code. Owner order 2026-11-09: all speed and size work is G11, a feature's own paired perf cells included (the Nix benchmark #6071 moved there). Removing Jet's own C dependencies is G1. JetOS is frozen (#3590 owner rule). Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is seventh.\n\nMerged from the former G9 (Jetpack beats Nix): upgrades need no hand edits (#6068, scheduled for v1 release preparation by owner order 2026-11-06). The KitSpeed cells are G11.\n\nOne card per stream: Jetpack engine port #3590, Nixpkgs translation #3402, package roots and typed configuration #4275, typed package records #6522, package-manager behaviors #6632, fn build permissions #6621, Nix cache admission #6646, case-suite seams #6317, workspaces #5965, one manifest #5969, config precedence #6041, config export #6029, multi-configuration builds #5006, install #5950, registry publish policy #6025, infrastructure package #6027, path case and module resolution #4613, linking model #5088, C source import #5034, FFI v3 #6366 (trait Language #6519, binder kit #6517, licenses #6521, gallery #6503-#6511), portable wasm seed #6186, build server design #6322, runtime pack without jet-env #6628, supply-chain security #5455 (#5457-#5462), upgrades #6068, Core as a package (ballot) #6145.",
       "status": "active",
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -230596,7 +230764,7 @@
         }
       ],
       "created": "2026-11-04T18:09:34.103Z",
-      "updated": "2026-11-15T17:44:53.608Z",
+      "updated": "2026-11-16T01:32:00.248Z",
       "updatedBy": "Main"
     },
     {
@@ -230652,6 +230820,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
+        {
           "at": "2026-11-15",
           "by": "Main",
           "text": "OWNER ORDER 2026-11-15 ~13:10: one goal agent slot does Jet's native debugger, profiler and perf (G5: #6730 jet debug, #4632 jet perf, #6918 debug info, #6841, #6919), native only with no lldb, gdb or Linux perf dependency. The G9 slot (GoalsB-5-2) takes it after its returned fixes; G9 is unstaffed until an agent snowballs past G6."
@@ -230683,7 +230856,7 @@
         }
       ],
       "created": "2026-11-04T18:09:58.998Z",
-      "updated": "2026-11-15T18:34:44.447Z",
+      "updated": "2026-11-16T01:31:50.063Z",
       "updatedBy": "Main"
     },
     {
@@ -230692,6 +230865,11 @@
       "body": "Memory checks accept every safe program and refuse every unsafe one (including the 2026-11-04 double close), zero leaks, zero undefined behavior, proven task outcomes and cancellation, and closed authority boundaries. Rust-level safety or better, easier than Rust: every memory-safe program is accepted, neither over- nor under-strict; never copy where Rust borrows or moves; #Unsafe is the only opt-out. Owner order 2026-11-09: all speed and size work is G11 (perf rows found on these cards are on #2858 and #6085). Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is ninth.\n\nOne card per stream: memory model and stored references #4620 (foundations review and its ratified ballots #3645), live links #4500 (stored sibling links #4756), over-strict rejections #6066, swap and replace #4935, owed transitions #4139, native leaks #5014 and structural leak freedom #6567, run-time checks for #Unsafe #6011, zero undefined behavior #6323, ownership checks the Rust checker had #6634, task outcomes and cancellation #3239 (the task APIs it proves are G3: #2279, #4637, #6526, #6539), authority and sandbox boundaries #4268, compiler-private text read #4907, function-value copy #6548, file maps #6706, call-site copies #6611, trait receiver mismatch #6732, verify-batch miscompile catch #6616.",
       "status": "active",
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -230709,7 +230887,7 @@
         }
       ],
       "created": "2026-11-04T18:09:37.154Z",
-      "updated": "2026-11-15T17:44:52.618Z",
+      "updated": "2026-11-16T01:31:57.764Z",
       "updatedBy": "Main"
     },
     {
@@ -230718,6 +230896,11 @@
       "body": "The performance gate passes against every peer and the machine ceiling: measurement gate and dashboards, self-compile memory and time, codegen equal to hand-written assembly, and the smallest binaries (see G4, G10 and G12). Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is tenth.\n\nMerged from G4 (Self-compile in about 50 ms): The compiler checks and builds itself in about 50 ms, through per-phase throughput targets toward 500k lines per second.\n\nMerged from G10 (Codegen beats C): Native codegen emits near-perfect machine code and beats C on every required perf cell (Jet/C < 1.00; Jet/Rust <= 1.05 on the same run) at --release, with identical output and one meaning on every tier. Exploit what C can't assume: no aliasing between distinct values, sema-proven bounds and loop facts, whole-program compilation, comptime specialization, automatic layout and per-chip builds. Epic card #6205; streams #3039 C6, #6201, #6203. Owner direction 2026-10-29.\n\nMerged from G12 (Smallest binaries: every program within 1.5-2x of hand-written assembly): Owner order 2026-10-30. Jet default builds produce the smallest output of any language, for every program, by design: each program is within 1.5-2x (target 1.5x, hard bound 2x) of an optimized hand-written x86-64 assembly reference with the same behavior. The runtime is pay-for-what-you-use: the program reference graph alone decides what is linked, with lazy subsystem start, no unconditional startup, no unwind tables the runtime never uses, and symbols in a sidecar. Hello targets 504 B (floor 253 B). Plan: Docs/proposals/hello-size-architecture-2026-10-30.md.\n\nOwner order 2026-11-09: all speed and size work is in this goal, wherever it was filed. Whole speed cards moved here; the speed and size rows of feature cards moved to the matching card here, or to #2858. The climbs moved from G13 (#5479 compile speed, #6328 binary size, #6414 run time, #6483 Pareto census, #6501 empty-program floor, #6502 beyond the hand-written ceiling, #6533 startup, #6639 scripting speed, #6642 expert performance APIs) keep the 2026-11-08 horizon rule: none blocks a card, milestone, release or gate, and their targets are not pass/fail criteria elsewhere.",
       "status": "active",
       "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Owner order 2026-11-15 ~20:30 (supersedes the 2026-11-08 order and the 06:00 speed deadline): precompiled Core is finished first, ASAP, with up to all 4 agents (#6759 c20, c15, c1, c2, c9, c4; #6501 c15). Then the goals run in the chain G6 -> G9 -> G5 -> G3 -> G10 -> G7 -> G11: 3 of the 4 agents always work the current goal and 1 works the goal after it (start: 3 on G6, 1 on G9). G6 and G9 are both due 2026-11-16 06:00. Speed work (#5479 steps 2-5) moves to G11; the type-ID switch is G6's first step; ownership keyed by ids moves into G10 (#6066)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -230785,7 +230968,7 @@
         }
       ],
       "created": "2026-11-04T18:09:54.108Z",
-      "updated": "2026-11-15T17:44:54.513Z",
+      "updated": "2026-11-16T01:32:02.690Z",
       "updatedBy": "Main"
     },
     {
