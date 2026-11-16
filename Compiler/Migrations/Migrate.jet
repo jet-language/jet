@@ -1,5 +1,5 @@
 // Runs one registered migration plan over files.
-// Usage: jet run Compiler/Migrations/Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...
+// Usage: jet run Compiler/Migrations/Migrate.jet -- <plan> [--write] [--against DIR] [--list FILE] [--source-list FILE] PATH...
 // Each PATH, and each line of a `--list` file, names a file the plan reads by
 // its kind: a `.jet` or `.template` source, a `.md` file, or any other text,
 // such as an expected output. Each line of a `--source-list` file names a file
@@ -7,6 +7,11 @@
 // output. Without `--write` the files are only read. The run prints
 // `EDIT <path> <count>` for each file the plan changes, `SKIP <site>: <reason>`
 // for each site it leaves alone, and a closing `TOTAL` line.
+// With `--against DIR` the run rewrites nothing: it checks that each file
+// means what DIR's copy at the same path means, that copy being the file
+// before the plan rewrote it. It prints `CHANGED <path>: <reason>` for each
+// file whose meaning differs and a closing `SAME <same> of <files> files`
+// line, and exits 1 when any file changed meaning.
 use {
     files: core.files
     process: core.process
@@ -40,6 +45,15 @@ migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) ->
     }
 }
 
+// Why a plan's rewrite `after` of `before` does not mean what `before`
+// means, or None when it does.
+migration_same_meaning: fn(plan: String, path: String, before: String, after: String, source: Bool) -> String? {
+    if plan == {
+        "paren-tuple1" -> paren_tuple1_same_meaning(path, before, after, source)
+        else -> panic("the {plan} plan has no meaning check")
+    }
+}
+
 migration_listing: fn(path: String, into: &[String]) {
     listing: files.read(path) ?? panic("cannot read {path}: {err}")
     loop line in listing.split("\n") {
@@ -52,17 +66,23 @@ run: fn() {
     names := [String]{}
     loop known in migration_plans() -> names.push(known.name.copy())
     if args.len() == 0 || !names.contains(args[0]) {
-        panic("usage: Migrate.jet -- <plan> [--write] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
+        panic("usage: Migrate.jet -- <plan> [--write] [--against DIR] [--list FILE] [--source-list FILE] PATH...; plans: {names.join(", ")}")
     }
     plan: args[0]
     write := false
     paths := [String]{}
     sources := [String]{}
+    // The index of `--against`'s DIR in `args`, or -1.
+    against := -1
     index := 1
     loop index < args.len() {
         arg: args[index]
         if {
             arg == "--write" -> write = true
+            arg == "--against" && index + 1 < args.len() -> {
+                against = index + 1
+                index += 1
+            }
             arg == "--list" && index + 1 < args.len() -> {
                 migration_listing(args[index + 1], paths)
                 index += 1
@@ -78,6 +98,21 @@ run: fn() {
     // A file named in both lists is read once, as a source.
     loop source in sources {
         if !paths.contains(source) -> paths.push(source.copy())
+    }
+    if against > 0 {
+        same := 0
+        loop path in paths {
+            after: files.read(path) ?? panic("cannot read {path}: {err}")
+            before: files.read("{args[against]}/{path}") ?? panic("cannot read {args[against]}/{path}: {err}")
+            if migration_same_meaning(plan, path, before, after, sources.contains(path)) == .Val(why) {
+                print("CHANGED {path}: {why}")
+                next
+            }
+            same += 1
+        }
+        print("SAME {same} of {paths.len()} files")
+        if same < paths.len() -> process.exit(1)
+        return
     }
     total := 0
     changed := 0
