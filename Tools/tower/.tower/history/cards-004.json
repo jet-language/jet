@@ -102353,6 +102353,87 @@
       "completedAt": "2026-11-13T06:05:42.066Z",
       "questions": [],
       "retiredAt": "2026-11-16T06:06:23.681Z"
+    },
+    {
+      "id": "c0eo2mnm",
+      "num": 4499,
+      "title": "Map and Set cannot be keyed by a user-defined type with custom equality and ordering (needed for OsPath path keys)",
+      "body": "The Rust-to-Jet port needs maps and sets keyed by a native path whose equality and ordering are component-wise, as Rust's Path Eq/Ord/Hash are (Path::components: 'a//b' == 'a/b', trailing separators and '.' are normalized away). The runtime lane reports that Jet's Map/Set key restriction rules this out today, so the CLI transaction port (CT01), REPL history and the Driver can't key on OsPath faithfully. Workarounds such as keying by raw encoded bytes, String, digest or FileID change behaviour and are refused. Needed: Map/Set keys over user types that implement the canonical Equatable/Comparable (and hashing) traits, on every tier (I9). If that's a language or Core API change, it needs an owner decision; the OsPath trait implementations themselves belong to the Core path-components owner.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner question C-G3-1 (CONFLICTS.md): PriorityQueue.new() pops the largest item first (core-library.md:474), but by(key) pops the smallest key first, so by(x -> x) and new() disagree. The from_by/from_by_desc spelling Main chose on 2026-11-07 goes in the same question."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 01:20: c1 met on the a0_036 release gate. The card stays open only for the owner conflict logged earlier: PriorityQueue.new() is a max-heap, while the D-ORDER-BY1 code says lowest-first."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-07 (owner asleep; for the owner to confirm or veto). (1) The spelling of the from(xs) variants is not in the ratified text. Main ruled PriorityQueue.from_by(xs, key)/from_by_desc(xs, key) and the same on Rank, following the ballot rule \"the same by and by_desc spelling lists already use for sorting\" (sort -> sort_by). (2) Conflict to resolve: D-ORDER-BY1 option A code shows `PriorityQueue.new()   // lowest first only`, and its lesson says a priority queue gives back the smallest item first. But the native PriorityQueue is a max-heap: new()/from() pop the highest first, and Examples/Collections/Iterators/IterToolsAudit.jet prints a highest-first to_sorted_list. No spec makes it a max-heap. Tonight by(key) pops the smallest key first and by_desc the largest (as ratified), and new()/from() stay highest-first, so by(x -> x) pops opposite to new(). Owner choice: flip new()/from() to lowest-first (as the ballot premise says) with a full cutover of callers and goldens, or keep the max-heap and correct the decision text."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4757 \"PriorityQueue and Rank per-instance pure key ordering\" (CardTrim 2026-10-28: D-ORDER-BY1 is hosted on #4499; PriorityQueue/Rank ordering is one of its steps). Body: D-ORDER-BY1=A The container stores one pure key function and compares keys with the key type's order. by_desc reverses that comparison. The key function must have an empty effect row, the rule callbacks already follow. from(xs) gains by and by_desc variants. Equality between two containers compares items and ignores order functions. Implementation areas: Compiler/JetFoundation/Source/{Collections.jet,Registry/BuiltinStatics.jet,TIR/TIR.jet} constructor/operation rows; Compiler/JetSema callback effects and collection calls; Jet backend/runtime PriorityQueue/Rank storage and order key; Core/collections/collections.jet Spec/registry: Docs/spec/reference/core-library.md PriorityQueue/Rank; synta"
+        },
+        {
+          "at": "2026-10-05",
+          "by": "Pip",
+          "text": "Distill 2026-10-05 (Gren, youtube DuGy1tmKP-w 32:06-33:53; Roc DzhIprQan68 ~27:00). Gren passes a different compare module to get a reverse-sorted string dict beside a normal one; type classes allow one instance per type. Jet KeyBy is per type (D-KEY-TRAITS1=A), and PriorityQueue.new()/from(xs) take no order or key (core-library.md:284), so a max-heap or descending ordered map needs a wrapper type, while lists already have sort_by/sort_by_desc (core-library.md:558-559). Fills a gap under this card's law: decide whether ordered containers accept a per-instance order (a typed key/order function at construction) or whether the wrapper type is the documented route; a new public parameter is an owner gate if chosen. Roc's equality/hash/order from one ability confirms one-key equality, hash and order (Jet's KeyBy makes disagreement impossible).\nTeaching witness (v3-P2 PYB-96, 4M87qBgpafk 6:25-6:28): the course diagram says every value hashes to a unique address and that set uniqueness makes hashing work; the key-trait docs should say hashes collide and equality resolves them (Hash + Eq, E0506)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #4757) PriorityQueue and Rank per-instance pure key ordering",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "7d03b85290 (PriorityQueue.by/by_desc/from_by/from_by_desc) and 7358c18b48 (Rank.by …): release gate of a0_036 at 8a85d45051 (candidate s2, 2026-11-08 01:10, all suites 0 lost, 0 untracked failures). PASS: golden Examples/Collections/KeyedPriorityQueue and KeyedRank at o0, o1 and o2; ui priority_queue_key_effect and rank_key_effect.",
+          "at": "2026-11-08T06:12:39.225Z"
+        },
+        {
+          "n": 2,
+          "text": "Owner ruling on C-G3-1: PriorityQueue.new() and PriorityQueue.from(xs) pop the smallest item first by its own order, the same as by(key); by_desc and from_by_desc pop the largest first. Every caller, example, case and Docs/spec/reference/core-library.md:474 move in one cutover, and a golden passes on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 1130a16d2a (G12Docs-62b): PriorityQueue.new() and from(xs) pop smallest-first by their own order, the same as by(key). by_desc and from_by_desc pop largest-first. core-library.md is updated, and callers, examples and cases moved in the same commit. On seed-b14, goldens Collections/KeyedPriorityQueue, PopTable and Iterators/IterToolsAudit each give PASS 3 (o0, o1, o2), REFUSED 0.",
+          "at": "2026-11-13T07:39:00.844Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:task"
+      ],
+      "parentId": "c0iuv3zr",
+      "needsAcceptance": false,
+      "created": "2026-10-04T00:06:29.585Z",
+      "updated": "2026-11-13T07:39:02.444Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ],
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-13T07:39:02.444Z",
+      "questions": [],
+      "retiredAt": "2026-11-16T07:39:59.295Z"
     }
   ]
 }

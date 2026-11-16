@@ -25727,6 +25727,370 @@
       "outcome": "A",
       "ratifiedAt": "2026-09-15",
       "retiredAt": "2026-11-16T02:21:00.557Z"
+    },
+    {
+      "id": "D-KEY-TRAITS1",
+      "cardId": "c0eo2mnm",
+      "group": "core",
+      "title": "User-defined equality for Map and Set keys",
+      "gist": "How should a type tell Map and Set when two of its values count as the same key?",
+      "lesson": "A Map finds values by key; a Set keeps one copy of each value. Today both compare raw fields, so values a type calls equal can become separate entries. Every option lets a type define key sameness. They differ in how much the author writes, and whether ==, sorting and lookup can ever disagree.",
+      "explainer": "Words first. A Map stores values under keys, like a dictionary stores definitions under words. A Set stores each value once, like a guest list. Equality decides whether two keys are the same. Ordering decides which key sorts first, and Jet keeps Map keys sorted. Hashing turns a value into a number that picks a storage bucket quickly. It never decides sameness on its own.\n\nToday Jet checks a key by looking at its fields. A struct whose fields are numbers, text or other such structs is accepted, and Map compares those fields exactly. A hand-written equal function on the type is ignored by Map. So == can say two emails match while the Map stores both.\n\nOption A adds one small trait, KeyBy. A type writes one function, key, that returns an ordinary value such as lowercase text. Jet builds ==, ordering, sorting, Map lookup and Set hashing from that one value. Because everything comes from one value, the rules cannot contradict each other. The author proves no comparison laws and writes no hashing code. Choosing the right key is still the author's job, checked by ordinary tests.\n\nOption B keeps today's field rules and adds a wrapper, Key<T>. The author writes equal, compare and hash by hand, then wraps every key with Key.new. Option C honours the same three hand-written functions directly, with no wrapper. B and C both need a new public hashing API. Both trust the author to keep three functions consistent.\n\nReading the code: x := ... creates a changeable variable. [Email:Int]{} creates an empty Map from Email to Int. m[k] = 1 stores 1 under k. m.get(k) ?? 0 looks k up and gives 0 when it is missing. impl Email.KeyBy { ... } attaches the KeyBy trait to Email.\n\nEdge cases. Under A a lookup cannot miss a stored key, because the key value uses Jet's own lawful comparisons. Under B and C a wrong hand-written rule can make a lookup miss, though it never corrupts memory. Re-inserting an equal key replaces the value and keeps the first stored key, under every option.",
+      "story": "Ana is porting the Jet command-line tool from Rust. It keeps tables keyed by file paths, and a//b and a/b must land in one entry, exactly as in Rust. Her sign-up demo has the same problem with emails that differ only in capital letters.",
+      "inWild": "// https://doc.rust-lang.org/std/path/struct.Path.html\nlet mut seen = std::collections::BTreeMap::new();\nseen.insert(std::path::PathBuf::from(\"a//b\"), 7);\nassert_eq!(seen.get(std::path::Path::new(\"a/b\")), Some(&7));",
+      "detail": "Current code. Compiler/JetSema/Source/Sema/Comparability.jet:367-375 and 422-465 accept a Map key by walking its fields; a hand-written equal is not consulted. Compiler/JetSema/Source/Sema/Expressions/Literals.jet:552-553 holds the E0502 refusal text, which also refuses lists as keys.\n\ncrates/jet-foundation/src/Collections.rs:75-100 keeps separate Map-key and Set-element checks. crates/jet-codegen/src/Prelude/Core.rs:2681 stores Map in a sorted BTreeMap. No public Hash or KeyHasher declaration exists today.\n\nScope. Card #4499 needs path keys for the command-line port. The OSPath type and its component rules belong to D-OSPATH-NATIVE1 (#4378), which uses whichever mechanism this vote picks. Under A this ballot amends D-MAP-KEY1=A twice: KeyBy types become keys, and lists of eligible keys become keys. Sorted Map iteration stays. Examples are proposed, not run.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One comparison key (KeyBy)",
+          "detail": "A type writes one function that returns its comparison key. Jet derives ==, ordering, sorting, Map lookup and Set hashing from that key, so they always agree. Ordinary structs keep today's automatic field rules unchanged.\n\nBeginner: write fn key(self) returning the value that should decide sameness, often one field. Expert: return a tuple for a multi-part key, or a list for a path-like key. No separate equality, ordering or hash laws need proving, because all three come from one value.\n\nWhether that value matches the program's idea of identity is still the author's choice, and ordinary tests check it. For example, key returning text.lower(self.address) makes Ana@Example.com and ana@example.com one entry. Returning self.address unchanged makes them two entries again.\n\nTypes that already hand-write equal or compare and are used as keys are migrated by jet fix, so no existing behavior changes. OSPath from D-OSPATH-NATIVE1 uses this mechanism. Its key is its list of path components, so a//b and a/b are one entry.",
+          "technical": "Core adds trait KeyBy with one method, fn key(self) -> K, where K is the trait's associated key type (D-LIB2). key must be pure and infallible: no effect row and no error suffix. Otherwise E0502 names the effect or error.\n\nK must be Map-eligible for Map use and Set-eligible for Set use. Eligible now includes [T] for eligible T, ordered item by item with a shorter prefix first. K may be another KeyBy type; a cycle is E0502. Float stays ineligible.\n\nA KeyBy type gets Equatable, Comparable and internal hashing derived from key. A hand-written equal or compare, or a signed marker for those traits, on the same type is a new error naming both declarations. A type with hand-written equal or compare and no KeyBy stops being a key; E0502 suggests KeyBy.\n\nMigration for those types, which are keys today through the field walk (Comparability.jet:446-453). jet fix finds each one used as a Map key or Set element. If its equal compares one derived value, f(self.x) == f(other.x), KeyBy returns f(self.x) and the hand-written equal and compare are deleted. Otherwise KeyBy returns the tuple of all fields, exactly today's Map identity. The old equal becomes the named method equal_by_rule, and existing == calls on that type are rewritten to it, so both behaviors stay.\n\nIn the second case, equality reached through generic code, such as list contains or assert_eq, cannot be rewritten at its site. jet fix lists those uses for review.\n\nThe implementing type may not hold Shared, Cell, Atomic, weak or native-handle fields at any depth, so its key cannot change while stored. Such fields are not key-eligible today either, so no current key type is excluded. Each insert, get or remove calls key once on its argument. A computed key is stored beside its entry; a key that only reads fields is read in place.\n\nRe-inserting an equal key replaces the value and keeps the first stored key. Set union and intersection keep left-side values; difference keeps left-only values. Iteration follows key order. Every tier uses the same derived code, and no public hasher or seed is exposed.",
+          "code": "use core.text.parse as text\n\nstruct Email { address: String }\n\n// Two emails are the same key when their lowercase spellings match.\nimpl Email.KeyBy {\n    fn key(self) -> String { text.lower(self.address) }\n}\n\nsignups := [Email:Int]{}                      // empty map: Email -> count\nsignups[Email{address: \"Ana@Example.com\"}] = 1\nprint(signups.get(Email{address: \"ana@example.com\"}) ?? 0)  // 1\nprint(Email{address: \"ANA@EXAMPLE.COM\"} == Email{address: \"ana@example.com\"})  // true\n// Adding impl Email.Equatable as well is an error: KeyBy already defines =="
+        },
+        {
+          "key": "B",
+          "name": "Explicit Key wrapper",
+          "detail": "Keep today's field rules for ordinary keys. Add one Core wrapper, Key<T>, whose Map and Set behaviour calls the type's hand-written equal, compare and hash.\n\nBeginner: learn the wrapper and three trait functions for any custom key. Expert: write all three and keep them consistent; wrap at every insert and lookup. A wrong rule can make lookups miss but cannot corrupt memory.",
+          "technical": "Key.new(^T) owns its value; T needs Equatable, Comparable for Map and Hash for Set. Missing traits are front-end errors. The new public trait is Hash.hash(self, state: &KeyHasher). KeyHasher.write(value) accepts any Set-eligible value; its seed is runtime-owned and never exposed.\n\nLaws are the author's duty: compare says Equal exactly when equal is true, ordering is consistent, and equal values hash alike. The compiler checks signatures, purity and immutability only. Replacement, removal and Set representative rules match A.",
+          "code": "use core.text.parse as text\n\nstruct Email { address: String }\n\n// Three hand-written functions that the author must keep consistent.\nimpl Email.Equatable {\n    fn equal(self, rhs: Email) -> Bool { text.lower(self.address) == text.lower(rhs.address) }\n}\nimpl Email.Comparable {\n    fn compare(self, rhs: Email) -> Ordering { text.lower(self.address).compare(text.lower(rhs.address)) }\n}\nimpl Email.Hash {\n    fn hash(self, state: &KeyHasher) { state.write(text.lower(self.address)) }\n}\n\nsignups := [Key<Email>:Int]{}                 // keys must be wrapped\nsignups[Key.new(Email{address: \"Ana@Example.com\"})] = 1\nprint(signups.get(Key.new(Email{address: \"ana@example.com\"})) ?? 0)  // 1"
+        },
+        {
+          "key": "C",
+          "name": "Honour hand-written traits directly",
+          "detail": "Map and Set call the type's hand-written equal, compare and hash with no wrapper. Ordinary structs keep today's field rules.\n\nBeginner: ordinary Map syntax, but three trait functions to write. Expert: full control over each rule, with the duty to keep all three consistent. A wrong rule can make lookups miss but cannot corrupt memory.",
+          "technical": "Uses the same new public Hash and KeyHasher API, laws and immutability checks as B. Map uses compare; Set uses hash then equal. The compiler checks signatures, purity and immutability, not mathematical laws.",
+          "code": "use core.text.parse as text\n\nstruct Email { address: String }\n\n// Three hand-written functions that the author must keep consistent.\nimpl Email.Equatable {\n    fn equal(self, rhs: Email) -> Bool { text.lower(self.address) == text.lower(rhs.address) }\n}\nimpl Email.Comparable {\n    fn compare(self, rhs: Email) -> Ordering { text.lower(self.address).compare(text.lower(rhs.address)) }\n}\nimpl Email.Hash {\n    fn hash(self, state: &KeyHasher) { state.write(text.lower(self.address)) }\n}\n\nsignups := [Email:Int]{}                      // Map calls compare; Set calls hash and equal\nsignups[Email{address: \"Ana@Example.com\"}] = 1\nprint(signups.get(Email{address: \"ana@example.com\"}) ?? 0)  // 1, if the three rules agree"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust Path compares components, while BTreeMap and HashSet use key traits.",
+          "code": "// https://doc.rust-lang.org/std/path/struct.Path.html\nlet mut seen = std::collections::BTreeMap::new();\nseen.insert(std::path::PathBuf::from(\"a//b\"), 7);\nassert_eq!(seen.get(std::path::Path::new(\"a/b\")), Some(&7));"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One key value makes equality, sorting, Map and Set agree by construction. Authors write one short function, prove no comparison laws and never write hashing code.",
+        "gains": [
+          "==, sorting, Map and Set can never disagree.",
+          "A custom key needs one short function and no hash code.",
+          "No new public hashing API is needed."
+        ],
+        "losses": [
+          {
+            "loss": "A computed key is stored once beside each entry.",
+            "mitigation": "computing and storing are separate costs. key runs once per insert, get or remove, never during the search. Only computed keys are stored, about the key's own size per entry; keys that only read fields are read in place and add nothing."
+          },
+          {
+            "loss": "Existing key types with a hand-written equal or compare stop being keys until migrated.",
+            "mitigation": "jet fix migrates each one. A simple equal becomes the key; otherwise the key is all fields, as Map uses today, and == calls move to the old equal, now equal_by_rule."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Wrapping every key adds ceremony, and authors must still keep three hand-written functions consistent."
+          },
+          {
+            "key": "C",
+            "reason": "Three hand-written functions can quietly disagree and make lookups miss. It also needs a new public hashing API."
+          }
+        ],
+        "tradeoff": "A asks for one key function instead of three. Its costs are one stored copy of a computed key and a jet fix migration for key types that already hand-write equal or compare."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Run the Email and path examples on every tier: both spellings find one entry and == agrees. Check refusals for an effectful or fallible key, hand-written equal beside KeyBy, a Shared field, a key cycle and a Float key.\n\nCheck list keys order item by item, re-insert keeps the first key, Set union keeps left values and sorted iteration stays.\n\nMigration: an Email with hand-written equal comparing lower(address) becomes KeyBy with that key. A type with an unrecognized equal gets the all-fields key and equal_by_rule, and its Map results and == results match before and after jet fix.",
+      "surface": {
+        "gist": "How should a type tell Map and Set when two of its values count as the same key?",
+        "lesson": "A Map finds values by key; a Set keeps one copy of each value. Today both compare raw fields, so values a type calls equal can become separate entries. Every option lets a type define key sameness. They differ in how much the author writes, and whether ==, sorting and lookup can ever disagree.",
+        "trio": {
+          "current": {
+            "note": "Map compares key fields directly and ignores a hand-written equal.",
+            "code": "// Compiler/JetSema/Source/Sema/Comparability.jet:446-453\n// A struct key qualifies when every field qualifies,\n// and Map then compares those raw fields.\n// A hand-written equal on the type is not consulted.\n// crates/jet-codegen/src/Prelude/Core.rs:2681\nstruct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust paths compare by components, so both spellings find one entry.",
+            "code": "// https://doc.rust-lang.org/std/path/struct.Path.html\nlet mut seen = std::collections::BTreeMap::new();\nseen.insert(std::path::PathBuf::from(\"a//b\"), 7);\nassert_eq!(seen.get(std::path::Path::new(\"a/b\")), Some(&7));"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One comparison key (KeyBy)",
+            "gist": "One key function; Jet derives ==, sorting, Map and Set from it.",
+            "gains": [
+              "==, sorting, Map and Set can never disagree.",
+              "A custom key needs one short function and no hash code.",
+              "No new public hashing API is needed."
+            ],
+            "losses": [
+              "Computed keys are stored once per entry; field keys cost nothing.",
+              "Key types with hand-written equal migrate through jet fix."
+            ],
+            "proposed": {
+              "code": "use core.text.parse as text\nstruct Email { address: String }\n\n// One key decides ==, sorting, Map and Set.\nimpl Email.KeyBy {\n    fn key(self) -> String { text.lower(self.address) }\n}\n\nsignups := [Email:Int]{}\nsignups[Email{address: \"Ana@Example.com\"}] = 1\nprint(signups.get(Email{address: \"ana@example.com\"}) ?? 0)  // 1\nprint(Email{address: \"ANA@EXAMPLE.COM\"} == Email{address: \"ana@example.com\"})  // true"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Explicit Key wrapper",
+            "gist": "Hand-write three rules and wrap every key in Key.new.",
+            "gains": [
+              "Custom key use is visible at every Map call."
+            ],
+            "losses": [
+              "Every insert and lookup needs Key.new.",
+              "Authors keep equal, compare and hash consistent by hand."
+            ],
+            "proposed": {
+              "code": "impl Email.Equatable { fn equal(self, rhs: Email) -> Bool { ... } }\nimpl Email.Comparable { fn compare(self, rhs: Email) -> Ordering { ... } }\nimpl Email.Hash { fn hash(self, state: &KeyHasher) { ... } }\n// each body lowercases both addresses; the author keeps all three consistent\n\nsignups := [Key<Email>:Int]{}\nsignups[Key.new(Email{address: \"Ana@Example.com\"})] = 1\nprint(signups.get(Key.new(Email{address: \"ana@example.com\"})) ?? 0)  // 1"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Honour hand-written traits directly",
+            "gist": "Hand-write three rules; Map and Set call them directly.",
+            "gains": [
+              "Experts can write any equality, ordering and hash."
+            ],
+            "losses": [
+              "A wrong rule can make lookups miss stored keys.",
+              "Needs a new public hashing API."
+            ],
+            "proposed": {
+              "code": "impl Email.Equatable { fn equal(self, rhs: Email) -> Bool { ... } }\nimpl Email.Comparable { fn compare(self, rhs: Email) -> Ordering { ... } }\nimpl Email.Hash { fn hash(self, state: &KeyHasher) { ... } }\n// each body lowercases both addresses; the author keeps all three consistent\n\nsignups := [Email:Int]{}\nsignups[Email{address: \"Ana@Example.com\"}] = 1\nprint(signups.get(Email{address: \"ana@example.com\"}) ?? 0)  // 1 if the rules agree"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One key value makes equality, sorting, Map and Set agree by construction. Authors write one short function, prove no comparison laws and never write hashing code.",
+          "gains": [
+            "==, sorting, Map and Set can never disagree.",
+            "A custom key needs one short function and no hash code.",
+            "No new public hashing API is needed."
+          ],
+          "losses": [
+            {
+              "loss": "A computed key is stored once beside each entry.",
+              "mitigation": "about the key's own size; field-reading keys are read in place and add nothing."
+            },
+            {
+              "loss": "Key types with hand-written equal stop being keys until migrated.",
+              "mitigation": "jet fix turns a simple equal into the key, or keeps today's field key and old == meaning."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Wrapping every key adds ceremony, and authors must still keep three hand-written functions consistent."
+            },
+            {
+              "key": "C",
+              "reason": "Three hand-written functions can quietly disagree and make lookups miss. It also needs a new public hashing API."
+            }
+          ],
+          "tradeoff": "A asks for one key function instead of three; it costs one stored computed key and a jet fix migration."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-04T01:12:35.166Z",
+      "situation": "Jet's Map is a lookup table from keys to values, and its Set is a collection that keeps each value once. Today both decide whether two keys are the same by comparing their raw stored fields, even when the type has its own idea of equality. So Ana@Example.com and ana@example.com, or the file paths a//b and a/b, become two separate entries. That is why the Jet command-line port cannot keep its path-keyed tables faithful to the Rust original. Beginners meet it as == saying true while the Map disagrees, and experts porting code meet it as quiet duplicate entries. You are deciding how a type tells Map and Set what the same key means. We recommend that a type name one plain comparison key, from which Jet derives equality, sorting, hashing and Map and Set behaviour, so they can never disagree.",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-04",
+      "retiredAt": "2026-11-16T07:39:59.297Z"
+    },
+    {
+      "id": "D-ORDER-BY1",
+      "cardId": "c0eo2mnm",
+      "group": "core",
+      "title": "Choosing the order of a priority queue or ordered set when you create it",
+      "situation": "A priority queue hands back items in order, and an ordered set keeps its items sorted. In Jet both always use the item type's own order today. So a queue that should serve the highest score first, or jobs by deadline, needs a new wrapper type just to flip or change the order. You decide whether these containers accept an order when they are made; we recommend the same by and by_desc spelling lists already use for sorting.",
+      "gist": "Should a priority queue or ordered set take its sorting order when you create it, instead of needing a wrapper type?",
+      "lesson": "A priority queue always gives back the smallest item first. An ordered set, called Rank in Jet, keeps items sorted. Both use the type's own order today. A lets you pass an order when you create one, with the by and by_desc words lists already use for sort_by. B adds one Core wrapper that reverses any order. C makes the order part of the container's type.",
+      "explainer": "A priority queue is a container whose pop always returns the item that comes first in some order. An ordered set keeps its items sorted and unique. Jet's PriorityQueue and Rank both take the order from the item type. Numbers and text sort ascending, and a struct uses the order its type declares (D-KEY-TRAITS1).\n\nThat is fine until one program needs two orders for the same type. Popping the largest score, serving jobs by deadline, or keeping names sorted by length all need a new wrapper type today. Lists already avoid this, because sort_by and sort_by_desc take a key function.\n\nOption A brings the list spelling to these containers. PriorityQueue.by(key) and PriorityQueue.by_desc(key) make a queue ordered by that key. Rank.by and Rank.by_desc make an ordered set the same way. new() and from(xs) keep the type's own order. When two containers with different orders combine, the result keeps the receiver's order.\n\nOption B adds one Core wrapper, Desc<T>, that reverses any order, and keeps everything else. Option C writes the order into the container type, as C++ and Gren do.",
+      "story": "Priya builds a leaderboard that should always pop the highest score. Jet's priority queue pops the lowest. She writes a HighScore wrapper type with its own comparison, converts every score into it and back, and her teammate asks why a number needed a new type.",
+      "inWild": "// Java: the comparator is passed when the queue is created\n// https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/PriorityQueue.html\nvar q = new PriorityQueue<Score>(Comparator.comparing(Score::points).reversed());\n\n// Kotlin\nval q = PriorityQueue(compareByDescending<Score> { it.points })",
+      "detail": "Current state: PriorityQueue.new() and PriorityQueue.from(xs) take no order or key, and Rank.new() and Rank.from(xs) likewise (core-library.md:282, 284). Order and equality come from the type through D-KEY-TRAITS1=A (KeyBy per type). Lists already have sort_by((item) -> key or (a, b) -> Ordering) and sort_by_desc((item) -> key) (core-library.md:558-559). The v3 A2-langs re-read confirmed the gap (note 1).\n\nSources: Gren talk (DuGy1tmKP-w 32:06-33:53), where a reverse-sorted dictionary is made by passing a different compare module, and type classes allow only one instance per type. Roc (DzhIprQan68, about 27:00) makes the same point. Claim languages-a:Q28, attached to #4499.\n\nProven approaches. Java's PriorityQueue and TreeMap and Kotlin's PriorityQueue take a comparator at construction, and this is the most used form in practice. Rust's BinaryHeap takes order from Ord, so a max-heap of a custom key needs Reverse<T> or a newtype. That wrapper friction is a frequent Rust forum topic.\n\nC++ std::priority_queue and Gren's Dict take the comparator as a type or module parameter. That is precise but makes the order part of every signature. Python's heapq takes no key, so programs push (key, item) tuples by hand.\n\nOption A reuses Jet's existing sort_by vocabulary. The key function must be pure, which sema already checks for callbacks. Combining two containers with different orders uses the receiver's order, as Java's addAll does.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Pass the order when you create the container",
+          "detail": "PriorityQueue.by(key) and PriorityQueue.by_desc(key) make a queue ordered by a key function. Rank.by and Rank.by_desc do the same for ordered sets. new() and from(xs) keep the type's own order. Combining two containers keeps the receiver's order.",
+          "technical": "The container stores one pure key function and compares keys with the key type's order. by_desc reverses that comparison. The key function must have an empty effect row, the rule callbacks already follow. from(xs) gains by and by_desc variants. Equality between two containers compares items and ignores order functions.",
+          "code": "scores := PriorityQueue.by_desc((s: Score) -> s.points)\n&scores.push(Score{name: \"Ana\", points: 90})\nbest :: &scores.pop()   // highest points first\n\nby_len :: Rank.by((w: String) -> w.len())"
+        },
+        {
+          "key": "B",
+          "name": "One Core wrapper that reverses order",
+          "detail": "Core gains Desc<T>, a wrapper whose order is the reverse of T's. Containers keep using the type's order. Any other order still needs a custom wrapper type.",
+          "technical": "One generic struct with a reversed KeyBy implementation. Items are wrapped on the way in and unwrapped on the way out. Orders other than reversal, such as by deadline, still need a new type.",
+          "code": "scores := PriorityQueue.new()\n&scores.push(Desc{Score{name: \"Ana\", points: 90}})\nbest :: (&scores.pop()).value"
+        },
+        {
+          "key": "C",
+          "name": "The order is part of the container's type",
+          "detail": "An ordered container's type names its order, such as PriorityQueue(Score, ByPointsDesc). Two queues with different orders are different types.",
+          "technical": "The order becomes a build-time parameter of the container type (D-GENERIC-TYPEFN1). Every signature that holds such a container must name the order.",
+          "code": "ByPointsDesc :: order((s: Score) -> s.points, .Desc)\nscores := PriorityQueue(Score, ByPointsDesc).new()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "PriorityQueue and TreeSet take a comparator when they are created.",
+          "code": "var q = new PriorityQueue<Job>(Comparator.comparing(Job::deadline));\nvar s = new TreeSet<String>(Comparator.comparingInt(String::length));"
+        },
+        {
+          "lang": "Rust",
+          "note": "Order comes from Ord; a max-heap or custom key needs a wrapper.",
+          "code": "// https://doc.rust-lang.org/std/cmp/struct.Reverse.html\nlet mut q = BinaryHeap::new();\nq.push(Reverse(job.deadline));"
+        },
+        {
+          "lang": "C++",
+          "note": "The comparator is a template parameter of the queue type.",
+          "code": "std::priority_queue<Job, std::vector<Job>, ByDeadline> q;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A lets one program use several orders for one type without inventing wrapper types, and it reuses the by and by_desc words Jet already teaches for sorting lists. Java and Kotlin show this is the form people use most.",
+        "tradeoff": "An ordered container now carries one small key function.",
+        "gains": [
+          "Max-heaps and custom orders need no wrapper type.",
+          "Sorting lists and ordering containers use the same words.",
+          "The type's own order stays the default."
+        ],
+        "losses": [
+          {
+            "loss": "Two containers built with different orders can be combined, and the result silently follows one of them.",
+            "mitigation": "The rule is fixed and documented: the receiver's order wins, as in Java. The editor shows each container's order in its hover, so the choice is visible."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B only covers reversal; ordering by a field still needs a hand-written wrapper type."
+          },
+          {
+            "key": "C",
+            "reason": "C makes every signature spell the order, which is heavy for a beginner and rarely needed."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Check that PriorityQueue.by and by_desc pop in key order and reverse key order, with ties stable by insertion. Check the same for Rank.by and Rank.by_desc on first, last and to_list.\n\nCheck that a key function with effects is rejected with the callback diagnostic. Check that union and merge keep the receiver's order. Check that new() and from(xs) behavior is unchanged on every tier.",
+      "surface": {
+        "gist": "Should a priority queue or ordered set take its sorting order when you create it, instead of needing a wrapper type?",
+        "lesson": "Jet's priority queue and ordered set always use the item type's own order. A lets you pass an order when you make one, with the by and by_desc words lists use. B adds one reversing wrapper. C writes the order into the type.",
+        "trio": {
+          "current": {
+            "note": "A highest-first queue needs a hand-written wrapper type.",
+            "code": "scores := PriorityQueue.new()   // lowest first only\n&scores.push(HighScore{s})       // custom wrapper\nbest :: (&scores.pop()).inner"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "The order is passed when the queue is made.",
+            "code": "val q = PriorityQueue(compareByDescending<Score> { it.points })"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Order passed at creation",
+            "gist": "by and by_desc pick the order when you make it.",
+            "gains": [
+              "No wrapper types.",
+              "Same words as sort_by."
+            ],
+            "losses": [
+              "Combining two orders keeps the receiver's."
+            ],
+            "proposed": {
+              "code": "scores := PriorityQueue.by_desc((s: Score) -> s.points)\nbest :: &scores.pop()   // highest first"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A reversing wrapper",
+            "gist": "Core adds Desc<T> to flip any order.",
+            "gains": [
+              "Max-heaps without a custom type."
+            ],
+            "losses": [
+              "Ordering by a field still needs a wrapper."
+            ],
+            "proposed": {
+              "code": "&scores.push(Desc{s})\nbest :: (&scores.pop()).value"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Order in the type",
+            "gist": "The container's type names its order.",
+            "gains": [
+              "Different orders never mix."
+            ],
+            "losses": [
+              "Every signature spells the order."
+            ],
+            "proposed": {
+              "code": "scores := PriorityQueue(Score, ByPointsDesc).new()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives several orders per type with no wrapper types, using words Jet already teaches for sorting.",
+          "gains": [
+            "Custom orders in one line.",
+            "One vocabulary for ordering."
+          ],
+          "losses": [
+            {
+              "loss": "Combining two orders keeps the receiver's.",
+              "mitigation": "A fixed, documented rule shown in hover."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B covers only reversal."
+            },
+            {
+              "key": "C",
+              "reason": "C puts the order in every signature."
+            }
+          ],
+          "tradeoff": "Containers carry a key function."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Two containers built with different orders can be combined, and the result silently follows one of them.",
+          "attempts": [
+            "Reject combining containers with different orders. Rejected: key functions cannot be compared for equality, so the check would be guesswork.",
+            "Fix the receiver's order as the rule and show each container's order in hover. Kept."
+          ]
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T00:58:09.963Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-07",
+      "retiredAt": "2026-11-16T07:39:59.297Z"
     }
   ]
 }
