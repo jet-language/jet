@@ -1,0 +1,61 @@
+// Outcome cases keep their built-in roles everywhere reflection and the
+// codecs read them. `reflect.of(x).case()` names an optional's `Val` or
+// `None` and a result's `Ok` or `Err`, the roles its patterns use; a codec
+// writes absence as `null` and a present value as the value, never as a
+// tagged case. A case catalog lists the declared cases only: an enum whose
+// payload is an `Int` has its two cases, not one per `Int`, and `Int` itself
+// has none.
+use {
+    reflect: core.reflect
+    core.encoding.json
+}
+
+#Error
+Fault: enum {
+    Broken
+}
+
+Slot: enum<T> {
+    Empty
+    Full(T)
+}
+
+#Codable
+Reading: struct {
+    count: Int?
+    label: String?
+}
+
+SLOT_CASES: #run Slot<Int>.reflect().cases.len()
+
+INT_CASES: #run Int.reflect().cases.len()
+
+role: fn(value: Value) -> String {
+    if value.case() == .Val(held) {
+        payload: (loop field in held.fields() -> "{field.name()}={field.value().display()}").join(",")
+        return "{held.name()}[{payload}]"
+    }
+    "-"
+}
+
+outcome: fn(result: Int Fault!) -> String { role(reflect.of(result)) }
+
+maybe: fn(n: Int) -> Int? {
+    if n > 0 -> return n
+    None
+}
+
+checked: fn(n: Int) -> Int Fault! {
+    if n < 0 -> return Err(Fault.Broken)
+    n
+}
+
+run: fn() {
+    print("{role(reflect.of(maybe(3)))} {role(reflect.of(maybe(0)))}")
+    print("{outcome(checked(4))} {outcome(checked(-4))}")
+    print("{role(reflect.of(Slot<Int>.Full(9)))} {role(reflect.of(5))}")
+    print("slot cases {SLOT_CASES}, int cases {INT_CASES}")
+    print(json.to_string(Reading{count: maybe(2), label: None}) ?? panic("json"))
+    back: json.decode<Reading>("{{\"count\":null,\"label\":\"on\"}}")
+    print("{back.count ?? -1} {back.label ?? "none"}")
+}

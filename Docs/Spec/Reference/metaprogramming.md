@@ -687,7 +687,8 @@ value, so a value that can't be copied (one holding a `#SingleUse` value,
 resource state or a borrowed loan) is refused with E0112 too.
 
 An enum value's `case()` returns the case it held when it was captured as a
-`Case`, and `None` for a value of any other type. `Case.name()` is the case's
+`Case`, an outcome value's its built-in case (below), and `None` for a value
+of any other type. `Case.name()` is the case's
 name (a grouped case's last segment), `path()` its `module.Enum.Case` path,
 the same text as `T.reflect().cases[i].path`, and `fields()` its payload as
 the `Field` list a struct value has: a lone unnamed payload is the field
@@ -698,6 +699,27 @@ whichever case it holds; an enum met again inside its own payload holds no
 case there. [`enum_case_meta`](../../../Tests/Run/Reflect/enum_case_meta.jet)
 walks each kind of case. `jet inspect expand --facts reflect` lists each call
 with the type, field and case tree it retains.
+
+An optional or result value holds the built-in case its patterns name: an
+optional `Val` with the present value or `None`, a result `Ok` or `Err` with
+its payload, and a result of an optional one flat three-state case, `Val`,
+`None` or `Err`. A lone payload is the field `value`; a unit success holds
+none. A case's path is the type's path, then the case (`Int?.Val`,
+`Int? app.Lookup!.Err`), and an outcome type's name and path spell each
+declared type it holds by its leaf name and its canonical path. These cases
+show at every reflected boundary, a struct field, an enum payload and
+another outcome's payload included. Absence is never another case: `None` of
+`Int?` is not a named unit case like `Gate.Shut`, and the unit value `()`
+holds no case. The language keeps them apart the same way: `()` is not an
+absent `Int?` (E0113), bare `None` is not an enum's unit case (E0308), and a
+unit case is not an optional's absence (E0305), as
+[`enum_cases_no_unit_collapse`](../../../Tests/UI/enum_cases_no_unit_collapse.jet)
+shows. A case catalog lists declared cases only: an enum with an `Int`
+payload has its declared cases, never one per `Int`, and a codec writes a
+present optional as its value, never as a tagged case
+([`enum_cases_builtin_roles`](../../../Tests/Cases/Reflect/enum_cases_builtin_roles.case)).
+[`OutcomeCases`](../../../Examples/Metaprogramming/Reflection/OutcomeCases.jet)
+walks each outcome at each boundary.
 
 `info.marker(T)` on a `TypeInfo`, `FieldInfo`, `CaseInfo`, `MethodInfo` or `FunctionInfo`
 (and, in a marker body, on a module's `ModuleInfo`) reads the marker
