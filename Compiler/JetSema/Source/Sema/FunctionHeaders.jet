@@ -20,6 +20,7 @@ use jet_foundation.[
     MARKER_MEMO,
     MARKER_OVERFLOW,
     MARKER_REACTIVE,
+    MARKER_RUNTIME,
     MARKER_STATE,
     MARKER_TARGET,
     Marker,
@@ -34,6 +35,7 @@ use jet_foundation.[
     SymbolKind,
     Type,
     overflow_marker_mode,
+    runtime_marker_mode,
 ]
 
 SemaFunctionHeaderMarkerGate: struct {
@@ -349,9 +351,10 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 // the marker rules, and `#Policy` by the policy wrappers, the call routes
 // that apply them (CallablePolicies.jet), and the body checker, which reads
 // `#Overflow(mode)` as the function's arithmetic policy
-// (sema_function_arithmetic_policy).
+// (sema_function_arithmetic_policy) and `#Runtime(mode)` as its run-time
+// policy (sema_function_runtime_policy).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH || name == MARKER_OVERFLOW
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH || name == MARKER_OVERFLOW || name == MARKER_RUNTIME
 }
 
 // The first `#Overflow(mode)` of a function or method opens its lexical
@@ -374,6 +377,32 @@ sema_policy_arithmetic_mode: fn(declarations: [PolicyDeclaration]) -> Arithmetic
         }
     }
     None
+}
+
+// The `#Runtime(.NoEager)` or `#Runtime(.Only)` of a function or method:
+// `PolicyValue.NoEager` or `PolicyValue.Only` for its whole body. A mode
+// the menu does not name is the marker-argument check's report and opens
+// none.
+sema_function_runtime_policy: fn(markers: [Marker]) -> PolicyValue? Never! {
+    loop marker in markers {
+        if marker.name == MARKER_RUNTIME -> return runtime_marker_mode(marker)
+    }
+    None
+}
+
+// The run-time policy a `#Runtime(mode) { … }` block declares, if any.
+sema_policy_runtime_mode: fn(declarations: [PolicyDeclaration]) -> PolicyValue? Never! {
+    loop declaration in declarations {
+        if declaration.key == PolicyKey.Runtime -> return Val(declaration.value)
+    }
+    None
+}
+
+// Whether run-time policy `policy` is `#Runtime(.Only)`: the code it covers
+// runs only in the running program, so no `#run` inside it and no
+// compile-time call of it runs while building (E1022).
+sema_runtime_policy_only: fn(policy: PolicyValue?) -> Bool Never! {
+    policy == Val(PolicyValue.Only)
 }
 
 // The sentry mode a `#Policy(sentries: …) { … }` block declares, if any:

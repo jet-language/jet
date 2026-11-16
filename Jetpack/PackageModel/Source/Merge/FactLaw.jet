@@ -165,7 +165,7 @@ FactValue: enum {
             }
             .Policy(value) -> if value == {
                 .Limit(limit) -> "Policy(Limit({limit:Debug}))"
-                .Enabled | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> "Policy({value:Debug})"
+                .Enabled | .Forbid | .Default | .GateOnly | .Obligations | .Relaxed | .PerSite | .Track | .Skip | .Allow | .On | .Off | .Explicit | .Arithmetic(_) | .NoEager | .Only -> "Policy({value:Debug})"
             }
         }
     }
@@ -228,6 +228,8 @@ pkg_policy_value_display: fn(value: PolicyValue) -> String Never! {
         .Off -> ".Off"
         .Explicit -> ".Explicit"
         .Arithmetic(mode) -> ".{overflow_mode_name(mode)}"
+        .NoEager -> ".NoEager"
+        .Only -> ".Only"
     }
 }
 
@@ -240,13 +242,13 @@ pkg_policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never
         .PerSite -> inner != PolicyValue.Track && inner != PolicyValue.Skip && inner != PolicyValue.PerSite
         .Default | .GateOnly | .Relaxed -> if inner == {
             .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> false
-            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> true
+            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) | .NoEager | .Only -> true
         }
         .Track -> inner != PolicyValue.Track
         .Skip -> inner != PolicyValue.Skip
         .On -> inner != PolicyValue.On && inner != PolicyValue.Off
         .Off -> inner != PolicyValue.Off
-        .Enabled | .Limit(_) | .Allow | .Explicit | .Arithmetic(_) -> true
+        .Enabled | .Limit(_) | .Allow | .Explicit | .Arithmetic(_) | .NoEager | .Only -> true
     }
 }
 

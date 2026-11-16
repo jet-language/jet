@@ -1,0 +1,17 @@
+# `#Runtime(.NoEager)` turns off automatic compile-time evaluation and keeps
+# explicit `#run`. Under the mark, on a function or on a block, a local over
+# pure code is computed when the program runs, while its `#run` local is still
+# computed while compiling; unmarked code, and code after a marked block,
+# keeps automatic evaluation. The trace names each local the build computes,
+# and every value prints the same either way.
+fixture: ComptimePolicyNoEagerKeepsExplicitRun.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --trace main.jet
+exit: 0
+stdout: = "49\n64\n81\n100\n121\n"
+stderr: ~ "comptime.eval lazy_explicit " # the explicit `#run` runs while compiling
+stderr: !~ "comptime.eval lazy_local " # the marked function's local runs with the program
+stderr: ~ "comptime.eval eager_local " # unmarked code keeps automatic evaluation
+stderr: !~ "comptime.eval block_local " # the marked block's local runs with the program
+stderr: ~ "comptime.eval after_block " # the mark ends with its block

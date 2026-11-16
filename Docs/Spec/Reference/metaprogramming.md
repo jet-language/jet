@@ -105,6 +105,29 @@ with `value: #run T.f(…)`
 ([`comptime_no_silent_fallback_run_fn_call.jet`](../../../Tests/UI/comptime_no_silent_fallback_run_fn_call.jet),
 [`comptime_no_silent_fallback_run_fn_call`](../../../Tests/Cases/ComptimeNoSilentFallback/comptime_no_silent_fallback_run_fn_call.case)).
 
+A local whose value only calls pure code is computed while compiling when
+it can be, and the program reads the computed value; this automatic
+evaluation never changes what the program prints. `#Runtime(mode)` on a
+function, a method or a block sets how much of its code may run while
+building:
+
+- `#Runtime(.NoEager)` turns automatic evaluation off, so its locals are
+  computed when the program runs. An explicit `#run` still runs while
+  building.
+- `#Runtime(.Only)` keeps the code to the running program. Automatic
+  evaluation is off, and compile-time code may not run it: a `#run`, a
+  `#run { … }` block or a computed `#if` inside it, a call of a function it
+  marks from compile-time code, and a `#Runtime(.Only)` block that
+  compile-time code reaches are each E1022. A local elsewhere that calls a
+  marked function is computed when the program runs.
+
+A `.NoEager` block inside `.Only` code stays `.Only`. Neither mode is an
+optimizer setting: the optimizer still inlines and folds the lowered code
+at `-O1` and above
+([`comptime_policy_no_eager_keeps_explicit_run`](../../../Tests/Cases/ComptimeDiff/comptime_policy_no_eager_keeps_explicit_run.case),
+[`comptime_policy_only_refuses_compile_time_code`](../../../Tests/Cases/ComptimeDiff/comptime_policy_only_refuses_compile_time_code.case),
+[`comptime_policy_keeps_optimizer_folding`](../../../Tests/Cases/ComptimeDiff/comptime_policy_keeps_optimizer_folding.case)).
+
 A compile-time value that can't be computed is reported once, at the value
 that owns the problem, and the values and code that read it report nothing
 more. Each case has a UI snapshot:

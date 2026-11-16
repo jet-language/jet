@@ -6,6 +6,7 @@
 use {
     jet_foundation.[
         MARKER_OVERFLOW,
+        MARKER_RUNTIME,
         Marker,
         PolicyDeclaration,
         PolicyKey,
@@ -17,6 +18,7 @@ use {
         marker_registered_site_bound,
         overflow_marker_mode,
         policy_key_parse,
+        runtime_marker_mode,
         type_name,
     ]
     jet_lexer.[
@@ -88,6 +90,20 @@ parser_overflow_declaration: fn(marker: Marker, scope: PolicyScope, target: Span
 parser_overflow_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
     declarations := [PolicyDeclaration]{}
     if parser_overflow_declaration(marker, PolicyScope.Block, Val(span)) == .Val(declaration) {
+        state.block_policy_declarations.push(declaration.copy())
+        declarations.push(declaration)
+    }
+    Stmt.Policy{declarations: declarations, body: body, span: span}
+}
+
+// `#Runtime(.NoEager) { … }` or `#Runtime(.Only) { … }` scopes its run-time
+// policy to the block, sourced to the marker so the formatter writes it back
+// as `#Runtime`. A malformed argument still keeps the body, with no policy
+// open.
+parser_runtime_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
+    declarations := [PolicyDeclaration]{}
+    if runtime_marker_mode(marker) == .Val(value) {
+        declaration: PolicyDeclaration{key: PolicyKey.Runtime, value: value, scope: PolicyScope.Block, span: marker.span, target: Val(span), source: MARKER_RUNTIME}
         state.block_policy_declarations.push(declaration.copy())
         declarations.push(declaration)
     }
@@ -198,8 +214,9 @@ parser_policy_declarations_from_marker: fn(state: &JetParserState, marker: Marke
                 parser_add_error_code(state, "E0355", name_span, "`sentries` needs an explicit mode", "sentry instrumentation is either on or off; it is not a boolean memory fact", "write `sentries: .Off` or `sentries: .On`")
                 return None
             }
-            // `#Overflow` declares the arithmetic key; no policy name parses to it.
-            .Arithmetic -> panic("policy_key_parse never names the arithmetic key")
+            // `#Overflow` and `#Runtime` declare the arithmetic and run-time
+            // keys; no policy name parses to either.
+            .Arithmetic | .Runtime -> panic("policy_key_parse never names a body-policy key")
             .ScopedGC | .ExplicitUnits -> PolicyValue.Enabled
             .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride -> {
                 parser_add_error_code(state, "E0355", name_span, "`{name}` is not a source policy", "organization and package policy own the audited-escape floor; source code can only write the corresponding marker", "use the audited marker, or `policy: {{ {name}: .Forbid }}` in `package.jet`")

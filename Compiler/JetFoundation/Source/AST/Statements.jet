@@ -107,11 +107,16 @@ PolicyKey: enum {
     Arithmetic
     Writes
     Failures
+    Runtime
 }
 
 // `#Overflow(.Mode)`, at function, method or
 // block scope only; the innermost declaration wins and never crosses a call.
 // `failures: .Explicit`: each call that can fail is written with `?`.
+// `#Runtime(.NoEager)` and `#Runtime(.Only)`, at function, method or block
+// scope only, are the `Runtime` key's `NoEager` and `Only` values: the body
+// computes no local value while compiling, and `Only` also keeps every
+// compile-time run (`#run`, a build or comptime call) out of it.
 
 PolicyValue: enum {
     Enabled
@@ -129,6 +134,8 @@ PolicyValue: enum {
     Off
     Explicit
     Arithmetic(mode: ArithmeticMode)
+    NoEager
+    Only
 }
 
 // The fixed-width arithmetic mode of `#Overflow(.Mode)`.

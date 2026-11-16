@@ -985,6 +985,10 @@ SemaCheckContext: struct {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Overflow(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The active run-time policy (`#Runtime(.NoEager)` or `#Runtime(.Only)`)
+    // of the function and block being checked: `PolicyValue.NoEager` or
+    // `PolicyValue.Only`. Closures checked inside the body keep it.
+    runtime_policy: PolicyValue?{None}
     // The overflow word (`wrapping`, `saturating` or `checked`) written
     // directly around the typed-literal conversion being checked. The
     // conversion takes it on entry, so it never reaches a nested expression.
@@ -1622,6 +1626,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
+        runtime_policy: source.runtime_policy,
         compiler_generated: source.compiler_generated,
         fork_copy_rebuilding: source.fork_copy_rebuilding.copy(),
         return_view_declared: source.return_view_declared,
@@ -1783,6 +1788,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
             subject_shorthand_depth: context.subject_shorthand_depth,
             arithmetic_policy: context.arithmetic_policy,
+            runtime_policy: context.runtime_policy,
             compiler_generated: context.compiler_generated,
             return_view_declared: context.return_view_declared,
         },
@@ -1902,6 +1908,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
     context.arithmetic_policy = saved.arithmetic_policy.move()
+    context.runtime_policy = saved.runtime_policy
     context.compiler_generated = saved.compiler_generated
     context.return_view_declared = saved.return_view_declared
 }

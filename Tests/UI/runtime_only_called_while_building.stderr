@@ -1,0 +1,8 @@
+Error [jet.RuntimeOnlyAtBuildTime]: Compile-time code calls `stamp()` while building, but `#Runtime(.Only)` keeps it to the running program
+  --> Tests/UI/runtime_only_called_while_building.jet:6:17
+    |
+  6 |     value: #run stamp()
+    |                 ^^^^^
+ Why: `#Runtime(.Only)` marks a function, method or block that runs only in the shipped program, so neither compile-time code inside it nor compile-time code calling it may run while building.
+ Fix: Move the compile-time code out of the `#Runtime(.Only)` code, or call it from run-time code. To stop only automatic compile-time evaluation and keep explicit `#run`, use `#Runtime(.NoEager)`.
+More: jet-lang.dev/e/E1022

@@ -3142,7 +3142,17 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     // Every early return here is the same `true`, and the target lookup is
     // pure, so the cheap tests go first and only a `#run` target builds
     // its row (whose declaration copy is the callee's whole body).
-    if scopes.comptime_execution_depth > 0 -> return true
+    if scopes.comptime_execution_depth > 0 {
+        // Compile-time code never runs a `#Runtime(.Only)` function: the
+        // mark keeps it to the running program.
+        graph: program.registration_graph ?? return true
+        row: sema_registration_callable_row_of(graph, symbol) ?? return true
+        if sema_callable_runtime_only(graph, row) {
+            diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code calls `{sema_effect_comptime_callee_name(symbol_table_key(graph.symbols, symbol))}`", span))
+            return false
+        }
+        return true
+    }
     if !sema_expr_comptime_target_declared(environment, program, scopes, symbol) -> return true
     target: sema_expr_comptime_target(environment, program, scopes, symbol) ?? return true
     // A `#run fn` runs while building: run-time code never calls it, or it

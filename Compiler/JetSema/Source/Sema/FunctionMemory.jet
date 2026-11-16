@@ -589,8 +589,9 @@ sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclarati
         // witness of a sentry build on or off; the lexical #Unsafe gate and its
         // obligations are checked either way, and a normal build lowers a
         // sentry scope as a plain scope (JetIR BuildExpr ir_stmt). An
-        // overflow mode only routes fixed-width operators.
-        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.Writes || declaration.key == PolicyKey.Failures || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries || declaration.key == PolicyKey.Arithmetic {
+        // overflow mode only routes fixed-width operators, and a run-time
+        // policy only decides what runs while compiling.
+        if declaration.key == PolicyKey.ScopedGC || declaration.key == PolicyKey.Copies || declaration.key == PolicyKey.Writes || declaration.key == PolicyKey.Failures || declaration.key == PolicyKey.ExplicitUnits || declaration.key == PolicyKey.Sentries || declaration.key == PolicyKey.Arithmetic || declaration.key == PolicyKey.Runtime {
             next
         }
         // An audited-gate key (`unsafe: .Forbid`, `check_removal: .Forbid`, …)

@@ -30,6 +30,7 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
         .Arithmetic -> "arithmetic"
         .Writes -> "writes"
         .Failures -> "failures"
+        .Runtime -> "runtime"
     }
 }
 
@@ -65,7 +66,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
 // Rust `PolicyKey::is_audited_gate`.
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
-        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes | .Failures -> false
+        .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes | .Failures | .Runtime -> false
         .Unsafe | .Impure | .Nondeterministic | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .TaintScrub | .DutyDrop | .StateTransition | .PrecisionDemotion | .Structure | .LintAllow | .CheckRemoval | .LinkOverride -> true
     }
 }
@@ -88,6 +89,8 @@ policy_value_display: fn(value: PolicyValue) -> String Never! {
         .Off -> ".Off"
         .Explicit -> ".Explicit"
         .Arithmetic(mode) -> ".{overflow_mode_name(mode)}"
+        .NoEager -> ".NoEager"
+        .Only -> ".Only"
     }
 }
 
@@ -122,6 +125,27 @@ overflow_marker_mode: fn(marker: Marker) -> ArithmeticMode? Never! {
     if marker.args[0] == .Expr(value) {
         if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 {
             return overflow_mode_parse(variant)
+        }
+    }
+    None
+}
+
+// The run-time policy a `#Runtime(.NoEager)` or `#Runtime(.Only)` marker
+// opens: its one argument, positional or labeled `mode:`, names a
+// RuntimeMode variant. None for any other shape, which the typed
+// marker-argument check reports.
+runtime_marker_mode: fn(marker: Marker) -> PolicyValue? Never! {
+    if marker.args.len() != 1 || marker.negated -> return None
+    if marker.arg_labels.len() > 0 && marker.arg_labels[0] == .Val(label) && label.name != "mode" {
+        return None
+    }
+    if marker.args[0] == .Expr(value) {
+        if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 {
+            if variant == {
+                "NoEager" -> return Val(PolicyValue.NoEager)
+                "Only" -> return Val(PolicyValue.Only)
+                else -> return None
+            }
         }
     }
     None
@@ -165,7 +189,8 @@ POLICY_PACKAGE_SCOPES: #run { [PolicyScope]{PolicyScope.Package, PolicyScope.Mod
 
 POLICY_ALL_SCOPES: #run { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 
-// The overflow mode (`#Overflow`) is a function, method or block policy.
+// The overflow mode (`#Overflow`) and the run-time policy (`#Runtime`) are
+// function, method or block policies.
 POLICY_BODY_SCOPES: #run { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
@@ -194,6 +219,8 @@ POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Arithmetic, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Override},
     {key: PolicyKey.Writes, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Failures, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    // `#Runtime(.NoEager)` inside `#Runtime(.Only)` would widen it.
+    {key: PolicyKey.Runtime, scopes: POLICY_BODY_SCOPES, combine: PolicyCombine.Tighten},
 } }
 
 // Rust `rule`.
@@ -288,6 +315,7 @@ policy_key_debug_text: fn(key: PolicyKey) -> String Never! {
         .Arithmetic -> "Arithmetic"
         .Writes -> "Writes"
         .Failures -> "Failures"
+        .Runtime -> "Runtime"
     }
 }
 
@@ -308,6 +336,8 @@ policy_value_debug_text: fn(value: PolicyValue) -> String Never! {
         .Off -> "Off"
         .Explicit -> "Explicit"
         .Arithmetic(mode) -> "Arithmetic({overflow_mode_name(mode)})"
+        .NoEager -> "NoEager"
+        .Only -> "Only"
     }
 }
 
@@ -382,6 +412,7 @@ policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Boo
         if outer == PolicyValue.Off && inner == PolicyValue.On -> return true
         if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
     }
+    if key == PolicyKey.Runtime -> return outer == PolicyValue.Only && inner == PolicyValue.NoEager
     if policy_key_is_audited_gate(key) -> return policy_gate_widens(outer, inner)
     true
 }
@@ -412,7 +443,7 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if outer == PolicyValue.Default || outer == PolicyValue.GateOnly || outer == PolicyValue.Relaxed {
         if inner == {
             .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> return false
-            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) -> {}
+            .Enabled | .Limit(_) | .Forbid | .PerSite | .Allow | .On | .Off | .Explicit | .Arithmetic(_) | .NoEager | .Only -> {}
         }
     }
     if outer == PolicyValue.Track && inner == PolicyValue.Track -> return false

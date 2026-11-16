@@ -15406,6 +15406,31 @@ InlineAlwaysForeign: struct {
     }
 }
 
+RuntimeOnlyAtBuildTime: struct {
+    subject: String
+
+    impl Diagnostic {
+        code: "E1022"
+        safety_class: .Soundness
+        safety_reason: "`#Runtime(.Only)` code must run in the shipped program, so a value computed from it while building would hand every run the build machine's answer."
+        expert_path: "none: `#Runtime(.Only)` code runs only in the running program"
+        stage: [.Comptime]
+        meaning: "Compile-time code runs `#Runtime(.Only)` code: a `#run`, `#if` or `#run` block inside it, or a call of a function it marks from code that runs while building"
+
+        what: fn(self) -> String {
+            "{self.subject} while building, but `#Runtime(.Only)` keeps it to the running program"
+        }
+
+        why: fn(self) -> String {
+            "`#Runtime(.Only)` marks a function, method or block that runs only in the shipped program, so neither compile-time code inside it nor compile-time code calling it may run while building."
+        }
+
+        fix: fn(self) -> String {
+            "Move the compile-time code out of the `#Runtime(.Only)` code, or call it from run-time code. To stop only automatic compile-time evaluation and keep explicit `#run`, use `#Runtime(.NoEager)`."
+        }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

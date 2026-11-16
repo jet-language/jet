@@ -6905,6 +6905,11 @@ sema_stmt_is_path_op: fn(operation: THandleOp, normalize: Bool) -> Bool Never! {
 // owner body like a local value (Comptime/LocalSplice.jet) instead of
 // finalizing the program again.
 sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    if sema_runtime_policy_only(context.runtime_policy) {
+        diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#run` runs its code", expr_span(binding.init)))
+        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, context)
+        return None
+    }
     fact_start: context.call_facts.len()
     reference_start: context.name_references.len()
     scopes.comptime_execution_depth += 1
@@ -11091,6 +11096,12 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     value := sema_expr_comptime_value(condition, context)
     if value == None -> value = sema_fact_constant_path_value(condition, context)
     if value == None {
+        // A condition known here runs nothing; one computed while building
+        // runs code, which `#Runtime(.Only)` refuses.
+        if sema_runtime_policy_only(context.runtime_policy) {
+            diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#if` runs its condition", cond_span))
+            return false
+        }
         staged: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), cond_span, span)
         if staged == .Val(body_value) -> value = Val(body_value.value) else {
             _ := sema_comptime_body_capture(context, environment, program, scopes, "#if", cond, condition.ty, cond_span, span)
@@ -11127,6 +11138,10 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
 // nothing behind. A failed check or a panic stops the build.
 // False while the block is staged.
 sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_runtime_policy_only(context.runtime_policy) {
+        diagnostics.push(sema_runtime_only_build_time_diagnostic("This `#run` block runs its code", span))
+        return false
+    }
     if sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), span, span) != None {
         return true
     }
@@ -11636,10 +11651,22 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             if sema_policy_arithmetic_mode(declarations) == .Val(mode) {
                 context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})
             }
+            // `#Runtime(mode) { … }` is the run-time policy over the block,
+            // read as `context.runtime_policy`. `.Only` holds through any
+            // nested `.NoEager`, which would widen it.
+            outer_runtime: context.runtime_policy
+            if sema_policy_runtime_mode(declarations) == .Val(mode) && !sema_runtime_policy_only(outer_runtime) {
+                context.runtime_policy = Val(mode)
+            }
+            if scopes.comptime_execution_depth > 0 && sema_runtime_policy_only(sema_policy_runtime_mode(declarations)) {
+                diagnostics.push(sema_runtime_only_build_time_diagnostic("Compile-time code runs this block", span))
+                complete = false
+            }
             previous_writes_policy := sema_call_marks_push_policy(scopes, declarations)
             previous_failures_policy := sema_failure_marks_push_policy(scopes, declarations)
             nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "policy@{span.start}", loop_depth)
             context.arithmetic_policy = outer_arithmetic
+            context.runtime_policy = outer_runtime
             sema_scope_pop_unit_policy(scopes, previous_unit_policy)
             scopes.copies_explicit = previous_copies_policy
             scopes.writes_explicit = previous_writes_policy

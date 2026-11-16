@@ -79,10 +79,13 @@ sema_comptime_local_value: fn(
 // facts from `fact_start` on, whose name reads the references from
 // `reference_start` on and whose nodes are the arena rows from `node_start`
 // on, may be computed while compiling: it calls code, is not compile-time
-// code already, sits outside `#Impure`, `#Unsafe` and generic bodies, reads
-// no run-time local or parameter, holds a value a build can keep, no call's
-// written row reaches the outside world, and it holds no callback bound
-// (sema_comptime_local_value_holds_callback_bound).
+// code already, sits outside `#Impure`, `#Unsafe`, `#Runtime` and generic
+// bodies, reads no run-time local or parameter, holds a value a build can
+// keep, no call's written row reaches the outside world, and it holds no
+// callback bound (sema_comptime_local_value_holds_callback_bound).
+// `#Runtime(.NoEager)` turns this automatic evaluation off and leaves
+// explicit `#run`; `#Runtime(.Only)` refuses both. Neither touches the
+// optimizer's folding of the lowered code.
 // A `jet check` (graph.check_tests) computes none: it lowers nothing, and a
 // local value reports nothing whether it lands or not, so its outcome
 // changes no diagnostic. The every-body Core check (graph.every_core_body)
@@ -97,7 +100,7 @@ sema_comptime_local_value_candidate: fn(
     context: SemaCheckContext,
 ) -> Bool {
     if context.call_facts.len() <= fact_start -> return false
-    if scopes.comptime_execution_depth > 0 || context.unsafe_depth > 0 || context.generic_params.len() > 0 {
+    if scopes.comptime_execution_depth > 0 || context.unsafe_depth > 0 || context.generic_params.len() > 0 || context.runtime_policy != None {
         return false
     }
     if sema_scope_inside_impure(scopes) || sema_comptime_local_value_unstorable(ty) -> return false
@@ -214,10 +217,10 @@ SEMA_COMPTIME_LOCAL_VALUE_AHEAD: "::local-value-ahead::"
 // The locals of `source_module`'s top-level functions that its declaration
 // pass stages to be computed ahead: none in a `jet check` (which computes no
 // local value) or in a Core or Prelude module. A compile-time, unsafe,
-// generic or generated function, or one a marker template wrote, stages
-// none. Only the function's own blocks, loop bodies, switch arms and `if`
-// branches are read; a local that a policy, `#Impure` or `#Unsafe` block, or a
-// lambda holds is not staged.
+// generic or generated function, one a marker template wrote, or one under
+// `#Runtime` stages none. Only the function's own blocks, loop bodies, switch
+// arms and `if` branches are read; a local that a policy, `#Impure` or
+// `#Unsafe` block, or a lambda holds is not staged.
 sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     sources := [SemaComptimeItemSource]{}
     if graph.check_tests && !graph.every_core_body -> return sources
@@ -225,7 +228,7 @@ sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source
         return sources
     }
     loop function in source_module.functions {
-        if function.declaration.is_comptime || function.declaration.is_unsafe || function.declaration.compiler_generated || function.declaration.definition_module != "" || function.declaration.type_params.len() > 0 {
+        if function.declaration.is_comptime || function.declaration.is_unsafe || function.declaration.compiler_generated || function.declaration.definition_module != "" || function.declaration.type_params.len() > 0 || sema_function_runtime_policy(function.declaration.markers) != None {
             next
         }
         function_key: symbol_table_key(graph.symbols, function.symbol.id)

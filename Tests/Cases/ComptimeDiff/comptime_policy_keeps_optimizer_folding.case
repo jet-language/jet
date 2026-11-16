@@ -1,0 +1,27 @@
+# `#Runtime` sets what runs while building, not what the optimizer does. Under
+# `.NoEager` and under `.Only` the build leaves `square(6) + 1000` to the
+# program, so `run` reaches the passes still calling `square`; the O2 passes
+# then inline the call and fold the sum to 1036, as they fold any code.
+fixture: ComptimePolicyKeepsOptimizerFolding.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect decisions -O2 no_eager.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # -O2 runs the O2 passes
+stdout: ~ "inlined 1," # the call of `square`
+stdout: count "no_eager.jet::square" = 1 # `run` calls `square` before the passes, and not after them
+stdout: ~ "<- 1036 -1 -1" # the folded sum after the passes
+step: jet inspect decisions -O2 only.jet
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # -O2 runs the O2 passes
+stdout: ~ "inlined 1," # the call of `square`
+stdout: count "only.jet::square" = 1 # `run` calls `square` before the passes, and not after them
+stdout: ~ "<- 1036 -1 -1" # the folded sum after the passes
+step: jet run -O2 no_eager.jet
+exit: 0
+stdout: = "1036\n"
+step: jet run -O2 only.jet
+exit: 0
+stdout: = "1036\n"
