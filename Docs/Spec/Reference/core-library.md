@@ -5827,9 +5827,12 @@ type argument is E0119.
 The server also keeps a `.Public{max_age}` method's successful reply for
 `max_age`, by the call's JSON array of arguments: a call with the same
 arguments within it is answered with the kept reply and its `Age`, and the
-method does not run. A reply is kept for being a reply, not for its value, so
-`false`, `0` and `""` are kept like any other. A failed run, or a call
-replayed under its `Idempotency-Key`, keeps nothing.
+method does not run. `max_age` is a Duration, measured on the monotonic
+clock: a kept reply is fresh through the instant its `max_age` ends and stale
+after it, when the next call runs the method and keeps its new reply. A reply
+is kept for being a reply, not for its value, so `false`, `0` and `""` are
+kept like any other. A failed run, a call replayed under its
+`Idempotency-Key`, or a `max_age` of zero keeps nothing.
 
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:

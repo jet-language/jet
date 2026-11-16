@@ -1830,6 +1830,21 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     assert_eq(held.value, 3)
 }
 
+#Test("a kept reply is fresh through the instant its max_age ends and stale after it") {
+    kept: Shared{[String:AppKeptReply]{}}
+    app_keep_reply(kept, "[1]", "{{\"ok\":0}}", 1000, Duration{ns: 500})
+    assert_eq((app_kept_reply(kept, "[1]", 1000) ?? panic("kept at once")).reply, "{{\"ok\":0}}")
+    assert_eq((app_kept_reply(kept, "[1]", 1500) ?? panic("kept at the instant max_age ends")).kept_ns, 1000)
+    assert_eq(app_kept_reply(kept, "[1]", 1501) == None, true)
+    assert_eq(app_kept_reply(kept, "[2]", 1000) == None, true)
+    app_keep_reply(kept, "[1]", "{{\"ok\":1}}", 1501, Duration{ns: 500})
+    assert_eq((app_kept_reply(kept, "[1]", 2001) ?? panic("kept again after it ran")).reply, "{{\"ok\":1}}")
+    app_keep_reply(kept, "[3]", "{{\"ok\":0}}", 1000, Duration{ns: 0})
+    assert_eq(app_kept_reply(kept, "[3]", 1000) == None, true)
+    app_keep_reply(kept, "[4]", "{{\"ok\":0}}", 1000, Duration{ns: 9223372036854775807})
+    assert_eq(app_kept_reply(kept, "[4]", 9223372036854775807) == None, false)
+}
+
 // One webhook method of a mounted service: how its sender signs, the names
 // of its path parameters in the method's order, and the two calls sema
 // builds from it and its `#App.SigningKey` method.

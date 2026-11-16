@@ -1,0 +1,13 @@
+# A `.Public{max_age}` policy is a Duration: the server keeps a reply fresh
+# through the instant its max_age ends and stale after it. The fixture caches
+# `tick`'s Int replies for one second: the call within the second is answered
+# with the kept reply and its Age, without a run; the call after the second
+# runs `tick` again and keeps its new reply.
+fixture: CacheIsFreshUntilMaxAgeEnds.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: ~ "at once: 200 {\"ok\":1} | cache-control: public, max-age=1 | age: none\n"
+stdout: ~ "within the second: 200 {\"ok\":1} | cache-control: public, max-age=1 | age: 0\n" # kept, no run
+stdout: ~ "after the second: 200 {\"ok\":2} | cache-control: public, max-age=1 | age: none\n" # stale, so it ran again
