@@ -145,20 +145,20 @@ stdin_line_scan: fn(start: I64, count: I64) -> I64 {
     words: count - count % I64{8}
     loop at < words {
         raw: rt_text_word(wrapping(start + at))
-        word: raw.bit_xor(I64{723401728380766730})
-        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) {
+        word: raw ~ I64{723401728380766730}
+        if (wrapping(word - I64{72340172838076673}) & (word ~ I64{-1}) & I64{-9187201950435737472} != I64{0}) {
             break
         }
-        seen = seen.bit_or(raw)
+        seen |= raw
         at = wrapping(at + I64{8})
     }
     loop at < count {
         byte: rt_text_byte(wrapping(start + at))
         at = wrapping(at + I64{1})
         if (byte == I64{10}) { break }
-        seen = seen.bit_or(byte)
+        seen |= byte
     }
-    if (seen.bit_and(I64{-9187201950435737472}) != I64{0}) { return wrapping(I64{0} - at) }
+    if (seen & I64{-9187201950435737472} != I64{0}) { return wrapping(I64{0} - at) }
     at
 }
 
@@ -293,8 +293,8 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     result: host_call(I64{16}, I64{0}, I64{21523}, size)
     packed: rt_text_word(size)
     jet_rt_free(size, I64{8}, I64{8})
-    rows: packed.bit_and(I64{65535})
-    columns: (packed >> I64{16}).bit_and(I64{65535})
+    rows: packed & I64{65535}
+    columns: (packed >> I64{16}) & I64{65535}
     none: I64{0}
     if result != none || rows <= none || columns <= none -> return none
     rt_text_store(height, rows)
@@ -370,7 +370,7 @@ term_tcsetattr: fn(fd: I64, termios: I64) -> I64 {
     next: jet_rt_alloc(I64{64}, I64{8})
     rt_text_bytes_copy(next, mode, I64{64})
     flags: net_load_uint(wrapping(next + I64{12}), I64{4})
-    cleared: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
+    cleared: if raw -> flags & I64{4294967285} else -> flags & I64{4294967287}
     net_store_uint(wrapping(next + I64{12}), I64{4}, cleared)
     if raw {
         net_store_uint(wrapping(wrapping(next + I64{17}) + I64{6}), I64{1}, I64{1})

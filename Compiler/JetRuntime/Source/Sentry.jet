@@ -44,7 +44,7 @@ sentry_save: fn(save: I64) { coll_copy(wrapping(thread_base() + I64{128}), save,
     sync_store(wrapping(base + I64{128}), if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
     sync_store(wrapping(base + I64{136}), file)
     sync_store(wrapping(base + I64{144}), file_len)
-    sync_store(wrapping(base + I64{152}), line.bit_and(I64{4294967295}))
+    sync_store(wrapping(base + I64{152}), line & I64{4294967295})
     sync_store(wrapping(base + I64{160}), reason)
     sync_store(wrapping(base + I64{168}), reason_len)
 }
@@ -474,8 +474,8 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
 }
 
 sentry_remainder: fn(value: I64, divisor: I64) -> I64 {
-    if ((divisor.bit_and(wrapping(divisor - I64{1}))) == I64{0}) {
-        return value.bit_and(wrapping(divisor - I64{1}))
+    if ((divisor & wrapping(divisor - I64{1})) == I64{0}) {
+        return value & wrapping(divisor - I64{1})
     }
     remainder := I64{0}
     shift := I64{63}
@@ -483,7 +483,7 @@ sentry_remainder: fn(value: I64, divisor: I64) -> I64 {
         // Modular doubling without overflowing an unsigned machine word.
         gap: wrapping(divisor - remainder)
         remainder = if !world_unsigned_before(remainder, gap) -> wrapping(remainder - gap) else -> wrapping(remainder + remainder)
-        bit: (value >> shift).bit_and(I64{1})
+        bit: (value >> shift) & I64{1}
         remainder = if (remainder == wrapping(divisor - I64{1}) && bit != I64{0}) -> I64{0} else -> wrapping(remainder + bit)
         if (shift == I64{0}) { break }
         shift -= I64{1}
@@ -507,7 +507,7 @@ sentry_hex: fn(text: I64, value: I64) {
     shift := I64{60}
     started := false
     loop {
-        digit: (value >> shift).bit_and(I64{15})
+        digit: (value >> shift) & I64{15}
         if (digit != I64{0} || started || shift == I64{0}) {
             rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
             started = true
@@ -545,7 +545,7 @@ sentry_quote: fn(text: I64, value: I64, json: Bool) {
                 if json {
                     shift := I64{12}
                     loop {
-                        digit: (scalar >> shift).bit_and(I64{15})
+                        digit: (scalar >> shift) & I64{15}
                         rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
                         if (shift == I64{0}) { break }
                         shift -= I64{4}
@@ -697,9 +697,9 @@ sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, f
         rt_text_append(report, sync_load(wrapping(base + I64{136})), sync_load(wrapping(base + I64{144})))
         rt_text_push_scalar(report, I64{58})
         if (site != I64{0}) {
-            sentry_append_number(report, site.bit_and(I64{4294967295}))
+            sentry_append_number(report, site & I64{4294967295})
             rt_text_push_scalar(report, I64{58})
-            sentry_append_number(report, (site >> I64{32}).bit_and(I64{4294967295}))
+            sentry_append_number(report, (site >> I64{32}) & I64{4294967295})
         } else { sentry_append_number(report, sync_load(wrapping(base + I64{152}))) }
         sentry_append_owned(report, services_msg_sentry_gate())
         sentry_quote(report, gate, false)

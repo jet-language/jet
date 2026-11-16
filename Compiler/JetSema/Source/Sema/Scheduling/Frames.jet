@@ -109,7 +109,7 @@ sema_frame_core_call_operation: fn(record: CoreCallRecord, name: String, args: [
             }
         }
     }
-    external_effect := record.effect_kind != None || record.effect_leaf != None
+    external_effect := record.effects.len() > 0
     if !external_effect && accesses.len() == 0 {
         return SemaFrameOperationFact{operation: None, error: None}
     }
@@ -405,7 +405,7 @@ sema_frame_schedule_validate: fn(operations: [FrameOperation]) -> String? {
             }
             if access.layout != None {
                 layout: access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
-                if layout.size <= 0 || layout.size > 0xffffffffffffffff || layout.align <= 0 || layout.align > 0xffffffffffffffff || ((layout.align).bit_and((layout.align - 1))) != 0 {
+                if layout.size <= 0 || layout.size > 0xffffffffffffffff || layout.align <= 0 || layout.align > 0xffffffffffffffff || ((layout.align) & (layout.align - 1)) != 0 {
                     return Val("operation `{operation.name}` has invalid access to `{sema_frame_resource_label(access.resource)}`: layout size must be positive and alignment must be a non-zero power of two")
                 }
                 if layout.layout.trim() == "" {

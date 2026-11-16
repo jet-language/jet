@@ -3,6 +3,8 @@ Flags: struct {
     bits: Int
 }
 
+SIGN: 8
+
 low: fn(value: Int) -> Int { value & 3 }
 
 run: fn() {
@@ -46,6 +48,51 @@ run: fn() {
     flags := Flags{bits: 1}
     flags.bits |= 2
     print(flags.bits)
+    slots := [Int]{1, 2}
+    slots[1] = slots[1] | 4
+    print(slots[1])
+    byte: U8{200}
+    if byte & (U8{192}) == (U8{192}) -> print("top bits")
+    print(~(~a))
+    m: #run ((255) & 15)
+    print(m)
+    print((a ~ SIGN) < b ~ SIGN)
+    // The call as the left and the right operand of each binary operator.
+    print((a | b) + c)
+    print(c + (a | b))
+    print((a | b) - c)
+    print(c - (a | b))
+    print((a | b) * c)
+    print(c * (a | b))
+    print((a | b) / c)
+    print(100 / (a | b))
+    print((a | b) % c)
+    print(100 % (a | b))
+    print((a | b) << 1)
+    print(c << (b & 3))
+    print((a | b) >> 1)
+    print(100 >> (b & 3))
+    print((a | b) & c)
+    print(c & (a | b))
+    print(a & b & c)
+    print(c & (a & b))
+    print(c &~ (a | b))
+    print(a ~ b | c)
+    print(c | a ~ b)
+    print(a | b | c)
+    print(c | (a | b))
+    print((a | b) ~ c)
+    print(c ~ (a | b))
+    print(a ~ b ~ c)
+    print(c ~ (a ~ b))
+    print(a | b == 14)
+    print(14 == a | b)
+    print(a | b < c)
+    print(c < a | b)
+    print(~(a | b))
+    // A typed literal's `}` ends the left operand of the `+` before the call.
+    n: U32{3}
+    print(n + U32{48} + (((U32{9} - n) >> 8) & U32{39}))
     source: `total: 6 | 1`
     print(source)
     print("write `a & b` to keep the shared bits")

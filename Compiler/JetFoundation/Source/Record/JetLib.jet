@@ -181,7 +181,7 @@ JetLibStamp: struct {
             loop convention in export.conventions -> out.bytes.push(U8{convention.to_int()})
         }
         effects: jetlib_effects_canonical(self.declared_effects)
-        out.push_u32(effects.len().bit_and(4294967295))
+        out.push_u32(effects.len() & 4294967295)
         loop effect_name in effects -> out.push_text(effect_name)
         out.push_text(self.payload_digest)
         out.bytes
@@ -273,7 +273,7 @@ JetLibArtifact: struct {
 
     encode_bytes: fn(self) -> [U8] Never! {
         out := JetLibWriter{bytes: self.stamp.encode_bytes()}
-        loop i in 0..<8 -> out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)).bit_and(255)})
+        loop i in 0..<8 -> out.bytes.push(U8{(self.payload.len() >> ((7 - i) * 8)) & 255})
         out.push_raw(self.payload)
         out.bytes
     }
@@ -284,7 +284,7 @@ JetLibArtifact: struct {
         stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
         declared := 0
-        loop index in 0..<8 -> declared = (declared << 8).bit_or(Int{bytes[reader.at + index]})
+        loop index in 0..<8 -> declared = (declared << 8) | Int{bytes[reader.at + index]}
         if declared > host_max -> return Err("the .jetlib payload is too large for this host")
         payload: bytes[reader.at + 8..<bytes.len()]
         if payload.len() != declared {
@@ -308,7 +308,7 @@ JetLibWriter: struct {
     push_u32: fn(&self, value: Int) Never! {
         assert(value >= 0 && value <= 4294967295, ".jetlib header value exceeds u32")
         shift_values: [Int]{24, 16, 8, 0}
-        loop shift in shift_values -> self.bytes.push(U8{(value >> shift).bit_and(0xFF)})
+        loop shift in shift_values -> self.bytes.push(U8{(value >> shift) & 0xFF})
     }
 
     // A u32 length prefix, then the bytes.
@@ -337,7 +337,7 @@ JetLibReader: struct {
     take_u32: fn(&self, what: String) -> Int Err! {
         if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
         value := 0
-        loop index in 0..<4 -> value = (value << 8).bit_or(Int{self.bytes[self.at + index]})
+        loop index in 0..<4 -> value = (value << 8) | Int{self.bytes[self.at + index]}
         self.at += 4
         Ok(value)
     }

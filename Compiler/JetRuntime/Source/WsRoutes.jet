@@ -208,17 +208,17 @@ ws_write_frame: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -
     mask_bytes: if client -> I64{4} else -> I64{0}
     total: header + mask_bytes + length
     frame: jet_rt_alloc(total, I64{1})
-    rt_text_put(frame, I64{128}.bit_or(opcode))
+    rt_text_put(frame, I64{128} | opcode)
     mask_bit: if client -> I64{128} else -> I64{0}
-    if (length < I64{126}) { rt_text_put(wrapping(frame + I64{1}), mask_bit.bit_or(length)) } else if (length <= I64{65535}) {
-        rt_text_put(wrapping(frame + I64{1}), mask_bit.bit_or(I64{126}))
-        rt_text_put(wrapping(frame + I64{2}), (length >> I64{8}).bit_and(I64{255}))
-        rt_text_put(wrapping(frame + I64{3}), length.bit_and(I64{255}))
+    if (length < I64{126}) { rt_text_put(wrapping(frame + I64{1}), mask_bit | length) } else if (length <= I64{65535}) {
+        rt_text_put(wrapping(frame + I64{1}), mask_bit | I64{126})
+        rt_text_put(wrapping(frame + I64{2}), (length >> I64{8}) & I64{255})
+        rt_text_put(wrapping(frame + I64{3}), length & I64{255})
     } else {
-        rt_text_put(wrapping(frame + I64{1}), mask_bit.bit_or(I64{127}))
+        rt_text_put(wrapping(frame + I64{1}), mask_bit | I64{127})
         at := I64{0}
         loop at < (I64{8}) {
-            rt_text_put(wrapping(wrapping(frame + I64{2}) + at), (length >> (I64{56} - at * I64{8})).bit_and(I64{255}))
+            rt_text_put(wrapping(wrapping(frame + I64{2}) + at), (length >> (I64{56} - at * I64{8})) & I64{255})
             at += I64{1}
         }
     }
@@ -231,7 +231,7 @@ ws_write_frame: fn(conn: I64, opcode: I64, data: I64, length: I64, error: I64) -
     at := I64{0}
     loop at < length {
         byte: rt_text_byte(wrapping(data + at))
-        rt_text_put(wrapping(body + at), if client -> byte.bit_xor(rt_text_byte(wrapping(mask + at % I64{4}))) else -> byte)
+        rt_text_put(wrapping(body + at), if client -> byte ~ rt_text_byte(wrapping(mask + at % I64{4})) else -> byte)
         at += I64{1}
     }
     // The write lock keeps this frame whole beside a hub publish.
@@ -272,7 +272,7 @@ ws_shut: fn(conn: I64) {
     kept: if (rt_text_len(reason) > I64{123}) -> I64{123} else -> rt_text_len(reason)
     payload: jet_rt_alloc(I64{2} + kept, I64{1})
     rt_text_put(payload, status >> I64{8})
-    rt_text_put(wrapping(payload + I64{1}), status.bit_and(I64{255}))
+    rt_text_put(wrapping(payload + I64{1}), status & I64{255})
     if (kept != I64{0}) {
         rt_text_bytes_copy(wrapping(payload + I64{2}), rt_text_data(reason), kept)
     }
@@ -361,20 +361,20 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
         }
         first: rt_text_byte(ws_unread(conn))
         second: rt_text_byte(wrapping(ws_unread(conn) + I64{1}))
-        fin: first.bit_and(I64{128}) != I64{0}
-        opcode: first.bit_and(I64{15})
-        if (first.bit_and(I64{112}) != I64{0}) { return ws_fail(WS_ERROR_PROTOCOL, error) }
-        if ((second.bit_and(I64{128}) != I64{0}) != expect_masked) {
+        fin: first & I64{128} != I64{0}
+        opcode: first & I64{15}
+        if (first & I64{112} != I64{0}) { return ws_fail(WS_ERROR_PROTOCOL, error) }
+        if ((second & I64{128} != I64{0}) != expect_masked) {
             return ws_fail(WS_ERROR_PROTOCOL, error)
         }
-        length := second.bit_and(I64{127})
+        length := second & I64{127}
         offset := I64{2}
         if (length == I64{126}) {
             filled = ws_fill(conn, I64{4}, error)
             if (filled <= I64{0}) {
                 return if (filled < I64{0}) -> ws_fail(WS_ERROR_CLOSED, error) else -> I64{0}
             }
-            length = (rt_text_byte(wrapping(ws_unread(conn) + I64{2})) << I64{8}).bit_or(rt_text_byte(wrapping(ws_unread(conn) + I64{3})))
+            length = (rt_text_byte(wrapping(ws_unread(conn) + I64{2})) << I64{8}) | rt_text_byte(wrapping(ws_unread(conn) + I64{3}))
             offset = I64{4}
         } else if (length == I64{127}) {
             filled = ws_fill(conn, I64{10}, error)
@@ -387,7 +387,7 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
             length = I64{0}
             at := I64{2}
             loop at < (I64{10}) {
-                length = (length << I64{8}).bit_or(rt_text_byte(wrapping(ws_unread(conn) + at)))
+                length = (length << I64{8}) | rt_text_byte(wrapping(ws_unread(conn) + at))
                 at += I64{1}
             }
             offset = I64{10}
@@ -407,7 +407,7 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
         if expect_masked {
             at := I64{0}
             loop at < length {
-                rt_text_put(wrapping(payload + at), rt_text_byte(wrapping(payload + at)).bit_xor(rt_text_byte(wrapping(wrapping(frame + mask_at) + at % I64{4}))))
+                rt_text_put(wrapping(payload + at), rt_text_byte(wrapping(payload + at)) ~ rt_text_byte(wrapping(wrapping(frame + mask_at) + at % I64{4})))
                 at += I64{1}
             }
         }
@@ -439,7 +439,7 @@ ws_receive: fn(conn: I64, assembly: I64, output: I64, error: I64) -> I64 {
                 ws_assembly_push(assembly, payload, length)
             }
             (opcode == I64{8}) -> {
-                status: if (length >= I64{2}) -> (rt_text_byte(payload) << I64{8}).bit_or(rt_text_byte(wrapping(payload + I64{1}))) else -> I64{1000}
+                status: if (length >= I64{2}) -> (rt_text_byte(payload) << I64{8}) | rt_text_byte(wrapping(payload + I64{1})) else -> I64{1000}
                 reason: if (length >= I64{2}) -> rt_text_lossy(wrapping(payload + I64{2}), length - I64{2}) else -> jet_rt_string_clone(rt_static_text(""))
                 echo: jet_rt_alloc(I64{8}, I64{8})
                 net_put(echo, I64{0}, I64{0})
@@ -502,11 +502,11 @@ ws_base64: fn(data: I64, length: I64) -> I64 {
         b0: rt_text_byte(wrapping(data + at))
         b1: if (rest > I64{1}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{1})) else -> I64{0}
         b2: if (rest > I64{2}) -> rt_text_byte(wrapping(wrapping(data + at) + I64{2})) else -> I64{0}
-        group: (b0 << I64{16}).bit_or(b1 << I64{8}).bit_or(b2)
-        rt_text_put(wrapping(out + written), rt_text_byte(wrapping(table + (group >> I64{18}).bit_and(I64{63}))))
-        rt_text_put(wrapping(wrapping(out + written) + I64{1}), rt_text_byte(wrapping(table + (group >> I64{12}).bit_and(I64{63}))))
-        rt_text_put(wrapping(wrapping(out + written) + I64{2}), if (rest > I64{1}) -> rt_text_byte(wrapping(table + (group >> I64{6}).bit_and(I64{63}))) else -> I64{61})
-        rt_text_put(wrapping(wrapping(out + written) + I64{3}), if (rest > I64{2}) -> rt_text_byte(wrapping(table + group.bit_and(I64{63}))) else -> I64{61})
+        group: (b0 << I64{16}) | b1 << I64{8} | b2
+        rt_text_put(wrapping(out + written), rt_text_byte(wrapping(table + ((group >> I64{18}) & I64{63}))))
+        rt_text_put(wrapping(wrapping(out + written) + I64{1}), rt_text_byte(wrapping(table + ((group >> I64{12}) & I64{63}))))
+        rt_text_put(wrapping(wrapping(out + written) + I64{2}), if (rest > I64{1}) -> rt_text_byte(wrapping(table + ((group >> I64{6}) & I64{63}))) else -> I64{61})
+        rt_text_put(wrapping(wrapping(out + written) + I64{3}), if (rest > I64{2}) -> rt_text_byte(wrapping(table + (group & I64{63}))) else -> I64{61})
         at += I64{3}
         written += I64{4}
     }

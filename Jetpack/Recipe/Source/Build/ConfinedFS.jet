@@ -543,9 +543,7 @@ recipe_realized_tool: fn(tools: [String:String], tool: String) -[FS, Env]> Strin
     if !opened.is_file || !recipe_same_file_identity(expected, opened) {
         return Err(RecipeDiagnostic.e1238(tool))
     }
-    if !sys.is_windows() && (expected.mode).bit_and(0o111) == 0 {
-        return Err(RecipeDiagnostic.e1238(tool))
-    }
+    if !sys.is_windows() && (expected.mode) & 0o111 == 0 -> return Err(RecipeDiagnostic.e1238(tool))
     after: files.stat(path) ?? return Err(RecipeDiagnostic.e1238(tool))
     if !recipe_same_file_identity(expected, after) -> return Err(RecipeDiagnostic.e1238(tool))
     Ok(path)

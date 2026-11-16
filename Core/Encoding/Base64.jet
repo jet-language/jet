@@ -92,7 +92,7 @@ l64a: fn(value: Int) -> String Base64Error! {
     out := [U8]{}
     rest := value
     loop rest > 0 {
-        out.push(digits[rest.bit_and(63)])
+        out.push(digits[rest & 63])
         rest = rest >> 6
     }
     String.from_bytes(out) ?? ""
@@ -108,7 +108,7 @@ a64l: fn(text: String) -> Int Base64Error! {
     value := 0
     loop k in 0..<raw.len() {
         digit: l64a_digit(raw[k]) ?? return Err(rewrap("invalid a64l character at byte {k}"))
-        value = value.bit_or(digit << (6 * k))
+        value |= digit << (6 * k)
     }
     if value > 4294967295 -> return Err(rewrap("a64l value {value} exceeds 32 bits"))
     Ok(value)
@@ -201,7 +201,7 @@ ascii85_encode: fn(data: [U8]) -> String {
         b: if width > 1 -> u8_int(data[i + 1]) else -> 0
         c: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
-        n: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
+        n: ((((a << 24)) | (b << 16)) | (c << 8)) | d
         if width == 4 && n == 0 -> out.push(U8{122}) else {
             digits := [U8]{}
             v := n
@@ -281,7 +281,7 @@ base85_encode: fn(data: [U8], alphabet: String, require_full: Bool) -> String Ba
         b: if width > 1 -> u8_int(data[i + 1]) else -> 0
         c: if width > 2 -> u8_int(data[i + 2]) else -> 0
         d: if width > 3 -> u8_int(data[i + 3]) else -> 0
-        value: ((((a << 24)).bit_or((b << 16))).bit_or((c << 8))).bit_or(d)
+        value: ((((a << 24)) | (b << 16)) | (c << 8)) | d
         digits := [Int]{}
         v := value
         loop _ in 0..<5 {
@@ -347,11 +347,11 @@ encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never!
         b: if remain > 1 -> u8_int(data[i + 1]) else -> 0
         c: if remain > 2 -> u8_int(data[i + 2]) else -> 0
         out.push(chars[a >> 2])
-        out.push(chars[((a.bit_and(3)) << 4).bit_or((b >> 4))])
-        if remain > 1 -> out.push(chars[((b.bit_and(15)) << 2).bit_or((c >> 6))]) else {
+        out.push(chars[((a & 3) << 4) | (b >> 4)])
+        if remain > 1 -> out.push(chars[((b & 15) << 2) | (c >> 6)]) else {
             if padded -> out.push(U8{61})
         }
-        if remain > 2 -> out.push(chars[c.bit_and(63)]) else {
+        if remain > 2 -> out.push(chars[c & 63]) else {
             if padded -> out.push(U8{61})
         }
         i += 3
@@ -412,7 +412,7 @@ invalid_byte: fn(url: Bool, offset: Int, byte: U8) -> Base64Error Never! {
     alphabet: if url -> "URL-safe base64" else -> "standard base64"
     digits: "0123456789ABCDEF".bytes()
     n: Int{byte}
-    pair: String.from_bytes([U8]{digits[n >> 4], digits[n.bit_and(15)]}) ?? ""
+    pair: String.from_bytes([U8]{digits[n >> 4], digits[n & 15]}) ?? ""
     decode_error(url, offset, "byte 0x{pair} is not in the {alphabet} alphabet")
 }
 
@@ -441,13 +441,13 @@ decode_strict: fn(text: String, url: Bool, whitespace: Bool, relaxed: Bool) -> [
         value: alphabet_value(b, url) ?? return Err(invalid_byte(url, i, b))
         count += 1
         last = i
-        buffer = (buffer << 6).bit_or(value)
+        buffer = (buffer << 6) | value
         bits += 6
         if bits >= 8 {
             bits -= 8
-            out.push(U8{(buffer >> bits).bit_and(255)})
+            out.push(U8{(buffer >> bits) & 255})
         }
-        buffer = buffer.bit_and(((1 << bits) - 1))
+        buffer &= ((1 << bits) - 1)
     }
     if count == 0 && padding == 0 -> return Ok(out)
     eof: if pad_start >= 0 -> pad_start else -> last + 1

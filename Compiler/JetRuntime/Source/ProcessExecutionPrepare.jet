@@ -62,7 +62,7 @@ process_execution_env_set: fn(env: I64, key: I64, value: I64) {
 
 process_execution_environment: fn(spec: I64, err: I64) -> I64 {
     env: data_sequence_new(I64{0}, I64{16})
-    if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255}) == I64{0}) {
+    if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR) & I64{255} == I64{0}) {
         root: logical_environment_current()
         shared_acquire(root, false)
         // The logical environment holds each key once (logical_environment_append
@@ -211,7 +211,7 @@ process_execution_affinity_mask: fn(cpus: I64) -> I64 {
         cpu: fd_word(fd_word(cpus, I64{16}), at * I64{8})
         if (cpu >= I64{0} && cpu < PROCESS_CPU_SET_CPUS) {
             byte: wrapping(mask + cpu / I64{8})
-            rt_text_put(byte, rt_text_byte(byte).bit_or(I64{1} << (cpu % I64{8})))
+            rt_text_put(byte, rt_text_byte(byte) | I64{1} << (cpu % I64{8}))
         }
         at += I64{1}
     }
@@ -219,7 +219,7 @@ process_execution_affinity_mask: fn(cpus: I64) -> I64 {
 }
 
 process_execution_affinity_has: fn(mask: I64, cpu: I64) -> Bool {
-    rt_text_byte(wrapping(mask + cpu / I64{8})).bit_and(I64{1} << (cpu % I64{8})) != I64{0}
+    rt_text_byte(wrapping(mask + cpu / I64{8})) & I64{1} << (cpu % I64{8}) != I64{0}
 }
 
 // `.cpu_affinity(cpus)` as its limits value: the CPUs ascending, each run
@@ -256,7 +256,7 @@ process_execution_ioprio: fn(spec: I64) -> I64 {
     class: fd_word(spec, PROCESS_SPEC_IO_PRIORITY)
     if (class == PROCESS_IO_PRIORITY_IDLE) { return I64{3} << I64{13} }
     if (class == PROCESS_IO_PRIORITY_BEST_EFFORT) {
-        return (I64{2} << I64{13}).bit_or(fd_word(spec, PROCESS_SPEC_IO_PRIORITY_LEVEL))
+        return (I64{2} << I64{13}) | fd_word(spec, PROCESS_SPEC_IO_PRIORITY_LEVEL)
     }
     I64{0}
 }
@@ -333,7 +333,7 @@ process_execution_pack: fn(spec: I64) -> I64 {
     fd_put(
         mechanical,
         I64{168},
-        if (terminal != I64{0} || fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) -> {
+        if (terminal != I64{0} || fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) -> {
             I64{1}
         } else -> {
             I64{0}
@@ -343,10 +343,10 @@ process_execution_pack: fn(spec: I64) -> I64 {
     fd_put(mechanical, I64{184}, terminal)
     fd_put(mechanical, I64{208}, fd_word(spec, PROCESS_SPEC_DIRECTORIES))
     // A detached child is meant to outlive this process: no parent death.
-    if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) == I64{0}) {
+    if (fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} == I64{0}) {
         fd_put(mechanical, I64{216}, fd_word(spec, PROCESS_SPEC_PARENT_DEATH))
     }
-    if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
+    if (fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) {
         fd_put(mechanical, I64{56}, I64{0})
         fd_put(mechanical, I64{72}, PROCESS_STREAM_NULL)
         fd_put(mechanical, I64{80}, PROCESS_STREAM_NULL)
@@ -423,7 +423,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         _ := process_execution_invalid(spec, rt_static_text("nul byte found in provided data"), err)
         return I64{0}
     }
-    if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
+    if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) {
         _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
         return I64{0}
     }
@@ -447,7 +447,7 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         _ := process_execution_invalid(spec, rt_static_text("memory_scope needs a cap of at least 1 byte"), err)
         return I64{0}
     }
-    if (scoped && fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
+    if (scoped && fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}) {
         _ := process_execution_invalid(spec, rt_static_text("a detached process outlives its handle, and a memory_scope ends with it"), err)
         return I64{0}
     }

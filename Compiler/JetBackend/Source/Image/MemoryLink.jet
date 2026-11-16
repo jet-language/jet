@@ -55,7 +55,7 @@ LinkImageView: struct {
 }
 
 link_image_u16: fn(bytes: [U8], at: Int) -> Int Never! {
-    Int{bytes[at]}.bit_or((Int{bytes[at + 1]} << 8))
+    Int{bytes[at]} | (Int{bytes[at + 1]} << 8)
 }
 
 link_image_u32: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -120,9 +120,7 @@ link_image_view: fn(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
     exports_size := 0
     loop k in 1..<shnum {
         h: v.shoff + 64 * k
-        if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8).bit_and(2)) != 0 {
-            v.alloc_headers = k
-        }
+        if v.alloc_headers == k - 1 && (link_s64(c.bufs, b, h + 8) & 2) != 0 -> v.alloc_headers = k
         name: v.names_at + link_u32(c.bufs, b, h)
         if {
             link_u32(c.bufs, b, h + 4) == LINK_SHT_SYMTAB -> {
@@ -156,7 +154,7 @@ link_image_view: fn(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
     }
     if exports_at >= 0 && exports_size >= 16 && exports_at + exports_size <= size && link_s64(c.bufs, b, exports_at) == LINK_IMAGE_EXPORTS_MAGIC {
         slots: link_s64(c.bufs, b, exports_at + 8)
-        if slots < 1 || slots.bit_and(slots - 1) != 0 || 16 + 4 * slots != exports_size {
+        if slots < 1 || slots & slots - 1 != 0 || 16 + 4 * slots != exports_size {
             link_error(c, "runtime image: malformed `{LINK_IMAGE_EXPORTS_SECTION}` section")
             return v
         }
@@ -177,7 +175,7 @@ link_image_view: fn(c: &LinkContext, b: Int, gap_at: Int, gap: Int) -> LinkImage
 // an index entry can only miss, never bind a wrong symbol.
 link_image_export: fn(c: LinkContext, view: LinkImageView, name: String) -> Int Never! {
     mask: view.exports_slots - 1
-    slot := link_image_export_hash(name.bytes()).bit_and(mask)
+    slot := link_image_export_hash(name.bytes()) & mask
     loop _ in 0..<view.exports_slots {
         k: link_u32(c.bufs, 1, view.exports_at + 4 * slot)
         if k == 0 -> return -1
@@ -187,7 +185,7 @@ link_image_export: fn(c: LinkContext, view: LinkImageView, name: String) -> Int 
                 return k
             }
         }
-        slot = (slot + 1).bit_and(mask)
+        slot = (slot + 1) & mask
     }
     -1
 }
@@ -312,8 +310,8 @@ link_bind_write: fn(c: &LinkContext, exe: &X64Executable, view: LinkImageView, l
 link_bind_header: fn(c: &LinkContext, exe: &X64Executable, out: &[U8], view: LinkImageView, l: LinkLayout, target: Int) -> [U8] Never! {
     elf := c.bufs[1][0..<LINK_EHDR_SIZE]
     link_put64(elf, 32, view.program_base - c.base)
-    elf[56] = U8{l.phnum.bit_and(255)}
-    elf[57] = U8{(l.phnum >> 8).bit_and(255)}
+    elf[56] = U8{l.phnum & 255}
+    elf[57] = U8{(l.phnum >> 8) & 255}
     loop k in 0..<view.sites.len().div_euclid(3) {
         address: view.sites[3 * k]
         kind: view.sites[3 * k + 1]
@@ -389,7 +387,7 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         loop k in 1..<c.obj_first_global[obj] {
             at: link_sym_at(c, obj, k)
             info: link_u8(c.bufs, b, at + 4)
-            if (info.bit_and(15)) != 1 && (info.bit_and(15)) != 2 -> next
+            if (info & 15) != 1 && (info & 15) != 2 -> next
             name_offset: link_u32(c.bufs, b, at)
             if name_offset == 0 -> next
             s: link_sym_shndx(c, obj, k)
@@ -406,7 +404,7 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
         if header < 0 -> next
         bind: if c.g_weak_def[g] -> 2 else -> 1
         kind: if c.live_class[c.live[s]] == LINK_TEXT -> 2 else -> 1
-        link_image_symbol(globals, symbol_names, names_base, c.g_name[g], (bind << 4).bit_or(kind), header, link_global_addr(c, g), c.g_size[g])
+        link_image_symbol(globals, symbol_names, names_base, c.g_name[g], (bind << 4) | kind, header, link_global_addr(c, g), c.g_size[g])
     }
     link_bind_symbols(out, origin, headers, locals, globals, symbol_names, elf)
 }
@@ -748,7 +746,7 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
     view := link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 -> return link_bind_failure(c)
     if program_base == .Val(chosen) {
-        if chosen.bit_and(LINK_PAGE - 1) != 0 || chosen < view.program_base {
+        if chosen & LINK_PAGE - 1 != 0 || chosen < view.program_base {
             link_error(c, "runtime image: program base {chosen} is not a page boundary at or above {view.program_base}")
             return link_bind_failure(c)
         }

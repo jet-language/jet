@@ -443,7 +443,7 @@ store_cache_now_seconds: fn() -> Int Never! { store_archive_now_secs() }
 store_make_tree_writable_for_removal: fn(path: String) StoreError! {
     metadata: store_archive_lstat_ok(path) ?? return
     if metadata.is_dir {
-        files.set_mode(path, (metadata.mode).bit_or(STORE_MODE_WRITE_BITS))
+        files.set_mode(path, (metadata.mode) | STORE_MODE_WRITE_BITS)
         loop child in files.list_dir(path) -> store_make_tree_writable_for_removal(child.path)
     }
 }
@@ -470,7 +470,7 @@ store_seal_tree_changed: fn(path: String) -> Bool StoreError! {
             if store_seal_tree_changed(child.path) -> changed = true
         }
     }
-    sealed_mode: metadata.mode - ((metadata.mode).bit_and(STORE_MODE_WRITE_BITS))
+    sealed_mode: metadata.mode - ((metadata.mode) & STORE_MODE_WRITE_BITS)
     if sealed_mode == metadata.mode -> return Ok(changed)
     files.set_mode(path, sealed_mode)
     Ok(true)

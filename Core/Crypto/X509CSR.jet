@@ -147,8 +147,8 @@ x509_csr_parse_extensions: fn(csr: &X509CSR, data: [U8], p: &Int, end: Int, cb: 
             p = end_ext_octet
             next
         }
-        if csr.ext_types.bit_and(ext_type) != 0 -> return Err(.InvalidExtensions(Val(.InvalidData)))
-        csr.ext_types = csr.ext_types.bit_or(ext_type)
+        if csr.ext_types & ext_type != 0 -> return Err(.InvalidExtensions(Val(.InvalidData)))
+        csr.ext_types |= ext_type
         if {
             ext_type == oids.X509_EXT_KEY_USAGE -> {
                 csr.key_usage = x509.x509_get_key_usage(data, p, end_ext_data)
@@ -287,15 +287,15 @@ x509_csr_info: fn(prefix: String, csr: X509CSR) -> [U8] x509.X509Error! {
     if key_size.len() >= X509CSR_BEFORE_COLON -> return Err(.BufferTooSmall)
     loop key_size.len() < X509CSR_BEFORE_COLON -> key_size = "{key_size} "
     out.extend("\n{prefix}{key_size}: {pk.pk_get_bitlen(csr.pk)} bits\n".bytes())
-    if csr.ext_types.bit_and(oids.X509_EXT_SUBJECT_ALT_NAME) != 0 {
+    if csr.ext_types & oids.X509_EXT_SUBJECT_ALT_NAME != 0 {
         out.extend("\n{prefix}subject alt name  :".bytes())
         x509.x509_info_subject_alt_name(out, data, csr.subject_alt_names, prefix)
     }
-    if csr.ext_types.bit_and(oids.X509_EXT_NS_CERT_TYPE) != 0 {
+    if csr.ext_types & oids.X509_EXT_NS_CERT_TYPE != 0 {
         out.extend("\n{prefix}cert. type        : ".bytes())
         x509.x509_info_cert_type(out, csr.ns_cert_type)
     }
-    if csr.ext_types.bit_and(oids.X509_EXT_KEY_USAGE) != 0 {
+    if csr.ext_types & oids.X509_EXT_KEY_USAGE != 0 {
         out.extend("\n{prefix}key usage         : ".bytes())
         x509.x509_info_key_usage(out, csr.key_usage)
     }

@@ -2479,9 +2479,9 @@ os_stat_packed_i64: fn(number: I64, object: I64, output: I64) -> I64 {
 os_stat_facts_i64: fn(number: I64, object: I64, output: I64) -> I64 {
     #Unsafe("packed Linux 32-bit fields become independent portable machine words without any allocation") {
         result: os_stat_packed_i64(number, object, output)
-        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})).bit_and(I64{4294967295}))
-        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}).bit_and(I64{4294967295}))
-        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})).bit_and(I64{4294967295}))
+        os_store_i64(wrapping(output + I64{16}), os_load_i64(wrapping(output + I64{16})) & I64{4294967295})
+        os_store_i64(wrapping(output + I64{32}), (os_load_i64(wrapping(output + I64{32})) >> I64{32}) & I64{4294967295})
+        os_store_i64(wrapping(output + I64{40}), os_load_i64(wrapping(output + I64{40})) & I64{4294967295})
         return result
     }
 }

@@ -94,7 +94,7 @@ controlled_monotonic_ns: fn(output: I64) -> Bool {
     if (provider == I64{0}) { return false }
     // Registered provider code remains live at this world/lease boundary;
     // `output` lends one writable word.
-    (coll_call_box(provider, output).bit_and(I64{255})) != I64{0}
+    (coll_call_box(provider, output) & I64{255}) != I64{0}
 }
 
 #Export(c) jet_rt_time_monotonic_provider_set: fn(provider: I64) -> I64 {
@@ -118,7 +118,7 @@ world_decimal: fn(data: I64, value: I64) -> I64 {
     number := value
     count := I64{0}
     loop {
-        half: (number >> I64{1}).bit_and(I64{9223372036854775807})
+        half: (number >> I64{1}) & I64{9223372036854775807}
         quotient: half /% I64{5}
         digit: wrapping(number - wrapping(quotient * I64{10}))
         trap_put(wrapping(data + count), I64{48} + digit)
@@ -270,7 +270,7 @@ world_timer_find: fn(world: I64, slot: I64) -> I64 {
 
 world_begin_wait: fn(world: I64, slot: I64) {
     base: thread_base()
-    if ((sync_load(wrapping(base + I64{112})).bit_and(I64{2})) != I64{0}) {
+    if ((sync_load(wrapping(base + I64{112})) & I64{2}) != I64{0}) {
         return
     }
     sync_mutex_lock(wrapping(world + I64{8}))
@@ -278,7 +278,7 @@ world_begin_wait: fn(world: I64, slot: I64) {
     world_notify(world)
     sync_mutex_unlock(wrapping(world + I64{8}))
     sync_park_retain(slot)
-    sync_store(wrapping(base + I64{112}), sync_load(wrapping(base + I64{112})).bit_or(I64{2}))
+    sync_store(wrapping(base + I64{112}), sync_load(wrapping(base + I64{112})) | I64{2})
     sync_store(wrapping(base + I64{120}), slot)
 }
 
@@ -302,13 +302,13 @@ world_park: fn(world: I64, duration_ns: I64, slot: I64) {
     world_notify(world)
     sync_mutex_unlock(wrapping(world + I64{8}))
     sync_park_retain(slot)
-    sync_store(wrapping(thread_base() + I64{112}), sync_load(wrapping(thread_base() + I64{112})).bit_or(I64{2}))
+    sync_store(wrapping(thread_base() + I64{112}), sync_load(wrapping(thread_base() + I64{112})) | I64{2})
     sync_store(wrapping(thread_base() + I64{120}), slot)
 }
 
 world_finish_park: fn(world: I64, slot: I64) {
     base: thread_base()
-    if ((sync_load(wrapping(base + I64{112})).bit_and(I64{2})) == I64{0}) {
+    if ((sync_load(wrapping(base + I64{112})) & I64{2}) == I64{0}) {
         return
     }
     sync_mutex_lock(wrapping(world + I64{8}))
@@ -319,14 +319,14 @@ world_finish_park: fn(world: I64, slot: I64) {
         world_notify(world)
     }
     sync_mutex_unlock(wrapping(world + I64{8}))
-    sync_store(wrapping(base + I64{112}), sync_load(wrapping(base + I64{112})).bit_and(I64{-3}))
+    sync_store(wrapping(base + I64{112}), sync_load(wrapping(base + I64{112})) & I64{-3})
     sync_store(wrapping(base + I64{120}), I64{0})
     sync_park_drop(slot)
 }
 
 world_task_finished: fn(world: I64) {
     base: thread_base()
-    waiting: (sync_load(wrapping(base + I64{112})).bit_and(I64{2})) != I64{0}
+    waiting: (sync_load(wrapping(base + I64{112})) & I64{2}) != I64{0}
     slot: sync_load(wrapping(base + I64{120}))
     sync_mutex_lock(wrapping(world + I64{8}))
     index: if waiting -> world_timer_find(world, slot) else -> I64{-1}
@@ -459,8 +459,8 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     if (world == I64{0}) { return false }
     sync_mutex_lock(wrapping(world + I64{8}))
     value := sync_load(wrapping(world + I64{40}))
-    value = value.bit_xor((value << I64{7}))
-    value = value.bit_xor(((value >> I64{9}).bit_and(I64{36028797018963967})))
+    value ~= (value << I64{7})
+    value ~= ((value >> I64{9}) & I64{36028797018963967})
     value = wrapping(value * I64{-7046029254386353131})
     sync_store(wrapping(world + I64{40}), value)
     world_event(world, services_msg_rng(), value, I64{0}, I64{1})

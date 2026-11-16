@@ -39,7 +39,7 @@ encode_upper: fn(data: [U8]) -> String Never! {
     loop b in data {
         n: u8_int(b)
         out.push(nibble_upper(n >> 4))
-        out.push(nibble_upper(n.bit_and(15)))
+        out.push(nibble_upper(n & 15))
     }
     String.from_bytes(out) ?? ""
 }
@@ -82,12 +82,12 @@ a2b_base64: fn(text: String) -> [U8] HexError! {
 
 /// Python `binascii.crc_hqx` (CRC-CCITT).
 crc_hqx: fn(data: [U8], value: Int) -> Int Never! {
-    crc := value.bit_and(65535)
+    crc := value & 65535
     loop b in data {
-        crc = crc.bit_xor((u8_int(b) << 8))
+        crc ~= (u8_int(b) << 8)
         loop _ in 0..<8 {
-            if crc.bit_and(32768) != 0 -> crc = ((crc << 1).bit_xor(4129)).bit_and(65535) else {
-                crc = (crc << 1).bit_and(65535)
+            if crc & 32768 != 0 -> crc = ((crc << 1) ~ 4129) & 65535 else {
+                crc = (crc << 1) & 65535
             }
         }
     }
@@ -158,9 +158,9 @@ b2a_uu: fn(data: [U8]) -> String Never! {
             b: if j + 1 < count -> u8_int(data[pos + 1]) else -> 0
             c: if j + 2 < count -> u8_int(data[pos + 2]) else -> 0
             out.push(uu_char(a >> 2))
-            out.push(uu_char(((a << 4).bit_xor(b >> 4)).bit_and(63)))
-            out.push(uu_char(((b << 2).bit_xor(c >> 6)).bit_and(63)))
-            out.push(uu_char(c.bit_and(63)))
+            out.push(uu_char(((a << 4) ~ b >> 4) & 63))
+            out.push(uu_char(((b << 2) ~ c >> 6) & 63))
+            out.push(uu_char(c & 63))
             j += 3
         }
         out.push(U8{10})
@@ -190,14 +190,14 @@ a2b_uu: fn(text: String) -> [U8] Never! {
             b: uu_value(raw[i + 1])
             c: uu_value(raw[i + 2])
             d: uu_value(raw[i + 3])
-            out.push(wrapping(U8{((a << 2)).bit_xor((b >> 4))}))
+            out.push(wrapping(U8{((a << 2)) ~ (b >> 4)}))
             produced += 1
             if produced < count {
-                out.push(wrapping(U8{((b << 4)).bit_xor((c >> 2))}))
+                out.push(wrapping(U8{((b << 4)) ~ (c >> 2)}))
                 produced += 1
             }
             if produced < count {
-                out.push(wrapping(U8{((c << 6)).bit_xor(d)}))
+                out.push(wrapping(U8{((c << 6)) ~ d}))
                 produced += 1
             }
             i += 4
@@ -211,13 +211,13 @@ qp_hex: fn(n: Int) -> U8 { nibble_upper(n) }
 
 uu_char: fn(n: Int) -> U8 {
     if n == 0 -> return (U8{96})
-    U8{32 + ((n).bit_and(63))}
+    U8{32 + ((n) & 63)}
 }
 
 uu_value: fn(byte: U8) -> Int {
     n: u8_int(byte)
     if n == 96 -> return 0
-    ((n - 32)).bit_and(63)
+    ((n - 32)) & 63
 }
 
 encode_sep: fn(data: [U8], sep: String) -> String Never! {
@@ -229,7 +229,7 @@ encode_sep: fn(data: [U8], sep: String) -> String Never! {
         }
         n: u8_int(data[i])
         out.push(encoding.hex_nibble(n >> 4))
-        out.push(encoding.hex_nibble(n.bit_and(15)))
+        out.push(encoding.hex_nibble(n & 15))
     }
     String.from_bytes(out) ?? ""
 }
@@ -240,7 +240,7 @@ dump: fn(data: [U8]) -> String Never! {
     offset := 0
     shifts: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop offset < data.len() {
-        loop shift in shifts { out.push(encoding.hex_nibble((offset >> shift).bit_and(15))) }
+        loop shift in shifts { out.push(encoding.hex_nibble((offset >> shift) & 15)) }
         out.push(U8{32})
         out.push(U8{32})
         loop i in 0..<16 {
@@ -248,7 +248,7 @@ dump: fn(data: [U8]) -> String Never! {
             if offset + i < data.len() {
                 n: u8_int(data[offset + i])
                 out.push(encoding.hex_nibble(n >> 4))
-                out.push(encoding.hex_nibble(n.bit_and(15)))
+                out.push(encoding.hex_nibble(n & 15))
             } else {
                 out.push(U8{32})
                 out.push(U8{32})

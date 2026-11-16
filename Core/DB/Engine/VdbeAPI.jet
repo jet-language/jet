@@ -160,17 +160,17 @@ wal_checkpoint_v2: fn(db: &conn.Conn, name: [U8], e_mode: Int, n_log: &Int, n_ck
 // statements give the extended error code), masked by errMask; Vdbe.rc
 // SQLITE_SCHEMA with SQLITE_ERROR asks for a reprepare.
 vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
-    savesql: v.prep_flags.bit_and(conn.PREPARE_SAVESQL) != 0
+    savesql: v.prep_flags & conn.PREPARE_SAVESQL != 0
     if v.state == conn.VDBE_HALT_STATE -> _: reset_vdbe<H>(h, db, v)
     if v.state == conn.VDBE_READY_STATE {
         if db.vdbe_links[v.slot].expired != 0 {
             v.rc = base.SCHEMA
             rc := base.ERROR
             if savesql -> rc = aux.transfer_error(db, v)
-            return rc.bit_and(db.err_mask)
+            return rc & db.err_mask
         }
         if db.n_vdbe_active == 0 -> db.is_interrupted = false
-        profiled: db.m_trace.bit_and(conn.TRACE_PROFILE.bit_or(conn.TRACE_XPROFILE)) != 0
+        profiled: db.m_trace & (conn.TRACE_PROFILE | conn.TRACE_XPROFILE) != 0
         if profiled && !db.init.busy && v.sql.len() > 0 -> v.start_time = os.os_current_time()
         db.n_vdbe_active += 1
         if !v.read_only -> db.n_vdbe_write += 1
@@ -200,7 +200,7 @@ vdbe_step: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         v.rc = base.NOMEM
         if savesql -> rc = v.rc
     }
-    rc.bit_and(db.err_mask)
+    rc & db.err_mask
 }
 
 // sqlite3_step: step statement s, recompiling it (at most
@@ -243,7 +243,7 @@ stmt_step: fn<H: Host>(h: &H, db: &conn.Conn, s: Int) -[DB]> Int Never! {
 stmt_explain: fn<H: Host>(h: &H, db: &conn.Conn, s: Int, e_mode: Int) -[DB]> Int Never! {
     v := conn.vdbe_take(db, s)
     rc := base.OK
-    if v.explain == e_mode -> rc = base.OK else if e_mode < 0 || e_mode > 2 -> rc = base.ERROR else if v.prep_flags.bit_and(conn.PREPARE_SAVESQL) == 0 {
+    if v.explain == e_mode -> rc = base.OK else if e_mode < 0 || e_mode > 2 -> rc = base.ERROR else if v.prep_flags & conn.PREPARE_SAVESQL == 0 {
         rc = base.ERROR
     } else if v.state != conn.VDBE_READY_STATE { rc = base.BUSY } else if v.n_mem >= 10 && (e_mode != 2 || v.have_eqp_ops) {
         // The registers an EXPLAIN listing uses exist already.
@@ -499,7 +499,7 @@ unbind: fn(db: &conn.Conn, s: Int, i: Int) -> Int Never! {
     db.err_code = base.OK
     mask: db.vdbes[s].expmask
     bit: if i >= 31 -> 2147483648 else -> 1 << i
-    if mask != 0 && mask.bit_and(bit) != 0 -> db.vdbe_links[s].expired = conn.EXPIRED_NOW
+    if mask != 0 && mask & bit != 0 -> db.vdbe_links[s].expired = conn.EXPIRED_NOW
     base.OK
 }
 
@@ -580,11 +580,11 @@ bind_value: fn(db: &conn.Conn, s: Int, i: Int, p: base.Mem) -> Int Never! {
     t: base.value_type(p)
     if t == base.SQL_INTEGER -> return bind_int64(db, s, i, p.i)
     if t == base.SQL_FLOAT {
-        r: if p.flags.bit_and(base.MEM_REAL) != 0 -> p.r else -> util.int_to_double(p.i)
+        r: if p.flags & base.MEM_REAL != 0 -> p.r else -> util.int_to_double(p.i)
         return bind_double(db, s, i, r)
     }
     if t == base.SQL_BLOB {
-        if p.flags.bit_and(base.MEM_ZERO) != 0 -> return bind_zeroblob(db, s, i, p.i)
+        if p.flags & base.MEM_ZERO != 0 -> return bind_zeroblob(db, s, i, p.i)
         return bind_blob(db, s, i, Val(p.z), p.z.len())
     }
     if t == base.SQL_TEXT -> return bind_text_enc(db, s, i, Val(p.z), p.z.len(), p.enc)
@@ -709,7 +709,7 @@ result_null: fn(v: &conn.Vdbe) Never! { mem.set_null(v.mem[v.fctx.out]) }
 result_pointer: fn(v: &conn.Vdbe, handle: Int, ptype: [U8]) Never! {
     o: v.fctx.out
     run.release_dyn(v, o)
-    m := base.mem_init(base.MEM_NULL.bit_or(conn.MEM_DYN).bit_or(base.MEM_SUBTYPE))
+    m := base.mem_init(base.MEM_NULL | conn.MEM_DYN | base.MEM_SUBTYPE)
     m.subtype = conn.DYN_POINTER
     m.z = ptype
     m.i = handle
@@ -718,8 +718,8 @@ result_pointer: fn(v: &conn.Vdbe, handle: Int, ptype: [U8]) Never! {
 
 // sqlite3_value_pointer: the handle of a pointer value of type ptype.
 value_pointer: fn(m: base.Mem, ptype: [U8]) -> Int? Never! {
-    want: base.MEM_NULL.bit_or(conn.MEM_DYN).bit_or(base.MEM_SUBTYPE)
-    if m.flags.bit_and(base.MEM_TYPE_MASK.bit_or(conn.MEM_DYN)) == want && m.subtype == conn.DYN_POINTER && m.z == ptype {
+    want: base.MEM_NULL | conn.MEM_DYN | base.MEM_SUBTYPE
+    if m.flags & (base.MEM_TYPE_MASK | conn.MEM_DYN) == want && m.subtype == conn.DYN_POINTER && m.z == ptype {
         return Val(m.i)
     }
     None
@@ -728,8 +728,8 @@ value_pointer: fn(m: base.Mem, ptype: [U8]) -> Int? Never! {
 // sqlite3_result_subtype: the low 8 bits of e_subtype tag the result.
 result_subtype: fn(v: &conn.Vdbe, e_subtype: Int) Never! {
     o: v.fctx.out
-    v.mem[o].subtype = e_subtype.bit_and(255)
-    v.mem[o].flags = v.mem[o].flags.bit_or(base.MEM_SUBTYPE)
+    v.mem[o].subtype = e_subtype & 255
+    v.mem[o].flags = v.mem[o].flags | base.MEM_SUBTYPE
 }
 
 // sqlite3_result_text.
@@ -797,7 +797,7 @@ result_zeroblob64: fn(db: conn.Conn, v: &conn.Vdbe, n: Int) -> Int Never! {
 // message that code's text unless one is set.
 result_error_code: fn(db: &conn.Conn, v: &conn.Vdbe, err_code: Int) Never! {
     v.fctx.is_error = if err_code != 0 -> err_code else -> -1
-    if v.mem[v.fctx.out].flags.bit_and(base.MEM_NULL) != 0 {
+    if v.mem[v.fctx.out].flags & base.MEM_NULL != 0 {
         result_str(db, v, base.error_string(err_code).bytes(), -1, base.UTF8)
     }
 }
@@ -820,8 +820,8 @@ result_error_nomem: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
 result_int_real: fn(v: &conn.Vdbe) Never! {
     o: v.fctx.out
     f: v.mem[o].flags
-    if f.bit_and(base.MEM_INT) != 0 {
-        v.mem[o].flags = util.clear_bits(f, base.MEM_INT).bit_or(base.MEM_INT_REAL)
+    if f & base.MEM_INT != 0 {
+        v.mem[o].flags = util.clear_bits(f, base.MEM_INT) | base.MEM_INT_REAL
     }
 }
 
@@ -837,7 +837,7 @@ vtab_nochange: fn(v: conn.Vdbe) -> Bool Never! { mem.value_nochange(v.mem[v.fctx
 // ValueList) into `out`; SQLITE_DONE past the last, SQLITE_ERROR for a
 // value that is no ValueList.
 value_list_value: fn(db: &conn.Conn, v: &conn.Vdbe, list: base.Mem, out: &base.Mem, b_next: Bool) -[DB]> Int Never! {
-    is_list: list.flags.bit_and(conn.MEM_DYN) != 0 && list.subtype == conn.DYN_POINTER && list.z == "ValueList".bytes()
+    is_list: list.flags & conn.MEM_DYN != 0 && list.subtype == conn.DYN_POINTER && list.z == "ValueList".bytes()
     if !is_list -> return base.ERROR
     o: v.ops[list.i]
     ci: run.csr(v, o.p1)
@@ -886,7 +886,7 @@ stmt_current_time: fn(v: &conn.Vdbe) -[DB]> Int Never! {
 // accumulator) for n_byte <= 0 before then.
 aggregate_context: fn(v: &conn.Vdbe, n_byte: Int) -> Int Never! {
     a: v.fctx.agg
-    if v.mem[a].flags.bit_and(base.MEM_AGG) != 0 -> return v.mem[a].i
+    if v.mem[a].flags & base.MEM_AGG != 0 -> return v.mem[a].i
     if n_byte <= 0 {
         run.release_dyn(v, a)
         v.mem[a] = base.mem_null()

@@ -205,7 +205,7 @@ store_nar_encode_node: fn(path: String, root: String, out: &[U8], nodes: &Int, d
             store_nar_put_text(out, "(")
             store_nar_put_text(out, "type")
             store_nar_put_text(out, "regular")
-            if (metadata.mode).bit_and(73) != 0 {
+            if (metadata.mode) & 73 != 0 {
                 store_nar_put_text(out, "executable")
                 store_nar_put_text(out, "")
             }
@@ -254,7 +254,7 @@ NarReader: struct {
     field: fn(&self) -> [U8] StoreError! {
         raw: self.take_bytes(8)
         length := 0
-        loop index in 0..<8 -> length = (length).bit_or((Int{raw[index]} << (8 * index)))
+        loop index in 0..<8 -> length = (length) | (Int{raw[index]} << (8 * index))
         if length < 0 || length > STORE_NAR_MAX_NODE_BYTES {
             return Err(store_nar_invalid("NAR field exceeds the 512 MiB limit"))
         }
@@ -438,7 +438,7 @@ NarStreamReader: struct {
     u64: fn(&self) -> Int StoreError! {
         raw: self.read_exact(8)
         value := 0
-        loop index in 0..<8 -> value = (value).bit_or((Int{raw[index]} << (8 * index)))
+        loop index in 0..<8 -> value = (value) | (Int{raw[index]} << (8 * index))
         Ok(value)
     }
 

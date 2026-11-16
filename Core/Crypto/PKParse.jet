@@ -231,7 +231,7 @@ parse_key_sec1_der: fn<R: RNG>(key: &pk.PKContext, data: [U8], rng: &R) pk.PKErr
     p += d_len
     pubkey_done := false
     if p != end {
-        if asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED)) == {
+        if asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED) == {
             .Ok(params_len) -> {
                 params_end: p + params_len
                 params: get_ecparams(data, p, params_end)
@@ -244,7 +244,7 @@ parse_key_sec1_der: fn<R: RNG>(key: &pk.PKContext, data: [U8], rng: &R) pk.PKErr
     }
     pk.pk_ecc_set_key(key, cipher.bytes_of(data, d_at, d_len))
     if p != end {
-        if asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(1)) == {
+        if asn1.get_tag(data, p, end, asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED | 1) == {
             .Ok(pub_len) -> {
                 end2: p + pub_len
                 bits_len: asn1.get_bitstring_null(data, p, end2) ?? return Err(.KeyInvalidFormat(Val(err)))

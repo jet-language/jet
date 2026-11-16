@@ -8455,7 +8455,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
                 value: if op == .Val(operator) -> Expr.Binary{op: operator, left: Expr.Field{base: swizzle_base.copy(), member: member, span: swizzle_span, id: AST_NODE_GENERATED}, right: expr, span: Span{start: swizzle_span.start, end: expr_span(expr).end}, id: AST_NODE_GENERATED} else -> expr
                 args := [CallArg]{}
                 loop index in 0..<count {
-                    lane: (packed >> (index * 2)).bit_and(3)
+                    lane: (packed >> (index * 2)) & 3
                     args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: swizzle_span, width: None, raw: None, id: AST_NODE_GENERATED}, span: swizzle_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                 }
                 value_span: expr_span(value)

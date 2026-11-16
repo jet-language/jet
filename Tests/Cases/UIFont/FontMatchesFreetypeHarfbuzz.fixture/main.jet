@@ -20,7 +20,7 @@ units: fn(value: Float) -> Int {
 
 // Code point `scalar` (below U+0800, all the pairs need) as text.
 scalar_text: fn(scalar: Int) -> String {
-    bytes: if scalar < 128 -> [U8]{U8{scalar}} else -> [U8]{U8{192 + (scalar >> 6)}, U8{128 + scalar.bit_and(63)}}
+    bytes: if scalar < 128 -> [U8]{U8{scalar}} else -> [U8]{U8{192 + (scalar >> 6)}, U8{128 + (scalar & 63)}}
     String.from_bytes(bytes) ?? panic("{scalar} is not a scalar")
 }
 

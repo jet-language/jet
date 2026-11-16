@@ -54,13 +54,13 @@ bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 
 little: fn(value: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
-    loop i in 0..<width -> out.push(U8{(value >> (i * 8)).bit_and(255)})
+    loop i in 0..<width -> out.push(U8{(value >> (i * 8)) & 255})
     out
 }
 
 integer: fn(raw: [U8], start: Int, width: Int) -> Int Never! {
     value := 0
-    loop i in 0..<width -> value = value.bit_or((Int{raw[start + i]} << (i * 8)))
+    loop i in 0..<width -> value |= (Int{raw[start + i]} << (i * 8))
     value
 }
 

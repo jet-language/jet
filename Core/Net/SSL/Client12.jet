@@ -706,7 +706,7 @@ ssl_cli12_parse_server_key_exchange: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &
 // Whether in_buf[start..<end] starts with a well-formed DER Name.
 ssl_cli12_dn_hint_is_name: fn(data: [U8], start: Int, end: Int) -> Bool Never! {
     p := start
-    asn1_len := if asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) == {
+    asn1_len := if asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) == {
         .Ok(len) -> len
         .Err(_) -> {
             return false

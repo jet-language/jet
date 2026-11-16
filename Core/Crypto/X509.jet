@@ -255,7 +255,7 @@ X509SigAlg: struct {
 x509_get_serial: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
     if end - p < 1 -> return Err(.InvalidSerial(Val(.OutOfData)))
     tag_id: Int{data[p]}
-    if tag_id != asn1.ASN1_CONTEXT_SPECIFIC.bit_or(2) && tag_id != asn1.ASN1_INTEGER {
+    if tag_id != asn1.ASN1_CONTEXT_SPECIFIC | 2 && tag_id != asn1.ASN1_INTEGER {
         return Err(.InvalidSerial(Val(.UnexpectedTag)))
     }
     p += 1
@@ -297,9 +297,7 @@ x509_get_hash_alg: fn(data: [U8], alg: asn1.ASN1Buf) -> hashes.Md X509Error! {
 }
 
 // The tag of an explicit [n] field.
-x509_explicit: fn(n: Int) -> Int Never! {
-    asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(n)
-}
+x509_explicit: fn(n: Int) -> Int Never! { asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED | n }
 
 /// RSASSA-PSS-params (RFC 4055), each field defaulted when absent; the
 /// trailerField, when present, must be 1 (mbedtls_x509_get_rsassa_pss_params).
@@ -411,7 +409,7 @@ x509_get_name: fn(data: [U8], p: &Int, end: Int) -> [asn1.NamedData] X509Error! 
 // day without leap seconds.
 x509_date_is_valid: fn(t: X509Time) -> Bool Never! {
     if t.mon < 1 || t.mon > 12 -> return false
-    leap: t.year.bit_and(3) == 0 && (t.year %% 100 != 0 || t.year %% 400 == 0)
+    leap: t.year & 3 == 0 && (t.year %% 100 != 0 || t.year %% 400 == 0)
     month_days: if {
         t.mon == 2 && leap -> 29
         t.mon == 2 -> 28
@@ -528,14 +526,14 @@ x509_hex_digit: fn(n: Int) -> U8 Never! {
 
 x509_push_hex2: fn(out: &[U8], b: Int) {
     out.push(x509_hex_digit(b >> 4))
-    out.push(x509_hex_digit(b.bit_and(15)))
+    out.push(x509_hex_digit(b & 15))
 }
 
 x509_hex_text: fn(value: Int, width: Int) -> [U8] Never! {
     digits := [U8]{}
     v := value
     loop v > 0 || digits.len() < width {
-        digits.push(x509_hex_digit(v.bit_and(15)))
+        digits.push(x509_hex_digit(v & 15))
         v = v >> 4
     }
     out := [U8]{}
@@ -560,7 +558,7 @@ x509_oid_item: fn(oid: [U8]) -> asn1.ASN1Buf Never! {
 // The value of one hexadecimal digit, -1 for any other byte.
 x509_hex_value: fn(c: Int) -> Int Never! {
     if c >= 48 && c <= 57 -> return c - 48
-    upper: c.bit_and(0xDF)
+    upper: c & 0xDF
     if upper >= 65 && upper <= 70 -> return upper - 55
     return -1
 }
@@ -712,9 +710,9 @@ x509_key_size_helper: fn(name: String) -> String Never! { "{name} key size" }
 /// Negative, zero or positive as t1 is before, at or after t2
 /// (mbedtls_x509_time_cmp).
 x509_time_cmp: fn(t1: X509Time, t2: X509Time) -> Int Never! {
-    x: ((t1.year << 9).bit_or(t1.mon << 5).bit_or(t1.day)) - ((t2.year << 9).bit_or(t2.mon << 5).bit_or(t2.day))
+    x: ((t1.year << 9) | t1.mon << 5 | t1.day) - ((t2.year << 9) | t2.mon << 5 | t2.day)
     if x != 0 -> return x
-    ((t1.hour << 12).bit_or(t1.min << 6).bit_or(t1.sec)) - ((t2.hour << 12).bit_or(t2.min << 6).bit_or(t2.sec))
+    ((t1.hour << 12) | t1.min << 6 | t1.sec) - ((t2.hour << 12) | t2.min << 6 | t2.sec)
 }
 
 /// The UTC date and time of a Unix time in seconds
@@ -736,7 +734,7 @@ x509_time_is_future: fn(from: X509Time) -[Time]> Bool Never! { x509_time_cmp(fro
 // x509_get_other_name: an otherName holding a hardwareModuleName, the only
 // type mbedtls reads.
 x509_get_other_name: fn(data: [U8], san: asn1.ASN1Buf) -> SanOtherName X509Error! {
-    if san.tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK.bit_or(asn1.ASN1_TAG_VALUE_MASK)) != asn1.ASN1_CONTEXT_SPECIFIC.bit_or(X509_SAN_OTHER_NAME) {
+    if san.tag_id & (asn1.ASN1_TAG_CLASS_MASK | asn1.ASN1_TAG_VALUE_MASK) != asn1.ASN1_CONTEXT_SPECIFIC | X509_SAN_OTHER_NAME {
         return Err(.BadInput)
     }
     p := san.p
@@ -745,7 +743,7 @@ x509_get_other_name: fn(data: [U8], san: asn1.ASN1Buf) -> SanOtherName X509Error
     type_id: asn1.ASN1Buf{tag_id: asn1.ASN1_OID, p: p, len: len}
     if !oids.is(oids.OID_ON_HW_MODULE_NAME, data, type_id) -> return Err(.FeatureUnavailable(None))
     p += len
-    len = asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_CONTEXT_SPECIFIC)) ?? return Err(.InvalidExtensions(Val(err)))
+    len = asn1.get_tag(data, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_CONTEXT_SPECIFIC) ?? return Err(.InvalidExtensions(Val(err)))
     if end != p + len -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
     len = asn1.get_tag(data, p, end, X509_SEQUENCE) ?? return Err(.InvalidExtensions(Val(err)))
     if end != p + len -> return Err(.InvalidExtensions(Val(.LengthMismatch)))
@@ -764,11 +762,11 @@ x509_get_other_name: fn(data: [U8], san: asn1.ASN1Buf) -> SanOtherName X509Error
 /// or IPv6 iPAddress; FeatureUnavailable for the other types
 /// (mbedtls_x509_parse_subject_alt_name).
 x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName X509Error! {
-    kind: san.tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK.bit_or(asn1.ASN1_TAG_VALUE_MASK))
-    if kind.bit_and(asn1.ASN1_TAG_CLASS_MASK) != asn1.ASN1_CONTEXT_SPECIFIC {
+    kind: san.tag_id & (asn1.ASN1_TAG_CLASS_MASK | asn1.ASN1_TAG_VALUE_MASK)
+    if kind & asn1.ASN1_TAG_CLASS_MASK != asn1.ASN1_CONTEXT_SPECIFIC {
         return Err(.FeatureUnavailable(None))
     }
-    if kind.bit_and(asn1.ASN1_TAG_VALUE_MASK) == {
+    if kind & asn1.ASN1_TAG_VALUE_MASK == {
         X509_SAN_OTHER_NAME -> {
             other: x509_get_other_name(data, san)
             Ok(.OtherName(other))
@@ -799,7 +797,7 @@ x509_get_subject_alt_name_ext: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Bu
         p += 1
         len: asn1.get_len(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
         item: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
-        if tag_id.bit_and(asn1.ASN1_TAG_CLASS_MASK) != asn1.ASN1_CONTEXT_SPECIFIC {
+        if tag_id & asn1.ASN1_TAG_CLASS_MASK != asn1.ASN1_CONTEXT_SPECIFIC {
             return Err(.InvalidExtensions(Val(.UnexpectedTag)))
         }
         if x509_parse_subject_alt_name(data, item) == {
@@ -839,7 +837,7 @@ x509_get_key_usage: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
     usage := 0
     loop i in 0..<bs.len {
         if i >= 4 -> break
-        usage = usage.bit_or(Int{data[bs.p + i]} << (8 * i))
+        usage |= Int{data[bs.p + i]} << (8 * i)
     }
     Ok(usage)
 }
@@ -908,7 +906,7 @@ x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: Strin
 x509_info_flags: fn(out: &[U8], bits: Int, flags: [Int], names: [String]) {
     sep := ""
     loop i in 0..<flags.len() {
-        if bits.bit_and(flags[i]) != 0 {
+        if bits & flags[i] != 0 {
             out.extend("{sep}{names[i]}".bytes())
             sep = ", "
         }

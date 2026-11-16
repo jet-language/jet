@@ -176,7 +176,7 @@ receipt_section_frame: fn(target: I64, value: I64) {
     length: rt_text_len(value)
     shift := I64{56}
     loop shift >= (I64{0}) {
-        rt_text_append_raw_word(target, (length >> shift).bit_and(I64{255}), I64{1})
+        rt_text_append_raw_word(target, (length >> shift) & I64{255}, I64{1})
         shift -= I64{8}
     }
     rt_text_append(target, rt_text_data(value), length)
@@ -269,7 +269,7 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
         at := I64{0}
         loop at < listed {
             record: wrapping(buffer + at)
-            at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+            at += rt_text_byte(wrapping(record + I64{16})) | (rt_text_byte(wrapping(record + I64{17})) << I64{8})
             entry: wrapping(record + I64{19})
             if files_dot_entry(entry) -> next
             path_text: jet_rt_string_builder_new()
@@ -285,7 +285,7 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
                 stop = rt_static_text("could not inspect receipt section")
                 break
             }
-            if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{32768}) {
+            if ((rt_text_word(wrapping(facts + I64{16})) & I64{61440}) != I64{32768}) {
                 stop = rt_static_text("receipt section record is not a regular file")
                 break
             }
@@ -346,7 +346,7 @@ receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
             loop {
                 result: receipt_section_lstat(name, facts)
                 if (result == I64{0}) {
-                    if ((rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})) != I64{16384}) {
+                    if ((rt_text_word(wrapping(facts + I64{16})) & I64{61440}) != I64{16384}) {
                         safe = false
                     }
                     break

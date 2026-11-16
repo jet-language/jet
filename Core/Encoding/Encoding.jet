@@ -668,7 +668,7 @@ __dyn_kind: fn(tree: Dyn) -> String Never! {
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask
 /// after arithmetic to get machine-word wrapping without a second integer type.
-wrap32: fn(n: Int) -> Int Never! { n.bit_and(4294967295) }
+wrap32: fn(n: Int) -> Int Never! { n & 4294967295 }
 
 #Test("every Dyn variant has one decode kind in Core and in the runtime scalar decodes") {
     stamp: Dyn.DateTime(time.zoned(time.from_unix_seconds(0), time.utc()))

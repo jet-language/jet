@@ -562,7 +562,7 @@ game_backend_next: fn(backend: I64) -> I64 {
 // ---- run --------------------------------------------------------------------------
 
 game_hash_byte: fn(state: I64, byte: I64) -> I64 {
-    wrapping(state.bit_xor(byte) * GAME_TRANSCRIPT_PRIME)
+    wrapping((state ~ byte) * GAME_TRANSCRIPT_PRIME)
 }
 
 game_hash_u64: fn(state: I64, value: I64) -> I64 {
@@ -570,7 +570,7 @@ game_hash_u64: fn(state: I64, value: I64) -> I64 {
     at := I64{0}
     width: I64{8}
     loop at < width {
-        hash = game_hash_byte(hash, (value >> (at * I64{8})).bit_and(I64{255}))
+        hash = game_hash_byte(hash, (value >> (at * I64{8})) & I64{255})
         at += I64{1}
     }
     hash
@@ -610,7 +610,7 @@ game_push_hex: fn(target: I64, value: I64) {
     shift := I64{60}
     floor: I64{0}
     loop shift >= floor {
-        nibble: (value >> shift).bit_and(I64{15})
+        nibble: (value >> shift) & I64{15}
         digit: if (nibble < I64{10}) -> I64{48} + nibble else -> I64{87} + nibble
         rt_text_push_scalar(target, digit)
         shift -= I64{4}

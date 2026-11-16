@@ -276,14 +276,14 @@ vault_utf8_valid: fn(data: I64, length: I64) -> Bool {
 }
 
 vault_u32: fn(data: I64) -> I64 {
-    rt_text_byte(data).bit_or((rt_text_byte(wrapping(data + I64{1})) << I64{8})).bit_or((rt_text_byte(wrapping(data + I64{2})) << I64{16})).bit_or((rt_text_byte(wrapping(data + I64{3})) << I64{24}))
+    rt_text_byte(data) | (rt_text_byte(wrapping(data + I64{1})) << I64{8}) | (rt_text_byte(wrapping(data + I64{2})) << I64{16}) | (rt_text_byte(wrapping(data + I64{3})) << I64{24})
 }
 
 vault_put_u32: fn(target: I64, value: I64) {
-    rt_text_put(target, value.bit_and(I64{255}))
-    rt_text_put(wrapping(target + I64{1}), (value >> I64{8}).bit_and(I64{255}))
-    rt_text_put(wrapping(target + I64{2}), (value >> I64{16}).bit_and(I64{255}))
-    rt_text_put(wrapping(target + I64{3}), (value >> I64{24}).bit_and(I64{255}))
+    rt_text_put(target, value & I64{255})
+    rt_text_put(wrapping(target + I64{1}), (value >> I64{8}) & I64{255})
+    rt_text_put(wrapping(target + I64{2}), (value >> I64{16}) & I64{255})
+    rt_text_put(wrapping(target + I64{3}), (value >> I64{24}) & I64{255})
 }
 
 vault_encode_pairs: fn(pairs: I64) -> I64 {
@@ -824,7 +824,7 @@ vault_take_uint: fn(cursor: I64, width: I64) -> I64 {
     at := I64{0}
     value := I64{0}
     loop at < width {
-        value = value.bit_or((rt_text_byte(wrapping(bytes + at)) << (at * I64{8})))
+        value |= (rt_text_byte(wrapping(bytes + at)) << (at * I64{8}))
         at += I64{1}
     }
     value

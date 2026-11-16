@@ -26,9 +26,9 @@ byte_buffer_render: fn(buffer: I64) -> I64 {
         byte: host_u8_get(data, at)
         // Decimal U8 fits in one word: no temporary Text/Int or heap scratch.
         if (byte < I64{10}) { rt_text_push_word(result, I64{48} + byte, I64{1}) } else if (byte < I64{100}) {
-            rt_text_push_word(result, (I64{48} + byte / I64{10}).bit_or(((I64{48} + byte % I64{10}) << I64{8})), I64{2})
+            rt_text_push_word(result, (I64{48} + byte / I64{10}) | ((I64{48} + byte % I64{10}) << I64{8}), I64{2})
         } else {
-            rt_text_push_word(result, (I64{48} + byte / I64{100}).bit_or(((I64{48} + byte / I64{10} % I64{10}) << I64{8})).bit_or(((I64{48} + byte % I64{10}) << I64{16})), I64{3})
+            rt_text_push_word(result, (I64{48} + byte / I64{100}) | ((I64{48} + byte / I64{10} % I64{10}) << I64{8}) | ((I64{48} + byte % I64{10}) << I64{16}), I64{3})
         }
         at += I64{1}
     }

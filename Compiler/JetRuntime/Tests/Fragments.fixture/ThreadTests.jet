@@ -331,14 +331,14 @@ thread_test_registry_rows: fn() {
     seed := I64{12345}
     steps := I64{0}
     loop steps < (I64{4096}) {
-        seed = (seed * I64{1103515245} + I64{12345}).bit_and(I64{2147483647})
+        seed = (seed * I64{1103515245} + I64{12345}) & I64{2147483647}
         pick: (seed >> I64{8}) % count
         tcb: sync_load(wrapping(slots + pick * I64{8}))
         if (tcb != I64{0}) {
             thread_unregister_tcb(tcb)
             jet_rt_free(tcb, I64{128}, I64{64})
             sync_store(wrapping(slots + pick * I64{8}), I64{0})
-        } else if ((seed >> I64{20}).bit_and(I64{1}) == I64{0}) {
+        } else if ((seed >> I64{20}) & I64{1} == I64{0}) {
             fresh: jet_rt_alloc(I64{128}, I64{64})
             thread_zero(fresh, I64{128})
             sync_store(fresh, fresh)
@@ -347,7 +347,7 @@ thread_test_registry_rows: fn() {
             sync_mutex_unlock(thread_tls_registry)
             sync_store(wrapping(slots + pick * I64{8}), fresh)
         }
-        if (steps.bit_and(I64{63}) == I64{0}) { thread_test_registry_check(slots, count) }
+        if (steps & I64{63} == I64{0}) { thread_test_registry_check(slots, count) }
         steps += I64{1}
     }
     at = I64{0}

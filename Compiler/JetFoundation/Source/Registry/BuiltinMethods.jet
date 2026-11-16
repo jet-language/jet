@@ -44,7 +44,6 @@ BuiltinMethodLowering: enum {
     Predicate
     BitCount
     Arithmetic(operation: TBinaryOp)
-    BitNot
     Euclidean(remainder: Bool)
     Overflow(prefix: String, operation: String)
     Atomic
@@ -58,7 +57,7 @@ BuiltinMethodLowering: enum {
 // `to_string` on a scalar: numeric receivers show through TNumericOp.ToShow,
 // Bool, Char and inline ranges through TBuiltinOp.ToString.
 // Float predicates and integer bit-population queries.
-// Checked by sema_expr_check_binary / numeric unary.
+// Checked by sema_expr_check_binary.
 // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
 // Fixed-width rotation (`rotate_left`, `rotate_right`) on the overflow-word seam.
 // A call of the Core source helper `owner.member(receiver, args…)`: the
@@ -282,10 +281,6 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.Bytes, name: "write", parameters: [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferWrite{method: "write"}}},
     // Numbers.
     {receiver: BuiltinMethodReceiver.Scalar, name: "to_string", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Show},
-    {receiver: BuiltinMethodReceiver.Integer, name: "bit_and", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitAnd}},
-    {receiver: BuiltinMethodReceiver.Integer, name: "bit_or", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitOr}},
-    {receiver: BuiltinMethodReceiver.Integer, name: "bit_xor", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.BitXor}},
-    {receiver: BuiltinMethodReceiver.Integer, name: "bit_not", parameters: [Type]{}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.BitNot},
     {receiver: BuiltinMethodReceiver.Integer, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
     {receiver: BuiltinMethodReceiver.Float, name: "pow", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Arithmetic{operation: TBinaryOp.Pow}},
     // IEEE 754 totalOrder, as `<=>`: -NaN < -inf < ... < -0.0 < +0.0 < ... <

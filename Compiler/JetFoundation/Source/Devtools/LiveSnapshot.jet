@@ -113,7 +113,7 @@ jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
         return Err(jet_live_error("live runtime snapshot is truncated"))
     }
     value := U64{0}
-    loop index in 0..<8 -> value = value.bit_or(U64{cursor.bytes[cursor.at + index]} << (index * 8))
+    loop index in 0..<8 -> value |= U64{cursor.bytes[cursor.at + index]} << (index * 8)
     cursor.at += 8
     Ok(value)
 }
@@ -430,7 +430,7 @@ jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetL
     before: reader.stat() ?? return Err(jet_live_error("cannot inspect live runtime snapshot: {err}"))
     if !before.is_file -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
     if live_sys.is_unix() {
-        if (before.mode.bit_and(0o077)) != 0 {
+        if (before.mode & 0o077) != 0 {
             return Err(jet_live_error("live runtime snapshot permissions expose runtime state"))
         }
         if before.owner != Val(live_sys.getuid()) {

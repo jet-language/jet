@@ -27,7 +27,7 @@ wasm_decode_module: fn(bytes: &&[U8]) -> WasmModule WasmError! {
     }
     version: reader.fixed(4) ?? return Err(WasmError.new("unexpected end: missing version", 4))
     if version != WASM_CORE_VERSION {
-        if version.bit_and(0xffff) == 0x0d {
+        if version & 0xffff == 0x0d {
             return Err(WasmError.new("this is a component, not a core module", 4))
         }
         return Err(WasmError.new("unknown binary version 0x{wasm_hex(version)}", 4))
@@ -281,14 +281,14 @@ wasm_decode_elems: fn(wm: &WasmModule, section: &WasmReader) WasmError! {
         flags: section.u32()
         if flags > 7 -> return Err(WasmError.new("malformed element segment flags {flags}", at))
         mode := WASM_SEGMENT_ACTIVE
-        if flags.bit_and(1) != 0 {
-            mode = if flags.bit_and(2) == 0 -> WASM_SEGMENT_PASSIVE else -> WASM_SEGMENT_DECLARATIVE
+        if flags & 1 != 0 {
+            mode = if flags & 2 == 0 -> WASM_SEGMENT_PASSIVE else -> WASM_SEGMENT_DECLARATIVE
         }
         table := 0
         if flags == 2 || flags == 6 -> table = section.u32()
         offset := wasm_zero_offset()
         if mode == WASM_SEGMENT_ACTIVE -> offset = wasm_read_const_expr(section)
-        uses_exprs: flags.bit_and(4) != 0
+        uses_exprs: flags & 4 != 0
         // Flags 0 and 4 imply funcref; the others carry an elemkind (0x00) or a reference type.
         elem_type := WASM_FUNCREF
         if flags != 0 && flags != 4 {

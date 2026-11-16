@@ -154,7 +154,7 @@ CBORPull: struct<R: Reader> {
         value := U64{0}
         loop _ in 0..<width {
             byte: self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(err)
-            value = (value << 8).bit_or(U64{Int{byte}})
+            value = (value << 8) | U64{Int{byte}}
         }
         Ok(Val(value))
     }
@@ -201,11 +201,11 @@ CBORPull: struct<R: Reader> {
             }
             if head == (U8{255}) -> break
             byte: Int{head}
-            if (byte >> 5) != major || (byte.bit_and(31)) == 31 {
+            if (byte >> 5) != major || (byte & 31) == 31 {
                 release<U8>(self.allocation, out)
                 return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
             }
-            count: if self.argument(byte.bit_and(31), chunk) == {
+            count: if self.argument(byte & 31, chunk) == {
                 .Ok(value) -> value
                 .Err(failure) -> {
                     release<U8>(self.allocation, out)
@@ -306,7 +306,7 @@ CBORPull: struct<R: Reader> {
             raw_byte: self.required(start, "truncated CBOR {name}") ?? return Err(err)
             byte: Int{raw_byte}
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256 else {
-                bits = (bits << 8).bit_or(byte)
+                bits = (bits << 8) | byte
             }
         }
         Ok(if width == 2 -> parser.widen_float(bits, 5, 10) else if width == 4 -> parser.widen_float(bits, 8, 23) else -> math.from_bits(bits))
@@ -338,7 +338,7 @@ CBORPull: struct<R: Reader> {
             return Err(error(.Syntax, start, self.path(), "CBOR break outside an indefinite container"))
         }
         major: head >> 5
-        additional: head.bit_and(31)
+        additional: head & 31
         key_expected: self.frames.len() > 0 && self.frames[self.frames.len() - 1].object && self.frames[self.frames.len() - 1].expecting_key
         if key_expected && major != 3 {
             return Err(error(.Unsupported, start, self.path(), "CBOR map key must be text"))
@@ -427,13 +427,13 @@ length_size: fn(n: Int) -> Int Never! {
 }
 
 uint: fn(out: &[U8], value: Int, width: Int) Never! {
-    loop i in 0..<width -> out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
+    loop i in 0..<width -> out.push(U8{(value >> ((width - i - 1) * 8)) & 255})
 }
 
 length: fn(out: &[U8], major: Int, n: Int) Never! {
     size: length_size(n)
-    if size == 1 -> out.push(U8{(major << 5).bit_or(n)}) else {
-        out.push(U8{(major << 5).bit_or((if size == 2 -> 24 else if size == 3 -> 25 else if size == 5 -> 26 else -> 27))})
+    if size == 1 -> out.push(U8{(major << 5) | n}) else {
+        out.push(U8{(major << 5) | (if size == 2 -> 24 else if size == 3 -> 25 else if size == 5 -> 26 else -> 27)})
         uint(out, n, size - 1)
     }
 }

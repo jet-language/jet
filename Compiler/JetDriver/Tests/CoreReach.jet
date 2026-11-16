@@ -305,7 +305,7 @@ reach_test_read: fn(path: String) -> String {
     assert_eq(words.spells[3].len(), 0)
     spelled := [String]{}
     loop row in 0..<2 {
-        loop key in words.spells[row] -> spelled.push("{words.words[key >> 2]}/{key.bit_and(3)}")
+        loop key in words.spells[row] -> spelled.push("{words.words[key >> 2]}/{key & 3}")
     }
     assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
 }

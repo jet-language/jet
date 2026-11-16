@@ -322,7 +322,7 @@ jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverR
             return Err(jet_driver_run_receipt_error("receipt links version is malformed"))
         }
         version_number := U64{0}
-        loop byte in version -> version_number = (version_number << 8).bit_or(U64{byte})
+        loop byte in version -> version_number = (version_number << 8) | U64{byte}
         if version_number != 1 {
             return Err(jet_driver_run_receipt_error("unsupported receipt links version {version_number}"))
         }

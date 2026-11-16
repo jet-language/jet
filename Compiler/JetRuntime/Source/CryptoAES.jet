@@ -29,9 +29,7 @@ aes_ni_table := I64{0}
 // CPUID.1:ECX bits 25 (AES-NI), 1 (PCLMULQDQ) and 9 (SSSE3, for pshufb).
 aes_ni_present: fn() -> Bool {
     #Unsafe("cpuid only reports processor identification") {
-        if (os_cpuid_ecx_i64(I64{1}, I64{0}).bit_and(I64{33554946}) == I64{33554946}) {
-            return true
-        }
+        if (os_cpuid_ecx_i64(I64{1}, I64{0}) & I64{33554946} == I64{33554946}) { return true }
     }
     false
 }
@@ -63,7 +61,7 @@ RT_AES_XTS_DEC: I64{10}
 rt_aes_xor: fn(dst: I64, a: I64, b: I64, bytes: I64) {
     at := I64{0}
     loop at < bytes {
-        rt_text_store(wrapping(dst + at), rt_text_word(wrapping(a + at)).bit_xor(rt_text_word(wrapping(b + at))))
+        rt_text_store(wrapping(dst + at), rt_text_word(wrapping(a + at)) ~ rt_text_word(wrapping(b + at)))
         at += I64{8}
     }
 }
@@ -113,7 +111,7 @@ rt_aes_one: fn(keys: I64, rounds: I64, src: I64, pre: I64, post: I64, out: I64, 
 rt_aes_increment: fn(ctr: I64, width: I64) {
     i := I64{15}
     loop i >= (I64{16} - width) {
-        byte: (rt_text_byte(wrapping(ctr + i)) + I64{1}).bit_and(I64{255})
+        byte: (rt_text_byte(wrapping(ctr + i)) + I64{1}) & I64{255}
         rt_text_put(wrapping(ctr + i), byte)
         if (byte != I64{0}) {
             return
@@ -127,8 +125,8 @@ rt_aes_increment: fn(ctr: I64, width: I64) {
 rt_aes_xts_double: fn(t: I64) {
     lo: rt_text_word(t)
     hi: rt_text_word(wrapping(t + I64{8}))
-    rt_text_store(t, (lo << I64{1}).bit_xor(I64{0x87}.bit_and(hi >> I64{63})))
-    rt_text_store(wrapping(t + I64{8}), (hi << I64{1}).bit_or(rt_crypto_shr64(lo, I64{63})))
+    rt_text_store(t, (lo << I64{1}) ~ I64{0x87} & hi >> I64{63})
+    rt_text_store(wrapping(t + I64{8}), (hi << I64{1}) | rt_crypto_shr64(lo, I64{63}))
 }
 
 // core.crypto.__aes_blocks: the `count` whole blocks of the borrowed bytes

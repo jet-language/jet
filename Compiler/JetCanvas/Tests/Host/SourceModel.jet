@@ -73,7 +73,7 @@ source_model_test_replace_after_ancestor_swap: fn(path: String, outside: String,
     source_model_test_files.set_mode(path, 0o640) ?? panic("cannot set mode: {err}")
     replace_source_if_unchanged_locked(path, Val("before\n"), Val("after\n")) ?? panic("replace failed")
     stat: source_model_test_files.stat(path) ?? panic("cannot stat source: {err}")
-    assert_eq(stat.mode.bit_and(0o7777), 0o640)
+    assert_eq(stat.mode & 0o7777, 0o640)
     source_model_test_cleanup(root)
 }
 

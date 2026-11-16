@@ -103,7 +103,7 @@ x64_comptime_frame: fn(kind: Int, operands: [Int]) -> [U8] Never! {
 x64_comptime_put_word: fn(bytes: &[U8], value: Int) Never! {
     bits := if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<8 {
-        bytes.push(U8{bits.bit_and(255)})
+        bytes.push(U8{bits & 255})
         bits = bits >> 8
     }
 }
@@ -219,9 +219,9 @@ x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: X64_COMPTIME_SIGRETURN, jt: rest, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 56, jt: -1, jf: -1})
-    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: cookie.bit_and(4294967295), jt: -1, jf: rest})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: cookie & 4294967295, jt: -1, jf: rest})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 60, jt: -1, jf: -1})
-    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: (cookie >> 32).bit_and(4294967295), jt: -1, jf: rest})
+    program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: (cookie >> 32) & 4294967295, jt: -1, jf: rest})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 0, jt: -1, jf: -1})
     loop number in calls {
         program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: number, jt: if X64_COMPTIME_FILE_FD_CALLS.contains(number) -> fd_check else -> allow, jf: -1})
@@ -283,11 +283,11 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
         if jt < 0 || jt > 255 || jf < 0 || jf > 255 {
             panic("comptime seccomp jump out of range at {at}")
         }
-        bytes.push(U8{row.code.bit_and(255)})
-        bytes.push(U8{(row.code >> 8).bit_and(255)})
+        bytes.push(U8{row.code & 255})
+        bytes.push(U8{(row.code >> 8) & 255})
         bytes.push(U8{jt})
         bytes.push(U8{jf})
-        loop shift in 0..<4 -> bytes.push(U8{(row.k >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<4 -> bytes.push(U8{(row.k >> (8 * shift)) & 255})
     }
     bytes
 }
@@ -310,7 +310,7 @@ x64_comptime_bpf_run: fn(program: [U8], number: Int, first: Int, sixth: Int) -> 
     // instruction pointer, then its six arguments.
     header: [Int]{number, X64_AUDIT_ARCH_X86_64}
     loop word in header {
-        loop shift in 0..<4 -> data.push(U8{(word >> (8 * shift)).bit_and(255)})
+        loop shift in 0..<4 -> data.push(U8{(word >> (8 * shift)) & 255})
     }
     x64_comptime_put_word(data, 0)
     x64_comptime_put_word(data, first)

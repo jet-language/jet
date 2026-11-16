@@ -144,7 +144,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
         key: core_call_key(row)
         assert(row.signature.borrow_mask.len() == row.signature.arity, "{key}: {row.signature.borrow_mask.len()} mask entries for arity {row.signature.arity}")
         assert(row.signature.max_arity >= row.signature.arity, "{key}: max arity {row.signature.max_arity} is below arity {row.signature.arity}")
-        if row.effect_kind == (Val("Net")) -> network += 1
+        if row.effects.contains("Net") -> network += 1
     }
     assert(network > 0, "CORE_CALLS has no Net route row")
 }
@@ -214,7 +214,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     shortcut: (core_decl_call_record("CoreCallRecord::source_owned(\"core.ui.host\", \"shortcut\", &[false, false]).with_ui_capabilities(&[\"UI.Shortcuts\"])", "source-owned constructor fixture", none) ?? panic("the source-owned constructor was refused: {err.message}")).record
     assert(shortcut.module_name == "core.ui.host" && shortcut.member == "shortcut" && shortcut.receiver_types.len() == 0)
     assert(shortcut.signature.arity == 2 && shortcut.signature.max_arity == 2 && shortcut.signature.borrow_mask == [Bool]{false, false})
-    assert(shortcut.capability.kind == CoreCapabilityKind.Pure && shortcut.effect_kind == None && shortcut.source_target == None)
+    assert(shortcut.capability.kind == CoreCapabilityKind.Pure && shortcut.effects.len() == 0 && shortcut.source_target == None)
     assert(shortcut.coverage.bits == 1 && !shortcut.aot_direct && !shortcut.native_int_result)
     assert_eq(shortcut.ui_capabilities, [String]{"UI.Shortcuts"})
     assert(
@@ -232,7 +232,10 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     )
     assert_eq(connect.source_target ?? "", "__unix_connect_entry")
     assert(connect.signature.arity == 1 && connect.signature.max_arity == 2 && connect.coverage.bits == 1 && !connect.aot_direct)
-    assert((connect.effect_kind ?? "") == "Net" && (connect.effect_leaf ?? "") == "Time.Wait")
+    // A source-owned row's effects are its Core declaration's, not its own.
+    assert(connect.effects.len() == 0)
+    adapter: (core_decl_call_record("CoreCallRecord::new(\"core.net\", \"unix_connect\", \"jet_net_unix_connect\", true, &[true])", "adapter fixture", none) ?? panic("the adapter row was refused: {err.message}")).record
+    assert_eq(adapter.effects, [String]{"Net", "Time.Wait"})
     assert(connect.capability.kind == CoreCapabilityKind.NativeRequired && (connect.capability.provider ?? "") == "core.net")
     assert(core_declarations_call_error("CoreCallRecord::new(\"core.mem\", \"volatile_read\", \"std::ptr::read_volatile\", false, &[false])").contains("names a retired Rust route"))
     assert(core_declarations_call_error("CoreCallRecord::new(\"core.net\", \"ip\", \"jet_net_ip\", true)").contains("expected 5 arguments"))

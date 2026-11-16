@@ -540,7 +540,7 @@ jetc_verify_output: fn(input: JetcFd, writer: &&jetc.Writer, length: Int) FileCr
             )
             assert((core.files.read_bytes(opened.to_string()) ?? panic("read existing output")) == ([U8]{9, 8, 7}))
             corrupt := before.copy()
-            corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1].bit_xor(U8{1})
+            corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1] ~ U8{1}
             sealed.write_atomic(corrupt) ?? panic("tamper")
             assert(
                 if open(identity, sealed, failed) == {

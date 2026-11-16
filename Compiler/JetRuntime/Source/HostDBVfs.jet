@@ -47,13 +47,13 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
     }
     name: fd_c_path(path)
     create_mode: if (native_mode == I64{0}) -> DB_VFS_DEFAULT_MODE else -> native_mode
-    exclusive_create: DB_VFS_O_EXCL.bit_or(DB_VFS_O_CREAT)
+    exclusive_create: DB_VFS_O_EXCL | DB_VFS_O_CREAT
     fd := DB_VFS_EINTR
     loop {
-        fd = host_call(I64{2}, name, native_flags.bit_or(DB_VFS_O_CLOEXEC), create_mode)
+        fd = host_call(I64{2}, name, native_flags | DB_VFS_O_CLOEXEC, create_mode)
         if (fd == DB_VFS_EINTR) { next }
         if (fd < I64{0} || fd >= DB_VFS_MINIMUM_FD) { break }
-        if (native_flags.bit_and(exclusive_create) == exclusive_create) {
+        if (native_flags & exclusive_create == exclusive_create) {
             _ := host_call(I64{87}, name, I64{0}, I64{0})
         }
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -64,7 +64,7 @@ db_vfs_fd_valid: fn(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
     if (fd >= I64{0} && native_mode != I64{0}) {
         facts: jet_rt_alloc(I64{144}, I64{8})
         thread_zero(facts, I64{144})
-        if (host_call(I64{5}, fd, facts, I64{0}) == I64{0} && rt_text_word(wrapping(facts + I64{48})) == I64{0} && rt_text_word(wrapping(facts + I64{24})).bit_and(I64{511}) != native_mode) {
+        if (host_call(I64{5}, fd, facts, I64{0}) == I64{0} && rt_text_word(wrapping(facts + I64{48})) == I64{0} && rt_text_word(wrapping(facts + I64{24})) & I64{511} != native_mode) {
             _ := host_call(I64{91}, fd, native_mode, I64{0})
         }
         jet_rt_free(facts, I64{144}, I64{8})
@@ -191,7 +191,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     thread_zero(facts, I64{144})
     status: host_call(call, name, facts, I64{0})
     fd_c_path_drop(name, path)
-    fact: if (status < I64{0}) -> status else -> rt_text_word(wrapping(facts + offset)).bit_and(mask)
+    fact: if (status < I64{0}) -> status else -> rt_text_word(wrapping(facts + offset)) & mask
     jet_rt_free(facts, I64{144}, I64{8})
     fact
 }
@@ -226,8 +226,8 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     }
     owner: db_vfs_path_fact(path, I64{4}, I64{28}, I64{-1})
     if (owner < I64{0}) { return jet_int_owned_from_i64(owner) }
-    uid: owner.bit_and(I64{4294967295})
-    gid: (owner /% I64{4294967296}).bit_and(I64{4294967295})
+    uid: owner & I64{4294967295}
+    gid: (owner /% I64{4294967296}) & I64{4294967295}
     jet_int_owned_from_i64(host_call(I64{93}, native_fd, uid, gid))
 }
 
@@ -265,7 +265,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     rt_text_store(wrapping(lock + I64{8}), native_start)
     rt_text_store(wrapping(lock + I64{16}), native_len)
     status: host_call(I64{72}, native_fd, native_command, lock)
-    found: rt_text_word(lock).bit_and(I64{65535})
+    found: rt_text_word(lock) & I64{65535}
     jet_rt_free(lock, I64{32}, I64{8})
     if (status < I64{0}) { return jet_int_owned_from_i64(status) }
     if (native_command == I64{36} || native_command == I64{5}) {
@@ -308,7 +308,7 @@ db_vfs_path_fact: fn(path: I64, call: I64, offset: I64, mask: I64) -> I64 {
     thread_zero(facts, I64{144})
     status: host_call(I64{4}, name, facts, I64{0})
     fd_c_path_drop(name, path)
-    kind: rt_text_word(wrapping(facts + I64{24})).bit_and(I64{61440})
+    kind: rt_text_word(wrapping(facts + I64{24})) & I64{61440}
     size: rt_text_word(wrapping(facts + I64{48}))
     jet_rt_free(facts, I64{144}, I64{8})
     if (status < I64{0}) { return false }

@@ -116,14 +116,14 @@ scheduler_turn_give: fn() {
 scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
     address: wrapping(control + I64{24})
     if on {
-        if (sync_load(address).bit_and(bits) == bits) {
+        if (sync_load(address) & bits == bits) {
             return
         }
         scheduler_checks_arm()
     }
     loop {
         old: sync_load(address)
-        new: if on -> old.bit_or(bits) else -> old.bit_and(bits.bit_xor(I64{-1}))
+        new: if on -> old | bits else -> old & (bits ~ I64{-1})
         if (old == new) || (sync_cas(address, old, new) == old) {
             return
         }
@@ -153,7 +153,7 @@ scheduler_deadline_reported: fn() {
 
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 scheduler_text_new: fn(length: I64) -> I64 {
-    capacity: (length + I64{7}).bit_and(I64{-8})
+    capacity: (length + I64{7}) & I64{-8}
     text: rt_text_with_length(length, capacity)
     if (text == I64{0}) { return I64{0} }
     if (capacity != I64{0}) { coll_zero(sync_load(text), capacity) }
@@ -368,9 +368,9 @@ scheduler_control_leave: fn(save: I64) {
 #Export(c) jet_rt_root_begin: fn(save: I64) -> I64 {
     parent: scheduler_control_current()
     parent_flags: scheduler_scope_flags(parent)
-    inherited: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} || ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
+    inherited: (parent_flags & SCHEDULER_SCOPE_INHERITED_STOP) != I64{0} || ((parent_flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control: scheduler_control_new()
-    sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
+    sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_ROOT | (if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0}))
     // jet_scheduler_with_root_control: an entry with no current control runs
     // under the process root task control.
     if (parent == I64{0}) { scheduler_process_root_install(control) }
@@ -429,7 +429,7 @@ scheduler_root_task_control: fn() -> I64 {
 }
 
 scheduler_control_is_root: fn(control: I64) -> Bool {
-    (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}
+    (scheduler_scope_flags(control) & SCHEDULER_SCOPE_ROOT) != I64{0}
 }
 
 // jet_task_deliver_cancel: only a task unwinds a delivered cancellation. A
@@ -443,36 +443,36 @@ scheduler_root_cancel_observed: fn() -> Bool {
 // Only scheduler_text_new's owned, eight-aligned 24B E4 header is tagged.
 // Bit0 records an actual requested code independently of opaque scope flags.
 scheduler_root_capture_pointer: fn(control: I64) -> I64 {
-    if (control == I64{0}) -> I64{0} else -> sync_load(wrapping(control + I64{120})).bit_and(I64{-2})
+    if (control == I64{0}) -> I64{0} else -> sync_load(wrapping(control + I64{120})) & I64{-2}
 }
 
 scheduler_root_capture_begin: fn() {
     control: scheduler_control_current()
     if (scheduler_root_capture_pointer(control) != I64{0}) { scheduler_abort_double_panic() }
     text: scheduler_text_empty()
-    sync_store(wrapping(control + I64{120}), text.bit_or((sync_load(wrapping(control + I64{120})).bit_and(I64{1}))))
+    sync_store(wrapping(control + I64{120}), text | (sync_load(wrapping(control + I64{120})) & I64{1}))
 }
 
 scheduler_root_capture_take: fn(control: I64) -> I64 {
     word: sync_load(wrapping(control + I64{120}))
-    sync_store(wrapping(control + I64{120}), word.bit_and(I64{1}))
-    word.bit_and(I64{-2})
+    sync_store(wrapping(control + I64{120}), word & I64{1})
+    word & I64{-2}
 }
 
 scheduler_root_code_known: fn(control: I64) -> Bool {
-    (sync_load(wrapping(control + I64{120})).bit_and(I64{1})) != I64{0}
+    (sync_load(wrapping(control + I64{120})) & I64{1}) != I64{0}
 }
 
 scheduler_root_set_code: fn(control: I64, code: I64) {
     sync_store(wrapping(control + I64{112}), code)
-    sync_store(wrapping(control + I64{120}), sync_load(wrapping(control + I64{120})).bit_or(I64{1}))
+    sync_store(wrapping(control + I64{120}), sync_load(wrapping(control + I64{120})) | I64{1})
 }
 
 // Takes an already checked Panic record. This one named publication sink is
 // shared by Task, Root, rendered Sentry and transported Parallel failures.
 scheduler_panic_publish_record: fn(record: I64) -> Bool {
     control: scheduler_control_current()
-    if ((scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}) {
+    if ((scheduler_scope_flags(control) & SCHEDULER_SCOPE_ROOT) != I64{0}) {
         if (sync_load(wrapping(record + I64{48})) == I64{0}) {
             old: scheduler_stop_take_message(record)
             rendered: trap_root_panic_report(old)
@@ -548,7 +548,7 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     }
     sync_store(wrapping(record + I64{48}), I64{1})
     sync_store(code_out, code)
-    sync_store(wrapping(control + I64{120}), sync_load(wrapping(control + I64{120})).bit_and(I64{-2}))
+    sync_store(wrapping(control + I64{120}), sync_load(wrapping(control + I64{120})) & I64{-2})
     record
 }
 
@@ -625,7 +625,7 @@ scheduler_scope_flags: fn(control: I64) -> I64 {
 }
 
 scheduler_scope_delivered_kind: fn(flags: I64) -> I64 {
-    (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8}
+    (flags & SCHEDULER_SCOPE_MASK_KIND) >> I64{8}
 }
 
 // Origin16 is dynamic: only an actual native Task frame can mint it.
@@ -634,12 +634,12 @@ scheduler_scope_delivered_kind: fn(flags: I64) -> I64 {
     control: scheduler_control_current()
     if (control == I64{0}) { return I64{0} }
     saved: scheduler_scope_flags(control)
-    flags := (saved.bit_and(I64{-1793})).bit_or(SCHEDULER_SCOPE_CLEANUP)
+    flags := (saved & I64{-1793}) | SCHEDULER_SCOPE_CLEANUP
     if (sync_load(wrapping(thread_base() + I64{64})) != I64{0}) {
-        flags = flags.bit_or(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)
+        flags |= SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN
     }
     if (delivered_at_entry >= I64{1} && delivered_at_entry <= I64{5} && scheduler_control_status(control) == delivered_at_entry) {
-        flags = flags.bit_or(delivered_at_entry << I64{8})
+        flags |= delivered_at_entry << I64{8}
     }
     sync_store(wrapping(control + I64{104}), flags)
     saved
@@ -673,8 +673,8 @@ scheduler_scope_delivered_kind: fn(flags: I64) -> I64 {
     if (control == I64{0}) { return I64{0} }
     flags: scheduler_scope_flags(control)
     body: sync_load(wrapping(thread_base() + I64{64})) != I64{0}
-    if ((flags.bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} && !body) { return I64{1} }
-    if body || ((flags.bit_and(SCHEDULER_SCOPE_TASK)) != I64{0} && (flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && (flags.bit_and(SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN)) != I64{0}) {
+    if ((flags & SCHEDULER_SCOPE_ROOT) != I64{0} && !body) { return I64{1} }
+    if body || ((flags & SCHEDULER_SCOPE_TASK) != I64{0} && (flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && (flags & SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN) != I64{0}) {
         return I64{2}
     }
     I64{0}
@@ -683,7 +683,7 @@ scheduler_scope_delivered_kind: fn(flags: I64) -> I64 {
 scheduler_cleanup_mask: fn(status: I64) -> I64 {
     flags: scheduler_scope_flags(scheduler_control_current())
     delivered: scheduler_scope_delivered_kind(flags)
-    if ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && delivered >= I64{1} && delivered <= I64{5} && status == delivered) -> I64{0} else -> status
+    if ((flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && delivered >= I64{1} && delivered <= I64{5} && status == delivered) -> I64{0} else -> status
 }
 
 // Shield defers cancellation/deadline/interrupt-class stops, never a panic
@@ -808,7 +808,7 @@ scheduler_body_leave: fn(saved: I64) { sync_store(wrapping(thread_base() + I64{6
 #Export(c) jet_rt_poll_call_enter: fn() -> I64 {
     cell: wrapping(thread_base() + I64{64})
     saved: sync_load(cell)
-    if (saved.bit_and(I64{1}) != I64{0}) { sync_store(cell, saved.bit_or(I64{2})) }
+    if (saved & I64{1} != I64{0}) { sync_store(cell, saved | I64{2}) }
     saved
 }
 
@@ -1016,14 +1016,14 @@ scheduler_check_loops: fn(control: I64) {
     if (attention == I64{0}) || scheduler_shielded() {
         return
     }
-    if (attention.bit_and(SCHEDULER_ATTEND_PAUSE) != I64{0}) {
+    if (attention & SCHEDULER_ATTEND_PAUSE != I64{0}) {
         // The bit is raised only after a strong pause installed the park.
         park: scheduler_pause_park_rail_code
         if (park != I64{0} && coll_call1(park, control) == I64{0}) {
             return
         }
     }
-    if (sync_load(wrapping(control + I64{24})).bit_and(SCHEDULER_ATTEND_CANCEL) != I64{0}) {
+    if (sync_load(wrapping(control + I64{24})) & SCHEDULER_ATTEND_CANCEL != I64{0}) {
         scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, false)
         if (sync_load(wrapping(control + I64{16})) != I64{0}) { scheduler_deliver_cancel() }
     }
@@ -1041,7 +1041,7 @@ scheduler_check_loops: fn(control: I64) {
 // value.
 scheduler_check_loop_deadline: fn(control: I64) {
     attention: sync_load(wrapping(control + I64{24}))
-    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) {
+    if (attention & SCHEDULER_ATTEND_DEADLINE == I64{0}) || scheduler_shielded() || (scheduler_control_status(control) != I64{0}) {
         return
     }
     if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) {
@@ -1089,7 +1089,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     }
     waiter: if !shielded -> scheduler_cancel_waiter_register(control, slot) else -> I64{0}
     wait := timeout_ns
-    virtual_wait: (sync_load(wrapping(thread_base() + I64{112})).bit_and(I64{2})) != I64{0}
+    virtual_wait: (sync_load(wrapping(thread_base() + I64{112})) & I64{2}) != I64{0}
     if virtual_wait {
         if (wait != I64{0}) { wait = I64{-1} }
     }
@@ -1438,7 +1438,7 @@ scheduler_work_waits: fn(root: I64) -> Bool {
 // (~tid << 3) | 6 that pthread_getcpuclockid names, or -1 once it is gone.
 // Not sync_clock_read, which stops on a failed read.
 scheduler_thread_cpu_ns: fn(tid: I64) -> I64 {
-    clock: (wrapping(I64{-1} - tid) << I64{3}).bit_or(I64{6})
+    clock: (wrapping(I64{-1} - tid) << I64{3}) | I64{6}
     scratch := I64{0}
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
         scratch = wrapping(os_tls_base_i64() + I64{232})
@@ -1545,7 +1545,7 @@ scheduler_monitor_scan: fn(root: I64, buffer: I64, turns: Bool) -> I64 {
         runs: sync_load(wrapping(record + I64{40}))
         tid: sync_load(wrapping(record + I64{32}))
         cpu := I64{-1}
-        if (runs.bit_and(I64{1}) == I64{1} && tid > I64{0}) {
+        if (runs & I64{1} == I64{1} && tid > I64{0}) {
             cpu = scheduler_thread_cpu_ns(tid)
             seen: sync_load(wrapping(record + I64{56}))
             same: runs == sync_load(wrapping(record + I64{48}))
@@ -2044,7 +2044,7 @@ scheduler_park_duration: fn(wait_kind: I64, duration_ns: I64) -> I64 {
     if (duration_ns <= I64{0}) { return jet_scheduler_native_propagate() }
     world: world_current()
     if (world != I64{0}) {
-        if ((sync_load(wrapping(thread_base() + I64{112})).bit_and(I64{1})) == I64{0}) {
+        if ((sync_load(wrapping(thread_base() + I64{112})) & I64{1}) == I64{0}) {
             scheduler_fatal(services_msg_world_sleep())
             return jet_scheduler_native_status()
         }
@@ -2223,7 +2223,7 @@ scheduler_abort_double_panic: fn() {
 scheduler_stop_fatal: fn() -> Bool {
     if (jet_rt_stop_domain() == I64{0}) { return false }
     flags: scheduler_scope_flags(scheduler_control_current())
-    if ((flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} || ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) || scheduler_delivered_status_unmasked() != I64{0}) {
+    if ((flags & SCHEDULER_SCOPE_INHERITED_STOP) != I64{0} || ((flags & SCHEDULER_SCOPE_CLEANUP) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) || scheduler_delivered_status_unmasked() != I64{0}) {
         return true
     }
     false

@@ -213,7 +213,7 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
         diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), message, row.why, row.fix))
     }
     if diagnostics.len() > 0 {
-        parts.flags = parts.flags.bit_and(14)
+        parts.flags &= 14
         parts.stderr = "{parts.stderr}{diagnostic_render_all(doctests.shown, doctests.source, diagnostics, color)}"
     }
     parts.stdout = output

@@ -214,7 +214,7 @@ get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
         return Color{r: 0, g: 0, b: 0, a: 0}
     }
     rgba: straight_at(image.pixels, (y * image.width + x) * 4)
-    color((rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
+    color((rgba >> 24) & 255, (rgba >> 16) & 255, (rgba >> 8) & 255, rgba & 255)
 }
 
 // Image drawing stores the color, premultiplied, alpha included; it does
@@ -422,7 +422,7 @@ image_color_tint: fn(image: &Image, color: Color) Never! {
         tinted := 0
         shift := 24
         loop shift >= 0 {
-            tinted = (tinted << 8) + (rgba >> shift).bit_and(255) * (tint >> shift).bit_and(255) /% 255
+            tinted = (tinted << 8) + ((rgba >> shift) & 255) * ((tint >> shift) & 255) /% 255
             shift -= 8
         }
         put_rgba(image.pixels, at, premultiply(tinted))
@@ -435,7 +435,7 @@ image_color_invert: fn(image: &Image) Never! {
     at := 0
     loop at + 4 <= image.pixels.len() {
         rgba: straight_at(image.pixels, at)
-        put_rgba(image.pixels, at, premultiply(0xFFFFFF00 - rgba.bit_and(0xFFFFFF00) + rgba.bit_and(255)))
+        put_rgba(image.pixels, at, premultiply(0xFFFFFF00 - (rgba & 0xFFFFFF00) + (rgba & 255)))
         at += 4
     }
 }
@@ -451,12 +451,12 @@ image_color_brightness: fn(image: &Image, brightness: Int) Never! {
         bright := 0
         shift := 24
         loop shift >= 8 {
-            sum: (rgba >> shift).bit_and(255) + amount
+            sum: ((rgba >> shift) & 255) + amount
             value: if sum < 0 -> 1 else -> min_int(sum, 255)
             bright = (bright << 8) + value
             shift -= 8
         }
-        put_rgba(image.pixels, at, premultiply((bright << 8) + rgba.bit_and(255)))
+        put_rgba(image.pixels, at, premultiply((bright << 8) + (rgba & 255)))
         at += 4
     }
 }
@@ -480,9 +480,9 @@ image_size_ok: fn(width: Int, height: Int) -> Bool {
 
 push_rgba: fn(pixels: &[U8], rgba: Int) {
     pixels.push(U8{rgba >> 24})
-    pixels.push(U8{(rgba >> 16).bit_and(255)})
-    pixels.push(U8{(rgba >> 8).bit_and(255)})
-    pixels.push(U8{rgba.bit_and(255)})
+    pixels.push(U8{(rgba >> 16) & 255})
+    pixels.push(U8{(rgba >> 8) & 255})
+    pixels.push(U8{rgba & 255})
 }
 
 image_rgba: fn(pixels: [U8], at: Int) -> Int {
@@ -506,24 +506,24 @@ straight_pixels: fn(pixels: [U8]) -> [U8] {
 // A straight 0xRRGGBBAA color as the canvas holds it: red, green and blue
 // each (c * a + 127) / 255.
 premultiply: fn(rgba: Int) -> Int {
-    alpha: rgba.bit_and(255)
+    alpha: rgba & 255
     if alpha == 255 -> return rgba
-    red: div255((rgba >> 24).bit_and(255) * alpha + 127)
-    green: div255((rgba >> 16).bit_and(255) * alpha + 127)
-    blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
+    red: div255(((rgba >> 24) & 255) * alpha + 127)
+    green: div255(((rgba >> 16) & 255) * alpha + 127)
+    blue: div255(((rgba >> 8) & 255) * alpha + 127)
     (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
 // A premultiplied 0xRRGGBBAA color straight again: red, green and blue
 // each (c * 255 + a / 2) / a, at most 255; alpha 0 is clear black.
 unpremultiply: fn(rgba: Int) -> Int {
-    alpha: rgba.bit_and(255)
+    alpha: rgba & 255
     if alpha == 255 -> return rgba
     if alpha == 0 -> return 0
     half: alpha /% 2
-    red: min_int((rgba >> 24).bit_and(255) * 255 + half, alpha * 255) /% alpha
-    green: min_int((rgba >> 16).bit_and(255) * 255 + half, alpha * 255) /% alpha
-    blue: min_int((rgba >> 8).bit_and(255) * 255 + half, alpha * 255) /% alpha
+    red: min_int(((rgba >> 24) & 255) * 255 + half, alpha * 255) /% alpha
+    green: min_int(((rgba >> 16) & 255) * 255 + half, alpha * 255) /% alpha
+    blue: min_int(((rgba >> 8) & 255) * 255 + half, alpha * 255) /% alpha
     (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
@@ -582,7 +582,7 @@ draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size:
     none: UIRect{x: x, y: y, width: 0, height: 0}
     if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return none
     rgba: pack_rgba(color)
-    if rgba.bit_and(255) == 0 -> return none
+    if rgba & 255 == 0 -> return none
     ramp: coverage_ramp(rgba)
     face: set.face
     px: Float{size}
@@ -665,10 +665,10 @@ text_lines: fn(text: String) -> [String] {
 // (weight << 24) + (red << 16) + (green << 8) + blue, one per coverage
 // 0 through 255.
 coverage_ramp: fn(rgba: Int) -> [Int] {
-    red: (rgba >> 24).bit_and(255)
-    green: (rgba >> 16).bit_and(255)
-    blue: (rgba >> 8).bit_and(255)
-    alpha: rgba.bit_and(255)
+    red: (rgba >> 24) & 255
+    green: (rgba >> 16) & 255
+    blue: (rgba >> 8) & 255
+    alpha: rgba & 255
     ramp := [Int]{}
     loop cover in 0..<256 {
         a: div255(cover * alpha + 127)
@@ -705,9 +705,9 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]
             a: source >> 24
             if {
                 a == 255 -> {
-                    pixels[at] = U8{(source >> 16).bit_and(255)}
-                    pixels[at + 1] = U8{(source >> 8).bit_and(255)}
-                    pixels[at + 2] = U8{source.bit_and(255)}
+                    pixels[at] = U8{(source >> 16) & 255}
+                    pixels[at + 1] = U8{(source >> 8) & 255}
+                    pixels[at + 2] = U8{source & 255}
                     pixels[at + 3] = U8{255}
                 }
                 a != 0 -> {
@@ -716,9 +716,9 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]
                     g: Int{pixels[at + 1]} * rest + 127
                     b: Int{pixels[at + 2]} * rest + 127
                     o: Int{pixels[at + 3]} * rest + 127
-                    pixels[at] = U8{(source >> 16).bit_and(255) + ((r + 1 + (r >> 8)) >> 8)}
-                    pixels[at + 1] = U8{(source >> 8).bit_and(255) + ((g + 1 + (g >> 8)) >> 8)}
-                    pixels[at + 2] = U8{source.bit_and(255) + ((b + 1 + (b >> 8)) >> 8)}
+                    pixels[at] = U8{((source >> 16) & 255) + ((r + 1 + (r >> 8)) >> 8)}
+                    pixels[at + 1] = U8{((source >> 8) & 255) + ((g + 1 + (g >> 8)) >> 8)}
+                    pixels[at + 2] = U8{(source & 255) + ((b + 1 + (b >> 8)) >> 8)}
                     pixels[at + 3] = U8{a + ((o + 1 + (o >> 8)) >> 8)}
                 }
                 else -> {}
@@ -831,7 +831,7 @@ draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height
         line: tie_line(tie_axis(first, last, v), v, across)
         at := (row * target.width + box.left) * 4
         loop rgba in line {
-            blend_pixel(pixels, at, (rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
+            blend_pixel(pixels, at, (rgba >> 24) & 255, (rgba >> 16) & 255, (rgba >> 8) & 255, rgba & 255)
             at += 4
         }
     }
@@ -853,7 +853,7 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
         levels.push(axis_rgba(first, last, (Float{column} + 0.5 - rec.x) / rec.width))
     }
     span: box.right - box.left
-    opaque: first.bit_and(255) == 255 && last.bit_and(255) == 255
+    opaque: first & 255 == 255 && last & 255 == 255
     // Opaque, one row of the levels copied to every row (a column on a tie
     // takes black here and its own pixels below); translucent, blended.
     if opaque {
@@ -868,7 +868,7 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
             at := (row * target.width + box.left) * 4
             loop level in levels {
                 if level >= 0 {
-                    blend_pixel(target.pixels, at, (level >> 24).bit_and(255), (level >> 16).bit_and(255), (level >> 8).bit_and(255), level.bit_and(255))
+                    blend_pixel(target.pixels, at, (level >> 24) & 255, (level >> 16) & 255, (level >> 8) & 255, level & 255)
                 }
                 at += 4
             }
@@ -886,7 +886,7 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
         line: tie_line(tie_axis(first, last, u), u, across)
         at := box.top * stride + column * 4
         loop rgba in line {
-            blend_pixel(pixels, at, (rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
+            blend_pixel(pixels, at, (rgba >> 24) & 255, (rgba >> 16) & 255, (rgba >> 8) & 255, rgba & 255)
             at += stride
         }
     }
@@ -926,7 +926,7 @@ axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
     rgba := 0
     shift := 24
     loop shift >= 0 {
-        level: Float{(first >> shift).bit_and(255)} * (Float{1.0} - t) + Float{(last >> shift).bit_and(255)} * t + 0.5
+        level: Float{(first >> shift) & 255} * (Float{1.0} - t) + Float{(last >> shift) & 255} * t + 0.5
         whole: core.math.floor(level)
         if level - whole < 0.000000001 || whole + 1.0 - level < 0.000000001 -> return -1
         rgba = (rgba << 8) + clamp8(checked(Int{whole}) ?? 0)
@@ -960,8 +960,8 @@ tie_axis: fn(first: Int, last: Int, t: Float) -> TieAxis {
     lasts := [Float]{}
     shift := 24
     loop shift >= 0 {
-        from: Float{(first >> shift).bit_and(255)}
-        to: Float{(last >> shift).bit_and(255)}
+        from: Float{(first >> shift) & 255}
+        to: Float{(last >> shift) & 255}
         level: from * (Float{1.0} - t) + to * t + 0.5
         whole: core.math.floor(level)
         if {
@@ -1352,7 +1352,7 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     if target.pixels.len() != target.width * target.height * 4 {
         return
     }
-    alpha: rgba.bit_and(255)
+    alpha: rgba & 255
     if alpha == 0 && !replace {
         return
     }
@@ -1363,9 +1363,9 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     if left >= right || top >= bottom {
         return
     }
-    red: div255((rgba >> 24).bit_and(255) * alpha + 127)
-    green: div255((rgba >> 16).bit_and(255) * alpha + 127)
-    blue: div255((rgba >> 8).bit_and(255) * alpha + 127)
+    red: div255(((rgba >> 24) & 255) * alpha + 127)
+    green: div255(((rgba >> 16) & 255) * alpha + 127)
+    blue: div255(((rgba >> 8) & 255) * alpha + 127)
     if replace || alpha == 255 {
         // One in-place range fill per row, or one for rows the full width
         // spans: a copy of the pixel, then the filled bytes doubling.
@@ -1733,10 +1733,10 @@ gradient_rgba: fn(top_left: Int, bottom_left: Int, bottom_right: Int, top_right:
     rgba := 0
     shift := 24
     loop shift >= 0 {
-        tl: (top_left >> shift).bit_and(255)
-        bl: (bottom_left >> shift).bit_and(255)
-        br: (bottom_right >> shift).bit_and(255)
-        tr: (top_right >> shift).bit_and(255)
+        tl: (top_left >> shift) & 255
+        bl: (bottom_left >> shift) & 255
+        br: (bottom_right >> shift) & 255
+        tr: (top_right >> shift) & 255
         level := Float{0.0}
         if v >= u -> level = Float{tl} * (Float{1.0} - v) + Float{bl} * (v - u) + Float{br} * u else {
             level = Float{tl} * (Float{1.0} - u) + Float{tr} * (u - v) + Float{br} * v
@@ -2181,9 +2181,9 @@ decode_png: fn(data: [U8]) -> Image {
 
 put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
     red: rgba >> 24
-    green: (rgba >> 16).bit_and(255)
-    blue: (rgba >> 8).bit_and(255)
-    alpha: rgba.bit_and(255)
+    green: (rgba >> 16) & 255
+    blue: (rgba >> 8) & 255
+    alpha: rgba & 255
     pixels[at] = U8{red}
     pixels[at + 1] = U8{green}
     pixels[at + 2] = U8{blue}
@@ -2377,13 +2377,13 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
 // Paints runs pixel by pixel with blend: the plain reading of `fill`.
 reference_paint: fn(image: &Image, runs: [Run]) {
     loop run in runs {
-        alpha: run.rgba.bit_and(255)
+        alpha: run.rgba & 255
         rest: 255 - alpha
         loop row in run.y..<(run.y + run.height) {
             loop column in run.x..<(run.x + run.width) {
                 at: (row * image.width + column) * 4
                 loop k in 0..<3 {
-                    image.pixels[at + k] = U8{over(div255((run.rgba >> (24 - 8 * k)).bit_and(255) * alpha + 127), Int{image.pixels[at + k]}, rest)}
+                    image.pixels[at + k] = U8{over(div255(((run.rgba >> (24 - 8 * k)) & 255) * alpha + 127), Int{image.pixels[at + k]}, rest)}
                 }
                 image.pixels[at + 3] = U8{over(alpha, Int{image.pixels[at + 3]}, rest)}
             }
@@ -2733,7 +2733,7 @@ piece_words: fn(pieces: [Piece]) -> [Int] {
 push_be32: fn(out: &[U8], value: Int) {
     shifts: [Int]{24, 16, 8, 0}
     loop shift in shifts {
-        byte: (value >> shift).bit_and(255)
+        byte: (value >> shift) & 255
         out.push(U8{byte})
     }
 }

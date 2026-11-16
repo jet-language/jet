@@ -41,7 +41,7 @@ current: fn() -[]> mem.Allocator { context.allocator }
 take_and_give: fn(size: Int) -> Bool {
     allocator := current()
     block: allocator.allocate(size, 16) ?? return false
-    fits: block.address().bit_and(15) == 0 && block.size() == size
+    fits: block.address() & 15 == 0 && block.size() == size
     allocator.release(block)
     fits
 }

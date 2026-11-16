@@ -1,0 +1,13 @@
+# An upload endpoint's `#App.UploadCheck` method runs as the caller, after
+# the session check and before the server reads the request's body. Eve is
+# signed in but no member of the task's project, so the check's read of the
+# task through the row policy fails. She announces a 100000-byte file and
+# sends none of it, and is answered 403 at once: a server that waited for the
+# body would not answer. Nothing is staged for her. Ann, a member, uploads
+# her notes, and her staged file is gone once her request ends.
+fixture: UploadByANonMemberIs403BeforeItIsRead.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "eve announces a file: HTTP/1.1 403 Forbidden\nstaged: 0\nann uploads: 200 {\"ok\":\"notes.txt, 19 bytes\"}\nstaged after: 0\n"

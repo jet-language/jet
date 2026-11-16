@@ -55,7 +55,7 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 #Export(c) jet_rt_rc_release: fn(count: I64) -> Bool {
     word: rc_load(count)
     if (word < I64{0} || main_process_ending != I64{0}) { return false }
-    if (word.bit_and(RC_OWNER_BITS) == I64{1}) {
+    if (word & RC_OWNER_BITS == I64{1}) {
         // The sole owner, as in unique: no other thread holds a reference
         // to retain, release or mark with, so the word cannot change and a
         // plain store leaves what LOCK XADD would. The load read the word
@@ -65,12 +65,12 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
         rc_store(count, wrapping(word - I64{1}))
         return true
     }
-    rc_add(count, I64{-1}).bit_and(RC_OWNER_BITS) == I64{1}
+    rc_add(count, I64{-1}) & RC_OWNER_BITS == I64{1}
 }
 
 #Export(c) jet_rt_rc_unique: fn(count: I64) -> Bool {
     word: rc_load(count)
-    word >= I64{0} && word.bit_and(RC_OWNER_BITS) == I64{1}
+    word >= I64{0} && word & RC_OWNER_BITS == I64{1}
 }
 
 // Sets the zero-at-free mark of a live non-immortal block the caller holds a
@@ -79,10 +79,10 @@ rc_init: fn(count: I64) { rc_store(count, I64{1}) }
 rc_mark_zero: fn(count: I64) {
     loop {
         word: rc_load(count)
-        if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) {
+        if (word < I64{0} || word & RC_ZERO_MARK != I64{0}) {
             return
         }
-        if (sync_cas(count, word, word.bit_or(RC_ZERO_MARK)) == word) {
+        if (sync_cas(count, word, word | RC_ZERO_MARK) == word) {
             return
         }
     }
@@ -109,7 +109,7 @@ rc_mark_zero: fn(count: I64) {
 // `replica` is a fresh block the caller owns holding bytes of `block`: a copy
 // of a block marked zero-at-free carries the mark too.
 #Export(c) jet_rt_block_inherit_zero: fn(block: I64, replica: I64) {
-    if (rc_load(wrapping(block - I64{24})).bit_and(RC_ZERO_MARK) != I64{0}) {
+    if (rc_load(wrapping(block - I64{24})) & RC_ZERO_MARK != I64{0}) {
         rc_mark_zero(wrapping(replica - I64{24}))
     }
 }

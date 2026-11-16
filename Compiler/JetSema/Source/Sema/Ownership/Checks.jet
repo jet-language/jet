@@ -1346,7 +1346,7 @@ SemaOwnershipAnchors: struct {
 sema_ownership_anchor_key: fn(def_id: SymbolID, use_span: Span) -> Int Never! {
     hash := sema_name_reference_hash_mix(U64{def_id.id}, use_span.start)
     hash = sema_name_reference_hash_mix(hash, use_span.end)
-    Int{hash.bit_and(U64{0x3fffffffffffffff})}
+    Int{hash & U64{0x3fffffffffffffff}}
 }
 
 sema_ownership_anchor_add: fn(anchors: &SemaOwnershipAnchors, key: Int, row: Int) Never! {

@@ -142,10 +142,10 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
         output = "{output}{rest}"
     }
     parts.stdout = output
-    passed: parts.flags.bit_and(5) == 1
+    passed: parts.flags & 5 == 1
     fields: (frame ?? {
         if passed {
-            parts.flags = parts.flags.bit_and(6)
+            parts.flags &= 6
             parts.stderr = "{parts.stderr}the `.measure` region of `{name}` left before its samples finished\n"
         }
         return Ok(jet_cli_native_test_wire(parts))
@@ -201,7 +201,7 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
             diagnostics.push(diagnostic)
         }
         if verdict.status == "miss" && passed {
-            parts.flags = parts.flags.bit_and(6)
+            parts.flags &= 6
             record.ok = false
         }
         if diagnostics.len() > 0 {

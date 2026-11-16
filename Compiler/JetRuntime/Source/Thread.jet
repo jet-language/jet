@@ -482,7 +482,7 @@ thread_stack_capped: fn(bytes: I64) -> I64 {
     capped := bytes
     space: thread_rlimit_soft(I64{9})
     if (space > I64{0}) {
-        share: (space / THREAD_STACK_SPACE_SHARE).bit_and(I64{-4096})
+        share: (space / THREAD_STACK_SPACE_SHARE) & I64{-4096}
         if share < capped {
             capped = if share > THREAD_STACK_FLOOR -> share else -> THREAD_STACK_FLOOR
         }
@@ -561,7 +561,7 @@ thread_stack_map: fn(bytes: I64) -> I64 {
 thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     sync_sole_end()
     thread_reap()
-    bytes := (thread_stack_bytes() + I64{4095}).bit_and(I64{-4096})
+    bytes := (thread_stack_bytes() + I64{4095}) & I64{-4096}
     if (thread_libc_create != I64{0}) { return thread_libc_spawn(entry, argument, bytes) }
     mapping := thread_stack_map(bytes)
     loop mapping < (I64{0}) && bytes > THREAD_STACK_FLOOR {

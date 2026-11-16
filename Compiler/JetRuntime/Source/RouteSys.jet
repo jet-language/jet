@@ -324,7 +324,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
         loop {
             digit: rt_text_byte(s) - I64{48}
             if (digit < I64{0} || digit > I64{9}) { break }
-            group = (group * I64{10} + digit).bit_and(I64{4294967295})
+            group = (group * I64{10} + digit) & I64{4294967295}
             s = wrapping(s + I64{1})
         }
         if (rt_text_byte(s) != I64{58}) { next }
@@ -373,7 +373,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     list: jet_rt_alloc(SYS_NGROUPS_MAX * I64{4}, I64{4})
     look: jet_rt_alloc(I64{8}, I64{8})
     net_put(look, LK_ERRNO, I64{0})
-    n: sys_grouplist(name, rt_text_len(user), native.bit_and(I64{4294967295}), list, look)
+    n: sys_grouplist(name, rt_text_len(user), native & I64{4294967295}, list, look)
     left: net_word(look, LK_ERRNO)
     jet_rt_free(look, I64{8}, I64{8})
     fd_c_path_drop(name, user)
@@ -394,7 +394,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
         return
     }
     name: fd_c_path(path)
-    result: host_call(I64{133}, name, native.bit_and(I64{4294967295}).bit_or(I64{4096}), I64{0})
+    result: host_call(I64{133}, name, native & I64{4294967295} | I64{4096}, I64{0})
     fd_c_path_drop(name, path)
     host_sample_out(result, available, value, errno)
 }
@@ -411,7 +411,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
         return
     }
     name: fd_c_path(path)
-    result: host_call(I64{133}, name, native_mode.bit_and(I64{4294967295}), native_dev)
+    result: host_call(I64{133}, name, native_mode & I64{4294967295}, native_dev)
     fd_c_path_drop(name, path)
     host_sample_out(result, available, value, errno)
 }
@@ -443,7 +443,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     // `param` owns an initialized struct sched_param; the caller lends the
     // tuple's Bool byte and three Int words.
     rt_text_put(available, I64{1})
-    rt_text_store(policy, jet_int_owned_from_i64(if (kind < I64{0}) -> I64{-1} else -> kind.bit_and(I64{1073741823})))
+    rt_text_store(policy, jet_int_owned_from_i64(if (kind < I64{0}) -> I64{-1} else -> kind & I64{1073741823}))
     rt_text_store(priority, jet_int_owned_from_i64(net_i32(net_load_uint(param, I64{4}))))
     rt_text_store(errno, jet_int_owned_from_i64(if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0}))
     jet_rt_free(param, I64{8}, I64{8})
@@ -467,7 +467,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     }
     param: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(param, I64{8})
-    net_store_uint(param, I64{4}, native_priority.bit_and(I64{4294967295}))
+    net_store_uint(param, I64{4}, native_priority & I64{4294967295})
     result: host_call(I64{144}, native_pid, native_policy, param)
     jet_rt_free(param, I64{8}, I64{8})
     host_sample_out(result, available, value, errno)
@@ -570,7 +570,7 @@ sys_group_file: fn(user: I64, gid: I64, list: I64, look: I64, reader: I64, nscd:
     }
     number: if (native_group == I64{1}) -> I64{119} else -> I64{117}
     mask: I64{4294967295}
-    host_sample_out(thread_setxid(number, native_real.bit_and(mask), native_effective.bit_and(mask), native_saved.bit_and(mask)), available, value, errno)
+    host_sample_out(thread_setxid(number, native_real & mask, native_effective & mask, native_saved & mask), available, value, errno)
 }
 
 // getloadavg(avg, 3): (true, count, avg0, avg1, avg2). musl reads sysinfo's

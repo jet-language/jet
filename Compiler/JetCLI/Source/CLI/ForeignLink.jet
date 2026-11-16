@@ -357,9 +357,9 @@ jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: 
 // A length-delimited identity avoids concatenation aliases.
 jet_cli_foreign_hash_field: fn(identity: &[U8], name: String, value: [U8]) Never! {
     name_bytes: name.bytes()
-    loop shift in 0..<8 -> identity.push(U8{(name_bytes.len() >> (shift * 8)).bit_and(255)})
+    loop shift in 0..<8 -> identity.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
     loop byte in name_bytes -> identity.push(byte)
-    loop shift in 0..<8 -> identity.push(U8{(value.len() >> (shift * 8)).bit_and(255)})
+    loop shift in 0..<8 -> identity.push(U8{(value.len() >> (shift * 8)) & 255})
     loop byte in value -> identity.push(byte)
 }
 

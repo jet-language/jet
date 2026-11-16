@@ -1410,7 +1410,7 @@ package_authority_read: fn(path: String) -[Env, FS]> String ServiceError! {
     if info.owner != Val(service_sys.geteuid()) {
         return Err(ServiceError.Policy("job queue authority `{path}` is not owned by this user; remove it so the next run can create a private one"))
     }
-    if info.mode.bit_and(0o077) != 0 {
+    if info.mode & 0o077 != 0 {
         return Err(ServiceError.Policy("job queue authority `{path}` is readable or writable by group or others; restrict it with `chmod 600` or remove it"))
     }
     raw: service_files.read_bytes(path) ?? return Err(package_authority_io(path, err))
@@ -4638,7 +4638,7 @@ delivery_signature_payload: fn(fields: [String]) -> [U8] Never! {
     loop field in fields {
         bytes: field.bytes()
         length: bytes.len()
-        loop byte in 0..<8 -> payload.push(U8{(length >> ((7 - byte) * 8)).bit_and(255)})
+        loop byte in 0..<8 -> payload.push(U8{(length >> ((7 - byte) * 8)) & 255})
         loop value in bytes -> payload.push(value)
     }
     payload

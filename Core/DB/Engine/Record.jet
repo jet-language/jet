@@ -30,7 +30,7 @@ serial_len: fn(t: Int) -> Int Never! {
 get_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
     value := Int{buf[at]}
     if value >= 128 -> value -= 256
-    loop i in 1..<n -> value = (value << 8).bit_or(Int{buf[at + i]})
+    loop i in 1..<n -> value = (value << 8) | Int{buf[at + i]}
     value
 }
 
@@ -41,10 +41,10 @@ serial_get: fn(buf: [U8], at: Int, t: Int, enc: Int) -> Mem Never! {
     if t >= 12 {
         n: (t - 12) >> 1
         bytes: buf[at..<at + n].copy()
-        if t.bit_and(1) == 1 -> return base.mem_text(bytes, enc)
+        if t & 1 == 1 -> return base.mem_text(bytes, enc)
         return base.mem_blob(bytes)
     }
-    if t == 10 -> return base.mem_init(MEM_NULL.bit_or(MEM_ZERO))
+    if t == 10 -> return base.mem_init(MEM_NULL | MEM_ZERO)
     if t >= 1 && t <= 6 -> return base.mem_int(get_signed(buf, at, serial_len(t)))
     if t == 7 -> return base.mem_real(math.from_bits(get_signed(buf, at, 8)))
     if t == 8 || t == 9 -> return base.mem_int(t - 8)
@@ -96,11 +96,11 @@ decode_record: fn(rec: [U8], enc: Int) -> [Mem] SQLError! {
 // becomes that REAL, as in C.
 serial_type: fn(m: &Mem, file_format: Int) -> Int Never! {
     f: m.flags
-    if f.bit_and(MEM_NULL) != 0 {
-        if f.bit_and(MEM_ZERO) != 0 -> return 10
+    if f & MEM_NULL != 0 {
+        if f & MEM_ZERO != 0 -> return 10
         return 0
     }
-    if f.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 {
+    if f & (MEM_INT | MEM_INT_REAL) != 0 {
         i: m.i
         u: if i < 0 -> -1 - i else -> i
         if u <= 127 {
@@ -111,23 +111,23 @@ serial_type: fn(m: &Mem, file_format: Int) -> Int Never! {
         if u <= 8388607 -> return 3
         if u <= 2147483647 -> return 4
         if u <= 140737488355327 -> return 5
-        if f.bit_and(MEM_INT_REAL) != 0 {
+        if f & MEM_INT_REAL != 0 {
             m.r = util.int_to_double(i)
-            m.flags = f.bit_and(MEM_INT_REAL.bit_xor(65535)).bit_or(MEM_REAL)
+            m.flags = f & (MEM_INT_REAL ~ 65535) | MEM_REAL
             return 7
         }
         return 6
     }
-    if f.bit_and(MEM_REAL) != 0 -> return 7
+    if f & MEM_REAL != 0 -> return 7
     n := m.z.len()
-    if f.bit_and(MEM_ZERO) != 0 -> n += m.i
-    n * 2 + 12 + (if f.bit_and(MEM_STR) != 0 -> 1 else -> 0)
+    if f & MEM_ZERO != 0 -> n += m.i
+    n * 2 + 12 + (if f & MEM_STR != 0 -> 1 else -> 0)
 }
 
 // Append the `n`-byte big-endian two's-complement form of `value`.
 put_signed: fn(out: &[U8], value: Int, n: Int) Never! {
     v: if value < 0 -> value + 18446744073709551616 else -> value
-    loop i in 0..<n -> out.push(U8{(v >> (8 * (n - 1 - i))).bit_and(255)})
+    loop i in 0..<n -> out.push(U8{(v >> (8 * (n - 1 - i))) & 255})
 }
 
 // sqlite3VdbeSerialPut: append the body bytes of m as serial type `t`; a
@@ -137,7 +137,7 @@ serial_put: fn(out: &[U8], m: Mem, t: Int) Never! {
         put_signed(out, math.to_bits(m.r), 8)
     } else if t >= 12 {
         loop b in m.z -> out.push(b)
-        if m.flags.bit_and(MEM_ZERO) != 0 {
+        if m.flags & MEM_ZERO != 0 {
             loop _k in 0..<m.i -> out.push(U8{0})
         }
     }
@@ -225,8 +225,8 @@ all_zero: fn(z: [U8]) -> Bool Never! {
 // sqlite3BlobCompare: memcmp, then the shorter first; a MEM_Zero blob
 // counts its zero bytes.
 blob_compare: fn(a: Mem, b: Mem) -> Int Never! {
-    za: a.flags.bit_and(MEM_ZERO) != 0
-    zb: b.flags.bit_and(MEM_ZERO) != 0
+    za: a.flags & MEM_ZERO != 0
+    zb: b.flags & MEM_ZERO != 0
     if za && zb -> return a.i - b.i
     if za {
         if !all_zero(b.z) -> return -1
@@ -254,8 +254,8 @@ int_float_compare: fn(i: Int, r: Float) -> Int Never! {
     if r == math.INFINITY -> return -1
     if r == -math.INFINITY -> return 1
     bits: util.as_u64(math.to_bits(r))
-    e := (bits >> 52).bit_and(2047)
-    m := bits.bit_and(4503599627370495)
+    e := (bits >> 52) & 2047
+    m := bits & 4503599627370495
     if e == 0 -> e = 1 else -> m += 4503599627370496
     if bits >= 9223372036854775808 -> m = 0 - m
     shift: e - 1075
@@ -272,30 +272,30 @@ int_float_compare: fn(i: Int, r: Float) -> Int Never! {
 mem_compare: fn(a: Mem, b: Mem, coll: Int) -> Int Never! {
     f1: a.flags
     f2: b.flags
-    combined: f1.bit_or(f2)
-    if combined.bit_and(MEM_NULL) != 0 -> return f2.bit_and(MEM_NULL) - f1.bit_and(MEM_NULL)
-    ints: MEM_INT.bit_or(MEM_INT_REAL)
-    if combined.bit_and(ints.bit_or(MEM_REAL)) != 0 {
-        if f1.bit_and(f2).bit_and(ints) != 0 -> return compare_ints(a.i, b.i)
-        if f1.bit_and(f2).bit_and(MEM_REAL) != 0 {
+    combined: f1 | f2
+    if combined & MEM_NULL != 0 -> return (f2 & MEM_NULL) - (f1 & MEM_NULL)
+    ints: MEM_INT | MEM_INT_REAL
+    if combined & (ints | MEM_REAL) != 0 {
+        if f1 & f2 & ints != 0 -> return compare_ints(a.i, b.i)
+        if f1 & f2 & MEM_REAL != 0 {
             if a.r < b.r -> return -1
             if a.r > b.r -> return 1
             return 0
         }
-        if f1.bit_and(ints) != 0 {
-            if f2.bit_and(MEM_REAL) != 0 -> return int_float_compare(a.i, b.r)
-            if f2.bit_and(ints) != 0 -> return compare_ints(a.i, b.i)
+        if f1 & ints != 0 {
+            if f2 & MEM_REAL != 0 -> return int_float_compare(a.i, b.r)
+            if f2 & ints != 0 -> return compare_ints(a.i, b.i)
             return -1
         }
-        if f1.bit_and(MEM_REAL) != 0 {
-            if f2.bit_and(ints) != 0 -> return 0 - int_float_compare(b.i, a.r)
+        if f1 & MEM_REAL != 0 {
+            if f2 & ints != 0 -> return 0 - int_float_compare(b.i, a.r)
             return -1
         }
         return 1
     }
-    if combined.bit_and(MEM_STR) != 0 {
-        if f1.bit_and(MEM_STR) == 0 -> return 1
-        if f2.bit_and(MEM_STR) == 0 -> return -1
+    if combined & MEM_STR != 0 {
+        if f1 & MEM_STR == 0 -> return 1
+        if f2 & MEM_STR == 0 -> return -1
         return compare_mem_string(a, b, coll)
     }
     blob_compare(a, b)
@@ -366,7 +366,7 @@ key_varint: fn(buf: [U8], at: Int) -> util.Varint Never! {
 key_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
     value := key_byte(buf, at)
     if value >= 128 -> value -= 256
-    loop i in 1..<n -> value = (value << 8).bit_or(key_byte(buf, at + i))
+    loop i in 1..<n -> value = (value << 8) | key_byte(buf, at + i)
     value
 }
 
@@ -469,14 +469,14 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
         rhs: p.mem[i]
         rc := 0
         serial_type := 0
-        if rhs.flags.bit_and(MEM_INT.bit_or(MEM_INT_REAL)) != 0 {
+        if rhs.flags & (MEM_INT | MEM_INT_REAL) != 0 {
             serial_type = key_byte(buf, at + idx1)
             if serial_type >= 10 -> rc = if serial_type == 10 -> -1 else -> 1 else if serial_type == 0 {
                 rc = -1
             } else if serial_type == 7 {
                 rc = 0 - int_float_compare(rhs.i, decode_real(buf, at + d1))
             } else { rc = compare_ints(decode_int(serial_type, buf, at + d1), rhs.i) }
-        } else if rhs.flags.bit_and(MEM_REAL) != 0 {
+        } else if rhs.flags & MEM_REAL != 0 {
             serial_type = key_byte(buf, at + idx1)
             if serial_type >= 10 -> rc = if serial_type == 10 -> -1 else -> 1 else if serial_type == 0 {
                 rc = -1
@@ -484,9 +484,9 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
                 r: decode_real(buf, at + d1)
                 if r < rhs.r -> rc = -1 else if r > rhs.r -> rc = 1
             } else { rc = int_float_compare(decode_int(serial_type, buf, at + d1), rhs.r) }
-        } else if rhs.flags.bit_and(MEM_STR) != 0 {
+        } else if rhs.flags & MEM_STR != 0 {
             serial_type = key_varint(buf, at + idx1).value
-            if serial_type < 12 -> rc = -1 else if serial_type.bit_and(1) == 0 -> rc = 1 else {
+            if serial_type < 12 -> rc = -1 else if serial_type & 1 == 0 -> rc = 1 else {
                 n: (serial_type - 12) /% 2
                 if d1 + n > n_key1 || p.key_info.n_all_field <= i {
                     p.err_code = base.CORRUPT
@@ -502,15 +502,15 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
                     if rc == 0 -> rc = n - rhs.z.len()
                 }
             }
-        } else if rhs.flags.bit_and(MEM_BLOB) != 0 {
+        } else if rhs.flags & MEM_BLOB != 0 {
             serial_type = key_varint(buf, at + idx1).value
-            if serial_type < 12 || serial_type.bit_and(1) != 0 -> rc = -1 else {
+            if serial_type < 12 || serial_type & 1 != 0 -> rc = -1 else {
                 n: (serial_type - 12) /% 2
                 if d1 + n > n_key1 {
                     p.err_code = base.CORRUPT
                     return 0
                 }
-                if rhs.flags.bit_and(MEM_ZERO) != 0 {
+                if rhs.flags & MEM_ZERO != 0 {
                     if !all_zero(key_slice(buf, at + d1, n)) -> rc = 1 else -> rc = n - rhs.i
                 } else {
                     n_cmp: if n < rhs.z.len() -> n else -> rhs.z.len()
@@ -525,8 +525,8 @@ record_compare_with_skip: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord
         if rc != 0 {
             sort_flags: sort_flags_of(p.key_info, i)
             if sort_flags != 0 {
-                nulls: if serial_type == 0 || rhs.flags.bit_and(MEM_NULL) != 0 -> 1 else -> 0
-                if sort_flags.bit_and(KEYINFO_ORDER_BIGNULL) == 0 || sort_flags.bit_and(KEYINFO_ORDER_DESC) != nulls {
+                nulls: if serial_type == 0 || rhs.flags & MEM_NULL != 0 -> 1 else -> 0
+                if sort_flags & KEYINFO_ORDER_BIGNULL == 0 || sort_flags & KEYINFO_ORDER_DESC != nulls {
                     rc = 0 - rc
                 }
             }
@@ -554,7 +554,7 @@ record_compare: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int N
 // vdbeRecordCompareInt: the first field of p is an integer and the
 // record's header size fits in one byte.
 record_compare_int: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -> Int Never! {
-    body: at + key_byte(buf, at).bit_and(63)
+    body: at + (key_byte(buf, at) & 63)
     serial_type: key_byte(buf, at + 1)
     if serial_type == 0 || serial_type == 7 || serial_type > 9 {
         return record_compare(n_key1, buf, at, p)
@@ -578,7 +578,7 @@ record_compare_string: fn(n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -
         if serial_type < 12 -> return p.r1
     }
     if serial_type < 12 -> return p.r1
-    if serial_type.bit_and(1) == 0 -> return p.r2
+    if serial_type & 1 == 0 -> return p.r2
     sz_hdr: key_byte(buf, at)
     n_str: (serial_type - 12) /% 2
     if sz_hdr + n_str > n_key1 {
@@ -612,18 +612,18 @@ find_compare: fn(p: &UnpackedRecord) -> Int Never! {
         flags: p.mem[0].flags
         sf: sort_flags_of(p.key_info, 0)
         if sf != 0 {
-            if sf.bit_and(KEYINFO_ORDER_BIGNULL) != 0 -> return COMPARE_GENERIC
+            if sf & KEYINFO_ORDER_BIGNULL != 0 -> return COMPARE_GENERIC
             p.r1 = 1
             p.r2 = -1
         } else {
             p.r1 = -1
             p.r2 = 1
         }
-        if flags.bit_and(MEM_INT) != 0 {
+        if flags & MEM_INT != 0 {
             p.u_i = p.mem[0].i
             return COMPARE_INT
         }
-        if flags.bit_and(MEM_REAL.bit_or(MEM_INT_REAL).bit_or(MEM_NULL).bit_or(MEM_BLOB)) == 0 && coll_of(p.key_info, 0) == COLL_NONE {
+        if flags & (MEM_REAL | MEM_INT_REAL | MEM_NULL | MEM_BLOB) == 0 && coll_of(p.key_info, 0) == COLL_NONE {
             p.u_z = p.mem[0].z
             return COMPARE_STRING
         }
@@ -659,7 +659,7 @@ compare_by: fn(kind: Int, n_key1: Int, buf: [U8], at: Int, p: &UnpackedRecord) -
     m.i = 1 << 50
     assert_eq(serial_type(m, 4), 7)
     assert(m.flags == MEM_REAL && m.r == Float{1 << 50})
-    z := base.mem_init(MEM_BLOB.bit_or(MEM_ZERO))
+    z := base.mem_init(MEM_BLOB | MEM_ZERO)
     z.z = [U8]{7}
     z.i = 2
     vals := [Mem]{z}

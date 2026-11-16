@@ -90,7 +90,7 @@ cli_tool_project_bins: fn(bin_dir: String, tool: InstalledUserTool, lease: &Cach
         projected.push(folded)
         destination: files.join(bin_dir, physical)
         proof: lease.copy_profile_executable(member, destination)
-        if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 {
+        if sys.is_unix() && ((proof.mode) & TOOL_PROFILE_EXEC_BITS) == 0 {
             return Err(CLIError.Other("profile projection is not executable"))
         }
         cli_make_profile_projection_read_only(destination)
@@ -135,7 +135,7 @@ cli_validate_generation_bins: fn(verification: &StoreVerification, generation: I
             if proof.digest != tool.member_digests[index] {
                 return Err(CLIError.Other("profile projection proof mismatch for `{bin}`"))
             }
-            if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 {
+            if sys.is_unix() && ((proof.mode) & TOOL_PROFILE_EXEC_BITS) == 0 {
                 return Err(CLIError.Other("profile projection is not executable for `{bin}`"))
             }
         }
@@ -178,8 +178,8 @@ cli_install_profile_projection: fn(generation: Int, bin: String) -[FS, Env]> CLI
 // Drop every write bit so the projected bytes stay read-only (Windows maps
 // this to the readonly attribute).
 cli_make_profile_projection_read_only: fn(path: String) -[FS]> CLIError! {
-    mode: (files.stat(path).mode).bit_and(TOOL_PROFILE_PERMISSION_BITS)
-    files.set_mode(path, mode - ((mode).bit_and(TOOL_PROFILE_WRITE_BITS)))
+    mode: (files.stat(path).mode) & TOOL_PROFILE_PERMISSION_BITS
+    files.set_mode(path, mode - ((mode) & TOOL_PROFILE_WRITE_BITS))
 }
 
 // A write refused by permissions becomes the E1340 managed-tool failure.

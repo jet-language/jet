@@ -252,6 +252,27 @@ priv HTTPMuxState: struct {
     starts: [fn() -[Time]> Never!]
     stops: [fn(Int) -[Time]> Never!]
     upgraded: [Shared<HTTPUpgradedCell>]
+    // The checks of the routes that admit a request by its head before its
+    // body is read (`__route_add_admitted`).
+    admits: [HTTPAdmitRow]
+}
+
+// What an admitted route's check (`__route_add_admitted`) decides from a
+// request's head, before the body is read: the response that refuses the
+// request, or else the most bytes its body may hold.
+HTTPAdmit: struct {
+    refused: HTTPResponse?
+    max_body: Int
+}
+
+priv HTTPAdmitCell: struct {
+    check: fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!
+}
+
+priv HTTPAdmitRow: struct {
+    method: String
+    pattern: String
+    cell: Shared<HTTPAdmitCell>
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
@@ -291,6 +312,16 @@ priv route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler
         route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
     }
     route_add_dynamic(mux, method, pattern, handler, contract, at)
+}
+
+// A route whose request `admit` checks by its head, before the server reads
+// the body (`mux_admit`): a refused request gets the check's response and its
+// body is never read, and an admitted one's body may hold the check's
+// `max_body` bytes in place of the server's own limit.
+__route_add_admitted: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, admit: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!, at: SourceLocation) Never! {
+    route_add(mux, method, pattern, handler, "", at)
+    guard := mux.__state.guard_edit()
+    guard.value.admits.push(HTTPAdmitRow{method: method, pattern: pattern, cell: Shared{HTTPAdmitCell{check: admit.move()}}})
 }
 
 // A middleware layer: the first registered layer is the outermost.
@@ -720,7 +751,7 @@ priv accept_transient_code: fn(os_code: Int?) -> Bool Never! {
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
 // routes with.
 priv mux_new: fn() -> HTTPMux Never! {
-    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}, upgraded: [Shared<HTTPUpgradedCell>]{}}}}
+    HTTPMux{__state: Shared{HTTPMuxState{routes: [HTTPRoute]{}, layers: [Shared<HTTPLayerCell>]{}, request_seq: 0, starts: [fn() -[Time]> Never!]{}, stops: [fn(Int) -[Time]> Never!]{}, upgraded: [Shared<HTTPUpgradedCell>]{}, admits: [HTTPAdmitRow]{}}}}
 }
 
 // Has the first server that serves `mux`, by `serve` or `serve_once`, run
@@ -1583,10 +1614,14 @@ priv route_better: fn(candidate: [HTTPSegment], current: [HTTPSegment]) -> Bool 
 // ---------------------------------------------------------------------------
 // One connection: read one request, answer it, close.
 
+// Why a connection ends without its handler's answer: a status to send, a
+// dropped connection, or `Refuse`, the response on the wire that an admitted
+// route's check refused the request with (`mux_admit`).
 #Error
 priv HTTPFault: enum {
     Reply(Int)
     Drop
+    Refuse([U8])
 }
 
 priv HTTPWire: struct {
@@ -1651,7 +1686,7 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
     wire := HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
     upgraded := false
-    if read_request(stream, wire) == {
+    if read_request(stream, wire, mux) == {
         .Ok(received) -> {
             own: server_answer(server, mux, received, refusing)
             if own == .Val(answer) {
@@ -1683,6 +1718,8 @@ priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, s
         .Err(fault) -> {
             if fault == .Reply(status) {
                 _: __send(stream, error_wire(status), rt.clock_mono_ns() + budget)
+            } else if fault == .Refuse(bytes) {
+                answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
             }
         }
     }
@@ -1800,7 +1837,9 @@ priv field_line: fn(raw: [U8]) -> Header? Never! {
     Val(Header{name: name, value: http.trim(value)})
 }
 
-priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTPRequest HTTPFault! {
+// One request off the wire. When a route of `mux` admits requests by their
+// head (`mux_admit`), the head is checked before the body is read.
+priv read_request: fn(stream: HTTPConn, wire: &HTTPWire, mux: HTTPMux) -[Net, FS.Read, Time]> HTTPRequest HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -1852,7 +1891,18 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTP
         if index > 0 && value != length -> return Err(.Reply(400))
         length = value
     }
-    if length > C_MAX_BODY_BYTES -> return Err(.Reply(413))
+    limit := C_MAX_BODY_BYTES
+    if mux_admits(mux) {
+        asked := http.server_request(method, target, http.body_empty(), fields.copy())
+        asked.__peer = stream.peer.copy()
+        asked.__received = core.time.now_utc().to_timestamp()
+        admitted: mux_admit(mux, asked)
+        if admitted.refused == .Val(refusal) {
+            return Err(.Refuse(response_wire(method, refusal) ?? error_wire(500)))
+        }
+        limit = admitted.max_body
+    }
+    if length > limit -> return Err(.Reply(413))
     if http.headers_get(fields, "content-encoding") != None -> return Err(.Reply(415))
     declared := [String]{}
     loop value in http.headers_all(fields, "trailer") {
@@ -1872,7 +1922,7 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTP
     content := [U8]{}
     trailers := Headers?{None}
     if chunked {
-        decoded: read_chunked(stream, wire, split, declared) ?? return Err(err)
+        decoded: read_chunked(stream, wire, split, declared, limit) ?? return Err(err)
         content = decoded.body
         trailers = Val(decoded.trailers)
     } else if length > 0 {
@@ -1889,6 +1939,39 @@ priv read_request: fn(stream: HTTPConn, wire: &HTTPWire) -[Net, Time.Wait]> HTTP
     Ok(request)
 }
 
+// Whether a route of `mux` admits requests by their head.
+priv mux_admits: fn(mux: HTTPMux) -> Bool Never! {
+    guard: mux.__state.guard_read()
+    guard.value.admits.len() > 0
+}
+
+// The check of the admitted route that takes `head`, run as a task of its
+// own, as a handler is, so a panic in it is a 500. A request that no
+// admitted route takes is admitted under the server's own limit.
+priv mux_admit: fn(mux: HTTPMux, head: HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never! {
+    pick: mux_pick(mux, head)
+    open: HTTPAdmit{refused: None, max_body: C_MAX_BODY_BYTES}
+    if pick.answer != .None -> return open
+    route: pick.routes[pick.index]
+    cell: mux_admit_cell(mux, route.method, route.pattern) ?? return open
+    picked: pick.request.copy()
+    checking: task { mux_admit_run(cell, picked) }
+    checking.join() ?? HTTPAdmit{refused: Val(status_page(500)), max_body: 0}
+}
+
+priv mux_admit_cell: fn(mux: HTTPMux, method: String, pattern: String) -> Shared<HTTPAdmitCell>? Never! {
+    guard: mux.__state.guard_read()
+    loop row in guard.value.admits {
+        if row.method == method && row.pattern == pattern -> return Val(row.cell.copy())
+    }
+    None
+}
+
+priv mux_admit_run: fn(cell: Shared<HTTPAdmitCell>, request: HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never! {
+    guard: cell.guard_read()
+    guard.value.check(request)
+}
+
 priv chunk_size: fn(line: [U8]) -> Int? Never! {
     end := http.index_byte(line, 59)
     if end < 0 -> end = line.len()
@@ -1902,7 +1985,7 @@ priv chunk_size: fn(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
+priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [String], limit: Int) -[Net, Time.Wait]> HTTPChunked HTTPFault! {
     at := start
     body := [U8]{}
     loop {
@@ -1910,7 +1993,7 @@ priv read_chunked: fn(stream: HTTPConn, wire: &HTTPWire, start: Int, declared: [
         size: chunk_size(wire.buffer.slice(at, line_end)) ?? return Err(.Reply(400))
         at = line_end + 2
         if size == 0 -> break
-        if body.len() + size > C_MAX_BODY_BYTES -> return Err(.Reply(413))
+        if body.len() + size > limit -> return Err(.Reply(413))
         wire_need(stream, wire, at + size + 2) ?? return Err(err)
         loop b in wire.buffer.slice(at, at + size) -> body.push(b)
         if wire.buffer[at + size] != (U8{13}) || wire.buffer[at + size + 1] != (U8{10}) {

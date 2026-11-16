@@ -326,9 +326,9 @@ x509write_san_der: fn(buf: &[U8], p: &Int, sans: [X509SanEntry]) -> Int asn1.ASN
     loop san in sans {
         if san.kind == x509.X509_SAN_DIRECTORY_NAME {
             names: x509_write_names(buf, p, 0, san.directory)
-            len += asn1.write_len_and_tag(buf, p, 0, names, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(x509.X509_SAN_DIRECTORY_NAME))
+            len += asn1.write_len_and_tag(buf, p, 0, names, asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED | x509.X509_SAN_DIRECTORY_NAME)
         } else {
-            len += asn1.write_tagged_string(buf, p, 0, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(san.kind), san.name)
+            len += asn1.write_tagged_string(buf, p, 0, asn1.ASN1_CONTEXT_SPECIFIC | san.kind, san.name)
         }
     }
     total: asn1.write_len_and_tag(buf, p, 0, len, X509_CREATE_SEQUENCE)
@@ -540,10 +540,8 @@ X509WRITE_KU_ALLOWED: 0x80FF
 /// (mbedtls_x509write_crt_set_key_usage, RFC 5280 section 4.2.1.3);
 /// FeatureUnavailable for any other bit.
 x509write_crt_set_key_usage: fn(ctx: &X509WriteCert, key_usage: Int) x509.X509Error! {
-    if key_usage.bit_and(X509WRITE_KU_ALLOWED.bit_not()) != 0 {
-        return Err(.FeatureUnavailable(None))
-    }
-    ku: [U8]{U8{key_usage.bit_and(0xFF)}, U8{(key_usage >> 8).bit_and(0xFF)}}
+    if key_usage &~ X509WRITE_KU_ALLOWED != 0 -> return Err(.FeatureUnavailable(None))
+    ku: [U8]{U8{key_usage & 0xFF}, U8{(key_usage >> 8) & 0xFF}}
     buf := cipher.zero_bytes(5)
     p := 5
     len: asn1.write_named_bitstring(buf, p, 0, ku, 9) ?? return Err(.Asn1(err))
@@ -609,7 +607,7 @@ x509write_crt_tail: fn(ctx: X509WriteCert, buf: &[U8], c: &Int) -> Int asn1.ASN1
     if ctx.version == X509_CRT_VERSION_3 {
         len = x509_write_extensions(buf, c, 0, ctx.extensions)
         len = asn1.write_len_and_tag(buf, c, 0, len, X509_CREATE_SEQUENCE)
-        len = asn1.write_len_and_tag(buf, c, 0, len, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED).bit_or(3))
+        len = asn1.write_len_and_tag(buf, c, 0, len, asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED | 3)
     }
     Ok(len)
 }
@@ -632,7 +630,7 @@ x509write_crt_version: fn(ctx: X509WriteCert, buf: &[U8], c: &Int, fields: Int) 
     len := fields
     if ctx.version != X509_CRT_VERSION_1 {
         v: asn1.write_int(buf, c, 0, ctx.version)
-        len += asn1.write_len_and_tag(buf, c, 0, v, asn1.ASN1_CONTEXT_SPECIFIC.bit_or(asn1.ASN1_CONSTRUCTED))
+        len += asn1.write_len_and_tag(buf, c, 0, v, asn1.ASN1_CONTEXT_SPECIFIC | asn1.ASN1_CONSTRUCTED)
     }
     total: asn1.write_len_and_tag(buf, c, 0, len, X509_CREATE_SEQUENCE)
     Ok(total)
@@ -655,7 +653,7 @@ x509write_crt_der: fn<R: RNG>(ctx: &X509WriteCert, size: Int, rng: &R) -> [U8] x
     len += x509write_crt_head(ctx, buf, c, sig_oid, pk_alg) ?? return Err(.Asn1(err))
     // Serial ::= INTEGER, with a 0x00 byte first when its top bit is set.
     serial_len := asn1.write_raw_buffer(buf, c, 0, ctx.serial) ?? return Err(.Asn1(err))
-    if buf[c].bit_and(U8{0x80}) != (U8{0}) {
+    if buf[c] & (U8{0x80}) != (U8{0}) {
         if c < 1 -> return Err(.BufferTooSmall)
         c -= 1
         buf[c] = U8{0}
@@ -737,7 +735,7 @@ x509write_csr_attributes: fn(ctx: X509WriteCSR, buf: &[U8], c: &Int) -> Int asn1
         len += asn1.write_oid(buf, c, 0, oids.OID_PKCS9_CSR_EXT_REQ)
         len = asn1.write_len_and_tag(buf, c, 0, len, X509_CREATE_SEQUENCE)
     }
-    total: asn1.write_len_and_tag(buf, c, 0, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_CONTEXT_SPECIFIC))
+    total: asn1.write_len_and_tag(buf, c, 0, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_CONTEXT_SPECIFIC)
     Ok(total)
 }
 
@@ -801,7 +799,7 @@ x509write_csr_pem: fn<R: RNG>(ctx: &X509WriteCSR, size: Int, rng: &R) -> [U8] x5
 #Test("The keyUsage setter takes only the bits RFC 5280 defines, and a v3 serial longer than 20 bytes is refused") {
     crt := x509write_crt_new()
     assert(x509write_crt_set_key_usage(crt, 0x0100) == .Err(.FeatureUnavailable(None)))
-    x509write_crt_set_key_usage(crt, x509.X509_KU_DIGITAL_SIGNATURE.bit_or(x509.X509_KU_DECIPHER_ONLY)) ?? panic("key_usage")
+    x509write_crt_set_key_usage(crt, x509.X509_KU_DIGITAL_SIGNATURE | x509.X509_KU_DECIPHER_ONLY) ?? panic("key_usage")
     // BIT STRING of 9 bits: 7 unused, 0x80 then 0x80.
     assert(crt.extensions[0].val == [U8]{1, 0x03, 0x03, 0x07, 0x80, 0x80})
     assert(x509write_crt_set_serial_raw(crt, cipher.zero_bytes(21)) == .Err(.BadInput))

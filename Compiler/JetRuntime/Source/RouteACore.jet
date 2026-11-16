@@ -39,7 +39,7 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
     }
     request: jet_rt_alloc(I64{32}, I64{8})
     // u64 millis: floor(millis / 1000) = floor(floor(millis / 2) / 500).
-    seconds: ((native >> I64{1}).bit_and(I64{9223372036854775807})) /% I64{500}
+    seconds: ((native >> I64{1}) & I64{9223372036854775807}) /% I64{500}
     remainder: wrapping(native - seconds * I64{1000})
     rt_text_store(request, seconds)
     rt_text_store(wrapping(request + I64{8}), remainder * I64{1000000})

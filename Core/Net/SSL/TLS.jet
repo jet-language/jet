@@ -678,7 +678,7 @@ ssl_conf_dh_param_bin: fn(conf: &ssldefs.SSLConfig, dhm_p: [U8], dhm_g: [U8]) ss
 
 /// A TLS 1.2 SignatureAndHashAlgorithm value
 /// (MBEDTLS_SSL_TLS12_SIG_AND_HASH_ALG).
-ssl_tls12_sig_and_hash_alg: fn(sig: Int, hash: Int) -> Int Never! { (hash * 256).bit_or(sig) }
+ssl_tls12_sig_and_hash_alg: fn(sig: Int, hash: Int) -> Int Never! { (hash * 256) | sig }
 
 /// The groups a default configuration offers, cheapest first
 /// (ssl_preset_default_groups).
@@ -846,35 +846,33 @@ ssl_conf_max_frag_len: fn(conf: &ssldefs.SSLConfig, mfl_code: Int) ssldefs.SSLEr
 /// Whether a TLS 1.2 client asks for session tickets
 /// (mbedtls_ssl_conf_session_tickets).
 ssl_conf_session_tickets: fn(conf: &ssldefs.SSLConfig, use_tickets: Bool) Never! {
-    conf.session_tickets = conf.session_tickets.bit_and(-2)
-    if use_tickets -> conf.session_tickets = conf.session_tickets.bit_or(1)
+    conf.session_tickets &= -2
+    if use_tickets -> conf.session_tickets |= 1
 }
 
 /// Whether a TLS 1.3 client reports NewSessionTicket messages to the
 /// caller (mbedtls_ssl_conf_tls13_enable_signal_new_session_tickets).
 ssl_conf_tls13_enable_signal_new_session_tickets: fn(conf: &ssldefs.SSLConfig, signal: Bool) Never! {
-    conf.session_tickets = conf.session_tickets.bit_and(-3)
-    if signal -> conf.session_tickets = conf.session_tickets.bit_or(2)
+    conf.session_tickets &= -3
+    if signal -> conf.session_tickets |= 2
 }
 
 /// mbedtls_ssl_conf_get_session_tickets.
 ssl_conf_get_session_tickets: fn(conf: ssldefs.SSLConfig) -> Int Never! {
-    if conf.session_tickets.bit_and(1) != 0 -> return ssldefs.SSL_SESSION_TICKETS_ENABLED
+    if conf.session_tickets & 1 != 0 -> return ssldefs.SSL_SESSION_TICKETS_ENABLED
     ssldefs.SSL_SESSION_TICKETS_DISABLED
 }
 
 /// mbedtls_ssl_conf_is_signal_new_session_tickets_enabled.
 ssl_conf_is_signal_new_session_tickets_enabled: fn(conf: ssldefs.SSLConfig) -> Int Never! {
-    if conf.session_tickets.bit_and(2) != 0 {
-        return ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED
-    }
+    if conf.session_tickets & 2 != 0 -> return ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_ENABLED
     ssldefs.SSL_TLS1_3_SIGNAL_NEW_SESSION_TICKETS_DISABLED
 }
 
 /// The TLS 1.3 key exchange modes to allow
 /// (mbedtls_ssl_conf_tls13_key_exchange_modes).
 ssl_conf_tls13_key_exchange_modes: fn(conf: &ssldefs.SSLConfig, kex_modes: Int) Never! {
-    conf.tls13_kex_modes = kex_modes.bit_and(ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_ALL)
+    conf.tls13_kex_modes = kex_modes & ssldefs.SSL_TLS1_3_KEY_EXCHANGE_MODE_ALL
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,7 +1064,7 @@ ssl_get_extension_mask: fn(extension_type: Int) -> Int Never! {
 
 /// Record a TLS 1.3 extension as sent (mbedtls_ssl_tls13_set_hs_sent_ext_mask).
 ssl_tls13_set_hs_sent_ext_mask: fn(ssl: &ssldefs.SSLContext, extension_type: Int) Never! {
-    ssl.handshake.sent_extensions = ssl.handshake.sent_extensions.bit_or(ssl_get_extension_mask(extension_type))
+    ssl.handshake.sent_extensions |= ssl_get_extension_mask(extension_type)
 }
 
 // ---------------------------------------------------------------------------
@@ -1264,9 +1262,9 @@ SSLSigAlgParts: struct {
 /// The key type and digest of a signature algorithm
 /// (mbedtls_ssl_get_pk_type_and_md_alg_from_sig_alg).
 ssl_get_pk_type_and_md_alg_from_sig_alg: fn(sig_alg: Int) -> SSLSigAlgParts ssldefs.SSLError! {
-    if ssl_pk_alg_from_sig(sig_alg.bit_and(0xFF)) == {
+    if ssl_pk_alg_from_sig(sig_alg & 0xFF) == {
         .Val(kind) -> {
-            if ssl_md_alg_from_hash((sig_alg >> 8).bit_and(0xFF)) == {
+            if ssl_md_alg_from_hash((sig_alg >> 8) & 0xFF) == {
                 .Val(md) -> return Ok(SSLSigAlgParts{pk_type: kind, md_alg: md})
                 None -> {}
             }
@@ -1288,8 +1286,8 @@ ssl_get_pk_type_and_md_alg_from_sig_alg: fn(sig_alg: Int) -> SSLSigAlgParts ssld
 /// mbedtls_ssl_tls12_sig_alg_is_supported: an MD5 to SHA-512 hash with
 /// RSA or ECDSA.
 ssl_tls12_sig_alg_is_supported: fn(sig_alg: Int) -> Bool Never! {
-    hash: (sig_alg >> 8).bit_and(0xFF)
-    sig: sig_alg.bit_and(0xFF)
+    hash: (sig_alg >> 8) & 0xFF
+    sig: sig_alg & 0xFF
     if hash < ssldefs.SSL_HASH_MD5 || hash > ssldefs.SSL_HASH_SHA512 -> return false
     sig == ssldefs.SSL_SIG_RSA || sig == ssldefs.SSL_SIG_ECDSA
 }
@@ -1320,7 +1318,7 @@ ssl_tls13_cipher_suite_is_offered: fn(ssl: ssldefs.SSLContext, cipher_suite: Int
 
 /// mbedtls_ssl_conf_tls13_is_kex_mode_enabled.
 ssl_conf_tls13_is_kex_mode_enabled: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
-    ssl.conf.tls13_kex_modes.bit_and(mask) != 0
+    ssl.conf.tls13_kex_modes & mask != 0
 }
 
 /// mbedtls_ssl_conf_tls13_is_psk_enabled.
@@ -1350,7 +1348,7 @@ ssl_conf_tls13_is_some_psk_enabled: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 /// mbedtls_ssl_tls13_is_kex_mode_supported: a mode both sides allow.
 ssl_tls13_is_kex_mode_supported: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
-    ssl.handshake.tls13_kex_modes.bit_and(mask) != 0
+    ssl.handshake.tls13_kex_modes & mask != 0
 }
 
 /// mbedtls_ssl_tls13_is_psk_supported.
@@ -1380,7 +1378,7 @@ ssl_tls13_is_some_psk_supported: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 
 /// mbedtls_ssl_tls13_key_exchange_mode_check: the negotiated mode.
 ssl_tls13_key_exchange_mode_check: fn(ssl: ssldefs.SSLContext, mask: Int) -> Bool Never! {
-    ssl.handshake.key_exchange_mode.bit_and(mask) != 0
+    ssl.handshake.key_exchange_mode & mask != 0
 }
 
 /// mbedtls_ssl_tls13_key_exchange_mode_with_psk.
@@ -1395,7 +1393,7 @@ ssl_tls13_key_exchange_mode_with_ephemeral: fn(ssl: ssldefs.SSLContext) -> Bool 
 
 /// mbedtls_ssl_tls13_session_get_ticket_flags.
 ssl_tls13_session_get_ticket_flags: fn(session: ssldefs.SSLSession, flags: Int) -> Int Never! {
-    session.ticket_flags.bit_and(flags).bit_and(ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK)
+    session.ticket_flags & flags & ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK
 }
 
 /// mbedtls_ssl_tls13_session_ticket_has_flags.
@@ -1415,12 +1413,12 @@ ssl_tls13_session_ticket_allow_psk_ephemeral: fn(session: ssldefs.SSLSession) ->
 
 /// mbedtls_ssl_tls13_session_set_ticket_flags.
 ssl_tls13_session_set_ticket_flags: fn(session: &ssldefs.SSLSession, flags: Int) Never! {
-    session.ticket_flags = session.ticket_flags.bit_or(flags.bit_and(ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK))
+    session.ticket_flags |= flags & ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK
 }
 
 /// mbedtls_ssl_tls13_session_clear_ticket_flags.
 ssl_tls13_session_clear_ticket_flags: fn(session: &ssldefs.SSLSession, flags: Int) Never! {
-    session.ticket_flags = session.ticket_flags.bit_and(flags.bit_and(ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK).bit_not())
+    session.ticket_flags &~= (flags & ssldefs.SSL_TLS1_3_TICKET_FLAGS_MASK)
 }
 
 /// Whether a record transform is AEAD (mbedtls_ssl_transform_uses_aead).
@@ -1780,7 +1778,7 @@ ssl_tls12_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, ciphersuite
     taglen := 0
     if ssl_mode == .AEAD {
         taglen = 16
-        if cs.flags.bit_and(suites.CIPHERSUITE_SHORT_TAG) != 0 -> taglen = 8
+        if cs.flags & suites.CIPHERSUITE_SHORT_TAG != 0 -> taglen = 8
     }
     ssl.tpool[tix].taglen = taglen
     info: suites.ssl_ciphersuite_cipher_info(cs) ?? return Err(.BadInputData)
@@ -2213,7 +2211,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
         ssldefs.ssl_fill(ssl.cur_out_ctr, 2, ssldefs.SSL_SEQUENCE_NUMBER_LEN - 2, U8{0})
         i := 2
         loop i > 0 {
-            v: (Int{ssl.cur_out_ctr[i - 1]} + 1).bit_and(0xFF)
+            v: (Int{ssl.cur_out_ctr[i - 1]} + 1) & 0xFF
             ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(v)
             if v != 0 -> break
             i -= 1
@@ -2230,7 +2228,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 
 /// Read and check the peer's Finished message (mbedtls_ssl_parse_finished).
 ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLError! {
-    buf := ssl_calc_finished(ssl, ssl.conf.endpoint.bit_xor(1)) ?? return Err(err)
+    buf := ssl_calc_finished(ssl, ssl.conf.endpoint ~ 1) ?? return Err(err)
     if sslmsg.ssl_read_record(ssl, true, rng) == {
         .Err(e) -> {
             ssldefs.ssl_wipe(buf)
@@ -2303,8 +2301,8 @@ ssl_get_key_exchange_md_tls1_2: fn(ssl: ssldefs.SSLContext, buf: [U8], off: Int,
 ssl_tls12_get_preferred_hash_for_sig_alg: fn(ssl: ssldefs.SSLContext, sig_alg: Int) -> Int Never! {
     if sig_alg == ssldefs.SSL_SIG_ANON -> return ssldefs.SSL_HASH_NONE
     loop received in ssl.handshake.received_sig_algs {
-        hash_alg: received.bit_and(0xFF00) >> 8
-        sig_alg_received: received.bit_and(0xFF)
+        hash_alg: (received & 0xFF00) >> 8
+        sig_alg_received: received & 0xFF
         if ssl_md_alg_from_hash(hash_alg) == None -> next
         if sig_alg == sig_alg_received -> return hash_alg
     }
@@ -2513,7 +2511,7 @@ ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersui
     }
     if x509crt.x509_crt_check_key_usage(cert, usage) == {
         .Err(_) -> {
-            flags = flags.bit_or(x509.X509_BADCERT_KEY_USAGE)
+            flags |= x509.X509_BADCERT_KEY_USAGE
             ok = false
         }
         .Ok(_) -> {}
@@ -2521,7 +2519,7 @@ ssl_check_cert_usage: fn(cert: x509crt.X509Crt, ciphersuite: suites.SSLCiphersui
     ext_oid: if recv_endpoint == ssldefs.SSL_IS_CLIENT -> oids.OID_SERVER_AUTH else -> oids.OID_CLIENT_AUTH
     if x509crt.x509_crt_check_extended_key_usage(cert, ext_oid) == {
         .Err(_) -> {
-            flags = flags.bit_or(x509.X509_BADCERT_EXT_KEY_USAGE)
+            flags |= x509.X509_BADCERT_EXT_KEY_USAGE
             ok = false
         }
         .Ok(_) -> {}
@@ -2554,33 +2552,23 @@ ssl_verify_failure_is_soft: fn(e: ssldefs.SSLError) -> Bool Never! {
 // The alert for a rejected certificate, by the first of its failures in
 // C's order.
 ssl_verify_alert: fn(verify_result: Int) -> Int Never! {
-    if verify_result.bit_and(x509.X509_BADCERT_OTHER) != 0 {
-        return ssldefs.SSL_ALERT_MSG_ACCESS_DENIED
-    }
-    if verify_result.bit_and(x509.X509_BADCERT_CN_MISMATCH) != 0 {
-        return ssldefs.SSL_ALERT_MSG_BAD_CERT
-    }
-    if verify_result.bit_and(x509.X509_BADCERT_KEY_USAGE) != 0 {
+    if verify_result & x509.X509_BADCERT_OTHER != 0 -> return ssldefs.SSL_ALERT_MSG_ACCESS_DENIED
+    if verify_result & x509.X509_BADCERT_CN_MISMATCH != 0 -> return ssldefs.SSL_ALERT_MSG_BAD_CERT
+    if verify_result & x509.X509_BADCERT_KEY_USAGE != 0 {
         return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
     }
-    if verify_result.bit_and(x509.X509_BADCERT_EXT_KEY_USAGE) != 0 {
+    if verify_result & x509.X509_BADCERT_EXT_KEY_USAGE != 0 {
         return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
     }
-    if verify_result.bit_and(x509.X509_BADCERT_BAD_PK) != 0 {
+    if verify_result & x509.X509_BADCERT_BAD_PK != 0 {
         return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
     }
-    if verify_result.bit_and(x509.X509_BADCERT_BAD_KEY) != 0 {
+    if verify_result & x509.X509_BADCERT_BAD_KEY != 0 {
         return ssldefs.SSL_ALERT_MSG_UNSUPPORTED_CERT
     }
-    if verify_result.bit_and(x509.X509_BADCERT_EXPIRED) != 0 {
-        return ssldefs.SSL_ALERT_MSG_CERT_EXPIRED
-    }
-    if verify_result.bit_and(x509.X509_BADCERT_REVOKED) != 0 {
-        return ssldefs.SSL_ALERT_MSG_CERT_REVOKED
-    }
-    if verify_result.bit_and(x509.X509_BADCERT_NOT_TRUSTED) != 0 {
-        return ssldefs.SSL_ALERT_MSG_UNKNOWN_CA
-    }
+    if verify_result & x509.X509_BADCERT_EXPIRED != 0 -> return ssldefs.SSL_ALERT_MSG_CERT_EXPIRED
+    if verify_result & x509.X509_BADCERT_REVOKED != 0 -> return ssldefs.SSL_ALERT_MSG_CERT_REVOKED
+    if verify_result & x509.X509_BADCERT_NOT_TRUSTED != 0 -> return ssldefs.SSL_ALERT_MSG_UNKNOWN_CA
     ssldefs.SSL_ALERT_MSG_CERT_UNKNOWN
 }
 
@@ -2663,7 +2651,7 @@ ssl_verify_certificate: fn<R: RNG>(ssl: &ssldefs.SSLContext, authmode: Int, chai
         // names the curve, and the CertificateVerify's key must be on it
         // (ssl_tls13_key_fits).
         if ssl.tls_version == ssldefs.SSL_VERSION_TLS1_2 && pk.pk_can_do(chain[0].pk, .ECKey) && !ssl_check_curve(ssl, pk.pk_get_ec_group_id(chain[0].pk)) {
-            ssl.spool[sn].verify_result = ssl.spool[sn].verify_result.bit_or(x509.X509_BADCERT_BAD_KEY)
+            ssl.spool[sn].verify_result = ssl.spool[sn].verify_result | x509.X509_BADCERT_BAD_KEY
             if !failed {
                 failed = true
                 reason = ssldefs.SSLError.BadCertificate
@@ -3850,7 +3838,7 @@ CtRand: struct {
     // not carry an HMAC_DRBG's own spread.
     impl RNG {
         fill: fn(&self, out: &[U8]) -> Bool Never! {
-            loop i in 0..<out.len() -> out[i] = U8{ct_next(self).bit_and(U64{255})}
+            loop i in 0..<out.len() -> out[i] = U8{ct_next(self) & U64{255}}
             true
         }
     }
@@ -3858,16 +3846,16 @@ CtRand: struct {
 
 #Overflow(.Wrapping) ct_next: fn(r: &CtRand) -> U64 Never! {
     x := r.s.copy()
-    x = x.bit_xor(x << 13)
-    x = x.bit_xor(x >> 7)
-    x = x.bit_xor(x << 17)
+    x ~= x << 13
+    x ~= x >> 7
+    x ~= x << 17
     r.s = x.copy()
     x
 }
 
 ct_bytes: fn(r: &CtRand, n: Int) -> [U8] Never! {
     out := [U8]{}
-    loop _ in 0..<n -> out.push(U8{ct_next(r).bit_and(U64{255})})
+    loop _ in 0..<n -> out.push(U8{ct_next(r) & U64{255}})
     out
 }
 
@@ -3907,17 +3895,17 @@ ct_measure: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8])
     inputs := [[U8]]{}
     random := [Bool]{}
     loop _ in 0..<samples {
-        pick: ct_next(r).bit_and(U64{1}) == U64{1}
+        pick: ct_next(r) & U64{1} == U64{1}
         random.push(pick)
         if pick -> inputs.push(ct_bytes(r, fixed.len())) else -> inputs.push(fixed.copy())
     }
     sink := 0
-    loop i in 0..<32 -> sink = sink.bit_xor(op(inputs[i %% samples]))
+    loop i in 0..<32 -> sink ~= op(inputs[i %% samples])
     times := [Int]{}
     loop i in 0..<samples {
         x: inputs[i]
         watch: core.time.start()
-        loop _ in 0..<batch -> sink = sink.bit_xor(op(x))
+        loop _ in 0..<batch -> sink ~= op(x)
         times.push(core.time.elapsed(watch).ns)
     }
     sorted := times.copy()
@@ -3944,7 +3932,7 @@ ct_dudect: fn(what: String, samples: Int, batch: Int, fixed: [U8], op: fn([U8]) 
 /// `bytes` at the end only, where a random one differs at the start.
 ct_last_flipped: fn(bytes: [U8]) -> [U8] Never! {
     out := bytes.copy()
-    out[out.len() - 1] = out[out.len() - 1].bit_xor(U8{1})
+    out[out.len() - 1] = out[out.len() - 1] ~ U8{1}
     out
 }
 
@@ -4029,8 +4017,8 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
 /// below the group order, and the low bit set, so it is not zero.
 ct_scalar: fn(bytes: [U8]) -> [U8] Never! {
     out := bytes.copy()
-    out[0] = out[0].bit_and(U8{0x7f})
-    out[out.len() - 1] = out[out.len() - 1].bit_or(U8{1})
+    out[0] = out[0] & U8{0x7f}
+    out[out.len() - 1] = out[out.len() - 1] | U8{1}
     out
 }
 
@@ -4085,7 +4073,7 @@ ct_rsa_sign: fn(der: [U8], hash: [U8]) -> Int {
 ct_base64_text: fn(bytes: [U8]) -> [U8] Never! {
     digits: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
     out := [U8]{}
-    loop b in bytes -> out.push(digits[Int{b.bit_and(U8{63})}])
+    loop b in bytes -> out.push(digits[Int{b & U8{63}}])
     out
 }
 
@@ -4219,7 +4207,7 @@ ct_rsa_kx_sealed: fn(key: &rsa.RSAContext, rng: &drbg.HMACDrbg, r: &CtRand, kind
         // The block's private-key image is no EME-PKCS1-v1_5 encoding: the
         // raw public operation turns it into the ciphertext.
         block := ct_bytes(r, key.len)
-        loop i in 0..<block.len() -> block[i] = block[i].bit_or(U8{1})
+        loop i in 0..<block.len() -> block[i] = block[i] | U8{1}
         block[0] = if kind == 1 -> U8{1} else -> U8{0}
         block[1] = U8{2}
         if kind == 1 -> block[key.len - 49] = U8{0}
@@ -4296,7 +4284,7 @@ ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
 /// 2 no zero after the padding; 3 a 47-byte message; 4 version 3.2.
 ct_rsa_kx_block: fn(r: &CtRand, len: Int, kind: Int) -> [U8] {
     block := ct_bytes(r, len)
-    loop i in 0..<len -> block[i] = block[i].bit_or(U8{1})
+    loop i in 0..<len -> block[i] = block[i] | U8{1}
     block[0] = if kind == 1 -> U8{1} else -> U8{0}
     block[1] = U8{2}
     message: if kind == 3 -> 47 else -> 48
@@ -4386,7 +4374,7 @@ ct_oaep_db: fn(r: &CtRand, len: Int, label: [U8], kind: Int) -> [U8] {
     db := [U8]{}
     lhash: hashes.hash(.SHA256, label)
     loop i in 0..<32 -> db.push(lhash[i])
-    if kind == 2 -> db[31] = db[31].bit_xor(U8{1})
+    if kind == 2 -> db[31] = db[31] ~ U8{1}
     message: if kind == 4 -> 40 else -> 32
     loop _ in 32..<(len - message - 1) -> db.push(U8{0})
     separator: if kind == 3 -> U8{2} else -> U8{1}
@@ -4540,7 +4528,7 @@ ct_pkcs8_x25519_der: fn(k: [U8]) -> [U8] Never! {
 ct_pkcs8_rsa_der: fn(pkcs1: [U8]) -> [U8] Never! {
     body: pkcs1.len()
     total: body + 22
-    out := [U8]{0x30, 0x82, U8{total >> 8}, U8{total.bit_and(255)}, 0x02, 0x01, 0x00, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82, U8{body >> 8}, U8{body.bit_and(255)}}
+    out := [U8]{0x30, 0x82, U8{total >> 8}, U8{total & 255}, 0x02, 0x01, 0x00, 0x30, 0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82, U8{body >> 8}, U8{body & 255}}
     loop b in pkcs1 -> out.push(b)
     out
 }
@@ -4570,7 +4558,7 @@ ct_rsa_redrawn: fn(r: &CtRand, der: [U8]) -> [U8] {
     out := der.copy()
     end: out.len()
     p := 0
-    _ := asn1.get_tag(out, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? panic("RSAPrivateKey: {err}")
+    _ := asn1.get_tag(out, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? panic("RSAPrivateKey: {err}")
     _ := asn1.get_int(out, p, end) ?? panic("version: {err}")
     loop part in 0..<8 {
         len: asn1.get_tag(out, p, end, asn1.ASN1_INTEGER) ?? panic("INTEGER {part}: {err}")
@@ -4588,11 +4576,11 @@ ct_redraw_integer: fn(r: &CtRand, buf: &[U8], at: Int, len: Int, odd: Bool) {
     lead := at
     if buf[lead] == (U8{0}) -> lead += 1
     top := U8{0x80}
-    loop top.bit_and(buf[lead]) == (U8{0}) -> top = top >> 1
+    loop top & buf[lead] == (U8{0}) -> top = top >> 1
     fresh: ct_bytes(r, at + len - lead)
     loop i in 0..<fresh.len() -> buf[lead + i] = fresh[i]
-    buf[lead] = buf[lead].bit_and(top - U8{1}).bit_or(top)
-    if odd -> buf[at + len - 1] = buf[at + len - 1].bit_or(U8{1})
+    buf[lead] = buf[lead] & top - U8{1} | top
+    if odd -> buf[at + len - 1] = buf[at + len - 1] | U8{1}
 }
 
 // Each primitive of the dudect tests above runs once here, so a build of this
@@ -5039,7 +5027,7 @@ ct_cbc_record: fn(t: &ssldefs.SSLTransform, plain: [U8], pad: Int, iv: [U8], mac
     add_data: sslmsg.ssl_extract_add_data_from_record(rec, t.tls_version, t.taglen)
     body := plain.copy()
     ssldefs.ssl_push_all(body, sslmsg.ssl_mac_of(t.md_enc, add_data, plain, 0, plain.len()) ?? panic("no MAC key"))
-    if !mac_ok -> body[plain.len()] = body[plain.len()].bit_xor(U8{1})
+    if !mac_ok -> body[plain.len()] = body[plain.len()] ~ U8{1}
     loop _ in 0..pad -> body.push(ssldefs.ssl_byte(pad))
     assert(body.len() %% 16 == 0)
     enc := [U8]{}

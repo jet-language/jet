@@ -3,18 +3,23 @@
 // `a.bit_or(b)` is `a | b`, `a.bit_xor(b)` is `a ~ b`, `a.bit_not()` is `~a`
 // and `a.bit_and(b.bit_not())` is `a &~ b`. A statement that assigns a call
 // back to its own receiver (`x = x.bit_and(m)`) becomes an update (`x &= m`,
-// `x |= m`, `x ~= m`, `x &~= m`). The plan reads the lexer's tokens: a call's
+// `x |= m`, `x ~= m`, `x &~= m`) when the receiver is a local or a field; an
+// indexed slot keeps its assignment (`x[i] = x[i] | m`), since sema refuses
+// an update to one. The plan reads the lexer's tokens: a call's
 // receiver is the chain of names, literals, calls, indexes, typed literals,
 // fields and `?` steps before its `.`, and the tokens beside the call decide
 // whether the sigil form needs parentheses, which it does after a prefix
-// operator, before a postfix step, and beside an operator that binds at least
-// as tightly. A source that parsed cleanly must still parse after the
+// operator or a marker (`#run`), before a postfix step, before a `<` that
+// would read a constant's name as a generic call, and beside an operator that
+// binds at least as tightly. A typed literal written beside a sigil inside an
+// `if` or `loop` header goes in parentheses, and so does a complement of a
+// complement (`~(~x)`). A source that parsed cleanly must still parse after the
 // rewrite, or it is left alone. Jet quoted in a string (a raw string whole, a
 // plain string by its code spans or whole), an interpolation hole, a Markdown
 // ```jet fence and the code spans of prose or of any other text are read the
 // same way.
 use {
-    jet_lexer.[Token, TokenTables, lex_generated, lexer_without_comments, STRING_PART_INTERPOLATION, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_CARET, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_DOT_DOT_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_NULL, TOKEN_PIPE, TOKEN_PIPE_GT, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STAR, TOKEN_STRING, TOKEN_TILDE, TOKEN_UNIFIED_ARROW]
+    jet_lexer.[Token, TokenTables, lex_generated, lexer_without_comments, STRING_PART_INTERPOLATION, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_CARET, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_DOT_DOT_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_KW_IT, TOKEN_KW_LOOP, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_LT, TOKEN_LT_GT, TOKEN_MINUS, TOKEN_NULL, TOKEN_PIPE, TOKEN_PIPE_GT, TOKEN_PREP, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STAR, TOKEN_STRING, TOKEN_TILDE, TOKEN_UNIFIED_ARROW]
     jet_parser.[parser_expression_precedence]
 }
 
@@ -256,13 +261,15 @@ bit_sigils1_opener: fn(tokens: [Token], close: Int) -> Int {
 }
 
 // Whether a token of `kind` ends a value, so an operator after it is binary:
-// a name, a literal, `true`, `false`, `self`, `null`, a closer or `?`.
+// a name, `it`, `<>`, a literal, `true`, `false`, `self`, `null`, a closer
+// (a typed literal's `}` too, as in `U32{48} + x`) or `?`.
 bit_sigils1_value_end: fn(kind: Int) -> Bool {
-    kind == TOKEN_IDENT || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_QUESTION || (kind >= TOKEN_RAW_STRING && kind <= TOKEN_NULL)
+    kind == TOKEN_IDENT || kind == TOKEN_KW_IT || kind == TOKEN_LT_GT || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_QUESTION || (kind >= TOKEN_RAW_STRING && kind <= TOKEN_NULL)
 }
 
 // The first token of the target when the call from `first` to `close` is a
-// whole statement `target = target.bit_*(m)`; -1 otherwise.
+// whole statement `target = target.bit_*(m)` and the target is a local or a
+// field, not an indexed slot; -1 otherwise.
 bit_sigils1_update_target: fn(bytes: [U8], tokens: [Token], first: Int, dot: Int, close: Int) -> Int {
     if first < 2 || tokens[first - 1].kind != TOKEN_EQ -> return -1
     if close + 1 < tokens.len() && tokens[close + 1].kind != TOKEN_SEMI && tokens[close + 1].kind != TOKEN_RBRACE {
@@ -270,6 +277,9 @@ bit_sigils1_update_target: fn(bytes: [U8], tokens: [Token], first: Int, dot: Int
     }
     target := first - 2
     loop target > 0 && !bit_sigils1_statement_start(tokens[target - 1].kind) -> target -= 1
+    loop index in target..<(first - 1) {
+        if tokens[index].kind == TOKEN_LBRACKET -> return -1
+    }
     written: lambda_shape1_text(bytes, tokens[target].span.start, tokens[first - 2].span.end)
     if written != lambda_shape1_text(bytes, tokens[first].span.start, tokens[dot - 1].span.end) {
         return -1
@@ -376,8 +386,10 @@ bit_sigils1_site: fn(scan: BitSigilsScan, index: Int, wrap: Bool) -> String {
     receiver_start: bit_sigils1_token(scan, site.stream, site.first).span.start
     receiver_end: bit_sigils1_token(scan, site.stream, site.dot - 1).span.end
     binding: bit_sigils1_binding(site.op)
+    header: bit_sigils1_in_header(scan, site.stream, site.first)
     if site.op == "" {
-        complement: "~{bit_sigils1_operand(scan, receiver_start, receiver_end, BIT_SIGILS_PREFIX, false)}"
+        operand: bit_sigils1_operand(scan, receiver_start, receiver_end, BIT_SIGILS_PREFIX, false, header)
+        complement: if operand.starts_with("~") -> "~({operand})" else -> "~{operand}"
         return if wrap -> "({complement})" else -> complement
     }
     argument_start: bit_sigils1_token(scan, site.stream, site.dot + 3).span.start
@@ -385,18 +397,18 @@ bit_sigils1_site: fn(scan: BitSigilsScan, index: Int, wrap: Bool) -> String {
     if bit_sigils1_token(scan, site.stream, last).kind == TOKEN_COMMA -> last -= 1
     argument_end: bit_sigils1_token(scan, site.stream, last).span.end
     update: site.target_end >= 0
-    left: if update -> bit_sigils1_render(scan, site.start, site.target_end) else -> bit_sigils1_operand(scan, receiver_start, receiver_end, binding, false)
+    left: if update -> bit_sigils1_render(scan, site.start, site.target_end) else -> bit_sigils1_operand(scan, receiver_start, receiver_end, binding, false, header)
     cleared: if site.op == "&" -> bit_sigils1_exact(scan, argument_start, argument_end, true) else -> -1
     body: if {
         cleared >= 0 -> {
             inner: scan.sites[cleared]
             operand_start: bit_sigils1_token(scan, inner.stream, inner.first).span.start
             operand_end: bit_sigils1_token(scan, inner.stream, inner.dot - 1).span.end
-            operand: bit_sigils1_operand(scan, operand_start, operand_end, BIT_SIGILS_PREFIX, false)
+            operand: bit_sigils1_operand(scan, operand_start, operand_end, BIT_SIGILS_PREFIX, false, header)
             if update -> "{left} &~= {operand}" else -> "{left} &~ {operand}"
         }
-        update -> "{left} {site.op}= {bit_sigils1_operand(scan, argument_start, argument_end, 0, true)}"
-        else -> "{left} {site.op} {bit_sigils1_operand(scan, argument_start, argument_end, binding, true)}"
+        update -> "{left} {site.op}= {bit_sigils1_operand(scan, argument_start, argument_end, 0, true, header)}"
+        else -> "{left} {site.op} {bit_sigils1_operand(scan, argument_start, argument_end, binding, true, header)}"
     }
     if wrap -> "({body})" else -> body
 }
@@ -415,9 +427,10 @@ bit_sigils1_exact: fn(scan: BitSigilsScan, lo: Int, hi: Int, complement: Bool) -
 
 // The value from `lo` to `hi` written beside an operator that binds at
 // `binding`, on its right when `right`, in parentheses when it binds more
-// loosely (or as loosely, on the right). A receiver that is no call is a
-// chain, which binds tighter than any operator.
-bit_sigils1_operand: fn(scan: BitSigilsScan, lo: Int, hi: Int, binding: Int, right: Bool) -> String {
+// loosely (or as loosely, on the right), or when it is a typed literal or
+// holds one outside brackets and stands in a `header`. A receiver that is no
+// call is a chain, which binds tighter than any operator.
+bit_sigils1_operand: fn(scan: BitSigilsScan, lo: Int, hi: Int, binding: Int, right: Bool, header: Bool) -> String {
     exact: bit_sigils1_exact(scan, lo, hi, false)
     if exact >= 0 {
         inner: bit_sigils1_binding(scan.sites[exact].op)
@@ -425,12 +438,64 @@ bit_sigils1_operand: fn(scan: BitSigilsScan, lo: Int, hi: Int, binding: Int, rig
     }
     text: bit_sigils1_render(scan, lo, hi)
     if right && bit_sigils1_loosest(text) <= binding -> return "({text})"
+    if header && bit_sigils1_braced(text) -> return "({text})"
     text
 }
 
+// Whether the token at `index` stands in an `if` or `loop` header, where a
+// `{` outside brackets opens the body: its statement starts with `if` or
+// `loop` (or `else if`) and no bracket it sits in survives the rewrite. A bit
+// call's own parentheses do not survive, so the search goes on past them.
+bit_sigils1_in_header: fn(scan: BitSigilsScan, stream: Int, index: Int) -> Bool {
+    tokens: scan.streams[stream]
+    at := index - 1
+    loop at >= 0 {
+        kind: tokens[at].kind
+        if {
+            kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP -> return true
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> {
+                open: bit_sigils1_opener(tokens, at)
+                if open < 0 -> return false
+                at = open - 1
+            }
+            kind == TOKEN_LPAREN -> {
+                call: bit_sigils1_opened(scan, stream, at)
+                if call < 0 -> return false
+                at = scan.sites[call].first - 1
+            }
+            kind == TOKEN_LBRACKET || bit_sigils1_statement_start(kind) -> return false
+            else -> at -= 1
+        }
+    }
+    false
+}
+
+// The call whose `(` is the token at `open` of `stream`, or -1.
+bit_sigils1_opened: fn(scan: BitSigilsScan, stream: Int, open: Int) -> Int {
+    loop index in 0..<scan.sites.len() {
+        site: scan.sites[index]
+        if site.stream == stream && site.dot + 2 == open -> return index
+    }
+    -1
+}
+
+// Whether `text` holds a `{` outside any `(…)` or `[…]`.
+bit_sigils1_braced: fn(text: String) -> Bool {
+    lexed: lex_generated(text.bytes())
+    depth := 0
+    loop token in lexer_without_comments(lexed.tokens) {
+        kind: token.kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+        if depth == 0 && kind == TOKEN_LBRACE -> return true
+    }
+    false
+}
+
 // Whether the tokens around a call need its sigil form in parentheses: a
-// postfix step after it, a prefix operator before it, or an operator beside
-// it that binds at least as tightly (more tightly, after it).
+// postfix step after it, a prefix operator or a marker (`#run`) before it, a
+// `<` after a constant's name, which would read as a generic call, or an
+// operator beside it that binds at least as tightly (more tightly, after it).
 bit_sigils1_wrapped: fn(scan: BitSigilsScan, index: Int) -> Bool {
     site: scan.sites[index]
     if site.target_end >= 0 -> return false
@@ -445,9 +510,17 @@ bit_sigils1_wrapped: fn(scan: BitSigilsScan, index: Int) -> Bool {
             return true
         }
         if parser_expression_precedence(after.kind) > binding -> return true
+        if after.kind == TOKEN_LT && site.op != "" {
+            last: bit_sigils1_token(scan, site.stream, bit_sigils1_argument_last(scan.streams[site.stream], site.close))
+            name: lambda_shape1_text(scan.bytes, last.span.start, last.span.end)
+            if last.kind == TOKEN_IDENT && name.bytes()[0] >= 65 && name.bytes()[0] <= 90 {
+                return true
+            }
+        }
     }
     if site.first == 0 -> return false
     before: bit_sigils1_token(scan, site.stream, site.first - 1)
+    if before.kind == TOKEN_PREP -> return true
     if site.first >= 2 && bit_sigils1_value_end(bit_sigils1_token(scan, site.stream, site.first - 2).kind) && parser_expression_precedence(before.kind) > 0 {
         return parser_expression_precedence(before.kind) >= binding
     }

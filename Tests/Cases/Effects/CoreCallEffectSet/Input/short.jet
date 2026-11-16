@@ -1,0 +1,11 @@
+// A `-[DB]>` row holds the call's DB and, through DB's `#FX(Net, FS)`, its
+// FS; the Env, Rand and Time `jobs.queue` declares are left over.
+use core.jobs
+
+open_queue: fn() -[DB]> {
+    _: jobs.queue() ?? return
+}
+
+main: fn() -[DB, Env, FS, Rand, Time]> {
+    open_queue()
+}

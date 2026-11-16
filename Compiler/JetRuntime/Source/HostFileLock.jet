@@ -35,10 +35,10 @@ fs_lock_identity: fn(result: I64, facts: I64) -> I64 {
         return identity
     }
     inode: rt_text_word(wrapping(facts + I64{8}))
-    kind: rt_text_word(wrapping(facts + I64{16})).bit_and(I64{61440})
+    kind: rt_text_word(wrapping(facts + I64{16})) & I64{61440}
     rt_text_store(identity, rt_text_word(facts))
-    rt_text_store(wrapping(identity + I64{8}), inode.bit_and(I64{4294967295}))
-    rt_text_store(wrapping(identity + I64{16}), (inode >> I64{32}).bit_and(I64{4294967295}))
+    rt_text_store(wrapping(identity + I64{8}), inode & I64{4294967295})
+    rt_text_store(wrapping(identity + I64{16}), (inode >> I64{32}) & I64{4294967295})
     rt_text_store(wrapping(identity + I64{24}), if (kind == I64{32768}) -> I64{1} else -> I64{0})
     rt_text_store(wrapping(identity + I64{32}), if (kind == I64{40960}) -> I64{1} else -> I64{0})
     identity

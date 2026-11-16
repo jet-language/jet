@@ -9,8 +9,8 @@
 shared_count_retain: fn(cell: I64, pin: Bool) -> Bool {
     refs := sync_load(cell)
     loop {
-        if (refs.bit_and(I64{4294967295})) == (I64{0}) -> break
-        count: if pin -> refs >> I64{32} else -> refs.bit_and(I64{4294967295})
+        if (refs & I64{4294967295}) == (I64{0}) -> break
+        count: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
         if count == (I64{2147483647}) {
             jet_rt_panic_overflow()
             return false
@@ -217,13 +217,13 @@ shared_revision_stop: fn() {
 // it adds to that guard's payload at 8, and its holders at 16 (the token both
 // halves of a split project has two). The last holder's drop releases the
 // guard it projects.
-shared_guard_cell: fn(guard: I64) -> I64 { guard.bit_and(I64{-2}) }
+shared_guard_cell: fn(guard: I64) -> I64 { guard & I64{-2} }
 
-shared_guard_held: fn(guard: I64) -> Bool { guard != I64{0} && (guard.bit_and(I64{1})) == I64{0} }
+shared_guard_held: fn(guard: I64) -> Bool { guard != I64{0} && (guard & I64{1}) == I64{0} }
 
-shared_guard_projected: fn(guard: I64) -> Bool { (guard.bit_and(I64{2})) != I64{0} }
+shared_guard_projected: fn(guard: I64) -> Bool { (guard & I64{2}) != I64{0} }
 
-shared_guard_token: fn(guard: I64) -> I64 { guard.bit_and(I64{-4}) }
+shared_guard_token: fn(guard: I64) -> I64 { guard & I64{-4} }
 
 // The root guard a guard projects.
 shared_guard_root: fn(guard: I64) -> I64 {
@@ -281,7 +281,7 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     sync_store(token, guard)
     sync_store(wrapping(token + I64{8}), offset)
     sync_store(wrapping(token + I64{16}), I64{1})
-    token.bit_or(I64{2})
+    token | I64{2}
 }
 
 // The guard both halves of `guard.split(...)` project: `guard` itself, held
@@ -292,7 +292,7 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     sync_store(token, guard)
     sync_store(wrapping(token + I64{8}), I64{0})
     sync_store(wrapping(token + I64{16}), I64{2})
-    token.bit_or(I64{2})
+    token | I64{2}
 }
 
 #Export(c) jet_rt_native_shared_guard_read: fn(shared: I64) -> I64 {
@@ -406,7 +406,7 @@ shared_count_release: fn(shared: I64, pin: Bool) {
     refs := sync_load(shared)
     next := refs
     loop {
-        count: if pin -> refs >> I64{32} else -> refs.bit_and(I64{4294967295})
+        count: if pin -> refs >> I64{32} else -> refs & I64{4294967295}
         if count == (I64{0}) {
             sync_mutex_unlock(wrapping(shared + I64{8}))
             shared_guard_invalid()
@@ -420,7 +420,7 @@ shared_count_release: fn(shared: I64, pin: Bool) {
     meta := I64{0}
     payload := I64{0}
     drop_code := I64{0}
-    if (next.bit_and(I64{4294967295})) == (I64{0}) && sync_load(wrapping(shared + I64{72})) == (I64{0}) {
+    if (next & I64{4294967295}) == (I64{0}) && sync_load(wrapping(shared + I64{72})) == (I64{0}) {
         meta = sync_load(wrapping(shared + I64{56}))
         payload = sync_load(wrapping(shared + I64{64}))
         drop_code = sync_load(wrapping(shared + I64{80}))
@@ -534,7 +534,7 @@ shared_registry_publish: fn(expected: I64, candidate: I64) -> Bool {
 // Source physical-owner API. Owner identity itself is the existing native weak
 // reference; none of these headers owns a copied payload or a factory context.
 #Export(c) jet_rt_shared_owner_strong_count: fn(owner: I64) -> I64 {
-    sync_load(owner).bit_and(I64{4294967295})
+    sync_load(owner) & I64{4294967295}
 }
 
 #Export(c) jet_rt_shared_owner_pin: fn(owner: I64, out: I64) -> Bool {

@@ -1,10 +1,10 @@
 // DateZoneABI only; the Rust original owns field order.
 datetime_leap: fn(value: I64) -> Bool {
-    (time_glue_word(wrapping(value + DATETIME_LEAP)).bit_and(I64{255})) != I64{0}
+    (time_glue_word(wrapping(value + DATETIME_LEAP)) & I64{255}) != I64{0}
 }
 
 datetime_nanos: fn(value: I64) -> I64 {
-    time_glue_word(wrapping(value + DATETIME_NANOS)).bit_and(I64{4294967295})
+    time_glue_word(wrapping(value + DATETIME_NANOS)) & I64{4294967295}
 }
 
 #Export(c) jet_rt_handle_clone_jet_date_time: fn(value: I64) -> I64 {
@@ -111,7 +111,7 @@ zone_rows_clone: fn(value: I64, infos: Bool) -> I64 {
         at := I64{0}
         loop at < length {
             slot: wrapping(wrapping(target + at * ZONE_ROW_BYTES) + ZONE_ROW_INDEX_OR_DST)
-            time_glue_store(slot, if ((time_glue_word(slot).bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0})
+            time_glue_store(slot, if ((time_glue_word(slot) & I64{255}) != I64{0}) -> I64{1} else -> I64{0})
             at += I64{1}
         }
     }
@@ -142,9 +142,7 @@ zone_rows_equal: fn(left: I64, right: I64, infos: Bool) -> Bool {
         x: time_glue_word(wrapping(first + ZONE_ROW_INDEX_OR_DST))
         y: time_glue_word(wrapping(second + ZONE_ROW_INDEX_OR_DST))
         if infos {
-            if ((x.bit_and(I64{255})) != I64{0}) != ((y.bit_and(I64{255})) != I64{0}) {
-                return false
-            }
+            if ((x & I64{255}) != I64{0}) != ((y & I64{255}) != I64{0}) -> return false
         } else {
             if (x != y) { return false }
         }

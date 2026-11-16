@@ -79,9 +79,9 @@ jet_driver_rust_foreign_mangle: fn(name: String) -> String Never! {
 // IdentityBuilder::field: u64 little-endian lengths, followed by exact UTF-8.
 jet_driver_rust_foreign_field: fn(bytes: &[U8], name: String, value: [U8]) Never! {
     name_bytes: name.bytes()
-    loop shift in 0..<8 -> bytes.push(U8{(name_bytes.len() >> (shift * 8)).bit_and(255)})
+    loop shift in 0..<8 -> bytes.push(U8{(name_bytes.len() >> (shift * 8)) & 255})
     loop byte in name_bytes -> bytes.push(byte)
-    loop shift in 0..<8 -> bytes.push(U8{(value.len() >> (shift * 8)).bit_and(255)})
+    loop shift in 0..<8 -> bytes.push(U8{(value.len() >> (shift * 8)) & 255})
     loop byte in value -> bytes.push(byte)
 }
 

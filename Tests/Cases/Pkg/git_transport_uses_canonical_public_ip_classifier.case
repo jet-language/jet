@@ -1,7 +1,7 @@
 # tests/pkg.rs::git_transport_uses_canonical_public_ip_classifier at tests/pkg.rs:4135; hand-port
 # Claim: the Git dependency transport has one call site for the canonical public-address classifier, defines no classifier of its own, and carries no second IP range table (tests/pkg.rs:4139-4151)
 # Source move: Source/Fetch.rs is now Jetpack/Provider/Source/PackageFetch/Git.jet; the canonical classifier jet_net::is_public_ip is now publication_addresses_public (Jetpack/Publication/Source/RegistryTransport.jet), which applies Core's ip.is_public_destination / ip.ipv6_is_public_destination tables (Core/Net/IP.jet)
-# The IPv4-mapped and 2000::/3 checks the original refused to see twice are spelled `::ffff:` / `bit_and(57344)` in Jet; the case refuses both spellings in the transport
+# The IPv4-mapped and 2000::/3 checks the original refused to see twice are spelled `::ffff:` / `& 57344` in Jet; the case refuses both spellings in the transport
 copy: {root}/Jetpack/Provider/Source/PackageFetch/Git.jet git.jet
 copy: {root}/Jetpack/Publication/Source/RegistryTransport.jet registry-transport.jet
 copy: {root}/Core/Net/IP.jet ip.jet

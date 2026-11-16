@@ -106,7 +106,7 @@ lsp_byte_offset_in_table: fn(bytes: [U8], table: LineTable, offset: Int) -> LSPP
     }
     line: table.lines[low]
     end: if bounded < line.end -> bounded else -> line.end
-    if end < bytes.len() && (Int{bytes[end]}.bit_and(192)) == 128 {
+    if end < bytes.len() && (Int{bytes[end]} & 192) == 128 {
         panic("byte offset is not a UTF-8 boundary")
     }
     LSPPos{line: low, character: lsp_utf16_length(bytes, line.start, end)}

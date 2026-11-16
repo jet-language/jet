@@ -216,7 +216,7 @@ source_write_all: fn(writer: &FileWriter, bytes: [U8]) CanvasSourceError! {
 // the target inside the held parent, keeping the replaced file's mode.
 source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceError! {
     file_mode: if mode == {
-        .Val(bits) -> bits.bit_and(4095)
+        .Val(bits) -> bits & 4095
         .None -> SOURCE_NEW_FILE_MODE
     }
     pid: source_sys.pid()

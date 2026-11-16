@@ -196,7 +196,7 @@ ssl_build_record_nonce: fn(fixed_iv: [U8], fixed_iv_len: Int, dynamic_iv: [U8], 
     iv := ssldefs.ssl_zeros(12)
     loop i in 0..<fixed_iv_len -> iv[i] = fixed_iv[i]
     base: 12 - dynamic_iv_len
-    loop i in 0..<dynamic_iv_len -> iv[base + i] = iv[base + i].bit_xor(dynamic_iv[doff + i])
+    loop i in 0..<dynamic_iv_len -> iv[base + i] = iv[base + i] ~ dynamic_iv[doff + i]
     iv
 }
 
@@ -533,7 +533,7 @@ ssl_write_version: fn(buf: &[U8], off: Int, transport: Int, tls_version: Int) Ne
     formatted := tls_version
     if transport == ssldefs.SSL_TRANSPORT_DATAGRAM {
         sub: if tls_version == 0x0302 -> 0x0202 else -> 0x0201
-        formatted = (tls_version - sub).bit_xor(0xFFFF).bit_and(0xFFFF)
+        formatted = ((tls_version - sub) ~ 0xFFFF) & 0xFFFF
     }
     ssldefs.ssl_put_u16(buf, off, formatted)
 }
@@ -544,7 +544,7 @@ ssl_read_version: fn(buf: [U8], off: Int, transport: Int) -> Int Never! {
     tls_version := ssldefs.ssl_get_u16(buf, off)
     if transport == ssldefs.SSL_TRANSPORT_DATAGRAM {
         sub: if tls_version == 0xFEFF -> 0x0202 else -> 0x0201
-        tls_version = (tls_version - sub).bit_xor(0xFFFF).bit_and(0xFFFF)
+        tls_version = ((tls_version - sub) ~ 0xFFFF) & 0xFFFF
     }
     tls_version
 }
@@ -1141,7 +1141,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         first_byte_idx: base + offset /% 8
         if len <= start_bits {
             loop len != 0 {
-                buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]}.bit_or(1 << (start_bits - len)))
+                buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]} | 1 << (start_bits - len))
                 len -= 1
             }
             return
@@ -1149,7 +1149,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         offset += start_bits
         len -= start_bits
         loop start_bits != 0 {
-            buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]}.bit_or(1 << (start_bits - 1)))
+            buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]} | 1 << (start_bits - 1))
             start_bits -= 1
         }
     }
@@ -1158,7 +1158,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         last_byte_idx: base + (offset + len) /% 8
         len -= end_bits
         loop end_bits != 0 {
-            buf[last_byte_idx] = ssldefs.ssl_byte(Int{buf[last_byte_idx]}.bit_or(1 << (8 - end_bits)))
+            buf[last_byte_idx] = ssldefs.ssl_byte(Int{buf[last_byte_idx]} | 1 << (8 - end_bits))
             end_bits -= 1
         }
     }
@@ -1172,7 +1172,7 @@ ssl_bitmask_check: fn(buf: [U8], base: Int, len: Int) -> Bool Never! {
         if buf[base + i] != (U8{0xFF}) -> return false
     }
     loop i in 0..<(len %% 8) {
-        if (Int{buf[base + len /% 8]}).bit_and(1 << (7 - i)) == 0 -> return false
+        if (Int{buf[base + len /% 8]}) & 1 << (7 - i) == 0 -> return false
     }
     true
 }
@@ -1290,7 +1290,7 @@ ssl_dtls_replay_reset: fn(ssl: &ssldefs.SSLContext) Never! {
 
 // The 48-bit big-endian record number at buf[off].
 ssl_load_six_bytes: fn(buf: [U8], off: Int) -> U64 Never! {
-    U64{(ssldefs.ssl_get_u16(buf, off) << 32).bit_or(ssldefs.ssl_get_u32(buf, off + 2))}
+    U64{(ssldefs.ssl_get_u16(buf, off) << 32) | ssldefs.ssl_get_u32(buf, off + 2)}
 }
 
 // Whether the record counter ctr[off..<off+8] may be accepted
@@ -1301,7 +1301,7 @@ ssl_dtls_replay_check_ctr: fn(ssl: ssldefs.SSLContext, ctr: [U8], off: Int) -> B
     if rec_seqnum > ssl.in_window_top -> return true
     bit: ssl.in_window_top - rec_seqnum
     if bit >= (U64{64}) -> return false
-    if ssl.in_window.bit_and(U64{1} << Int{bit}) != (U64{0}) -> return false
+    if ssl.in_window & (U64{1} << Int{bit}) != (U64{0}) -> return false
     true
 }
 
@@ -1321,12 +1321,12 @@ ssl_dtls_replay_update: fn(ssl: &ssldefs.SSLContext) Never! {
     if rec_seqnum > ssl.in_window_top {
         shift: rec_seqnum - ssl.in_window_top
         if shift >= (U64{64}) -> ssl.in_window = U64{1} else {
-            ssl.in_window = (ssl.in_window << Int{shift}).bit_or(U64{1})
+            ssl.in_window = (ssl.in_window << Int{shift}) | U64{1}
         }
         ssl.in_window_top = rec_seqnum
     } else {
         bit: ssl.in_window_top - rec_seqnum
-        if bit < (U64{64}) -> ssl.in_window = ssl.in_window.bit_or(U64{1} << Int{bit})
+        if bit < (U64{64}) -> ssl.in_window |= U64{1} << Int{bit}
     }
 }
 
@@ -1999,7 +1999,7 @@ ssl_parse_change_cipher_spec: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssld
     if ssl_is_dtls(ssl) {
         ssl_dtls_replay_reset(ssl)
         // A wrapping epoch is taken as an attack: no alert.
-        ssl.in_epoch = (ssl.in_epoch + 1).bit_and(0xFFFF)
+        ssl.in_epoch = (ssl.in_epoch + 1) & 0xFFFF
         if ssl.in_epoch == 0 -> return Err(.CounterWrapping)
     } else { ssldefs.ssl_fill(ssl.in_buf, ssl.in_ctr, ssldefs.SSL_SEQUENCE_NUMBER_LEN, U8{0}) }
     ssl_update_in_pointers(ssl)
@@ -2081,7 +2081,7 @@ ssl_tls13_is_new_session_ticket: fn(ssl: ssldefs.SSLContext) -> Bool Never! {
 // or ignores it (ssl_tls13_handle_hs_message_post_handshake).
 ssl_tls13_handle_hs_message_post_handshake: fn(ssl: &ssldefs.SSLContext) ssldefs.SSLError! {
     if ssl.conf.endpoint == ssldefs.SSL_IS_CLIENT && ssl_tls13_is_new_session_ticket(ssl) {
-        if ssl.conf.session_tickets.bit_and(2) != 0 {
+        if ssl.conf.session_tickets & 2 != 0 {
             ssl.keep_current_message = 1
             ssl_handshake_set_state(ssl, ssldefs.SSL_TLS1_3_NEW_SESSION_TICKET)
             return Err(.WantRead)

@@ -257,7 +257,7 @@ der_signature: fn(sig: ECDSASignature) -> [U8] asn1.ASN1Error! {
     p := ECDSA_MAX_LEN
     len := asn1.write_mpi(buf, p, 0, sig.s)
     len += asn1.write_mpi(buf, p, 0, sig.r)
-    total: asn1.write_len_and_tag(buf, p, 0, len, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE))
+    total: asn1.write_len_and_tag(buf, p, 0, len, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE)
     Ok(cipher.bytes_of(buf, p, total))
 }
 
@@ -276,7 +276,7 @@ ecdsa_write_signature: fn<R: RNG>(key: ecp.Keypair, md: hashes.Md, hash: [U8], s
 ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
     p := 0
     end: sig.len()
-    len: asn1.get_tag(sig, p, end, asn1.ASN1_CONSTRUCTED.bit_or(asn1.ASN1_SEQUENCE)) ?? return Err(.BadEncoding(err))
+    len: asn1.get_tag(sig, p, end, asn1.ASN1_CONSTRUCTED | asn1.ASN1_SEQUENCE) ?? return Err(.BadEncoding(err))
     if p + len != end -> return Err(.BadEncoding(.LengthMismatch))
     r: asn1.get_mpi(sig, p, end) ?? return Err(.BadEncoding(err))
     s: asn1.get_mpi(sig, p, end) ?? return Err(.BadEncoding(err))

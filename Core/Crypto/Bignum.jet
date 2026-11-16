@@ -74,34 +74,34 @@ RNG: trait {
 // Constant-time primitives. Each condition is the low bit of a U64.
 
 /// 1 when x is not zero.
-#Overflow(.Wrapping) ct_bool: fn(x: U64) -> U64 Never! { x.bit_or(U64{0} - x) >> 63 }
+#Overflow(.Wrapping) ct_bool: fn(x: U64) -> U64 Never! { (x | U64{0} - x) >> 63 }
 
 /// 1 when a < b: the borrow out of a - b (Hacker's Delight 2-13).
 #Overflow(.Wrapping) ct_lt: fn(a: U64, b: U64) -> U64 Never! {
-    na: a.bit_not()
-    na.bit_and(b).bit_or(na.bit_or(b).bit_and(a - b)) >> 63
+    na: ~a
+    (na & b | (na | b) & a - b) >> 63
 }
 
 /// All ones when the condition bit is 1, else zero.
 #Overflow(.Wrapping) ct_mask: fn(bit: U64) -> U64 Never! { U64{0} - bit }
 
 /// a when mask is all ones, b when it is zero.
-ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b.bit_xor(mask.bit_and(a.bit_xor(b))) }
+ct_select: fn(mask: U64, a: U64, b: U64) -> U64 Never! { b ~ mask & (a ~ b) }
 
 /// The 128-bit product of a and b as its high and low halves, from four
 /// 32-bit partial products.
 #Overflow(.Wrapping) mul_wide: fn(a: U64, b: U64) -> (hi: U64, lo: U64) Never! {
     m: U64{0xffffffff}
-    a0: a.bit_and(m)
+    a0: a & m
     a1: a >> 32
-    b0: b.bit_and(m)
+    b0: b & m
     b1: b >> 32
     p00: a0 * b0
     p01: a0 * b1
     p10: a1 * b0
     p11: a1 * b1
-    mid: (p00 >> 32) + p01.bit_and(m) + p10.bit_and(m)
-    (hi: p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32), lo: (mid << 32).bit_or(p00.bit_and(m)))
+    mid: (p00 >> 32) + (p01 & m) + (p10 & m)
+    (hi: p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32), lo: (mid << 32) | p00 & m)
 }
 
 copy_limbs: fn(dst: &[U64], src: [U64], limbs: Int) Never! {
@@ -130,10 +130,10 @@ core_bitlen: fn(a: [U64], limbs: Int) -> Int Never! {
 
 /// 1 when min <= a, in constant time; `limbs` must be at least 1.
 core_uint_le_mpi: fn(min: U64, a: [#Secret U64], limbs: Int) -> U64 Never! {
-    min_le_lsl: ct_lt(a[0], min).bit_xor(U64{1})
+    min_le_lsl: ct_lt(a[0], min) ~ U64{1}
     msll := U64{0}
-    loop i in 1..<limbs -> msll = msll.bit_or(ct_bool(a[i]))
-    msll.bit_or(min_le_lsl)
+    loop i in 1..<limbs -> msll |= ct_bool(a[i])
+    msll | min_le_lsl
 }
 
 /// 1 when a < b, both of `limbs` limbs, in constant time.
@@ -143,10 +143,10 @@ core_lt_ct: fn(a: [#Secret U64], b: [#Secret U64], limbs: Int) -> U64 Never! {
     i := limbs
     loop i > 0 {
         gt: ct_lt(b[i - 1], a[i - 1])
-        done = done.bit_or(gt)
+        done |= gt
         lt: ct_lt(a[i - 1], b[i - 1])
-        ret = ret.bit_or(lt.bit_and(done.bit_xor(U64{1})))
-        done = done.bit_or(lt)
+        ret |= lt & (done ~ U64{1})
+        done |= lt
         i -= 1
     }
     ret
@@ -157,8 +157,8 @@ core_bits_above: fn(a: [#Secret U64], pos: Int) -> U64 Never! {
     seen := U64{0}
     loop i in 0..<a.len() {
         low: i * LIMB_BITS
-        if low > pos -> seen = seen.bit_or(a[i]) else if low + LIMB_BITS > pos + 1 {
-            seen = seen.bit_or(a[i] >> (pos - low + 1))
+        if low > pos -> seen = seen | a[i] else if low + LIMB_BITS > pos + 1 {
+            seen |= a[i] >> (pos - low + 1)
         }
     }
     ct_bool(seen)
@@ -190,7 +190,7 @@ core_read_le: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     if x_limbs < (input.len() + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
     loop i in 0..<input.len() {
-        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[i]} << ((i % LIMB_BYTES) * 8))
+        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES] | U64{input[i]} << ((i % LIMB_BYTES) * 8)
     }
 }
 
@@ -200,7 +200,7 @@ core_read_be: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     if x_limbs < (n + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
     loop i in 0..<n {
-        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[n - 1 - i]} << ((i % LIMB_BYTES) * 8))
+        x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES] | U64{input[n - 1 - i]} << ((i % LIMB_BYTES) * 8)
     }
 }
 
@@ -233,7 +233,7 @@ core_write_be: fn(a: [U64], a_limbs: Int, out_len: Int) -> [U8] MpiError! {
     stored: a_limbs * LIMB_BYTES
     if stored <= out_len -> return true
     extra := U8{0}
-    loop i in out_len..<stored -> extra = extra.bit_or(get_byte(a, i))
+    loop i in out_len..<stored -> extra |= get_byte(a, i)
     extra == U8{0}
 }
 
@@ -254,7 +254,7 @@ core_shift_r: fn(x: &[U64], limbs: Int, count: Int) Never! {
         i := limbs
         loop i > 0 {
             r1: x[i - 1] << (LIMB_BITS - v1)
-            x[i - 1] = (x[i - 1] >> v1).bit_or(r0)
+            x[i - 1] = (x[i - 1] >> v1) | r0
             r0 = r1
             i -= 1
         }
@@ -280,7 +280,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
         r0 := U64{0}
         loop i in v0..<limbs {
             r1: x[i] >> (LIMB_BITS - v1)
-            x[i] = (x[i] << v1).bit_or(r0)
+            x[i] = (x[i] << v1) | r0
             r0 = r1
         }
     }
@@ -304,7 +304,7 @@ core_shift_l: fn(x: &[U64], limbs: Int, count: Int) Never! {
     mask: ct_mask(cond)
     c := U64{0}
     loop i in 0..<limbs {
-        add: a[i].bit_and(mask)
+        add: a[i] & mask
         t: c + x[i]
         c = ct_lt(t, x[i])
         s: t + add
@@ -369,7 +369,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
 /// -n^-1 mod 2^64 for odd n[0], by Newton iteration (Tom St Denis).
 #Overflow(.Wrapping) core_montmul_init: fn(n: [U64]) -> U64 Never! {
     x := n[0]
-    x += (n[0] + U64{2}).bit_and(U64{4}) << 1
+    x += ((n[0] + U64{2}) & U64{4}) << 1
     loop _ in 0..<4 -> x *= U64{2} - n[0] * x
     U64{0} - x
 }
@@ -392,7 +392,7 @@ core_mul: fn(x: &[U64], a: [U64], a_limbs: Int, b: [U64], b_limbs: Int) Never! {
     borrow: core_sub(x, t, n, an_limbs)
     // T < N: (0, 1), keep T. N <= T < R: (0, 0), and T >= R: (1, 1), keep
     // T - N. (1, 0) cannot happen.
-    core_cond_assign(x, t, an_limbs, carry.bit_xor(borrow))
+    core_cond_assign(x, t, an_limbs, carry ~ borrow)
 }
 
 /// R^2 mod n, R = 2^(64 * n.p.len()), in exactly n.p.len() limbs or more.
@@ -408,7 +408,7 @@ core_get_mont_r2_unsafe: fn(n: Mpi) -> Mpi MpiError! {
 /// entry so the index never shows in the access pattern.
 core_ct_uint_table_lookup: fn(dest: &[U64], table: [U64], limbs: Int, count: Int, index: #Secret U64) Never! {
     loop i in 0..<count {
-        mask: ct_mask(ct_bool(U64{i}.bit_xor(index)).bit_xor(U64{1}))
+        mask: ct_mask(ct_bool(U64{i} ~ index) ~ U64{1})
         loop j in 0..<limbs -> dest[j] = ct_select(mask, table[i * limbs + j], dest[j])
     }
 }
@@ -462,7 +462,7 @@ core_random: fn<R: RNG>(x: &[U64], min: U64, n: [U64], limbs: Int, rng: &R) MpiE
 /// A rejected draw is thrown away and an accepted one says only that it is
 /// in range, so the verdict is public.
 #Scrub(Secret) draw_in_range: fn(x: [#Secret U64], min: U64, n: [U64], limbs: Int) -> Bool Never! {
-    core_uint_le_mpi(min, x, limbs).bit_and(core_lt_ct(x, n, limbs)) == U64{1}
+    core_uint_le_mpi(min, x, limbs) & core_lt_ct(x, n, limbs) == U64{1}
 }
 
 /// The window width of exponentiation for an exponent of `ebits` bits.
@@ -509,7 +509,7 @@ core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64],
             bit_index = LIMB_BITS - 1
         } else { bit_index -= 1 }
         window_bits += 1
-        window = (window << 1).bit_or((e[limb_index] >> bit_index).bit_and(U64{1}))
+        window = (window << 1) | (e[limb_index] >> bit_index) & U64{1}
         last: bit_index == 0 && limb_index == 0
         if window_bits == wsize || last {
             core_ct_uint_table_lookup(selected, table, an_limbs, welem, window)
@@ -530,7 +530,7 @@ core_exp_mod: fn(x: &[U64], a: [U64], n: [U64], an_limbs: Int, e: [#Secret U64],
 /// 1 when any of a's first `limbs` limbs is not zero, in constant time.
 core_check_zero_ct: fn(a: [#Secret U64], limbs: Int) -> U64 Never! {
     bits := U64{0}
-    loop i in 0..<limbs -> bits = bits.bit_or(a[i])
+    loop i in 0..<limbs -> bits |= a[i]
     ct_bool(bits)
 }
 
@@ -557,7 +557,7 @@ core_add_mod: fn(x: &[U64], a: [U64], b: [U64], n: [U64], limbs: Int) Never! {
     borrow: core_sub(x, sum, n, limbs)
     // a + b < n: (0, 1), keep the sum; otherwise keep a + b - n, as in
     // core_montmul.
-    core_cond_assign(x, sum, limbs, carry.bit_xor(borrow))
+    core_cond_assign(x, sum, limbs, carry ~ borrow)
     cipher.wipe_words(sum)
 }
 
@@ -618,11 +618,11 @@ core_get_mont_r2_ct: fn(n: Mpi) -> Mpi MpiError! {
     loop _ in 0..<(2 * an * LIMB_BITS) {
         carry := U64{0}
         loop i in 0..<an {
-            d[i] = (x.p[i] << 1).bit_or(carry)
+            d[i] = (x.p[i] << 1) | carry
             carry = x.p[i] >> 63
         }
         borrow: core_sub(x.p, d, n.p, an)
-        core_cond_assign(x.p, d, an, carry.bit_xor(borrow))
+        core_cond_assign(x.p, d, an, carry ~ borrow)
     }
     cipher.wipe_words(d)
     Ok(x)
@@ -630,9 +630,9 @@ core_get_mont_r2_ct: fn(n: Mpi) -> Mpi MpiError! {
 
 /// x = x / 2 mod n for odd n and x in [0, n): add n first when x is odd.
 core_div2_mod_odd: fn(x: &[U64], n: [U64], limbs: Int) Never! {
-    c: core_add_if(x, n, limbs, x[0].bit_and(U64{1}))
+    c: core_add_if(x, n, limbs, x[0] & U64{1})
     core_shift_r(x, limbs, 1)
-    x[limbs - 1] = x[limbs - 1].bit_or(c << 63)
+    x[limbs - 1] = x[limbs - 1] | c << 63
 }
 
 /// g = gcd(a, n) and, with `inverse`, i = a^-1 mod n when g is 1, in
@@ -654,10 +654,10 @@ core_gcd_modinv_odd: fn(g: &[U64], i: &[U64], inverse: Bool, a: [#Secret U64], a
     r := cipher.words(n_limbs)
     r[0] = U64{1}
     loop _ in 0..<(an + n_limbs) * LIMB_BITS {
-        u_odd: u[0].bit_and(U64{1})
-        v_odd: v[0].bit_and(U64{1})
-        u_odd_v_odd: u_odd.bit_and(v_odd)
-        u_odd_v_even: u_odd.bit_and(v_odd.bit_xor(U64{1}))
+        u_odd: u[0] & U64{1}
+        v_odd: v[0] & U64{1}
+        u_odd_v_odd: u_odd & v_odd
+        u_odd_v_even: u_odd & (v_odd ~ U64{1})
         // u <= v, so v - u never borrows.
         _: core_sub(d, v, u, n_limbs)
         copy_limbs(t1, d, n_limbs)
@@ -841,7 +841,7 @@ get_bit: fn(x: Mpi, pos: Int) -> Int Never! { Int{limb_bit(x, pos)} }
 /// its value.
 limb_bit: fn(x: Mpi, pos: Int) -> U64 Never! {
     if x.p.len() * LIMB_BITS <= pos -> return U64{0}
-    (x.p[pos /% LIMB_BITS] >> (pos % LIMB_BITS)).bit_and(U64{1})
+    (x.p[pos /% LIMB_BITS] >> (pos % LIMB_BITS)) & U64{1}
 }
 
 /// Set bit `pos` of |x| to `val`, 0 or 1, growing x for a 1.
@@ -855,7 +855,7 @@ set_bit: fn(x: &Mpi, pos: Int, val: Int) MpiError! {
         }
         grow(x, off + 1) ?? return Err(err)
     }
-    x.p[off] = x.p[off].bit_and((U64{1} << idx).bit_not()).bit_or(U64{val} << idx)
+    x.p[off] = x.p[off] &~ (U64{1} << idx) | U64{val} << idx
 }
 
 /// The count of trailing zero bits of |x|; 0 for zero.
@@ -898,7 +898,7 @@ read_string: fn(radix: Int, s: String) -> Mpi MpiError! {
         lset(x, 0) ?? return Err(err)
         loop j in 0..<slen {
             d: digit(text[start + slen - 1 - j], radix) ?? return Err(err)
-            x.p[j /% 16] = x.p[j /% 16].bit_or(d << ((j % 16) * 4))
+            x.p[j /% 16] = x.p[j /% 16] | d << ((j % 16) * 4)
         }
     } else {
         lset(x, 0) ?? return Err(err)
@@ -940,7 +940,7 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
         loop i > 0 {
             j := LIMB_BYTES
             loop j > 0 {
-                c: Int{(x.p[i - 1] >> ((j - 1) * 8)).bit_and(U64{0xff})}
+                c: Int{(x.p[i - 1] >> ((j - 1) * 8)) & U64{0xff}}
                 if c != 0 || started || i + j == 2 {
                     out.push(digits[c /% 16])
                     out.push(digits[c % 16])
@@ -1080,15 +1080,15 @@ cmp_int: fn(x: Mpi, z: Int) -> Int Never! { cmp_mpi(x, from_int(z)) }
 /// 1 when x < y, in constant time; x and y must have the same limb count.
 lt_mpi_ct: fn(x: Mpi, y: Mpi) -> U64 MpiError! {
     if x.p.len() != y.p.len() -> return Err(.BadInput)
-    x_neg: U64{(x.s.bit_and(2)) >> 1}
-    y_neg: U64{(y.s.bit_and(2)) >> 1}
-    different: x_neg.bit_xor(y_neg)
-    result: different.bit_and(x_neg)
+    x_neg: U64{(x.s & 2) >> 1}
+    y_neg: U64{(y.s & 2) >> 1}
+    different: x_neg ~ y_neg
+    result: different & x_neg
     // Same signs: compare magnitudes, the other way round when negative.
     a_lt_b: core_lt_ct(x.p, y.p, x.p.len())
     b_lt_a: core_lt_ct(y.p, x.p, x.p.len())
     lt: ct_select(ct_mask(x_neg), b_lt_a, a_lt_b)
-    Ok(result.bit_or(different.bit_xor(U64{1}).bit_and(lt)))
+    Ok(result | (different ~ U64{1}) & lt)
 }
 
 /// The sign `a` when the condition bit is 1, else `b`, in constant time.
@@ -1100,16 +1100,16 @@ ct_sign_if: fn(cond: U64, a: Int, b: Int) -> Int Never! {
 /// x grows to y's limb count; its limbs above y's are zeroed on assignment.
 safe_cond_assign: fn(x: &Mpi, y: Mpi, assign: Int) MpiError! {
     grow(x, y.p.len()) ?? return Err(err)
-    cond: ct_bool(U64{assign.bit_and(0xff)})
+    cond: ct_bool(U64{assign & 0xff})
     x.s = ct_sign_if(cond, y.s, x.s)
     core_cond_assign(x.p, y.p, y.p.len(), cond)
-    keep: ct_mask(cond.bit_xor(U64{1}))
-    loop i in y.p.len()..<x.p.len() -> x.p[i] = x.p[i].bit_and(keep)
+    keep: ct_mask(cond ~ U64{1})
+    loop i in y.p.len()..<x.p.len() -> x.p[i] = x.p[i] & keep
 }
 
 /// Swap x and y when `swap` is 1, without revealing whether it happened.
 safe_cond_swap: fn(x: &Mpi, y: &Mpi, swap: Int) MpiError! {
-    cond: ct_bool(U64{swap.bit_and(0xff)})
+    cond: ct_bool(U64{swap & 0xff})
     grow(x, y.p.len()) ?? return Err(err)
     grow(y, x.p.len()) ?? return Err(err)
     s: x.s
@@ -1217,18 +1217,18 @@ mul_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
 /// (u1 * 2^64 + u0) / d, saturating at 2^64 - 1 when u1 >= d or d is 0
 /// (Knuth TAOCP vol. 2 section 4.3.1 algorithm D on 32-bit halves).
 #Overflow(.Wrapping) int_div_int: fn(high: U64, low: U64, divisor: U64) -> U64 Never! {
-    if divisor == (U64{0}) || high >= divisor -> return U64{0}.bit_not()
+    if divisor == (U64{0}) || high >= divisor -> return ~U64{0}
     radix: U64{1} << 32
     half: radix - U64{1}
     s: core_clz(divisor)
     d: divisor << s
     u1 := high << s
-    if s > 0 -> u1 = u1.bit_or(low >> (LIMB_BITS - s))
+    if s > 0 -> u1 |= low >> (LIMB_BITS - s)
     u0: low << s
     d1: d >> 32
-    d0: d.bit_and(half)
+    d0: d & half
     u0_msw: u0 >> 32
-    u0_lsw: u0.bit_and(half)
+    u0_lsw: u0 & half
     q1 := u1 /% d1
     r0 := u1 - d1 * q1
     loop q1 >= radix || q1 * d0 > radix * r0 + u0_msw {
@@ -1277,7 +1277,7 @@ div_mpi: fn(a: Mpi, b: Mpi) -> (q: Mpi, r: Mpi) MpiError! {
         // x keeps at least n + 1 limbs, as mbedtls's in-place x does.
         grow(x, n + 1) ?? return Err(err)
         at: i - t - 1
-        z.p[at] = if x.p[i] >= y.p[t] -> U64{0}.bit_not() else -> int_div_int(x.p[i], x.p[i - 1], y.p[t])
+        z.p[at] = if x.p[i] >= y.p[t] -> ~U64{0} else -> int_div_int(x.p[i], x.p[i - 1], y.p[t])
         t2 := zeros(3) ?? return Err(err)
         t2.p[0] = if i < 2 -> U64{0} else -> x.p[i - 2]
         t2.p[1] = if i < 1 -> U64{0} else -> x.p[i - 1]
@@ -1337,16 +1337,16 @@ mod_mpi: fn(a: Mpi, b: Mpi) -> Mpi MpiError! {
     if b == 0 -> return Err(.DivisionByZero)
     if b < 0 -> return Err(.NegativeValue)
     if b == 1 || a.p.len() == 0 -> return Ok(U64{0})
-    if b == 2 -> return Ok(a.p[0].bit_and(U64{1}))
+    if b == 2 -> return Ok(a.p[0] & U64{1})
     d: U64{b}
     y := U64{0}
     i := a.p.len()
     loop i > 0 {
         x := a.p[i - 1]
-        y = (y << 32).bit_or(x >> 32)
+        y = (y << 32) | x >> 32
         y -= (y /% d) * d
         x <<= 32
-        y = (y << 32).bit_or(x >> 32)
+        y = (y << 32) | x >> 32
         y -= (y /% d) * d
         i -= 1
     }
@@ -1409,9 +1409,9 @@ exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: 
     if a.s == -1 {
         negated := cipher.words(an)
         _: core_sub(negated, n.p, x.p, an)
-        odd: ep[0].bit_and(U64{1})
+        odd: ep[0] & U64{1}
         nonzero: core_check_zero_ct(x.p, an)
-        core_cond_assign(x.p, negated, an, odd.bit_and(nonzero))
+        core_cond_assign(x.p, negated, an, odd & nonzero)
         cipher.wipe_words(negated)
     }
     cipher.wipe_words(t)
@@ -1424,7 +1424,7 @@ exp_mod_from: fn(a: Mpi, ep: [#Secret U64], start_limb: Int, start_bit: Int, n: 
 /// read with no test of them and only the verdict leaves.
 exp_mod_modulus_ok: fn(n: Mpi) -> Bool Never! {
     if n.s < 0 || n.p.len() == 0 -> return false
-    ok: n.p[0].bit_and(U64{1}).bit_and(core_bits_above(n.p, MAX_BITS - 1).bit_xor(U64{1}))
+    ok: n.p[0] & U64{1} & (core_bits_above(n.p, MAX_BITS - 1) ~ U64{1})
     ok == U64{1}
 }
 
@@ -1483,11 +1483,11 @@ modinv_args_ok: fn(a: Mpi, n: Mpi, inverse: Bool) -> Bool Never! {
     low := cipher.words(nl)
     high := U64{0}
     loop i in 0..<a.p.len() {
-        if i < nl -> low[i] = a.p[i] else -> high = high.bit_or(a.p[i])
+        if i < nl -> low[i] = a.p[i] else -> high |= a.p[i]
     }
-    ok := core_lt_ct(n.p, low, nl).bit_or(ct_bool(high)).bit_xor(U64{1})
-    ok = ok.bit_and(n.p[0].bit_and(U64{1}))
-    if inverse -> ok = ok.bit_and(core_uint_le_mpi(U64{2}, n.p, nl))
+    ok := (core_lt_ct(n.p, low, nl) | ct_bool(high)) ~ U64{1}
+    ok &= n.p[0] & U64{1}
+    if inverse -> ok &= core_uint_le_mpi(U64{2}, n.p, nl)
     cipher.wipe_words(low)
     ok == U64{1}
 }
@@ -1615,7 +1615,7 @@ small_primes_product: fn() -> Mpi Never! {
 /// divided directly; larger ones take a gcd with the product of the small
 /// primes.
 check_small_factors: fn(x: Mpi) -> Bool MpiError! {
-    if x.p[0].bit_and(U64{1}) == (U64{0}) -> return Err(.NotAcceptable)
+    if x.p[0] & (U64{1}) == (U64{0}) -> return Err(.NotAcceptable)
     if cmp_int(x, SMALL_PRIMES_LIMIT) <= 0 {
         v: Int{x.p[0]}
         d := 2
@@ -1646,7 +1646,7 @@ miller_rabin: fn<R: RNG>(x: Mpi, rounds: Int, rng: &R) MpiError! {
             if j > k {
                 top: a.p.len() - 1
                 keep: k - top * LIMB_BITS - 1
-                a.p[top] = if keep <= 0 -> U64{0} else -> a.p[top].bit_and((U64{1} << keep) - U64{1})
+                a.p[top] = if keep <= 0 -> U64{0} else -> a.p[top] & (U64{1} << keep) - U64{1}
             }
             if count > 30 -> return Err(.NotAcceptable)
             count += 1
@@ -1718,14 +1718,14 @@ gen_prime: fn<R: RNG>(nbits: Int, rng: &R, dh: Bool{false}, low_err: Bool{false}
         if x.p[n - 1] < CEIL_MAXUINT_DIV_SQRT2 -> next
         k: n * LIMB_BITS
         if k > nbits -> shift_r(x, k - nbits)
-        x.p[0] = x.p[0].bit_or(U64{1})
+        x.p[0] = x.p[0] | U64{1}
         if !dh {
             if is_prime_ext(x, rounds, rng) == .Err(e) {
                 if e != .NotAcceptable -> return Err(e)
             } else { return Ok(x) }
         } else {
             // y and x = 2y + 1 both prime needs x = 2 mod 3; keep x = 3 mod 4.
-            x.p[0] = x.p[0].bit_or(U64{2})
+            x.p[0] = x.p[0] | U64{2}
             r: mod_int(x, 3) ?? return Err(err)
             if r == (U64{0}) {
                 sum: add_int(x, 8) ?? return Err(err)

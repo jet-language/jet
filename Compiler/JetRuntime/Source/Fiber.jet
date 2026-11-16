@@ -35,7 +35,7 @@
 // TLS, park slot, context and world words across carriers.
 FIBER_TCB: I64{256}
 
-fiber_header_bytes: fn() -> I64 { (FIBER_TCB + context_tcb_bytes() + I64{63}).bit_and(I64{-64}) }
+fiber_header_bytes: fn() -> I64 { (FIBER_TCB + context_tcb_bytes() + I64{63}) & I64{-64} }
 
 FIBER_RUNNING: I64{0}
 
@@ -421,7 +421,7 @@ fiber_stack_class: fn(root: I64, bytes: I64) -> I64 {
     fiber_prepare(root)
     normal: sync_load(wrapping(root + I64{184}))
     if (bytes <= normal) { return I64{0} }
-    wanted: if (bytes > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> (bytes + I64{4095}).bit_and(I64{-4096})
+    wanted: if (bytes > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> (bytes + I64{4095}) & I64{-4096}
     capped: thread_stack_capped(wanted)
     if (capped <= normal) -> I64{0} else -> capped
 }
@@ -464,7 +464,7 @@ fiber_prepare: fn(root: I64) {
                 sync_lot = lot
             }
         }
-        mode: if ((host_getauxval(I64{26}).bit_and(I64{2})) != I64{0}) -> I64{1} else -> I64{2}
+        mode: if ((host_getauxval(I64{26}) & I64{2}) != I64{0}) -> I64{1} else -> I64{2}
         sync_store(wrapping(root + I64{192}), mode)
     }
     sync_thread_unlock(root)
@@ -786,7 +786,7 @@ rt_fiber_ready_address: fn() -> I64 {
 }
 
 sync_lot_bucket: fn(lot: I64, address: I64) -> I64 {
-    index: ((address >> I64{3}) + (address >> I64{9}) + (address >> I64{15})).bit_and(FIBER_LOT_BUCKETS - I64{1})
+    index: ((address >> I64{3}) + (address >> I64{9}) + (address >> I64{15})) & FIBER_LOT_BUCKETS - I64{1}
     wrapping(wrapping(lot + I64{40}) + index * I64{16})
 }
 
@@ -811,7 +811,7 @@ sync_lot_unlink: fn(bucket: I64, fiber: I64) {
     bucket: sync_lot_bucket(lot, address)
     sync_thread_lock(bucket)
     _ := sync_add(lot, I64{1})
-    if ((sync_load(address).bit_and(I64{4294967295})) != (expected.bit_and(I64{4294967295}))) {
+    if ((sync_load(address) & I64{4294967295}) != (expected & I64{4294967295})) {
         _ := sync_add(lot, I64{-1})
         sync_thread_unlock(bucket)
         return I64{-11}

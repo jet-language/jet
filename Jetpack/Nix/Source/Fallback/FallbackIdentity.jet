@@ -188,7 +188,7 @@ nix_fallback_canonical_executable: fn(executable: String) -[FS, Env]> String Nix
     if !info.is_file {
         return Err(NixError.Fallback("Nix executable `{path}` is not a regular file"))
     }
-    if sys.family() != "windows" && (info.mode).bit_and(0o111) == 0 {
+    if sys.family() != "windows" && (info.mode) & 0o111 == 0 {
         return Err(NixError.Fallback("Nix executable `{path}` is not executable"))
     }
     Ok(path)

@@ -1037,7 +1037,7 @@ queue_record: fn(record: StoredJob, include_payload: Bool) -> JobQueueRecord Nev
 }
 
 queue_frame: fn(input: &[U8], field: [U8]) Never! {
-    loop index in 0..<8 -> input.push(U8{(field.len() >> ((7 - index) * 8)).bit_and(255)})
+    loop index in 0..<8 -> input.push(U8{(field.len() >> ((7 - index) * 8)) & 255})
     loop byte in field -> input.push(byte)
 }
 

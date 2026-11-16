@@ -3909,7 +3909,7 @@ ir_float_exact: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Ty
     }
     high_bits: (1023 + bits - (if signed -> 1 else -> 0)) << 52
     high: ir_int_constant(m, b, float_row, high_bits)
-    low: ir_int_constant(m, b, float_row, if signed -> high_bits.bit_or(-9223372036854775807 - 1) else -> 0)
+    low: ir_int_constant(m, b, float_row, if signed -> high_bits | -9223372036854775807 - 1 else -> 0)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     fits: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Const, fits, 0, -1, -1, b.line)
@@ -3992,7 +3992,7 @@ ir_float_is_whole: fn(m: &IRModule, b: &IRBuilder, floating: Int) -> Int Never! 
     ir_emit(b.f, IROp.Const, whole, 1, -1, -1, b.line)
     limit_bits: (1023 + 52) << 52
     limit: ir_int_constant(m, b, float_row, limit_bits)
-    negative_limit: ir_int_constant(m, b, float_row, limit_bits.bit_or(-9223372036854775807 - 1))
+    negative_limit: ir_int_constant(m, b, float_row, limit_bits | -9223372036854775807 - 1)
     under: ir_bool_op(m, b, IROp.Lt, floating, limit)
     ir_open_if(b.f, under, b.line)
     over: ir_bool_op(m, b, IROp.Lt, negative_limit, floating)
@@ -4068,7 +4068,7 @@ ir_float_narrow_fits: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! 
     // F32 max, (2 - 2^-23) * 2^127, as Float bits; its negation sets the sign bit.
     max_bits: 5183643170566569984
     high: ir_int_constant(m, b, float_row, max_bits)
-    low: ir_int_constant(m, b, float_row, max_bits.bit_or(-9223372036854775807 - 1))
+    low: ir_int_constant(m, b, float_row, max_bits | -9223372036854775807 - 1)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     fits: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Const, fits, 0, -1, -1, b.line)
@@ -5778,7 +5778,7 @@ ir_dyn_schema: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Spa
     loop word in words {
         rest := word
         loop _ in 0..<8 {
-            bytes.push(U8{rest.bit_and(255)})
+            bytes.push(U8{rest & 255})
             rest = rest >> 8
         }
     }

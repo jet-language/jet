@@ -135,10 +135,10 @@ Cursor: struct {
         shift := 0
         loop shift < 64 {
             b: self.byte(input) ?? return Err(err)
-            if shift == 63 && b.bit_and(127) > 1 {
+            if shift == 63 && b & 127 > 1 {
                 return Err(decode_failure("varint at byte {self.pos - 1} exceeds 64 bits"))
             }
-            value = value.bit_or((b.bit_and(127) << shift))
+            value |= ((b & 127) << shift)
             if b < 128 -> return Ok(value)
             shift += 7
         }
@@ -147,8 +147,8 @@ Cursor: struct {
 
     zigzag: fn(&self, input: [U8]) -> Int ParquetFailure! {
         raw: self.varint(input) ?? return Err(err)
-        half: (raw >> 1).bit_and(9223372036854775807)
-        if raw.bit_and(1) == 0 -> return Ok(half)
+        half: (raw >> 1) & 9223372036854775807
+        if raw & 1 == 0 -> return Ok(half)
         Ok(-half - 1)
     }
 
@@ -157,9 +157,7 @@ Cursor: struct {
             return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
         }
         value := 0
-        loop index in 0..<width {
-            value = value.bit_or((Int{input[self.pos + index]} << (8 * index)))
-        }
+        loop index in 0..<width -> value |= (Int{input[self.pos + index]} << (8 * index))
         self.pos += width
         Ok(value)
     }
@@ -184,7 +182,7 @@ Cursor: struct {
     // The next Thrift field header as (id, kind); kind 0 ends the struct.
     field: fn(&self, input: [U8], last: Int) -> (id: Int, kind: Int) ParquetFailure! {
         head: self.byte(input) ?? return Err(err)
-        kind: head.bit_and(15)
+        kind: head & 15
         if kind == 0 -> return Ok((id: 0, kind: 0))
         delta: head >> 4
         if delta != 0 -> return Ok((id: last + delta, kind: kind))
@@ -229,7 +227,7 @@ Cursor: struct {
         if size < 0 || size > self.end - self.pos {
             return Err(decode_failure("Thrift list of {size} elements runs past its region"))
         }
-        Ok((size: size, kind: head.bit_and(15)))
+        Ok((size: size, kind: head & 15))
     }
 
     // Skips one value of `kind`; a Bool element of a list or map is one byte.
@@ -275,7 +273,7 @@ Cursor: struct {
             kinds: self.byte(input) ?? return Err(err)
             loop _ in 0..<size {
                 self.skip(input, kinds >> 4, depth + 1, true) ?? return Err(err)
-                self.skip(input, kinds.bit_and(15), depth + 1, true) ?? return Err(err)
+                self.skip(input, kinds & 15, depth + 1, true) ?? return Err(err)
             }
             return
         }
@@ -637,7 +635,7 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
             return Err(decode_failure("column `{leaf.name}` holds fewer than {count} booleans"))
         }
         loop index in 0..<count {
-            bit: (Int{page[cursor.pos + (index >> 3)]} >> index.bit_and(7)).bit_and(1)
+            bit: (Int{page[cursor.pos + (index >> 3)]} >> (index & 7)) & 1
             values.push(Dyn.Bool(bit == 1))
         }
         cursor.pos += bytes
@@ -687,8 +685,8 @@ hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] Parquet
     value_bytes: (width + 7) >> 3
     loop out.len() < count {
         header: cursor.varint(data) ?? return Err(err)
-        run: (header >> 1).bit_and(9223372036854775807)
-        if header.bit_and(1) == 0 {
+        run: (header >> 1) & 9223372036854775807
+        if header & 1 == 0 {
             value: cursor.little(data, value_bytes) ?? return Err(err)
             repeat: if run < count - out.len() -> run else -> count - out.len()
             loop _ in 0..<repeat -> out.push(value)
@@ -706,8 +704,8 @@ hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] Parquet
                 value := 0
                 loop offset in 0..<width {
                     at: bit + offset
-                    set: (Int{data[cursor.pos + (at >> 3)]} >> at.bit_and(7)).bit_and(1)
-                    value = value.bit_or((set << offset))
+                    set: (Int{data[cursor.pos + (at >> 3)]} >> (at & 7)) & 1
+                    value |= (set << offset)
                 }
                 out.push(value)
                 bit += width
@@ -731,7 +729,7 @@ snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFail
     out := [U8]{}
     loop cursor.pos < cursor.end {
         lead: cursor.byte(input) ?? return Err(err)
-        kind: lead.bit_and(3)
+        kind: lead & 3
         if kind == 0 {
             size := (lead >> 2) + 1
             if size > 60 {
@@ -748,9 +746,9 @@ snappy: fn(input: [U8], start: Int, end: Int, expected: Int) -> [U8] ParquetFail
         size := 0
         offset := 0
         if kind == 1 {
-            size = (lead >> 2).bit_and(7) + 4
+            size = ((lead >> 2) & 7) + 4
             low: cursor.byte(input) ?? return Err(err)
-            offset = ((lead >> 5) << 8).bit_or(low)
+            offset = ((lead >> 5) << 8) | low
         } else if kind == 2 {
             size = (lead >> 2) + 1
             offset = cursor.little(input, 2) ?? return Err(err)
@@ -968,7 +966,7 @@ read_rows: fn(input: [U8], max_rows: Int, max_page_bytes: Int) -> Dyn ParquetFai
 test_varint: fn(out: &[U8], value: Int) {
     rest := value
     loop rest >= 128 {
-        out.push(U8{rest.bit_and(127) + 128})
+        out.push(U8{(rest & 127) + 128})
         rest = rest >> 7
     }
     out.push(U8{rest})
@@ -1088,7 +1086,7 @@ test_file: fn(column: TestColumn) -> [U8] Never! {
     meta.push(U8{0})
     meta.push(U8{0})
     loop byte in meta -> out.push(byte)
-    loop index in 0..<4 -> out.push(U8{(meta.len() >> (8 * index)).bit_and(255)})
+    loop index in 0..<4 -> out.push(U8{(meta.len() >> (8 * index)) & 255})
     magic: [U8]{80, 65, 82, 49}
     loop byte in magic -> out.push(byte)
     out

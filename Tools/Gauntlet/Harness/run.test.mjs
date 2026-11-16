@@ -201,7 +201,7 @@ test("a service row's startup is the median of one fresh-process sample per run"
   await withScratch("service-startup", async (root) => {
     const launcher = path.join(root, "launch");
     await execFileAsync("cc", ["-O2", "-o", launcher, path.join(repoRoot, "Tools", "gauntlet", "harness", "launch.c")]);
-    const fixtures = path.join(repoRoot, "Tools", "gauntlet", "entries", "run-stage-entry", "fixtures");
+    const fixtures = path.join(repoRoot, "Tools", "Gauntlet", "Entries", "RunStageEntry", "Fixtures");
     const jetBin = path.join(root, "jet");
     await fs.copyFile(path.join(fixtures, "fake-jet.txt"), jetBin);
     chmodSync(jetBin, 0o755);

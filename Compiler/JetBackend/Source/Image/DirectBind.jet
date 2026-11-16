@@ -44,7 +44,7 @@ x64_bind_functions_at: fn(name: String, program: &&X64ObjectModule, functions: &
 link_direct_bind: fn(c: &LinkContext, exe: &X64Executable, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], program_base: Int, gap_at: Int, gap: Int) -> Bool Never! {
     view := link_image_view(c, 1, gap_at, gap)
     if c.errors.len() > 0 || view.exports_slots == 0 -> return false
-    if program_base.bit_and(LINK_PAGE - 1) != 0 || program_base < view.program_base -> return false
+    if program_base & LINK_PAGE - 1 != 0 || program_base < view.program_base -> return false
     view.program_base = program_base
     c.base = view.base
     if functions.len() == 0 || debug.len() != functions.len() -> return false

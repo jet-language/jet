@@ -482,7 +482,7 @@ symbol_none: fn() -> SymbolID Never! { SymbolID{id: U32{0}} }
 
 symbol_is_none: fn(id: SymbolID) -> Bool Never! { id.id == U32{0} }
 
-symbol_is_local: fn(id: SymbolID) -> Bool Never! { id.id.bit_and(SYMBOL_LOCAL_BIT) != U32{0} }
+symbol_is_local: fn(id: SymbolID) -> Bool Never! { id.id & SYMBOL_LOCAL_BIT != U32{0} }
 
 // The key text of a declaration: its kind, module identity, owner key and
 // name.
@@ -564,13 +564,13 @@ symbol_local_keys_row: fn(keys: SymbolLocalKeys, key: String, hash: Int) -> Int?
         }
         return None
     }
-    slot := hash.bit_and(keys.mask)
+    slot := hash & keys.mask
     loop keys.slots[slot] != 0 {
         row: keys.slots[slot] - 1
         if keys.hashes[row] == hash && symbol_local_keys_spells(keys, row, key.bytes()) {
             return Val(row)
         }
-        slot = (slot + 1).bit_and(keys.mask)
+        slot = (slot + 1) & keys.mask
     }
     None
 }
@@ -594,16 +594,16 @@ symbol_local_keys_intern: fn(keys: &SymbolLocalKeys, key: String) -> SymbolID Ne
         mask: capacity - 1
         slots := (loop _ in 0..<capacity -> 0)
         loop index in 0..<keys.hashes.len() {
-            slot := keys.hashes[index].bit_and(mask)
-            loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+            slot := keys.hashes[index] & mask
+            loop slots[slot] != 0 -> slot = (slot + 1) & mask
             slots[slot] = index + 1
         }
         keys.slots = slots.move()
         keys.mask = mask
         return symbol_local_id(row)
     }
-    slot := hash.bit_and(keys.mask)
-    loop keys.slots[slot] != 0 -> slot = (slot + 1).bit_and(keys.mask)
+    slot := hash & keys.mask
+    loop keys.slots[slot] != 0 -> slot = (slot + 1) & keys.mask
     keys.slots[slot] = row + 1
     symbol_local_id(row)
 }
@@ -649,11 +649,11 @@ symbol_key_rows: fn(slots: Int) -> SymbolKeyRows Never! {
 
 // The row of `key`, whose `name_rows_hash` is `hash`, when `rows` holds it.
 symbol_key_rows_find: fn(rows: SymbolKeyRows, key: String, hash: Int) -> Int? Never! {
-    slot := hash.bit_and(rows.mask)
+    slot := hash & rows.mask
     loop rows.slots[slot] != 0 {
         row: rows.slots[slot] - 1
         if rows.hashes[row] == hash && rows.texts[row] == key -> return Val(row)
-        slot = (slot + 1).bit_and(rows.mask)
+        slot = (slot + 1) & rows.mask
     }
     None
 }
@@ -671,16 +671,16 @@ symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
         mask: capacity - 1
         slots := (loop _ in 0..<capacity -> 0)
         loop index in 0..<rows.texts.len() {
-            slot := rows.hashes[index].bit_and(mask)
-            loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+            slot := rows.hashes[index] & mask
+            loop slots[slot] != 0 -> slot = (slot + 1) & mask
             slots[slot] = index + 1
         }
         rows.slots = slots.move()
         rows.mask = mask
         return row
     }
-    slot := hash.bit_and(rows.mask)
-    loop rows.slots[slot] != 0 -> slot = (slot + 1).bit_and(rows.mask)
+    slot := hash & rows.mask
+    loop rows.slots[slot] != 0 -> slot = (slot + 1) & rows.mask
     rows.slots[slot] = row + 1
     row
 }
@@ -810,12 +810,12 @@ symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
     loop index in 0..<table.ranges.len() {
         loop row in 1..<table.ranges[index].keys.texts.len() {
             hash: table.ranges[index].keys.hashes[row]
-            slot := hash.bit_and(table.mask)
+            slot := hash & table.mask
             loop table.slots[slot] != 0 {
                 if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.texts[row]) {
                     panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
                 }
-                slot = (slot + 1).bit_and(table.mask)
+                slot = (slot + 1) & table.mask
             }
             table.slots[slot] = table.ranges[index].base + row + 1
         }
@@ -844,13 +844,13 @@ symbol_table_module_range: fn(table: SymbolTable, identity: ModuleID) -> Int? Ne
 symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
     if key == "" -> return Val(symbol_none())
     hash: name_rows_hash(key)
-    slot := hash.bit_and(table.mask)
+    slot := hash & table.mask
     loop table.slots[slot] != 0 {
         id: table.slots[slot] - 1
         if symbol_table_holds(table, id, hash, key) {
             return Val(SymbolID{id: checked(U32{id}) ?? return None})
         }
-        slot = (slot + 1).bit_and(table.mask)
+        slot = (slot + 1) & table.mask
     }
     open: table.ranges.len() - 1
     row: symbol_key_rows_find(table.ranges[open].keys, key, hash) ?? return None
@@ -1053,11 +1053,11 @@ symbol_kind_name: fn(kind: SymbolKind) -> String Never! {
 // equal. It reads variants, names and child types and skips spans, contracts
 // and measures, which only the equality check that follows compares.
 type_shape_hash: fn(ty: Type) -> Int Never! {
-    Int{type_shape_hash_into(U64{0xcbf29ce484222325}, ty).bit_and(U64{0x3fffffff})}
+    Int{type_shape_hash_into(U64{0xcbf29ce484222325}, ty) & U64{0x3fffffff}}
 }
 
 type_hash_mix: fn(hash: U64, value: U64) -> U64 Never! {
-    wrapping((hash.bit_xor(value)) * U64{0x100000001b3})
+    wrapping((hash ~ value) * U64{0x100000001b3})
 }
 
 type_shape_hash_list: fn(hash: U64, types: [Type]) -> U64 Never! {
@@ -1125,11 +1125,11 @@ type_table_intern: fn(table: &TypeTable, ty: Type) -> Int Never! {
     hash: type_shape_hash(ty)
     if table.slots.len() == 0 -> type_table_grow(table, TYPE_TABLE_INITIAL_SLOTS)
     mask: table.slots.len() - 1
-    slot := hash.bit_and(mask)
+    slot := hash & mask
     loop table.slots[slot] != 0 {
         index: table.slots[slot] - 1
         if table.hashes[index] == hash && table.types[index] == ty -> return index
-        slot = (slot + 1).bit_and(mask)
+        slot = (slot + 1) & mask
     }
     index: table.types.len()
     // copy: `ty` is the caller's read value; the table owns this one
@@ -1145,11 +1145,11 @@ type_table_find: fn(table: TypeTable, ty: Type) -> Int? Never! {
     if table.slots.len() == 0 -> return None
     hash: type_shape_hash(ty)
     mask: table.slots.len() - 1
-    slot := hash.bit_and(mask)
+    slot := hash & mask
     loop table.slots[slot] != 0 {
         index: table.slots[slot] - 1
         if table.hashes[index] == hash && table.types[index] == ty -> return Val(index)
-        slot = (slot + 1).bit_and(mask)
+        slot = (slot + 1) & mask
     }
     None
 }
@@ -1160,8 +1160,8 @@ type_table_grow: fn(table: &TypeTable, capacity: Int) Never! {
     loop _ in 0..<capacity -> slots.push(0)
     mask: capacity - 1
     loop index in 0..<table.types.len() {
-        slot := table.hashes[index].bit_and(mask)
-        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slot := table.hashes[index] & mask
+        loop slots[slot] != 0 -> slot = (slot + 1) & mask
         slots[slot] = index + 1
     }
     table.slots = slots.move()

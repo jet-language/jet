@@ -201,11 +201,11 @@ cli_build_plugin_read_u32_leb: fn(bytes: [U8], offset: &Int) -> Int BuildPluginP
         }
         byte: Int{bytes[offset]}
         offset += 1
-        if shift == 28 && byte.bit_and(0xf0) != 0 {
+        if shift == 28 && byte & 0xf0 != 0 {
             return Err(cli_build_plugin_error("plugin component section length overflows u32"))
         }
-        value = value.bit_or(byte.bit_and(0x7f) << shift)
-        if byte.bit_and(0x80) == 0 -> return Ok(value)
+        value |= (byte & 0x7f) << shift
+        if byte & 0x80 == 0 -> return Ok(value)
         shift += 7
     }
     Err(cli_build_plugin_error("plugin component section length uses an overlong integer"))

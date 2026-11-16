@@ -107,7 +107,7 @@ reaped_how: fn(pid: String) -> String {
     state: fields.get(0) ?? ""
     if state == "Z" || state == "X" || state == "x" -> return "zombie"
     flags: Int.parse(fields.get(6) ?? "") ?? 0
-    if flags.bit_and(4) != 0 -> return "exiting in state {state}"
+    if flags & 4 != 0 -> return "exiting in state {state}"
     status: files.read("/proc/{pid}/status") ?? return "gone"
     if kill_pending(status) -> return "kill pending in state {state}"
     ""

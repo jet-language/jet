@@ -46,11 +46,11 @@ Fake: struct {
 GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base"}
 
 fake_put: fn(out: &[U8], value: Int) {
-    v: value.bit_and(4294967295)
-    out.push(U8{v.bit_and(255)})
-    out.push(U8{(v >> 8).bit_and(255)})
-    out.push(U8{(v >> 16).bit_and(255)})
-    out.push(U8{(v >> 24).bit_and(255)})
+    v: value & 4294967295
+    out.push(U8{v & 255})
+    out.push(U8{(v >> 8) & 255})
+    out.push(U8{(v >> 16) & 255})
+    out.push(U8{(v >> 24) & 255})
 }
 
 fake_words: fn(values: [Int]) -> [U8] {
@@ -255,7 +255,7 @@ fake_dispatch: fn(f: &Fake) {
         }
         if f.inbox.len() - at < size -> break
         body: f.inbox[(at + 8)..<(at + size)].copy()
-        fake_request(f, object, word.bit_and(65535), body)
+        fake_request(f, object, word & 65535, body)
         at += size
     }
     if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()

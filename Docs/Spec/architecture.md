@@ -1821,10 +1821,10 @@ through the C marshalling of foreign rows. The raw export is the one body of
 each binding; the binding declares it and nothing else does. A member X of
 `jet.runtime.M` replaces the Core leaf `core.M.__X`, and
 `Tools/Agent/RuntimeEffectRows.jet --check` (a verify-full gate) fails when the
-member's declared row differs from that leaf's CoreCallRecord effect
-(`effect_leaf`, else `effect_kind`) or only one of the leaf's record and
-`dispatcher_row` remains; `--before REV` reads the leaves at the revision
-before a cutover deleted them.
+member's declared row differs from that leaf's CoreCallRecord effects (for a
+source-owned leaf, the effects its Core declaration writes) or only one of the
+leaf's record and `dispatcher_row` remains; `--before REV` reads the leaves at
+the revision before a cutover deleted them.
 
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),

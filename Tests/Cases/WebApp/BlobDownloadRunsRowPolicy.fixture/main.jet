@@ -1,0 +1,154 @@
+// Crewboard's attachments: Ann, a member of the task's project, uploads her
+// notes, and the attachment row holds the blob's id. A blob's download, GET
+// `app.blob_url(id)`, runs the read policy of the row that holds the id as
+// the caller: Ann gets the file, as an attachment the browser must not
+// sniff, and kept out of shared caches. Eve, signed in but no member, a
+// caller with no session, and an id no row holds are each answered 404 alike,
+// so a download tells no one that a blob they may not read exists.
+use {
+    app
+    auth: core.auth
+    db: core.db
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Attachment: struct {
+    id: Int
+    project: Int
+    blob: app.BlobID
+    name: String
+}
+
+#Error
+AttachError: enum {
+    NotAllowed
+    Unkept
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+account_of: fn(who: db.Who) -> auth.AccountID? {
+    if who == {
+        .Account(account) -> Val(account)
+        .System -> None
+        .Anonymous -> None
+    }
+}
+
+// Members of an attachment's project read and add it; no one else does.
+attachment_policy: fn(row: Attachment, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: row.project, account: account}) == {
+        .Val(_) -> Ok(true)
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// The store the tables open from. A lambda owns what it captures, so each
+// call opens the tables rather than capturing them.
+Stores: struct {
+    store: db.Store?
+}
+
+STORE: Shared{Stores{store: None}}
+
+open_store: fn(store: db.Store) {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(store.copy())
+}
+
+opened: fn() -> db.Store {
+    stores := STORE.guard_edit()
+    store: stores.value.store ?? panic("the store is open")
+    store.copy()
+}
+
+attachments: fn() -> db.Table<Int, Attachment> {
+    opened().table("attachments", key: fn(row: Attachment) { row.id }).guard(attachment_policy)
+}
+
+Crew: struct {
+    shelf: app.Blobs
+
+    // Attaches `file` to project `project`, as the address of its blob.
+    #[App.SignedIn, App.UploadCheck(method: "may_attach")]
+    attach: fn(self, project: Int, file: app.Upload) -[DB.Read, DB.Write, FS.Write]> String AttachError! {
+        blob: self.shelf.keep(file, allow: [app.Media]{app.Media.Text}) ?? return Err(AttachError.Unkept)
+        _: attachments().add(Attachment{id: 1, project: project, blob: blob.id, name: file.name}) ?? return Err(AttachError.NotAllowed)
+        Ok(app.blob_url(blob.id))
+    }
+
+    // attach's check: only a member of the project attaches.
+    may_attach: fn(self, project: Int) -[DB.Read]> AttachError! {
+        account: app.caller()
+        if members_in(opened()).get(MemberKey{project: project, account: account}) == {
+            .Val(_) -> Ok()
+            .None | .Err(_) -> Err(AttachError.NotAllowed)
+        }
+    }
+}
+
+// The address Ann's upload of her notes gives.
+uploaded: fn(addr: String, session: String) -> String HTTPError! {
+    fields: http.headers_set(http.headers(), "authorization", "Bearer {session}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/attach?args=%5B1%5D&name=notes.txt", fields, http.body_text("notes for the beta\n")))
+    reply: answer.text()
+    if answer.status != 200 -> return Ok("refused: {answer.status} {reply}")
+    // The reply is `{"ok":"<address>"}`.
+    Ok(reply.removeprefix("{{\"ok\":\"").removesuffix("\"}}"))
+}
+
+// GETs `path` under `session` ("" sends none), as its status, the headers
+// a download is read by, and its body.
+fetched: fn(addr: String, path: String, session: String) -> String HTTPError! {
+    fields := http.headers()
+    if session != "" -> fields = http.headers_set(fields, "authorization", "Bearer {session}")
+    answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", fields, http.body_empty()))
+    if answer.status != 200 -> return Ok("{answer.status}")
+    Ok("{answer.status} | {answer.header("content-type") ?? "none"} | {answer.header("content-disposition") ?? "none"} | nosniff: {answer.header("x-content-type-options") ?? "none"} | {answer.header("cache-control") ?? "none"} | {answer.text().trim()}")
+}
+
+signed_in: fn(name: String) -> String {
+    auth.register_user(name, "{name}'s password hash") ?? panic("{name} registers")
+    session: auth.password_login(name, "{name}'s password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("{name} signs in")
+    auth.session_id(session)
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    ann: signed_in("ann")
+    eve: signed_in("eve")
+    open_store(db.open_memory())
+    _: members_in(opened()).add(Member{project: 1, account: auth.AccountID.from_string("ann")}) ?? panic("ann joins")
+    served: web.app().mount("/api", Crew{shelf: app.blobs("attachments")})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<5 { served.serve_once(listener) }
+    }
+    path: uploaded(addr, ann)
+    print("ann's blob is at {app.blob_url(app.BlobID.from_string("<id>"))}: {path.starts_with(app.blob_url(app.BlobID.from_string(""))) && path.len() == app.blob_url(app.BlobID.from_string("0".repeat(32))).len()}")
+    print("ann downloads: {fetched(addr, path, ann)}")
+    print("eve downloads: {fetched(addr, path, eve)}")
+    print("no session downloads: {fetched(addr, path, "")}")
+    print("an id no row holds: {fetched(addr, app.blob_url(app.BlobID.from_string("0".repeat(32))), ann)}")
+    serving.join()
+}

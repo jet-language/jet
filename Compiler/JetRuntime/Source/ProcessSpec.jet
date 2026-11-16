@@ -128,8 +128,8 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     result: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
     coll_copy(value, result, PROCESS_SPEC_BYTES)
     // Field helpers lend Bool bytes, so ignore padding and normalize clone words.
-    encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), if ((encoding_word(wrapping(value + PROCESS_SPEC_ENV_CLEAR)).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1})
-    encoding_store(wrapping(result + PROCESS_SPEC_DETACHED), if ((encoding_word(wrapping(value + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(wrapping(result + PROCESS_SPEC_ENV_CLEAR), if ((encoding_word(wrapping(value + PROCESS_SPEC_ENV_CLEAR)) & I64{255}) == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(wrapping(result + PROCESS_SPEC_DETACHED), if ((encoding_word(wrapping(value + PROCESS_SPEC_DETACHED)) & I64{255}) == I64{0}) -> I64{0} else -> I64{1})
     encoding_store(wrapping(result + PROCESS_SPEC_CMD), process_text_list_clone(encoding_word(wrapping(value + PROCESS_SPEC_CMD)), false))
     encoding_store(wrapping(result + PROCESS_SPEC_CWD), process_optional_text_clone(encoding_word(wrapping(value + PROCESS_SPEC_CWD))))
     encoding_store(wrapping(result + PROCESS_SPEC_ENV_SET), process_text_list_clone(encoding_word(wrapping(value + PROCESS_SPEC_ENV_SET)), true))
@@ -184,7 +184,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     if !process_optional_text_eq(encoding_word(wrapping(a + PROCESS_SPEC_CWD)), encoding_word(wrapping(b + PROCESS_SPEC_CWD))) {
         return false
     }
-    if (encoding_word(wrapping(a + PROCESS_SPEC_ENV_CLEAR)).bit_and(I64{255})) != (encoding_word(wrapping(b + PROCESS_SPEC_ENV_CLEAR)).bit_and(I64{255})) {
+    if (encoding_word(wrapping(a + PROCESS_SPEC_ENV_CLEAR)) & I64{255}) != (encoding_word(wrapping(b + PROCESS_SPEC_ENV_CLEAR)) & I64{255}) {
         return false
     }
     if !process_text_list_eq(encoding_word(wrapping(a + PROCESS_SPEC_ENV_SET)), encoding_word(wrapping(b + PROCESS_SPEC_ENV_SET)), true) {
@@ -209,7 +209,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
         }
         field += DYN_ELEMENT_BYTES
     }
-    if (encoding_word(wrapping(a + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) != (encoding_word(wrapping(b + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) {
+    if (encoding_word(wrapping(a + PROCESS_SPEC_DETACHED)) & I64{255}) != (encoding_word(wrapping(b + PROCESS_SPEC_DETACHED)) & I64{255}) {
         return false
     }
     if encoding_word(wrapping(a + PROCESS_SPEC_PARENT_DEATH)) != encoding_word(wrapping(b + PROCESS_SPEC_PARENT_DEATH)) {

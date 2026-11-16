@@ -61,11 +61,11 @@ sema_numeric_unit_conversion_exact_service: fn(value: Float, scale_numerator: St
     if !math.is_finite(value) -> return None
     // `value` is exactly `top / bottom`, `bottom` a power of two.
     bits: math.to_bits(value)
-    exponent: (bits >> 52).bit_and(2047)
-    top := bits.bit_and(4503599627370495)
+    exponent: (bits >> 52) & 2047
+    top := bits & 4503599627370495
     power := -1074
     if exponent != 0 {
-        top = top.bit_or(4503599627370496)
+        top |= 4503599627370496
         power = exponent - 1075
     }
     bottom := 1

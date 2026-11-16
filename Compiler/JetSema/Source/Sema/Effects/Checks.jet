@@ -3683,21 +3683,13 @@ sema_effect_with_instance_notes: fn(diagnostic: Diagnostic, notes: [SemaEffectIn
     labeled
 }
 
-// A Core call's declared effects from its record: the root of its effect
-// kind (unless its leaf refines that root) and its leaf, as
-// sema_call_core_record_effects records them on a call-site fact.
+// A Core call's effects from its record, as sema_call_core_record_effects
+// records them on a call-site fact. A CoreCall node is an adapter row's: a
+// source-owned row is checked as a call of its Core declaration.
 sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, record: CoreCallRecord, span: Span) Never! {
-    leaf_name: record.effect_leaf ?? ""
-    if record.effect_kind == .Val(root_name) {
-        if leaf_name == "" || !sema_effect_covers(root_name, leaf_name) {
-            if sema_effect_parse_name(root_name) == .Val(root) {
-                sema_effect_node_add_direct(nodes, node_index, root, span)
-            }
-        }
-    }
-    if leaf_name != "" {
-        if sema_effect_parse_name(leaf_name) == .Val(leaf) {
-            sema_effect_node_add_direct(nodes, node_index, leaf, span)
+    loop name in record.effects {
+        if sema_effect_parse_name(name) == .Val(effect) {
+            sema_effect_node_add_direct(nodes, node_index, effect, span)
         }
     }
 }

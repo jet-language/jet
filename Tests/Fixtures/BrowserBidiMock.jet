@@ -263,9 +263,9 @@ accept: fn(peer: &Peer) {
 // Port of read_text_frame.
 read: fn(peer: &Peer) -> String {
     head: take_bytes(peer, 2)
-    if (Int{head[0]}).bit_and(15) != 1 -> fail("expected text frame")
-    if (Int{head[1]}).bit_and(128) == 0 -> fail("client frame must be masked")
-    short: (Int{head[1]}).bit_and(127)
+    if (Int{head[0]}) & 15 != 1 -> fail("expected text frame")
+    if (Int{head[1]}) & 128 == 0 -> fail("client frame must be masked")
+    short: (Int{head[1]}) & 127
     len := short
     if short == 126 {
         wide: take_bytes(peer, 2)
@@ -277,7 +277,7 @@ read: fn(peer: &Peer) -> String {
     }
     mask: take_bytes(peer, 4)
     payload := take_bytes(peer, len)
-    loop i in 0..<payload.len() -> payload[i] = payload[i].bit_xor(mask[i % 4])
+    loop i in 0..<payload.len() -> payload[i] = payload[i] ~ mask[i % 4]
     String.from_bytes(payload) ?? fail("text frame is not UTF-8")
 }
 

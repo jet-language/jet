@@ -2105,7 +2105,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             kind: ir_kind_of(m, b, value)
             if op == .Not {
                 if kind == .Int || kind == .Word {
-                    // `bit_not`: an exact Int is `-v - 1`, its bits xor -1; a
+                    // `~`: an exact Int is `-v - 1`, its bits xor -1; a
                     // fixed width flips only its own bits.
                     row: b.f.slot_type[value]
                     signed: m.types[row].signed
@@ -5431,7 +5431,7 @@ ir_variant_bits: fn(m: IRModule, p: IRProgram, b: IRBuilder, subject: Int, alter
         if alternative == .Variant(variant, bindings, _, _) {
             if bindings.len() > 0 || ir_group_leaves(p, row, variant).len() > 0 -> return None
             index: ir_variant_index(p, row, variant) ?? return None
-            bits = bits.bit_or(1 << index)
+            bits |= 1 << index
         } else { return None }
     }
     Val(bits)
@@ -5767,7 +5767,7 @@ ir_take_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: Int, parts
                     size: if value.len() - at >= 4 -> 4 else if value.len() - at >= 2 -> 2 else -> 1
                     row: ir_type_row(m, Type.IntN{signed: false, bits: 8 * size}) ?? 0
                     expected := 0
-                    loop k in 0..<size -> expected = expected.bit_or(Int{value[at + k]} << (8 * k))
+                    loop k in 0..<size -> expected |= Int{value[at + k]} << (8 * k)
                     loaded: ir_load_at(m, b, base, offset + at, row)
                     constant: ir_int_constant(m, b, row, expected)
                     differs: ir_bool_op(m, b, IROp.Ne, loaded, constant)

@@ -4,7 +4,7 @@
 process_execution_flags_add: fn(child: I64, flag: I64) {
     loop {
         before: sync_load(wrapping(child + I64{120}))
-        if (sync_cas(wrapping(child + I64{120}), before, before.bit_or(flag)) == before) {
+        if (sync_cas(wrapping(child + I64{120}), before, before | flag) == before) {
             return
         }
     }
@@ -92,7 +92,7 @@ process_execution_wake_reader: fn(child: I64) {
     sync_mutex_lock(child)
     worker: fd_word(child, I64{32}) != I64{0}
     last: fd_word(child, I64{8}) == (if worker -> I64{2} else -> I64{1})
-    detached: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    detached: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED) & I64{255} != I64{0}
     unfinished: sync_load(wrapping(child + I64{40})) == I64{0}
     sync_mutex_unlock(child)
     // Never hold the child mutex while joining: the collector publishes its
@@ -199,7 +199,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
         number: fd_word(native, spawn_stream_offset(native, stream))
         if (number >= I64{0}) {
             flags: host_call(I64{72}, number, I64{3}, I64{0})
-            result: if (flags < I64{0}) -> flags else -> host_call(I64{72}, number, I64{4}, flags.bit_or(I64{2048}))
+            result: if (flags < I64{0}) -> flags else -> host_call(I64{72}, number, I64{4}, flags | I64{2048})
             if (result < I64{0}) {
                 process_execution_first_error(child, HOST_IO_OP_READ, if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr"), host_errno_cause(-result))
                 process_execution_stop(child)
@@ -256,9 +256,9 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
             output_done = true
             errors_done = true
         }
-        detached: fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
-        contained: !detached || sync_load(wrapping(child + I64{120})).bit_and(I64{4}) != I64{0}
-        if (exited && contained && sync_load(wrapping(child + I64{120})).bit_and(I64{8}) == I64{0}) {
+        detached: fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}
+        contained: !detached || sync_load(wrapping(child + I64{120})) & I64{4} != I64{0}
+        if (exited && contained && sync_load(wrapping(child + I64{120})) & I64{8} == I64{0}) {
             process_execution_sweep(child)
         }
         if (exited && output_done && errors_done) { break }
@@ -283,7 +283,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
     if (resource_limit >= I64{0} && fd_word(child, I64{56}) == I64{0}) {
         fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(resource_limit))
     }
-    if (status.bit_and(I64{127}) == I64{24} && fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && fd_word(child, I64{56}) == I64{0}) {
+    if (status & I64{127} == I64{24} && fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && fd_word(child, I64{56}) == I64{0}) {
         fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(PROCESS_RESOURCE_CPU_TIME))
     }
     if (fd_word(child, I64{56}) == I64{0}) {
@@ -312,7 +312,7 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
 process_execution_idle: fn(child: I64, native: I64, pidfd: I64, exited: Bool, output_done: Bool, errors_done: Bool, fds: I64) {
     count := I64{0}
     if (!exited && pidfd >= I64{0}) {
-        fd_put(fds, I64{0}, pidfd.bit_or(I64{4294967296}))
+        fd_put(fds, I64{0}, pidfd | I64{4294967296})
         count = I64{1}
     }
     stream := I64{1}
@@ -320,7 +320,7 @@ process_execution_idle: fn(child: I64, native: I64, pidfd: I64, exited: Bool, ou
         done: if (stream == I64{1}) -> output_done else -> errors_done
         number: fd_word(native, spawn_stream_offset(native, stream))
         if (!done && number >= I64{0}) {
-            fd_put(fds, count * I64{8}, number.bit_or(I64{4294967296}))
+            fd_put(fds, count * I64{8}, number | I64{4294967296})
             count += I64{1}
         }
         stream += I64{1}
@@ -332,7 +332,7 @@ process_execution_idle: fn(child: I64, native: I64, pidfd: I64, exited: Bool, ou
 
 process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     flags: sync_load(wrapping(child + I64{120}))
-    if (flags.bit_and(I64{2}) != I64{0} && flags.bit_and(I64{4}) == I64{0}) {
+    if (flags & I64{2} != I64{0} && flags & I64{4} == I64{0}) {
         return compiler_fs_error(HOST_IO_KIND_CLOSED, HOST_IO_OP_CLOSE, rt_static_text("process"), I64{0}, jet_rt_string_clone(rt_static_text("process child wait result is unavailable")), err)
     }
     process_execution_flags_add(child, I64{4})
@@ -361,9 +361,7 @@ process_execution_wait: fn(child: I64, ok: I64, err: I64) -> I64 {
     }
     process_execution_park_return(child, I64{64}, park)
     // Detached spawn/drop does not sweep descendants. Explicit wait does.
-    if (sync_load(wrapping(child + I64{120})).bit_and(I64{8}) == I64{0}) {
-        process_execution_sweep(child)
-    }
+    if (sync_load(wrapping(child + I64{120})) & I64{8} == I64{0}) { process_execution_sweep(child) }
     sync_mutex_lock(child)
     error: fd_word(child, I64{56})
     if (error != I64{0}) {
@@ -388,7 +386,7 @@ process_execution_park_return: fn(child: I64, slot: I64, park: I64) {
 }
 
 #Export(c) jet_process_child_exited: fn(child: I64, ok: I64, err: I64) -> I64 {
-    if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) {
+    if (sync_load(wrapping(child + I64{120})) & I64{2} != I64{0}) {
         // `ok` is the canonical writable Bool output slot.
         rt_text_put(ok, I64{1})
         return I64{1}
@@ -407,7 +405,7 @@ process_execution_park_return: fn(child: I64, slot: I64, park: I64) {
 
 process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
     native: process_execution_native(child)
-    if (sync_load(wrapping(child + I64{120})).bit_and(I64{2}) != I64{0}) { return I64{1} }
+    if (sync_load(wrapping(child + I64{120})) & I64{2} != I64{0}) { return I64{1} }
     if (fd_word(native, I64{16}) == I64{1}) { return I64{1} }
     result: host_call(I64{62}, -fd_word(native, I64{8}), signal, I64{0})
     // ESRCH: the group has nobody left to signal, because the child already
@@ -433,7 +431,7 @@ process_execution_signal: fn(child: I64, signal: I64, err: I64) -> I64 {
 
 #Export(c) jet_process_child_close: fn(child: I64) {
     process_execution_flags_add(child, I64{2})
-    detached: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    detached: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED) & I64{255} != I64{0}
     if (!detached && sync_load(wrapping(child + I64{40})) == I64{0}) {
         process_execution_stop(child)
         if (fd_word(child, I64{32}) != I64{0}) { process_execution_await_cleanup(child) } else {
@@ -584,7 +582,7 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     packed: spawn_stream_dup(stdin, I64{0})
     if (packed == I64{-9}) { return process_stdin_closed(err) }
     if (packed < I64{0}) { return process_stdin_failure(-packed, err) }
-    native: packed.bit_and(I64{4294967295})
+    native: packed & I64{4294967295}
     offset := I64{0}
     failure := I64{0}
     loop offset < length {
@@ -611,7 +609,7 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     packed: spawn_stream_dup(stdin, I64{0})
     if (packed == I64{-9}) { return process_stdin_closed(err) }
     if (packed < I64{0}) { return process_stdin_failure(-packed, err) }
-    native: packed.bit_and(I64{4294967295})
+    native: packed & I64{4294967295}
     written := host_call(I64{1}, native, data, length)
     loop written == (I64{-4}) -> written = host_call(I64{1}, native, data, length)
     spawn_close(native)

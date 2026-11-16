@@ -267,7 +267,7 @@ comptime_serve_stop_code := I64{0}
 // made untracked (trap_map's sentry account allocates); no checked code
 // reaches it before the process exits.
 #Export(c) jet_rt_comptime_refused: fn(info: I64, context: I64) {
-    number: trap_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
+    number: trap_word(wrapping(info + I64{24})) & I64{4294967295}
     first: trap_word(wrapping(context + I64{104}))
     if (comptime_serve_admitted != I64{0}) {
         result: trap_syscall(number, first, trap_word(wrapping(context + I64{112})), trap_word(wrapping(context + I64{136})), trap_word(wrapping(context + I64{56})), trap_word(wrapping(context + I64{40})), comptime_serve_cookie)

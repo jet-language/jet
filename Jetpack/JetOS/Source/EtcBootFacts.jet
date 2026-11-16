@@ -266,7 +266,7 @@ jetos_copy_file_replace: fn(source: String, destination: String) -[FS]> IOError!
     if !files.is_dir(parent) {
         return Err(IOError.NotFound(IOContext{operation: .Write, resource: Val(destination), os_code: None, cause: Val("parent directory `{parent}` does not exist")}))
     }
-    mode: (files.stat(source).mode).bit_and(0o7777)
+    mode: (files.stat(source).mode) & 0o7777
     files.copy(source, destination)
-    files.set_mode(destination, mode.bit_or(0o222))
+    files.set_mode(destination, mode | 0o222)
 }

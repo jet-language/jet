@@ -26,13 +26,13 @@ read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
 }
 read_frame: fn(stream: TCPStream) -> Frame {
     head: read_exact(stream, 9)
-    size: (Int{head[0]} << 16).bit_or(Int{head[1]} << 8).bit_or(Int{head[2]})
-    id: (Int{head[5]} << 24).bit_or(Int{head[6]} << 16).bit_or(Int{head[7]} << 8).bit_or(Int{head[8]}).bit_and(2147483647)
+    size: (Int{head[0]} << 16) | Int{head[1]} << 8 | Int{head[2]}
+    id: ((Int{head[5]} << 24) | Int{head[6]} << 16 | Int{head[7]} << 8 | Int{head[8]}) & 2147483647
     return Frame{kind: Int{head[3]}, flags: Int{head[4]}, id: id, payload: read_exact(stream, size)}
 }
 write_frame: fn(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
     size: payload.len()
-    head: [U8]{(U8{(size >> 16).bit_and(255)}), (U8{(size >> 8).bit_and(255)}), (U8{size.bit_and(255)}), (U8{kind}), (U8{flags}), (U8{(id >> 24).bit_and(255)}), (U8{(id >> 16).bit_and(255)}), (U8{(id >> 8).bit_and(255)}), (U8{id.bit_and(255)})}
+    head: [U8]{(U8{(size >> 16) & 255}), (U8{(size >> 8) & 255}), (U8{size & 255}), (U8{kind}), (U8{flags}), (U8{(id >> 24) & 255}), (U8{(id >> 16) & 255}), (U8{(id >> 8) & 255}), (U8{id & 255})}
     stream.write_bytes(head) ?? panic("frame head write_all")
     stream.write_bytes(payload) ?? panic("frame payload write_all")
 }
@@ -55,14 +55,14 @@ run: fn() {
     preface(stream)
     request: first_headers(stream)
     assert(request.id == 1)
-    assert(request.flags.bit_and(4) != 0)
+    assert(request.flags & 4 != 0)
     response: [U8]{136, 15, 13, 129, 23}
     write_frame(stream, 1, 4, 1, response)
     write_frame(stream, 0, 1, 1, "w0".bytes())
     ids := [Int]{}
     loop ids.len() < 2 {
         frame: read_frame(stream)
-        if frame.kind == 6 && frame.flags.bit_and(1) == 0 {
+        if frame.kind == 6 && frame.flags & 1 == 0 {
             write_frame(stream, 6, 1, 0, frame.payload)
             next
         }

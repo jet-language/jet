@@ -10,7 +10,7 @@ process_authority_at: fn(list: I64, at: I64) -> I64 { fd_word(fd_word(list, I64{
 process_authority_bound: fn(spec: I64) -> Bool { fd_word(spec, PROCESS_SPEC_POLICY_WIRE) != I64{0} }
 
 process_authority_detached: fn(spec: I64) -> Bool {
-    fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    fd_word(spec, PROCESS_SPEC_DETACHED) & I64{255} != I64{0}
 }
 
 // The policy's rights, sorted and deduplicated; the caller drops the list.
@@ -442,7 +442,7 @@ process_authority_real_directory: fn(spec: I64, path: I64, err: I64) -> I64 {
     real: rt_text_lossy(bytes, fd_word(scratch, I64{160}))
     jet_rt_free(bytes, fd_word(scratch, I64{168}), I64{1})
     jet_fs_stat_raw(real, true, scratch, wrapping(scratch + I64{128}))
-    directory: fd_word(scratch, I64{128}) == I64{0} && fd_word(scratch, I64{16}).bit_and(I64{61440}) == I64{16384}
+    directory: fd_word(scratch, I64{128}) == I64{0} && fd_word(scratch, I64{16}) & I64{61440} == I64{16384}
     jet_rt_free(scratch, I64{176}, I64{8})
     if directory -> return real
     jet_rt_string_drop(real)
@@ -470,7 +470,7 @@ process_authority_child_directory: fn(spec: I64, parent: I64, name: I64, err: I6
     } else -> {
         fd_word(scratch, I64{136})
     }
-    mode: fd_word(scratch, I64{16}).bit_and(I64{61440})
+    mode: fd_word(scratch, I64{16}) & I64{61440}
     jet_rt_free(scratch, I64{160}, I64{8})
     refusal := I64{0}
     if (errno == I64{0} && mode == I64{40960}) { refusal = rt_static_text("` is a symlink") } else if (errno == I64{0} && mode != I64{16384}) {

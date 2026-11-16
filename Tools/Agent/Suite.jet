@@ -183,7 +183,7 @@ same_bytes: fn(left: String, right: String) -[FS]> Bool Never! {
 
 executable: fn(path: String) -[FS]> Bool Never! {
     meta: files.stat(path, links: .Follow) ?? return false
-    meta.is_file && (meta.mode).bit_and(0o111) != 0
+    meta.is_file && (meta.mode) & 0o111 != 0
 }
 
 exit_code: fn(receipt: ProcessReceipt) -> Int Never! {

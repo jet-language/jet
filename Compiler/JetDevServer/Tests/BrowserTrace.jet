@@ -32,7 +32,7 @@ browser_trace_test_lines: fn(action: String) -> [String] {
     relay := BrowserTraceRelay.new(browser_trace_test_manifest()) ?? panic("relay failed: {err.message}")
     path: browser_trace_relay_path(browser_trace_test_sys.pid())
     stat: browser_trace_test_files.stat(path) ?? panic("cannot stat relay: {err}")
-    assert_eq(stat.mode.bit_and(0o777), 0o600, "relay mode must be atomic owner-only")
+    assert_eq(stat.mode & 0o777, 0o600, "relay mode must be atomic owner-only")
     header: browser_trace_test_lines("browser.relay")
     assert_eq(header.len(), 1)
     assert(header[0].starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[]"), header[0])

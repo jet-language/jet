@@ -45,7 +45,7 @@ cli_schema_read_num: fn(bytes: View<U8>, at: Int, width: Int, little: Bool, maxi
     number := U64{0}
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
-        number = number.bit_or((U64{value[index]} << shift))
+        number |= (U64{value[index]} << shift)
     }
     Ok(number)
 }
@@ -297,8 +297,8 @@ cli_schema_wasm_leb: fn(bytes: View<U8>, at: &Int, maximum: U64) -> Int RecordDe
         at += 1
         if shift >= bits -> return Err(RecordDecodeError.Malformed{why: "Wasm LEB overflow"})
         // Rust's usize shift truncates high bits on a 32-bit reader.
-        value = (value.bit_or((U64{byte.bit_and(U8{127})} << shift))).bit_and(maximum)
-        if byte.bit_and((U8{128})) == (U8{0}) -> return Ok(Int{value})
+        value = (value | (U64{byte & U8{127}} << shift)) & maximum
+        if byte & (U8{128}) == (U8{0}) -> return Ok(Int{value})
         shift += 7
     }
     Err(RecordDecodeError.Malformed{why: "Wasm LEB too long"})
@@ -334,9 +334,9 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Record
 cli_schema_put_wasm_leb: fn(out: &[U8], input: Int) Never! {
     value := input
     loop {
-        byte := value.bit_and(127)
+        byte := value & 127
         value = value >> 7
-        if value != 0 -> byte = byte.bit_or(128)
+        if value != 0 -> byte |= 128
         out.push(checked(U8{byte}) ?? panic("a LEB group is one byte"))
         if value == 0 -> break
     }

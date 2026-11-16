@@ -16,7 +16,7 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
                 status = os_syscall_i64(I64{5}, probe, stat, I64{0}, I64{0}, I64{0}, I64{0})
                 _ := os_syscall_i64(I64{3}, probe, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
             }
-            directory = status >= I64{0} && (rt_text_word(wrapping(stat + I64{24}))).bit_and(I64{61440}) == I64{16384}
+            directory = status >= I64{0} && (rt_text_word(wrapping(stat + I64{24}))) & I64{61440} == I64{16384}
             jet_rt_free(stat, I64{144}, I64{8})
         }
     }
@@ -53,7 +53,7 @@ fs_directory_row: fn(fd: I64, entry: I64, length: I64) -> I64 {
         at := I64{0}
         loop at < got {
             entry: wrapping(scratch + at)
-            record_length: (rt_text_word(wrapping(entry + I64{16}))).bit_and(I64{65535})
+            record_length: (rt_text_word(wrapping(entry + I64{16}))) & I64{65535}
             bytes := I64{0}
             loop rt_text_byte(wrapping(wrapping(entry + I64{19}) + bytes)) != (I64{0}) {
                 bytes += I64{1}

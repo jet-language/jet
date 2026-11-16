@@ -93,6 +93,12 @@ SEMA_APP_SIGNING_KEY_MARKER: "SigningKey"
 // The app marker of a schedule's method.
 SEMA_APP_EVERY_MARKER: "Every"
 
+// The app marker naming the check of an upload endpoint, and the app
+// module's type of the file such an endpoint takes.
+SEMA_APP_UPLOAD_CHECK_MARKER: "UploadCheck"
+
+SEMA_APP_UPLOAD: "Upload"
+
 // Whether `marker`, written in module `module_identity`, is the app module's
 // marker `name`.
 sema_app_marker_is: fn(marker: Marker, name: String, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool {
@@ -238,6 +244,20 @@ sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: Sem
     graph: program.registration_graph ?? return false
     row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
     graph.modules[row.module_index].module_name == SEMA_APP_MARKER_MODULE && graph.modules[row.module_index].nominals[row.row].symbol.name == SEMA_APP_REMOTE
+}
+
+// The indices of the parameters of `method`, declared in module
+// `module_identity`, that take an `app.Upload`.
+sema_app_upload_params: fn(method: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> [Int] {
+    found := [Int]{}
+    loop index in 1..<method.params.len() {
+        param: sema_type_resolve_declared(graph, method.params[index].ty, module_identity)
+        row: sema_type_resolve_nominal_row(graph, param, module_identity) ?? next
+        if graph.modules[row.module_index].module_name == SEMA_APP_MARKER_MODULE && graph.modules[row.module_index].nominals[row.row].symbol.name == SEMA_APP_UPLOAD {
+            found.push(index)
+        }
+    }
+    found
 }
 
 // `remote.method(args…)` on an `app.Remote<S>`. A method of `S` that
@@ -608,15 +628,31 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     prefix = graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key.copy()
                 }
                 loop method in definition.methods {
+                    uploads: sema_app_upload_params(method, graph, method_module)
                     // An endpoint method answers POST `{prefix}/{name}`, once
-                    // whatever markers it carries.
+                    // whatever markers it carries; one that takes an `Upload`
+                    // through an upload endpoint.
                     loop marker in method.markers {
                         access: sema_app_endpoint_access(marker, graph, method_module) ?? next
-                        endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
+                        if uploads.len() > 0 && on_graph {
+                            diagnostics.push(sema_app_graph_mount_refused(method.name, "an upload endpoint", marker.span))
+                            break
+                        }
+                        mux_node: sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span)
+                        endpoint: if uploads.len() == 0 -> sema_app_mount_endpoint(mux_node, value_name, method, method_module, access, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_app_mount_upload(mux_node, value_name, graph.modules[nominal_row.module_index].nominals[nominal_row.row].identity_key, definition.methods, method, method_module, uploads, access, marker, prefix, span, environment, program, scopes, state, tail_store, context, diagnostics)
                         if endpoint == .Val(value) {
                             body.push(TStmt.ExprStmt{value: value, span: span})
                         }
                         break
+                    }
+                    // `#App.UploadCheck` checks an upload before it is read,
+                    // so marks only a method that takes one.
+                    if uploads.len() == 0 {
+                        loop marker in method.markers {
+                            if sema_app_marker_is(marker, SEMA_APP_UPLOAD_CHECK_MARKER, graph, method_module) {
+                                diagnostics.push(sema_error("E2805", marker.span, "`{method.name}` takes no `app.Upload`, so it has no upload to check", "`#App.UploadCheck` names the check an upload endpoint runs before it reads the request's file", "remove the marker, or take the file as an `app.Upload` parameter of `{method.name}`"))
+                            }
+                        }
                     }
                     // A webhook answers POST `{prefix}{path}` for its sender.
                     loop marker in method.markers {
@@ -771,6 +807,76 @@ sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method
     key: sema_app_reply_key(graph, replied, method_module)
     reply: sema_call_http_static_tree_arg(sema_call_http_core_string(key, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: key}}, span: span, id: AST_NODE_GENERATED}, span))
     sema_call_http_mux_source_call(mux, member, [TCallArg]{path, answer, calls, window, reply}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+}
+
+// The endpoint method `method` of the mounted value `value_name`, of the
+// service keyed `service`, whose parameter `uploads[0]` takes an
+// `app.Upload`, answers POST `{prefix}/{name}` on the App `mux` through its
+// `__remote_upload`: the request's body is the file, and the query's `args`
+// the JSON array of the method's other arguments. The method's
+// `#App.UploadCheck(method:)` names the method of `methods` that the server
+// runs on those arguments, by name, before it reads the body
+// (`sema_app_upload_check`). A method takes one `Upload` and names its
+// check (E2805 otherwise). The answer, limit and window are an endpoint's
+// (`sema_app_mount_endpoint`). The generated code is the mount call's, at
+// `span`.
+sema_app_mount_upload: fn(mux: TExpr, value_name: String, service: String, methods: [Func], method: Func, method_module: ModuleID, uploads: [Int], access: String, marker: Marker, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(method) {
+        diagnostics.push(sema_error("E2805", marker.span, "upload endpoint `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        return None
+    }
+    if uploads.len() > 1 {
+        diagnostics.push(sema_error("E2805", method.params[uploads[1]].name_span, "upload endpoint `{method.name}` takes {uploads.len()} `app.Upload`s", "an upload endpoint's request body is its one file", "take one `app.Upload`, and upload each other file in a call of its own"))
+        return None
+    }
+    check_at := -1
+    loop (index, candidate) in method.markers {
+        if sema_app_marker_is(candidate, SEMA_APP_UPLOAD_CHECK_MARKER, graph, method_module) {
+            check_at = index
+        }
+    }
+    if check_at < 0 {
+        diagnostics.push(sema_error("E2805", marker.span, "upload endpoint `{method.name}` names no check", "the server checks an upload's caller before it reads the file, with the method `#App.UploadCheck(method:)` names", "mark `{method.name}` `#App.UploadCheck(method: \"may_{method.name}\")`, a method of the service that takes its other arguments by name and fails for a caller who may not upload"))
+        return None
+    }
+    check_marker: method.markers[check_at]
+    // The marker's own check reports a missing argument.
+    name_at: sema_app_marker_arg_at(check_marker, "method", 0) ?? return None
+    check_name: sema_app_marker_string(check_marker, name_at, environment, program, scopes) ?? {
+        diagnostics.push(sema_error("E2805", sema_app_marker_span(check_marker, name_at), "an upload check's method must be a static String", "an upload endpoint's check is found while building", "use a literal or compile-time String constant"))
+        return None
+    }
+    check_method_at := -1
+    loop (index, candidate) in methods {
+        if candidate.name == check_name -> check_method_at = index
+    }
+    if check_method_at < 0 {
+        diagnostics.push(sema_error("E2805", sema_app_marker_span(check_marker, name_at), "`{check_name}` names no method of the service of `{method.name}`", "an upload endpoint's check is a method of its service, which the server runs before it reads the file", "name a method of the service, or declare `{check_name}: fn(self, ...)` taking the arguments of `{method.name}` it checks"))
+        return None
+    }
+    upload_at: uploads[0]
+    check: sema_app_upload_check(mux, value_name, methods[check_method_at], method, method_module, upload_at, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    address: "{prefix}/{method.name}"
+    path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
+    service_arg: sema_call_http_static_tree_arg(sema_call_http_core_string(service, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: service}}, span: span, id: AST_NODE_GENERATED}, span))
+    // The call's arguments hold the file at the Upload's position.
+    at_value: Expr.Int{value: upload_at - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+    at_checked: sema_check_expression(at_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 2, span, environment, program, diagnostics)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    at_arg: sema_call_http_static_tree_arg(at_checked, sema_http_mount_arg(at_value, span))
+    signed_value: Expr.Bool{value: access == "SignedIn", span: span, id: AST_NODE_GENERATED}
+    signed_checked: sema_check_expression(signed_value, Val(sema_app_mux_param_type(mux, "__remote_upload", 3, span, environment, program, diagnostics)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    signed_arg: sema_call_http_static_tree_arg(signed_checked, sema_http_mount_arg(signed_value, span))
+    // The app module's own steps of the file: staging, ending the request,
+    // serving a kept blob (core.app's `FileJob.run`).
+    files_name: "__jet_http_upload_files_{span.start}"
+    run: Expr.MethodCall{receiver: sema_app_remote_ident(files_name, span), method: "run", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    files: sema_app_mount_callback(files_name, [Stmt]{Stmt.Expr{expr: Expr.Ok{value: run, span: span, id: AST_NODE_GENERATED}}}, sema_app_mux_param_type(mux, "__remote_upload", 5, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    answer: sema_app_mount_answer(value_name, method, method_module, sema_app_mux_param_type(mux, "__remote_upload", 6, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    limit := sema_app_endpoint_limit(marker, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    window: limit.pop() ?? panic("an endpoint limit has no window")
+    calls: limit.pop() ?? panic("an endpoint limit has no count")
+    sema_call_http_mux_source_call(mux, "__remote_upload", [TCallArg]{path, service_arg, at_arg, signed_arg, check, files, answer, calls, window}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
 }
 
 // Whether a mounted method `method` has read-only self, read parameters and
@@ -1049,13 +1155,19 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
         reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
     }
     invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
-    declared_return: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
-    // A method that can fail replies with its error: `value: method(...) ??
-    // return Ok(args.__reply_err<E>(err))`; then `Ok(args.__reply_value<R>(value))`,
-    // or `Ok(args.__reply_unit<Unit>(value))` when it answers nothing, since
-    // `Unit` has no codec to meet `__reply_value`'s `Encode` bound. A method
-    // that can't fail (`T Never!`) has no error to encode, so its fallback,
-    // which never runs, is `__failed`.
+    sema_app_mount_reply(args_name, statements, invocation, sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module), span)
+    sema_app_mount_callback(args_name, statements, answer_type, span, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// Pushes onto `statements` the reply of `invocation`, a call, on the mounted
+// call's arguments `args_name`, of a method whose return is
+// `declared_return`. A method that can fail replies with its error: `value:
+// method(...) ?? return Ok(args.__reply_err<E>(err))`; then
+// `Ok(args.__reply_value<R>(value))`, or `Ok(args.__reply_unit<Unit>(value))`
+// when it answers nothing, since `Unit` has no codec to meet
+// `__reply_value`'s `Encode` bound. A method that can't fail (`T Never!`)
+// has no error to encode, so its fallback, which never runs, is `__failed`.
+sema_app_mount_reply: fn(args_name: String, statements: &[Stmt], invocation: &&Expr, declared_return: &&Type, span: Span) {
     replied: "{args_name}_value"
     reply_type: if {
         declared_return == .Result(ok, err) -> {
@@ -1072,7 +1184,44 @@ sema_app_mount_answer: fn(value_name: String, method: Func, method_module: Modul
     }
     answer: if reply_type == (Type.Named{name: "Unit"}) -> "__reply_unit" else -> "__reply_value"
     statements.push(Stmt.Expr{expr: Expr.Ok{value: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: answer, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{reply_type}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident(replied, span), span)}, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}})
-    sema_app_mount_callback(args_name, statements, answer_type, span, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The checked check callback of the upload endpoint `method`, whose
+// parameter `upload_at` takes its `Upload`: it decodes each parameter of the
+// check method `check_method` from the call's arguments, which hold each of
+// `method`'s but the `Upload`, by name, runs the check and replies as a
+// mounted call does (`sema_app_mount_reply`), so a check that fails refuses
+// the upload.
+sema_app_upload_check: fn(mux: TExpr, value_name: String, check_method: Func, method: Func, method_module: ModuleID, upload_at: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TCallArg? {
+    graph: program.registration_graph ?? return None
+    if !sema_app_mount_concrete(check_method) {
+        diagnostics.push(sema_error("E2805", check_method.name_span, "upload check `{check_method.name}` needs read-only self, read parameters and a concrete signature", "the server runs an upload endpoint's check on the call's other arguments, on request workers, before it reads the file", "write `{check_method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        return None
+    }
+    args_name: "__jet_http_upload_check_{span.start}"
+    statements := [Stmt]{}
+    reads := [CallArg]{}
+    loop index in 1..<check_method.params.len() {
+        name: check_method.params[index].name
+        // The call's arguments skip the Upload.
+        position := -1
+        loop param_index in 1..<method.params.len() {
+            if param_index == upload_at || method.params[param_index].name != name -> next
+            position = param_index - 1
+            if param_index > upload_at -> position = param_index - 2
+        }
+        if position < 0 {
+            diagnostics.push(sema_error("E2805", check_method.params[index].name_span, "upload check parameter `{name}` names no parameter of `{method.name}` but its `app.Upload`", "an upload endpoint's check takes the call's other arguments by name, before the file is read", "take only parameters that `{method.name}` takes, other than its `app.Upload`"))
+            return None
+        }
+        local_name: "{args_name}_{index}"
+        decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, check_method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: position, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
+        statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
+        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+    }
+    invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: check_method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
+    sema_app_mount_reply(args_name, statements, invocation, sema_type_resolve_declared(graph, check_method.return_type ?? Type.Named{name: "Unit"}, method_module), span)
+    sema_app_mount_callback(args_name, statements, sema_app_mux_param_type(mux, "__remote_upload", 4, span, environment, program, diagnostics), span, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // The lambda of one parameter `args_name` running `statements`, checked as

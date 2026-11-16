@@ -177,7 +177,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         if r.short[index] {
             out.push(if jump -> (U8{0xeb}) else -> (U8{0x70 + (Int{code[start + 1]} - 0x80)}))
             reach: target - (out.len() + 1)
-            out.push(U8{reach.bit_and(255)})
+            out.push(U8{reach & 255})
         } else {
             if jump -> out.push(U8{0xe9}) else {
                 out.push(U8{0x0f})
@@ -224,7 +224,7 @@ ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
         loop seen < landed.len() && landed[seen] < start -> seen += 1
         if r.lengths[index] == 6 && r.lengths[jump] == 5 && r.starts[index] + 6 == start && targets[index] == start + 5 && !(seen < landed.len() && landed[seen] == start) && !r.heads.contains(start) {
             opcode: r.starts[index] + 1
-            code[opcode] = U8{Int{code[opcode]}.bit_xor(1)}
+            code[opcode] = U8{Int{code[opcode]} ~ 1}
             targets[index] = targets[jump]
             r.gone[jump] = true
             index += 2
@@ -250,7 +250,7 @@ ir_x64_relax_pad: fn(r: &IRX64Relax) Never! {
 
 // The signed rel32 field at `at`.
 ir_x64_rel32_at: fn(code: [U8], at: Int) -> Int Never! {
-    word: Int{code[at]}.bit_or((Int{code[at + 1]} << 8)).bit_or((Int{code[at + 2]} << 16)).bit_or((Int{code[at + 3]} << 24))
+    word: Int{code[at]} | (Int{code[at + 1]} << 8) | (Int{code[at + 2]} << 16) | (Int{code[at + 3]} << 24)
     if word >= 2147483648 -> word - 4294967296 else -> word
 }
 

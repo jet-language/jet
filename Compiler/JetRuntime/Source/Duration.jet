@@ -137,10 +137,10 @@ runtime_duration_unit_ns: fn(unit: I64) -> I64 {
 runtime_duration_float_word: fn(whole: Float) -> I64 {
     if (whole <= Float{-9223372036854775808.0}) { return I64{-9223372036854775807 - 1} }
     bits: rt_f64_bits(whole)
-    magnitude: bits.bit_and(I64{9223372036854775807})
+    magnitude: bits & I64{9223372036854775807}
     if (magnitude == I64{0}) { return I64{0} }
     shift: (magnitude >> I64{52}) - I64{1075}
-    significand: (magnitude.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
+    significand: (magnitude & I64{4503599627370495}) | I64{4503599627370496}
     word: if (shift >= I64{0}) -> significand << shift else -> significand >> (-shift)
     if (bits < I64{0}) -> -word else -> word
 }

@@ -97,21 +97,21 @@ float_bits: fn(value: Int) -> Int {
     if magnitude == 0 -> return 0
     length: bit_length(magnitude)
     if length <= 53 {
-        mantissa: (magnitude << (53 - length)).bit_and(pow2(52) - 1)
+        mantissa: (magnitude << (53 - length)) & pow2(52) - 1
         return sign + ((length - 1 + 1023) << 52) + mantissa
     }
     shift := length - 53
     quotient := magnitude >> shift
     rest: magnitude - (quotient << shift)
     half: pow2(shift - 1)
-    if rest > half || (rest == half && quotient.bit_and(1) == 1) -> quotient += 1
+    if rest > half || (rest == half && quotient & 1 == 1) -> quotient += 1
     if quotient == pow2(53) {
         quotient = quotient >> 1
         shift += 1
     }
     exponent: 52 + shift
     if exponent > 1023 -> return sign + (2047 << 52)
-    sign + ((exponent + 1023) << 52) + quotient.bit_and(pow2(52) - 1)
+    sign + ((exponent + 1023) << 52) + (quotient & pow2(52) - 1)
 }
 
 hex16: fn(value: Int) -> String {
@@ -119,7 +119,7 @@ hex16: fn(value: Int) -> String {
     out := [U8]{}
     rest := value
     loop _ in 0..<16 {
-        out.push(digits[rest.bit_and(15)])
+        out.push(digits[rest & 15])
         rest = rest >> 4
     }
     out.reverse()
@@ -150,7 +150,7 @@ corpus: fn() -> Corpus {
         }
         loop j in 0..<values.len() {
             b: values[j]
-            binary: [Int]{a + b, a - b, a * b, a.bit_and(b), a.bit_or(b), a.bit_xor(b)}
+            binary: [Int]{a + b, a - b, a * b, a & b, a | b, a ~ b}
             loop k in 0..<BINARY.len() {
                 rows.push(value_row("{BINARY[k]}-{i}-{j}", "jet_int_{BINARY[k]}({raw(a)}, {raw(b)})", binary[k]))
             }

@@ -250,11 +250,11 @@ Keymap: struct {
     modifiers: fn(&self, depressed: Int, latched: Int, locked: Int, group: Int) {
         // The event's fields are uint32; the group is read as libxkbcommon
         // reads it, as an int32 that wraps into the key's groups.
-        layout: group.bit_and(4294967295)
+        layout: group & 4294967295
         self.server = true
-        self.base_mods = depressed.bit_and(4294967295)
-        self.latched_mods = latched.bit_and(4294967295)
-        self.locked_mods = locked.bit_and(4294967295)
+        self.base_mods = depressed & 4294967295
+        self.latched_mods = latched & 4294967295
+        self.locked_mods = locked & 4294967295
         self.base_group = 0
         self.latched_group = 0
         self.locked_group = if layout >= 2147483648 -> layout - 4294967296 else -> layout
@@ -305,7 +305,7 @@ Keymap: struct {
     /// "Shift_L", "NoSymbol" for 0, "U20AC" for an unnamed Unicode keysym,
     /// else "0x" and eight hex digits. `sym` is read as a uint32.
     keysym_name: fn(self, sym: Int) -> String {
-        value: sym.bit_and(4294967295)
+        value: sym & 4294967295
         if self.sym_names.get(value) == .Val(name) -> return name
         if value >= 16777472 && value <= 17891327 -> return "U{hex(value - 16777216, 4)}"
         "0x{hex(value, 8).lower()}"
@@ -324,10 +324,10 @@ Keymap: struct {
     /// ("Alt", "NumLock", "LevelThree", "Super").
     active: fn(self, name: String) -> Bool {
         real: real_mod_index(name)
-        if real >= 0 -> return (self.mods >> real).bit_and(1) == 1
+        if real >= 0 -> return (self.mods >> real) & 1 == 1
         loop v in 0..<self.vmod_names.len() {
             if self.vmod_names[v].lower() == name.lower() {
-                return self.vmod_masks[v] != 0 && self.mods.bit_and(self.vmod_masks[v]) != 0
+                return self.vmod_masks[v] != 0 && self.mods & self.vmod_masks[v] != 0
             }
         }
         false
@@ -617,14 +617,14 @@ priv internal: module {
     mod_expr: fn(p: &Parser) -> Int UIError! {
         mask := 0
         loop {
-            if kind_at(p) == T_NUMBER -> mask = mask.bit_or(expect_number(p)) else {
+            if kind_at(p) == T_NUMBER -> mask = mask | expect_number(p) else {
                 name: expect_word(p)
                 lower: name.lower()
                 real: real_mod_index(name)
                 vmod: vmod_index(p, name)
-                if lower == "all" -> mask = ALL_MODS else if real >= 0 {
-                    mask = mask.bit_or(1 << real)
-                } else if vmod >= 0 { mask = mask.bit_or(1 << (8 + vmod)) } else if lower != "none" {
+                if lower == "all" -> mask = ALL_MODS else if real >= 0 -> mask |= 1 << real else if vmod >= 0 {
+                    mask |= 1 << (8 + vmod)
+                } else if lower != "none" {
                     return Err(syntax(line_at(p), "unknown modifier '{name}'"))
                 }
             }
@@ -718,16 +718,16 @@ priv internal: module {
         out := [U8]{}
         if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
             out.push(U8{192 + (scalar >> 6)})
-            out.push(U8{128 + scalar.bit_and(63)})
+            out.push(U8{128 + (scalar & 63)})
         } else if scalar < 65536 {
             out.push(U8{224 + (scalar >> 12)})
-            out.push(U8{128 + (scalar >> 6).bit_and(63)})
-            out.push(U8{128 + scalar.bit_and(63)})
+            out.push(U8{128 + ((scalar >> 6) & 63)})
+            out.push(U8{128 + (scalar & 63)})
         } else {
             out.push(U8{240 + (scalar >> 18)})
-            out.push(U8{128 + (scalar >> 12).bit_and(63)})
-            out.push(U8{128 + (scalar >> 6).bit_and(63)})
-            out.push(U8{128 + scalar.bit_and(63)})
+            out.push(U8{128 + ((scalar >> 12) & 63)})
+            out.push(U8{128 + ((scalar >> 6) & 63)})
+            out.push(U8{128 + (scalar & 63)})
         }
         String.from_bytes(out) ?? ""
     }
@@ -740,9 +740,9 @@ priv internal: module {
         loop i < bytes.len() {
             b: Int{bytes[i]}
             width: if b < 128 -> 1 else if b < 224 -> 2 else if b < 240 -> 3 else -> 4
-            value := if b < 128 -> b else if b < 224 -> b.bit_and(31) else if b < 240 -> b.bit_and(15) else -> b.bit_and(7)
+            value := if b < 128 -> b else if b < 224 -> b & 31 else if b < 240 -> b & 15 else -> b & 7
             loop k in 1..<width {
-                if i + k < bytes.len() -> value = (value << 6) + (Int{bytes[i + k]}).bit_and(63)
+                if i + k < bytes.len() -> value = (value << 6) + ((Int{bytes[i + k]}) & 63)
             }
             out.push(value)
             i += width
@@ -983,7 +983,7 @@ priv internal: module {
         expect(p, ";")
         kept := [TypeEntry]{}
         loop entry in entries {
-            if entry.mods.bit_and(mods) == entry.mods -> kept.push(entry)
+            if entry.mods & mods == entry.mods -> kept.push(entry)
         }
         defined: KeyType{name: name.copy(), mods: mods, mask: 0, levels: levels, entries: kept}
         loop i in 0..<p.types.len() {
@@ -1123,7 +1123,7 @@ priv internal: module {
                 mods = mod_expr(p)
             }
         }
-        rule := Interp{sym: sym, any: any || sym == 0, match: match, mods: mods.bit_and(REAL_MODS), action: no_action(), vmod: -1, level_one: p.default_level_one, repeat: p.default_repeat}
+        rule := Interp{sym: sym, any: any || sym == 0, match: match, mods: mods & REAL_MODS, action: no_action(), vmod: -1, level_one: p.default_level_one, repeat: p.default_repeat}
         expect(p, "{{")
         loop !is_punct(p, "}}") {
             field: word_lower(p)
@@ -1446,10 +1446,10 @@ priv internal: module {
         if syms.len() == 0 -> return false
         if !rule.any && (syms.len() > 1 || rule.sym != syms[0]) -> return false
         mods: if rule.level_one && level != 0 -> 0 else -> key.modmap
-        if rule.match == MATCH_NONE_OF -> return rule.mods.bit_and(mods) == 0
-        if rule.match == MATCH_ANY_OR_NONE -> return mods == 0 || rule.mods.bit_and(mods) != 0
-        if rule.match == MATCH_ANY_OF -> return rule.mods.bit_and(mods) != 0
-        if rule.match == MATCH_ALL_OF -> return rule.mods.bit_and(mods) == rule.mods
+        if rule.match == MATCH_NONE_OF -> return rule.mods & mods == 0
+        if rule.match == MATCH_ANY_OR_NONE -> return mods == 0 || rule.mods & mods != 0
+        if rule.match == MATCH_ANY_OF -> return rule.mods & mods != 0
+        if rule.match == MATCH_ALL_OF -> return rule.mods & mods == rule.mods
         rule.mods == mods
     }
 
@@ -1462,9 +1462,9 @@ priv internal: module {
     }
 
     effective: fn(mods: Int, vmod_masks: [Int]) -> Int {
-        mask := mods.bit_and(REAL_MODS)
+        mask := mods & REAL_MODS
         loop i in 0..<vmod_masks.len() {
-            if (mods >> (8 + i)).bit_and(1) == 1 -> mask = mask.bit_or(vmod_masks[i])
+            if (mods >> (8 + i)) & 1 == 1 -> mask |= vmod_masks[i]
         }
         mask
     }
@@ -1478,7 +1478,7 @@ priv internal: module {
             if entry.key != "" -> index = key_slot(p, entry.key) else {
                 index = key_for_sym(p, entry.sym)
             }
-            if index >= 0 -> p.keys[index].modmap = p.keys[index].modmap.bit_or(1 << entry.mod)
+            if index >= 0 -> p.keys[index].modmap = p.keys[index].modmap | 1 << entry.mod
         }
         // Interprets, most specific first: keysym rules before Any, then by
         // match kind, then in declaration order.
@@ -1510,7 +1510,7 @@ priv internal: module {
                             if !matches(rule, key, g, l) -> next
                             if g == 0 && l == 0 && key.repeat < 0 -> key.repeats = rule.repeat
                             if (g == 0 && l == 0) || !rule.level_one {
-                                if rule.vmod >= 0 -> vmodmap = vmodmap.bit_or(1 << rule.vmod)
+                                if rule.vmod >= 0 -> vmodmap |= 1 << rule.vmod
                             }
                             if rule.action.kind != ACT_NONE {
                                 key.groups[g].actions[l] = rule.action.copy()
@@ -1530,7 +1530,7 @@ priv internal: module {
             mask := if p.vmod_fixed[v] >= 0 -> p.vmod_fixed[v] else -> 0
             if p.vmod_fixed[v] < 0 {
                 loop key in p.keys {
-                    if (key.vmodmap >> v).bit_and(1) == 1 -> mask = mask.bit_or(key.modmap)
+                    if (key.vmodmap >> v) & 1 == 1 -> mask |= key.modmap
                 }
             }
             vmod_masks.push(mask)
@@ -1653,7 +1653,7 @@ priv internal: module {
     // or -1 for level 1 without an entry.
     key_entry: fn(km: Keymap, index: Int, group: Int) -> Int {
         kind: km.types[km.keys[index].groups[group].type]
-        active: km.mods.bit_and(kind.mask)
+        active: km.mods & kind.mask
         loop e in 0..<kind.entries.len() {
             entry: kind.entries[e]
             if (entry.mods == 0 || entry.mask != 0) && entry.mask == active -> return e
@@ -1674,7 +1674,7 @@ priv internal: module {
         kind: km.types[km.keys[index].groups[group].type]
         entry: key_entry(km, index, group)
         preserve: if entry >= 0 -> kind.entries[entry].preserve_mask else -> 0
-        kind.mask - kind.mask.bit_and(preserve)
+        kind.mask - (kind.mask & preserve)
     }
 
     key_syms: fn(km: Keymap, index: Int) -> [Int] {
@@ -1696,7 +1696,7 @@ priv internal: module {
     }
 
     transforms: fn(km: Keymap, index: Int, mod: Int) -> Bool {
-        km.mods.bit_and(mod) != 0 && consumed(km, index).bit_and(mod) == 0
+        km.mods & mod != 0 && consumed(km, index) & mod == 0
     }
 
     // The one keysym for text, as xkb_state_key_get_one_sym with libxkbcommon's
@@ -1720,7 +1720,7 @@ priv internal: module {
     }
 
     to_control: fn(c: Int) -> Int {
-        if (c >= 64 && c < 127) || c == 32 -> return c.bit_and(31)
+        if (c >= 64 && c < 127) || c == 32 -> return c & 31
         if c == 50 -> return 0
         if c >= 51 && c <= 55 -> return c - 24
         if c == 56 -> return 127
@@ -1816,10 +1816,10 @@ priv internal: module {
     refresh: fn(km: &Keymap) {
         km.locked_group = wrap(km.locked_group, km.group_count)
         km.group = wrap(km.base_group + km.latched_group + km.locked_group, km.group_count)
-        km.mods = km.base_mods.bit_or(km.latched_mods).bit_or(km.locked_mods)
+        km.mods = km.base_mods | km.latched_mods | km.locked_mods
     }
 
-    clear_bits: fn(value: Int, mask: Int) -> Int { value - value.bit_and(mask) }
+    clear_bits: fn(value: Int, mask: Int) -> Int { value - (value & mask) }
 
     // xkb_state_update_key: run the held keys' filters, start the pressed key's
     // action, then recount the base modifiers.
@@ -1839,13 +1839,13 @@ priv internal: module {
             }
         }
         loop bit in 0..<32 {
-            if (km.set_mods >> bit).bit_and(1) == 1 {
+            if (km.set_mods >> bit) & 1 == 1 {
                 km.mod_counts[bit] = km.mod_counts[bit] + 1
-                km.base_mods = km.base_mods.bit_or(1 << bit)
+                km.base_mods |= 1 << bit
             }
         }
         loop bit in 0..<32 {
-            if (km.clear_mods >> bit).bit_and(1) == 1 {
+            if (km.clear_mods >> bit) & 1 == 1 {
                 km.mod_counts[bit] = km.mod_counts[bit] - 1
                 if km.mod_counts[bit] <= 0 {
                     km.mod_counts[bit] = 0
@@ -1867,9 +1867,9 @@ priv internal: module {
             km.filters[f].latch = LATCH_KEY_DOWN
             km.set_mods = act.mask
         } else if act.kind == ACT_LOCK_MODS {
-            km.filters[f].saved = km.locked_mods.bit_and(act.mask)
-            km.set_mods = km.set_mods.bit_or(act.mask)
-            if act.lock -> km.locked_mods = km.locked_mods.bit_or(act.mask)
+            km.filters[f].saved = km.locked_mods & act.mask
+            km.set_mods |= act.mask
+            if act.lock -> km.locked_mods |= act.mask
         } else if act.kind == ACT_SET_GROUP {
             km.filters[f].saved = km.base_group
             km.base_group = if act.absolute -> act.group else -> km.base_group + act.group
@@ -1909,7 +1909,7 @@ priv internal: module {
             km.clear_mods = act.mask
             if act.clear_locks -> km.locked_mods = clear_bits(km.locked_mods, act.mask)
         } else if act.kind == ACT_LOCK_MODS {
-            km.clear_mods = km.clear_mods.bit_or(act.mask)
+            km.clear_mods |= act.mask
             if act.unlock -> km.locked_mods = clear_bits(km.locked_mods, km.filters[f].saved)
         } else if act.kind == ACT_SET_GROUP {
             km.base_group = km.filters[f].saved
@@ -1931,7 +1931,7 @@ priv internal: module {
                 km.latched_mods = clear_bits(km.latched_mods, act.mask)
                 if act.latch_to_lock {
                     km.filters[f].action.kind = ACT_LOCK_MODS
-                    km.locked_mods = km.locked_mods.bit_or(act.mask)
+                    km.locked_mods |= act.mask
                 } else {
                     km.filters[f].action.kind = ACT_SET_MODS
                     km.set_mods = act.mask
@@ -1952,7 +1952,7 @@ priv internal: module {
                     latch = LATCH_PENDING
                     km.latched_group += if act.absolute -> act.group - km.base_group else -> act.group
                 }
-            } else if latch == LATCH_NONE || (act.clear_locks && km.locked_mods.bit_and(act.mask) == act.mask) {
+            } else if latch == LATCH_NONE || (act.clear_locks && km.locked_mods & act.mask == act.mask) {
                 if latch == LATCH_PENDING -> km.latched_mods = clear_bits(km.latched_mods, act.mask) else {
                     km.clear_mods = act.mask
                 }
@@ -1961,7 +1961,7 @@ priv internal: module {
             } else {
                 latch = LATCH_PENDING
                 km.clear_mods = act.mask
-                km.latched_mods = km.latched_mods.bit_or(act.mask)
+                km.latched_mods |= act.mask
             }
         } else if down && latch == LATCH_KEY_DOWN { latch = LATCH_NONE }
         km.filters[f].latch = latch

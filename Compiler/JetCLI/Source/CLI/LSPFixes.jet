@@ -221,10 +221,10 @@ jet_cli_fix_edited: fn(text: String, fixes: [JetCLIFix], kept: [JetCLIFixEditRef
         start: if span.start < bytes.len() -> span.start else -> bytes.len()
         bounded_end: if span.end < bytes.len() -> span.end else -> bytes.len()
         end: if bounded_end > start -> bounded_end else -> start
-        if start < bytes.len() && (Int{bytes[start]}.bit_and(192)) == 128 {
+        if start < bytes.len() && (Int{bytes[start]} & 192) == 128 {
             panic("edit spans must be UTF-8 character boundaries")
         }
-        if end < bytes.len() && (Int{bytes[end]}.bit_and(192)) == 128 {
+        if end < bytes.len() && (Int{bytes[end]} & 192) == 128 {
             panic("edit spans must be UTF-8 character boundaries")
         }
         loop position in cursor..<start -> out.push(bytes[position])

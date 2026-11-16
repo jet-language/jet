@@ -11,7 +11,7 @@ doctor_setup_writable: fn(path: String) {
         entries: files.list_dir(path) ?? panic("directory")
         loop entry in entries -> doctor_setup_writable(entry.path)
     }
-    if sys.is_unix() -> files.chmod(path, info.mode.bit_or(0o200)) ?? panic("writable")
+    if sys.is_unix() -> files.chmod(path, info.mode | 0o200) ?? panic("writable")
 }
 
 run: fn() {

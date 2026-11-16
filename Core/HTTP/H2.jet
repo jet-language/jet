@@ -477,7 +477,7 @@ h2_feed: fn(x: &H2Exchange, bytes: [U8]) H2Error! {
         if x.input.len() - at < 9 + size -> break
         kind: Int{x.input[at + 3]}
         flags: Int{x.input[at + 4]}
-        stream: (Int{x.input[at + 5]} * 16777216 + Int{x.input[at + 6]} * 65536 + Int{x.input[at + 7]} * 256 + Int{x.input[at + 8]}).bit_and(H2_MAX_WINDOW)
+        stream: (Int{x.input[at + 5]} * 16777216 + Int{x.input[at + 6]} * 65536 + Int{x.input[at + 7]} * 256 + Int{x.input[at + 8]}) & H2_MAX_WINDOW
         payload: x.input.slice(at + 9, at + 9 + size)
         x.input_at = at + 9 + size
         _: h2_frame_take(x, kind, flags, stream, payload) ?? return Err(err)
@@ -501,7 +501,7 @@ priv h2_frame_take: fn(x: &H2Exchange, kind: Int, flags: Int, stream: Int, paylo
             return Err(h2_fail("the server sent a CONTINUATION frame that continues no header block"))
         }
         x.block.extend(payload.copy())
-        if flags.bit_and(H2_END_HEADERS) != 0 -> return h2_block_end(x)
+        if flags & H2_END_HEADERS != 0 -> return h2_block_end(x)
         return Ok()
     }
     if kind == H2_RST_STREAM {
@@ -521,14 +521,14 @@ priv h2_frame_take: fn(x: &H2Exchange, kind: Int, flags: Int, stream: Int, paylo
         if stream != 0 || payload.len() != 8 {
             return Err(h2_fail("the server sent a malformed PING frame"))
         }
-        if flags.bit_and(H2_ACK) == 0 -> h2_frame(x.out, H2_PING, H2_ACK, 0, payload)
+        if flags & H2_ACK == 0 -> h2_frame(x.out, H2_PING, H2_ACK, 0, payload)
         return Ok()
     }
     if kind == H2_GOAWAY {
         if stream != 0 || payload.len() < 8 {
             return Err(h2_fail("the server sent a malformed GOAWAY frame"))
         }
-        last: h2_u32(payload, 0).bit_and(H2_MAX_WINDOW)
+        last: h2_u32(payload, 0) & H2_MAX_WINDOW
         if last < H2_STREAM && !x.done {
             return Err(h2_fail("the server went away before the stream (error code {h2_u32(payload, 4)})"))
         }
@@ -553,7 +553,7 @@ priv h2_data: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error
         return Err(h2_fail("the response body is longer than {H2_BODY_MAX} bytes"))
     }
     x.body.extend(data)
-    if flags.bit_and(H2_END_STREAM) != 0 {
+    if flags & H2_END_STREAM != 0 {
         x.done = true
         return Ok()
     }
@@ -572,12 +572,12 @@ priv h2_headers_take: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8])
     if stream != H2_STREAM {
         return Err(h2_fail("the server sent HEADERS on stream {stream}, which the client never opened"))
     }
-    skip: if flags.bit_and(H2_PRIORITY) != 0 -> 5 else -> 0
+    skip: if flags & H2_PRIORITY != 0 -> 5 else -> 0
     fragment: h2_unpad(flags, payload, skip) ?? return Err(err)
     x.block_stream = stream
     x.block = fragment
-    x.block_ends = flags.bit_and(H2_END_STREAM) != 0
-    if flags.bit_and(H2_END_HEADERS) != 0 -> return h2_block_end(x)
+    x.block_ends = flags & H2_END_STREAM != 0
+    if flags & H2_END_HEADERS != 0 -> return h2_block_end(x)
     Ok()
 }
 
@@ -618,7 +618,7 @@ priv h2_block_end: fn(x: &H2Exchange) H2Error! {
 /// A SETTINGS frame: the server's limits, acked.
 priv h2_settings: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2Error! {
     if stream != 0 -> return Err(h2_fail("the server sent SETTINGS on stream {stream}"))
-    if flags.bit_and(H2_ACK) != 0 {
+    if flags & H2_ACK != 0 {
         if payload.len() != 0 -> return Err(h2_fail("the server acked SETTINGS with a payload"))
         return Ok()
     }
@@ -653,7 +653,7 @@ priv h2_settings: fn(x: &H2Exchange, flags: Int, stream: Int, payload: [U8]) H2E
 /// A WINDOW_UPDATE frame: a window opens, and more of the body may go.
 priv h2_window_update: fn(x: &H2Exchange, stream: Int, payload: [U8]) H2Error! {
     if payload.len() != 4 -> return Err(h2_fail("the server sent a malformed WINDOW_UPDATE frame"))
-    increment: h2_u32(payload, 0).bit_and(H2_MAX_WINDOW)
+    increment: h2_u32(payload, 0) & H2_MAX_WINDOW
     if increment == 0 -> return Err(h2_fail("the server opened a window by 0"))
     if stream == 0 {
         if x.connection_window + increment > H2_MAX_WINDOW {
@@ -690,7 +690,7 @@ priv h2_send_body: fn(x: &H2Exchange) Never! {
 /// A frame's payload without its padding and the `skip` bytes before the
 /// block (a HEADERS frame's priority fields).
 priv h2_unpad: fn(flags: Int, payload: [U8], skip: Int) -> [U8] H2Error! {
-    if flags.bit_and(H2_PADDED) == 0 {
+    if flags & H2_PADDED == 0 {
         if payload.len() < skip {
             return Err(h2_fail("the server sent a frame shorter than its fields"))
         }
@@ -723,9 +723,9 @@ priv h2_status: fn(value: String) -> Int H2Error! {
 /// Appends a frame: its 9-byte head and `payload`.
 h2_frame: fn(out: &[U8], kind: Int, flags: Int, stream: Int, payload: [U8]) Never! {
     size: payload.len()
-    out.push(U8{(size >> 16).bit_and(255)})
-    out.push(U8{(size >> 8).bit_and(255)})
-    out.push(U8{size.bit_and(255)})
+    out.push(U8{(size >> 16) & 255})
+    out.push(U8{(size >> 8) & 255})
+    out.push(U8{size & 255})
     out.push(U8{kind})
     out.push(U8{flags})
     h2_put_u32(out, stream)
@@ -751,16 +751,16 @@ h2_headers: fn(out: &[U8], stream: Int, block: [U8], end_stream: Bool, max_frame
 
 /// Appends one setting: its 16-bit id and 32-bit value.
 h2_setting: fn(out: &[U8], id: Int, value: Int) Never! {
-    out.push(U8{(id >> 8).bit_and(255)})
-    out.push(U8{id.bit_and(255)})
+    out.push(U8{(id >> 8) & 255})
+    out.push(U8{id & 255})
     h2_put_u32(out, value)
 }
 
 priv h2_put_u32: fn(out: &[U8], value: Int) Never! {
-    out.push(U8{(value >> 24).bit_and(255)})
-    out.push(U8{(value >> 16).bit_and(255)})
-    out.push(U8{(value >> 8).bit_and(255)})
-    out.push(U8{value.bit_and(255)})
+    out.push(U8{(value >> 24) & 255})
+    out.push(U8{(value >> 16) & 255})
+    out.push(U8{(value >> 8) & 255})
+    out.push(U8{value & 255})
 }
 
 priv h2_u32: fn(raw: [U8], at: Int) -> Int Never! {
@@ -815,7 +815,7 @@ hpack_integer: fn(out: &[U8], high: Int, prefix: Int, value: Int) Never! {
     out.push(U8{high + mask})
     rest := value - mask
     loop rest >= 128 {
-        out.push(U8{rest.bit_and(127) + 128})
+        out.push(U8{(rest & 127) + 128})
         rest = rest >> 7
     }
     out.push(U8{rest})
@@ -883,7 +883,7 @@ priv HpackString: struct {
 /// Reads the integer with a `prefix`-bit prefix at `at`.
 priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H2Error! {
     mask: (1 << prefix) - 1
-    value := Int{block[at]}.bit_and(mask)
+    value := Int{block[at]} & mask
     next := at + 1
     if value < mask -> return Ok(HpackInteger{value: value, next: next})
     shift := 0
@@ -892,7 +892,7 @@ priv hpack_read_integer: fn(block: [U8], at: Int, prefix: Int) -> HpackInteger H
         if shift > 21 -> return Err(h2_fail("a header block has an integer past 2^28"))
         byte: Int{block[next]}
         next += 1
-        value += byte.bit_and(127) << shift
+        value += (byte & 127) << shift
         shift += 7
         if byte < 128 -> return Ok(HpackInteger{value: value, next: next})
     }
@@ -990,7 +990,7 @@ hpack_huffman_decode: fn(h: HpackHuffman, raw: [U8]) -> [U8] H2Error! {
     ones := true
     loop byte in raw {
         loop bit in 0..<8 {
-            set: (Int{byte} >> (7 - bit)).bit_and(1)
+            set: (Int{byte} >> (7 - bit)) & 1
             code = code * 2 + set
             length += 1
             ones = ones && set == 1

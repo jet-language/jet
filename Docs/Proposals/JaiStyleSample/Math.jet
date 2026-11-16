@@ -166,9 +166,9 @@ truncate :: fn(n: Float) -> Float Never! { trunc(n) }
 
 cot :: fn(n: Float) -> Float Never! { 1.0 / tan(n) }
 copysign :: fn(value: Float, sign_value: Float) -> Float Never! {
-    magnitude :: to_bits(value).bit_and(9223372036854775807)
-    sign :: to_bits(sign_value).bit_and((-9223372036854775807 - 1))
-    from_bits(magnitude.bit_or(sign))
+    magnitude :: to_bits(value) & 9223372036854775807
+    sign :: to_bits(sign_value) & (-9223372036854775807 - 1)
+    from_bits(magnitude | sign)
 }
 fma :: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 muladd :: fn(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
@@ -183,7 +183,7 @@ radians :: fn(n: Float) -> Float Never! { n * 0.017453292519943295 }
 lerp :: fn(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
 float32 :: fn(n: Float) -> Float Never! { n }
 float64 :: fn(n: Float) -> Float Never! { n }
-fabs :: fn(n: Float) -> Float Never! { from_bits(to_bits(n).bit_and(9223372036854775807)) }
+fabs :: fn(n: Float) -> Float Never! { from_bits(to_bits(n) & 9223372036854775807) }
 // `math.abs` on F32 and I64 (MathBuiltin `abs`): F32 negates exactly when the
 // sign bit is set, so -0.0 and a negative NaN lose their sign; I64 negation
 // stops at I64.MIN like any fixed-width overflow.
@@ -245,13 +245,13 @@ nextafter :: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward)
 significand :: fn(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
     bits :: to_bits(n)
-    exponent :: (bits >> 52).bit_and(2047)
+    exponent :: (bits >> 52) & 2047
     if exponent == 0 {
         value := fabs(n)
         loop value < 1.0 -> value = value * 2.0
         return copysign(value, n)
     }
-    copysign(from_bits((1023 << 52).bit_or((bits.bit_and(4503599627370495)))), n)
+    copysign(from_bits((1023 << 52) | (bits & 4503599627370495)), n)
 }
 ulp :: fn(n: Float) -> Float Never! {
     if is_nan(n) -> return nan()
@@ -334,7 +334,7 @@ checked_pow :: fn(base: Int, exponent: Int) -> Int? Never! {
     factor := base
     power := exponent
     loop power > 0 {
-        if ((power).bit_and(1)) != 0 {
+        if ((power) & 1) != 0 {
             result = checked_mul(result, factor) ?? return None
         }
         power = power /% 2
@@ -415,7 +415,7 @@ powmod :: fn(base: Int, exponent: Int, modulus: Int) -> Int? Never! {
     if factor < 0 -> factor = factor + modulus
     power := exponent
     loop power > 0 {
-        if ((power).bit_and(1)) != 0 {
+        if ((power) & 1) != 0 {
             product :: checked_mul(result, factor) ?? return None
             result = product %% modulus
         }
@@ -452,7 +452,7 @@ digits :: fn(n: Int) -> Int Never! {
 leading_ones :: fn(n: Int) -> Int Never! {
     count := 0
     loop count < 64 {
-        if ((n >> (63 - count)).bit_and(1)) == 0 -> return count
+        if ((n >> (63 - count)) & 1) == 0 -> return count
         count = count + 1
     }
     count
@@ -460,7 +460,7 @@ leading_ones :: fn(n: Int) -> Int Never! {
 trailing_ones :: fn(n: Int) -> Int Never! {
     count := 0
     loop count < 64 {
-        if ((n >> count).bit_and(1)) == 0 -> return count
+        if ((n >> count) & 1) == 0 -> return count
         count = count + 1
     }
     count
@@ -638,7 +638,7 @@ copy :: fn(n: Float) -> Float Never! { n }
     assert_eq(digits(-9223372036854775808), 19)
     assert_eq(leading_ones(-1), 64)
     assert_eq(trailing_ones(-1), 64)
-    assert_eq((Int{3}).bit_xor(5), 6)
+    assert_eq((Int{3}) ~ 5, 6)
 }
 
 #Test("math special functions retain their approximation") {
@@ -1174,11 +1174,11 @@ __fraction_from_float :: fn(value: Float) -> Fraction Never! {
     if !is_finite(value) -> panic("Float has no word-sized exact Fraction")
     if value == 0.0 -> return __fraction_from_int(0)
     bits :: to_bits(value)
-    exponent :: (bits >> 52).bit_and(2047)
-    significand := bits.bit_and(4503599627370495)
+    exponent :: (bits >> 52) & 2047
+    significand := bits & 4503599627370495
     power := -1074
     if exponent != 0 {
-        significand = significand.bit_or(4503599627370496)
+        significand |= 4503599627370496
         power = exponent - 1023 - 52
     }
     top := significand

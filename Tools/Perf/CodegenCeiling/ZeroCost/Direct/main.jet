@@ -21,7 +21,7 @@ PAGE_BYTES: 65536
 churn: fn(n: Int) -> Int {
     total := I64{0}
     loop i in 0..<n {
-        count: 1 + i.bit_and(63)
+        count: 1 + (i & 63)
         #Unsafe("each index is checked against the block's `count` words, and the block is released once, at the end of the turn") {
             bytes: mem.alloc_raw(count * 8, 8) ?? panic("no memory")
             words: bytes.cast<I64>()
@@ -81,7 +81,7 @@ scan: fn(n: Int) -> Int {
         mem.fill<I64>(b, I64{0}, WORDS)
         loop pass in 0..<n {
             mem.fill<I64>(a, I64{pass}, WORDS)
-            at: pass.bit_and(WORDS - 1)
+            at: pass & WORDS - 1
             if at < 0 || at >= WORDS -> panic("word {at} is outside {WORDS}")
             mem.volatile_write(a.offset(at), I64{-1})
             same := true
@@ -115,7 +115,7 @@ tally: fn(n: Int) -> Int {
     total := I64{0}
     loop _ in 0..<n {
         loop round in 0..<ROUNDS {
-            total = wrapping(total + word.add(I64{round.bit_and(31)}))
+            total = wrapping(total + word.add(I64{round & 31}))
             seen: word.load()
             if word.compare_exchange(seen, wrapping(seen + 1)) -> total = wrapping(total + 1)
         }
@@ -133,7 +133,7 @@ pages: fn(n: Int) -> Int {
         #Unsafe("each index is checked against the mapping's `count` words, and the region stays mapped until its close") {
             words: mem.Ptr<I64>.from_addr(region.address())
             last: count - 1
-            at: i.bit_and(last)
+            at: i & last
             if at < 0 || at >= count -> panic("word {at} is outside {count}")
             mem.volatile_write(words.offset(at), I64{i})
             if last < 0 || last >= count -> panic("word {last} is outside {count}")

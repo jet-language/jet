@@ -678,7 +678,7 @@ jet_cli_named_engine: fn() -[Env]> String? Never! {
 jet_cli_engine_candidate: fn(candidate: String) -[FS]> String? Never! {
     if !cli_files.is_file(candidate) -> return None
     stat: cli_files.stat(candidate) ?? return None
-    if stat.is_symlink || (stat.mode.bit_and(73)) != 0 -> return Val(candidate)
+    if stat.is_symlink || (stat.mode & 73) != 0 -> return Val(candidate)
     None
 }
 
@@ -750,7 +750,7 @@ jet_cli_find_external: fn(name: String) -[FS, Env]> String? Never! {
         candidate: jet_cli_authority_path(if directory == "" -> "." else -> directory, "{JET_CLI_BINARY}-{name}")
         if !cli_files.is_file(candidate) -> next
         stat: cli_files.stat(candidate) ?? next
-        if stat.is_symlink || (stat.mode.bit_and(73)) != 0 -> return Val(candidate)
+        if stat.is_symlink || (stat.mode & 73) != 0 -> return Val(candidate)
     }
     None
 }

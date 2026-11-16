@@ -99,20 +99,20 @@ EQUALS: U8{61}
 /// lookup on it (mbedtls_ct_base64_enc_char).
 #Overflow(.Wrapping) base64_enc_char: fn(value: U8) -> U8 Never! {
     digit := ctime.uchar_in_range_if(U8{0}, U8{25}, value, U8{65} + value)
-    digit = digit.bit_or(ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26}))
-    digit = digit.bit_or(ctime.uchar_in_range_if(U8{52}, U8{61}, value, U8{48} + value - U8{52}))
-    digit = digit.bit_or(ctime.uchar_in_range_if(U8{62}, U8{62}, value, U8{43}))
-    digit.bit_or(ctime.uchar_in_range_if(U8{63}, U8{63}, value, U8{47}))
+    digit |= ctime.uchar_in_range_if(U8{26}, U8{51}, value, U8{97} + value - U8{26})
+    digit |= ctime.uchar_in_range_if(U8{52}, U8{61}, value, U8{48} + value - U8{52})
+    digit |= ctime.uchar_in_range_if(U8{62}, U8{62}, value, U8{43})
+    digit | ctime.uchar_in_range_if(U8{63}, U8{63}, value, U8{47})
 }
 
 // One plus the value of Base64 digit c, or zero when c is no digit; no
 // branch or table lookup on c.
 #Overflow(.Wrapping) dec_bits: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(U8{65}, U8{90}, c, c - U8{65} + U8{1})
-    v = v.bit_or(ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27}))
-    v = v.bit_or(ctime.uchar_in_range_if(U8{48}, U8{57}, c, c - U8{48} + U8{53}))
-    v = v.bit_or(ctime.uchar_in_range_if(U8{43}, U8{43}, c, U8{63}))
-    v.bit_or(ctime.uchar_in_range_if(U8{47}, U8{47}, c, U8{64}))
+    v |= ctime.uchar_in_range_if(U8{97}, U8{122}, c, c - U8{97} + U8{27})
+    v |= ctime.uchar_in_range_if(U8{48}, U8{57}, c, c - U8{48} + U8{53})
+    v |= ctime.uchar_in_range_if(U8{43}, U8{43}, c, U8{63})
+    v | ctime.uchar_in_range_if(U8{47}, U8{47}, c, U8{64})
 }
 
 /// The value of Base64 digit c ('A'..'Z', 'a'..'z', '0'..'9', '+', '/'), or
@@ -134,10 +134,10 @@ LAYOUT_INVALID: U8{5}
 // the class, the text's layout; never on a digit's value.
 #Overflow(.Wrapping) layout_class: fn(c: U8) -> U8 Never! {
     v := ctime.uchar_in_range_if(SPACE, SPACE, c, LAYOUT_SPACE)
-    v = v.bit_or(ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR))
-    v = v.bit_or(ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF))
-    v = v.bit_or(ctime.uchar_in_range_if(EQUALS, EQUALS, c, LAYOUT_EQUALS))
-    v.bit_or(ctime.uchar_in_range_if(U8{0}, U8{0}, dec_bits(c).bit_or(v), LAYOUT_INVALID))
+    v |= ctime.uchar_in_range_if(CR, CR, c, LAYOUT_CR)
+    v |= ctime.uchar_in_range_if(LF, LF, c, LAYOUT_LF)
+    v |= ctime.uchar_in_range_if(EQUALS, EQUALS, c, LAYOUT_EQUALS)
+    v | ctime.uchar_in_range_if(U8{0}, U8{0}, dec_bits(c) | v, LAYOUT_INVALID)
 }
 
 /// The padded Base64 of src, no line breaks (mbedtls_base64_encode).
@@ -149,19 +149,19 @@ base64_encode: fn(src: [U8]) -> [U8] Never! {
         c1: src[3 * b]
         c2: src[3 * b + 1]
         c3: src[3 * b + 2]
-        out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
-        out.push(base64_enc_char((c1.bit_and(U8{3}) << 4).bit_or(c2 >> 4)))
-        out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_or(c3 >> 6)))
-        out.push(base64_enc_char(c3.bit_and(U8{0x3F})))
+        out.push(base64_enc_char((c1 >> 2) & U8{0x3F}))
+        out.push(base64_enc_char(((c1 & U8{3}) << 4) | c2 >> 4))
+        out.push(base64_enc_char(((c2 & U8{15}) << 2) | c3 >> 6))
+        out.push(base64_enc_char(c3 & U8{0x3F}))
     }
     i: 3 * whole
     if i < src.len() {
         c1: src[i]
         two: i + 1 < src.len()
         c2: if two -> src[i + 1] else -> U8{0}
-        out.push(base64_enc_char((c1 >> 2).bit_and(U8{0x3F})))
-        out.push(base64_enc_char((c1.bit_and(U8{3}) << 4).bit_or(c2 >> 4)))
-        if two -> out.push(base64_enc_char((c2.bit_and(U8{15}) << 2).bit_and(U8{0x3F}))) else {
+        out.push(base64_enc_char((c1 >> 2) & U8{0x3F}))
+        out.push(base64_enc_char(((c1 & U8{3}) << 4) | c2 >> 4))
+        if two -> out.push(base64_enc_char(((c2 & U8{15}) << 2) & U8{0x3F})) else {
             out.push(EQUALS)
         }
         out.push(EQUALS)
@@ -215,7 +215,7 @@ base64_decode: fn(src: [U8]) -> [U8] Base64Error! {
         if class == LAYOUT_CR || class == LAYOUT_LF || class == LAYOUT_SPACE -> next
         // The first pass put every `=` at the end.
         if class == LAYOUT_EQUALS -> break
-        x = (x << 6).bit_or(wrapping(U32{dec_bits(c)} - U32{1}))
+        x = (x << 6) | wrapping(U32{dec_bits(c)} - U32{1})
         digits += 1
         if digits == 4 {
             digits = 0
@@ -321,8 +321,8 @@ get_iv: fn(data: [U8], at: Int, count: Int) -> [U8] PEMError! {
                 return Err(.InvalidEncIV)
             }
         }
-        k: if i.bit_and(1) != 0 -> j else -> j << 4
-        iv[i >> 1] = iv[i >> 1].bit_or(k)
+        k: if i & 1 != 0 -> j else -> j << 4
+        iv[i >> 1] = iv[i >> 1] | k
     }
     Ok(iv)
 }

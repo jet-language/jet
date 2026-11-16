@@ -353,7 +353,7 @@ key_info_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, list: Int, i_start: Int, 
 // Whether built-in window function `id` (cat.FI_*) is window w's.
 wfunc_is: fn(p: cg.Parse, a: ast.AST, w: Int, id: Int) -> Bool Never! {
     d: p.wfuncs[a.windows[w].wfunc]
-    d.flags.bit_and(conn.FUNC_BUILTIN) != 0 && d.impl_id == id
+    d.flags & conn.FUNC_BUILTIN != 0 && d.impl_id == id
 }
 
 // selectWindowRewriteExprCb with selectWindowRewriteSelectCb: a column,
@@ -408,7 +408,7 @@ WindowRewriteWalker: struct {
                 sub = ast.expr_list_append(a, sub, dup)
                 p.walks[t].u = sub
             }
-            f: a.exprs[e].flags.bit_and(ast.EP_COLLATE)
+            f: a.exprs[e].flags & ast.EP_COLLATE
             ast.expr_delete(a, e)
             n := ast.zero_expr(tk.TK_COLUMN)
             n.icolumn = if icol < 0 -> ast.list_len(a, sub) - 1 else -> icol
@@ -466,7 +466,7 @@ expr_list_append_list: fn(a: &ast.AST, list0: Int, append: Int, int_to_null: Boo
             sub: ast.skip_collate_and_likely(a, dup)
             if ast.expr_is_integer(a, sub) != None {
                 a.exprs[sub].op = tk.TK_NULL
-                a.exprs[sub].flags = util.clear_bits(a.exprs[sub].flags, ast.EP_INT_VALUE.bit_or(ast.EP_IS_TRUE).bit_or(ast.EP_IS_FALSE))
+                a.exprs[sub].flags = util.clear_bits(a.exprs[sub].flags, ast.EP_INT_VALUE | ast.EP_IS_TRUE | ast.EP_IS_FALSE)
                 a.exprs[sub].token = None
             }
         }
@@ -554,7 +554,7 @@ expr_list_prefix_same: fn(a: &ast.AST, sort: Int, ob: Int) -> Bool Never! {
 // on failure.
 window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     rc := base.OK
-    if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags.bit_and(ast.SF_WIN_REWRITE) != 0 || ast.in_rename(a) {
+    if a.selects[s].win < 0 || a.selects[s].prior >= 0 || a.selects[s].sel_flags & ast.SF_WIN_REWRITE != 0 || ast.in_rename(a) {
         return rc
     }
     cg.get_vdbe(p)
@@ -566,7 +566,7 @@ window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     sel_flags: a.selects[s].sel_flags
     tab: conn.table_alloc(p.db)
     ex.agg_info_persist_select(p, a, s)
-    if sel_flags.bit_and(ast.SF_AGGREGATE) == 0 {
+    if sel_flags & ast.SF_AGGREGATE == 0 {
         w := DisallowAggOrderByWalker{unused: 0}
         cg.walk_push(p, w, 0)
         ob: a.selects[s].order_by
@@ -577,7 +577,7 @@ window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     a.selects[s].where_expr = -1
     a.selects[s].group_by = -1
     a.selects[s].having = -1
-    a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_AGGREGATE).bit_or(ast.SF_WIN_REWRITE)
+    a.selects[s].sel_flags = util.clear_bits(a.selects[s].sel_flags, ast.SF_AGGREGATE) | ast.SF_WIN_REWRITE
 
     // The subquery's ORDER BY is the window's PARTITION BY and ORDER BY;
     // the SELECT's own ORDER BY goes when that makes it redundant.
@@ -612,7 +612,7 @@ window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
         owner: a.windows[win].owner
         args: a.exprs[owner].x
         d: p.wfuncs[a.windows[win].wfunc]
-        if d.flags.bit_and(conn.FUNC_SUBTYPE) != 0 {
+        if d.flags & conn.FUNC_SUBTYPE != 0 {
             sublist = select_window_rewrite_elist(p, a, mwin, src, args, tab, sublist)
             a.windows[win].iarg_col = ast.list_len(a, sublist)
             a.windows[win].expr_args = true
@@ -647,17 +647,17 @@ window_rewrite: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
     a.items[si].select = sub
     a.items[si].is_correlated = true
     p.f.n_tab = ast.src_list_assign_cursors(a, new_src, p.f.n_tab)
-    a.selects[sub].sel_flags = a.selects[sub].sel_flags.bit_or(ast.SF_EXPANDED).bit_or(ast.SF_ORDER_BY_REQD)
+    a.selects[sub].sel_flags = a.selects[sub].sel_flags | ast.SF_EXPANDED | ast.SF_ORDER_BY_REQD
     g := p.up
     tab2: g.result_set_of_select(p, a, sub, base.AFF_NONE)
-    a.selects[sub].sel_flags = a.selects[sub].sel_flags.bit_or(sel_flags.bit_and(ast.SF_AGGREGATE))
+    a.selects[sub].sel_flags = a.selects[sub].sel_flags | sel_flags & ast.SF_AGGREGATE
     if tab2 < 0 {
         // Perhaps some other error, which then is the Parse's.
         rc = base.NOMEM
         conn.delete_table_now(p.db, tab)
     } else {
         eph_tab := p.db.tables[tab2].copy()
-        eph_tab.tab_flags = eph_tab.tab_flags.bit_or(ast.TF_EPHEMERAL)
+        eph_tab.tab_flags |= ast.TF_EPHEMERAL
         p.db.tables[tab] = eph_tab
         a.items[si].tab = tab
         conn.delete_table_now(p.db, tab2)
@@ -718,7 +718,7 @@ window_code_init: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
     win := mwin
     loop win >= 0 {
         d: p.wfuncs[a.windows[win].wfunc].copy()
-        if d.flags.bit_and(conn.FUNC_MINMAX) != 0 && a.windows[win].start_type != tk.TK_UNBOUNDED {
+        if d.flags & conn.FUNC_MINMAX != 0 && a.windows[win].start_type != tk.TK_UNBOUNDED {
             // The inline min() and max(): an ephemeral index and three
             // registers, for the argument copied for OP_MakeRecord, an
             // integer that keeps keys unique, and the record.
@@ -780,7 +780,7 @@ window_check_value: fn(p: &cg.Parse, reg: Int, e_cond: Int) Never! {
         _: cg.op4_text(p, opc.OP_STRING8, 0, reg_string, 0, [U8]{})
         here: cg.v_current_addr(p)
         _: cg.op3(p, opc.OP_GE, reg_string, here + 2, reg)
-        cg.v_change_p5(p, base.AFF_NUMERIC.bit_or(conn.CMP_JUMPIFNULL))
+        cg.v_change_p5(p, base.AFF_NUMERIC | conn.CMP_JUMPIFNULL)
     } else {
         here: cg.v_current_addr(p)
         _: cg.op2(p, opc.OP_MUST_BE_INT, reg, here + 2)
@@ -858,7 +858,7 @@ window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Boo
         }
         reg_arg := reg
         is_noop: wfunc_is(p, a, win, cat.FI_LEAD) || wfunc_is(p, a, win, cat.FI_LAG)
-        if a.windows[mwin].reg_start_rowid == 0 && d.flags.bit_and(conn.FUNC_MINMAX) != 0 && w.start_type != tk.TK_UNBOUNDED {
+        if a.windows[mwin].reg_start_rowid == 0 && d.flags & conn.FUNC_MINMAX != 0 && w.start_type != tk.TK_UNBOUNDED {
             addr_is_null: cg.op1(p, opc.OP_IS_NULL, reg_arg)
             if !inverse {
                 _: cg.op2(p, opc.OP_ADD_IMM, w.reg_app + 1, 1)
@@ -895,7 +895,7 @@ window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Boo
                     i_op += 1
                 }
             }
-            if d.flags.bit_and(conn.FUNC_NEEDCOLL) != 0 {
+            if d.flags & conn.FUNC_NEEDCOLL != 0 {
                 e0: ast.list_expr(a, owner_args, 0)
                 coll: ex.expr_nn_coll_seq(p, a, e0)
                 _: cg.op4(p, opc.OP_COLL_SEQ, 0, 0, 0, conn.P4.Coll(coll))
@@ -903,7 +903,7 @@ window_agg_step: fn(p: &cg.Parse, a: &ast.AST, mwin: Int, csr: Int, inverse: Boo
             opcode: if inverse -> opc.OP_AGG_INVERSE else -> opc.OP_AGG_STEP
             _: cg.op3(p, opcode, b_inverse, reg_arg, w.reg_accum)
             cg.v_append_p4(p, conn.P4.FuncDef(d))
-            cg.v_change_p5(p, n_arg.bit_and(255))
+            cg.v_change_p5(p, n_arg & 255)
             if w.expr_args -> cg.release_temp_range(p, reg_arg, n_arg)
             if addr_if != 0 -> cg.v_jump_here(p, addr_if)
         }
@@ -920,7 +920,7 @@ window_agg_final: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, fin: Bool) Nev
     loop win >= 0 {
         w: a.windows[win].copy()
         d: p.wfuncs[w.wfunc].copy()
-        if a.windows[mwin].reg_start_rowid == 0 && d.flags.bit_and(conn.FUNC_MINMAX) != 0 && w.start_type != tk.TK_UNBOUNDED {
+        if a.windows[mwin].reg_start_rowid == 0 && d.flags & conn.FUNC_MINMAX != 0 && w.start_type != tk.TK_UNBOUNDED {
             _: cg.op2(p, opc.OP_NULL, 0, w.reg_result)
             _: cg.op1(p, opc.OP_LAST, w.csr_app)
             _: cg.op3(p, opc.OP_COLUMN, w.csr_app, 0, w.reg_result)
@@ -1074,7 +1074,7 @@ window_init_accum: fn(p: &cg.Parse, a: &ast.AST, mwin: Int) -> Int Never! {
                 _: cg.op2(p, opc.OP_INTEGER, 0, w.reg_app)
                 _: cg.op2(p, opc.OP_INTEGER, 0, w.reg_app + 1)
             }
-            if d.flags.bit_and(conn.FUNC_MINMAX) != 0 && w.csr_app != 0 {
+            if d.flags & conn.FUNC_MINMAX != 0 && w.csr_app != 0 {
                 _: cg.op1(p, opc.OP_RESET_SORTER, w.csr_app)
                 _: cg.op2(p, opc.OP_INTEGER, 0, w.reg_app + 1)
             }
@@ -1133,13 +1133,13 @@ window_code_range_test: fn(p: &cg.Parse, a: &ast.AST, s: WindowCodeArg, op0: Int
     window_read_peer_values(p, a, s, csr2, reg2)
     op := op0
     sf: a.lists[ob].items[0].sort_flags
-    if sf.bit_and(base.KEYINFO_ORDER_DESC) != 0 {
+    if sf & base.KEYINFO_ORDER_DESC != 0 {
         if op == opc.OP_GE -> op = opc.OP_LE else if op == opc.OP_GT -> op = opc.OP_LT else {
             op = opc.OP_GE
         }
         arith = opc.OP_SUBTRACT
     }
-    if sf.bit_and(base.KEYINFO_ORDER_BIGNULL) != 0 {
+    if sf & base.KEYINFO_ORDER_BIGNULL != 0 {
         // reg1 is NULL.
         addr: cg.op1(p, opc.OP_NOT_NULL, reg1)
         if op == opc.OP_GE -> _: cg.op2(p, opc.OP_GOTO, 0, lbl) else if op == opc.OP_GT {

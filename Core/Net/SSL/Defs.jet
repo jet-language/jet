@@ -1724,19 +1724,17 @@ ssl_push_all: fn(out: &[U8], bytes: [U8]) Never! {
 
 ssl_u8: fn(buf: [U8], off: Int) -> Int Never! { Int{buf[off]} }
 
-ssl_get_u16: fn(buf: [U8], off: Int) -> Int Never! {
-    (Int{buf[off]} << 8).bit_or(Int{buf[off + 1]})
-}
+ssl_get_u16: fn(buf: [U8], off: Int) -> Int Never! { (Int{buf[off]} << 8) | Int{buf[off + 1]} }
 
 ssl_get_u24: fn(buf: [U8], off: Int) -> Int Never! {
-    (Int{buf[off]} << 16).bit_or(Int{buf[off + 1]} << 8).bit_or(Int{buf[off + 2]})
+    (Int{buf[off]} << 16) | Int{buf[off + 1]} << 8 | Int{buf[off + 2]}
 }
 
 ssl_get_u32: fn(buf: [U8], off: Int) -> Int Never! {
-    (ssl_get_u16(buf, off) << 16).bit_or(ssl_get_u16(buf, off + 2))
+    (ssl_get_u16(buf, off) << 16) | ssl_get_u16(buf, off + 2)
 }
 
-ssl_byte: fn(v: Int) -> U8 Never! { U8{v.bit_and(0xFF)} }
+ssl_byte: fn(v: Int) -> U8 Never! { U8{v & 0xFF} }
 
 ssl_put_u16: fn(buf: &[U8], off: Int, v: Int) Never! {
     buf[off] = ssl_byte(v >> 8)
@@ -1780,7 +1778,7 @@ ssl_push_u64: fn(out: &[U8], v: Int) Never! {
 }
 
 ssl_get_u64: fn(buf: [U8], off: Int) -> Int Never! {
-    (ssl_get_u32(buf, off) << 32).bit_or(ssl_get_u32(buf, off + 4))
+    (ssl_get_u32(buf, off) << 32) | ssl_get_u32(buf, off + 4)
 }
 
 ssl_range_eq: fn(a: [U8], aoff: Int, b: [U8], boff: Int, len: Int) -> Bool Never! {

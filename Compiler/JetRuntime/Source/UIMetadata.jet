@@ -24,7 +24,7 @@ ui_optional_text_get: fn(value: I64, some: I64) -> I64 {
 
 // Bool occupies a byte, not the uninitialized rest of its carrier word.
 ui_carrier_bool: fn(address: I64) -> I64 {
-    if ((ui_carrier_word(address).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1}
+    if ((ui_carrier_word(address) & I64{255}) == I64{0}) -> I64{0} else -> I64{1}
 }
 
 // UIAccessibilityState: a UI_STATE_BYTES state, inline in its accessibility's
@@ -257,7 +257,7 @@ ui_accessibility_fields_drop: fn(value: I64) {
     raw: jet_int_owned_to_i64(bits)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     result: jet_rt_alloc(UI_SHORTCUT_MODIFIERS_BYTES, I64{8})
-    ui_carrier_store(result, raw.bit_and(I64{255}))
+    ui_carrier_store(result, raw & I64{255})
     result
 }
 
@@ -282,7 +282,7 @@ ui_accessibility_fields_drop: fn(value: I64) {
 // UIShortcut.
 ui_shortcut_copy: fn(value: I64, result: I64) {
     ui_carrier_store(wrapping(result + UI_SHORTCUT_KEY), jet_rt_string_clone(ui_carrier_word(wrapping(value + UI_SHORTCUT_KEY))))
-    ui_carrier_store(wrapping(result + UI_SHORTCUT_MODIFIERS), ui_carrier_word(wrapping(value + UI_SHORTCUT_MODIFIERS)).bit_and(I64{255}))
+    ui_carrier_store(wrapping(result + UI_SHORTCUT_MODIFIERS), ui_carrier_word(wrapping(value + UI_SHORTCUT_MODIFIERS)) & I64{255})
 }
 
 ui_shortcut_fields_drop: fn(value: I64) {
@@ -304,7 +304,7 @@ ui_shortcut_fields_drop: fn(value: I64) {
 
 #Export(c) jet_rt_record_get_jet_ui_shortcut_modifiers: fn(value: I64) -> I64 {
     result: jet_rt_alloc(UI_SHORTCUT_MODIFIERS_BYTES, I64{8})
-    ui_carrier_store(result, ui_carrier_word(wrapping(value + UI_SHORTCUT_MODIFIERS)).bit_and(I64{255}))
+    ui_carrier_store(result, ui_carrier_word(wrapping(value + UI_SHORTCUT_MODIFIERS)) & I64{255})
     result
 }
 
@@ -323,5 +323,5 @@ ui_shortcut_fields_drop: fn(value: I64) {
 }
 
 #Export(c) jet_rt_handle_eq_jet_ui_shortcut: fn(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(ui_carrier_word(wrapping(left + UI_SHORTCUT_KEY)), ui_carrier_word(wrapping(right + UI_SHORTCUT_KEY))) && (ui_carrier_word(wrapping(left + UI_SHORTCUT_MODIFIERS)).bit_and(I64{255})) == (ui_carrier_word(wrapping(right + UI_SHORTCUT_MODIFIERS)).bit_and(I64{255}))
+    jet_rt_string_eq(ui_carrier_word(wrapping(left + UI_SHORTCUT_KEY)), ui_carrier_word(wrapping(right + UI_SHORTCUT_KEY))) && (ui_carrier_word(wrapping(left + UI_SHORTCUT_MODIFIERS)) & I64{255}) == (ui_carrier_word(wrapping(right + UI_SHORTCUT_MODIFIERS)) & I64{255})
 }

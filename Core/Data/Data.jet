@@ -1461,12 +1461,12 @@ __schema: fn<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Ne
 priv column_identity: fn(name: String, type_name: String) -> String Never! {
     key: "{name.bytes().len()}:{type_name}"
     hash := U64{14695981039346656037}
-    loop byte in key.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+    loop byte in key.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
     out := "column-".bytes()
     loop index in 0..<16 {
         shift: checked(U64{60 - index * 4}) ?? U64{0}
-        out.push(digits[Int{(hash >> shift).bit_and(U64{15})}])
+        out.push(digits[Int{(hash >> shift) & U64{15}}])
     }
     String.from_bytes(out) ?? ""
 }
@@ -3113,7 +3113,7 @@ data_loader_put_control: fn(out: &[U8], value: Int) Never! {
     out.push(U8{48})
     hex: "0123456789abcdef"
     out.push(encoding_stream.byte_at(hex, value >> 4))
-    out.push(encoding_stream.byte_at(hex, value.bit_and(15)))
+    out.push(encoding_stream.byte_at(hex, value & 15))
 }
 
 data_loader_quote: fn(out: &[U8], text: String) Never! {

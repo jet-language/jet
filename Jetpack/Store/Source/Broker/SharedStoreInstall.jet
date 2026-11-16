@@ -378,7 +378,7 @@ store_broker_require_private_mode_followed: fn(path: String, label: String) Stor
         return
     }
     info: files.stat(files.canonicalize(path))
-    if (info.mode).bit_and(0o077) != 0 {
+    if (info.mode) & 0o077 != 0 {
         return Err(store_broker_invalid("{label} has insecure permissions"))
     }
 }
@@ -424,7 +424,7 @@ store_broker_ensure_admin_public_dir: fn(path: String) StoreError! {
         store_broker_require_admin_dir(path)
         if sys.family() != "windows" {
             info: files.stat(path)
-            if (info.mode).bit_and(0o005) != 0o005 -> store_broker_set_mode(path, 0o755)
+            if (info.mode) & 0o005 != 0o005 -> store_broker_set_mode(path, 0o755)
         }
     } else { store_broker_set_mode(path, 0o755) }
     store_broker_require_admin_public_dir(path)
@@ -438,7 +438,7 @@ store_broker_require_admin_dir: fn(path: String) StoreError! {
     if (info.owner ?? -1) != 0 {
         return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
     }
-    if (info.mode).bit_and(0o022) != 0 {
+    if (info.mode) & 0o022 != 0 {
         return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
     }
 }
@@ -449,7 +449,7 @@ store_broker_require_admin_public_dir: fn(path: String) StoreError! {
         return
     }
     info: files.stat(path)
-    if (info.mode).bit_and(0o005) != 0o005 {
+    if (info.mode) & 0o005 != 0o005 {
         return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
     }
 }
@@ -478,7 +478,7 @@ store_broker_ensure_private_dir: fn(path: String) StoreError! {
         return
     }
     info: files.stat(path)
-    if (info.mode).bit_and(0o077) != 0 {
+    if (info.mode) & 0o077 != 0 {
         if existed {
             return Err(store_broker_invalid("shared-store directory has insecure permissions"))
         }
@@ -491,7 +491,7 @@ store_broker_require_private_mode: fn(path: String, label: String) StoreError! {
         return
     }
     info: files.stat(path)
-    if (info.mode).bit_and(0o077) != 0 {
+    if (info.mode) & 0o077 != 0 {
         return Err(store_broker_invalid("{label} has insecure permissions"))
     }
 }
@@ -504,7 +504,7 @@ store_broker_require_safe_descriptor: fn(path: String, label: String) StoreError
     if info.is_symlink || !info.is_file {
         return Err(store_broker_invalid("{label} is not a regular file"))
     }
-    if sys.family() != "windows" && (info.mode).bit_and(0o022) != 0 {
+    if sys.family() != "windows" && (info.mode) & 0o022 != 0 {
         return Err(store_broker_invalid("{label} is writable by another user"))
     }
 }

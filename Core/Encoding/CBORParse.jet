@@ -22,7 +22,7 @@ bignum_bytes: fn(magnitude: Int) -> [U8] Never! {
     reversed := [U8]{}
     rest := magnitude
     loop rest > 0 {
-        reversed.push(U8{rest.bit_and(255)})
+        reversed.push(U8{rest & 255})
         rest = rest >> 8
     }
     out := [U8]{}
@@ -49,14 +49,12 @@ bignum_magnitude: fn(n: Int) -> Int Never! { if n >= 0 -> n else -> -(n + 1) }
 narrow_bits: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
     negative: bits < 0
     sign: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
-    exponent: (bits >> 52).bit_and(2047)
-    fraction: bits.bit_and(4503599627370495)
+    exponent: (bits >> 52) & 2047
+    fraction: bits & 4503599627370495
     max_exponent: (1 << exponent_bits) - 1
     if exponent == 2047 {
-        if fraction != 0 {
-            return Val((max_exponent << fraction_bits).bit_or((1 << (fraction_bits - 1))))
-        }
-        return Val(sign.bit_or((max_exponent << fraction_bits)))
+        if fraction != 0 -> return Val((max_exponent << fraction_bits) | (1 << (fraction_bits - 1)))
+        return Val(sign | (max_exponent << fraction_bits))
     }
     if exponent == 0 {
         if fraction == 0 -> return Val(sign)
@@ -70,13 +68,13 @@ narrow_bits: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never
     if target_exponent <= 0 {
         shift += 1 - target_exponent
         if shift > 52 + fraction_bits -> return None
-        significand = significand.bit_or(4503599627370496)
+        significand |= 4503599627370496
     }
     if shift >= 63 -> return None
-    if (significand.bit_and(((1 << shift) - 1))) != 0 -> return None
+    if (significand & ((1 << shift) - 1)) != 0 -> return None
     mantissa: significand >> shift
-    if target_exponent <= 0 -> return Val(sign.bit_or(mantissa))
-    Val(sign.bit_or((target_exponent << fraction_bits)).bit_or(mantissa))
+    if target_exponent <= 0 -> return Val(sign | mantissa)
+    Val(sign | (target_exponent << fraction_bits) | mantissa)
 }
 
 failure: fn(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CBORError Never! {
@@ -166,7 +164,7 @@ Parser: struct {
         }
         number := 0
         loop _ in 0..<width {
-            number = (number << 8).bit_or(Int{input[self.cursor]})
+            number = (number << 8) | Int{input[self.cursor]}
             self.cursor += 1
         }
         if self.options.require_canonical && ((additional == 24 && number < 24) || (additional == 25 && number <= 255) || (additional == 26 && number <= 65535) || (additional == 27 && number <= 4294967295)) {
@@ -195,10 +193,10 @@ Parser: struct {
                 head: Int{input[self.cursor]}
                 self.cursor += 1
                 self.count(chunk, path) ?? return Err(err)
-                if (head >> 5) != major || (head.bit_and(31)) == 31 {
+                if (head >> 5) != major || (head & 31) == 31 {
                     return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
                 }
-                length: self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
+                length: self.argument(input, head & 31, chunk, path) ?? return Err(err)
                 if length > input.len() - self.cursor {
                     return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
                 }
@@ -389,7 +387,7 @@ Parser: struct {
         loop i in 0..<width {
             byte: Int{input[self.cursor]}
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256 else {
-                bits = (bits << 8).bit_or(byte)
+                bits = (bits << 8) | byte
             }
             self.cursor += 1
         }
@@ -415,7 +413,7 @@ Parser: struct {
         self.cursor += 1
         self.count(start, path) ?? return Err(err)
         major: head >> 5
-        additional: head.bit_and(31)
+        additional: head & 31
         if major == 0 || major == 1 {
             number: self.argument(input, additional, start, path) ?? return Err(err)
             return Ok(Dyn.Int(if major == 0 -> number else -> -number - 1))
@@ -449,21 +447,21 @@ bytewise_before: fn(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool
 widen_float: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never! {
     sign: if (bits >> (exponent_bits + fraction_bits)) != 0 -> (-9223372036854775807 - 1) else -> 0
     maximum: (1 << exponent_bits) - 1
-    exponent: (bits >> fraction_bits).bit_and(maximum)
-    fraction: bits.bit_and(((1 << fraction_bits) - 1))
+    exponent: (bits >> fraction_bits) & maximum
+    fraction: bits & ((1 << fraction_bits) - 1)
     if exponent == maximum {
-        return math.from_bits(sign.bit_or((2047 << 52)).bit_or((fraction << (52 - fraction_bits))))
+        return math.from_bits(sign | (2047 << 52) | (fraction << (52 - fraction_bits)))
     }
     bias: (1 << (exponent_bits - 1)) - 1
     if exponent == 0 {
         if fraction == 0 -> return math.from_bits(sign)
         lead := fraction_bits - 1
-        loop 0 == (fraction.bit_and((1 << lead))) -> lead -= 1
+        loop 0 == (fraction & (1 << lead)) -> lead -= 1
         normal_exponent: 1 - bias - fraction_bits + lead
         mantissa: (fraction - (1 << lead)) << (52 - lead)
-        return math.from_bits(sign.bit_or(((normal_exponent + 1023) << 52)).bit_or(mantissa))
+        return math.from_bits(sign | ((normal_exponent + 1023) << 52) | mantissa)
     }
-    math.from_bits(sign.bit_or(((exponent - bias + 1023) << 52)).bit_or((fraction << (52 - fraction_bits))))
+    math.from_bits(sign | ((exponent - bias + 1023) << 52) | (fraction << (52 - fraction_bits)))
 }
 
 // The adapter and String.from_bytes share the validator,

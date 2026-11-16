@@ -392,7 +392,7 @@ ssl_tls13_populate_transform: fn(ssl: &ssldefs.SSLContext, tix: Int, endpoint: I
     }
     ssl.tpool[tix].cipher_enc = Val(enc)
     ssl.tpool[tix].cipher_dec = Val(dec)
-    taglen: if cs.flags.bit_and(suites.CIPHERSUITE_SHORT_TAG) != 0 -> 8 else -> 16
+    taglen: if cs.flags & suites.CIPHERSUITE_SHORT_TAG != 0 -> 8 else -> 16
     ssl.tpool[tix].taglen = taglen
     ssl.tpool[tix].ivlen = traffic_keys.iv_len
     ssl.tpool[tix].maclen = 0
@@ -504,7 +504,7 @@ ssl_tls13_ecdh_agree: fn<R: RNG>(ctx: &ecdh.ECDHContext, peer: [U8], rng: &R) ->
     // X alone on Montgomery ones.
     curve_bytes := peer.len()
     if ecp.group_type(ctx.grp) != .Montgomery {
-        if peer.len().bit_and(1) == 0 -> return Err(.BadInputData)
+        if peer.len() & 1 == 0 -> return Err(.BadInputData)
         curve_bytes = peer.len() /% 2
     }
     if curve_bytes != plen -> return Err(.BadInputData)

@@ -64,15 +64,15 @@ compiler_process_signal_name: fn(signal: I64) -> I64 {
 
 compiler_process_status_text: fn(status: I64) -> I64 {
     text: jet_rt_string_builder_new()
-    low: status.bit_and(I64{127})
+    low: status & I64{127}
     if (low == I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("exit status: "))
-        rt_text_push_number(text, (status >> I64{8}).bit_and(I64{255}))
+        rt_text_push_number(text, (status >> I64{8}) & I64{255})
     } else if (status == I64{65535}) {
         jet_rt_string_builder_push(text, rt_static_text("continued (WIFCONTINUED)"))
     } else {
-        stopped: (status.bit_and(I64{255})) == I64{127}
-        signal: if stopped -> (status >> I64{8}).bit_and(I64{255}) else -> low
+        stopped: (status & I64{255}) == I64{127}
+        signal: if stopped -> (status >> I64{8}) & I64{255} else -> low
         jet_rt_string_builder_push(text, if stopped -> rt_static_text("stopped (not terminated) by signal: ") else -> rt_static_text("signal: "))
         rt_text_push_number(text, signal)
         name: compiler_process_signal_name(signal)
@@ -81,7 +81,7 @@ compiler_process_status_text: fn(status: I64) -> I64 {
             jet_rt_string_builder_push(text, name)
             rt_text_push_word(text, I64{41}, I64{1})
         }
-        if (!stopped && (status.bit_and(I64{128})) != I64{0}) {
+        if (!stopped && (status & I64{128}) != I64{0}) {
             jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
         }
     }
@@ -255,14 +255,14 @@ host_image_part: fn(name: I64) -> I64 {
     loop index < count {
         row: wrapping(table + index * I64{56})
         index = wrapping(index + I64{1})
-        if (rt_text_word(row).bit_and(mask) != I64{4}) { next }
+        if (rt_text_word(row) & mask != I64{4}) { next }
         note: rt_text_word(wrapping(row + I64{16}))
         size: rt_text_word(wrapping(row + I64{32}))
         if (size < wrapping(I64{16} + label)) { next }
         head: rt_text_word(note)
         kind: rt_text_word(wrapping(note + I64{8}))
-        descriptor: (head >> I64{32}).bit_and(mask)
-        if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) {
+        descriptor: (head >> I64{32}) & mask
+        if (head & mask != I64{4} || kind & mask != HOST_NOTE_JET_PART || (kind >> I64{32}) & mask != HOST_NOTE_JET_OWNER) {
             next
         }
         if (descriptor < label || wrapping(I64{16} + descriptor) > size) { next }
@@ -280,7 +280,7 @@ host_image_part: fn(name: I64) -> I64 {
 host_image_part_length: fn(note: I64, name: I64) -> I64 {
     // `note` is a mapped part note host_image_part found; its first word holds
     // the descriptor size.
-    wrapping((rt_text_word(note) >> I64{32}).bit_and(I64{4294967295}) - host_image_part_label(name))
+    wrapping(((rt_text_word(note) >> I64{32}) & I64{4294967295}) - host_image_part_label(name))
 }
 
 // jet_sys_image_part_size_raw: the byte length of the part `name` the build

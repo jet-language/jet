@@ -1059,10 +1059,8 @@ CSVReader: struct<R: Reader> {
         if (n == 224 && second < 160) || (n == 237 && second > 159) || (n == 240 && second < 144) || (n == 244 && second > 143) {
             return Err(self.utf8_error(self.offset - width))
         }
-        value := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
-        loop i in 1..<width {
-            value = (value << 6).bit_or((Int{self.character_byte(i)}.bit_and(63)))
-        }
+        value := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
+        loop i in 1..<width -> value = (value << 6) | (Int{self.character_byte(i)} & 63)
         Ok(Val(value))
     }
 
@@ -1374,8 +1372,8 @@ reader: fn<R: Reader>(source: &&R, limits: EncodingLimits{EncodingLimits.safe()}
     if raw.len() != width || n == 34 || n == 13 || n == 10 {
         return Err(unsupported_error(EncodingFormat.CSV, 0, reason))
     }
-    code := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
-    loop i in 1..<width -> code = (code << 6).bit_or((Int{raw[i]}.bit_and(63)))
+    code := n & (if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7)
+    loop i in 1..<width -> code = (code << 6) | (Int{raw[i]} & 63)
     stops := [U8]{}
     loop b in 0..<256 {
         stops.push(if b >= 128 || b == 34 || b == 13 || b == 10 || b == code -> U8{1} else -> U8{0})

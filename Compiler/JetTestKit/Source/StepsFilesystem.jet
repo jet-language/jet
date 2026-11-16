@@ -152,7 +152,7 @@ kit_steps_setup_run: fn(step: KitStep, env: KitEnv, work: String, scratch: Strin
             if step.argv[4] == "hex" -> bytes[offset + index] = byte else {
                 a: Int{bytes[offset + index]}
                 b: Int{byte}
-                bytes[offset + index] = U8{a + b - 2 * a.bit_and(b)}
+                bytes[offset + index] = U8{a + b - 2 * (a & b)}
             }
         }
         files.write_bytes(path, bytes) ?? return kit_expect_verdict("ERROR", "poke write: {err}")

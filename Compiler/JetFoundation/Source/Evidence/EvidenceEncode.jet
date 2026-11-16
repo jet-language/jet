@@ -3,9 +3,7 @@
 // composes this encoder without decoder/Core JSON dependencies.
 
 evidence_put_number: fn(out: &[U8], value: U64, width: Int) Never! {
-    loop index in 0..<width {
-        out.push(U8{Int{(value >> ((width - index - 1) * 8)).bit_and(U64{255})}})
-    }
+    loop index in 0..<width { out.push(U8{Int{(value >> ((width - index - 1) * 8)) & U64{255}}}) }
 }
 
 evidence_put_string: fn(out: &[U8], text: String) EvidenceCodecError! {
@@ -64,7 +62,7 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCode
     out.push(U8{record.kind.to_int()})
     out.push(U8{record.producer.to_int()})
     out.push(U8{record.facet.to_int()})
-    out.push(U8{record.outcome.to_int().bit_or((evidence_expectation_code(record.expectation) * 128))})
+    out.push(U8{record.outcome.to_int() | (evidence_expectation_code(record.expectation) * 128)})
     out.push(U8{evidence_completeness_code(record.completeness)})
     evidence_put_number(out, record.count, 8)
     evidence_put_number(out, U64{Int{record.source.line}}, 4)

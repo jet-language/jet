@@ -159,16 +159,16 @@ utf8_text: fn(scalar: Int) -> String {
     out := [U8]{}
     if scalar < 128 -> out.push(U8{scalar}) else if scalar < 2048 {
         out.push(U8{192 + (scalar >> 6)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + (scalar & 63)})
     } else if scalar < 65536 {
         out.push(U8{224 + (scalar >> 12)})
-        out.push(U8{128 + (scalar >> 6).bit_and(63)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + ((scalar >> 6) & 63)})
+        out.push(U8{128 + (scalar & 63)})
     } else {
         out.push(U8{240 + (scalar >> 18)})
-        out.push(U8{128 + (scalar >> 12).bit_and(63)})
-        out.push(U8{128 + (scalar >> 6).bit_and(63)})
-        out.push(U8{128 + scalar.bit_and(63)})
+        out.push(U8{128 + ((scalar >> 12) & 63)})
+        out.push(U8{128 + ((scalar >> 6) & 63)})
+        out.push(U8{128 + (scalar & 63)})
     }
     String.from_bytes_lossy(out)
 }
@@ -244,7 +244,7 @@ parse_compose: fn(source: String, names: [String:Int], scalars: [Int:Int]) -> [N
 }
 
 push_be: fn(out: &[U8], value: Int, width: Int) {
-    loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
+    loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)) & 255})
 }
 
 // The XkbTables.jet line that embeds the data file `name` of DATA_DIRECTORY.

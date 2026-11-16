@@ -17,7 +17,7 @@ rt_text_push_debug_char: fn(target: I64, cp: I64) {
         else -> I64{-1}
     }
     if {
-        (short >= I64{0}) -> rt_text_push_word(target, I64{92}.bit_or(short << I64{8}), I64{2})
+        (short >= I64{0}) -> rt_text_push_word(target, I64{92} | short << I64{8}, I64{2})
         (cp < I64{32} || cp == I64{127} || (cp >= I64{128} && trap_debug_escaped(cp))) -> {
             rt_text_push_rust_unicode_escape(target, cp)
         }

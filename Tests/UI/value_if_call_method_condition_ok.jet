@@ -3,11 +3,11 @@
 word: fn(value: I64) -> I64 { value }
 
 low_byte_clear: fn(value: I64) -> I64 {
-    if (word(value).bit_and(I64{255})) == (I64{0}) -> { I64{0} } else -> { I64{1} }
+    if (word(value) & I64{255}) == (I64{0}) -> { I64{0} } else -> { I64{1} }
 }
 
 low_byte_clear_bool: fn(value: I64) -> Bool {
-    if (word(value).bit_and(I64{255})) == (I64{0}) -> true else -> false
+    if (word(value) & I64{255}) == (I64{0}) -> true else -> false
 }
 
 ones_clear: fn(value: I64) -> I64 {
@@ -15,11 +15,11 @@ ones_clear: fn(value: I64) -> I64 {
 }
 
 matches_word: fn(value: I64) -> I64 {
-    if (word(value).bit_and(I64{255})) == word(value) -> I64{0} else -> I64{1}
+    if (word(value) & I64{255}) == word(value) -> I64{0} else -> I64{1}
 }
 
 low_byte_clear_and: fn(value: I64, enabled: Bool) -> I64 {
-    if (word(value).bit_and(I64{255})) == (I64{0}) && enabled -> I64{0} else -> I64{1}
+    if (word(value) & I64{255}) == (I64{0}) && enabled -> I64{0} else -> I64{1}
 }
 
 run: fn() {

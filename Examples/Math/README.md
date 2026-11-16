@@ -7,7 +7,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 ## Lessons
 
 - [ApproxIntoFloat](ApproxIntoFloat.jet) — A whole number that meets a Float converts with an exact check, so a value no Float holds stops.
-- [BitNot](BitNot.jet) — Integer bit_not flips bits; !
+- [BitNot](BitNot.jet) — Integer `~` flips bits; `!` only negates Bool.
 - [Combinatorics](Combinatorics.jet) — core.math.combinatorics generates over any element type; list methods cover the sequence work.
 - [Constants](Constants/) — core.math constants: PI, E, TAU, INFINITY and NAN are comptime values, read as `math.PI`, never called.
 - [Decimal](Decimal.jet) — Decimal literals use exact base-10 arithmetic.
@@ -39,7 +39,7 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [Roots](Roots.jet) — The nth root of x and (1 + x)^n for a whole n, correctly rounded: the same bits on every tier, exact roots exact, and 1 + x never rounded first.
 - [Spaceship](Spaceship.jet) — Primitive `<=>`, Ordering combinators, and a user comparator.
 - [TypedAbs](TypedAbs.jet)
-- [XorOperator](XorOperator.jet) — Bitwise exclusive-or: infix `~|` keeps a bit where exactly one side has it — the exclusive variant of `|`.
+- [XorOperator](XorOperator.jet) — Bitwise exclusive-or: infix `~` keeps a bit where exactly one side has it — the exclusive variant of `|`.
 
 ## Compute
 

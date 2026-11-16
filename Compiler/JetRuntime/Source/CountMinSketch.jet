@@ -2,16 +2,16 @@
 // preserve seed Arc<Mutex> sharing, NOT snapshots. ONE lock for each row
 // operation.
 cms_u32: fn(address: I64) -> I64 {
-    rt_text_byte(address).bit_or((rt_text_byte(wrapping(address + I64{1})) << I64{8})).bit_or((rt_text_byte(wrapping(address + I64{2})) << I64{16})).bit_or((rt_text_byte(wrapping(address + I64{3})) << I64{24}))
+    rt_text_byte(address) | (rt_text_byte(wrapping(address + I64{1})) << I64{8}) | (rt_text_byte(wrapping(address + I64{2})) << I64{16}) | (rt_text_byte(wrapping(address + I64{3})) << I64{24})
 }
 
 // The caller holds this native CMS mutex and owns the initialized four-byte
 // counter.
 cms_put_u32: fn(address: I64, value: I64) {
-    rt_text_put(address, value.bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{1}), (value >> I64{8}).bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{2}), (value >> I64{16}).bit_and(I64{255}))
-    rt_text_put(wrapping(address + I64{3}), (value >> I64{24}).bit_and(I64{255}))
+    rt_text_put(address, value & I64{255})
+    rt_text_put(wrapping(address + I64{1}), (value >> I64{8}) & I64{255})
+    rt_text_put(wrapping(address + I64{2}), (value >> I64{16}) & I64{255})
+    rt_text_put(wrapping(address + I64{3}), (value >> I64{24}) & I64{255})
 }
 
 cms_hash: fn(text: I64, initial: I64) -> I64 {
@@ -20,7 +20,7 @@ cms_hash: fn(text: I64, initial: I64) -> I64 {
     length: rt_text_len(text)
     at := I64{0}
     loop at < length {
-        hash = wrapping((hash.bit_xor(rt_text_byte(wrapping(data + at)))) * I64{1099511628211})
+        hash = wrapping((hash ~ rt_text_byte(wrapping(data + at))) * I64{1099511628211})
         at += I64{1}
     }
     hash
@@ -60,7 +60,7 @@ cms_hash: fn(text: I64, initial: I64) -> I64 {
     sync_mutex_lock(wrapping(value + CMS_MUTEX))
     row := I64{0}
     loop row < CMS_ROWS {
-        column: wrapping(first + wrapping(second * (row + I64{1}))).bit_and(I64{255})
+        column: wrapping(first + wrapping(second * (row + I64{1}))) & I64{255}
         address: wrapping(wrapping(value + CMS_DATA) + (row * CMS_COLUMNS + column) * CMS_COUNTER_BYTES)
         count: cms_u32(address)
         if (count < I64{4294967295}) { cms_put_u32(address, count + I64{1}) }
@@ -76,7 +76,7 @@ cms_hash: fn(text: I64, initial: I64) -> I64 {
     least := I64{4294967295}
     row := I64{0}
     loop row < CMS_ROWS {
-        column: wrapping(first + wrapping(second * (row + I64{1}))).bit_and(I64{255})
+        column: wrapping(first + wrapping(second * (row + I64{1}))) & I64{255}
         count: cms_u32(wrapping(wrapping(value + CMS_DATA) + (row * CMS_COLUMNS + column) * CMS_COUNTER_BYTES))
         if (count < least) { least = count }
         row += I64{1}

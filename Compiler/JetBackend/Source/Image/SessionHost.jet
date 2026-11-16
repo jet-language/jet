@@ -168,7 +168,7 @@ x64_comptime_pipe: fn(scratch: Int) -> [Int] {
     if os_failed(result) -> return [Int]{}
     packed: os_load_word(scratch)
     ends := [Int]{}
-    lows: [Int]{packed.bit_and(4294967295), (packed >> 32).bit_and(4294967295)}
+    lows: [Int]{packed & 4294967295, (packed >> 32) & 4294967295}
     loop low in lows {
         // F_DUPFD_CLOEXEC above every descriptor the child is given.
         high := 0
@@ -239,9 +239,9 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
         // pollfd {fd: i32, events: POLLIN, revents}; a closed (-1) output is skipped.
         ready := 0
         #Unsafe("the poll set is our scratch page's first three entries, which poll reads and writes; the clock words lie past them") {
-            os_store_word(poll, child.reply.bit_and(4294967295).bit_or(1 << 32))
-            os_store_word(poll + 8, child.output.bit_and(4294967295).bit_or(1 << 32))
-            os_store_word(poll + 16, child.errors.bit_and(4294967295).bit_or(1 << 32))
+            os_store_word(poll, child.reply & 4294967295 | 1 << 32)
+            os_store_word(poll + 8, child.output & 4294967295 | 1 << 32)
+            os_store_word(poll + 16, child.errors & 4294967295 | 1 << 32)
             started: x64_comptime_clock(child.scratch)
             ready = os_syscall(7, poll, 3, child.budget, 0, 0, 0)
             if child.budget >= 0 {
@@ -262,9 +262,7 @@ x64_comptime_receive_bytes: fn(child: &X64ComptimeChild, count: Int) -> [U8]? {
         }
         events := [Int]{}
         #Unsafe("poll wrote the entries' returned events") {
-            loop index in 0..<3 {
-                events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
-            }
+            loop index in 0..<3 { events.push((os_load_word(poll + 8 * index) >> 48) & 65535) }
         }
         if events[1] != 0 -> _ := x64_comptime_drain(child, false)
         if events[2] != 0 -> _ := x64_comptime_drain(child, true)
@@ -293,8 +291,8 @@ x64_comptime_settle: fn(child: &X64ComptimeChild) {
     poll: child.scratch
     loop {
         #Unsafe("the poll set is our scratch page's first two entries") {
-            os_store_word(poll, child.output.bit_and(4294967295).bit_or(1 << 32))
-            os_store_word(poll + 8, child.errors.bit_and(4294967295).bit_or(1 << 32))
+            os_store_word(poll, child.output & 4294967295 | 1 << 32)
+            os_store_word(poll + 8, child.errors & 4294967295 | 1 << 32)
         }
         ready := 0
         #Unsafe("poll reads and writes the two entries of our scratch page") {
@@ -306,9 +304,7 @@ x64_comptime_settle: fn(child: &X64ComptimeChild) {
         }
         events := [Int]{}
         #Unsafe("poll wrote the entries' returned events") {
-            loop index in 0..<2 {
-                events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
-            }
+            loop index in 0..<2 { events.push((os_load_word(poll + 8 * index) >> 48) & 65535) }
         }
         if events[0] != 0 -> _ := x64_comptime_drain(child, false)
         if events[1] != 0 -> _ := x64_comptime_drain(child, true)
@@ -375,7 +371,7 @@ x64_comptime_reap: fn(child: &X64ComptimeChild, kill: Bool) {
         if result != -4 -> break
     }
     #Unsafe("wait4 wrote the status word") {
-        child.status = if result == child.pid -> os_load_word(child.scratch + 80).bit_and(4294967295) else -> 0
+        child.status = if result == child.pid -> os_load_word(child.scratch + 80) & 4294967295 else -> 0
     }
     child.pid = 0
     x64_comptime_close_fd(child.command)
@@ -465,9 +461,9 @@ x64_comptime_load: fn(child: &X64ComptimeChild, code: X64ComptimeCode) -> String
         }
         // PF_X, PF_W, PF_R to PROT_EXEC, PROT_WRITE, PROT_READ.
         protection := 0
-        if segment.flags.bit_and(1) != 0 -> protection += 4
-        if segment.flags.bit_and(2) != 0 -> protection += 2
-        if segment.flags.bit_and(4) != 0 -> protection += 1
+        if segment.flags & 1 != 0 -> protection += 4
+        if segment.flags & 2 != 0 -> protection += 2
+        if segment.flags & 4 != 0 -> protection += 1
         protected: x64_comptime_ask(child, X64_COMPTIME_PROTECT, [Int]{low, end - low, protection}) ?? return x64_comptime_end_text(child, "while its code loaded")
         if protected != 0 {
             return "the comptime child couldn't protect its code at {low} ({protected})"
@@ -589,7 +585,7 @@ x64_comptime_functions: fn(header: [U8], file: [U8], file_at: Int, symbols: Name
             entry: offset + symbol * entry_size
             if entry + 24 > file.len() -> break
             // STT_FUNC
-            if (Int{file[entry + 4]}).bit_and(15) != 2 -> next
+            if (Int{file[entry + 4]}) & 15 != 2 -> next
             at: strings + x64_comptime_unsigned(file, entry, 4)
             end := at
             loop end < file.len() && file[end] != (U8{0}) -> end += 1

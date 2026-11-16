@@ -228,16 +228,14 @@ LoaderPlan: struct {
     failure: String
 }
 
-loader_u16: fn(bytes: [U8], at: Int) -> Int Never! {
-    Int{bytes[at]}.bit_or(Int{bytes[at + 1]} << 8)
-}
+loader_u16: fn(bytes: [U8], at: Int) -> Int Never! { Int{bytes[at]} | Int{bytes[at + 1]} << 8 }
 
 loader_u32: fn(bytes: [U8], at: Int) -> Int Never! {
-    loader_u16(bytes, at).bit_or(loader_u16(bytes, at + 2) << 16)
+    loader_u16(bytes, at) | loader_u16(bytes, at + 2) << 16
 }
 
 loader_u64: fn(bytes: [U8], at: Int) -> Int Never! {
-    loader_u32(bytes, at).bit_or(loader_u32(bytes, at + 4) << 32)
+    loader_u32(bytes, at) | loader_u32(bytes, at + 4) << 32
 }
 
 loader_hex: fn(value: Int) -> String Never! {
@@ -245,7 +243,7 @@ loader_hex: fn(value: Int) -> String Never! {
     text := ""
     rest := value
     loop {
-        text = "{String.from_bytes([U8]{digits[rest.bit_and(15)]}) ?? ""}{text}"
+        text = "{String.from_bytes([U8]{digits[rest & 15]}) ?? ""}{text}"
         rest = rest >> 4
         if rest == 0 -> break
     }
@@ -383,7 +381,7 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
         if segment.vaddr % OS_PAGE_SIZE != segment.offset % OS_PAGE_SIZE || segment.file_size > segment.memory_size || segment.offset + segment.file_size > size {
             return loader_segments_failed("PT_LOAD {k} of the image is malformed")
         }
-        if segment.flags.bit_and(3) == 3 {
+        if segment.flags & 3 == 3 {
             return loader_segments_failed("PT_LOAD at {loader_hex(segment.vaddr)} is writable and executable")
         }
         start: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
@@ -405,9 +403,9 @@ loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64S
 loader_hex_push: fn(out: &[U8], value: Int) Never! {
     digits: "0123456789abcdef".bytes()
     shift := 60
-    loop shift > 0 && (value >> shift).bit_and(15) == 0 -> shift -= 4
+    loop shift > 0 && (value >> shift) & 15 == 0 -> shift -= 4
     loop shift >= 0 {
-        out.push(digits[(value >> shift).bit_and(15)])
+        out.push(digits[(value >> shift) & 15])
         shift -= 4
     }
 }
@@ -445,7 +443,7 @@ x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
         loop s in 0..<symbols_size /% 24 {
             symbol: symbols + s * 24
             // STT_FUNC
-            if (Int{bytes[symbol + 4]}).bit_and(15) != 2 -> next
+            if (Int{bytes[symbol + 4]}) & 15 != 2 -> next
             value: loader_u64(bytes, symbol + 8)
             length: loader_u64(bytes, symbol + 16)
             name := names + loader_u32(bytes, symbol)
@@ -599,13 +597,13 @@ loader_protect: fn(plan: X64Segments) -> String {
         start: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
         end: os_page_round(segment.vaddr + segment.memory_size)
         protection := 0
-        if segment.flags.bit_and(4) != 0 -> protection += OS_PROT_READ
-        if segment.flags.bit_and(2) != 0 -> protection += OS_PROT_WRITE
-        if segment.flags.bit_and(1) != 0 -> protection += OS_PROT_EXEC
+        if segment.flags & 4 != 0 -> protection += OS_PROT_READ
+        if segment.flags & 2 != 0 -> protection += OS_PROT_WRITE
+        if segment.flags & 1 != 0 -> protection += OS_PROT_EXEC
         if protection == OS_PROT_READ + OS_PROT_WRITE -> next
         result: os_protect(start, end - start, protection)
         if os_failed(result) {
-            return if protection.bit_and(OS_PROT_EXEC) != 0 -> "executable memory was refused (errno {-result})" else -> "protecting the image failed (errno {-result})"
+            return if protection & OS_PROT_EXEC != 0 -> "executable memory was refused (errno {-result})" else -> "protecting the image failed (errno {-result})"
         }
     }
     ""
@@ -1421,7 +1419,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
             #Unsafe("F_GETFD only reads the descriptor's flags") {
                 flags = os_syscall(OS_SYS_FCNTL, fd, 1, 0, 0, 0, 0)
             }
-            if !os_failed(flags) && flags.bit_and(1) != 0 {
+            if !os_failed(flags) && flags & 1 != 0 {
                 loader_record(rows, OS_SYS_CLOSE, fd, 0, 0, 0, 0, 0, 0)
             }
         }
@@ -1744,7 +1742,7 @@ x64_process_wait: fn(pid: Int) -> Int {
     result := -OS_EINTR
     #Unsafe("wait4 writes one int status to the fresh page") {
         loop result == -OS_EINTR -> result = os_syscall(OS_SYS_WAIT4, pid, word, 0, 0, 0, 0)
-        if result == pid -> result = os_load_word(word).bit_and(0xffffffff)
+        if result == pid -> result = os_load_word(word) & 0xffffffff
     }
     _ := os_unmap(word, 8)
     result
@@ -1777,8 +1775,8 @@ x64_process_wait_foreground: fn(pid: Int) -> Int {
 // same exit code, or death by the same signal. Returns the shell's code
 // (128 + signal) only if the signal doesn't end the process.
 x64_process_mirror: fn(status: Int) -> Int {
-    signal: status.bit_and(0x7f)
-    if signal == 0 -> return (status >> 8).bit_and(0xff)
+    signal: status & 0x7f
+    if signal == 0 -> return (status >> 8) & 0xff
     page: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)
     if !os_failed(page) {
         #Unsafe("a zeroed kernel sigaction (SIG_DFL) and an empty signal set on a fresh page") {
@@ -1992,8 +1990,8 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
         pair = os_syscall(OS_SYS_SOCKETPAIR, LOADER_SOCKET_UNIX, LOADER_SOCKET_STREAM_CLOEXEC, 0, scratch + LOADER_TRACE_WORD, 0, 0)
         if !os_failed(pair) {
             ends: Int{os_load_i64(I64{scratch + LOADER_TRACE_WORD})}
-            trace.channel = ends.bit_and(0xffffffff)
-            theirs = (ends >> 32).bit_and(0xffffffff)
+            trace.channel = ends & 0xffffffff
+            theirs = (ends >> 32) & 0xffffffff
         }
     }
     out: loader_open_as(output, OS_O_APPEND_CLOEXEC)
@@ -2075,9 +2073,9 @@ x64_trace_spawn: fn(path: String, argv: [String], output: String) -> X64Trace {
     trace.pid = pid
     // The kernel stops the program with SIGTRAP once execve has replaced it.
     status: x64_trace_wait(trace)
-    if status.bit_and(0xff) != 0x7f || (status >> 8).bit_and(0xff) != 5 {
+    if status & 0xff != 0x7f || (status >> 8) & 0xff != 5 {
         trace.pid = -1
-        trace.failure = if status.bit_and(0x7f) == 0 && (status >> 8).bit_and(0xff) == 127 -> "execve of {path} failed" else -> "the program ended before it started (wait status {status})"
+        trace.failure = if status & 0x7f == 0 && (status >> 8) & 0xff == 127 -> "execve of {path} failed" else -> "the program ended before it started (wait status {status})"
         return trace
     }
     #Unsafe("PTRACE_SETOPTIONS on the helper's own stopped tracee") {
@@ -2135,7 +2133,7 @@ x64_trace_wait: fn(trace: X64Trace) -> Int {
             result = x64_trace_call(trace, OS_SYS_WAIT4, trace.pid, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL, 0, 0, 0)
         }
         if result == trace.pid {
-            result = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})}.bit_and(0xffffffff)
+            result = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
         }
     }
     result
@@ -2242,7 +2240,7 @@ x64_trace_close: fn(trace: &X64Trace) {
         // The kill ends a stopped tracee too; the helper reaps it.
         loop {
             status: x64_trace_wait(trace)
-            if status < 0 || status.bit_and(0xff) != 0x7f -> break
+            if status < 0 || status & 0xff != 0x7f -> break
         }
         trace.pid = -1
     }

@@ -1219,6 +1219,7 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
+    table_blob_known<K, T>(table, guard.value.store)
     if app.live_reads.running() -> db_live_watch(guard.value, table.state, table.name)
     every: "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\""
     if filter.len() == 0 -> return table_read(guard.value.driver, table.name, every, values, None)
@@ -1299,7 +1300,7 @@ priv table_judge: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
 // `add` (replace false) and `put` (replace true): creates the table on its
 // first write, then inserts the row's storage encoding under its key columns,
 // with its field columns (`table_fields`).
-priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, replace: Bool) -[DB.Write]> T DBError! {
+priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, replace: Bool) -[DB.Read, DB.Write]> T DBError! {
     key: table.key_of(row.copy())
     cells: table_cells(table.name, key.encode()) ?? return Err(err)
     stored: row.encode_stored()
@@ -1314,6 +1315,7 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, table.state, call) ?? return Err(err)
+    table_blob_known<K, T>(table, guard.value.store)
     _: __driver_execute(guard.value.driver, "CREATE TABLE IF NOT EXISTS \"{table.name}\" ({names}, {TABLE_ROW_COLUMN} TEXT NOT NULL{created.join("")}, PRIMARY KEY ({names}))", [DBValue]{}) ?? return Err(err)
     kept: table_columns(guard.value.driver, table.name, fields) ?? return Err(err)
     held: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
@@ -1333,6 +1335,33 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({columns.join(", ")}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
     guard.value.wrote(table.name, Val(changed))
     Ok(row)
+}
+
+// Once a blob store is made (app.blobs), gives app the blob reader of
+// `table`, in the store `store`, so that a blob's GET runs the read policy
+// of a row that holds the blob's id (`table_blob_read`).
+priv table_blob_known: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, store: String) Never! {
+    guarded: table.policy == .Val(_)
+    if !app.__blob_reader_wanted(store, table.name, guarded) {
+        return
+    }
+    held: table.again()
+    app.__blob_reader(store, table.name, guarded, fn(id: String) { table_blob_read<K, T>(held, id) })
+}
+
+// For the blob `id`: 1 when a row of `table` holds it and the row's read
+// policy admits the caller, 0 when rows hold it and none admits the caller,
+// and -1 when no row holds it or the table can't be read. A row holds the id
+// when its stored text has it, in any field.
+priv table_blob_read: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, id: String) -[DB.Read]> Int Never! {
+    rows: table_rows<K, T>(table, "instr({TABLE_ROW_COLUMN}, ?) > 0", [DBValue]{.Text(id.copy())}, None) ?? return -1
+    if rows.len() == 0 -> return -1
+    loop stored in rows {
+        row: table_decode<T>(stored) ?? next
+        allowed: table_allows<K, T>(table, row, Op.Read) ?? next
+        if allowed -> return 1
+    }
+    0
 }
 
 // The stored row's field columns, which a filter written as SQL compares
@@ -2882,7 +2911,7 @@ migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DB
 priv fnv_offset: fn() -> U64 Never! { U64{14695981039346656037} }
 
 priv fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! {
-    wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
+    wrapping((hash ~ U64{byte}) * U64{1099511628211})
 }
 
 priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
@@ -2890,7 +2919,7 @@ priv hash_field: fn(hash: U64, value: String) -> U64 Never! {
     out := hash
     length := bytes.len()
     loop _ in 0..<8 {
-        out = fnv_byte(out, length.bit_and(255))
+        out = fnv_byte(out, length & 255)
         length = length >> 8
     }
     loop byte in bytes -> out = fnv_byte(out, Int{byte})
@@ -2930,7 +2959,7 @@ priv hex16: fn(hash: U64) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
+        nibble: Int{(hash >> (60 - index * 4)) & U64{15}}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
@@ -3456,7 +3485,7 @@ prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
     prepared: prep.prepare_v3(driver.database, text, 1)
     if prepared.rc != base.OK {
         failure := error(driver)
-        primary: prepared.rc.bit_and(255)
+        primary: prepared.rc & 255
         // rusqlite: only Unknown primary errors (outside 2..26) acquire
         // modern_sqlite's SQL/offset diagnostic suffix.
         if primary < 2 || primary > 26 {

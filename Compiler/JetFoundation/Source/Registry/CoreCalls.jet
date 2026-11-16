@@ -102,12 +102,12 @@ CoreCallRecord: struct {
     frame_accesses: [CoreCallResourceAccess]
     frame_completion: CoreCallCompletion?
     fallibility: CoreCallFallibility
-    // The effect root the call has (`FS`, `DB`): a machine effect or a Core
-    // service effect, named as EFFECT_VOCABULARY_ROOTS names it.
-    effect_kind: String?
+    // An adapter row's effects (`Net`, `Time.Wait`), named as
+    // EFFECT_VOCABULARY_ROOTS names them: a root, unless one of its leaves
+    // refines it, and each leaf. A source-owned row carries none: its effects
+    // are its Core declaration's row.
+    effects: [String]
     capability: CoreCapabilityContract
-    effect_leaf: String?
-    sink_class: SinkClass?
     pure_route: CoreCallPureRoute
     symbol: CoreCallSymbol
     // Optional checked Jet export name after special-call normalization.
@@ -141,7 +141,7 @@ core_call_one_of: fn(value: String, choices: [String]) -> Bool Never! {
 }
 
 core_call_coverage_contains: fn(coverage: CoreCallCoverage, projection: Int) -> Bool Never! {
-    coverage.bits.bit_and(projection) == projection
+    coverage.bits & projection == projection
 }
 
 core_call_source_member: fn(row: CoreCallRecord) -> String? Never! {
@@ -161,7 +161,15 @@ core_call_authority_boundary_at: fn(row: CoreCallRecord, index: Int) -> Bool Nev
     assert_eq(core_call_authority_boundary_at(row, 2), false)
     wire: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
     assert_eq(core_call_authority_boundary_at(wire, 1), false)
-    assert_eq(wire.effect_kind, None)
+    assert_eq(wire.effects.len(), 0)
+}
+
+#Test("a source-owned row carries no effects of its own") {
+    loop row in CORE_CALLS {
+        if row.symbol == CoreCallSymbol.SourceOwned && row.effects.len() > 0 {
+            panic("{core_call_key(row)} is source-owned but carries effects {row.effects.join(", ")}")
+        }
+    }
 }
 
 core_call_is_receiver: fn(row: CoreCallRecord) -> Bool Never! { row.receiver_types.len() > 0 }

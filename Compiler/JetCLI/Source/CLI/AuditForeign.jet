@@ -66,7 +66,7 @@ JetCLIForeignAudit: struct {
 jet_cli_elf_field: fn(bytes: [U8], at: Int, width: Int) -> Int? Never! {
     if at < 0 || width < 1 || at + width > bytes.len() -> return None
     value := 0
-    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
+    loop k in 0..<width -> value |= Int{bytes[at + k]} << (8 * k)
     Val(value)
 }
 
@@ -281,7 +281,7 @@ jet_cli_audit_foreign: fn(file: String, source: String, color: Bool, json: Bool)
 
 // Writes the little-endian `width`-byte `value` at `at` of `bytes`.
 jet_cli_elf_test_put: fn(bytes: &[U8], at: Int, width: Int, value: Int) Never! {
-    loop k in 0..<width -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    loop k in 0..<width -> bytes[at + k] = U8{(value >> (8 * k)) & 255}
 }
 
 // A little-endian ELF64 image of `size` zero bytes with an ELF header and,

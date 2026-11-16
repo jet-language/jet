@@ -64,7 +64,11 @@ INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, St
     if core_json.exit_code != 0 || !core_json.stdout.contains("\"root_types\":") || !core_json.stdout.contains("\"type_exports\":") {
         panic("canonical Core projection")
     }
-    if !core_json.stdout.contains("\"calls\":[{{\"module\":\"") || !core_json.stdout.contains("\"effect_leaf\":") {
-        panic("the Core call records' effect fields")
+    if !core_json.stdout.contains("\"calls\":[{{\"module\":\"") || !core_json.stdout.contains("\"effects\":[") {
+        panic("the Core call records' effects")
+    }
+    // A source-owned row lists the effects its Core declaration writes.
+    if !core_json.stdout.contains("{{\"module\":\"core.jobs\",\"member\":\"queue\",\"effects\":[\"DB\",\"Env\",\"FS\",\"Rand\",\"Time\"],") {
+        panic("jobs.queue's declared effects")
     }
 }

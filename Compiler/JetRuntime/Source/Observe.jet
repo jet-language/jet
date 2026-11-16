@@ -49,9 +49,9 @@ OBSERVE_TASK_SLOTS: I64{8192}
 
 observe_task_slot: fn(table: I64, at: I64) -> I64 { wrapping(table + at * I64{8}) }
 
-observe_task_next_slot: fn(at: I64) -> I64 { (at + I64{1}).bit_and(OBSERVE_TASK_SLOTS - I64{1}) }
+observe_task_next_slot: fn(at: I64) -> I64 { (at + I64{1}) & OBSERVE_TASK_SLOTS - I64{1} }
 
-observe_task_home: fn(id: I64) -> I64 { id.bit_and(OBSERVE_TASK_SLOTS - I64{1}) }
+observe_task_home: fn(id: I64) -> I64 { id & OBSERVE_TASK_SLOTS - I64{1} }
 
 observe_task_find: fn(id: I64) -> I64 {
     table: sync_load(wrapping(observe_root + I64{128}))
@@ -123,7 +123,7 @@ observe_decimal_unsigned: fn(builder: I64, word: I64) {
     quotient := I64{0}
     remainder := I64{0}
     if (word < I64{0}) {
-        low: word.bit_and(I64{9223372036854775807})
+        low: word & I64{9223372036854775807}
         quotient = low /% I64{10} + I64{922337203685477580}
         remainder = low % I64{10} + I64{8}
         if (remainder >= I64{10}) {

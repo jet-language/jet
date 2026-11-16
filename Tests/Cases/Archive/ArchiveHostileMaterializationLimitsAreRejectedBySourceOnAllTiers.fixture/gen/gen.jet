@@ -10,7 +10,7 @@ BitWriter: struct {
 }
 
 byte: fn(n: Int) -> U8 Never! {
-    v: n.bit_and(255)
+    v: n & 255
     U8{v}
 }
 
@@ -37,9 +37,9 @@ repeated: fn(b: Int, count: Int) -> [U8] Never! {
 bits_write: fn(bits: &BitWriter, value: Int, count: Int) Never! {
     loop offset in 0..<count {
         if bits.bit == 0 -> bits.bytes.push(U8{0})
-        if (value >> offset).bit_and(1) != 0 {
+        if (value >> offset) & 1 != 0 {
             last: bits.bytes.len() - 1
-            bits.bytes[last] = byte(int(bits.bytes[last]).bit_or(1 << bits.bit))
+            bits.bytes[last] = byte(int(bits.bytes[last]) | 1 << bits.bit)
         }
         bits.bit = (bits.bit + 1) % 8
     }
@@ -49,7 +49,7 @@ reverse_bits: fn(code: Int, count: Int) -> Int Never! {
     c := code
     reversed := 0
     loop _ in 0..<count {
-        reversed = (reversed << 1).bit_or(c.bit_and(1))
+        reversed = (reversed << 1) | c & 1
         c = c >> 1
     }
     reversed
@@ -80,13 +80,13 @@ crc32_repeated: fn(b: Int, length: Int) -> Int Never! {
     loop index in 0..<256 {
         crc := index
         loop _ in 0..<8 {
-            if crc.bit_and(1) != 0 -> crc = (crc >> 1).bit_xor(0xedb88320) else -> crc = crc >> 1
+            if crc & 1 != 0 -> crc = (crc >> 1) ~ 0xedb88320 else -> crc = crc >> 1
         }
         table.push(crc)
     }
     crc := 0xffffffff
-    loop _ in 0..<length -> crc = (crc >> 8).bit_xor(table[crc.bit_and(255).bit_xor(b)])
-    crc.bit_xor(0xffffffff)
+    loop _ in 0..<length -> crc = (crc >> 8) ~ table[crc & 255 ~ b]
+    crc ~ 0xffffffff
 }
 
 // A compact fixed-DEFLATE stream that expands through the shared codec cap.
@@ -123,7 +123,7 @@ zstd_rle_frame: fn(output_len: Int, b: Int) -> [U8] Never! {
     loop remaining > 0 {
         block: if remaining < 131072 -> remaining else -> 131072
         last: if block == remaining -> 1 else -> 0
-        header: (block << 3).bit_or(2).bit_or(last)
+        header: (block << 3) | 2 | last
         frame.push(byte(header))
         frame.push(byte(header >> 8))
         frame.push(byte(header >> 16))
@@ -194,7 +194,7 @@ gzip_body: fn(gzip: [U8]) -> [U8] Never! {
 
 gzip_crc: fn(gzip: [U8]) -> Int Never! {
     n: gzip.len()
-    int(gzip[n - 8]).bit_or(int(gzip[n - 7]) << 8).bit_or(int(gzip[n - 6]) << 16).bit_or(int(gzip[n - 5]) << 24)
+    int(gzip[n - 8]) | int(gzip[n - 7]) << 8 | int(gzip[n - 6]) << 16 | int(gzip[n - 5]) << 24
 }
 
 tar_bomb_octal: fn(header: &[U8], start: Int, width: Int, value: Int) Never! {
@@ -203,7 +203,7 @@ tar_bomb_octal: fn(header: &[U8], start: Int, width: Int, value: Int) Never! {
     header[start + width - 1] = U8{0}
     index := start + width - 2
     loop n > 0 {
-        header[index] = byte(48 + n.bit_and(7))
+        header[index] = byte(48 + (n & 7))
         n = n >> 3
         index -= 1
     }
@@ -224,7 +224,7 @@ append_tar_bomb_record: fn(output: &[U8], name: [U8], payload: [U8], kind: Int) 
     checksum := 0
     loop item in header -> checksum += int(item)
     // format!("{checksum:06o}"), last six digits.
-    loop k in 0..<6 -> header[153 - k] = byte(48 + (checksum >> (3 * k)).bit_and(7))
+    loop k in 0..<6 -> header[153 - k] = byte(48 + ((checksum >> (3 * k)) & 7))
     header[154] = U8{0}
     loop item in header -> output.push(item)
     loop item in payload -> output.push(item)

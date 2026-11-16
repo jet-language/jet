@@ -49,9 +49,9 @@ impl Seeded {
     next: fn(&self) -> Int {
         self.state = wrapping(self.state + U32{1831565813})
         t := self.state
-        t = wrapping(t.bit_xor(t >> 15) * t.bit_or(U32{1}))
-        t = t.bit_xor(wrapping(t + wrapping(t.bit_xor(t >> 7) * t.bit_or(U32{61}))))
-        Int{t.bit_xor(t >> 14)}
+        t = wrapping((t ~ t >> 15) * (t | U32{1}))
+        t ~= wrapping(t + wrapping((t ~ t >> 7) * (t | U32{61})))
+        Int{t ~ t >> 14}
     }
 
     int: fn(&self, lo: Int, hi: Int) -> Int {

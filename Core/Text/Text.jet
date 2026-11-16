@@ -464,9 +464,9 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
             next
         }
         cp := 0
-        if width == 2 -> cp = (first).bit_and(31)
-        if width == 3 -> cp = (first).bit_and(15)
-        if width == 4 -> cp = (first).bit_and(7)
+        if width == 2 -> cp = (first) & 31
+        if width == 3 -> cp = (first) & 15
+        if width == 4 -> cp = (first) & 7
         valid := true
         k := 1
         loop k < width {
@@ -475,7 +475,7 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
                 valid = false
                 break
             }
-            cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
+            cp = ((cp << 6)) | ((byte) & 63)
             k += 1
         }
         if !valid {
@@ -540,15 +540,15 @@ unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
     first: Int{raw[at]}
     if first < 128 -> return (cp: first, end: at + 1)
     width := 2
-    cp := first.bit_and(31)
+    cp := first & 31
     if first >= 240 {
         width = 4
-        cp = first.bit_and(7)
+        cp = first & 7
     } else if first >= 224 {
         width = 3
-        cp = first.bit_and(15)
+        cp = first & 15
     }
-    loop offset in 1..<width -> cp = (cp << 6).bit_or((Int{raw[at + offset]}.bit_and(63)))
+    loop offset in 1..<width -> cp = (cp << 6) | (Int{raw[at + offset]} & 63)
     (cp: cp, end: at + width)
 }
 
@@ -1011,7 +1011,7 @@ SB_CLOSE: 14
 // Tables are checksum-verified and round-tripped by the generator, not decoded
 // into another allocation at startup. Header size is 40 bytes.
 segment_uint: fn(table: View<U8>, at: Int) -> Int Never! {
-    Int{table[at]}.bit_or((Int{table[at + 1]} << 8)).bit_or((Int{table[at + 2]} << 16))
+    Int{table[at]} | (Int{table[at + 1]} << 8) | (Int{table[at + 2]} << 16)
 }
 
 segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
@@ -1380,7 +1380,7 @@ compare_collation_keys: fn(left: [U8], right: [U8]) -> Ordering Never! {
 }
 
 push_collation_weight: fn(key: &[U8], weight: Int, width: Int) Never! {
-    loop at in 0..<width -> key.push(U8{(weight >> (8 * (width - 1 - at))).bit_and(Int{255})})
+    loop at in 0..<width -> key.push(U8{(weight >> (8 * (width - 1 - at))) & Int{255}})
 }
 
 COLLATION_ABSENT: 16777215
@@ -1534,18 +1534,18 @@ collation_single_elements: fn(out: &[Int], singles: View<U8>, pool: View<U8>, id
 // UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].
 collation_implicit: fn(ideographs: View<U8>, scalar: Int) -> (base: Int, trail: Int) Never! {
     if (scalar >= 94208 && scalar <= 100351) || (scalar >= 101632 && scalar <= 101759) {
-        return (base: 64256, trail: (scalar - 94208).bit_or(32768))
+        return (base: 64256, trail: (scalar - 94208) | 32768)
     }
     if (scalar >= 100352 && scalar <= 101119) || (scalar >= 101760 && scalar <= 101887) {
-        return (base: 64257, trail: (scalar - 100352).bit_or(32768))
+        return (base: 64257, trail: (scalar - 100352) | 32768)
     }
     if scalar >= 110960 && scalar <= 111359 {
-        return (base: 64258, trail: (scalar - 110960).bit_or(32768))
+        return (base: 64258, trail: (scalar - 110960) | 32768)
     }
     if scalar >= 101120 && scalar <= 101631 {
-        return (base: 64259, trail: (scalar - 101120).bit_or(32768))
+        return (base: 64259, trail: (scalar - 101120) | 32768)
     }
-    trail: scalar.bit_and(32767).bit_or(32768)
+    trail: scalar & 32767 | 32768
     if !text_asset.contains(ideographs, scalar) {
         return (base: 64448 + (scalar >> 15), trail: trail)
     }

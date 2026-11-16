@@ -23,7 +23,7 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
     valid := false
     if {
         (status == I64{0}) -> {
-            valid = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{16384}
+            valid = ((sync_load(wrapping(scratch + I64{24}))) & I64{61440}) == I64{16384}
         }
         (status == I64{-2}) -> {
             valid = true
@@ -44,7 +44,7 @@ sentry_ledger_parent: fn(path: I64, scratch: I64) -> Bool {
                 at += I64{1}
             }
             if valid {
-                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(wrapping(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
+                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(wrapping(scratch + I64{24})) & I64{61440}) == I64{16384}
                 if valid {
                     valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
                 }
@@ -75,7 +75,7 @@ sentry_ledger_write: fn(path: I64, row: I64) {
         status: sentry_ledger_stat(name, scratch)
         if {
             (status == I64{0}) -> {
-                allowed = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{32768} && sync_load(wrapping(scratch + I64{48})) <= I64{4194304} - rt_text_len(row)
+                allowed = ((sync_load(wrapping(scratch + I64{24}))) & I64{61440}) == I64{32768} && sync_load(wrapping(scratch + I64{48})) <= I64{4194304} - rt_text_len(row)
             }
             (status != I64{-2}) -> allowed = false
         }

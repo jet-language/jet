@@ -78,8 +78,8 @@ poll: fn() -[IO]> UIShortcutDispatch? UIHostError! {
     }
     pressed: core.ui.host.shortcut(fields[1], UIShortcutModifiers{bits: mask})
     if lookup(pressed) == .Val(exact) -> return Ok(Val(UIShortcutDispatch.Dispatched(exact)))
-    control: mask.bit_and(1) != 0
-    meta: mask.bit_and(8) != 0
+    control: mask & 1 != 0
+    meta: mask & 8 != 0
     if control == meta -> return Ok(Val(UIShortcutDispatch.Unhandled))
     command: mask - (if control -> 1 else -> 8) + COMMAND
     Ok(Val(dispatched(lookup(UIShortcut{key: pressed.key.copy(), modifiers: UIShortcutModifiers{bits: command}}))))
@@ -104,10 +104,10 @@ priv internal: module {
     // and its Meta form, since the page's platform is the browser's.
     key_claims: fn(shortcut: UIShortcut) -> [String] Never! {
         bits: shortcut.modifiers.bits
-        base: bits.bit_and(15)
-        if bits.bit_and(COMMAND) == 0 -> return [String]{"{base}:{shortcut.key}"}
-        control: if base.bit_and(1) == 0 -> base + 1 else -> base
-        meta: if base.bit_and(8) == 0 -> base + 8 else -> base
+        base: bits & 15
+        if bits & COMMAND == 0 -> return [String]{"{base}:{shortcut.key}"}
+        control: if base & 1 == 0 -> base + 1 else -> base
+        meta: if base & 8 == 0 -> base + 8 else -> base
         [String]{"{control}:{shortcut.key}", "{meta}:{shortcut.key}"}
     }
 

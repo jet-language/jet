@@ -17,7 +17,7 @@ use {
     codec: core.image
     crypto: core.crypto
     web_http: core.http
-    core.http.server.[HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
+    core.http.server.[HTTPAdmit, HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
     http_server: core.http.server
     live_json: core.encoding.json
     core.encoding.[Dyn]
@@ -34,6 +34,7 @@ use {
     core.log.[LogField, TraceSpan]
     log_rt: jet.runtime.log
     rt: jet.runtime.time
+    builtin: jet_builtins
 }
 
 // core.web — server-rendered apps on `core.http`.
@@ -184,8 +185,8 @@ priv AppMount: struct {
 // An endpoint, webhook or mount that `app.mount` registered, whose rows the
 // app adds once it serves (`app_service_routes`), with the place of the call
 // that registered it. It is the endpoint (`__remote_public`, or
-// `__remote_signed_in` when `signed_in`), the webhook, or the mounted
-// handler, whichever is set.
+// `__remote_signed_in` when `signed_in`, and an upload endpoint when `upload`
+// is set too), the webhook, or the mounted handler, whichever is set.
 priv AppService: struct {
     path: String
     at: SourceLocation
@@ -193,6 +194,26 @@ priv AppService: struct {
     signed_in: Bool
     hook: AppWebhook?
     mounted: AppHandler?
+    upload: AppUpload?
+}
+
+// What an upload endpoint (`__remote_upload`) adds to its call: the request's
+// body is the `Upload` at argument `at` of the method; `check` runs the
+// method its `#App.UploadCheck` names, before the body is read; `files` runs
+// each step of its files (the app module's `FileJob`); and `service` keys
+// the app graph's `.api` row, whose `max_upload` bounds the body.
+priv AppUpload: struct {
+    service: String
+    at: Int
+    signed_in: Bool
+    check: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+    files: fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!
+}
+
+// An upload endpoint as its rows answer it (`app_upload_routes`).
+priv AppUploadEndpoint: struct {
+    remote: AppRemote
+    upload: AppUpload
 }
 
 priv AppState: struct {
@@ -355,7 +376,7 @@ App: struct {
         security := [String]{}
         if policy != "" -> security.push(policy.copy())
         mounted: app_handler(handler)
-        app_service_add(self, AppService{path: app_trim_slashes(prefix), at: at, remote: None, signed_in: false, hook: None, mounted: Val(mounted.copy())})
+        app_service_add(self, AppService{path: app_trim_slashes(prefix), at: at, remote: None, signed_in: false, hook: None, mounted: Val(mounted.copy()), upload: None})
         guard := self.__state.guard_edit()
         guard.value.mounts.push(AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
         self.copy()
@@ -372,7 +393,7 @@ App: struct {
     __remote_public: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, reply: String, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: reply, kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: false, hook: None, mounted: None})
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: false, hook: None, mounted: None, upload: None})
         self.copy()
     }
 
@@ -382,7 +403,26 @@ App: struct {
     __remote_signed_in: fn(self, path: String, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
         endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
         app_traced(self, path, app_endpoint_method(path))
-        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: true, hook: None, mounted: None})
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: true, hook: None, mounted: None, upload: None})
+        self.copy()
+    }
+
+    // An endpoint method of `app.mount(service)` that takes an `Upload`
+    // (sema lowers each here) answers POST `path`, with the file as the
+    // request's raw body, the name its sender gave it as the query's `name`,
+    // and the method's other arguments as the JSON array of the query's
+    // `args` (`app_upload_response`). It is `#App.SignedIn` when `signed_in`.
+    // Before the body is read, `check` runs the method its `#App.UploadCheck`
+    // names on those arguments (`app_upload_admit`). `answer` runs the method
+    // on them with the `Upload` at argument `upload_at`, and `files` runs the
+    // steps of its files (the app module's `FileJob`). `service` keys the app
+    // graph's `.api` row, whose `max_upload` bounds the body; `limit` and
+    // `window_ns` are the marker's `limit:` and `per:` (`AppRemote`).
+    __remote_upload: fn(self, path: String, service: String, upload_at: Int, signed_in: Bool, check: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, files: &&fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!, answer: &&fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!, limit: Int, window_ns: Int, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: AppRemote{path: path.copy(), answer: answer, limit: app_remote_limit(limit, window_ns), reply: "", kept: Shared{[String:AppKeptReply]{}}}
+        upload: AppUpload{service: service.copy(), at: upload_at, signed_in: signed_in, check: check, files: files}
+        app_traced(self, path, app_endpoint_method(path))
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: Val(endpoint), signed_in: signed_in, hook: None, mounted: None, upload: Val(upload)})
         self.copy()
     }
 
@@ -396,7 +436,7 @@ App: struct {
         if params != "" -> names = params.split(",").to_list()
         hook: AppWebhook{signature: signature, params: names, key: key, answer: answer}
         app_traced(self, path, "")
-        app_service_add(self, AppService{path: path.copy(), at: at, remote: None, signed_in: false, hook: Val(hook), mounted: None})
+        app_service_add(self, AppService{path: path.copy(), at: at, remote: None, signed_in: false, hook: Val(hook), mounted: None, upload: None})
         self.copy()
     }
 
@@ -605,7 +645,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
-        app_service_routes(self)
+        app_uploads_clean(app_service_routes(self))
         app_screen_routes(self)
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
@@ -615,7 +655,7 @@ App: struct {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
-        app_service_routes(self)
+        app_uploads_clean(app_service_routes(self))
         app_screen_routes(self)
         http_server.server_serve_once(listener, app_table(self))
     }
@@ -674,7 +714,7 @@ bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Setting
     settings: app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_image_route(app)
-    app_service_routes(app)
+    app_uploads_clean(app_service_routes(app))
     app_screen_routes(app)
     _: app_trace_start(app)
     http_server.server_bind(address, app_table(app), tls, deadline)
@@ -751,15 +791,24 @@ priv app_services_taken: fn(app: App) -> [AppService] Never! {
 // it last served, in the order it registered them. Their handlers are made
 // here, by a serving call, and not where `app.mount` registers them: a
 // handler may read files and use the network when it answers, which serving
-// does, so code that only builds the app needs neither.
-priv app_service_routes: fn(app: App) Never! {
+// does, so code that only builds the app needs neither. Gives the upload
+// endpoints among them, whose staging the serving call then cleans
+// (`app_uploads_clean`).
+priv app_service_routes: fn(app: App) -> [Shared<AppUploadEndpoint>] Never! {
     table: app_table(app)
     services := app_services_taken(app)
+    uploads := [Shared<AppUploadEndpoint>]{}
     loop {
-        service: services.pop() ?? return
+        service: services.pop() ?? return uploads
         path: service.path.copy()
         at: service.at
-        if service.remote == .Val(_) {
+        if service.upload == .Val(_) {
+            upload: service.upload.move() ?? next
+            endpoint: service.remote.move() ?? next
+            held: Shared{AppUploadEndpoint{remote: endpoint, upload: upload}}
+            app_upload_routes(table, path, held.copy(), at)
+            uploads.push(held)
+        } else if service.remote == .Val(_) {
             endpoint: service.remote.move() ?? next
             if service.signed_in {
                 http_server.route_add(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_signed_in_response(endpoint, request)) }), "", at)
@@ -826,7 +875,7 @@ priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Ne
     app_image_route(app)
     app_push_route(app)
     app_crawl_routes(app)
-    app_service_routes(app)
+    app_uploads_clean(app_service_routes(app))
     app_screen_routes(app)
     if !app_has_root_catch_all(table) {
         fallback: app.copy()
@@ -1900,11 +1949,18 @@ priv app_remote_who: fn(request: HTTPRequest) -> String Never! {
 // The account whose live session `request` carries: the id of an
 // `Authorization: Bearer <id>`, or else its session cookie
 // (`app_session_cookie`). Every id is looked up the same way
-// (`auth.session_validate`), at the second the request was read, and a
-// missing, malformed, unknown, expired or forged one gives None alike.
+// (`app_session_named`), and a missing, malformed, unknown, expired or
+// forged one gives None alike.
 priv app_session_account: fn(request: HTTPRequest) -> auth.AccountID? Never! {
+    app_session_named(request, app_session_cookie(request))
+}
+
+// The account of the live session whose id is that of the
+// `Authorization: Bearer <id>` `request` carries, or else `cookie`, looked
+// up (`auth.session_validate`) at the second the request was read.
+priv app_session_named: fn(request: HTTPRequest, cookie: String) -> auth.AccountID? Never! {
     bearer: request.header("authorization") ?? ""
-    id: if bearer.starts_with("Bearer ") -> bearer.slice(7, bearer.len()).trim() else -> app_session_cookie(request)
+    id: if bearer.starts_with("Bearer ") -> bearer.slice(7, bearer.len()).trim() else -> cookie
     session: auth.session_validate(id, request.__received * 1000) ?? return None
     Val(auth.AccountID.from_string(auth.session_user(session)))
 }
@@ -1916,6 +1972,12 @@ priv app_session_account: fn(request: HTTPRequest) -> auth.AccountID? Never! {
 // signed-in user.
 priv app_session_cookie: fn(request: HTTPRequest) -> String Never! {
     if request.header("origin") == None || !app_same_origin(request) -> return ""
+    app_cookie_session(request)
+}
+
+// The `jet_session` cookie `request` carries, whatever its `Origin`; "" for
+// none.
+priv app_cookie_session: fn(request: HTTPRequest) -> String Never! {
     loop part in (request.header("cookie") ?? "").split(";").to_list() {
         pair: part.trim()
         if pair.starts_with("jet_session=") -> return pair.slice(12, pair.len())
@@ -2097,6 +2159,194 @@ priv app_signed_in_call: fn(endpoint: AppRemote, request: HTTPRequest) -[Net, FS
     app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
 }
 
+// The most bytes an upload's body holds when the app graph's `.api` names no
+// `max_upload:` for its service.
+priv APP_MAX_UPLOAD: 1000000
+
+// The rows of an upload endpoint: POST `path`, admitted by its head
+// (`app_upload_admit`) before the body is read, then answered
+// (`app_upload_response`); and, once per table, GET `{BLOB_PATH}/:id`
+// (`app_blob_response`).
+priv app_upload_routes: fn(table: HTTPMux, path: String, held: Shared<AppUploadEndpoint>, at: SourceLocation) Never! {
+    admits: held.copy()
+    answers: held.copy()
+    http_server.__route_add_admitted(table, "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(app_upload_response(answers, request)) }), fn(request: HTTPRequest) { app_upload_admit(admits, request) }, at)
+    blob: "{calls.BLOB_PATH}/:id"
+    loop route in http_server.mux_routes(table) {
+        if route.method == "GET" && route.pattern == blob {
+            return
+        }
+    }
+    http_server.route_add(table, "GET", blob, http_server.__handler(fn(request: HTTPRequest) { Ok(app_blob_response(held, request)) }), "", at)
+}
+
+// Removes what a server that stopped left staged for the upload endpoints
+// `uploads` (jet_builtins.FileStep.Clean), once per process, before the
+// server takes a request.
+priv app_uploads_clean: fn(uploads: [Shared<AppUploadEndpoint>]) -[Net, FS.Read]> Never! {
+    if uploads.len() == 0 {
+        return
+    }
+    held: uploads[0].guard_read()
+    _: held.value.upload.files(calls.FileJob{step: .Clean}) ?? return
+}
+
+// The most bytes the body of a call of `upload` may hold: its service's
+// `.api` `max_upload`, or APP_MAX_UPLOAD.
+priv app_upload_max: fn(upload: AppUpload) -> Int Never! {
+    calls.__api_max_upload(upload.service) ?? APP_MAX_UPLOAD
+}
+
+// A request an upload endpoint refuses by its head: no one keeps the answer.
+priv app_upload_refused: fn(response: HTTPResponse) -> HTTPAdmit Never! {
+    HTTPAdmit{refused: Val(response.__with_header("cache-control", "private, no-store")), max_body: 0}
+}
+
+// Admits an upload's request by its head, before the body is read. A
+// signed-in endpoint's caller needs a live session, or is refused 401, as
+// `app_signed_in_call` refuses it; then the checks of `app_upload_checked`
+// run, acting for the session's account.
+priv app_upload_admit: fn(held: Shared<AppUploadEndpoint>, request: HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never! {
+    entry: held.guard_read()
+    if !entry.value.upload.signed_in -> return app_upload_checked(entry.value, request)
+    if app_session_account(request) == .Val(account) {
+        calls.callers.begin_account(account)
+        defer calls.callers.end()
+        return app_upload_checked(entry.value, request)
+    }
+    if app_remote_limited(entry.value.remote.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_upload_refused(app_limited(wait_ns))
+    }
+    app_upload_refused(app_json(401, app_error_json("`{request.path}` needs a signed-in caller")))
+}
+
+// The checks of an upload's head: the call counts against the endpoint's
+// limit (429); its `Content-Length` is at most `app_upload_max` (413); the
+// query's `args` is a JSON array (422); and the endpoint's check passes on
+// it, or the request is refused 403 with the check's error. The check runs
+// in a transaction that is rolled back whatever it does, so it can read but
+// never write. An admitted body may hold `app_upload_max` bytes.
+priv app_upload_checked: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never! {
+    if app_remote_limited(endpoint.remote.limit, app_remote_who(request)) == .Val(wait_ns) {
+        return app_upload_refused(app_limited(wait_ns))
+    }
+    max: app_upload_max(endpoint.upload)
+    if (Int.parse(request.header("content-length") ?? "0") ?? 0) > max {
+        return app_upload_refused(app_json(413, app_error_json("an upload to `{request.path}` is at most {max} bytes")))
+    }
+    args: app_upload_query(request, "args", "[]") ?? return app_upload_refused(app_json(422, app_invalid_json(err)))
+    tree: live_json.parse(args) ?? return app_upload_refused(app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}})))
+    checked: app_transacted(None, None, fn() {
+        reply: endpoint.upload.check(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        (response: app_json(if app_reply_failed(reply) -> 403 else -> 200, reply), commit: false)
+    })
+    if checked.status != 200 -> return app_upload_refused(checked)
+    HTTPAdmit{refused: None, max_body: max}
+}
+
+// The query field `name` of `request`, or `otherwise` when it has none.
+priv app_upload_query: fn(request: HTTPRequest, name: String, otherwise: String) -> String [FieldError]! {
+    at: web_http.index_byte(request.path.bytes(), 63)
+    if at < 0 -> return Ok(otherwise.copy())
+    fields: web_http.query_decode_strict(request.path.slice(at + 1, request.path.len())) ?? return Err([FieldError]{FieldError{path: "", reason: "the call's query is malformed: {err}"}})
+    Ok(web_http.query_get(fields, name) ?? otherwise.copy())
+}
+
+// A call of an upload endpoint whose head it admitted (`app_upload_admit`),
+// acting for the session's account when the endpoint is signed-in. No one
+// keeps its answer: `Cache-Control: private, no-store`.
+priv app_upload_response: fn(held: Shared<AppUploadEndpoint>, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    entry: held.guard_read()
+    if !entry.value.upload.signed_in {
+        return app_upload_call(entry.value, request).__with_header("cache-control", "private, no-store")
+    }
+    answered := app_json(401, app_error_json("`{request.path}` needs a signed-in caller"))
+    if app_session_account(request) == .Val(account) {
+        calls.callers.begin_account(account)
+        answered = app_upload_call(entry.value, request)
+        calls.callers.end()
+    }
+    answered.__with_header("cache-control", "private, no-store")
+}
+
+// One call of an upload endpoint. The body is staged
+// (jet_builtins.FileStep.Stage) before the call's transaction begins, so
+// each run of the transaction, a retry's too, keeps the same staged file.
+// The method gets the body as the `Upload` at its argument `at`, named by
+// the query's `name` ("upload" when it has none), among the query's `args`.
+// When the request ends (jet_builtins.FileStep.Finish), the staged file is
+// removed, and so is each blob that a run kept and then rolled back. A call
+// that failed once `keep` refused the file's media is answered 415 with its
+// error.
+priv app_upload_call: fn(endpoint: AppUploadEndpoint, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    args: app_upload_query(request, "args", "[]") ?? return app_json(422, app_invalid_json(err))
+    name: app_upload_query(request, "name", "upload") ?? return app_json(422, app_invalid_json(err))
+    given: live_json.parse(args) ?? return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    items := [Dyn]{}
+    if given == .Array(list) -> items = list.copy() else {
+        return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not a JSON array"}}))
+    }
+    at: endpoint.upload.at
+    if at > items.len() {
+        return app_json(422, app_invalid_json([FieldError]{FieldError{path: "", reason: "the call has {items.len()} arguments besides its upload, short of {at}"}}))
+    }
+    body: request.body.bytes(app_upload_max(endpoint.upload)) ?? return app_json(400, app_error_json("the upload can't be read: {err}"))
+    file: live_json.parse("{{\"name\":{app_json_string(name)},\"bytes\":{body.len()}}}") ?? return app_json(500, app_error_json("the upload can't be described: {err}"))
+    spliced := [Dyn]{}
+    loop index in 0..<items.len() {
+        if index == at -> spliced.push(file.copy())
+        spliced.push(items[index].copy())
+    }
+    if at == items.len() -> spliced.push(file.copy())
+    staged: endpoint.upload.files(calls.FileJob{step: .Stage(body)}) ?? return app_json(500, app_error_json("the upload can't be staged"))
+    if staged.status != 200 -> return app_json(500, app_error_json("the upload can't be staged"))
+    tree: Dyn.Array(spliced)
+    last: Shared{""}
+    ran: last.copy()
+    answered: app_transacted(None, None, fn() {
+        reply: endpoint.remote.answer(RemoteArgs{tree: tree.copy()}) ?? return (response: app_json(422, app_invalid_json(err)), commit: false)
+        if calls.transactions.current() == .Val(call) -> calls.transactions.answer(call, reply)
+        kept := ran.guard_edit()
+        kept.value = reply.copy()
+        (response: app_json(200, reply), commit: !app_reply_failed(reply))
+    })
+    finished: endpoint.upload.files(calls.FileJob{step: .Finish}) ?? return answered
+    reply: last.guard_read()
+    if finished.status == 415 && app_reply_failed(reply.value) -> return app_json(415, reply.value)
+    answered
+}
+
+// GET `{BLOB_PATH}/:id`: the blob to a caller that the read policy of a row
+// holding its id admits (jet_builtins.FileStep.Serve), as an attachment that
+// the browser never sniffs (`Content-Disposition: attachment`,
+// `X-Content-Type-Options: nosniff`) and no one keeps
+// (`Cache-Control: private, no-store`). Any other caller, and an id no blob
+// has, get the same 404. The caller is the account of a bearer session, or
+// of the session cookie on a request whose `Origin`, if it has one, is this
+// server's: a link the browser follows sends none.
+priv app_blob_response: fn(held: Shared<AppUploadEndpoint>, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    id: request.param("id") ?? ""
+    entry: held.guard_read()
+    cookie: if app_same_origin(request) -> app_cookie_session(request) else -> ""
+    if app_session_named(request, cookie) == .Val(account) {
+        calls.callers.begin_account(account)
+        defer calls.callers.end()
+        return app_blob_served(entry.value.upload, id)
+    }
+    app_blob_served(entry.value.upload, id)
+}
+
+priv app_blob_served: fn(upload: AppUpload, id: String) -[Net, FS.Read]> HTTPResponse Never! {
+    missing: app_json(404, app_error_json("no blob `{id}` is here for this caller"))
+    served: upload.files(calls.FileJob{step: .Serve(id)}) ?? return missing
+    if served.status != 200 -> return missing
+    fields := web_http.headers_set(web_http.headers(), "content-type", served.media)
+    fields = web_http.headers_set(fields, "content-disposition", "attachment")
+    fields = web_http.headers_set(fields, "x-content-type-options", "nosniff")
+    fields = web_http.headers_set(fields, "cache-control", "private, no-store")
+    http_server.response_body(200, web_http.body_bytes(served.body), fields)
+}
+
 // The longest request key a call carries, in bytes.
 priv APP_REQUEST_KEY_MAX: 255
 
@@ -2207,7 +2457,7 @@ priv app_transacted: fn(delivery: calls.CallDelivery?, request: calls.CallReques
     live: auth.password_login("web-test-ann", "ann's hash", now * 1000, 60000) ?? panic("ann signs in: {err}")
     ended: auth.password_login("web-test-ann", "ann's hash", (now - 60) * 1000, 1) ?? panic("ann signed in before: {err}")
     served: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<String>((calls.maybe_caller() ?? auth.AccountID.from_string("no one")).raw())) }, 0, 0)
-    app_service_routes(served)
+    _: app_service_routes(served)
     table: app_table(served)
     id: auth.session_id(live)
     assert_eq(app_signed_in_test(table, now, "", "Bearer {id}", "theme=dark; jet_session=not-it"), "200 {{\"ok\":\"web-test-ann\"}}")
@@ -2241,7 +2491,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
 #Test("a public reply cached `.Public` carries its max-age and ETag and is answered 304 to a GET that names the ETag; no one keeps a `.Private` or signed-in reply") {
     _: calls.new("Cache").__cache<String>("web-test.Cached", calls.CachePolicy.Public{max_age: 10min})
     served: app().__remote_public("/api/cached", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0, "web-test.Cached")
-    app_service_routes(served)
+    _: app_service_routes(served)
     table: app_table(served)
     posted: http_server.__dispatch(table, web_http.server_request("POST", "/api/cached", web_http.body_text("[]"), web_http.headers()))
     assert_eq(posted.status, 200)
@@ -2264,7 +2514,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
     assert_eq(refused.status, 405)
     assert_eq(refused.header("allow"), Val("POST"))
     signed: app().__remote_signed_in("/api/me", fn(args: RemoteArgs) { Ok(args.__reply_value<Bool>(false)) }, 0, 0)
-    app_service_routes(signed)
+    _: app_service_routes(signed)
     unsigned: http_server.__dispatch(app_table(signed), web_http.server_request("POST", "/api/me", web_http.body_text("[]"), web_http.headers()))
     assert_eq(unsigned.status, 401)
     assert_eq(unsigned.header("cache-control"), Val("private, no-store"))
@@ -2288,7 +2538,7 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
         0,
         "web-test.Kept",
     )
-    app_service_routes(served)
+    _: app_service_routes(served)
     table: app_table(served)
     replies: [String]{"{{\"ok\":false}}", "{{\"ok\":0}}", "{{\"ok\":\"\"}}"}
     loop (kind, reply) in replies {
@@ -2805,7 +3055,7 @@ priv app_json_string: fn(value: String) -> String Never! {
         } else if n < 32 {
             app_push(out, "\\u00")
             out.push(app_hex_digit(n >> 4))
-            out.push(app_hex_digit(n.bit_and(15)))
+            out.push(app_hex_digit(n & 15))
         } else { out.push(byte) }
     }
     out.push(U8{34})
@@ -2856,11 +3106,9 @@ priv app_route_identity: fn(path: String, handler: String) -> String Never! {
     bytes := path.bytes()
     bytes.push(U8{0})
     loop byte in handler.bytes() -> bytes.push(byte)
-    loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
+    loop byte in bytes -> hash = wrapping((hash ~ U64{Int{byte}}) * U64{1099511628211})
     out := [U8]{}
-    loop index in 0..<16 {
-        out.push(app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
-    }
+    loop index in 0..<16 { out.push(app_hex_digit(Int{(hash >> (60 - index * 4)) & U64{15}})) }
     "route-{String.from_bytes(out) ?? ""}"
 }
 
@@ -3397,11 +3645,9 @@ priv openapi_operation_id: fn(name: String, path: String) -> String Never! {
     bytes.push(U8{0})
     loop byte in path.bytes() -> bytes.push(byte)
     hash := U64{14695981039346656037}
-    loop byte in bytes -> hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
+    loop byte in bytes -> hash = wrapping((hash ~ U64{Int{byte}}) * U64{1099511628211})
     out := [U8]{}
-    loop index in 0..<16 {
-        out.push(app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
-    }
+    loop index in 0..<16 { out.push(app_hex_digit(Int{(hash >> (60 - index * 4)) & U64{15}})) }
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }
 
@@ -3862,7 +4108,7 @@ priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Ne
 
 #Test("with no collector named an app runs no trace layer; with one, an endpoint call is one span") {
     served: app().__remote_public("/api/status", fn(args: RemoteArgs) { Ok(args.__reply_value<String>("up")) }, 0, 0, "String")
-    app_service_routes(served)
+    _: app_service_routes(served)
     table: app_table(served)
     // No collector named: nothing is installed, so a request runs no layer.
     assert(!(app_trace_settings([String:String]{}) == .Val(_)))

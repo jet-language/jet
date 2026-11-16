@@ -200,11 +200,11 @@ core_decl_hex_number: fn(text: String) -> Int Never! {
 // The UTF-8 bytes of scalar `value`.
 core_decl_utf8: fn(value: Int) -> [U8] Never! {
     if value < 128 -> return [U8]{U8{value}}
-    if value < 2048 -> return [U8]{U8{192 + (value >> 6)}, U8{128 + value.bit_and(63)}}
+    if value < 2048 -> return [U8]{U8{192 + (value >> 6)}, U8{128 + (value & 63)}}
     if value < 65536 {
-        return [U8]{U8{224 + (value >> 12)}, U8{128 + (value >> 6).bit_and(63)}, U8{128 + value.bit_and(63)}}
+        return [U8]{U8{224 + (value >> 12)}, U8{128 + ((value >> 6) & 63)}, U8{128 + (value & 63)}}
     }
-    [U8]{U8{240 + (value >> 18)}, U8{128 + (value >> 12).bit_and(63)}, U8{128 + (value >> 6).bit_and(63)}, U8{128 + value.bit_and(63)}}
+    [U8]{U8{240 + (value >> 18)}, U8{128 + ((value >> 12) & 63)}, U8{128 + ((value >> 6) & 63)}, U8{128 + (value & 63)}}
 }
 
 // The text of a Rust string literal's content.
@@ -400,10 +400,10 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
             if bit < 0 {
                 return Err(core_decl_fail("CoreCallCoverage::{name} has no Jet coverage bit in {context}"))
             }
-            bits = bits.bit_or(bit)
+            bits |= bit
             next
         }
-        bits = bits.bit_or(core_decl_rust_int(part, context) ?? return Err(err))
+        bits |= core_decl_rust_int(part, context) ?? return Err(err)
     }
     Ok(CoreCallCoverage{bits: bits})
 }
@@ -476,8 +476,9 @@ core_decl_marker: fn(expression: String, context: String, constants: [String:Str
 }
 
 // ---- Core call facts ----------------------------------------------------
-// The effect root, effect leaf and sink class of a plain Core call, keyed by
-// module and then member.
+// The effect root and effect leaf of a plain Core call, keyed by module and
+// then member: an adapter row's effects. A source-owned row's come from its
+// Core declaration.
 
 // The effect root a plain Core call needs, or None when it is pure.
 core_decl_call_effect: fn(module_name: String, member: String) -> String? Never! {
@@ -682,36 +683,30 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
     }
 }
 
-// The sink class a plain Core call's arguments reach, or None: the encoding
-// serializers, the terminal prints and every log call.
-core_decl_call_sink: fn(module_name: String, member: String) -> SinkClass? Never! {
-    if module_name == {
-        "core.log" -> Val(SinkClass.Credential)
-        "core.term" -> if member == "print" || member == "eprint" -> Val(SinkClass.Credential) else -> None
-        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.cbor" | "core.encoding.xml" -> if member == {
-            "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical" -> Val(SinkClass.Credential)
-            else -> None
-        }
-        "core.encoding.jsonl" -> if member == "to_string" -> Val(SinkClass.Credential) else -> None
-        else -> None
-    }
-}
-
 // `CoreCallRecord::new`'s record: the call's facts, Prelude symbol `symbol`.
+// Its effects are its root, unless its leaf refines that root (`FS.Read`
+// under `FS`), and its leaf: a leaf under another root (`Time.Wait` on a
+// network call) adds to the root.
 core_decl_plain_record: fn(module_name: String, member: String, symbol: String, mask: [Bool]) -> CoreCallRecord Never! {
     root: core_decl_call_effect(module_name, member)
     capability: if root == None -> core_decl_pure_capability() else -> CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(module_name.copy()), fallback: None, failure: Val("core.capability.unavailable")}
-    leaf: core_decl_call_effect_leaf(module_name, member)
-    sink: core_decl_call_sink(module_name, member)
+    leaf: core_decl_call_effect_leaf(module_name, member) ?? ""
+    effects := [String]{}
+    if root == .Val(root_name) {
+        if leaf == "" || !leaf.starts_with("{root_name}.") -> effects.push(root_name)
+    }
+    if leaf != "" -> effects.push(leaf)
     arity: mask.len()
-    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: root, capability: capability, effect_leaf: leaf, sink_class: sink, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effects: effects, capability: capability, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
 }
 
-// A record the Jet source of its module defines: no Prelude symbol, Sema
+// A record the Jet source of its module defines: no Prelude symbol, no
+// effects of its own (its Core declaration's row is its effects), Sema
 // coverage only, no direct AOT call.
 core_decl_source_owned: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
     owned := record
     owned.symbol = CoreCallSymbol.SourceOwned
+    owned.effects = [String]{}
     owned.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
     owned.aot_direct = false
     owned
@@ -759,7 +754,7 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
             arity: mask.len()
-            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: core_decl_pure_capability(), effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effects: [String]{}, capability: core_decl_pure_capability(), pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
         }
         else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
     }

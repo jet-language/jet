@@ -889,12 +889,8 @@ policy_is_ascii_replacement_chain: fn(expression: Expr) -> Bool {
             first: policy_ascii_literal(args[0].expr) ?? break
             second: policy_ascii_literal(args[1].expr) ?? break
             count += 1
-            if first >= 65 && first <= 90 && second == first + 32 {
-                lower = lower.bit_or(1 << (first - 65))
-            }
-            if first >= 97 && first <= 122 && second == first - 32 {
-                upper = upper.bit_or(1 << (first - 97))
-            }
+            if first >= 65 && first <= 90 && second == first + 32 -> lower |= 1 << (first - 65)
+            if first >= 97 && first <= 122 && second == first - 32 -> upper |= 1 << (first - 97)
             current = receiver
         } else { break }
     }

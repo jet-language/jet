@@ -87,13 +87,13 @@ ssl_cli_write_supported_groups_ext: fn(ssl: &ssldefs.SSLContext, buf: Int, end: 
     if group_list.len() == 0 -> return Err(.BadConfig)
     loop group in group_list {
         propose_group := false
-        if flags.bit_and(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG) != 0 {
+        if flags & SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG != 0 {
             if ssltls.ssl_tls13_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
                 propose_group = true
             }
             if ssltls.ssl_tls13_named_group_is_ffdh(group) -> propose_group = true
         }
-        if flags.bit_and(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG) != 0 && ssltls.ssl_tls12_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
+        if flags & SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG != 0 && ssltls.ssl_tls12_named_group_is_ecdhe(group) && ssltls.ssl_get_ecp_group_id_from_tls_id(group) != .Unknown {
             propose_group = true
         }
         if propose_group {
@@ -218,11 +218,9 @@ ssl_write_client_hello_body: fn<R: RNG>(ssl: &ssldefs.SSLContext, buf: Int, end:
     }
     groups_flags := 0
     if propose_tls13 && ssltls.ssl_conf_tls13_is_some_ephemeral_enabled(ssl) {
-        groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG)
+        groups_flags |= SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG
     }
-    if propose_tls12 && tls12_uses_ec {
-        groups_flags = groups_flags.bit_or(SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG)
-    }
+    if propose_tls12 && tls12_uses_ec -> groups_flags |= SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_2_FLAG
     if groups_flags != 0 {
         p += ssl_cli_write_supported_groups_ext(ssl, p, end, groups_flags) ?? return Err(err)
     }

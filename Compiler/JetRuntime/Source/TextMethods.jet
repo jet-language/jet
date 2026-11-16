@@ -38,9 +38,7 @@ text_push_repeat_byte: fn(target: I64, byte: I64, count: I64) {
 // Start of the scalar that ends at byte offset end (> floor).
 text_scalar_start: fn(data: I64, floor: I64, end: I64) -> I64 {
     at := end - I64{1}
-    loop at > floor && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) {
-        at -= I64{1}
-    }
+    loop at > floor && (rt_text_byte(wrapping(data + at)) & I64{192}) == (I64{128}) -> at -= I64{1}
     at
 }
 

@@ -285,7 +285,7 @@ x64_object_rela_section: fn(name: String, relas: [X64ObjectRela], target: Int) -
 // One RELA entry: offset, (symbol << 32) | kind, addend.
 x64_object_rela_put: fn(bytes: &[U8], at: Int, symbol: Int, kind: Int, addend: Int) Never! {
     elf64_u64(bytes, at)
-    elf64_u64(bytes, (symbol << 32).bit_or(kind))
+    elf64_u64(bytes, (symbol << 32) | kind)
     elf64_u64(bytes, addend)
 }
 
@@ -619,7 +619,7 @@ x64_object_data_order: fn(data: [X64Data], functions: [X64CompiledFunction], dat
 // The little-endian field of `width` bytes at `at`.
 x64_object_test_field: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
     value := 0
-    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
+    loop k in 0..<width -> value |= Int{bytes[at + k]} << (8 * k)
     value
 }
 
@@ -1085,9 +1085,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
         // The symbol is the high word of the entry's info (bytes 12..15).
         loop (at_index, at) in rows.runtime_at {
             symbol: globals[rows.runtime_local[at_index]]
-            loop shift in 0..<4 {
-                rows.relas[at + 12 + shift] = U8{(symbol >> (8 * shift)).bit_and(255)}
-            }
+            loop shift in 0..<4 -> rows.relas[at + 12 + shift] = U8{(symbol >> (8 * shift)) & 255}
         }
         // The part's private function symbols, their names moved past the
         // names before the part's.

@@ -443,7 +443,7 @@ ir_x64_leaf_open: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [Int]
     // Per instruction, how many before it may write rsi or rdi.
     writers := [Int]{0}
     loop at in 0..<f.op.len() {
-        writers.push(writers[at] + (if masks[at].bit_and(IR_X64_LEAF_OPEN_MASK) == 0 -> 0 else -> 1))
+        writers.push(writers[at] + (if masks[at] & IR_X64_LEAF_OPEN_MASK == 0 -> 0 else -> 1))
     }
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && writers[ends[slot] + 1] == writers[starts[slot]]
 }
@@ -463,9 +463,7 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
     held := loop _ in 0..<span -> 0
     loop slot in 0..<count {
         if regs[slot] < 0 || starts[slot] > ends[slot] -> next
-        loop at in (starts[slot] + 1)..<(ends[slot] + 2) {
-            held[at] = held[at].bit_or(1 << regs[slot])
-        }
+        loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at] | 1 << regs[slot]
     }
     work := IR_X64_FILL_WORK * (span + count)
     groups := [Int]{}
@@ -493,7 +491,7 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
             loop slot in batch {
                 work -= ends[slot] - starts[slot] + 1
                 loop at in starts[slot]..<(ends[slot] + 1) {
-                    barred = barred.bit_or(masks[at]).bit_or(held[at + 1])
+                    barred = barred | masks[at] | held[at + 1]
                 }
             }
             if work < 0 {
@@ -501,13 +499,13 @@ ir_x64_leaf_scratch: fn(f: IRFunction, masks: [Int], general: [Bool], starts: [I
             }
             target := -1
             loop candidate in IR_X64_LEAF_SCRATCH {
-                if target < 0 && barred.bit_and(1 << candidate) == 0 -> target = candidate
+                if target < 0 && barred & 1 << candidate == 0 -> target = candidate
             }
             if target < 0 -> next
             loop slot in batch {
                 regs[slot] = target
                 loop at in (starts[slot] + 1)..<(ends[slot] + 2) {
-                    held[at] = held[at].bit_or(1 << target)
+                    held[at] = held[at] | 1 << target
                 }
             }
         }
@@ -1515,7 +1513,7 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
         loop row in 0..<pool.len() {
             if pool[row] == regs[slot] -> bit = 1 << row
         }
-        loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at].bit_or(bit)
+        loop at in (starts[slot] + 1)..<(ends[slot] + 2) -> held[at] = held[at] | bit
     }
     keys := [Int]{}
     heaviest := 0
@@ -1536,17 +1534,17 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
             return
         }
         taken := 0
-        loop at in lo..<(hi + 1) -> taken = taken.bit_or(held[at])
+        loop at in lo..<(hi + 1) -> taken |= held[at]
         rows: if open[slot] -> pool.len() else -> wide
         first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
         free := -1
         loop step in 0..<rows {
             row: (step + first) %% rows
-            if free < 0 && taken.bit_and(1 << row) == 0 -> free = row
+            if free < 0 && taken & 1 << row == 0 -> free = row
         }
         if free < 0 -> next
         regs[slot] = pool[free]
-        loop at in lo..<(hi + 1) -> held[at] = held[at].bit_or(1 << free)
+        loop at in lo..<(hi + 1) -> held[at] = held[at] | 1 << free
     }
 }
 

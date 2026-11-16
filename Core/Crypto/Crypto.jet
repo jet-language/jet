@@ -383,7 +383,7 @@ constant_time_equal_bytes: fn(a: [U8], b: [U8]) -> Bool Never! {
         right := U8{0}
         if i < n -> left = a[i]
         if i < m -> right = b[i]
-        diff = diff.bit_or(left.bit_xor(right))
+        diff |= left ~ right
     }
     diff == U8{0}
 }
@@ -470,7 +470,7 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
     if raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
         return Err(CryptoError.OpenFailed)
     }
-    count: ((Int{raw[8]} << 8)).bit_or(Int{raw[9]})
+    count: ((Int{raw[8]} << 8)) | Int{raw[9]}
     if count < 1 || count > 256 -> return Err(CryptoError.OpenFailed)
     len_offset: 82 + count * 80
     if raw.len() < len_offset + 20 -> return Err(CryptoError.OpenFailed)
@@ -606,9 +606,9 @@ bech32_polymod: fn(values: [Int]) -> Int Never! {
     chk := 1
     loop v in values {
         top: chk >> 25
-        chk = ((((chk).bit_and(0x1ffffff)) << 5)).bit_xor(v)
+        chk = ((((chk) & 0x1ffffff) << 5)) ~ v
         loop i in 0..<5 {
-            if (((top >> i)).bit_and(1)) == 1 -> chk = (chk).bit_xor(generators[i])
+            if (((top >> i)) & 1) == 1 -> chk = (chk) ~ generators[i]
         }
     }
     chk
@@ -619,7 +619,7 @@ bech32_hrp_expand: fn(hrp: String) -> [Int] Never! {
     out := [Int]{}
     loop b in raw -> out.push(Int{b} >> 5)
     out.push(0)
-    loop b in raw -> out.push((Int{b}).bit_and(31))
+    loop b in raw -> out.push((Int{b}) & 31)
     out
 }
 
@@ -641,23 +641,23 @@ x25519_recipient_encode: fn(key: [U8]) -> String Never! {
     acc := 0
     bits := 0
     loop b in key {
-        acc = ((((acc << 8)).bit_or(Int{b}))).bit_and(4095)
+        acc = ((((acc << 8)) | Int{b})) & 4095
         bits += 8
         loop bits >= 5 {
             bits -= 5
-            data.push(((acc >> bits)).bit_and(31))
+            data.push(((acc >> bits)) & 31)
         }
     }
-    if bits > 0 -> data.push(((acc << (5 - bits))).bit_and(31))
+    if bits > 0 -> data.push(((acc << (5 - bits))) & 31)
     input := bech32_hrp_expand("jetx25519")
     loop v in data -> input.push(v)
     loop _ in 0..<6 -> input.push(0)
-    polymod: (bech32_polymod(input)).bit_xor(C_BECH32M_CONST)
+    polymod: (bech32_polymod(input)) ~ C_BECH32M_CONST
     charset: bech32_charset()
     out := [U8]{}
     loop b in "jetx255191".bytes() -> out.push(b)
     loop v in data -> out.push(charset[v])
-    loop i in 0..<6 -> out.push(charset[((polymod >> (5 * (5 - i)))).bit_and(31)])
+    loop i in 0..<6 -> out.push(charset[((polymod >> (5 * (5 - i)))) & 31])
     String.from_bytes(out) ?? panic("invalid UTF-8 in Bech32m recipient")
 }
 
@@ -682,21 +682,21 @@ x25519_recipient_decode: fn(text: String) -> [U8]? {
     acc := 0
     bits := 0
     loop i in 0..<52 {
-        acc = ((((acc << 5)).bit_or(values[i]))).bit_and(4095)
+        acc = ((((acc << 5)) | values[i])) & 4095
         bits += 5
         if bits >= 8 {
             bits -= 8
             out.push(wrapping(U8{acc >> bits}))
         }
     }
-    if ((acc).bit_and(((1 << bits) - 1))) != 0 -> return None
+    if ((acc) & ((1 << bits) - 1)) != 0 -> return None
     if out.len() != 32 -> return None
     Val(out)
 }
 
 all_zero: fn(bytes: [U8]) -> Bool Never! {
     diff := U8{0}
-    loop b in bytes -> diff = diff.bit_or(b)
+    loop b in bytes -> diff |= b
     diff == U8{0}
 }
 
@@ -875,7 +875,7 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     i := 0
     loop i + 3 <= bytes.len() {
-        n: ((U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)).bit_or(U32{bytes[i + 2]})
+        n: ((U32{bytes[i]} << 16) | U32{bytes[i + 1]} << 8) | U32{bytes[i + 2]}
         out.push(b64_digit(n >> 18))
         out.push(b64_digit(n >> 12))
         out.push(b64_digit(n >> 6))
@@ -889,7 +889,7 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
         out.push(b64_digit(n >> 12))
     }
     if rest == 2 {
-        n: (U32{bytes[i]} << 16).bit_or(U32{bytes[i + 1]} << 8)
+        n: (U32{bytes[i]} << 16) | U32{bytes[i + 1]} << 8
         out.push(b64_digit(n >> 18))
         out.push(b64_digit(n >> 12))
         out.push(b64_digit(n >> 6))
@@ -901,12 +901,12 @@ phc_b64_encode: fn(bytes: [U8]) -> String Never! {
 /// `+`, `/`, computed as `A` plus the offsets of the ranges `v` is past, each
 /// a mask from the borrow of a wrapping subtraction.
 #Overflow(.Wrapping) priv b64_digit: fn(n: U32) -> U8 Never! {
-    v: n.bit_and(U32{63})
+    v: n & U32{63}
     c := v + U32{65}
-    c += ((U32{25} - v) >> 8).bit_and(U32{6})
-    c -= ((U32{51} - v) >> 8).bit_and(U32{75})
-    c -= ((U32{61} - v) >> 8).bit_and(U32{15})
-    c += ((U32{62} - v) >> 8).bit_and(U32{3})
+    c += ((U32{25} - v) >> 8) & U32{6}
+    c -= ((U32{51} - v) >> 8) & U32{75}
+    c -= ((U32{61} - v) >> 8) & U32{15}
+    c += ((U32{62} - v) >> 8) & U32{3}
     wrapping(U8{c})
 }
 
@@ -919,12 +919,12 @@ phc_b64_decode: fn(text: String) -> [U8]? {
     bits := 0
     loop b in raw {
         value: phc_b64_value(b) ?? return None
-        n = ((n << 6)).bit_or(value)
+        n = ((n << 6)) | value
         bits += 6
         if bits >= 8 {
             bits -= 8
             out.push(wrapping(U8{n >> bits}))
-            n = (n).bit_and(((1 << bits) - 1))
+            n = (n) & ((1 << bits) - 1)
         }
     }
     if bits >= 6 || n != 0 -> return None
@@ -943,14 +943,14 @@ phc_b64_value: fn(b: U8) -> Int? {
 
 read_be32: fn(data: [U8], offset: Int) -> Int Never! {
     if offset < 0 || offset + 4 > data.len() -> return 0
-    ((((Int{data[offset]} << 24)).bit_or((Int{data[offset + 1]} << 16))).bit_or((Int{data[offset + 2]} << 8))).bit_or(Int{data[offset + 3]})
+    ((((Int{data[offset]} << 24)) | (Int{data[offset + 1]} << 16)) | (Int{data[offset + 2]} << 8)) | Int{data[offset + 3]}
 }
 
 // Byte-order loads behind ChaCha20, not part of the crypto surface.
 priv byte_words: module {
     load_le32: fn(bytes: [U8], off: Int) -> U32 Never! {
         if off + 3 >= bytes.len() -> return U32{0}
-        U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
+        U32{bytes[off]} | U32{bytes[off + 1]} << 8 | U32{bytes[off + 2]} << 16 | U32{bytes[off + 3]} << 24
     }
 
     push_le32: fn(out: &[U8], value: U32) Never! {
@@ -971,7 +971,7 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
     loop b in bytes {
         n: U32{b}
         out.push(hex_digit(n >> 4))
-        out.push(hex_digit(n.bit_and(U32{15})))
+        out.push(hex_digit(n & U32{15}))
     }
     String.from_bytes_lossy(out)
 }
@@ -979,7 +979,7 @@ hex_encode: fn(bytes: [U8]) -> String Never! {
 /// The lowercase hex digit of `n` (0 to 15): `0` plus `n`, and the 39 from
 /// `9` to `a` when `n` is past 9, a mask from the borrow of `9 - n`.
 #Overflow(.Wrapping) priv hex_digit: fn(n: U32) -> U8 Never! {
-    wrapping(U8{n + U32{48} + ((U32{9} - n) >> 8).bit_and(U32{39})})
+    wrapping(U8{n + U32{48} + (((U32{9} - n) >> 8) & U32{39})})
 }
 
 slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -1103,13 +1103,13 @@ priv chacha20_core: module {
     c := s[ic]
     d := s[id]
     a += b
-    d = (d.bit_xor(a)).rotate_left(16)
+    d = (d ~ a).rotate_left(16)
     c += d
-    b = (b.bit_xor(c)).rotate_left(12)
+    b = (b ~ c).rotate_left(12)
     a += b
-    d = (d.bit_xor(a)).rotate_left(8)
+    d = (d ~ a).rotate_left(8)
     c += d
-    b = (b.bit_xor(c)).rotate_left(7)
+    b = (b ~ c).rotate_left(7)
     s[ia] = a
     s[ib] = b
     s[ic] = c
@@ -1127,7 +1127,7 @@ priv chacha20_core: module {
             word: w[k] + state[k]
             loop shift in 0..<4 {
                 if i >= plain.len() -> return out
-                out.push(plain[i].bit_xor(wrapping(U8{word >> (8 * shift)})))
+                out.push(plain[i] ~ wrapping(U8{word >> (8 * shift)}))
                 i += 1
             }
         }
@@ -1443,9 +1443,9 @@ priv blake3_chunk: fn(data: [U8], chunk_index: Int, is_root: Bool) -> [U32] {
             block.push(U8{0})
         }
         flags := 0
-        if i == 0 -> flags = (flags).bit_or(1)
-        if i == blocks - 1 -> flags = (flags).bit_or(2)
-        if is_root && i == blocks - 1 -> flags = (flags).bit_or(8)
+        if i == 0 -> flags = (flags) | 1
+        if i == blocks - 1 -> flags = (flags) | 2
+        if is_root && i == blocks - 1 -> flags = (flags) | 8
         cv = blake3_compress(cv, block, chunk_index, end - start, flags)
     }
     cv
@@ -1463,7 +1463,7 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
     loop w in left -> push_le32(block, w)
     loop w in right -> push_le32(block, w)
     flags := 4
-    if is_root -> flags = (flags).bit_or(8)
+    if is_root -> flags = (flags) | 8
     blake3_compress(C_BLAKE3_IV, block, 0, 64, flags)
 }
 
@@ -1500,20 +1500,20 @@ priv blake3_parent: fn(left: [U32], right: [U32], is_root: Bool) -> [U32] {
         blake3_g(s, 3, 4, 9, 14, m[C_BLAKE3_MSG[base + 14]], m[C_BLAKE3_MSG[base + 15]])
     }
     out := [U32]{}
-    loop i in 0..<8 -> out.push(s[i].bit_xor(s[i + 8]))
+    loop i in 0..<8 -> out.push(s[i] ~ s[i + 8])
     out
 }
 
 /// BLAKE3 quarter-round G: right rotations by 16, 12, 8 and 7.
 #Overflow(.Wrapping) priv blake3_g: fn(s: &[U32], a: Int, b: Int, c: Int, d: Int, mx: U32, my: U32) {
     s[a] = s[a] + s[b] + mx
-    s[d] = (s[d].bit_xor(s[a])).rotate_right(16)
+    s[d] = (s[d] ~ s[a]).rotate_right(16)
     s[c] = s[c] + s[d]
-    s[b] = (s[b].bit_xor(s[c])).rotate_right(12)
+    s[b] = (s[b] ~ s[c]).rotate_right(12)
     s[a] = s[a] + s[b] + my
-    s[d] = (s[d].bit_xor(s[a])).rotate_right(8)
+    s[d] = (s[d] ~ s[a]).rotate_right(8)
     s[c] = s[c] + s[d]
-    s[b] = (s[b].bit_xor(s[c])).rotate_right(7)
+    s[b] = (s[b] ~ s[c]).rotate_right(7)
 }
 
 #Test("BLAKE3 matches the reference vectors (input bytes i mod 251) across one block, one chunk and a chunk tree") {

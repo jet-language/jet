@@ -167,16 +167,16 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
         }
         if jet_rt_string_eq(relative, rt_static_text(".ignore")) {
             if (rt_text_word(out + I64{48}) != I64{1}) { return I64{13} }
-            seen = seen.bit_or(I64{1})
+            seen |= I64{1}
         } else if jet_rt_string_eq(relative, rt_static_text("a")) {
             if (rt_text_word(out + I64{16}) != I64{1}) { return I64{14} }
             child = rt_text_word(out + I64{8})
-            seen = seen.bit_or(I64{2})
+            seen |= I64{2}
         } else if jet_rt_string_eq(relative, rt_static_text("c.log")) {
             if (rt_text_word(out + I64{24}) != I64{1} || jet_walk8_ignored(key, I64{0}, relative, false)) {
                 return I64{15}
             }
-            seen = seen.bit_or(I64{4})
+            seen |= I64{4}
         } else { return I64{16} }
         jet_rt_string_drop(rt_text_word(out + I64{32}))
         jet_rt_string_drop(relative)

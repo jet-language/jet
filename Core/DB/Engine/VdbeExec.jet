@@ -95,7 +95,7 @@ exec_return: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: &Run, answer: 
         rc = base.INTERRUPT
     }
     k: conn.STMTSTATUS_VM_STEP
-    v.counters[k] = (v.counters[k] + r.n_vm_step).bit_and(4294967295)
+    v.counters[k] = (v.counters[k] + r.n_vm_step) & 4294967295
     rc
 }
 
@@ -113,7 +113,7 @@ abort_due_to_error: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe, r: Run, co
     if v.state == conn.VDBE_RUN_STATE -> _: aux.halt<H>(h, db, v)
     if rc == base.IOERR_NOMEM -> aux.oom_fault(db)
     if rc == base.CORRUPT && !db.auto_commit {
-        db.flags = db.flags.bit_or(conn.SQLITE_CORRUPT_RD_ONLY)
+        db.flags |= conn.SQLITE_CORRUPT_RD_ONLY
         conn.sync_btrees(db)
     }
     if r.reset_schema_on_fault > 0 -> conn.reset_one_schema(db, r.reset_schema_on_fault - 1)

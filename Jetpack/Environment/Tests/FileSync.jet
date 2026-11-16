@@ -13,7 +13,7 @@ env_files_test_declaration: fn(destination: String, sensitive: Bool) -> ManagedF
 }
 
 env_files_test_mode: fn(path: String) -> Int {
-    ((files.stat(path) ?? panic("stat {path}")).mode).bit_and(0o7777)
+    ((files.stat(path) ?? panic("stat {path}")).mode) & 0o7777
 }
 
 env_files_test_plan: fn(root: String, declarations: [ManagedFile]) -> FilePlan {
@@ -59,7 +59,7 @@ env_files_test_action: fn(plan: FilePlan, destination: String) -> FileActionKind
     declaration.permissions = Val(0o644)
     output: env_files_create_new_file(temp, env_files_destination_permissions(declaration)) ?? panic("create sensitive temp")
     info: output.stat() ?? panic("stat sensitive temp")
-    assert_eq((info.mode).bit_and(0o7777), 0o600)
+    assert_eq((info.mode) & 0o7777, 0o600)
     files.remove_all(root).drop("temp project cleanup")
 }
 

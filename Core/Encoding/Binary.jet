@@ -38,7 +38,7 @@ pack_u8: fn(n: Int) -> [U8] BinaryError! {
 
 pack_i8: fn(n: Int) -> [U8] BinaryError! {
     if n < -128 || n > 127 -> return Err(BinaryError.Range)
-    pack_u8((n).bit_and(255))
+    pack_u8((n) & 255)
 }
 
 pack_u16le: fn(n: Int) -> [U8] BinaryError! {
@@ -85,14 +85,14 @@ unpack_u16le: fn(data: [U8], offset: Int) -> Int? Never! {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a: u8_int(data[offset])
     b: u8_int(data[offset + 1])
-    Val((a).bit_or((b << 8)))
+    Val((a) | (b << 8))
 }
 
 unpack_u16be: fn(data: [U8], offset: Int) -> Int? Never! {
     if offset < 0 || offset + 1 >= data.len() -> return None
     a: u8_int(data[offset])
     b: u8_int(data[offset + 1])
-    Val(((a << 8)).bit_or(b))
+    Val(((a << 8)) | b)
 }
 
 unpack_u32le: fn(data: [U8], offset: Int) -> Int? Never! {
@@ -101,7 +101,7 @@ unpack_u32le: fn(data: [U8], offset: Int) -> Int? Never! {
     k := 0
     loop k < 4 {
         b: u8_int(data[offset + k])
-        n = (n).bit_or((b << (k * 8)))
+        n = (n) | (b << (k * 8))
         k += 1
     }
     Val(n)
@@ -113,7 +113,7 @@ unpack_u32be: fn(data: [U8], offset: Int) -> Int? Never! {
     k := 0
     loop k < 4 {
         b: u8_int(data[offset + k])
-        n = ((n << 8)).bit_or(b)
+        n = ((n << 8)) | b
         k += 1
     }
     Val(n)
@@ -122,20 +122,20 @@ unpack_u32be: fn(data: [U8], offset: Int) -> Int? Never! {
 unpack_u64le: fn(data: [U8], offset: Int) -> Int? Never! {
     lo: unpack_u32le(data, offset) ?? return None
     hi: unpack_u32le(data, offset + 4) ?? return None
-    Val((lo).bit_or((hi << 32)))
+    Val((lo) | (hi << 32))
 }
 
 unpack_u64be: fn(data: [U8], offset: Int) -> Int? Never! {
     hi: unpack_u32be(data, offset) ?? return None
     lo: unpack_u32be(data, offset + 4) ?? return None
-    Val((lo).bit_or((hi << 32)))
+    Val((lo) | (hi << 32))
 }
 
 sign_extend: fn(n: Int, bits: Int) -> Int Never! {
     sign: 1 << (bits - 1)
     mask: (1 << bits) - 1
-    v := (n).bit_and(mask)
-    if ((v).bit_and(sign)) != 0 -> return v - (1 << bits)
+    v := (n) & mask
+    if ((v) & sign) != 0 -> return v - (1 << bits)
     v
 }
 
@@ -162,12 +162,12 @@ byteswap: fn(data: [U8], width: Int) -> [U8] BinaryError! {
 
 pack_f64le: fn(n: Float) -> [U8] BinaryError! {
     bits: math.to_bits(n) ?? return Err(BinaryError.Range)
-    pack_u64le(bits.bit_and(18446744073709551615))
+    pack_u64le(bits & 18446744073709551615)
 }
 
 pack_f64be: fn(n: Float) -> [U8] BinaryError! {
     bits: math.to_bits(n) ?? return Err(BinaryError.Range)
-    pack_u64be(bits.bit_and(18446744073709551615))
+    pack_u64be(bits & 18446744073709551615)
 }
 
 unpack_f64le: fn(data: [U8], offset: Int) -> Float? Never! {
@@ -331,8 +331,8 @@ pack_one: fn(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     if code == 98 -> return pack_i8(value)
     if code == 104 {
         if value < -32768 || value > 32767 -> return Err(BinaryError.Range)
-        if little -> return pack_u16le((value).bit_and(65535))
-        return pack_u16be((value).bit_and(65535))
+        if little -> return pack_u16le((value) & 65535)
+        return pack_u16be((value) & 65535)
     }
     if code == 72 {
         if little -> return pack_u16le(value)
@@ -340,8 +340,8 @@ pack_one: fn(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
     }
     if code == 105 || code == 108 {
         if value < -2147483648 || value > 2147483647 -> return Err(BinaryError.Range)
-        if little -> return pack_u32le((value).bit_and(4294967295))
-        return pack_u32be((value).bit_and(4294967295))
+        if little -> return pack_u32le((value) & 4294967295)
+        return pack_u32be((value) & 4294967295)
     }
     if code == 73 || code == 76 {
         if little -> return pack_u32le(value)
@@ -351,8 +351,8 @@ pack_one: fn(code: Int, little: Bool, value: Int) -> [U8] BinaryError! {
         if value < -9223372036854775808 || value > 9223372036854775807 {
             return Err(BinaryError.Range)
         }
-        if little -> return pack_u64le((value).bit_and(18446744073709551615))
-        return pack_u64be((value).bit_and(18446744073709551615))
+        if little -> return pack_u64le((value) & 18446744073709551615)
+        return pack_u64be((value) & 18446744073709551615)
     }
     if little -> return pack_u64le(value)
     pack_u64be(value)

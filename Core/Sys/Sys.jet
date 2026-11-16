@@ -56,7 +56,7 @@ usize_max: fn() -> U64 Never! { SYS_TARGET_USIZE_MAX }
     size: #run { SysTargetPointer.reflect().layout.size ?? panic("selected target pointer layout") }
     maximum: usize_max()
     assert((maximum >> (8 * (size - 1))) == U64{255})
-    assert((maximum.bit_and(U64{255})) == U64{255})
+    assert((maximum & U64{255}) == U64{255})
 }
 
 // Source owns validation, Unicode policy and child overlays. The existing

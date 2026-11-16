@@ -3205,20 +3205,20 @@ run: fn() {
 }
 ```
 
-Numeric arithmetic methods need no import (D-SIGIL-ALGEBRA1=B):
+Numeric power is a method that needs no import (D-SIGIL-ALGEBRA1=B):
 
 | Method | Receiver | Description |
 | --- | --- | --- |
-| `value.bit_and(other)` | Int and each fixed-width integer | Keep shared bits; the usual integer join determines the width. |
-| `value.bit_or(other)` | Int and each fixed-width integer | Keep bits set in either operand. |
-| `value.bit_xor(other)` | Int and each fixed-width integer | Keep bits set in exactly one operand. |
-| `value.bit_not()` | Int and each fixed-width integer | Flip every bit, keeping the width; exact Int returns `-value - 1`. |
 | `value.pow(exponent)` | Int and Float | Numeric power with the existing exactness and negative-exponent rules. A written negative Int exponent produces Fraction; a dynamic negative Int exponent stops with the existing arithmetic fault. On Float and F32 it is C23 `pow`, correctly rounded, so every tier returns the same bits: 1 for `x^0` and `1^y` (even at a quiet NaN), the IEEE 754 zeros and infinities for a zero or infinite operand, a negative `x` to a whole `y` signed by `y`'s parity, and NaN for a negative `x` to a fractional `y`. |
 
-These intrinsic methods lower to the ordinary typed numeric operations, not
-user function calls, so every tier computes the same bits; Float and F32
+This intrinsic method lowers to the ordinary typed numeric operation, not a
+user function call, so every tier computes the same bits; Float and F32
 `pow` call Core's correctly rounded power.
-An update writes `value = value.bit_xor(other)`. `!value` is Boolean
+Integer bits are sigils (D-BIT-SIGILS1=A): `a & b`, `a | b`, `a ~ b`
+(exclusive-or), `a &~ b` (and-not) and the complement `~a`, on Int and each
+fixed-width integer. The usual integer join determines the width, the
+complement keeps its operand's width, and an exact Int complement is
+`-value - 1`. The updates are `&=`, `|=`, `~=` and `&~=`. `!value` is Boolean
 negation only. Shifts retain `<<` and `>>`.
 
 Floating classifiers such as `math.is_nan` require Float or F32, not Int.
@@ -5548,6 +5548,9 @@ tasks never read or change the process registry. The module source is
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
+| `blobs(name: String) -> Blobs` | store | The blob store named `name`: the files `keep` stores live in the directory `name`. A service holds it as a field. See below. |
+| `blobs.keep(file: Upload, allow: [Media]) -[FS.Write]> Blob BlobError!` | blob | Store the upload `file` under an ID the store makes; `WrongType` when its first bytes are none of `allow`. See below. |
+| `blob_url(id: BlobID) -> String` | address | The address that serves the blob `id` to a caller whose read policy admits the row that holds it. See below. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. It may read the database, fetch over `Net` and wait
@@ -6005,6 +6008,45 @@ it, as when the App opens none; a write committed to any database the server
 has open, a file or in memory, drops those, and a run that saw one keeps
 none. A file whose kept replies can't be read or written is passed over: the
 call runs the method and is answered as if no reply were kept.
+
+A method that takes an `app.Upload` is an upload endpoint. It must be marked
+`#App.UploadCheck(method: "may_attach")`, which names the service's method
+that checks the call; `attach: fn(self, task: TaskID, file: app.Upload)`
+takes one Upload, and `may_attach: fn(self, task: TaskID) TaskError!` takes
+the endpoint's other parameters. Each is E2805 otherwise, as an
+`#App.UploadCheck` on a method with no Upload is. A client POSTs the file's
+bytes as the body to `{prefix}/attach?args=<the other arguments as a JSON
+array>&name=<the file's name>`. The server answers in this order, before it
+reads the body: 401 to an `#App.SignedIn` endpoint's call without a session,
+429 to a rate-limited caller, 413 to a `Content-Length` over the service's
+`max_upload` (1000000 bytes by default), 422 to arguments that don't decode,
+and 403 when the check fails. The check runs as the caller, so a check that
+reads a row runs its policy, and a caller it refuses never sends the body.
+Only then is the body read, at most `max_upload` bytes, and staged in a file
+under `.jet/uploads` before the method's transaction begins: a transaction
+that runs again reads the staged file again. The method gets
+`app.Upload{name, bytes}`, where `name` is the name the client sent, kept
+only as metadata.
+
+`blobs.keep(file, allow:)` stores the staged file under a 32-hex-digit
+`BlobID` it makes, never under the client's name, so `../../escape.png`
+stores safely. It reads the media type from the file's first bytes (PNG,
+JPEG, GIF and WebP are `Media.Image`, `%PDF-` is `Media.PDF`, UTF-8 text
+without control bytes is `Media.Text`) and ignores the type the client
+declared, so HTML sent as `image/png` is `WrongType`. The upload endpoint
+answers a failed call whose error is `WrongType` with 415. A blob a call kept
+is deleted when the call's transaction rolls back. The staged file is removed
+when the request ends, and a file a stopped server left staged is removed
+when the next server starts serving.
+
+GET `app.blob_url(id)` (`/__jet/blobs/<id>`) serves the blob to a caller,
+named by the session as for a call, when the read policy of a row that holds
+`id` in a table of a store the App opened admits the caller. It is served with
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and
+`Cache-Control: private, no-store`, under the type its first bytes show. A
+caller the policy refuses and an ID no row holds are both answered 404, so a
+download never tells a caller that a blob they may not read exists. A mounted
+app graph serves no uploads: an upload endpoint on `graph.mount` is E2805.
 
 `app.Notice{text:, retry:}` is where a handler's failure goes. A control's
 handler has the type `fn() app.Notice!`, so its error type converts to a
@@ -6526,7 +6568,7 @@ wrapper (**E1003**, whose fix names the value the wrapper would give).
 Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
-and `is_finite`. Named bit methods preserve operand width. A shift keeps its
+and `is_finite`. The bit sigils preserve operand width. A shift keeps its
 left operand's width, and its count may be any integer width (`U64{byte} << n`
 with `n: U8`); a count past the value's width traps rather than leaking a
 host-language panic.

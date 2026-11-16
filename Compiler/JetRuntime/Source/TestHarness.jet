@@ -38,7 +38,7 @@
     stdout: jet_rt_test_capture_take()
     skipped: jet_rt_test_take_whole_skip()
     outcome: jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
-    if runtime_stop -> trap_store(outcome, trap_word(outcome).bit_or(I64{8}))
+    if runtime_stop -> trap_store(outcome, trap_word(outcome) | I64{8})
     outcome
 }
 
@@ -81,14 +81,14 @@
         row += I64{1}
     }
     flags: trap_word(outcome)
-    if (!expected && flags.bit_and(I64{5}) == I64{1}) {
+    if (!expected && flags & I64{5} == I64{1}) {
         row = I64{0}
         loop row < count {
             nth := I64{1}
             loop nth <= trap_word(wrapping(observed + row * I64{8})) {
                 fault_schedule_arm(rows, count, row, nth)
                 injected: test_fault_run(name, expected, env, invoke, property)
-                if (trap_word(injected).bit_and(I64{1}) == I64{0}) {
+                if (trap_word(injected) & I64{1} == I64{0}) {
                     jet_rt_test_outcome_drop(outcome)
                     test_fault_report(injected, trap_word(wrapping(rows + row * I64{8})), nth)
                     outcome = injected

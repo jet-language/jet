@@ -1300,11 +1300,11 @@ priv handshake_message: fn(ssl: ssldefs.SSLContext, server_name: String, status:
 // MBEDTLS_X509_BADCERT_* flags in the order a path-building verifier reports
 // them, spelled like rustls' CertificateError.
 priv verify_reason: fn(flags: Int) -> String Never! {
-    if flags.bit_and(8) != 0 -> return "UnknownIssuer"
-    if flags.bit_and(1) != 0 -> return "Expired"
-    if flags.bit_and(512) != 0 -> return "NotValidYet"
-    if flags.bit_and(2) != 0 -> return "Revoked"
-    if flags.bit_and(4) != 0 -> return "NotValidForName"
+    if flags & 8 != 0 -> return "UnknownIssuer"
+    if flags & 1 != 0 -> return "Expired"
+    if flags & 512 != 0 -> return "NotValidYet"
+    if flags & 2 != 0 -> return "Revoked"
+    if flags & 4 != 0 -> return "NotValidForName"
     "Other"
 }
 
@@ -1943,12 +1943,12 @@ priv net_to_io: fn(err: NetError) -> IOError Never! {
 }
 
 // The high-level part of a composite Mbed TLS status (negative), or 0.
-priv mbedtls_high: fn(status: Int) -> Int Never! { 0 - (0 - status).bit_and(32640) }
+priv mbedtls_high: fn(status: Int) -> Int Never! { 0 - ((0 - status) & 32640) }
 
 priv mbedtls_text: fn(status: Int) -> String Never! {
     positive: 0 - status
-    high: positive.bit_and(32640)
-    low: positive.bit_and(127)
+    high: positive & 32640
+    low: positive & 127
     text: mbedtls_known(if high != 0 -> high else -> low)
     if text != "" -> return text
     "Mbed TLS error -0x{__hex(positive, 4)}"

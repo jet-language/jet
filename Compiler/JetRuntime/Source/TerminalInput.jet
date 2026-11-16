@@ -49,8 +49,8 @@ rt_line_run: fn(start: I64, count: I64) -> I64 {
     at := I64{0}
     words: count - count % I64{8}
     loop at < words {
-        word: rt_text_word(wrapping(start + at)).bit_xor(I64{723401728380766730})
-        if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) {
+        word: rt_text_word(wrapping(start + at)) ~ I64{723401728380766730}
+        if (wrapping(word - I64{72340172838076673}) & (word ~ I64{-1}) & I64{-9187201950435737472} != I64{0}) {
             break
         }
         at += I64{8}

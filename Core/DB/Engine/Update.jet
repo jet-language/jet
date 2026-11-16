@@ -86,8 +86,8 @@ update_from_select: fn(p: &cg.Parse, a: &ast.AST, i_eph: Int, pk: Int, changes: 
         e: ast.expr_dup(a, ce, 0)
         list = ast.expr_list_append(a, list, e)
     }
-    s: ast.select_new(a, list, new_src, where2, -1, -1, -1, ast.SF_UF_SRC_CHECK.bit_or(ast.SF_INCLUDE_HIDDEN).bit_or(ast.SF_UPDATE_FROM), -1)
-    if s >= 0 -> a.selects[s].sel_flags = a.selects[s].sel_flags.bit_or(ast.SF_ORDER_BY_REQD)
+    s: ast.select_new(a, list, new_src, where2, -1, -1, -1, ast.SF_UF_SRC_CHECK | ast.SF_INCLUDE_HIDDEN | ast.SF_UPDATE_FROM, -1)
+    if s >= 0 -> a.selects[s].sel_flags = a.selects[s].sel_flags | ast.SF_ORDER_BY_REQD
     dest := ex.select_dest_init(e_dest, i_eph)
     dest.i_sd_parm2 = if pk >= 0 -> p.db.indexes[pk].n_key_col else -> -1
     _: sel.select(p, a, s, dest)
@@ -195,7 +195,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
                     chng_rowid = true
                     rowid_expr = ce
                     i_rowid_expr = i
-                } else if pk >= 0 && cf.bit_and(conn.COLFLAG_PRIMKEY) != 0 { chng_pk = true } else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
+                } else if pk >= 0 && cf & conn.COLFLAG_PRIMKEY != 0 { chng_pk = true } else if cf & conn.COLFLAG_GENERATED != 0 {
                     ast.error(a, "cannot UPDATE generated column \"{ast.text(p.db.tables[t].cols[j].name)}\"")
                     return
                 }
@@ -227,12 +227,12 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     chng_key: chng_rowid || chng_pk
 
     // A generated column changes when what it is computed from does.
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
         loop {
             progress := false
             loop i in 0..<n_col {
                 if a_xref[i] >= 0 -> next
-                if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_GENERATED) == 0 -> next
+                if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_GENERATED == 0 -> next
                 ge: cat.column_expr(p.db, a, t, i)
                 if ins.expr_references_updated_column(a, ge, a_xref, chng_rowid) {
                     a_xref[i] = 99999
@@ -315,7 +315,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
 
     // The count of rows updated.
     reg_row_count := 0
-    if p.db.flags.bit_and(conn.SQLITE_COUNT_ROWS) != 0 && p.f.trigger_tab < 0 && a.ctx.nested == 0 && !p.f.b_returning {
+    if p.db.flags & conn.SQLITE_COUNT_ROWS != 0 && p.f.trigger_tab < 0 && a.ctx.nested == 0 && !p.f.b_returning {
         p.f.n_mem += 1
         reg_row_count = p.f.n_mem
         _: cg.op2(p, opc.OP_INTEGER, 0, reg_row_count)
@@ -372,7 +372,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
         // possible REPLACE or a WHERE subquery.
         wcf := cg.WHERE_ONEPASS_DESIRED
         if a.ctx.nested == 0 && !chng_key && !b_replace && (where_expr < 0 || !ast.has(a, where_expr, ast.EP_SUBQUERY)) {
-            wcf = wcf.bit_or(cg.WHERE_ONEPASS_MULTIROW)
+            wcf |= cg.WHERE_ONEPASS_MULTIROW
         }
         wr = wh.where_begin(p, a, src, where_expr, -1, -1, -1, wcf, i_idx_cur)
         if wr == .Val(w0) {
@@ -486,7 +486,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     if chng_pk {
         loop i in 0..<n_col {
             k: cat.table_column_to_storage(p.db, t, i) + reg_old
-            if p.db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_PRIMKEY) != 0 {
+            if p.db.tables[t].cols[i].col_flags & conn.COLFLAG_PRIMKEY != 0 {
                 ex.expr_code_get_column_of_table(p, a, t, i_data_cur, i, k)
             } else { _: cg.op2(p, opc.OP_NULL, 0, k) }
         }
@@ -500,8 +500,8 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
         reg: k
         k += 1
         cf: p.db.tables[t].cols[i].col_flags
-        if i == p.db.tables[t].ipkey -> _: cg.op2(p, opc.OP_NULL, 0, reg) else if cf.bit_and(conn.COLFLAG_GENERATED) != 0 {
-            if cf.bit_and(conn.COLFLAG_VIRTUAL) != 0 -> k -= 1
+        if i == p.db.tables[t].ipkey -> _: cg.op2(p, opc.OP_NULL, 0, reg) else if cf & conn.COLFLAG_GENERATED != 0 {
+            if cf & conn.COLFLAG_VIRTUAL != 0 -> k -= 1
         } else {
             j: a_xref[i]
             if j >= 0 {
@@ -515,7 +515,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
             }
         }
     }
-    if p.db.tables[t].tab_flags.bit_and(ast.TF_HAS_GENERATED) != 0 {
+    if p.db.tables[t].tab_flags & ast.TF_HAS_GENERATED != 0 {
         ins.compute_generated_columns(p, a, reg_new, t)
     }
 
@@ -533,7 +533,7 @@ update_body: fn(p: &cg.Parse, a: &ast.AST, src: Int, changes: Int, where_expr: I
     dl.generate_row_index_delete(p, a, t, i_data_cur, i_idx_cur, Val(a_reg_idx.copy()), -1)
     if b_finish_seek -> _: cg.op1(p, opc.OP_FINISH_SEEK, i_data_cur)
     if chng_key -> _: cg.op2(p, opc.OP_DELETE, i_data_cur, 0)
-    update_flags: conn.OPFLAG_ISUPDATE.bit_or(if e_one_pass == we.ONEPASS_MULTI -> conn.OPFLAG_SAVEPOSITION else -> 0)
+    update_flags: conn.OPFLAG_ISUPDATE | (if e_one_pass == we.ONEPASS_MULTI -> conn.OPFLAG_SAVEPOSITION else -> 0)
     ins.complete_insertion(p, a, t, i_data_cur, i_idx_cur, reg_new_rowid, a_reg_idx, update_flags, false, false)
 
     if reg_row_count != 0 -> _: cg.op2(p, opc.OP_ADD_IMM, reg_row_count, 1)

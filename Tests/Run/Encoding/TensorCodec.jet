@@ -71,7 +71,7 @@ from_values: fn(shape: [Int], data: [Float], profile: String) -> compute.Tensor 
     body: "{fields[0]};{fields[1]};profile={profile}"
     hash := U64{0xcbf29ce484222325}
     prime: U64{0x100000001b3}
-    loop byte in body.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * prime)
+    loop byte in body.bytes() -> hash = wrapping((hash ~ U64{byte}) * prime)
     checksum: fmt.hex(Int{hash}, 16)
     compute.deserialize("{body};checksum={checksum}") ?? panic("deserialize profile")
 }

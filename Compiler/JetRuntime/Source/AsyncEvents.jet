@@ -122,7 +122,7 @@ dispatch_report_new: fn(accepted: Bool, state: I64, delivered: I64, trace: I64, 
     sync_store(wrapping(report + I64{16}), state)
     sync_store(wrapping(report + I64{24}), delivered)
     sync_store(wrapping(report + I64{32}), async_trace_text(trace, lines, state))
-    sync_store(wrapping(report + I64{40}), if (trace.bit_and(ASYNC_TRACE_QUEUED) != I64{0}) -> I64{1} else -> I64{0})
+    sync_store(wrapping(report + I64{40}), if (trace & ASYNC_TRACE_QUEUED != I64{0}) -> I64{1} else -> I64{0})
     sync_store(wrapping(report + I64{48}), failures)
     sync_store(wrapping(report + I64{56}), if (failures != I64{0}) -> coll_meta_copy(e_meta) else -> I64{0})
     jet_rt_string_drop(lines)
@@ -133,13 +133,13 @@ dispatch_report_new: fn(accepted: Bool, state: I64, delivered: I64, trace: I64, 
 // when the entry took it.
 async_trace_text: fn(trace: I64, lines: I64, state: I64) -> I64 {
     text: jet_rt_string_builder_new()
-    if (trace.bit_and(ASYNC_TRACE_PENDING) != I64{0}) {
+    if (trace & ASYNC_TRACE_PENDING != I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("pending -> "))
     }
-    if (trace.bit_and(ASYNC_TRACE_QUEUED) != I64{0}) {
+    if (trace & ASYNC_TRACE_QUEUED != I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("queued -> "))
     }
-    if (trace.bit_and(ASYNC_TRACE_RUNNING) != I64{0}) {
+    if (trace & ASYNC_TRACE_RUNNING != I64{0}) {
         jet_rt_string_builder_push(text, rt_static_text("running -> "))
     }
     if (lines != I64{0}) { jet_rt_string_builder_push(text, lines) }
@@ -335,7 +335,7 @@ async_entry_release: fn(entry: I64) {
 }
 
 async_entry_trace: fn(entry: I64, step: I64) {
-    sync_store(wrapping(entry + I64{56}), sync_load(wrapping(entry + I64{56})).bit_or(step))
+    sync_store(wrapping(entry + I64{56}), sync_load(wrapping(entry + I64{56})) | step)
 }
 
 // Removes `entry` from the list at `base` and drops the list's count; the

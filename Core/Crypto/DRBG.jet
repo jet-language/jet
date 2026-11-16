@@ -119,10 +119,10 @@ block_cipher_df: fn(data: [U8], len: Int) -> [U8] DrbgError! {
     total: CTR_BLOCKSIZE + 8 + len + 1
     padded: (total + CTR_BLOCKSIZE - 1) /% CTR_BLOCKSIZE * CTR_BLOCKSIZE
     buf := cipher.zero_bytes(padded)
-    buf[CTR_BLOCKSIZE] = U8{(len >> 24).bit_and(255)}
-    buf[CTR_BLOCKSIZE + 1] = U8{(len >> 16).bit_and(255)}
-    buf[CTR_BLOCKSIZE + 2] = U8{(len >> 8).bit_and(255)}
-    buf[CTR_BLOCKSIZE + 3] = U8{len.bit_and(255)}
+    buf[CTR_BLOCKSIZE] = U8{(len >> 24) & 255}
+    buf[CTR_BLOCKSIZE + 1] = U8{(len >> 16) & 255}
+    buf[CTR_BLOCKSIZE + 2] = U8{(len >> 8) & 255}
+    buf[CTR_BLOCKSIZE + 3] = U8{len & 255}
     buf[CTR_BLOCKSIZE + 7] = U8{CTR_SEEDLEN}
     loop i in 0..<len -> buf[CTR_BLOCKSIZE + 8 + i] = data[i]
     buf[CTR_BLOCKSIZE + 8 + len] = U8{0x80}
@@ -176,7 +176,7 @@ ctr_blocks: fn(ctx: &CTRDrbg, count: Int, out: &[U8]) Never! {
 ctr_update_internal: fn(ctx: &CTRDrbg, data: [U8]) Never! {
     tmp := [U8]{}
     ctr_blocks(ctx, CTR_SEEDLEN /% CTR_BLOCKSIZE, tmp)
-    loop i in 0..<CTR_SEEDLEN -> tmp[i] = tmp[i].bit_xor(data[i])
+    loop i in 0..<CTR_SEEDLEN -> tmp[i] = tmp[i] ~ data[i]
     ctx.key = aes256(cipher.bytes_of(tmp, 0, CTR_KEYSIZE))
     loop i in 0..<CTR_BLOCKSIZE -> ctx.counter[i] = tmp[CTR_KEYSIZE + i]
     core.crypto.wipe(tmp)

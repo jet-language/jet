@@ -18,7 +18,7 @@ text_fmt_big_divide: fn(value: I64, divisor: I64) -> I64 {
     at := size
     loop at > (I64{0}) {
         at -= I64{1}
-        current: (remainder << I64{32}).bit_or(float_big_limb(value, at))
+        current: (remainder << I64{32}) | float_big_limb(value, at)
         quotient: current /% divisor
         float_big_put(value, at, quotient)
         remainder = current - quotient * divisor
@@ -63,11 +63,11 @@ text_fmt_push_big: fn(target: I64, value: I64) {
 text_fmt_next_digit: fn(remainder: I64, bits: I64) -> I64 {
     float_big_mul(remainder, I64{10})
     word: bits /% I64{32}
-    shift: bits.bit_and(I64{31})
+    shift: bits & I64{31}
     low: float_big_limb(remainder, word) >> shift
     high: if (shift == I64{0}) -> I64{0} else -> float_big_limb(remainder, word + I64{1}) << (I64{32} - shift)
-    digit: (low.bit_or(high)).bit_and(I64{15})
-    float_big_put(remainder, word, float_big_limb(remainder, word).bit_and((I64{1} << shift) - I64{1}))
+    digit: (low | high) & I64{15}
+    float_big_put(remainder, word, float_big_limb(remainder, word) & (I64{1} << shift) - I64{1})
     at := word + I64{1}
     loop at < (I64{40}) {
         float_big_put(remainder, at, I64{0})
@@ -79,13 +79,13 @@ text_fmt_next_digit: fn(remainder: I64, bits: I64) -> I64 {
 
 // exact_fixed_half_away: the unsigned text of finite magnitude bits.
 text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
-    exponent: (bits >> I64{52}).bit_and(I64{2047})
-    fraction: bits.bit_and(I64{4503599627370495})
-    significand: if (exponent == I64{0}) -> fraction else -> fraction.bit_or(I64{4503599627370496})
+    exponent: (bits >> I64{52}) & I64{2047}
+    fraction: bits & I64{4503599627370495}
+    significand: if (exponent == I64{0}) -> fraction else -> fraction | I64{4503599627370496}
     power: if (exponent == I64{0}) -> I64{-1074} else -> exponent - I64{1075}
     trailing := I64{0}
     if (significand != I64{0}) {
-        loop trailing < (I64{52}) && ((significand >> trailing).bit_and(I64{1})) == (I64{0}) {
+        loop trailing < (I64{52}) && ((significand >> trailing) & I64{1}) == (I64{0}) {
             trailing += I64{1}
         }
     }
@@ -102,7 +102,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     } else {
         bits_after: -power
         rt_text_push_number(body, if (bits_after >= I64{53}) -> I64{0} else -> significand >> bits_after)
-        float_big_init(big, if (bits_after >= I64{53}) -> significand else -> significand.bit_and((I64{1} << bits_after) - I64{1}))
+        float_big_init(big, if (bits_after >= I64{53}) -> significand else -> significand & (I64{1} << bits_after) - I64{1})
     }
     if (places > I64{0} || (!rounding && precision > I64{0})) { rt_text_push_scalar(body, I64{46}) }
     digit := I64{0}
@@ -141,7 +141,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
 
 #Export(c) jet_fmt_decimal: fn(value: Float, precision: I64) -> I64 {
     raw: rt_f64_bits(value)
-    magnitude: raw.bit_and(I64{9223372036854775807})
+    magnitude: raw & I64{9223372036854775807}
     if (magnitude >= I64{9218868437227405312}) {
         // f64 Display of the non-finite values: NaN, inf, -inf.
         if (magnitude > I64{9218868437227405312}) {
@@ -161,7 +161,7 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
             scale *= Float{10.0}
             at += I64{1}
         }
-        product: rt_f64_from_bits(rt_f64_bits(value * scale).bit_and(I64{9223372036854775807}))
+        product: rt_f64_from_bits(rt_f64_bits(value * scale) & I64{9223372036854775807})
         if (product < Float{4503599627370496.0}) {
             floor: libm_floor(product)
             fraction: product - floor
@@ -173,11 +173,11 @@ text_fmt_exact: fn(bits: I64, precision: I64) -> I64 {
     body := I64{0}
     if (rounded >= I64{0}) {
         shift: (rounded >> I64{52}) - I64{1075}
-        significand: (rounded.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
+        significand: (rounded & I64{4503599627370495}) | I64{4503599627370496}
         whole: if {
             (rounded == I64{0}) -> I64{0}
             // rounded <= 2^52: shift is at most 0.
-            (shift >= I64{0}) -> significand << shift.bit_and(I64{15})
+            (shift >= I64{0}) -> significand << (shift & I64{15})
             // significand < 2^53.
             (shift < I64{-52}) -> I64{0}
             else -> significand >> (-shift)

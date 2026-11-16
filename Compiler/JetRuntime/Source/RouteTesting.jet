@@ -322,10 +322,10 @@ testing_is_dir: fn(path: I64, length: I64) -> Bool {
     scratch: jet_rt_alloc(I64{160}, I64{8})
     jet_fs_stat_raw(text, true, scratch, wrapping(scratch + I64{128}))
     code: files_out_errno(wrapping(scratch + I64{128}))
-    mode: rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{4294967295})
+    mode: rt_text_word(wrapping(scratch + I64{16})) & I64{4294967295}
     jet_rt_free(scratch, I64{160}, I64{8})
     jet_rt_string_drop(text)
-    code == I64{0} && (mode.bit_and(I64{61440})) == I64{16384}
+    code == I64{0} && (mode & I64{61440}) == I64{16384}
 }
 
 testing_mkdir: fn(path: I64, length: I64) -> I64 {

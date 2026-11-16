@@ -77,7 +77,7 @@ csr: fn(v: conn.Vdbe, p: Int) -> Int Never! { v.csr_base + p }
 // Free what register i holds beyond its value (VdbeMemDynamic: an
 // aggregate context or a RowSet) before it is overwritten.
 release_dyn: fn(v: &conn.Vdbe, i: Int) Never! {
-    if v.mem[i].flags.bit_and(base.MEM_AGG.bit_or(conn.MEM_DYN)) != 0 -> aux.release_object(v, i)
+    if v.mem[i].flags & (base.MEM_AGG | conn.MEM_DYN) != 0 -> aux.release_object(v, i)
 }
 
 // out2Prerelease: register i becomes an INTEGER whose value the op
@@ -116,7 +116,7 @@ reg_set: fn(v: &conn.Vdbe, i: Int, m: base.Mem) Never! {
 reg_copy: fn(v: &conn.Vdbe, to: Int, from: Int) Never! {
     release_dyn(v, to)
     m := v.mem[from].copy()
-    if m.flags.bit_and(base.MEM_AGG.bit_or(conn.MEM_DYN)) != 0 -> m.flags = base.MEM_NULL
+    if m.flags & (base.MEM_AGG | conn.MEM_DYN) != 0 -> m.flags = base.MEM_NULL
     v.mem[to] = m
 }
 
@@ -176,10 +176,10 @@ filter_hash: fn(v: conn.Vdbe, p3: Int, n: Int) -> Int Never! {
     h := 0
     loop i in p3..<p3 + n {
         f: v.mem[i].flags
-        if f.bit_and(base.MEM_INT.bit_or(base.MEM_INT_REAL)) != 0 {
-            h = util.wrap_i64(h + v.mem[i].i)
-        } else if f.bit_and(base.MEM_REAL) != 0 { h = util.wrap_i64(h + mem.int_value(v.mem[i])) } else if f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)) != 0 {
-            h = util.wrap_i64(h + 4093 + f.bit_and(base.MEM_STR.bit_or(base.MEM_BLOB)))
+        if f & (base.MEM_INT | base.MEM_INT_REAL) != 0 -> h = util.wrap_i64(h + v.mem[i].i) else if f & base.MEM_REAL != 0 {
+            h = util.wrap_i64(h + mem.int_value(v.mem[i]))
+        } else if f & (base.MEM_STR | base.MEM_BLOB) != 0 {
+            h = util.wrap_i64(h + 4093 + (f & (base.MEM_STR | base.MEM_BLOB)))
         }
     }
     util.as_u64(h)

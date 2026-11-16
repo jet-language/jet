@@ -19,7 +19,7 @@ PAGE_BYTES: 65536
 churn: fn(n: Int) -> Int {
     total := I64{0}
     loop i in 0..<n {
-        count: 1 + i.bit_and(63)
+        count: 1 + (i & 63)
         words := Words.claim(count) ?? panic("no memory")
         words.set(0, I64{i})
         words.set(count - 1, I64{count})
@@ -52,7 +52,7 @@ scan: fn(n: Int) -> Int {
     total := I64{0}
     loop pass in 0..<n {
         a.set_all(I64{pass})
-        a.set(pass.bit_and(WORDS - 1), I64{-1})
+        a.set(pass & WORDS - 1, I64{-1})
         if a.same(b) -> total = wrapping(total + 1)
         b.copy_from(a)
         if a.same(b) -> total = wrapping(total + 1)
@@ -70,7 +70,7 @@ tally: fn(n: Int) -> Int {
     total := I64{0}
     loop _ in 0..<n {
         loop round in 0..<ROUNDS {
-            total = wrapping(total + word.bump(I64{round.bit_and(31)}))
+            total = wrapping(total + word.bump(I64{round & 31}))
             seen: word.seen()
             if word.trade(seen, wrapping(seen + 1)) -> total = wrapping(total + 1)
         }
@@ -85,9 +85,9 @@ pages: fn(n: Int) -> Int {
     loop i in 0..<n {
         mapping := Pages.map(PAGE_BYTES) ?? panic("no mapping")
         last: mapping.len() - 1
-        mapping.set(i.bit_and(last), I64{i})
+        mapping.set(i & last, I64{i})
         mapping.set(last, I64{last})
-        total = wrapping(total + mapping.get(i.bit_and(last)) + mapping.get(last))
+        total = wrapping(total + mapping.get(i & last) + mapping.get(last))
         close(mapping)
     }
     Int{total}

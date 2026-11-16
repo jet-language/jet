@@ -216,12 +216,12 @@ Region: struct {
     /// of two. None when the size or alignment is invalid, or the region has
     /// no room left.
     claim: fn(&self, size: Int, align: Int) -> Block? Never! {
-        if size <= 0 || align <= 0 || align.bit_and(align - 1) != 0 -> return None
+        if size <= 0 || align <= 0 || align & align - 1 != 0 -> return None
         mask: align - 1
         limit: self.base + self.size
         next: self.base + self.cursor
         if mask > limit - next -> return None
-        start: (next + mask).bit_and(mask.bit_not())
+        start: (next + mask) &~ mask
         if size > limit - start -> return None
         self.cursor = start + size - self.base
         Val(Block{address: start, size: size})

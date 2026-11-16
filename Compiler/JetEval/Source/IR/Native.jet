@@ -849,7 +849,7 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
         jet_eval_ir_problem(s, failure)
         return
     }
-    signal: s.child.status.bit_and(127)
+    signal: s.child.status & 127
     if signal == 11 {
         depth: s.max_depth
         jet_eval_ir_source_fail(s, "compile-time call depth exceeds {depth}")
@@ -859,7 +859,7 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
         jet_eval_ir_problem(s, "the comptime child ended on signal {signal}")
         return
     }
-    code: (s.child.status >> 8).bit_and(255)
+    code: (s.child.status >> 8) & 255
     if s.runtime_execution {
         s.exit_code = Val(code)
         return
@@ -1422,7 +1422,7 @@ jet_eval_ir_write: fn(s: &JetEvalIRState, pointer: Int, width: Int, value: Int) 
     bytes := [U8]{}
     bits := if value < 0 -> value + 18446744073709551616 else -> value
     loop _ in 0..<width {
-        bytes.push(U8{bits.bit_and(255)})
+        bytes.push(U8{bits & 255})
         bits = bits >> 8
     }
     jet_eval_native_put(s, pointer, bytes)
@@ -1490,7 +1490,7 @@ jet_eval_ir_pow2: fn(bits: Int) -> Int Never! { 1 << bits }
 // sign-extended when `signed`.
 jet_eval_ir_wrap: fn(value: Int, bits: Int, signed: Bool) -> Int Never! {
     modulus: jet_eval_ir_pow2(bits)
-    low: value.bit_and(modulus - 1)
+    low: value & modulus - 1
     if signed && low >= modulus /% 2 -> return low - modulus
     low
 }
@@ -1511,7 +1511,7 @@ jet_eval_ir_inline: fn(word: Int) -> Bool Never! {
 // base-1e9 limbs (Int.jet: negative@16, limbs@24, len@32).
 jet_eval_ir_int_value: fn(s: &JetEvalIRState, word: Int) -> Int? {
     if jet_eval_ir_inline(word) -> return Val(word)
-    node: word.bit_and(JET_EVAL_IR_INLINE_MAX)
+    node: word & JET_EVAL_IR_INLINE_MAX
     negative: jet_eval_ir_read(s, node + 16, 8) ?? return None
     limbs: jet_eval_ir_read(s, node + 24, 8) ?? return None
     length: jet_eval_ir_read(s, node + 32, 8) ?? return None
@@ -1533,13 +1533,13 @@ jet_eval_ir_float: fn(word: Int) -> Float Never! { math.from_bits(word) }
 // signaling NaN folded at compile time reads back with the same bits
 // (ir_float_constant_bits).
 jet_eval_ir_float32: fn(bits: Int) -> Float Never! {
-    sign: bits.bit_and(2147483648) != 0
-    exponent: (bits >> 23).bit_and(255)
-    fraction: bits.bit_and(8388607)
+    sign: bits & 2147483648 != 0
+    exponent: (bits >> 23) & 255
+    fraction: bits & 8388607
     magnitude := math.from_bits(0)
     if exponent == 255 {
         if fraction != 0 {
-            nan: 9218868437227405312.bit_or(fraction << 29)
+            nan: 9218868437227405312 | fraction << 29
             return math.from_bits(if sign -> nan - 9223372036854775807 - 1 else -> nan)
         }
         magnitude = math.from_bits(9218868437227405312)
@@ -1548,7 +1548,7 @@ jet_eval_ir_float32: fn(bits: Int) -> Float Never! {
         magnitude = Float.from_int(fraction) * math.from_bits(3936146074321813504)
     } else {
         wide: (exponent - 127 + 1023) << 52
-        magnitude = math.from_bits(wide.bit_or(fraction << 29))
+        magnitude = math.from_bits(wide | fraction << 29)
     }
     if sign -> return -magnitude
     magnitude

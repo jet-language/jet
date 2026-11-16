@@ -349,7 +349,7 @@ face: fn(bytes: [U8]) -> Face FontError! {
         out.kern_pairs = kern_table(bytes, kern)
     }
     mask := 0
-    loop lookup in out.lookups -> mask = mask.bit_or(lookup.skip_mask)
+    loop lookup in out.lookups -> mask |= lookup.skip_mask
     if mask != 0 && table(tables, "GDEF") == .Val(gdef) -> out.classes = glyph_classes(bytes, gdef)
     Ok(out)
 }
@@ -494,13 +494,13 @@ blend: fn(pixels: &[U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
     col_hi: min_int(min_int(x0 + mask.width, clip.x + clip.width), width)
     row_lo: max_int(max_int(y0, clip.y), 0)
     row_hi: min_int(min_int(y0 + mask.height, clip.y + clip.height), rows)
-    opacity: (argb >> 24).bit_and(255)
+    opacity: (argb >> 24) & 255
     if col_lo >= col_hi || row_lo >= row_hi || opacity == 0 {
         return
     }
-    blue: argb.bit_and(255)
-    green: (argb >> 8).bit_and(255)
-    red: (argb >> 16).bit_and(255)
+    blue: argb & 255
+    green: (argb >> 8) & 255
+    red: (argb >> 16) & 255
     loop row in row_lo..<row_hi {
         loop col in col_lo..<col_hi {
             share: (Int{mask.coverage[(row - y0) * mask.width + col - x0]} * opacity + 127) /% 255
@@ -575,7 +575,7 @@ priv internal: module {
 
     tag_text: fn(value: Int) -> String Never! {
         out := [U8]{}
-        loop k in 0..<4 -> out.push(U8{(value >> (24 - k * 8)).bit_and(255)})
+        loop k in 0..<4 -> out.push(U8{(value >> (24 - k * 8)) & 255})
         String.from_bytes(out) ?? ""
     }
 
@@ -701,7 +701,7 @@ priv internal: module {
             descent: signed16(raw16(b, span.offset + 70)),
             line_gap: signed16(raw16(b, span.offset + 72)),
         }
-        if raw16(b, span.offset + 62).bit_and(128) != 0 -> return Ok(typo)
+        if raw16(b, span.offset + 62) & 128 != 0 -> return Ok(typo)
         if from_hhea.ascent != 0 || from_hhea.descent != 0 -> return Ok(from_hhea)
         if typo.ascent != 0 || typo.descent != 0 -> return Ok(typo)
         Ok(Vertical{ascent: raw16(b, span.offset + 74), descent: -raw16(b, span.offset + 76), line_gap: 0})
@@ -781,12 +781,12 @@ priv internal: module {
         if lo >= segments || raw16(b, starts_at + lo * 2) > scalar -> return 0
         delta: raw16(b, deltas_at + lo * 2)
         range_offset: raw16(b, ranges_at + lo * 2)
-        if range_offset == 0 -> return (scalar + delta).bit_and(65535)
+        if range_offset == 0 -> return (scalar + delta) & 65535
         at: ranges_at + lo * 2 + range_offset + (scalar - raw16(b, starts_at + lo * 2)) * 2
         // An entry past the end of the font maps nothing, as in FreeType.
         if at + 2 > b.len() -> return 0
         glyph: raw16(b, at)
-        if glyph == 0 -> 0 else -> (glyph + delta).bit_and(65535)
+        if glyph == 0 -> 0 else -> (glyph + delta) & 65535
     }
 
     map_format12: fn(face: Face, scalar: Int) -> Int {
@@ -871,7 +871,7 @@ priv internal: module {
             flag: Int{b[at]}
             at += 1
             flags.push(flag)
-            if flag.bit_and(8) != 0 {
+            if flag & 8 != 0 {
                 if at >= limit -> return Err(font_error("glyf: glyph {id}'s flags pass its end"))
                 repeat: Int{b[at]}
                 at += 1
@@ -884,14 +884,14 @@ priv internal: module {
         xs := [Int]{}
         x := 0
         loop flag in flags {
-            if flag.bit_and(2) != 0 {
+            if flag & 2 != 0 {
                 if at >= limit {
                     return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
                 }
                 step: Int{b[at]}
                 at += 1
-                x = if flag.bit_and(16) != 0 -> x + step else -> x - step
-            } else if flag.bit_and(16) == 0 {
+                x = if flag & 16 != 0 -> x + step else -> x - step
+            } else if flag & 16 == 0 {
                 if at + 2 > limit {
                     return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
                 }
@@ -903,21 +903,21 @@ priv internal: module {
         y := 0
         loop p in 0..<count {
             flag: flags[p]
-            if flag.bit_and(4) != 0 {
+            if flag & 4 != 0 {
                 if at >= limit {
                     return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
                 }
                 step: Int{b[at]}
                 at += 1
-                y = if flag.bit_and(32) != 0 -> y + step else -> y - step
-            } else if flag.bit_and(32) == 0 {
+                y = if flag & 32 != 0 -> y + step else -> y - step
+            } else if flag & 32 == 0 {
                 if at + 2 > limit {
                     return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
                 }
                 y += signed16(raw16(b, at))
                 at += 2
             }
-            points.push(OutlinePoint{x: scaled(xs[p], scale), y: scaled(y, scale), on: flag.bit_and(1) != 0})
+            points.push(OutlinePoint{x: scaled(xs[p], scale), y: scaled(y, scale), on: flag & 1 != 0})
         }
         loop c in 0..<contours -> ends.push(base + raw16(b, span.offset + 10 + c * 2))
         Ok()
@@ -943,8 +943,8 @@ priv internal: module {
             if child >= face.glyph_count {
                 return Err(font_error("glyf: glyph {id} names component glyph {child} of {face.glyph_count}"))
             }
-            words: flags.bit_and(1) != 0
-            xy: flags.bit_and(2) != 0
+            words: flags & 1 != 0
+            xy: flags & 2 != 0
             if at + (if words -> 4 else -> 2) > limit {
                 return Err(font_error("glyf: glyph {id}'s component arguments pass its end"))
             }
@@ -972,7 +972,7 @@ priv internal: module {
             xy_term := 0
             yx := 0
             yy := 65536
-            scale_bytes: if flags.bit_and(8) != 0 -> 2 else if flags.bit_and(64) != 0 -> 4 else if flags.bit_and(128) != 0 -> 8 else -> 0
+            scale_bytes: if flags & 8 != 0 -> 2 else if flags & 64 != 0 -> 4 else if flags & 128 != 0 -> 8 else -> 0
             if at + scale_bytes > limit {
                 return Err(font_error("glyf: glyph {id}'s component transform passes its end"))
             }
@@ -1014,7 +1014,7 @@ priv internal: module {
             offset: points.len()
             loop p in part -> points.push(OutlinePoint{x: p.x + dx, y: p.y + dy, on: p.on})
             loop end in part_ends -> ends.push(offset + end)
-            if flags.bit_and(32) == 0 -> break
+            if flags & 32 == 0 -> break
         }
         Ok()
     }
@@ -1022,7 +1022,7 @@ priv internal: module {
     value_size: fn(format: Int) -> Int Never! {
         size := 0
         loop bit in 0..<8 {
-            if (format >> bit).bit_and(1) != 0 -> size += 2
+            if (format >> bit) & 1 != 0 -> size += 2
         }
         size
     }
@@ -1030,15 +1030,15 @@ priv internal: module {
     value_record: fn(b: [U8], at: Int, format: Int) -> ValueRecord Never! {
         out := ValueRecord{x_place: 0, y_place: 0, x_advance: 0}
         field := at
-        if format.bit_and(1) != 0 {
+        if format & 1 != 0 {
             out.x_place = signed16(raw16(b, field))
             field += 2
         }
-        if format.bit_and(2) != 0 {
+        if format & 2 != 0 {
             out.y_place = signed16(raw16(b, field))
             field += 2
         }
-        if format.bit_and(4) != 0 -> out.x_advance = signed16(raw16(b, field))
+        if format & 4 != 0 -> out.x_advance = signed16(raw16(b, field))
         out
     }
 
@@ -1128,7 +1128,7 @@ priv internal: module {
                 if sub_kind == 2 -> subtables.push(pair_subtable(b, sub))
             }
             if subtables.len() > 0 {
-                out.push(PairLookup{skip_mask: flag.bit_and(14), subtables: subtables})
+                out.push(PairLookup{skip_mask: flag & 14, subtables: subtables})
             }
         }
         Ok(out)
@@ -1240,14 +1240,14 @@ priv internal: module {
             coverage: raw16(b, at + 4)
             if length < 6 -> return Err(font_error("kern: a subtable of {length} bytes"))
             // Format 0, horizontal, neither minimum nor cross-stream.
-            if coverage >> 8 == 0 && coverage.bit_and(7) == 1 {
+            if coverage >> 8 == 0 && coverage & 7 == 1 {
                 pairs: u16(b, at + 6, "kern")
                 need(b, at + 14, pairs * 6, "kern")
                 loop p in 0..<pairs {
                     row: at + 14 + p * 6
                     key: (raw16(b, row) << 16) + raw16(b, row + 2)
                     value: signed16(raw16(b, row + 4))
-                    total: if coverage.bit_and(8) != 0 -> value else -> (out.get(key) ?? 0) + value
+                    total: if coverage & 8 != 0 -> value else -> (out.get(key) ?? 0) + value
                     _: out.remove(key)
                     _: out.add(key, total)
                 }
@@ -1262,8 +1262,8 @@ priv internal: module {
         first: Int{bytes[i]}
         width: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
         if i + width > bytes.len() -> return Decoded{scalar: 65533, next: bytes.len()}
-        scalar := if width == 1 -> first else if width == 2 -> first.bit_and(31) else if width == 3 -> first.bit_and(15) else -> first.bit_and(7)
-        loop k in 1..<width -> scalar = (scalar << 6) + (Int{bytes[i + k]}).bit_and(63)
+        scalar := if width == 1 -> first else if width == 2 -> first & 31 else if width == 3 -> first & 15 else -> first & 7
+        loop k in 1..<width -> scalar = (scalar << 6) + ((Int{bytes[i + k]}) & 63)
         Decoded{scalar: scalar, next: i + width}
     }
 
@@ -1283,7 +1283,7 @@ priv internal: module {
     skips: fn(face: Face, mask: Int, glyph: Int) -> Bool {
         if mask == 0 -> return false
         class: class_of(face.classes, glyph)
-        (class == GLYPH_CLASS_BASE && mask.bit_and(2) != 0) || (class == GLYPH_CLASS_LIGATURE && mask.bit_and(4) != 0) || (class == GLYPH_CLASS_MARK && mask.bit_and(8) != 0)
+        (class == GLYPH_CLASS_BASE && mask & 2 != 0) || (class == GLYPH_CLASS_LIGATURE && mask & 4 != 0) || (class == GLYPH_CLASS_MARK && mask & 8 != 0)
     }
 
     // Advances and offsets in font units after pair kerning, applied lookup by
@@ -1783,7 +1783,7 @@ priv internal: module {
     }
 
     put: fn(out: &[U8], value: Int, width: Int) {
-        loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)).bit_and(255)})
+        loop k in 0..<width -> out.push(U8{(value >> ((width - 1 - k) * 8)) & 255})
     }
 
     // A square's corners, all control points: a TrueType circle.
