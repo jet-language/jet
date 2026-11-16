@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6981,
-    "rev": 110200,
+    "nextNum": 6982,
+    "rev": 110208,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95799,6 +95799,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "Open criteria renamed to the cut-over paths: 1595 edits (paths and --filter strings; each filter resolved against the corpus its profile runs: cases .case stems, ui .stderr stems, golden .out IDs), 0 failures, a re-plan shows 0 edits left. Tools/tower stays as it is until c4. Twelve broad filters have no single new filter that selects exactly the same tests; each takes the form that keeps the most and is listed here:\n- #3024 c9: NARROWED entry -> Entry (keeps 203 of 284): no filter keeps its 284 cases IDs (folders form selects 105)\n- #3594 c2: NARROWED process -> process (keeps 75 of 91): no filter keeps its 91 cases IDs (folders form selects 75)\n- #3594 c5: NARROWED pty -> pty (keeps 55 of 67): no filter keeps its 67 cases IDs (folders form selects 55)\n- #5201 c1: NARROWED web -> web (keeps 31 of 32): no filter keeps its 32 ui IDs (folders form selects 31)\n- #6520 c2: NARROWED policy_ -> policy_ (keeps 22 of 29): no filter keeps its 29 ui IDs (folders form selects 22)\n- #6760 c4: NARROWED encoding -> Encoding (keeps 91 of 100): no filter keeps its 100 cases IDs (folders form selects 21)\n- #6846 c1: NARROWED meta_ladder_ -> meta_ladder_ (keeps 7 of 12): no filter keeps its 12 ui IDs (folders form selects 7)\n- #6846 c6: NARROWED generate_ -> Generate (keeps 1 of 1): no filter keeps its 1 ui IDs (folders form selects 0)\n- #6852 c3: NARROWED taint -> Taint (keeps 46 of 48): no filter keeps its 48 ui IDs (folders form selects 11)\n- #6877 c9: NARROWED enum_unknown_ -> enum_unknown_ (keeps 1 of 2): no filter keeps its 2 ui IDs (folders form selects 1)\n- #6925 c9: NARROWED crypto -> Crypto (keeps 40 of 46): no filter keeps its 46 cases IDs (folders form selects 14); NARROWED tls -> tls (keeps 20 of 26): no filter keeps its 26 cases IDs (folders form selects 20)\n- #6925 c10: NARROWED crypto -> Crypto (keeps 40 of 46): no filter keeps its 46 cases IDs (folders form selects 14)"
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Cutover landed on dev: ba783d11b9 (tree a74ed030aa, parent aa8715dacd), built from scripts only (genmap, rewrite, repair, restore, digests, fixups in the Main titlecase lane). Its full ttc run (bridge build rc=0; census check/build/selfcheck/core-bodies/runtime clean) gave golden 4987 PASS / 0 FAIL. Every row that was newly failing in cases, ui and core was rerun alone and passes, once the review digests and the CoreSurfaceLedger fixup were applied: the C-toolchain cases, CoreSurfaceLedger x2, CompiledWorkloads self-check and the AgentWorkloads baseline guard. Gap (c1, c3): the AcronymPathCase guard fails on dev. 3473 names are flagged, nearly all in trees the cutover kept (fixture contents, fixture: roots, test-project insides, AgentWorkloads data, digit-leading names); one PATH_CASE_DATA row is stale; and the c1 proof filter finds 0 tests, because the guard is a separate package. IfHole-6-1 is aligning the guard's kept classes with the cutover's rules, as SUB IfHole-6-1-6733-c1-path-case-guard. c2: the chain fixed point runs on the next batch compiler (p215, built from the cutover). Queued SUBs are being translated by replaying the cutover over the p215 queue (titlecase/replay.sh)."
         },
         {
@@ -95839,11 +95844,11 @@
         {
           "n": 3,
           "text": "OWNER 2026-11-09, restated 2026-11-15 (\"as soon as we can reasonably do it\"): every folder in the repository is TitleCase with acronyms in capitals, top level included: tests/ becomes Tests/ and every lowercase folder under it (cases, guards, fixtures, ui, ...) and elsewhere follows. The ONLY exceptions are names another language or tool REQUIRES (for example .git, and Tower or Rust/node files where their tool fixes the casing), each listed in the guard with the code or tool rule that requires it. The AGENTS.md line 'tests/ keeps its lowercase name' is replaced in the same cutover, and the guard from c1 also refuses lowercase folders. Scheduled ahead of the goal chain by owner order: Main writes the rename codemod now and lands the whole cutover as one stack at the first point with no agent patch in flight (the precompiled-Core to G6 hand-off). Proof: the c1 guard also refuses lowercase folders, and `git ls-files` lists no lowercase folder outside the named exceptions.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T01:44:52.915Z"
+          "evidence": "dev ba783d11b9 + 6d616e7873: every folder is TitleCase with capital acronyms (tests/ -> Tests/ and every folder under it). The c1 guard refuses lowercase folders: its planted self-test refuses exactly Core/Net/Tls.jet and Tests/cases, and its census over every tracked path (git ls-files) is 0, so no lowercase folder remains outside the named kept rows, each with the tool rule that requires it. AGENTS.md no longer says tests/ keeps its lowercase name; it states the TitleCase rule and names the guard. Proof run: `jet test Tests/Guards --filter acronym_path_case` -> 4 passed, 0 failed.",
+          "at": "2026-11-16T13:20:02.312Z"
         },
         {
           "n": 4,
@@ -95863,7 +95868,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T13:20:00.716Z",
+      "updated": "2026-11-16T13:20:03.399Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -101228,8 +101233,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T13:05:55.635Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-16T13:20:59.093Z",
+      "updatedBy": "owner",
       "criteriaLastN": 10
     },
     {
@@ -106250,6 +106255,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c12 waits on the owner ballot D-WARM-SET1 (card #6981): how an app names the reads a device keeps warm. Recommendation A, a warm function in .offline(.Queue, warm: fn ...) checked at compile time against each offline screen's live reads."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c4: Speed-3-3 SUB c4-live-invalidation-across-servers (per-file version map plus a 1 s poll in core.db, two processes, no broker) is queued in p215. The Postgres LISTEN/NOTIFY wake-up remains: Core has no Postgres client and the test host has no Postgres, so that half waits on a Core Postgres client stream."
         },
         {
@@ -106423,7 +106433,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:10.299Z",
-      "updated": "2026-11-16T13:07:21.748Z",
+      "updated": "2026-11-16T13:21:06.041Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -119626,6 +119636,40 @@
       "updated": "2026-11-16T13:19:37.436Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0ozl5j4",
+      "num": 6981,
+      "title": "Ballot D-WARM-SET1: how an app names the reads a device loads ahead for offline screens",
+      "body": "Owner ballot for #6868 c12 (warm coverage per screen). The build must know which live reads a device keeps warm so it can fail an offline screen that reads outside them. Options: A, a warm function in .offline(.Queue, warm: fn ...) with a compile-time coverage check; B, a .warm() screen mark; C, no warm set. Recommendation A. Ballot file: decision D-WARM-SET1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "6868"
+      ],
+      "tags": [
+        "ballot"
+      ],
+      "goals": [
+        "G9"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-16T13:20:56.548Z",
+      "updated": "2026-11-16T13:21:05.066Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -216263,8 +216307,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-16T09:17:45.663Z"
+      "status": "ratified",
+      "created": "2026-11-16T09:17:45.663Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-16"
     },
     {
       "id": "D-APP-ID1",
@@ -216655,6 +216701,186 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-16T12:28:47.195Z"
+    },
+    {
+      "id": "D-WARM-SET1",
+      "cardId": "c0ozl5j4",
+      "group": "web",
+      "title": "Which reads a device loads ahead so screens work offline",
+      "situation": "A synced app keeps the results it has read on the device, so a screen still shows them offline. Today the device holds only what the person opened while online. The sync note proposes a warm set: reads the device loads ahead after first paint, on an unmetered connection. The vote decides how an app names those reads, or whether Jet has no warm set at all. We recommend a warm function in the offline entry, checked against the screens.",
+      "gist": "How should an app say which reads a device loads ahead, so screens it has not opened yet still work offline?",
+      "lesson": "Offline, a device can show only what it already holds. Today that is what the person happened to open. A warm set loads more ahead of time, but only reads whose exact key a screen later uses help.",
+      "explainer": "",
+      "story": "Mara leads a field crew and opens Crewboard in a basement with no signal. She needs the board of a project she has not opened this week. Today it fails.",
+      "inWild": "bucket_definitions:\n  user_boards:\n    parameters: SELECT id AS project_id FROM projects WHERE owner = token_parameters.user_id\n    data:\n      - SELECT * FROM tasks WHERE project_id = bucket.project_id\n# https://docs.powersync.com (sync rules)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A warm function in the entry",
+          "detail": "The offline entry takes a warm function. Each statement is one endpoint call with codable arguments, or a loop over one call's result whose body is one call. Anything else is a compile error naming the statement. A warm read is one-shot and holds no subscription; a mounted screen reading the same key takes it over.\n\nThe compiler compares each warm call's key (endpoint and canonical encoded arguments) with the reads screens make. A warm call no screen makes is a compile error. The build reports, per screen, which of its live reads are warm (#6868 c12).",
+          "technical": "Warming runs after first paint on an unmetered connection, or in the foreground up to 16 MiB where the platform reports no network type (sync note 5.2). A loop is one batched request in one read transaction, streamed per item, each capped at LIVE_MAX_PAYLOAD. Online re-checks every 15 minutes follow the same metering rule (5.1).",
+          "code": "screens.crewboard()\n    .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n        crew.assigned_to_me()\n        loop project in crew.my_projects() -> crew.board(project.id)\n    })"
+        },
+        {
+          "key": "B",
+          "name": "A warm mark on screens",
+          "detail": "A screen marked .warm() is loaded ahead for every state value that loaded data links to. An example is each project in a loaded list whose rows link to the board screen. The warm set is the marked screens' reads at those states.",
+          "technical": "The compiler infers argument sources from links in screen views. A screen reached only by typed input, search or a computed state has no inferred arguments and is not warmed; the build lists it. Batching, metering and re-checks are as in A.",
+          "code": "board: screen(project: ProjectID) { ... }\n    .warm()  // warmed for each project a loaded list links to"
+        },
+        {
+          "key": "C",
+          "name": "No warm set",
+          "detail": "Offline, the device shows only results it has already read. The docs say so, and #6868 c12 becomes a report of which screens were last read and when. Apps that need more write their own preloading with ordinary calls.",
+          "technical": "Nothing is added to the offline entry, the compiler or the sync protocol. The per-screen coverage check of c12 is dropped, since there is no declared set to check against.",
+          "code": "screens.crewboard()\n    .offline(.Queue)  // unchanged; offline reach is what was seen"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "PowerSync",
+          "note": "Server-side sync rules choose a user's rows; the device keeps them in SQLite and any local query works offline. https://docs.powersync.com",
+          "code": "data:\n  - SELECT * FROM tasks WHERE project_id = bucket.project_id"
+        },
+        {
+          "lang": "Replicache and Zero",
+          "note": "The client names queries to keep synced; Zero keeps their rows locally for a TTL, so queries named ahead work offline. https://zero.rocicorp.dev",
+          "code": "z.query.task.where('projectID', id).preload()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Only A names arguments, so the compiler can check that each warm read helps a screen.",
+        "gains": [
+          "Offline reach is written down and checked.",
+          "The per-screen coverage report has a fixed list to check against."
+        ],
+        "losses": [
+          {
+            "loss": "A warm read helps only when its key equals a screen's key.",
+            "mitigation": "A warm call that no screen makes is a compile error, with the screen reads it was compared against."
+          },
+          {
+            "loss": "Offline search and new filters stay out of reach.",
+            "mitigation": "The device row store of ballot B2 covers them; the warm set stays the enumerated path."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hides the arguments in inference and cannot warm screens reached by search or typed input."
+          },
+          {
+            "key": "C",
+            "reason": "C is honest but leaves phones unusable offline beyond the screens already opened."
+          }
+        ],
+        "tradeoff": "Apps write their offline reach as code. In return, the compiler checks it against the screens."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should an app say which reads a device loads ahead, so screens it has not opened yet still work offline?",
+        "lesson": "Offline, a device can show only what it already holds. Today that is what the person happened to open. A warm set loads more ahead of time, but only reads whose exact key a screen later uses help.",
+        "trio": {
+          "current": {
+            "note": "Offline, Crewboard shows only boards the person opened while online. Other boards fail.",
+            "code": "screens.crewboard()\n    .offline(.Queue)"
+          },
+          "wild": {
+            "lang": "PowerSync",
+            "note": "Sync rules put a user's rows on the device, so any local query works offline. Source: docs.powersync.com, sync rules.",
+            "code": "bucket_definitions:\n  user_boards:\n    parameters: SELECT id AS project_id FROM projects WHERE owner = token_parameters.user_id\n    data:\n      - SELECT * FROM tasks WHERE project_id = bucket.project_id"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A warm function in the entry",
+            "gist": "The entry lists the reads to load ahead, with loops over earlier results.",
+            "gains": [
+              "Arguments are explicit, so every board of every project can be warmed.",
+              "The compiler checks each warm read against the reads screens make."
+            ],
+            "losses": [
+              "A new parameter on .offline to learn.",
+              "Offline search and new filters still need a row store (ballot B2)."
+            ],
+            "proposed": {
+              "code": "screens.crewboard()\n    .offline(.Queue, warm: fn(crew: app.Remote<logic.Crew>) {\n        crew.assigned_to_me()\n        loop project in crew.my_projects() -> crew.board(project.id)\n    })"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A warm mark on screens",
+            "gist": "Marked screens are loaded ahead for the states the device can link to.",
+            "gains": [
+              "The mark sits on the screen it protects.",
+              "No list of calls to keep in step with the screens."
+            ],
+            "losses": [
+              "The compiler must infer arguments from links in loaded data.",
+              "A screen reached only by typed input or search is never warmed."
+            ],
+            "proposed": {
+              "code": "board: screen(project: ProjectID) { ... }\n    .warm()  // warmed for each project a loaded list links to"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No warm set",
+            "gist": "Offline shows only what the device has already read, and the docs say so.",
+            "gains": [
+              "Nothing new to learn, build or check.",
+              "No background traffic."
+            ],
+            "losses": [
+              "A phone opened offline fails on any board it has not seen.",
+              "Apps that need offline reach must write their own preloading."
+            ],
+            "proposed": {
+              "code": "screens.crewboard()\n    .offline(.Queue)  // unchanged; offline reach is what was seen"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "Only A names arguments, so the compiler can check that each warm read helps a screen.",
+          "gains": [
+            "Offline reach is written down and checked.",
+            "The per-screen coverage report has a fixed list to check against."
+          ],
+          "losses": [
+            {
+              "loss": "A warm read helps only when its key equals a screen's key.",
+              "mitigation": "A warm call that no screen makes is a compile error, with the screen reads it was compared against."
+            },
+            {
+              "loss": "Offline search and new filters stay out of reach.",
+              "mitigation": "The device row store of ballot B2 covers them; the warm set stays the enumerated path."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hides the arguments in inference and cannot warm screens reached by search or typed input."
+            },
+            {
+              "key": "C",
+              "reason": "C is honest but leaves phones unusable offline beyond the screens already opened."
+            }
+          ],
+          "tradeoff": "Apps write their offline reach as code. In return, the compiler checks it against the screens.",
+          "rec": "A"
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-16T13:21:03.045Z"
     }
   ],
   "questions": [
@@ -219981,6 +220207,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T13:21:06.042Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00cqn1l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T13:21:05.067Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WARM-SET1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-16T13:21:04.051Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-WARM-SET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-16T13:21:03.045Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-WARM-SET1",
+      "note": "Which reads a device loads ahead so screens work offline (draft)"
+    },
+    {
+      "at": "2026-11-16T13:20:59.093Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-JOB-STORE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-16T13:20:56.548Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ozl5j4",
+      "note": "Ballot D-WARM-SET1: how an app names the reads a device loads ahead for offline screens"
+    },
+    {
+      "at": "2026-11-16T13:20:03.399Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T13:20:02.312Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07k91t6",
+      "note": "#3"
+    },
     {
       "at": "2026-11-16T13:20:00.716Z",
       "by": "Main",
