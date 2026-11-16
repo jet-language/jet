@@ -714,11 +714,23 @@ priv(package) callers: module {
 // A method the call reaches, and a row policy it asks, run on the same task
 // and so in the same transaction; a task the call spawns is outside it. A
 // store that can't begin or commit marks the call refused, and the framework
-// then runs it again.
+// then runs it again. A webhook's call carries its delivery (`deliver`),
+// whose ID core.db records in each store's transaction as the call joins
+// it; a store that has run the delivery already marks the call repeated, and
+// the framework rolls it back and drops the delivery.
 CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
     end: fn(Bool) -[]> Bool Never!
+}
+
+// A webhook delivery a call runs: the ID its sender gives it, the same each
+// time it is delivered again, and the second (since the Unix epoch) the
+// server received it.
+#Equatable
+CallDelivery: struct {
+    id: String
+    at: Int
 }
 
 CallRun: struct {
@@ -726,6 +738,8 @@ CallRun: struct {
     id: Int
     joins: [CallJoin]
     refused: Bool
+    delivery: CallDelivery?
+    repeated: Bool
 }
 
 CallRuns: struct {
@@ -750,7 +764,7 @@ priv(package) transactions: module {
             if run.task == me -> return None
         }
         runs.value.made += 1
-        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false})
+        runs.value.runs.push(CallRun{task: me, id: runs.value.made, joins: [CallJoin]{}, refused: false, delivery: None, repeated: false})
         Val(runs.value.made)
     }
 
@@ -792,15 +806,52 @@ priv(package) transactions: module {
         false
     }
 
+    // Gives call `call` the webhook delivery it runs.
+    deliver: fn(call: Int, delivery: CallDelivery) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call {
+                runs.value.runs[index].delivery = Val(delivery.copy())
+            }
+        }
+    }
+
+    // The webhook delivery call `call` runs; None for any other call.
+    delivery: fn(call: Int) -> CallDelivery? Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.delivery.copy()
+        }
+        None
+    }
+
+    // Marks call `call` repeated: a store it uses has run its delivery.
+    repeat: fn(call: Int) Never! {
+        runs := CALLS.guard_edit()
+        loop index in 0..<runs.value.runs.len() {
+            if runs.value.runs[index].id == call -> runs.value.runs[index].repeated = true
+        }
+    }
+
+    // Whether a store has run call `call`'s delivery already.
+    repeated: fn(call: Int) -> Bool Never! {
+        runs: CALLS.guard_read()
+        loop run in runs.value.runs {
+            if run.id == call -> return run.repeated
+        }
+        false
+    }
+
     // Ends call `call`: commits each joined transaction, in the order the
-    // call joined them, when `commit` holds and no store refused the call,
-    // and otherwise rolls each back. False when the call has to run again: a
-    // store refused it, or the first commit failed (and was rolled back).
-    // A call that writes two stores commits each on its own; once one has
-    // committed, a later failed commit can't undo it, so the call stands.
+    // call joined them, when `commit` holds and no store refused the call or
+    // had run its delivery, and otherwise rolls each back. False when the
+    // call has to run again: a store refused it, or the first commit failed
+    // (and was rolled back). A call that writes two stores commits each on
+    // its own; once one has committed, a later failed commit can't undo it,
+    // so the call stands.
     end: fn(call: Int, commit: Bool) -> Bool Never! {
         ended: calls_take(call) ?? return true
-        if ended.refused || !commit {
+        if ended.refused || ended.repeated || !commit {
             loop joined in ended.joins -> _: joined.end(false)
             return !ended.refused
         }
@@ -822,7 +873,7 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
     None
 }
 
-#Test("a call commits or rolls back every transaction joined to it, and runs again when one refused it") {
+#Test("a call commits or rolls back every transaction joined to it, runs again when one refused it, and rolls back a delivery run already") {
     seen: Shared{[String]{}}
     note: fn(name: String, commits: Bool) -> fn(Bool) -[]> Bool Never! {
         fn(commit: Bool) {
@@ -851,8 +902,17 @@ priv calls_take: fn(call: Int) -> CallRun? Never! {
     transactions.join(lost, note("e", false))
     transactions.join(lost, note("f", true))
     assert(!transactions.end(lost, true))
+    delivered: transactions.begin() ?? panic("no call is open")
+    assert_eq(transactions.delivery(delivered), CallDelivery?{None})
+    transactions.deliver(delivered, CallDelivery{id: "d-1", at: 1})
+    assert_eq(transactions.delivery(delivered), Val(CallDelivery{id: "d-1", at: 1}))
+    transactions.join(delivered, note("g", true))
+    assert(!transactions.repeated(delivered))
+    transactions.repeat(delivered)
+    assert(transactions.repeated(delivered))
+    assert(transactions.end(delivered, true))
     log: seen.guard_read()
-    assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f")
+    assert_eq(log.value.join(", "), "commit a, commit b, roll back c, roll back d, commit e, roll back f, roll back g")
 }
 
 LIVE_MAX_QUERIES: 1024

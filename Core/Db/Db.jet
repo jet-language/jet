@@ -1341,10 +1341,15 @@ priv db_waited: fn() -> DBError Never! {
 // statement there. A store that stays busy past the connection's wait
 // (another connection holds its write lock) refuses the call, and every
 // later statement of the attempt fails at once; the framework then runs the
-// call again.
+// call again. A webhook's call records its delivery's ID in the transaction
+// it begins (`db_delivered`); when the store has run that delivery already,
+// the call is repeated, every later statement of it fails at once, and the
+// framework rolls it back and drops the delivery.
 priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     if driver_closed(held.driver) -> return Err(db_closed())
-    if call == 0 || held.call == call -> return Ok()
+    if call == 0 -> return Ok()
+    if app.transactions.repeated(call) -> return Err(db_repeated())
+    if held.call == call -> return Ok()
     if app.transactions.refused(call) || !__driver_begin_immediate(held.driver) {
         app.transactions.refuse(call)
         return Err(db_error("the database is busy, so the call runs again"))
@@ -1354,7 +1359,44 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
     held.open = held.began
     held.call = call
     app.transactions.join(call, fn(commit: Bool) { db_end(state, commit) })
-    Ok()
+    delivery: app.transactions.delivery(call) ?? return Ok()
+    if db_delivered(held.driver, delivery) == {
+        .Ok(ran) -> {
+            if !ran -> return Ok()
+            app.transactions.repeat(call)
+            Err(db_repeated())
+        }
+        .Err(failure) -> {
+            app.transactions.refuse(call)
+            Err(failure)
+        }
+    }
+}
+
+priv db_repeated: fn() -> DBError Never! {
+    db_error("the webhook's delivery has run already, so it is dropped")
+}
+
+// A store keeps the ID of each webhook delivery it has run this long, in
+// seconds: 30 days.
+priv DB_DELIVERY_KEPT: 2592000
+
+// Whether the store has run `delivery` in the 30 days before it came; when
+// not, records it, in the open transaction, as run when it came, and forgets
+// the deliveries kept longer. A rollback forgets it with the rest of the
+// call, so a failed run is run again when the sender delivers it again.
+priv db_delivered: fn(driver: &DBDriver, delivery: app.CallDelivery) -> Bool DBError! {
+    _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS __jet_deliveries (id TEXT PRIMARY KEY, at INTEGER NOT NULL)", [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "CREATE INDEX IF NOT EXISTS __jet_deliveries_at ON __jet_deliveries (at)", [DBValue]{}) ?? return Err(err)
+    _: __driver_execute(driver, "DELETE FROM __jet_deliveries WHERE at < ?", [DBValue]{.Int(delivery.at - DB_DELIVERY_KEPT)}) ?? return Err(err)
+    if __driver_query_one(driver, "SELECT id FROM __jet_deliveries WHERE id = ?", [DBValue]{.Text(delivery.id.copy())}) == {
+        .Ok(found) -> {
+            if found != None -> return Ok(true)
+        }
+        .Err(failure) -> return Err(failure)
+    }
+    _: __driver_execute(driver, "INSERT INTO __jet_deliveries (id, at) VALUES (?, ?)", [DBValue]{.Text(delivery.id.copy()), .Int(delivery.at)}) ?? return Err(err)
+    Ok(false)
 }
 
 // Ends a call's transaction on `state`: commits it, or rolls it back when
@@ -1412,6 +1454,44 @@ priv call_count: fn(counts: Table<Int, CallCount>) -> Int {
     opened.rollback() ?? panic("the rollback")
     assert(writer.join() ?? panic("the writer ends"))
     assert_eq(call_count(counts), 3)
+}
+
+// One webhook call of delivery `id`, which came at second `at`, that writes
+// `count` to row 1 and commits when `commit` holds; whether the store had run
+// the delivery.
+priv call_deliver: fn(counts: Table<Int, CallCount>, id: String, at: Int, count: Int, commit: Bool) -> Bool {
+    call: app.transactions.begin() ?? panic("no call is open")
+    app.transactions.deliver(call, app.CallDelivery{id: id, at: at})
+    if counts.put(CallCount{id: 1, count: count}) == {
+        .Ok(_) -> {}
+        .Err(failure) -> assert(app.transactions.repeated(call), failure.message())
+    }
+    repeated: app.transactions.repeated(call)
+    assert(app.transactions.end(call, commit))
+    repeated
+}
+
+#Test("a delivery's call records its ID in its transaction, and a store drops a delivery it has run in the 30 days before") {
+    store: open_memory()
+    counts: call_counts(store)
+    _: counts.put(CallCount{id: 1, count: 0}) ?? panic("the first row")
+    came: 1000000000
+    // A run that rolls back forgets the delivery, which then runs again.
+    assert(!call_deliver(counts, "d-1", came, 1, false))
+    assert_eq(call_count(counts), 0)
+    assert(!call_deliver(counts, "d-1", came, 2, true))
+    assert_eq(call_count(counts), 2)
+    assert(call_deliver(counts, "d-1", came + 1, 3, true))
+    assert_eq(call_count(counts), 2)
+    assert(!call_deliver(counts, "d-2", came, 4, true))
+    assert_eq(call_count(counts), 4)
+    // Kept for 30 days, and forgotten a second later.
+    assert(call_deliver(counts, "d-2", came + DB_DELIVERY_KEPT, 5, true))
+    assert_eq(call_count(counts), 4)
+    assert(!call_deliver(counts, "d-2", came + DB_DELIVERY_KEPT + 1, 6, true))
+    assert_eq(call_count(counts), 6)
+    assert(!call_deliver(counts, "d-1", came + DB_DELIVERY_KEPT + 1, 7, true))
+    assert_eq(call_count(counts), 7)
 }
 
 priv db_shutdown: fn(state: Shared<DBState>) -> Bool Never! {

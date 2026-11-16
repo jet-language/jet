@@ -1,0 +1,13 @@
+# A webhook's sender delivers an event again when it saw no answer, so the
+# framework records each delivery's ID (GitHub's `X-GitHub-Delivery`, a
+# Stripe event's `id`) in the webhook's transaction on each store it uses,
+# and keeps it 30 days. The fixture's webhooks count events in a store. A
+# delivery that comes again after it ran is answered 200 `{"repeated":<ID>}`
+# and counts nothing; a delivery whose run failed recorded nothing, so it
+# runs when it comes again.
+fixture: webhook_redelivery_runs_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = webhook_redelivery_runs_once.stdout.expected

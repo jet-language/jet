@@ -5628,6 +5628,18 @@ the webhook: 200 with `{"ok": value}`, 500 with `{"err": error}`, or 422 when
 the body does not decode. Neither method is an endpoint, so no Remote calls
 it.
 
+A sender delivers an event again when it saw no answer, so a webhook runs
+each delivery once. The delivery's ID is GitHub's `X-GitHub-Delivery` header
+or a Stripe event's top-level `id`, which stays the same each time the sender
+delivers it again. The webhook's call records that ID in its transaction on
+each store it uses, in the store's `__jet_deliveries` table, with the second
+the server received the delivery, and keeps it 30 days. A delivery whose ID a
+store has already recorded is answered 200 with `{"repeated": id}`, so its
+sender stops delivering it, and the call rolls back: its method's writes are
+dropped. A run that fails rolls its record back with the rest, so a delivery
+that failed runs when it comes again. A delivery without an ID, and a webhook
+that uses no store, have nothing to record and run every time.
+
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with
