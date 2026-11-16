@@ -5486,7 +5486,7 @@ ir_list_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int
 }
 
 // `["k": p, "j"?: q, ..]` on a Map, or on a Dyn object's pair list
-// `[(key: String, value: Dyn)]`: each key's entry is found once (the Map's
+// `[{key: String, value: Dyn}]`: each key's entry is found once (the Map's
 // map.find, the pair list's first pair with that key). A required key must be
 // present and its value match `p`; an optional key hands `q` its `V?`, a
 // window onto the entry's value (absent when the key is). Without `..` the
@@ -7953,7 +7953,7 @@ ir_tuple_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names:
         }
         ir_store_at(m, p, b, storage, member.offset, slot)
     }
-    // A tuple around a value it does not own (`peek((res: env, n: 1))`)
+    // A tuple around a value it does not own (`peek({res: env, n: 1})`)
     // views it, like an Option or Result carrier (ir_carrier_lends).
     ir_note_lent(b, storage, lent)
 }
