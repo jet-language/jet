@@ -1,0 +1,32 @@
+// The shape of the compiler's own built-in Core tables: each compile-time
+// loop's source is a top-level value that waits on another. FILES loops over
+// ROWS, and ASSETS loops over a call on FILES.
+Row: struct {
+    path: String
+}
+
+File: struct {
+    path: String
+    text: String
+}
+
+Asset: struct {
+    path: String
+    size: Int
+}
+
+rows: fn() -> [Row] { [Row]{Row{path: "alpha.txt"}, Row{path: "beta.txt"}} }
+
+names: fn(files: [File]) -> [String] {
+    loop file in files -> file.path
+}
+
+ROWS: #run rows()
+
+FILES: #run { loop row in ROWS -> File{text: embed_file(row.path), path: row.path} }
+
+ASSETS: #run { loop path in names(FILES) -> Asset{size: embed_bytes(path).len(), path: path} }
+
+run: fn() {
+    loop asset in ASSETS -> print("{asset.path} {asset.size}")
+}
