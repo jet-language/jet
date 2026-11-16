@@ -92,6 +92,22 @@ with `value: #run T.f(…)`
 ([`comptime_no_silent_fallback_run_fn_call.jet`](../../../tests/ui/comptime_no_silent_fallback_run_fn_call.jet),
 [`comptime_no_silent_fallback_run_fn_call`](../../../tests/cases/comptime_no_silent_fallback/comptime_no_silent_fallback_run_fn_call.case)).
 
+A compile-time value that can't be computed is reported once, at the value
+that owns the problem, and the values and code that read it report nothing
+more. Each case has a UI snapshot:
+
+| Problem | Code | Reported at | Snapshot |
+| --- | --- | --- | --- |
+| a value reads itself | E0338 | its expression | [`comptime_dependency_self_cycle.jet`](../../../tests/ui/comptime_dependency_self_cycle.jet) |
+| values read each other, also through a function | E0338, naming each value around the cycle | the value the cycle closes on | [`comptime_dependency_cycle_through_function.jet`](../../../tests/ui/comptime_dependency_cycle_through_function.jet) |
+| a value calls something that doesn't exist | E0102 | the call | [`comptime_dependency_missing.jet`](../../../tests/ui/comptime_dependency_missing.jet) |
+| a value reaches an effect such as printing | E3410 | the call | [`comptime_dependency_impure.jet`](../../../tests/ui/comptime_dependency_impure.jet) |
+| a value reads a module value the build can't compute | E0643 | the module value | [`comptime_dependency_runtime_value.jet`](../../../tests/ui/comptime_dependency_runtime_value.jet) |
+| a value it reads panics | E3010 | the call that panicked | [`comptime_dependency_panics.jet`](../../../tests/ui/comptime_dependency_panics.jet) |
+| a value holds a runtime handle | E1018 | its name | [`comptime_dependency_handle_value.jet`](../../../tests/ui/comptime_dependency_handle_value.jet) |
+| a value holds a function that running code made, such as a closure | E1020 | the call that made it | [`comptime_dependency_closure_value.jet`](../../../tests/ui/comptime_dependency_closure_value.jet) |
+| code reads the value as another type | E0112 | the code that reads it | [`comptime_dependency_consumer_type.jet`](../../../tests/ui/comptime_dependency_consumer_type.jet) |
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

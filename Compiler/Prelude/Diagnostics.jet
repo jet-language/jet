@@ -15348,6 +15348,29 @@ ComptimeMethodCalledAtRunTime: struct {
     }
 }
 
+ComptimeValueIsComputedFunction: struct {
+    type: String
+
+    impl Diagnostic {
+        code: "E1020"
+        safety_class: .Soundness
+        safety_reason: "A function made by running code holds that run, so the build has no data to keep for it, and keeping something else would hand the program a different function."
+        expert_path: "none: a compile-time value is data"
+        stage: [.Comptime]
+        meaning: "A compile-time value is a function that running code made, such as a closure, which has no data form"
+
+        what: fn(self) -> String { "This compile-time value is a `{self.type}` that running code made, a function with no data form" }
+
+        why: fn(self) -> String {
+            "A compile-time value must be data, which the build keeps and hands to the program. The build keeps a function only when the value names it, as in `F: double`. A function that a call returns, such as a closure, belongs to the run that made it."
+        }
+
+        fix: fn(self) -> String {
+            "Name the function in the value (`F: double`), or keep the data the function needs as the compile-time value and pass it to a named function."
+        }
+    }
+}
+
 FlagArgumentCount: struct {
     impl Diagnostic {
         code: "E1301"

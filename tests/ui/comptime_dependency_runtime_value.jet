@@ -1,0 +1,13 @@
+// `BASE` is a module value that prints, so the build can't compute it, and
+// `TOTAL` can't be computed from it. The error is reported once, at `BASE`
+// (E0643), and `TOTAL` reports nothing more.
+counted: fn() -> Int {
+    print("counting")
+    3
+}
+
+BASE: counted()
+
+TOTAL: #run { BASE + 1 }
+
+run: fn() { print(TOTAL) }

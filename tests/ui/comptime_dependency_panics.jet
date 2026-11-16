@@ -1,0 +1,9 @@
+// `BASE` panics while building, which stops the build at `BASE`'s call
+// (E3010). `TOTAL`, which reads `BASE`, reports nothing more.
+boom: fn() -> Int { panic("no value") }
+
+BASE: #run boom()
+
+TOTAL: #run { BASE + 1 }
+
+run: fn() { print("{TOTAL} {BASE}") }

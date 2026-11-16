@@ -1455,6 +1455,15 @@ jet_eval_ir_unsupported: fn(s: &JetEvalIRState, operation: String) Never! {
     }
 }
 
+// E1020: the value read back is a function that running code made (a
+// closure, or a function a call returned), shown as `shown`.
+jet_eval_ir_function_value_refused: fn(s: &JetEvalIRState, shown: String) Never! {
+    if s.failure == None {
+        row: diagnostic_registry_row("E1020") ?? panic("E1020 has no registry row")
+        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Unsupported, diagnostic: diagnostic_from_registry("E1020", Val(s.span), row.what.replace("{{type}}", shown), row.why, row.fix)})
+    }
+}
+
 jet_eval_ir_out_of_fuel: fn(s: &JetEvalIRState) -> Int? Never! {
     if s.failure == None {
         s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))

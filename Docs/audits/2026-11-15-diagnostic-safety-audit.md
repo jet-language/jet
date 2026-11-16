@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 845 active error rows: 725 soundness and 120 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 846 active error rows: 726 soundness and 120 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -341,6 +341,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1017 | InlineAlwaysReadsTrace | Compiler/JetSema/Source/Sema/MarkerRules.jet:2265 | a function that reads `context.trace` is not `#Inline(Always)` |
 | E1018 | ComptimeValueIsRuntimeHandle | Compiler/JetSema/Source/Sema/Diagnostics.jet:456 | a compile-time value is data |
 | E1019 | ComptimeMethodCalledAtRunTime | Compiler/JetSema/Source/Sema/Diagnostics.jet:464 | a `#run fn` runs while building |
+| E1020 | ComptimeValueIsComputedFunction | Compiler/JetEval/Source/IR/Native.jet:1461 | a compile-time value is data |
 | E1101 | ConcurrentCaptureNotOwned | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:801 | the value is moved, frozen or shared with `Shared` |
 | E1102 | ValueNotSendable | Compiler/JetSema/Source/Sema/Calls/Static.jet:882 | owned, sendable data crosses the boundary |
 | E1103 | DetachUnsendableTask | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:1135 | the task's values are made sendable before it is detached |
@@ -1204,6 +1205,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E1017 | InlineAlwaysReadsTrace | soundness | `context.trace` starts at the reading function's own frame, and an inlined copy has no frame of its own, so the trace would name the caller. |
 | E1018 | ComptimeValueIsRuntimeHandle | soundness | A runtime handle's state lives only in the run that made it, so a build that kept one would hand later code a handle to nothing. |
 | E1019 | ComptimeMethodCalledAtRunTime | soundness | A `#run fn` runs while building, so a call left in the shipped program would run it at run time, where its failures no longer stop the build. |
+| E1020 | ComptimeValueIsComputedFunction | soundness | A function made by running code holds that run, so the build has no data to keep for it, and keeping something else would hand the program a different function. |
 | E1101 | ConcurrentCaptureNotOwned | soundness | The boundary can run concurrently with its owner, so a captured value that writes shared state would race with it. |
 | E1102 | ValueNotSendable | soundness | A view, trait value, mutable capture, borrowed closure or thread-confined cell that crosses to another worker would be used by two at once or outlive its source. |
 | E1103 | DetachUnsendableTask | soundness | A detached task may outlive its caller, so a task that already holds unsendable values would use them with no one supervising. |
