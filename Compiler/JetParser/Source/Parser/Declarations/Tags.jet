@@ -134,15 +134,26 @@ parser_tag_case_type: fn(field: String) -> String Never! {
 // A tag struct reaches no sema impl check, so a setting given twice is E0937
 // here, in the words sema uses for any impl.
 parser_tag_repeats: fn(state: &JetParserState, value: StructDef) {
-    seen := [String]{}
-    loop block in value.trait_impls {
-        loop constant in block.constants {
-            if seen.contains(constant.name) {
+    loop (block_index, block) in value.trait_impls {
+        loop (index, constant) in block.constants {
+            if parser_tag_given_before(value, block_index, index, constant.name) {
                 parser_add_error_code(state, "E0937", constant.name_span, "the impl gives the constant `{constant.name}` twice", "an implementation has one value for each trait constant", "remove one `{constant.name}: …`")
             }
-            seen.push(constant.name.copy())
         }
     }
+}
+
+// Whether a constant written before the one at `index` of the impl block at
+// `block_index` already gives `name`.
+parser_tag_given_before: fn(value: StructDef, block_index: Int, index: Int, name: String) -> Bool Never! {
+    loop (at, block) in value.trait_impls {
+        if at > block_index -> return false
+        loop (place, constant) in block.constants {
+            if at == block_index && place >= index -> return false
+            if constant.name == name -> return true
+        }
+    }
+    false
 }
 
 // A value tag erases at runtime: a field, a method or a type parameter has

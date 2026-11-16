@@ -874,10 +874,11 @@ CENSUS_COMPILER: "Compiler/JetCLI/run.jet"
 // The stderr line of the counter, before its value and the closing brace.
 CENSUS_COUNTER: "JET_PHASE_COUNTERS {{\"phase\":\"ir.opt\",\"marked_calls\":"
 
-// One census build: its row, the file it builds and its arguments.
+// One census build: the row of `ids` it counts toward, the argument that
+// names the file it builds, and its arguments.
 CensusRun: struct {
-    id: String
-    file: String
+    row: Int
+    file: Int
     args: [String]
 }
 
@@ -887,9 +888,10 @@ inline_census_rows: fn(rows: TestRows) {
         rows.fail("inline census", "couldn't create a scratch directory: {err}")
         return
     }
-    examples := [String]{}
-    loop entry in kit_golden_discover(setup.checkout, [String]{CENSUS_EXAMPLES}) {
-        if entry.path.ends_with(".jet") -> examples.push(entry.path.copy())
+    discovered: kit_golden_discover(setup.checkout, [String]{CENSUS_EXAMPLES})
+    examples := [Int]{}
+    loop (index, entry) in discovered {
+        if entry.path.ends_with(".jet") -> examples.push(index)
     }
     sources := [String]{}
     jet_sources(setup.checkout, "Core", sources) ?? {
@@ -897,13 +899,13 @@ inline_census_rows: fn(rows: TestRows) {
         return
     }
     sources.sort()
-    core := [String]{}
-    loop path in sources {
+    core := [Int]{}
+    loop (index, path) in sources {
         text: files.read(files.join(setup.checkout, path)) ?? {
             rows.fail(path, "couldn't read `{path}`: {err}")
             next
         }
-        if test_names(text).len() > 0 -> core.push(path.copy())
+        if test_names(text).len() > 0 -> core.push(index)
     }
     // The compiler's build needs the stack the bootstrap chain gives it.
     current: sys.stack_limit() ?? {
@@ -919,23 +921,23 @@ inline_census_rows: fn(rows: TestRows) {
     loop level in CORE_LEVELS {
         id: "Examples [{level}]"
         if rows.selects(id) {
-            loop entry in examples {
+            loop index in examples {
                 out: files.join(scratch.path, "{runs.len()}")
-                runs.push(CensusRun{id: id.copy(), file: entry.copy(), args: [String]{"build", "-{level}", "--output-dir={out}", entry.copy()}})
+                runs.push(CensusRun{row: ids.len(), file: 3, args: [String]{"build", "-{level}", "--output-dir={out}", discovered[index].path.copy()}})
             }
             ids.push(id)
         }
         core_id: "Core [{level}]"
         if rows.selects(core_id) {
-            loop path in core {
-                runs.push(CensusRun{id: core_id.copy(), file: path.copy(), args: [String]{"test", path.copy(), "-{level}"}})
+            loop index in core {
+                runs.push(CensusRun{row: ids.len(), file: 1, args: [String]{"test", sources[index].copy(), "-{level}"}})
             }
             ids.push(core_id)
         }
         compiler_id: "Compiler [{level}]"
         if rows.selects(compiler_id) {
             out: files.join(scratch.path, "{runs.len()}")
-            runs.push(CensusRun{id: compiler_id.copy(), file: CENSUS_COMPILER, args: [String]{"build", "-{level}", "--output-dir={out}", CENSUS_COMPILER}})
+            runs.push(CensusRun{row: ids.len(), file: 3, args: [String]{"build", "-{level}", "--output-dir={out}", CENSUS_COMPILER}})
             ids.push(compiler_id)
         }
     }
@@ -946,25 +948,25 @@ inline_census_rows: fn(rows: TestRows) {
     keys := [String]{}
     specs := [ProcessSpec]{}
     loop run in runs {
-        keys.push("{run.id} {run.file}")
+        keys.push("{ids[run.row]} {run.args[run.file]}")
         specs.push(jet_command(setup, setup.jet, run.args).env("JET_TRACE_FILE", trace).env("JET_PHASE_COUNTERS", "1"))
     }
     results: pool_runs(setup, "compiler-inline-census", keys, specs)
-    loop id in ids {
+    loop (row, id) in ids {
         counted := 0
         left := [String]{}
         loop (index, run) in runs {
-            if run.id != id -> next
+            if run.row != row -> next
             if results[index].receipt == {
                 .Val(receipt) -> {
                     loop line in receipt.errors.split("\n") {
                         value: census_marked_calls(line) ?? next
                         counted += 1
-                        if value > 0 -> left.push("{run.file}: {value}")
+                        if value > 0 -> left.push("{run.args[run.file]}: {value}")
                     }
                 }
                 .None -> {
-                    left.push("{run.file}: couldn't run `jet {run.args.join(" ")}`: {results[index].error}")
+                    left.push("{run.args[run.file]}: couldn't run `jet {run.args.join(" ")}`: {results[index].error}")
                 }
             }
         }

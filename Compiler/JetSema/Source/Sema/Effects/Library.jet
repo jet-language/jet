@@ -622,22 +622,16 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
 // names the bare effect, which stands for every value.
 sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], diagnostics: &[Diagnostic]) {
     rare: node.rare ?? return
-    values := [SemaLibraryEffectName]{}
-    loop row in rare.library_rows {
-        if effect_value_is_valued(row.token) -> values.push(row.copy())  // copy: the node keeps its row.
-    }
-    if values.len() == 0 {
-        return
-    }
+    if !sema_library_effect_has_value(rare.library_rows) -> return
     loop token in reached {
         if !token.contains("/") -> next
         base: effect_value_base(token)
-        written_base: sema_library_effect_value_written(values, base) ?? next
+        written_base: sema_library_effect_value_written(rare.library_rows, base) ?? next
         if sema_library_effect_row_names(rare.library_rows, base) || sema_library_effect_row_names(rare.library_rows, token) {
             next
         }
         hit: "{written_base}{token.slice(base.len(), token.len())}"
-        shown: sema_effect_show(loop row in values -> row.written)
+        shown: sema_effect_show(loop row in rare.library_rows if effect_value_is_valued(row.token) -> row.written)
         reach: if hit == written_base -> "every value of `{written_base}`" else -> "another value of `{written_base}`"
         span: node.row_span ?? node.name_span
         diagnostic: sema_error("E0740", span, "`{node.name}` uses the effect `{hit}`, which its signature doesn't allow", "the signature names `{shown}`, and a value of an effect covers only itself, so it doesn't cover {reach}", "add `{hit}` to `{node.name}`'s row, write `{written_base}` to allow every value, or stop calling the function that uses `{hit}`")
@@ -646,11 +640,20 @@ sema_library_effect_check_values: fn(node: SemaEffectNode, reached: [String], di
     }
 }
 
-// The written type of the first value in `values` whose effect's token is
+// Whether one of `rows` names a value of an effect (`Bucket{name:
+// "photos"}`).
+sema_library_effect_has_value: fn(rows: [SemaLibraryEffectName]) -> Bool Never! {
+    loop row in rows {
+        if effect_value_is_valued(row.token) -> return true
+    }
+    false
+}
+
+// The written type of the first value among `rows` whose effect's token is
 // `base` (`Bucket` for `Bucket{name: "photos"}`), or None.
-sema_library_effect_value_written: fn(values: [SemaLibraryEffectName], base: String) -> String? Never! {
-    loop row in values {
-        if effect_value_base(row.token) == base -> return Val(effect_value_base(row.written))
+sema_library_effect_value_written: fn(rows: [SemaLibraryEffectName], base: String) -> String? Never! {
+    loop row in rows {
+        if effect_value_is_valued(row.token) && effect_value_base(row.token) == base -> return Val(effect_value_base(row.written))
     }
     None
 }
