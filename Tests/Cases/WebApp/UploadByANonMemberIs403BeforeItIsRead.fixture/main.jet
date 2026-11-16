@@ -1,0 +1,167 @@
+// Crewboard's attach: a member of a task's project uploads a file to it. The
+// endpoint's check, `may_attach`, reads the task through the tasks table's
+// row policy as the caller, after the session check and before the server
+// reads the body. Eve, signed in but no member, announces a 100000-byte file
+// and sends none of it: she is answered 403 at once, which a server waiting
+// for the body could not do, and nothing is staged. Ann, a member, uploads
+// her notes.
+use {
+    app
+    auth: core.auth
+    db: core.db
+    files: core.files
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Member: struct {
+    project: Int
+    account: auth.AccountID
+}
+
+#Codable
+Chore: struct {
+    id: Int
+    project: Int
+    title: String
+}
+
+#Error
+TaskError: enum {
+    NotAllowed
+    Unreadable
+    Unkept
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Chore> {
+    store.table("tasks", key: fn(row: Chore) { row.id })
+}
+
+account_of: fn(who: db.Who) -> auth.AccountID? {
+    if who == {
+        .Account(account) -> Val(account)
+        .System -> None
+        .Anonymous -> None
+    }
+}
+
+// Members of a task's project read it; no one else does.
+task_policy: fn(row: Chore, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: row.project, account: account}) == {
+        .Val(_) -> Ok(true)
+        .None -> Ok(false)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// The store the tables open from. A lambda owns what it captures, so each
+// call opens the tables rather than capturing them.
+Stores: struct {
+    store: db.Store?
+}
+
+STORE: Shared{Stores{store: None}}
+
+open_store: fn(store: db.Store) {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(store.copy())
+}
+
+opened: fn() -> db.Store {
+    stores := STORE.guard_edit()
+    store: stores.value.store ?? panic("the store is open")
+    store.copy()
+}
+
+tasks: fn() -> db.Table<Int, Chore> { tasks_in(opened()).guard(task_policy) }
+
+// Whether the caller may edit task `task`: it reads the task through its
+// row policy, which only the project's members pass.
+editable: fn(task: Int) -[DB.Read]> TaskError! {
+    if tasks().get(task) == {
+        .Val(_) -> { Ok() }
+        .None -> { Err(TaskError.NotAllowed) }
+        .Err(_) -> Err(TaskError.Unreadable)
+    }
+}
+
+Crew: struct {
+    shelf: app.Blobs
+
+    // Attaches `file` to task `task`.
+    #[App.SignedIn, App.UploadCheck(method: "may_attach")]
+    attach: fn(self, task: Int, file: app.Upload) -[DB.Read, FS.Write]> String TaskError! {
+        editable(task) ?? return Err(err)
+        blob: self.shelf.keep(file, allow: [app.Media]{app.Media.Text, app.Media.PDF}) ?? return Err(TaskError.Unkept)
+        Ok("{file.name}, {blob.bytes} bytes")
+    }
+
+    // attach's check, run as the caller before the body is read.
+    may_attach: fn(self, task: Int) -[DB.Read]> TaskError! { editable(task) }
+}
+
+// A request for task 1 that announces a 100000-byte file under `session`
+// and sends none of it, as the first line of its answer, read within five
+// seconds.
+announced: fn(addr: String, session: String) -> String {
+    stream := net.tcp_connect(addr) ?? return "no connection: {err}"
+    crlf: "\r\n"
+    head: "POST /api/attach?args=%5B1%5D&name=plan.pdf HTTP/1.1{crlf}Host: {addr}{crlf}Authorization: Bearer {session}{crlf}Content-Length: 100000{crlf}Connection: close{crlf}{crlf}"
+    stream.write_bytes(head.bytes()) ?? return "no request: {err}"
+    answer: stream.read_bytes(8192, deadline: time.duration_ms(5000)) ?? return "no answer: {err}"
+    text: String.from_bytes(answer) ?? return "an answer that is not text"
+    text.partition("\r\n").head
+}
+
+// POSTs `body` to `attach` for task 1 as the file `name` under `session`,
+// as the status and body it is answered with.
+attached: fn(addr: String, session: String, name: String, body: String) -> String HTTPError! {
+    fields: http.headers_set(http.headers(), "authorization", "Bearer {session}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/attach?args=%5B1%5D&name={name}", fields, http.body_text(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+// How many uploads are staged now.
+staged: fn() -> Int {
+    found: files.list_dir(".jet/uploads") ?? return 0
+    found.len()
+}
+
+signed_in: fn(name: String) -> String {
+    auth.register_user(name, "{name}'s password hash") ?? panic("{name} registers")
+    session: auth.password_login(name, "{name}'s password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("{name} signs in")
+    auth.session_id(session)
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    ann: signed_in("ann")
+    eve: signed_in("eve")
+    open_store(db.open_memory())
+    _: members_in(opened()).add(Member{project: 1, account: auth.AccountID.from_string("ann")}) ?? panic("ann joins")
+    _: tasks_in(opened()).add(Chore{id: 1, project: 1, title: "ship the beta"}) ?? panic("the task is added")
+    served: web.app().mount("/api", Crew{shelf: app.blobs("attachments")})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<2 { served.serve_once(listener) }
+    }
+    print("eve announces a file: {announced(addr, eve)}")
+    print("staged: {staged()}")
+    print("ann uploads: {attached(addr, ann, "notes.txt", "notes for the beta\n")}")
+    serving.join()
+    print("staged after: {staged()}")
+}

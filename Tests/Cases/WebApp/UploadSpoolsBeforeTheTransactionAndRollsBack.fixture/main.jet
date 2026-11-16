@@ -1,0 +1,71 @@
+// An upload's body is staged in a file before the call's transaction begins,
+// and `keep` links that file into the store, so the staged file is still
+// there for a second `keep`, as it is for a retry of the transaction: both
+// keep the same bytes. The blobs of a call that commits stay; the blob of a
+// call that fails is deleted with its rollback. Once the request ends its
+// staged file is removed, and a file a stopped server left staged is removed
+// when the next server starts serving.
+use {
+    app
+    files: core.files
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+#Error
+DraftError: enum {
+    Unkept
+    Refused
+}
+
+Drafts: struct {
+    shelf: app.Blobs
+
+    // Keeps `file` twice, as a retry would keep it again.
+    #[App.Public, App.UploadCheck(method: "may_save")]
+    keep_twice: fn(self, file: app.Upload) -[FS.Write]> String DraftError! {
+        first: self.shelf.keep(file, allow: [app.Media]{app.Media.Text}) ?? return Err(DraftError.Unkept)
+        again: self.shelf.keep(file, allow: [app.Media]{app.Media.Text}) ?? return Err(DraftError.Unkept)
+        Ok("{first.bytes} and {again.bytes} bytes, two ids: {first.id != again.id}")
+    }
+
+    // Keeps `file` and then fails, so the call rolls back.
+    #[App.Public, App.UploadCheck(method: "may_save")]
+    keep_then_fail: fn(self, file: app.Upload) -[FS.Write]> String DraftError! {
+        _: self.shelf.keep(file, allow: [app.Media]{app.Media.Text}) ?? return Err(DraftError.Unkept)
+        Err(DraftError.Refused)
+    }
+
+    // The check of both: anyone may save a draft.
+    may_save: fn(self) DraftError! { Ok() }
+}
+
+// POSTs `body` to the endpoint `method` as the file `draft.txt`, as the
+// status and body it is answered with.
+post: fn(addr: String, method: String, body: String) -> String HTTPError! {
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/{method}?name=draft.txt", http.headers(), http.body_text(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+// How many files the directory `path` holds.
+held: fn(path: String) -> Int {
+    found: files.list_dir(path) ?? return 0
+    found.len()
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    files.create_dir_all(".jet/uploads") ?? panic("the staging directory is made")
+    files.write(".jet/uploads/left-by-a-crash", "half a fi") ?? panic("a stopped server's staged file")
+    served: web.app().mount("/api", Drafts{shelf: app.blobs("drafts")})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<2 { served.serve_once(listener) }
+    }
+    print("keep twice: {post(addr, "keep_twice", "a first draft\n")}")
+    print("keep, then fail: {post(addr, "keep_then_fail", "a second draft\n")}")
+    serving.join()
+    print("the store holds {held("drafts")} blobs")
+    print("staged now: {held(".jet/uploads")}")
+}

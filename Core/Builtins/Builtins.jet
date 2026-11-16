@@ -181,3 +181,25 @@ ProcessResourceLimit: enum {
     OpenFiles
     Output
 }
+
+// The file steps of an upload endpoint (core.app's uploads). core.web asks
+// for a step by handing core.app's `FileJob` to the lambda the compiler
+// writes where the endpoint's service is mounted, and that lambda runs it, so
+// only a program that mounts the service reaches its files and stores. A
+// step stages the request's body, ends the request, answers a blob's GET by
+// its id, or removes what a server that stopped left staged, as a server
+// starts.
+FileStep: enum {
+    Stage([U8])
+    Finish
+    Serve(String)
+    Clean
+}
+
+// What a file step gave: its status, 200 when it did what it was asked, and,
+// for a blob's GET, the blob's bytes and their content type.
+FileDone: struct {
+    status: Int
+    body: [U8]
+    media: String
+}

@@ -1,0 +1,68 @@
+// An upload endpoint keeps the file a person sends as a blob. The store
+// names the blob's file by its id: the name the sender gave, here a path that
+// climbs out of the store, is only what the call reads as `file.name`. What
+// the file is comes from its first bytes: a PNG is kept as an image, and an
+// HTML page the sender declared `image/png` is answered 415 and kept nowhere.
+use {
+    app
+    files: core.files
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+#Error
+AlbumError: enum {
+    NoAlbum
+}
+
+Photos: struct {
+    shelf: app.Blobs
+
+    // Keeps an image in album `album`.
+    #[App.Public, App.UploadCheck(method: "may_add")]
+    add: fn(self, album: Int, file: app.Upload) -[FS.Write]> String app.BlobError! {
+        blob: self.shelf.keep(file, allow: [app.Media]{app.Media.Image}) ?? return Err(err)
+        Ok("an image of {blob.bytes} bytes, sent as {file.name}, kept as {blob.id.raw().len()} hex digits")
+    }
+
+    // add's check: album 1 is the only one.
+    may_add: fn(self, album: Int) AlbumError! {
+        if album != 1 -> return Err(AlbumError.NoAlbum)
+        Ok()
+    }
+}
+
+// POSTs `body` to `add` for album 1, as the file `name` that the sender
+// declares `image/png`, as the status and body it is answered with.
+post: fn(addr: String, name: String, body: [U8]) -> String HTTPError! {
+    fields: http.headers_set(http.headers(), "content-type", "image/png")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/api/add?args=%5B1%5D&name={name}", fields, http.body_bytes(body)))
+    Ok("{answer.status} {answer.text()}")
+}
+
+// The names of the files the store `name` holds, as how many there are and
+// whether each is 32 characters long.
+kept: fn(name: String) -> String {
+    found: files.list_dir(name) ?? return "no store"
+    named := 0
+    loop entry in found {
+        if entry.name.len() == 32 -> named += 1
+    }
+    "{found.len()} files, {named} named by an id"
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    served: web.app().mount("/api", Photos{shelf: app.blobs("photos")})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<2 { served.serve_once(listener) }
+    }
+    png: [U8]{137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82}
+    print("png: {post(addr, "..%2F..%2Fescape.png", png)}")
+    print("html as image/png: {post(addr, "page.png", "<html><script>alert(1)</script></html>".bytes())}")
+    serving.join()
+    print("store: {kept("photos")}")
+    print("climbed out: {files.exists("escape.png")}")
+}

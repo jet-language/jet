@@ -1,0 +1,13 @@
+# A blob's download, GET `app.blob_url(id)`, runs the read policy of the row
+# that holds the blob's id, as the caller. Ann, a member of the project, gets
+# her notes back as an attachment the browser must not sniff, kept out of
+# shared caches, under the type their first bytes show. Eve, signed in but no
+# member, a caller with no session, and an id no row holds are each answered
+# 404 alike, so a download never tells a caller that a blob they may not read
+# exists.
+fixture: BlobDownloadRunsRowPolicy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "ann's blob is at /__jet/blobs/<id>: true\nann downloads: 200 | text/plain; charset=utf-8 | attachment | nosniff: nosniff | private, no-store | notes for the beta\neve downloads: 404\nno session downloads: 404\nan id no row holds: 404\n"

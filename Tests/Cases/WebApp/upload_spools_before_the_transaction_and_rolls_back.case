@@ -1,0 +1,13 @@
+# An upload's body is staged in a file after the endpoint's check and before
+# the call's transaction begins. `keep` links the staged file into the store,
+# so a second `keep` in the call, as a retry of the transaction would make,
+# reads the same bytes. A committed call's blobs stay; the blob a failing call
+# kept is deleted with its rollback. Each request's staged file is removed when
+# the request ends, and a file a stopped server left staged is removed when
+# the next server starts serving.
+fixture: UploadSpoolsBeforeTheTransactionAndRollsBack.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "keep twice: 200 {\"ok\":\"14 and 14 bytes, two ids: true\"}\nkeep, then fail: 200 {\"err\":\"Refused\"}\nthe store holds 2 blobs\nstaged now: 0\n"

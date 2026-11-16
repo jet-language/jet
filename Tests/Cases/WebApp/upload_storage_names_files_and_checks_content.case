@@ -1,0 +1,12 @@
+# An upload endpoint's store names each blob's file by a fresh id, never by
+# the name the sender gave: a name that climbs out of the store, sent as
+# `../../escape.png`, is only what the call reads as `file.name`, and no file
+# lands outside the store. The file's first bytes say what it is, never the
+# type the sender declared: a PNG is kept as an image, and an HTML page sent
+# as `image/png` is answered 415 and kept nowhere.
+fixture: UploadStorageNamesFilesAndChecksContent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = "png: 200 {\"ok\":\"an image of 16 bytes, sent as ../../escape.png, kept as 32 hex digits\"}\nhtml as image/png: 415 {\"err\":\"WrongType\"}\nstore: 1 files, 1 named by an id\nclimbed out: false\n"

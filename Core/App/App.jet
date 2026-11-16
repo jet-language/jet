@@ -32,6 +32,8 @@ use {
     push_wire: __core_app_push
     url: core.net.url
     markup: core.text.html
+    files: core.files
+    builtin: jet_builtins
 }
 
 SYNC_MAX_SESSION: 256
@@ -102,6 +104,23 @@ Webhook: struct {
 // parameters, by name, and gives the key the sender signs with, or None,
 // which answers 401. It is server-only.
 SigningKey: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+// An upload endpoint's check: `#App.UploadCheck(method: "may_attach")` on an
+// endpoint method that takes an `Upload` names the method of the same
+// service that decides whether the caller may send the file. That method
+// takes, by name, some of the endpoint's arguments other than the `Upload`,
+// and gives nothing or the error that refuses the call. It runs after the
+// request's head is read and before its body is: as the caller, in a
+// transaction that is always rolled back, so it can read but never write. An
+// error ends the request 403 with that error, and the body is never read.
+// An endpoint that takes an `Upload` has to name its check.
+UploadCheck: struct {
+    method: String
+
     impl Marker {
         sites: [.Method]
     }
@@ -1977,6 +1996,8 @@ priv(package) transactions: module {
             loop rest in 1..<ended.joins.len() -> _: ended.joins[rest].end(false)
             return false
         }
+        // The blobs the call kept stay once it ends (`uploads_finish`).
+        uploads_committed(call)
         if ended.joins.len() == 0 {
             loop job in ended.jobs.move() -> job_start(job, "", None, 0)
             return true
@@ -2950,6 +2971,14 @@ priv AppGraph: struct {
 
 priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, current: None}}
 
+// The most bytes one call's body to the service `service` (its key) may
+// hold, when the app graph's `.api<S>(path, max_upload:)` names it.
+__api_max_upload: fn(service: String) -> Int? Never! {
+    held: APP_GRAPH.guard_read()
+    api: held.value.apis.get(service) ?? return None
+    Val(api.max_upload)
+}
+
 // Makes the screen of `state`, at the address of the field texts `fields`,
 // the current one, and gives the graph.
 priv app_graph_open: fn(state: String, fields: [String:String]) -> App Never! {
@@ -3220,6 +3249,443 @@ priv push_device_listed: fn(found: [PushDevice], device: PushDevice) -> Bool Nev
         if known.service == device.service && known.token == device.token -> return true
     }
     false
+}
+
+// ── Uploads and blobs ─────────────────────────────────────────────────────
+//
+// An endpoint method that takes an `Upload` answers POST `{prefix}/{method}`
+// with the file as the request's raw body, the name its sender gave it as
+// the query's `name`, and the method's other arguments as the JSON array of
+// the query's `args`. The server reads the request's head first, and refuses
+// it before it reads the body when the endpoint's check (`UploadCheck`)
+// fails or the body is over the size limit. It then stages the body in a file
+// under UPLOAD_STAGING before the call's transaction begins, so each run of
+// the transaction, a retry's too, keeps the same staged file (`Blobs.keep`).
+// When the request ends, the staged file is removed, and so is each blob that
+// a run kept and then rolled back. The compiler writes the lambda that runs
+// each of these steps (`FileJob.run`) where the service is mounted, so the
+// steps use the files and stores of the program that mounts it, and a server
+// with no upload endpoint never reaches them.
+
+// A file a person sent to an upload endpoint: the name the sender gave it,
+// which is never a path on the server, and its size in bytes. Only the
+// request that sent it can keep it (`Blobs.keep`).
+#Codable
+Upload: struct {
+    name: String
+    bytes: Int
+}
+
+// What a blob's bytes are, as their first bytes show: an image (PNG, JPEG,
+// GIF or WebP), a PDF, or UTF-8 text that is not markup.
+#Codable
+Media: enum {
+    Image
+    PDF
+    Text
+}
+
+// The id of a kept blob. A row stores it to hold the blob, and it names the
+// blob's file in its store.
+#[Codable, Comparable, Printable]
+BlobID: distinct String
+
+// A blob `Blobs.keep` stored: its id, what its bytes are and how many.
+#Codable
+Blob: struct {
+    id: BlobID
+    media: Media
+    bytes: Int
+}
+
+// Why `Blobs.keep` kept no blob: the file's bytes are none of the media the
+// call allows (a call that fails on it is answered 415), or the store
+// failed.
+#Error
+BlobError: enum {
+    WrongType
+    Storage(String)
+}
+
+// A store of blobs: the directory `name`, under the working directory, which
+// holds each blob as a file named by its id. `blobs(name)` makes one.
+Blobs: struct {
+    name: String
+
+    // Keeps `file`, the upload the running request staged, as a blob in this
+    // store when its bytes are one of the media `allow` lists. Their first
+    // bytes decide that, never the type the sender declared. The blob stays
+    // only if the call that keeps it commits: a call that rolls back leaves
+    // none, and a retry keeps the staged file again.
+    keep: fn(self, file: Upload, allow: [Media]) -[FS.Write]> Blob BlobError! {
+        blobs_keep(self.name, file, allow)
+    }
+}
+
+// The blob store `name`. A served app answers GET `{BLOB_PATH}/<id>` with a
+// blob from any store made so far (`blob_url`).
+blobs: fn(name: String) -> Blobs Never! {
+    held := BLOBS.guard_edit()
+    if !held.value.stores.contains(name) -> held.value.stores.push(name.copy())
+    Blobs{name: name.copy()}
+}
+
+// The path a served app answers each blob under: GET `{BLOB_PATH}/<id>`
+// gives the blob to a caller that the read policy of a row holding the
+// blob's id admits, and 404 to any other caller.
+BLOB_PATH: "/__jet/blobs"
+
+// The address a served app answers the blob `id` at.
+blob_url: fn(id: BlobID) -> String Never! { "{BLOB_PATH}/{id.raw()}" }
+
+// The directory, under the working directory, where each request's upload
+// is staged until the request ends.
+UPLOAD_STAGING: ".jet/uploads"
+
+// How many of a file's first bytes tell what it is (`blob_type`).
+priv BLOB_HEAD: 512
+
+// An upload staged for the request that the task `task` answers: its file,
+// its size and first bytes, the blobs `keep` made of it, and whether `keep`
+// refused its media.
+priv StagedUpload: struct {
+    task: TaskID
+    path: String
+    bytes: Int
+    head: [U8]
+    kept: [KeptBlob]
+    refused: Bool
+}
+
+// A blob a call kept: its file, the call, and whether the call committed.
+// A blob kept outside any call is committed at once.
+priv KeptBlob: struct {
+    path: String
+    call: Int
+    committed: Bool
+}
+
+// How a table's blob reader (`__blob_reader`) answers whether the caller
+// may read a blob.
+priv BlobReader: struct {
+    read: fn(String) -[DB.Read]> Int Never!
+}
+
+// The process's blob stores by name; the uploads staged now; whether the
+// staging a stopped server left behind is removed; and the blob reader of
+// each table that has been read or written since a store was made
+// (`__blob_reader`), with whether a row policy guards that table.
+priv BlobState: struct {
+    stores: [String]
+    staged: [StagedUpload]
+    cleaned: Bool
+    readers: [String:Shared<BlobReader>]
+    guarded: [String:Bool]
+}
+
+priv BLOBS: Shared{BlobState{stores: [String]{}, staged: [StagedUpload]{}, cleaned: false, readers: [String:Shared<BlobReader>]{}, guarded: [String:Bool]{}}}
+
+// One file step of an upload endpoint, as core.web hands it to the lambda the
+// compiler writes where the service is mounted, which calls `run`.
+priv FileJob: struct {
+    step: builtin.FileStep
+
+    run: fn(self) -[FS, DB.Read]> builtin.FileDone Never! { file_steps(self.step) }
+}
+
+// Runs one file step of an upload endpoint (`FileJob`).
+priv file_steps: fn(step: builtin.FileStep) -[FS, DB.Read]> builtin.FileDone Never! {
+    if step == {
+        .Stage(body) -> uploads_stage(body)
+        .Finish -> uploads_finish()
+        .Serve(id) -> blobs_serve(id)
+        .Clean -> {
+            uploads_clean()
+            file_done(200)
+        }
+    }
+}
+
+priv file_done: fn(status: Int) -> builtin.FileDone Never! {
+    builtin.FileDone{status: status, body: [U8]{}, media: ""}
+}
+
+// Stages `body` for the request this task answers.
+priv uploads_stage: fn(body: [U8]) -[FS.Write]> builtin.FileDone Never! {
+    files.create_dir_all(UPLOAD_STAGING) ?? return file_done(500)
+    path: "{UPLOAD_STAGING}/{blob_id()}"
+    files.write_bytes(path, body) ?? return file_done(500)
+    staged: StagedUpload{task: tasks.current_task(), path: path, bytes: body.len(), head: blob_head(body), kept: [KeptBlob]{}, refused: false}
+    held := BLOBS.guard_edit()
+    held.value.staged.push(staged)
+    file_done(200)
+}
+
+// Removes the files a stopped server left staged, once per process.
+priv uploads_clean: fn() -[FS]> Never! {
+    held := BLOBS.guard_edit()
+    if held.value.cleaned {
+        return
+    }
+    held.value.cleaned = true
+    left: files.list_dir(UPLOAD_STAGING) ?? return
+    loop entry in left {
+        if !entry.is_dir {
+            files.remove(entry.path).drop("a staged file that can't be removed waits for the next start")
+        }
+    }
+}
+
+// Ends the request this task answers: removes its staged file and each blob
+// that a run of its call kept and that call did not commit. 415 when `keep`
+// refused the file's media, else 200.
+priv uploads_finish: fn() -[FS.Write]> builtin.FileDone Never! {
+    ended: uploads_take(tasks.current_task()) ?? return file_done(200)
+    files.remove(ended.path).drop("a staged file that can't be removed waits for the next start")
+    loop kept in ended.kept {
+        if !kept.committed -> files.remove(kept.path).drop("a blob no row holds is never served")
+    }
+    file_done(if ended.refused -> 415 else -> 200)
+}
+
+// Removes the upload staged for the request the task `task` answers, and
+// gives it.
+priv uploads_take: fn(task: TaskID) -> StagedUpload? Never! {
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].task == task -> return held.value.staged.remove(index, .Slot)
+    }
+    None
+}
+
+// The upload staged for the request the task `task` answers.
+priv uploads_staged: fn(task: TaskID) -> StagedUpload? Never! {
+    held: BLOBS.guard_read()
+    loop staged in held.value.staged {
+        if staged.task == task -> return Val(staged.copy())
+    }
+    None
+}
+
+// Marks the upload staged for the task `task` as one `keep` refused.
+priv uploads_refused: fn(task: TaskID) Never! {
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].task == task -> held.value.staged[index].refused = true
+    }
+}
+
+// Records the blob `path`, which the running call kept from the upload
+// staged for the task `owner`.
+priv uploads_kept: fn(owner: TaskID, path: String) Never! {
+    call: transactions.current()
+    kept: KeptBlob{path: path.copy(), call: call ?? 0, committed: call == .None}
+    held := BLOBS.guard_edit()
+    loop index in 0..<held.value.staged.len() {
+        if held.value.staged[index].task == owner {
+            held.value.staged[index].kept.push(kept)
+            return
+        }
+    }
+}
+
+// Marks the blobs that call `call` kept as committed (`transactions.end`).
+priv uploads_committed: fn(call: Int) Never! {
+    held := BLOBS.guard_edit()
+    loop staged in 0..<held.value.staged.len() {
+        loop kept in 0..<held.value.staged[staged].kept.len() {
+            if held.value.staged[staged].kept[kept].call == call {
+                held.value.staged[staged].kept[kept].committed = true
+            }
+        }
+    }
+}
+
+// `Blobs.keep` of the store `store`: links the staged file into the store
+// under a fresh id, so a retry finds the staged file still there.
+priv blobs_keep: fn(store: String, file: Upload, allow: [Media]) -[FS.Write]> Blob BlobError! {
+    me: tasks.current_task()
+    staged: uploads_staged(me) ?? return Err(.Storage("no upload is staged for this request: `keep` keeps only the Upload its endpoint was called with"))
+    if staged.bytes != file.bytes {
+        return Err(.Storage("`{file.name}` is not the upload this request staged"))
+    }
+    media: blob_media(blob_type(staged.head, staged.bytes)) ?? {
+        uploads_refused(me)
+        return Err(.WrongType)
+    }
+    if !allow.contains(media) {
+        uploads_refused(me)
+        return Err(.WrongType)
+    }
+    files.create_dir_all(store) ?? return Err(.Storage("the blob store `{store}` can't be made: {err}"))
+    id: blob_id()
+    path: "{store}/{id}"
+    files.hard_link(staged.path, path) ?? return Err(.Storage("the upload can't be kept in `{store}`: {err}"))
+    uploads_kept(me, path)
+    Ok(Blob{id: BlobID.from_string(id), media: media, bytes: staged.bytes})
+}
+
+// A fresh blob id: 32 lowercase hex digits.
+priv blob_id: fn() -> String Never! {
+    make_trace_id("blob:{rt.clock_mono_ns()}:{trace_next()}", 16)
+}
+
+// Whether `id` can be a blob id, so it never names a path outside a store.
+priv blob_id_valid: fn(id: String) -> Bool Never! {
+    raw: id.bytes()
+    if raw.len() != 32 -> return false
+    loop byte in raw {
+        n: Int{byte}
+        if !(n >= 48 && n <= 57) && !(n >= 97 && n <= 102) -> return false
+    }
+    true
+}
+
+// The first bytes of `body` that tell what it is.
+priv blob_head: fn(body: [U8]) -> [U8] Never! {
+    body.slice(0, if body.len() < BLOB_HEAD -> body.len() else -> BLOB_HEAD)
+}
+
+// The content type of a file of `bytes` bytes that starts with `head`, by
+// its first bytes alone; "" for none of the media a blob can be.
+priv blob_type: fn(head: [U8], bytes: Int) -> String Never! {
+    if blob_at(head, 0, [U8]{137, 80, 78, 71, 13, 10, 26, 10}) -> return "image/png"
+    if blob_at(head, 0, [U8]{255, 216, 255}) -> return "image/jpeg"
+    if blob_at(head, 0, "GIF87a".bytes()) || blob_at(head, 0, "GIF89a".bytes()) {
+        return "image/gif"
+    }
+    if blob_at(head, 0, "RIFF".bytes()) && blob_at(head, 8, "WEBP".bytes()) -> return "image/webp"
+    if blob_at(head, 0, "%PDF-".bytes()) -> return "application/pdf"
+    if bytes > 0 && blob_text(head, bytes > head.len()) -> return "text/plain; charset=utf-8"
+    ""
+}
+
+// The media of the content type `kind` (`blob_type`).
+priv blob_media: fn(kind: String) -> Media? Never! {
+    if kind.starts_with("image/") -> return Val(Media.Image)
+    if kind == "application/pdf" -> return Val(Media.PDF)
+    if kind.starts_with("text/") -> return Val(Media.Text)
+    None
+}
+
+// Whether `head` holds `sign` from byte `at` on.
+priv blob_at: fn(head: [U8], at: Int, sign: [U8]) -> Bool Never! {
+    if head.len() < at + sign.len() -> return false
+    loop index in 0..<sign.len() {
+        if head[at + index] != sign[index] -> return false
+    }
+    true
+}
+
+// Whether `head`, a file's first bytes, is text that is not markup: UTF-8,
+// whose last character may be split when the file goes on past `head`
+// (`cut`); no control byte but tab, newline, form feed and carriage return;
+// and no `<` as its first byte past white space, so a browser told it is
+// text never takes it for HTML.
+priv blob_text: fn(head: [U8], cut: Bool) -> Bool Never! {
+    end := head.len()
+    if cut {
+        back := 0
+        loop back < 3 && back < end && blob_byte(head, end - 1 - back).bit_and(192) == 128 {
+            back += 1
+        }
+        if back < end && blob_byte(head, end - 1 - back) >= 192 -> end = end - 1 - back
+    }
+    if String.from_bytes(head.slice(0, end)) == .Err(_) -> return false
+    loop index in 0..<end {
+        n: blob_byte(head, index)
+        if n == 127 || (n < 32 && n != 9 && n != 10 && n != 12 && n != 13) -> return false
+    }
+    loop index in 0..<end {
+        n: blob_byte(head, index)
+        if n == 32 || n == 9 || n == 10 || n == 12 || n == 13 -> next
+        return n != 60
+    }
+    true
+}
+
+priv blob_byte: fn(head: [U8], at: Int) -> Int Never! { Int{head[at]} }
+
+// Answers a blob's GET: its bytes and content type when `id` names a blob in
+// a store this process made and the read policy of a row that holds the id
+// admits the caller (`blobs_admitted`); else 404, the same for a blob that
+// isn't there as for one the caller may not read.
+priv blobs_serve: fn(id: String) -[FS.Read, DB.Read]> builtin.FileDone Never! {
+    if !blob_id_valid(id) || !blobs_admitted(id) -> return file_done(404)
+    loop store in blob_stores() {
+        body: files.read_bytes("{store}/{id}") ?? next
+        kind: blob_type(blob_head(body), body.len())
+        return builtin.FileDone{status: 200, body: body, media: if kind == "" -> "application/octet-stream" else -> kind}
+    }
+    file_done(404)
+}
+
+priv blob_stores: fn() -> [String] Never! {
+    held: BLOBS.guard_read()
+    held.value.stores.copy()
+}
+
+// Whether the table `table` of the store `store` wants a blob reader
+// (`__blob_reader`): once a blob store is made, a table that has none yet,
+// or one whose row policy now guards it when its reader was made unguarded.
+__blob_reader_wanted: fn(store: String, table: String, guarded: Bool) -> Bool Never! {
+    held: BLOBS.guard_read()
+    if held.value.stores.len() == 0 -> return false
+    known: held.value.guarded.get("{store} {table}") ?? return true
+    guarded && !known
+}
+
+// Keeps `read` as the blob reader of the table `table` of the store
+// `store`. For a blob id, `read` gives 1 when a row of the table holds it and
+// the row's read policy admits the caller, 0 when rows hold it and none
+// admits the caller, and -1 when no row holds it. The reader of a guarded
+// table is never replaced by one that isn't.
+__blob_reader: fn(store: String, table: String, guarded: Bool, read: &&fn(String) -[DB.Read]> Int Never!) Never! {
+    key: "{store} {table}"
+    held := BLOBS.guard_edit()
+    if (held.value.guarded.get(key) ?? false) && !guarded {
+        return
+    }
+    held.value.readers[key.copy()] = Shared{BlobReader{read: read}}
+    held.value.guarded[key] = guarded
+}
+
+// Whether the caller may read the blob `id`: some table holds it in a row
+// whose read policy admits the caller. The readers run after the lock is
+// released, since each one reads its table.
+priv blobs_admitted: fn(id: String) -[DB.Read]> Bool Never! {
+    loop reader in blob_readers() {
+        each: reader.guard_read()
+        if each.value.read(id) == 1 -> return true
+    }
+    false
+}
+
+priv blob_readers: fn() -> [Shared<BlobReader>] Never! {
+    held: BLOBS.guard_read()
+    readers := [Shared<BlobReader>]{}
+    loop key in held.value.readers.keys() {
+        reader: held.value.readers.get(key) ?? next
+        readers.push(reader.copy())
+    }
+    readers
+}
+
+#Test("a blob's media is what its first bytes show") {
+    png: [U8]{137, 80, 78, 71, 13, 10, 26, 10, 0, 0}
+    assert_eq(blob_type(png, png.len()), "image/png")
+    assert_eq(blob_type("%PDF-1.7\n".bytes(), 9), "application/pdf")
+    assert_eq(blob_type("a note\n".bytes(), 7), "text/plain; charset=utf-8")
+    assert_eq(blob_type("  <html><script>x</script>".bytes(), 26), "")
+    assert_eq(blob_type([U8]{104, 105, 0}, 3), "")
+    assert_eq(blob_type([U8]{}, 0), "")
+    // A head cut inside "é" is still text when the file goes on.
+    assert_eq(blob_type([U8]{104, 195}, 3), "text/plain; charset=utf-8")
+    assert_eq(blob_type([U8]{104, 195}, 2), "")
+    assert(blob_media("image/gif") == .Val(.Image))
+    assert(blob_media("") == .None)
+    assert(blob_id_valid(blob_id()))
+    assert(!blob_id_valid("../../etc/passwd"))
 }
 
 // The arguments of a mounted method's call or of a job, decoded from their

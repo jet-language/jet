@@ -1,14 +1,18 @@
 // `app.caller()` is the signed-in account, so a path that reaches it must
-// start where one is certain: at an `#App.SignedIn` method, or inside
-// `app.as_caller`'s run. Every other path is E2815, named from where it
-// starts: an `#App.Public` method, a webhook or its signing-key method, any
-// function nothing in the program calls (the entry, a test, a handler passed
-// as a value), and a `task` spawned where a caller is certain, since a
-// spawned task acts for no account.
+// start where one is certain: at an `#App.SignedIn` method or the check its
+// `#App.UploadCheck` names, or inside `app.as_caller`'s run. Every other
+// path is E2815, named from where it starts: an `#App.Public` method, a
+// webhook or its signing-key method, any function nothing in the program
+// calls (the entry, a test, a handler passed as a value), and a `task`
+// spawned where a caller is certain, since a spawned task acts for no
+// account.
 use jet_foundation.[
     CompilerThreads,
     Diagnostic,
     FnBody,
+    Func,
+    Marker,
+    ModuleID,
     NodeKind,
     Span,
     SymbolID,
@@ -131,8 +135,8 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
     }
     // The marked methods: a public one, a webhook and a signing key each
     // start a path, before the others, so a report names the marked method
-    // its path starts at; a signed-in one has its caller, so only a task it
-    // spawns starts one.
+    // its path starts at; a signed-in one, and the check of a signed-in
+    // upload, has its caller, so only a task it spawns starts one.
     signed_in := [Int]{}
     marked := [Int]{}
     loop module_row in graph.modules {
@@ -149,6 +153,12 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
                         }
                         access != None || sema_app_marker_is(marker, SEMA_APP_WEBHOOK_MARKER, graph, module_row.module_identity) || sema_app_marker_is(marker, SEMA_APP_SIGNING_KEY_MARKER, graph, module_row.module_identity) -> {
                             marked.push(row)
+                        }
+                        sema_app_marker_is(marker, SEMA_APP_UPLOAD_CHECK_MARKER, graph, module_row.module_identity) -> {
+                            check: sema_app_caller_upload_check(nominal, method.declaration, marker, graph, module_row.module_identity) ?? next
+                            check_row: program.rows.get(check) ?? next
+                            program.signed_in[check] = true
+                            signed_in.push(check_row)
                         }
                         else -> {}
                     }
@@ -176,6 +186,27 @@ sema_app_caller_diagnostics: fn(graph: SemaRegistrationGraph, modules: [SemaGrap
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[registration].source_segments)
     }
     diagnostics
+}
+
+// The run-wide symbol of the method of `nominal` that the `#App.UploadCheck`
+// `marker` of its signed-in method `endpoint` names by a literal: the server
+// runs the check as the upload's caller. None when `endpoint` isn't
+// signed-in or the marker names no method so.
+sema_app_caller_upload_check: fn(nominal: SemaRegistrationNominal, endpoint: Func, marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID) -> U32? {
+    signed_in: loop other in endpoint.markers {
+        if (sema_app_endpoint_access(other, graph, module_identity) ?? "") == "SignedIn" {
+            break true
+        }
+    } ?? false
+    if !signed_in -> return None
+    at: sema_app_marker_arg_at(marker, "method", 0) ?? return None
+    name: if marker.args[at] == .Expr(value) -> sema_ui_handle_literal_string(value) ?? return None else -> {
+        return None
+    }
+    loop checked in nominal.methods {
+        if checked.declaration.name == name -> return Val(checked.symbol.id.id)
+    }
+    None
 }
 
 // The run-wide symbol of the function a node calls directly, or names as a
