@@ -23,7 +23,7 @@ Wrapper: enum {
 }
 
 run: fn() {
-    shapes: [Shape]{Shape.Dot, Shape.Circle(3), Shape.Rect(width: 4, height: 5)}
+    shapes: [Shape]{Shape.Dot, Shape.Circle(3), Shape.Rect{width: 4, height: 5}}
     loop shape in shapes {
         captured: reflect.of(shape)
         if captured.case() == .Val(held) {
@@ -32,7 +32,7 @@ run: fn() {
         }
     }
 
-    scene := Scene{shape: Shape.Rect(width: 1, height: 2), label: "start"}
+    scene := Scene{shape: Shape.Rect{width: 1, height: 2}, label: "start"}
     before: reflect.of(scene)
     scene.shape = Shape.Circle(9)
     scene.label = "moved"
