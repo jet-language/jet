@@ -12756,23 +12756,19 @@ sema_finalize_walkers: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalk
 
 // One thread: walks the taint modules it claims, in claim order, with the
 // thread's own flow state, over its own copy of the catalog and the coverage
-// reports made at its first module.
+// reports, made once it has claimed a module: a thread that claims none
+// builds no state.
 sema_finalize_walk_claimed: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWalkInputs, queue: SemaFinalizeCoreQueue) -> [SemaTaintWalked] {
-    state := SemaTaintFlowState{catalog: sema_taint_catalog_init(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
-    stated := false
     claimed := [SemaTaintWalked]{}
-    loop {
-        rank: sema_finalize_core_claim(queue)
-        if rank >= inputs.taint_order.len() -> break
-        if !stated {
-            state.catalog = inputs.catalog.copy()
-            state.coverage_reports = inputs.coverage.copy()
-            stated = true
-        }
+    rank := sema_finalize_core_claim(queue)
+    if rank >= inputs.taint_order.len() -> return claimed
+    state := SemaTaintFlowState{catalog: inputs.catalog.copy(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, diagnostics: [Diagnostic]{}, coverage_reports: inputs.coverage.copy(), fixed_tags: [String]{}}
+    loop rank < inputs.taint_order.len() {
         module_index: inputs.taint_order[rank]
         found := [Diagnostic]{}
         sema_taint_check_module(graph, state, module_index, found)
         claimed.push(SemaTaintWalked{module_index: module_index, found: found.move(), masked: state.masked.copy(), fixed_tags: state.fixed_tags.copy()})
+        rank = sema_finalize_core_claim(queue)
     }
     claimed
 }
