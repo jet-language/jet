@@ -7752,15 +7752,10 @@ sema_effect_walk_core_closure_children: fn(walk: SemaEffectWalk, nodes: &[SemaEf
             sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, frames)
             sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         }
-        .UITextInputOnDrop(state, ime, executable) -> {
-            sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, state)
-            sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, ime)
-            sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
-        }
         .Guard(executable) -> {
             sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         }
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> {
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) | .UIDropSlot(executable) -> {
             sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         }
         .OnCommit(_, executable) | .OnRollback(_, executable) -> {

@@ -477,7 +477,7 @@ TCoreClosureKind: enum {
     OnCommit(handle_name: String, executable: TLambda)
     OnRollback(handle_name: String, executable: TLambda)
     UIClickSlot(executable: TLambda)
-    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
+    UIDropSlot(executable: TLambda)
     ReactiveDerived(executable: TLambda)
     ReactiveEffect(executable: TLambda)
     UIReactiveRender(executable: TLambda)
@@ -1170,13 +1170,8 @@ tree_each_core_closure_child: fn(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.
             visit(frames)
             tree_each_lambda_child(executable, visit)
         }
-        .UITextInputOnDrop(state, ime, executable) -> {
-            visit(state)
-            visit(ime)
-            tree_each_lambda_child(executable, visit)
-        }
         .Guard(executable) -> tree_each_lambda_child(executable, visit)
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) -> {
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) | .UIClickSlot(executable) | .UIDropSlot(executable) -> {
             tree_each_lambda_child(executable, visit)
         }
         .OnCommit(_, executable) | .OnRollback(_, executable) -> {

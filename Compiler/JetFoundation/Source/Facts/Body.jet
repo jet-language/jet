@@ -453,7 +453,7 @@ BodyCoreClosureKind: enum {
     OnCommit(handle_name: String, executable: BodyLambda)
     OnRollback(handle_name: String, executable: BodyLambda)
     UIClickSlot(executable: BodyLambda)
-    UITextInputOnDrop(state: Int, ime: Int, executable: BodyLambda)
+    UIDropSlot(executable: BodyLambda)
     ReactiveDerived(executable: BodyLambda)
     ReactiveEffect(executable: BodyLambda)
     UIReactiveRender(executable: BodyLambda)
@@ -1476,11 +1476,7 @@ body_each_core_closure_kind_child: fn(tree: BodyTree, value: BodyCoreClosureKind
         .OnCommit(_, f1) -> { body_each_lambda_child(tree, f1, visit) }
         .OnRollback(_, f1) -> { body_each_lambda_child(tree, f1, visit) }
         .UIClickSlot(f0) -> { body_each_lambda_child(tree, f0, visit) }
-        .UITextInputOnDrop(f0, f1, f2) -> {
-            visit(f0)
-            visit(f1)
-            body_each_lambda_child(tree, f2, visit)
-        }
+        .UIDropSlot(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .ReactiveDerived(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .ReactiveEffect(f0) -> { body_each_lambda_child(tree, f0, visit) }
         .UIReactiveRender(f0) -> { body_each_lambda_child(tree, f0, visit) }

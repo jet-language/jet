@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     tui_text: core.tui
     core.term.[Key]
     core.color.[Color]
@@ -130,7 +131,7 @@ InputEvent: enum {
 // One node of the portable tree: its label, its size in cells, and what
 // hosts and assistive tech read. A box stacks its children top to bottom;
 // a button built with a handler (`button(display, () -> { … })`) holds its click
-// slot.
+// slot, and a text input built with `on_drop:` its drop slot.
 UINode: struct {
     label: String
     width: Float
@@ -144,6 +145,8 @@ UINode: struct {
     priv color: Color?
     // The id the runtime's click registry keeps the handler under; 0 for none.
     priv click: Int
+    // The id the runtime's drop registry keeps the handler under; 0 for none.
+    priv drop: Int
 }
 
 // Whether a backend used an input event.
@@ -188,6 +191,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         children: children,
         color: None,
         click: 0,
+        drop: 0,
     }
 }
 
@@ -216,10 +220,20 @@ __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click
     result
 }
 
-// A text input over `state`, one cell per scalar, with its IME mode.
+// A text input over `state`, one cell per scalar, with its IME mode. The
+// `on_drop:` form is `text_input_drop`.
 text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
     result := leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
     result.ime = Val(ime)
+    result
+}
+
+// `text_input(state, ime, on_drop: (item: UIDropItem) -> { … })`: the compiler
+// registers the handler with the runtime's drop registry as slot `drop`, then
+// builds the input here.
+#Builtin.Role(.TextInputDrop) priv text_input_drop: fn(state: String, ime: UIIMEMode, drop: Int) -> UINode Never! {
+    result := text_input(state, ime)
+    result.drop = drop
     result
 }
 
@@ -1629,6 +1643,7 @@ priv internal: module {
             children: [UINode]{},
             color: color,
             click: 0,
+            drop: 0,
         }
     }
 

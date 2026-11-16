@@ -7859,11 +7859,9 @@ body_codec_put_bodycoreclosurekind: fn(out: &BodyCodecOut, value: BodyCoreClosur
             body_codec_put_tag(out, 5)
             body_codec_put_bodylambda(out, p0)
         }
-        .UITextInputOnDrop(p0, p1, p2) -> {
+        .UIDropSlot(p0) -> {
             body_codec_put_tag(out, 6)
-            body_codec_put_int(out, p0)
-            body_codec_put_int(out, p1)
-            body_codec_put_bodylambda(out, p2)
+            body_codec_put_bodylambda(out, p0)
         }
         .ReactiveDerived(p0) -> {
             body_codec_put_tag(out, 7)
@@ -7908,10 +7906,8 @@ body_codec_get_bodycoreclosurekind: fn(bytes: [U8], input: &BodyCodecIn) -> Body
             BodyCoreClosureKind.UIClickSlot{executable: f0}
         }
         6 -> {
-            f0: body_codec_get_int(bytes, input)
-            f1: body_codec_get_int(bytes, input)
-            f2: body_codec_get_bodylambda(bytes, input)
-            BodyCoreClosureKind.UITextInputOnDrop{state: f0, ime: f1, executable: f2}
+            f0: body_codec_get_bodylambda(bytes, input)
+            BodyCoreClosureKind.UIDropSlot{executable: f0}
         }
         7 -> {
             f0: body_codec_get_bodylambda(bytes, input)

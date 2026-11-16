@@ -106,36 +106,57 @@ ui_web_scene_fresh := I64{0}
     rt_text_len(ui_web_scene)
 }
 
-// ---- click slots ------------------------------------------------------------
+// ---- click and drop slots ---------------------------------------------------
 
 // ids from 1; each slot keeps its handler (env, invoke, release) for the
-// process, as the reference's registry does. A button may be built on any
-// task, so registration runs under the host lock. The slots are one word
-// vector (len0 cap8 data16, Events.jet event_words_*).
+// process, as the reference's registry does. A button or text input may be
+// built on any task, so registration runs under the host lock. Each registry
+// is one word vector (len0 cap8 data16, Events.jet event_words_*): the click
+// slots of buttons and the drop slots of text inputs.
 ui_click_slots := I64{0}
 
-ui_register_click: fn(env: I64, invoke: I64, release: I64) -> I64 {
-    host_lock()
-    if (ui_click_slots == I64{0}) {
-        base: jet_rt_alloc(I64{24}, I64{8})
-        ui_carrier_store(base, I64{0})
-        ui_carrier_store(wrapping(base + I64{8}), I64{0})
-        ui_carrier_store(wrapping(base + I64{16}), I64{0})
-        #Unsafe("written under the host lock") { ui_click_slots = base }
-    }
-    base: ui_click_slots
+ui_drop_slots := I64{0}
+
+ui_slots_new: fn() -> I64 {
+    base: jet_rt_alloc(I64{24}, I64{8})
+    ui_carrier_store(base, I64{0})
+    ui_carrier_store(wrapping(base + I64{8}), I64{0})
+    ui_carrier_store(wrapping(base + I64{16}), I64{0})
+    base
+}
+
+// Keeps the handler in registry `base`, which the host lock holder owns, and
+// returns its id.
+ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     event_words_push(base, env)
     event_words_push(base, invoke)
     event_words_push(base, release)
-    id: ui_carrier_word(base) / I64{3}
-    host_unlock()
-    id
+    ui_carrier_word(base) / I64{3}
 }
 
 // `ui.button(…, () -> { on_click })`: the click slot keeping the handler closure,
 // which it takes over, as the Int core.ui's `__button_click` stores.
 #Export(c) jet_ui_click_slot: fn(env: I64, invoke: I64, release: I64) -> I64 {
-    jet_int_owned_from_i64(ui_register_click(env, invoke, release))
+    host_lock()
+    if (ui_click_slots == I64{0}) {
+        #Unsafe("written under the host lock") { ui_click_slots = ui_slots_new() }
+    }
+    id: ui_slots_push(ui_click_slots, env, invoke, release)
+    host_unlock()
+    jet_int_owned_from_i64(id)
+}
+
+// `ui.text_input(…, on_drop: (item) -> { … })`: the drop slot keeping the
+// handler closure, which it takes over, as the Int core.ui's
+// `text_input_drop` stores.
+#Export(c) jet_ui_drop_slot: fn(env: I64, invoke: I64, release: I64) -> I64 {
+    host_lock()
+    if (ui_drop_slots == I64{0}) {
+        #Unsafe("written under the host lock") { ui_drop_slots = ui_slots_new() }
+    }
+    id: ui_slots_push(ui_drop_slots, env, invoke, release)
+    host_unlock()
+    jet_int_owned_from_i64(id)
 }
 
 // A web host's click on a scene element: runs the handler click slot `id`
