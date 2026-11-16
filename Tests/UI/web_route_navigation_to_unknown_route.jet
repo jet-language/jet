@@ -1,0 +1,15 @@
+use app
+
+TaskView: struct {
+    id: String
+}
+
+BoardView: struct {
+    project: String
+}
+
+task_screen: fn(view: TaskView) -> String Never! { view.id }
+
+graph: fn() -> app.App Never! { app.new("Crew").screen("/tasks/:id", task_screen) }
+
+open_board: fn() Never! { app.go(BoardView{project: "p1"}) }

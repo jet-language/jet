@@ -1,0 +1,8 @@
+Error [jet.StateWithoutScreen]: No screen of the app graph opens `BoardView`.
+  --> Tests/UI/web_route_navigation_to_unknown_route.jet:15:34
+    |
+ 15 | open_board: fn() Never! { app.go(BoardView{project: "p1"}) }
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Every target runs the program's one app graph, and only a `.screen` whose view takes `BoardView` gives it an address, so a link, push or mail that opens it would open nothing on any target.
+ Fix: Register a screen whose view takes `BoardView` in the graph, as `.screen("/path/:field", view)`, or open the state of a screen the graph registers.
+More: jet-lang.dev/e/E2821
