@@ -100,7 +100,7 @@ kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
     if report == "" {
         return if expected.ends_with("tests/run/CoreIO/LogFatal") -> Val(1) else -> None
     }
-    exit_one: ["Examples/ErrorsAndEffects/Errors/PropagationJourney", "Examples/ErrorsAndEffects/Errors/ErrorContext", "Examples/ErrorsAndEffects/Errors/DefaultErrorConversion", "Examples/ErrorsAndEffects/Errors/DefaultErrEdge", "Examples/ErrorsAndEffects/Errors/FatalExit", "Examples/ErrorsAndEffects/Failures/MintedLeaveRun", "Examples/Data/DecodeErrorExit", "Examples/Crypto/CryptoErrorRun", "tests/run/FailureFoundation/PropagationJourneyDirect", "tests/run/FailureFoundation/PropagationJourneyOneHop", "tests/run/FailureFoundation/PropagationJourneyCore", "tests/run/FailureFoundation/PropagationJourneyDecode", "tests/run/FailureFoundation/OrErrJourney"]
+    exit_one: ["Examples/ErrorsAndEffects/Errors/PropagationJourney", "Examples/ErrorsAndEffects/Errors/ErrorContext", "Examples/ErrorsAndEffects/Errors/DefaultErrorConversion", "Examples/ErrorsAndEffects/Errors/DefaultErrEdge", "Examples/ErrorsAndEffects/Errors/FatalExit", "Examples/ErrorsAndEffects/Failures/MintedLeaveRun", "Examples/Data/DecodeErrorExit", "Examples/Crypto/CryptoErrorRun", "tests/run/FailureFoundation/PropagationJourneyDirect", "tests/run/FailureFoundation/PropagationJourneyOneHop", "tests/run/FailureFoundation/PropagationJourneyCore", "tests/run/FailureFoundation/PropagationJourneyDecode", "tests/run/FailureFoundation/OrErrJourney", "tests/run/FailureFoundation/MintedFailureLeavesRun"]
     loop stem in exit_one {
         if expected.ends_with(stem) -> return Val(1)
     }
@@ -325,6 +325,9 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
         if plan.compile_only || !tier.direct -> plan.steps.push(kit_golden_default_step("build"))
         if !plan.compile_only -> plan.steps.push(kit_golden_default_step("built"))
     }
+    if !implicit {
+        plan.steps = kit_golden_spawned_built(plan.steps.move(), tier, files.join(source, entry.path))
+    }
     last_explicit := false
     loop assertion in plan.steps[plan.steps.len() - 1].assertions {
         if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
@@ -334,6 +337,36 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     outcome: kit_steps_execute(context, kit_golden_step_hooks())
     if outcome.verdict.status != "PASS" -> return outcome
     kit_golden_test_outcome(context, entry, tier, source, expected) ?? outcome
+}
+
+// `steps` with each spawned or session program the case names `built`
+// running the entry's build, as a plain `built` step does
+// (kit_golden_step_invoke): the build comes first when no step before it
+// builds, and the direct tier runs the entry through `jet run`. The spawn
+// is a case action the golden hooks never see, so it can't build itself.
+kit_golden_spawned_built: fn(steps: &&[KitStep], tier: KitTier, entry: String) -> [KitStep] {
+    rebuilt := [KitStep]{}
+    built := false
+    loop step in steps.move() {
+        held := step
+        names_built: held.argv.len() > 0 && held.argv[0] == "built"
+        names_build: held.argv.len() > 0 && held.argv[0] == "build"
+        spawned: held.action == "spawn" || held.action == "session"
+        if names_built && spawned {
+            if !built -> rebuilt.push(kit_golden_default_step("build"))
+            if tier.direct {
+                argv := [String]{"jet", "run", entry}
+                if held.argv.len() > 1 {
+                    argv.push("--")
+                    loop arg in held.argv.slice(1, held.argv.len()) -> argv.push(arg)
+                }
+                held.argv = argv
+            }
+        }
+        if names_build || names_built -> built = true
+        rebuilt.push(held)
+    }
+    rebuilt
 }
 
 kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
@@ -379,6 +412,12 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
             return KitStepResult{state: state, verdict: kit_golden_stream_verdict(context.id, golden.expected, golden.tier.name, streams, context.bless, "", kit_golden_source_name(golden.entry), true)}
         }
         state.built = if golden.tier.direct -> context.env.jet else -> kit_steps_artifact(golden.entry.path, golden.source, plan.artifact)
+        // An entry that marks itself for the web (`#Target(Web)`) builds the
+        // web bundle, as a case's `jet build` step finds it.
+        if !files.exists(state.built) {
+            web: kit_steps_artifact(golden.entry.path, golden.source, "app.js")
+            if files.exists(web) -> state.built = web
+        }
         if !files.exists(state.built) {
             return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
         }

@@ -1,5 +1,7 @@
-// A raw write from an address with no allocation provenance
-// is a located R0801 runtime fault in the default dev tier.
+// A raw write from an address with no allocation provenance is a located R0801
+// runtime fault; `harden: true` keeps the sentry in a release build too.
+package: { name: "unsafe_sentries_provenance", policy: { harden: true } }
+
 use core.mem
 
 run: fn() {

@@ -2970,8 +2970,12 @@ jet_driver_comptime_checked_text_source_add: fn(sources: &[SemaComptimeItemSourc
 // module is found through one identity map instead of copying every module
 // passed while searching, and edited without copying it out and back. An
 // incomplete result fails the merge before any module changes, and the
-// failure names the staged function and why it could not join. The caller
-// builds the bundle's name facts afterwards (jet_driver_merged_names).
+// failure names the staged function and why it could not join. A staged
+// Core function whose only errors are failure obligations joins: the body
+// pass that settles a staged function's obligations never checks a Core
+// body a program reads from the Core image, and the Core library's own
+// check, whose solve saw every Core body, already discharged them. The
+// caller builds the bundle's name facts afterwards (jet_driver_merged_names).
 jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: ModuleTable, functions: [SemaComptimeFunctionResult]) -> String? Never! {
     // Module slots: the first checked row of each module id, -1 for none.
     module_rows := (loop _ in 0..<module_count(table) -> -1)
@@ -2995,7 +2999,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
             keyed[row] = true
         }
         if held.get("{row}\n{function.key}") != None -> next
-        if !checked.complete {
+        if !checked.complete && !(checked.obligations_pending && module_is_core(checked.module_identity)) {
             reasons := ""
             loop reason in checked.incomplete_reasons {
                 reasons = if reasons == "" -> reason.copy() else -> "{reasons}; {reason}"
