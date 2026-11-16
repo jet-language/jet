@@ -69,6 +69,14 @@ program calls at run time
 The program makes each function value where it reads the module value, so
 such a value is never placed in static data.
 
+Compile-time code runs as native O0 code over the program's own runtime, so
+what a run does works the same while building: Shared cells, tasks and
+`task.all`, a select over channels, runtime kernels such as Core math and
+SHA-256, and allocation in a fixed backing
+([`native_o0_shared_tasks_select`](../../../tests/cases/comptime/native_o0_shared_tasks_select.case)).
+A foreign (`#FFI`) function is not linked into compile-time code, so a call
+of one while building stops the build (E3010).
+
 A compile-time value must be data: the build keeps it and hands it to later
 compile-time code and to the program. A runtime handle such as a
 [reader](../vocabulary.md#reader) or a [stream](../vocabulary.md#stream) lives
