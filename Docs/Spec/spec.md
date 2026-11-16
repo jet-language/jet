@@ -1009,12 +1009,19 @@ container, generated, and hand-written implementations. A built-in derive adds
 typed Jet items beside the marked type and sends them through the same sema, IR builder,
 and codegen path as hand-written members. JSON therefore compares the same
 encoded bytes and decoded values for generated and hand-written codecs. A
-package provider is a marker whose `expand` template holds the generated
-members; the built-in `Equatable` and `Comparable` providers are Prelude markers
-of the same shape. A marker from another module is written through its import
-alias (`#Labels.RemoteLabel`), so no separate orphan rule applies and E2711 is
-retired. The old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2,
-D-SERDE16, D-META-CODE1, D-META-BODY1, D-MARKER-LAW1).
+trait's derive is an `impl Trait.Derive { expand: fn(target: Target) { … } }`
+block: `#Trait` on a struct or enum requests it, and its template writes that
+type's `Trait` impl. The template has no `self`, since a derive request
+carries no data, and the block holds nothing else; the derive is as visible
+as its trait, and `priv` or a marker before `impl` is refused (E0003). A
+second `expand`, another member, or a template written with `self` is E0907.
+The built-in `Equatable` and `Comparable` derives are Prelude blocks of the
+same shape. A provider with no trait is a marker whose `expand` template holds
+the generated members. A marker from another module is written through its
+import alias (`#Labels.RemoteLabel`), so no separate orphan rule applies and
+E2711 is retired. No `derive` or `derives` declaration word remains, and the
+old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2, D-SERDE16,
+D-META-CODE1, D-META-BODY1, D-MARKER-LAW1, D-DECL-TYPES1).
 
 A struct's `validate { … }` block declares checks in the exact form
 `check(condition, at: field, "message")`. `field` names a sibling field. Every

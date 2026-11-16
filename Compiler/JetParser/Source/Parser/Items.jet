@@ -334,6 +334,9 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_trait(state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Trait{value: value}), handled: true}
         }
+        parser_derive_impl_ahead(state) -> {
+            return ParsedItemOrImport{item: Val(Item.MarkerDecl{value: parser_parse_derive_impl(state, modifiers)}), handled: true}
+        }
         token.kind == TOKEN_KW_IMPL -> return ParsedItemOrImport{item: Val(parser_parse_impl(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_MODULE -> return ParsedItemOrImport{item: Val(parser_parse_module(state, modifiers)), handled: true}
         token.kind == TOKEN_KW_EXTERN -> return ParsedItemOrImport{item: Val(parser_parse_extern_rust(state)), handled: true}

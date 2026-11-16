@@ -1,0 +1,26 @@
+Describe: trait {
+    describe: fn(self) -> String
+}
+
+impl Describe.Derive {
+    expand: fn(target: Target) {
+        name: target.name
+        impl #{name}.Describe {
+            describe: fn(self) -> String { target.reflect().name }
+        }
+    }
+}
+
+#Describe
+#Equatable
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    print("derived {point.describe()}")
+    same: Point{x: 1, y: 2}
+    print("equal {point == same}")
+}

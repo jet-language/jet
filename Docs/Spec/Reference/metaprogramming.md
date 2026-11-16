@@ -28,8 +28,8 @@ become part of a program. The boundary is visible in source:
   preparation or compile-time bindings.
 - `@if` selects a compile-time branch.
 - `@loop` repeats a typed body over a compile-time collection.
-- `derive` and marker bodies use ordinary items and statements rather than a
-  string macro language.
+- Derive (`impl Trait.Derive`) and marker templates use ordinary items and
+  statements rather than a string macro language.
 
 The feature examples exercise these forms directly. For example, the block in
 [`prep_block.jet`](../../../Examples/Metaprogramming/Comptime/PrepBlock.jet)
@@ -413,11 +413,13 @@ in the [Jetpack reference](jetpack-epoch5.md). Build-side inspection is
 read-only unless a ratified generation operation is used; a build entry cannot
 silently rewrite an existing declaration.
 
-The source registry reserves typed item-template generation. A marker's
-`expand` template and `b.generate(name) { ... }` carry ordinary Jet item and
-statement grammar, and neither form accepts a source string or re-lexes
-generated text. The old `derive T.Trait { ... }` provider declaration is not
-Jet syntax; a provider is a marker.
+The source registry reserves typed item-template generation. A marker's or a
+trait derive's `expand` template and `b.generate(name) { ... }` carry ordinary
+Jet item and statement grammar, and none of them accepts a source string or
+re-lexes generated text. The old `derive T.Trait { ... }` provider declaration
+is not Jet syntax; a trait's provider is its
+`impl Trait.Derive { expand: fn(target: Target) { ... } }` block, and any other
+provider is a marker.
 This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
 A `#{name}` paste in a `b.generate` body that names a local of the build entry splices

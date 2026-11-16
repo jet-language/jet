@@ -227,55 +227,64 @@ parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: Ef
 // inline module body that declares `Name`, joins the type once the whole
 // file is parsed: the type declares its effect as if its body held the
 // block, and a second block is E0908. A block whose type is declared
-// elsewhere stays an ordinary impl.
-parser_attach_effect_impls: fn(items: [Item], reports: &[Diagnostic]) -> [Item] Never! {
+// elsewhere stays an ordinary impl. The items change in place: each joined
+// type gains its effect, its effect names follow it, and its blocks leave.
+parser_attach_effect_impls: fn(items: &[Item], reports: &[Diagnostic]) Never! {
     pending := [Int]{}
     loop (index, item) in items {
-        if item == .Impl(definition) && parser_effect_impl_joins(items, definition) -> pending.push(index)
-    }
-    joined := [Item]{}
-    loop item in items {
-        if item == {
-            .Struct(definition) -> {
-                attached: parser_joined_effect_impl(definition.name, definition.name_span, definition.effect_impl, [Variant]{}, items, pending, reports)
-                if attached == None {
-                    joined.push(item.copy())
-                    next
-                }
-                updated := definition
-                updated.effect_impl = attached
-                companions: parser_type_companions(None, updated.effect_impl)
-                joined.push(Item.Struct{value: updated})
-                loop companion in companions -> joined.push(companion)
-            }
-            .Enum(definition) -> {
-                attached: parser_joined_effect_impl(definition.name, definition.name_span, definition.effect_impl, definition.variants, items, pending, reports)
-                if attached == None {
-                    joined.push(item.copy())
-                    next
-                }
-                updated := definition
-                updated.effect_impl = attached
-                companions: parser_type_companions(None, updated.effect_impl)
-                joined.push(Item.Enum{value: updated})
-                loop companion in companions -> joined.push(companion)
-            }
-            .Impl(definition) -> {
-                if !parser_effect_impl_joins(items, definition) -> joined.push(item.copy())
-            }
-            .CodeModule(definition) -> {
-                updated := definition
-                if definition.body == .Val(inner) {
-                    updated.body = Val(parser_attach_effect_impls(inner, reports))
-                }
-                joined.push(Item.CodeModule{value: updated})
-            }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                joined.push(item.copy())
-            }
+        if item == .Impl(definition) && parser_effect_impl_joins(items, definition) {
+            pending.push(index)
         }
     }
-    joined
+    joined := [Int]{}
+    groups := [[Item]]{}
+    loop index in 0..<items.len() {
+        replaced := Item?{None}
+        if items[index] == .Struct(definition) {
+            attached: parser_joined_effect_impl(definition.name, definition.name_span, definition.effect_impl, [Variant]{}, items, pending, reports)
+            if attached != None {
+                updated := definition
+                updated.effect_impl = attached
+                groups.push(parser_type_companions(None, updated.effect_impl))
+                replaced = Val(Item.Struct{value: updated})
+            }
+        }
+        if items[index] == .Enum(definition) {
+            attached: parser_joined_effect_impl(definition.name, definition.name_span, definition.effect_impl, definition.variants, items, pending, reports)
+            if attached != None {
+                updated := definition
+                updated.effect_impl = attached
+                groups.push(parser_type_companions(None, updated.effect_impl))
+                replaced = Val(Item.Enum{value: updated})
+            }
+        }
+        if items[index] == .CodeModule(definition) && definition.body == .Val(inner) {
+            body := inner
+            parser_attach_effect_impls(body, reports)
+            updated := definition
+            updated.body = Val(body)
+            replaced = Val(Item.CodeModule{value: updated})
+        }
+        item: replaced ?? next
+        if item == .Struct(_) || item == .Enum(_) -> joined.push(index)
+        items[index] = item
+    }
+    // From the end, so the indexes still to visit stay put.
+    index := items.len()
+    loop index > 0 {
+        index -= 1
+        if pending.contains(index) {
+            _ := items.remove(index, .Slot)
+            next
+        }
+        if joined.len() == 0 || joined[joined.len() - 1] != index -> next
+        _ := joined.pop()
+        group := groups.pop() ?? [Item]{}
+        loop {
+            companion: group.pop() ?? break
+            items.insert(index + 1, companion)
+        }
+    }
 }
 
 // Whether `definition` is an `impl Name.Effect` block of a struct or enum
@@ -295,7 +304,9 @@ parser_effect_impl_joins: fn(items: [Item], definition: ImplDef) -> Bool Never! 
 parser_effect_impls_outside: fn(items: [Item]) -> Bool Never! {
     loop item in items {
         if item == .Impl(definition) && parser_effect_impl_joins(items, definition) -> return true
-        if item == .CodeModule(definition) && definition.body == .Val(inner) && parser_effect_impls_outside(inner) -> return true
+        if item == .CodeModule(definition) && definition.body == .Val(inner) && parser_effect_impls_outside(inner) {
+            return true
+        }
     }
     false
 }
@@ -325,7 +336,9 @@ parser_effect_impl_from: fn(definition: ImplDef, type_name: String, reports: &[D
     irreversible := Expr?{None}
     method_span := Span?{None}
     parent := NamedSpan?{None}
-    loop assoc in definition.assoc_type_impls -> reports.push(parser_effect_setting_report(assoc.span, assoc.name))
+    loop assoc in definition.assoc_type_impls {
+        reports.push(parser_effect_setting_report(assoc.span, assoc.name))
+    }
     loop constant in definition.constants {
         if constant.name != "parent" {
             reports.push(parser_effect_setting_report(constant.name_span, constant.name))

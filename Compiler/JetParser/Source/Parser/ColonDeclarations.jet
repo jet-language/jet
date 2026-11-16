@@ -154,15 +154,22 @@ PARSER_COLON_MARKER_IMPL: 1
 
 PARSER_COLON_MARKER_TEMPLATE: 2
 
-// The marker part of the head at `head`: `impl Marker {` opens the marker's
-// settings block, and a `fn expand` head is its template when that block
-// holds it.
+// The marker part of the head at `head`: `impl Marker {` opens a marker's
+// settings block and `impl Name.Derive {` a derive's, and a `fn expand` head
+// is the template when such a block holds it.
 parser_colon_marker_head: fn(tokens: [Token], tables: TokenTables, head: Int) -> Int Never! {
     if head >= tokens.len() -> return PARSER_COLON_MARKER_NONE
     name: parser_colon_code_at(tokens, head + 1)
     if name >= tokens.len() || tokens[name].kind != TOKEN_IDENT -> return PARSER_COLON_MARKER_NONE
-    if tokens[head].kind == TOKEN_KW_IMPL && token_decoded(tables, tokens[name]) == "Marker" {
-        open: parser_colon_code_at(tokens, name + 1)
+    if tokens[head].kind == TOKEN_KW_IMPL {
+        open := parser_colon_code_at(tokens, name + 1)
+        if token_decoded(tables, tokens[name]) != "Marker" {
+            word: parser_colon_code_at(tokens, open + 1)
+            if open >= tokens.len() || tokens[open].kind != TOKEN_DOT || word >= tokens.len() || tokens[word].kind != TOKEN_IDENT || token_decoded(tables, tokens[word]) != "Derive" {
+                return PARSER_COLON_MARKER_NONE
+            }
+            open = parser_colon_code_at(tokens, word + 1)
+        }
         if open < tokens.len() && tokens[open].kind == TOKEN_LBRACE {
             return PARSER_COLON_MARKER_IMPL
         }
