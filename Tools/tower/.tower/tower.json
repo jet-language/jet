@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6982,
-    "rev": 110305,
+    "rev": 110310,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27310,6 +27310,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p221 (dev 88dc8f59b9) landed c27's core-type-names.r2, but the case program_type_named_like_core_keeps_core_methods still fails: program Sender/Receiver hide send/receive (E0104 at :58, E0405/E0109 at :60). Returned to DeclTypes-6-1-3 as r3."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "Found by DeclTypes-6-1 during #6867: a program type named Task hides task.join/detach (repro: Task: struct + working: task {...}; working.detach()). Added as a criterion and assigned to DeclTypes-6-1."
         },
         {
@@ -27593,7 +27598,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T17:53:11.819Z",
+      "updated": "2026-11-16T18:40:29.942Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -100296,11 +100301,11 @@
         {
           "n": 2,
           "text": "Built assets (images, fonts, icons and static files) have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name. Proof: `jet test Compiler --profile cases --filter WebBuild/hashed_assets_are_immutable`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:39.762Z"
+          "evidence": "p220 batch compiler (dev 17c073989d): jet test Compiler --profile cases --filter WebBuild/hashed_assets_are_immutable PASS 1/1",
+          "at": "2026-11-16T18:32:09.385Z"
         },
         {
           "n": 3,
@@ -100338,7 +100343,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:00.487Z",
-      "updated": "2026-11-16T17:11:14.348Z",
+      "updated": "2026-11-16T18:32:09.385Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -101312,12 +101317,12 @@
         },
         {
           "n": 9,
-          "text": "A queue store adapter that cannot keep the job store's durability and acknowledgement contract is refused at check time with a registered error naming what it lacks. Proof: `jet test Compiler --profile ui --filter app_job_store_adapter_contract`.",
+          "text": "Jobs are kept only in a core.db store's outbox, in the transaction of the call that queued them. core.app has no public job-store slot, so no app code can weaken the contract. Every engine core.db opens passes the contract rows of c1, c6, c7 and c8, and the case states the in-memory case: jobs last as long as the rows that queued them. Proof: `jet test Compiler --profile cases --filter WebApp/job_store_contract_per_engine`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:49:24.720Z"
+          "at": "2026-11-16T18:39:43.072Z"
         },
         {
           "n": 10,
@@ -101337,8 +101342,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T13:20:59.093Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-16T18:39:43.072Z",
+      "updatedBy": "Main",
       "criteriaLastN": 10
     },
     {
@@ -105452,11 +105457,11 @@
         {
           "n": 12,
           "text": "An executable token-to-meaning table gives each sigil one meaning, following D-SIGIL-ALGEBRA1=B, D-MOVE-SIGIL1=A and D-BIT-SIGILS1=A, and a guard checks the lexer against it. Proof: `jet test Tests/Guards/SigilMeaningTable` (a nested guard package, since it imports jet_lexer; the census runs it through GUARD_PACKAGES in Tools/Agent/Land.jet). (was #4022 c5)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T17:48:03.569Z"
+          "evidence": "p221 batch compiler (dev 88dc8f59b9): jet test Tests/Guards/SigilMeaningTable PASS; ArrowSurface and DynSurface guards PASS and joined GUARD_PACKAGES (IfHole-6-1-sigil-meaning-table, d1e7dd3c5b)",
+          "at": "2026-11-16T18:40:27.184Z"
         },
         {
           "n": 13,
@@ -105488,7 +105493,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-16T17:56:46.779Z",
+      "updated": "2026-11-16T18:40:27.184Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -220906,6 +220911,41 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T18:40:39.795Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0npqub6",
+      "note": "p221 landed; p222 running (8 SUBs); closure-first ordering"
+    },
+    {
+      "at": "2026-11-16T18:40:29.942Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T18:40:27.184Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-16T18:39:43.072Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#9: D-JOB-STORE1=A (ratified) rewords c9 to this text and proof; WebApp/ is the TitleCase path of the decision's web_app/; was: A queue store adapter that cannot keep the job store's durability and acknowledgement contract is refused at check time with a registered error naming what it lacks. Proof: `jet test Compiler --profil"
+    },
+    {
+      "at": "2026-11-16T18:32:09.385Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b8qwec",
+      "note": "#2"
+    },
+    {
       "at": "2026-11-16T18:31:41.622Z",
       "by": "Main",
       "action": "card.update",
@@ -225455,6 +225495,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0npqub6",
+      "title": "p221 landed; p222 running (8 SUBs); closure-first ordering",
+      "body": "p221 landed on dev 88dc8f59b9 (master ff9589f0b6): IfHole sigil meaning table, DeclTypes #3147 c27 core-type-names r2. The first p221 census held IfHole bit-sigils-b (its migration dropped precedence parens; Core/Crypto hex digests changed meaning) and returned it to IfHole.\n\nSuite: 155 failures, 1 new, 2 fixed; golden and core clean. The new failure is c27's own case (program Sender/Receiver still hide send/receive); DeclTypes-6-1-3 has it as r3.\n\nMet: #6857 c12; on p220: #6849 c3, #3067 c4, #6867 c1, #6847 c6, #6814 c2. Closed: #3838, #6811. Owner orders: #6311 frozen, #6675 moved to G13. #6825 c9 reworded to D-JOB-STORE1=A.\n\np222 (8 SUBs) is running: DeclTypes #6867 c10 stage 2, app_graph ICE fix and #6852 c3; Speed #6813 c2-c5 uploads (Main-merged Core.rows), #6814 c4/c5 (closes #6814) and #6825 c9; GoalsA B1 fallout and brace-record positions (stage 1 of #6857 c3b/c4).\n",
+      "by": "Main",
+      "created": "2026-11-16T18:40:39.795Z",
+      "sections": []
+    },
     {
       "id": "briefing0fhiwmh",
       "title": "p217 and p218 landed; p219 running",
