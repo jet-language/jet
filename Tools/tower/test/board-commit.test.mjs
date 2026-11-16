@@ -114,3 +114,21 @@ test('cli: board commit and board check', () => {
   assert.equal(JSON.parse(stale.stdout).error, 'E_BOARD_STALE');
   assert.match(stale.stderr, /4 writes behind \(batch 3\) — run `tower board commit --by <agent>`/);
 });
+
+test('a board commit is pushed to origin, so the remote never lags', async () => {
+  const { root, st } = project();
+  const remote = mkdtempSync(join(tmpdir(), 'tower-origin-'));
+  git(remote, 'init', '-q', '--bare');
+  git(root, 'remote', 'add', 'origin', remote);
+  git(root, 'push', '-q', 'origin', 'master');
+  for (let i = 0; i < BATCH; i++) addCard(st, `card ${i}`);
+  const head = git(root, 'rev-parse', 'HEAD');
+  assert.equal(committedRev(root), BATCH);
+  // The push runs detached; wait for it to reach the remote.
+  let pushed = '';
+  for (let i = 0; i < 100 && pushed !== head; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+    pushed = git(remote, 'rev-parse', 'master');
+  }
+  assert.equal(pushed, head);
+});

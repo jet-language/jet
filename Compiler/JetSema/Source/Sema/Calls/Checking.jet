@@ -207,7 +207,7 @@ sema_call_bound_slot: fn(binding: SemaCallBinding, source: SemaCallArgSource, ar
 }
 
 sema_call_view_place_equal: fn(left: SemaOwnershipPlace, right: SemaOwnershipPlace) -> Bool Never! {
-    if left.root_key != right.root_key || left.projections.len() != right.projections.len() {
+    if left.root_id != right.root_id || left.projections.len() != right.projections.len() {
         return false
     }
     loop index in 0..<left.projections.len() {
@@ -1511,7 +1511,7 @@ sema_call_prepare_variadic_elements: fn(typed: SemaCallTypedArguments, params: [
             borrowed := false
             loop place in places {
                 loop binding in scopes.bindings {
-                    if binding.key == place.root_key && sema_ownership_binding_is_borrowed_param(binding) {
+                    if binding.symbol.id == place.root_id && sema_ownership_binding_is_borrowed_param(binding) {
                         borrowed = true
                     }
                 }

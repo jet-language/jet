@@ -1797,7 +1797,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         symbol: Symbol{id: sema_symbol_id_of(program, context, key), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
         frame: scopes.current
         sema_scope_push_binding(scopes, SemaScopeBinding{frame: frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
-        sema_ownership_declare_ambient_binding(fallback_state, symbol, key)
+        sema_ownership_declare_ambient_binding(fallback_state, symbol)
         ambient_err = Val(checked_symbol_local("err", span, symbol.id, error_type))
     }
     fallback_reaches_merge := false
@@ -2127,7 +2127,7 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
         sema_scope_push_binding(scopes, SemaScopeBinding{frame: scopes.current, symbol: symbol, key: key.copy(), mutable: window, access: access, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     } else { _ := sema_scope_declare_local(scopes, symbol, key, window, access, bounds, false) }
     if in_place -> sema_scope_mark_place_alias(scopes, name)
-    sema_ownership_declare_binding(state, symbol, key, false)
+    sema_ownership_declare_binding(state, symbol, false)
     // The arms' payload sources are rooted at this local; the subject it
     // stands for decides whether a payload moves out of a named place.
     sema_copy_site_note_subject(state, name, subject_span, subject)
@@ -2655,13 +2655,13 @@ sema_expression_declare_condition_bindings: fn(bindings: [SemaConditionBinding],
         }
         if in_place -> sema_scope_mark_place_alias(scopes, binding.symbol.name)
         if track && binding.symbol.ty != None {
-            sema_ownership_declare_binding(state, binding.symbol, binding.key, false)
+            sema_ownership_declare_binding(state, binding.symbol, false)
         }
         // Also track the temporary `&&` bindings: later tests must resolve
         // their payload origin and reborrow ancestry, not a new local owner.
         _ := sema_ownership_record_pattern_views(state, binding.symbol.name, binding.symbol.span, binding.sources, access, scopes)
         if track && !binding.window && !in_place && !sema_copy_site_payload_of_named_subject(state, sema_ownership_payload_key(binding.symbol.name, binding.symbol.span)) {
-            sema_single_use_note_binding(state, binding.symbol, binding.key, environment, program)
+            sema_single_use_note_binding(state, binding.symbol, environment, program)
         }
     }
 }

@@ -720,13 +720,13 @@ SemaRegistrationModule: struct {
     foreign_functions: [SemaRegistrationForeignFunction]
     nominals: [SemaRegistrationNominal]
     constants: [SemaRegistrationConstant]
-    // Symbol keys of the `#Persist`, mutable, and `#Static` constants
+    // Symbol ids of the `#Persist`, mutable, and `#Static` constants
     // (sema_ownership_is_static_root), collected once at registration so a
     // function check reads them without walking the constant ASTs.
-    static_roots: [String]{[String]{}}
+    static_roots: [SymbolID]{[SymbolID]{}}
     // The `#Persist` subset of `static_roots`: mutable module state whose
     // cell may be lent for writing.
-    persist_roots: [String]{[String]{}}
+    persist_roots: [SymbolID]{[SymbolID]{}}
     imports: [SemaRegistrationImport]
     exports: [SemaRegistrationExport]
     // Local import name -> its binding (Rust `Checker::imports`). Import
@@ -2610,11 +2610,9 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
     if item == {
         .Const(value) -> {
             if sema_ownership_is_static_root(value) {
-                module_row.static_roots.push(symbol_table_key(symbols, symbol.id))
+                module_row.static_roots.push(SymbolID{id: symbol.id.id})
             }
-            if value.is_persist {
-                module_row.persist_roots.push(symbol_table_key(symbols, symbol.id))
-            }
+            if value.is_persist -> module_row.persist_roots.push(SymbolID{id: symbol.id.id})
             module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, typed: value.ty != None})
         }
         // Each member type a unit family declared in this module mints

@@ -25,6 +25,7 @@ use jet_foundation.[
     Type,
     expr_span,
     module_text,
+    symbol_is_none,
 ]
 
 SemaHardwareBoardPath: struct {
@@ -86,9 +87,14 @@ sema_hardware_result: fn(check: SemaMethodSpecialCheck) -> SemaHardwareMethodChe
 sema_hardware_place_key: fn(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> String? {
     places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
     if places.len() != 1 -> return None
-    key := places[0].root_key
-    if key == "" -> return None
-    Val(key)
+    if symbol_is_none(places[0].root_id) -> return None
+    slot: sema_scope_name_slot(scopes, places[0].root) ?? return None
+    loop position in scopes.name_positions[slot] {
+        if scopes.bindings[position].symbol.id == places[0].root_id {
+            return Val(scopes.bindings[position].key)
+        }
+    }
+    None
 }
 
 sema_hardware_place_frame: fn(expression: Expr, scopes: SemaScopeTable) -> Int? {
