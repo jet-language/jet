@@ -10,6 +10,12 @@
 // - The corrupted-zstd claim flips the frame's first byte instead of its last:
 //   Core's test encoder writes checksum-free raw-block frames, so the last byte
 //   is NAR padding rather than the frame checksum Rust's level-19 encoder wrote.
+use {
+    files: core.files
+    sys: core.sys
+    crypto: core.crypto
+    zstd: core.archive.zstd
+}
 
 STORE_NIX_TEST_STANDARD_NARINFO: "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\nURL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\nCompression: zstd\nFileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\nFileSize: 2133450\nNarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\nNarSize: 7088584\nReferences: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\nSig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n"
 
@@ -17,8 +23,8 @@ STORE_NIX_TEST_KEY_ID: "test-cache-1"
 
 store_nix_test_parse_fails: fn(text: String) -> Bool Never! {
     if NixNarInfo.parse(text) == {
-        .Ok(parsed) -> false
-        .Err(failed) -> true
+        .Ok(_) -> false
+        .Err(_) -> true
     }
 }
 
@@ -182,7 +188,7 @@ store_nix_test_admit: fn(verification: &StoreVerification, roots: HangarRoots, n
 
 // Register one entry while holding the Hangar lock for this call only.
 store_nix_test_register_locked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     _: store_register_entry_unlocked(verification, roots, entry) ?? panic("register entry")
 }
 
@@ -201,7 +207,7 @@ store_nix_test_single_failure: fn(verification: &StoreVerification, label: Strin
     }
     parsed_info: if NixNarInfo.parse(narinfo_text) == {
         .Ok(info) -> Val(info)
-        .Err(failed) -> None
+        .Err(_) -> None
     }
     if parsed_info == .Val(parsed) {
         url_path: parsed.url.split_once("?")?.before ?? parsed.url
@@ -274,8 +280,8 @@ NixTestProgress: struct {
     wrong_key: NixPublicKey.parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=") ?? panic("wrong key")
     assert(
         if info.verify_signature("/nix/store", [NixPublicKey]{wrong_key}) == {
-            .Ok(verified) -> false
-            .Err(failed) -> true
+            .Ok(_) -> false
+            .Err(_) -> true
         },
     )
     changes: [(needle: String, replacement: String)]{
@@ -288,8 +294,8 @@ NixTestProgress: struct {
         changed: NixNarInfo.parse(STORE_NIX_TEST_STANDARD_NARINFO.replace(change.needle, change.replacement)) ?? panic("changed narinfo parses")
         assert(
             if changed.verify_signature("/nix/store", [NixPublicKey]{key}) == {
-                .Ok(verified) -> false
-                .Err(failed) -> true
+                .Ok(_) -> false
+                .Err(_) -> true
             },
         )
     }
@@ -574,15 +580,15 @@ NixTestProgress: struct {
     cache: store_nix_test_single_object_cache("backslash-name", store_path, "backslash-name.nar", nar, seed)
     assert(
         if store_validate_nar(nar) == {
-            .Ok(stats) -> false
-            .Err(failed) -> true
+            .Ok(_) -> false
+            .Err(_) -> true
         },
     )
     strict_destination: files.join(cache.root, "strict")
     assert(
         if store_read_nar_stream(store_nix_test_byte_source(nar, 65536), strict_destination, nar.len()) == {
-            .Ok(stats) -> false
-            .Err(failed) -> true
+            .Ok(_) -> false
+            .Err(_) -> true
         },
     )
 

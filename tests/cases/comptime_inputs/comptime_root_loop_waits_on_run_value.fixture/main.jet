@@ -1,0 +1,27 @@
+// A root `#loop` over a value the build computes: ASSETS reads each file
+// ROWS names, so the loop waits until ASSETS is computed, then writes one
+// size function per asset, which `run` calls.
+Row: struct {
+    name: String
+}
+
+Asset: struct {
+    name: String
+    size: Int
+}
+
+rows: fn() -> [Row] { [Row]{Row{name: "alpha"}, Row{name: "beta"}} }
+
+ROWS: #run rows()
+
+ASSETS: #run { loop row in ROWS -> Asset{size: embed_bytes("{row.name}.txt").len(), name: row.name} }
+
+#loop asset in ASSETS {
+    getter: "{asset.name}_size"
+    #{getter}: fn() -> Int { asset.size }
+}
+
+run: fn() {
+    print("alpha {alpha_size()}")
+    print("beta {beta_size()}")
+}

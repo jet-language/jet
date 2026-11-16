@@ -1,4 +1,8 @@
 // Ingest, snapshot, locked replay, and doctor claims.
+use {
+    files: core.files
+    process: core.process
+}
 
 store_test_ingest_request: fn(name: String, reference: String, source: String, references: [String], provenance: String) -> IngestRequest Never! {
     IngestRequest{
@@ -338,7 +342,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
 
 // Register admitted Nix entries under the Hangar lock.
 store_test_register_admitted: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) Never! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     assert(store_register_admitted_nix_entries_unlocked(verification, roots, [StoreEntry]{entry}) ?? panic("register admitted"))
 }
 

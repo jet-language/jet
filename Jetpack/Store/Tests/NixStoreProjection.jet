@@ -5,6 +5,13 @@
 // They drive `Shell::run_clean_command` (Environment area, above Store in
 // Jetpack/Bootstrap/areas.list) inside the tests/support no-Nix namespace
 // harness; they belong with the Environment claims.
+use {
+    files: core.files
+    time: core.time
+    crypto: core.crypto
+    base64: core.encoding.base64
+    core_web: core.web
+}
 
 STORE_TEST_PROJECTION_ROOT: "/nix/store/00000000000000000000000000000000-root"
 
@@ -38,7 +45,7 @@ store_test_canonicalize_admitted_records: fn(verification: &StoreVerification, r
 }
 
 store_test_register_canonical: fn(verification: &StoreVerification, roots: HangarRoots, entries: &[StoreEntry]) Never! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     loop index in 0..<entries.len() {
         entry := entries[index]
         store_prepare_entry_receipt(roots, entry) ?? panic("receipt")
@@ -219,7 +226,7 @@ store_test_admit_signed_closure: fn(verification: &StoreVerification, roots: Han
 }
 
 store_test_register_conflict: fn(verification: &StoreVerification, roots: HangarRoots, original: StoreEntry) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     entry := original
     store_prepare_entry_receipt(roots, entry)
     store_register_entry_unlocked(verification, roots, entry)

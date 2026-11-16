@@ -1,7 +1,11 @@
 // JP-PUB-TUF composed CLI claims: publish through the real rebuilt engine, then
 // fetch into Hangar. They read the Store, so they prove in the Engine unit, not
 // the Publication package.
-use publication_tuf_test_process: core.process
+use {
+    publication_tuf_test_process: core.process
+    files: core.files
+    sys: core.sys
+}
 
 registry_cli_test_root: fn(label: String) -[FS, Env]> String Never! {
     scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.get("HOME") ?? panic("HOME"), ".cache"), "jet-dev"))

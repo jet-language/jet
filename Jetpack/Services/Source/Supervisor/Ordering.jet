@@ -2,6 +2,11 @@
 // by the CLI and the `jet dev` gate: start in dependency-first order and wait
 // for readiness, tear down in reverse, restart, watch, and the ServiceProbe
 // readiness measurement. Logs and lifecycle JSON present the state files.
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+}
 
 // The caller hook that does nothing before a start.
 services_no_before_start: fn(plan: DevServicePlan) ServicesError! {
@@ -22,7 +27,7 @@ services_dependency_order: fn(plans: [DevServicePlan]) -> [Int] ServicesError! {
     }
     // 0 = unvisited, 1 = on the current path, 2 = finished.
     states := [Int]{}
-    loop index in 0..<plans.len() -> states.push(0)
+    loop _ in 0..<plans.len() -> states.push(0)
     stack := [String]{}
     order := [Int]{}
     loop index in 0..<plans.len() {

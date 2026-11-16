@@ -3,6 +3,12 @@
 // readers the CLI uses; it has no separate state model. `r` starts another
 // snapshot load, and non-TTY callers receive the compact status summary
 // rendered from one synchronous read-only snapshot.
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+    term: core.term
+}
 
 DASHBOARD_MAX_RECENT_ACTIVITY: 5
 
@@ -298,7 +304,7 @@ cli_run_dashboard: fn(verification: &StoreVerification) -[IO, FS, Env, Exec, Net
     }
     // Core has no raw-mode or signal API (#5935): keys arrive
     // cooked, and an interrupt ends the process before the screen guard runs.
-    screen: DashboardAlternateScreen.enter()
+    _screen: DashboardAlternateScreen.enter()
     reader := DashboardKeyReader.terminal()
     loader := DashboardLoader?{None}
     frame := DashboardFrame.Loading

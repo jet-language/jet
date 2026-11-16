@@ -1,4 +1,9 @@
 // Closure registration claims.
+use {
+    files: core.files
+    sys: core.sys
+    process: core.process
+}
 
 store_test_closure_ingest: fn(verification: &StoreVerification, roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
     source: files.join(roots.root, "fixture-{name}")
@@ -41,7 +46,7 @@ store_test_physical_walk: fn(path: String, seen: &[FileID:Bool]) -> Int Never! {
 
 // Register under the Hangar lock.
 store_test_register_entry_locked: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_register_entry_unlocked(verification, roots, entry)
 }
 
@@ -253,7 +258,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
 }
 
 store_test_register_with_hook: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, hook: fn()) -> Bool StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_register_entry_unlocked_with_hook(verification, roots, entry, hook)
 }
 
@@ -298,7 +303,7 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     entries: store_test_batch_entries(verification, roots, "batch", false)
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     assert(store_register_entries_unlocked(verification, roots, entries) ?? panic("register batch"))
     store_test_assert_hashed_at_most_once(verification, entries)
     store_test_drop_roots(roots)
@@ -308,7 +313,7 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     verification := StoreVerification.new()
     roots: store_test_temp_roots()
     entries: store_test_batch_entries(verification, roots, "admitted-nix", true)
-    hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar") ?? panic("hangar lock")
     assert(store_register_admitted_nix_entries_unlocked(verification, roots, entries) ?? panic("register batch"))
     store_test_assert_hashed_at_most_once(verification, entries)
     store_test_drop_roots(roots)

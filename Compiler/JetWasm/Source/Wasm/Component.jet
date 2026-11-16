@@ -321,7 +321,7 @@ wasm_decode_component: fn(bytes: &&[U8]) -> WasmComponent WasmError! {
         section := WasmReader{bytes: reader.bytes, at: start, end: start + size}
         reader.at = start + size
         if id == 0 {
-            name: section.name()
+            _: section.name()
             section.at = section.end
         } else if id == 1 {
             nested: wasm_decode_nested_module(section)
@@ -860,9 +860,9 @@ wasm_read_core_type: fn(section: &WasmReader) -> WasmCtype WasmError! {
 wasm_skip_core_import_desc: fn(section: &WasmReader) WasmError! {
     at: section.at
     kind: section.byte()
-    if kind == WASM_EXTERN_FUNC -> index: section.u32() else if kind == WASM_EXTERN_TABLE {
-        table: wasm_read_table_type(section)
-    } else if kind == WASM_EXTERN_MEMORY { limits: wasm_read_limits(section, WASM_MAX_PAGES) } else if kind == WASM_EXTERN_GLOBAL {
-        global: wasm_read_global_type(section)
+    if kind == WASM_EXTERN_FUNC -> _: section.u32() else if kind == WASM_EXTERN_TABLE {
+        _: wasm_read_table_type(section)
+    } else if kind == WASM_EXTERN_MEMORY { _: wasm_read_limits(section, WASM_MAX_PAGES) } else if kind == WASM_EXTERN_GLOBAL {
+        _: wasm_read_global_type(section)
     } else { return Err(WasmError.new("malformed core import description", at)) }
 }

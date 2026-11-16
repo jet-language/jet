@@ -2,6 +2,7 @@
 // Nix output is projected into the Hangar CAS before Store registration, a
 // lock-declared closure is recreated from its portable CAS objects, and a
 // locked Nix package reuses or repairs only its original admission.
+use files: core.files
 
 // Reject a raw `/nix/store` registration that bypassed the native
 // projection. Jetpack never asks `nix-store` to create a root; projected Nix
@@ -75,7 +76,7 @@ store_record_locked_nix: fn(verification: &StoreVerification, roots: HangarRoots
         platform: lock_envelope.platform,
     }
 
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     _: AdmissionTransaction.recover_unlocked(roots)
     entries := [StoreEntry]{}
     loop digest in digests {
@@ -416,7 +417,7 @@ store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) 
 // Refresh the producer's lock digest only while the project lock still
 // names the same identity.
 store_refresh_locked_entry: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, spec: RefSpec, project: String, found: (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope), entry: StoreEntry, lock_digest: String) -> StoreEntry StoreError! {
-    project_lock: env_runtime_project_lock(project, "nix-verified-reuse")
+    _project_lock: env_runtime_project_lock(project, "nix-verified-reuse")
     current: provider_project_lock_digest(Val(project)) ?? return Err(StoreError.Other("{err}"))
     current_package: if pkg_lock_locked_nix_package_strict(project, spec.raw) == {
         .Ok(value) -> value

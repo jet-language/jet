@@ -394,7 +394,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_set_coverage([row], [], ["FFI01"], "FFI01\tright-only\tTower #6752\n", kept).status, "PASS")
     assert_eq(kit_ui_set_coverage([row], ["FFI01"], [], "FFI01\tleft-only\tTower #6752\n", kept).status, "FAIL")
     over := ""
-    loop i in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
+    loop _ in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
     assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))
     assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
     assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])

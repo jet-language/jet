@@ -5,6 +5,11 @@
 // endpoint (endpoint text, trusted keys, the HTTP client), signed narinfo
 // retrieval, the byte-capped hashing object download, and the store-path and
 // URL validation rules every admission step shares.
+use {
+    files: core.files
+    crypto: core.crypto
+    http_client: core.http.client
+}
 
 STORE_NIX_DEFAULT_ENDPOINT: "https://cache.nixos.org"
 
@@ -340,7 +345,7 @@ store_nix_content_length: fn(response: HTTPResponse) -> Int? Never! {
     text: response.header("content-length") ?? return None
     if Int.parse(text.trim()) == {
         .Ok(value) -> Val(value)
-        .Err(failed) -> None
+        .Err(_) -> None
     }
 }
 

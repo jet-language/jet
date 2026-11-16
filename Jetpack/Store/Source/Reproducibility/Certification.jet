@@ -5,6 +5,12 @@
 // same action identity, records immutable divergence evidence, and leaves the
 // trusted closure/cache graph unchanged on failure. Independent certification
 // builds one action in two fresh private roots and requires agreement.
+use {
+    json: core.encoding.json
+    files: core.files
+    sys: core.sys
+    crypto: core.crypto
+}
 
 STORE_REPRO_REPORT_DIR: "unreproducible"
 
@@ -507,7 +513,7 @@ store_reproducibility_blocked: fn(roots: HangarRoots, action_key: String) -[FS]>
 // Clear divergence evidence only after the complete promotion boundary has
 // succeeded, so a killed worker or later publication failure stays fail-closed.
 store_clear_reproducibility_report: fn(roots: HangarRoots, action_key: String) StoreError! -[FS, Env, Time]> {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_repro_remove_report(roots, action_key)
 }
 

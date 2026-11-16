@@ -54,6 +54,7 @@ use {
         SemaCheckedMemoryFacts,
         SemaLayoutProjectionRow,
         SemaComptimeItemValue,
+        SemaRootLoopValue,
         SemaRegistrationImportEdge,
         SemaSourceOrigin,
         SemaSourceSegment,
@@ -974,6 +975,12 @@ JetDriverCompileResult: struct {
     // the code the runtime image carries, so only then does the native route
     // bind its Core calls there (JetCli Host.jet).
     core_built_in: Bool{false}
+    // The first pass of a program with a root `#loop` over a module value
+    // computed while building (JetSema UserTemplates.jet
+    // SemaRootLoopValue): the values it computed, which the compile's
+    // second pass expands the loops over (Pipeline.jet
+    // jet_driver_compile_stages). None for every other compile.
+    root_loop_values: [SemaRootLoopValue]?{None}
 }
 
 // The `allocator:` policy of the entry package of `load`

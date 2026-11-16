@@ -10,7 +10,6 @@ use {
         ast_visit_body,
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
-        BuiltinMethodLowering,
         CORE_BUILTINS_MODULE,
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
@@ -5738,7 +5737,7 @@ jet_driver_order_core_modules: fn(modules: &&[JetDriverLoadedModule], source_uni
 jet_driver_core_module_order: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], bare_modules: [String]) -> [Int] Never! {
     placed := [Bool]{}
     direct := [Bool]{}
-    loop position in 0..<modules.len() {
+    loop _ in 0..<modules.len() {
         placed.push(false)
         direct.push(false)
     }
@@ -5911,7 +5910,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     pending := [Int]{entry_index ?? 0}
     queued := [Bool]{}
-    loop unit_index in 0..<source_units.len() -> queued.push(false)
+    loop _ in 0..<source_units.len() -> queued.push(false)
     queued[entry_index ?? 0] = true
     // The build plan selected these exact modules. Check every selected output,
     // including loose-file outputs not named by an import.
@@ -5923,7 +5922,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     modules := [JetDriverLoadedModule]{}
     namespace_expanded := [Bool]{}
-    loop root_index in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
+    loop _ in 0..<request.authorized_sources.roots.len() -> namespace_expanded.push(false)
     resolved_imports := [SemaRegistrationImportEdge]{}
     // Unit index -> the dotted `name: module` path that declared it
     // (JetDriverLoadedModule.declared_module); the first declaration wins.

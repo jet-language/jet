@@ -7,6 +7,13 @@
 // the same transaction: a repair pins the original complete receipt before any
 // object or package is published, so a valid replacement signature is not
 // replacement authority.
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+    crypto: core.crypto
+    zstd: core.archive.zstd
+}
 
 STORE_NIX_RECIPE_DOMAIN: "nix-binary-cache-substitution-v1"
 
@@ -292,7 +299,7 @@ NixAdmission: struct {
             receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
             return Ok(receipt)
         }
-        hangar_lock: env_runtime_lock(self.roots.root, "hangar")
+        _hangar_lock: env_runtime_lock(self.roots.root, "hangar")
         receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
         Ok(receipt)
     }
@@ -371,7 +378,7 @@ NixAdmission: struct {
             candidate: files.join(object.hangar_path, "bin")
             root_is_dir: if files.stat(object.hangar_path) == {
                 .Ok(info) -> info.is_dir && !info.is_symlink
-                .Err(failed) -> false
+                .Err(_) -> false
             }
             bin: if root_is_dir && files.is_dir(candidate) -> candidate else -> ""
             entries.push(
@@ -486,7 +493,7 @@ store_nix_existing_object: fn(verification: &StoreVerification, roots: HangarRoo
     loop reference in references {
         valid: if store_nix_validate_store_path(reference, store_dir) == {
             .Ok(_ok) -> true
-            .Err(failed) -> false
+            .Err(_) -> false
         }
         if !valid -> return Ok(None)
     }

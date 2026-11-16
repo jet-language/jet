@@ -278,7 +278,7 @@ publication_policy_test_resign: fn(feed: &PublicationAdvisoryFeed, seed: [U8]) P
     jet_dir: files.join(root, ".jet")
     files.create_dir_all(jet_dir) ?? panic("create fixture")
     seed := [U8]{}
-    loop index in 0..<32 -> seed.push(U8{17})
+    loop _ in 0..<32 -> seed.push(U8{17})
     feed := publication_advisory_test_signed_feed(seed) ?? panic("sign feed")
     feed.expires_at = PUBLICATION_U64_MAX
     publication_policy_test_resign(feed, seed) ?? panic("resign feed")

@@ -1,6 +1,11 @@
 // PENDING-SEAM(package-tests): canonical Jetpack package test staging after gate 2.
 // The two builders use their own run-cache, NOT the holder store (original lines 2129-2131).
-use concurrent_process: core.process
+use {
+    concurrent_process: core.process
+    files: core.files
+    sys: core.sys
+    time: core.time
+}
 
 store_concurrent_build_spec: fn(jet: String, scratch: String, store: String) -> ProcessSpec {
     concurrent_process.cmd([String]{jet, "build", "main.jet"}).cwd(scratch)

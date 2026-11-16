@@ -4,6 +4,12 @@
 // validation identity, and the exact package selections. The next entry can
 // reuse the checked leases directly when the stamp, the plan, and the
 // definition fingerprint still match.
+use {
+    files: core.files
+    sys: core.sys
+    time: core.time
+    crypto: core.crypto
+}
 
 ENV_ENTRY_RECEIPT_HEADER: "jetpack-env-entry-v4"
 
@@ -112,7 +118,7 @@ cli_publish_receipt: fn(temporary: String, path: String, text: String) CLIError!
 cli_u64_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value
-    loop step in 0..<8 {
+    loop _ in 0..<8 {
         out.push(U8{rest %% 256})
         rest = rest /% 256
     }

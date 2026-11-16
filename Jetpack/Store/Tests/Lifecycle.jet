@@ -1,5 +1,9 @@
 // Lifecycle-root journal claims. Each claim uses a private dev-mode root whose
 // closure journal knows three targets.
+use {
+    files: core.files
+    sys: core.sys
+}
 
 LifecycleTestFixture: struct {
     roots: HangarRoots
@@ -56,14 +60,14 @@ store_lifecycle_test_transaction_paths: fn(roots: HangarRoots) -> [String] Never
 
 // Prepare under the Hangar lock with fault injection.
 store_lifecycle_test_prepare_controlled: fn(roots: HangarRoots, known: [String], identity: RootIdentity, target: String, at: Int, control: LifecycleWriteControl, recover_first: Bool) StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     if recover_first -> _: store_lifecycle_recover_unlocked(roots)
     store_lifecycle_prepare_unlocked_controlled(roots, identity, [String]{target}, store_lifecycle_test_at(at), known, control)
 }
 
 // Rust test helper `persist_controlled`, under the Hangar lock.
 store_lifecycle_test_persist_controlled: fn(roots: HangarRoots, known: [String], entry: LifecycleJournalEntry, control: LifecycleWriteControl) StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     state := store_lifecycle_load_state(roots, known)
     if store_lifecycle_entry_already_applied(state, entry) {
         return

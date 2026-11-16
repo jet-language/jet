@@ -564,7 +564,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     // A case that binds a fixed host port holds its lock until the case ends,
     // waiting at most the wall-clock guard, so concurrent kit and
     // feature-example runs on this host take turns.
-    port_lock: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_steps_host_port_refusal(plan.host_port, context.env.timeout, err)))
+    _port_lock: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_steps_host_port_refusal(plan.host_port, context.env.timeout, err)))
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
     }

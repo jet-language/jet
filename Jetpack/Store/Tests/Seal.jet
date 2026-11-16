@@ -1,6 +1,10 @@
 // Rust set exact mtimes with `touch -m -d @s.ns`; Core's `sys.utime` takes
 // whole seconds, so fixtures first pin the payload to a whole-second mtime
 // and every restore is exact at that precision.
+use {
+    files: core.files
+    sys: core.sys
+}
 
 store_test_seal_fixture: fn(verification: &StoreVerification, roots: HangarRoots, name: String, platform_artifact_kind: String) -> IngestedObject Never! {
     source: files.join(roots.root, "seal-source-{name}")

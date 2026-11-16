@@ -9,6 +9,10 @@
 // that refuses the link gets a durable copy instead. Only the first equal file
 // in each output is shared, because linking two equal files within one output
 // changes its canonical archive identity.
+use {
+    files: core.files
+    sys: core.sys
+}
 
 STORE_SHARED_CAS_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
@@ -47,7 +51,7 @@ store_share_tree_files: fn(verification: &StoreVerification, roots: HangarRoots,
     if allow_semantic_xattrs {
         return
     }
-    shared_lock: store_with_shared_cas_lock(roots)
+    _shared_lock: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(verification, roots, root, allow_semantic_xattrs)
 }
 

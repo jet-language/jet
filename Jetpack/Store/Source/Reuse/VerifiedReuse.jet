@@ -3,6 +3,11 @@
 // entry into a leased realization.
 // A candidate is never consumable on its own: only an entry whose complete
 // proof passes under the Hangar lock gets a lease.
+use {
+    files: core.files
+    sys: core.sys
+    term: core.term
+}
 
 store_find_by_reference: fn(verification: &StoreVerification, roots: HangarRoots, reference: String) -> StoreEntry? Never! {
     store_reuse_newest(store_list(verification, roots), reference)
@@ -235,7 +240,7 @@ VerifiedCacheHit: struct {
 // The newest entry for `reference` whose complete proof passes, leased
 // under the Hangar lock.
 store_find_verified_by_reference: fn(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> VerifiedCacheHit? StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
     verified := [StoreEntry]{}
     entries: store_list_unlocked(roots)
@@ -281,7 +286,7 @@ store_reuse_verified_user_profile_batch: fn(verification: &StoreVerification, ro
 }
 
 store_reuse_user_profile_batch_locked: fn(verification: &StoreVerification, roots: HangarRoots, references: [String], local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
     selected := [StoreEntry]{}
@@ -322,7 +327,7 @@ store_reuse_user_profile_batch_locked: fn(verification: &StoreVerification, root
 // instead of invalidating unrelated verified members.
 store_reuse_verified_environment_members: fn(verification: &StoreVerification, roots: HangarRoots, selections: [EnvironmentSelection], expectations: [String:CacheExpectation], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 || expectations.len() == 0 -> return Ok(None)
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     graph: store_closure_graph_structure_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
     index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
@@ -364,7 +369,7 @@ store_reuse_verified_environment_members: fn(verification: &StoreVerification, r
 }
 
 store_snapshot_lease: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -> CacheLease StoreError! {
-    hangar_lock: env_runtime_lock(roots.root, "hangar")
+    _hangar_lock: env_runtime_lock(roots.root, "hangar")
     store_snapshot_lease_unlocked(verification, roots, entry, None, true)
 }
 

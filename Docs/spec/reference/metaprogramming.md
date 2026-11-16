@@ -70,6 +70,12 @@ Nested `@if` forms use the same rule. See
 and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptime/PrepLoop.jet)
 uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
+A root `#loop` may run over a module value the build computes, such as
+`#loop asset in ASSETS` over `ASSETS: #run { … embed_bytes(…) … }`: the
+loop waits until that value is computed and then expands over it, so its
+items are the same on every tier
+([`comptime_root_loop_waits_on_run_value`](../../../tests/cases/comptime_inputs/comptime_root_loop_waits_on_run_value.case)).
+A loop whose value cannot be computed is E0956.
 
 A `#Pre` condition written `#run { condition }` is decided for each call
 while building, by the same evaluator, after the call's arguments are
