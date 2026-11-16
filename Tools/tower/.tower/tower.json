@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6978,
-    "rev": 107600,
+    "rev": 107625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26019,193 +26019,6 @@
         "G11"
       ],
       "criteriaLastN": 11
-    },
-    {
-      "id": "c08fc2sx",
-      "num": 3065,
-      "title": "Restore the complete shipped example corpus on ordinary jet run",
-      "body": "Owner explicitly ordered a sweep of every example that prints an error, followed by fixing all examples before resuming remaining bug cards, other bugs and ICEs, then all tests and suites. Inventory: 1003 Jet files; 98 package manifests are data; 905 remaining source entries are queued for bounded default jet run. Preserve every observed error, exit code, stdout/stderr and source/binary identity. Intentional negative examples, non-entry modules and platform prerequisites must be reported explicitly, never counted as successful execution or used to hide a compiler failure. Evidence starts at ~/.cache/jet-luna/examples106/manifest.json.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": "## Goal\nOwner order: sweep every example that prints an error, then fix every example before resuming the remaining bug cards, other bugs and ICEs, and finally all tests and suites. Every applicable shipped example must run with its intended output on a freshly built default execution chain.\n\n## Current state\n- Criterion 1 is met. Receipts are at `~/.cache/jet-luna/examples106/manifest.json`: 1003 files, 98 package manifests and 905 executed, with exit0=268 and 637 nonzero outcomes (101=258, 1=359, 70=12, signal6=2, signal11=3, timeout124=3).\n- Those receipts are stale. They were recorded with binary sha 266535…, while the current binary is cbaeb13…, and the D-TYPE-SUFFIX1, D-CAP-RECEIVER1, D-PREP and D-FENCE2 codemods (2026-09-28) invalidate them again.\n- Known live failures:\n  - `Core/http/http.jet:456-457` calls `core.http.server.serve(addr, mux)` with 2 arguments, but `Core/http/server.jet:24` declares `serve(addr, mux, tls: HTTPServerTls?, deadline: Duration?)`. As a result `jet check` reports E0104 inside Core for `Examples/features/net/http_serve_entry.jet` and `http_routes.jet`.\n  - `http_serve_entry.jet:6` wraps the call in `#Unsafe(...)` and passes a closure where a mux is expected.\n- The per-example runner is `node Tools/agent/run-feature-examples.mjs` (bounded default `jet run`, timeout, jobs).\n\n## Changes\n1. Rebuild `jet`, then re-run the whole sweep with fresh receipts.\n2. Group failures by root cause and fix each in its home, without patching archived crates/jet-sema or crates/jet-codegen TIR paths unless the default chain still depends on them. Where it does, file that case as a host card.\n   - Front-end, type and lowering causes: `Compiler/` (JetSema, JetCodegen), mirrored only where the running chain needs it.\n   - JIT, Prelude and rustc-emission causes: the retained host crates.\n   - Core API defects: `Core/*.jet`. Start with `Core/http/http.jet:457`, which should call `core.http.server.serve(addr, mux, None, None)`.\n   - Example-local mistakes: the example itself. Start with `http_serve_entry.jet`, which should build a real `HTTPMux` and drop the misplaced `#Unsafe`.\n3. Classify intentional negatives, non-entry modules and platform prerequisites explicitly. They never count as passes and never hide an ICE.\n4. Repeat until criterion 2 holds on the integrated fresh binary.\n\n## Proof\n- `Tools/agent/jet-env jet check Examples/features/net/http_serve_entry.jet` and the same check on `http_routes.jet` report no E0104 inside Core.\n- `node Tools/agent/run-feature-examples.mjs --json --jobs 2 --timeout 90`, run with the fresh binary under the memory-capped wrapper. Every applicable example exits 0 and matches its `.out`/`.err.out`, negatives match their contract, and the run shows zero ICE, native code generator failure, timeout or missing receipt. The per-example receipts are stored.\n- `jet test Compiler --profile golden` (unfiltered; the owner ordered this sweep) is green.\n\n## Batch\n`batch-host-runtime`. The proof is a corpus run on `jet run`, AOT and the host tiers.\n\n## Dependencies\nNone blocking. Fixes land card by card; this card owns the sweep and the final green receipt.",
-      "checkSteps": "Inspect every recorded exit and error stream; require existing expected output and explicit expected-error contracts; verify service/platform examples through their actual applicable entry path. No tier fallback, example deletion, expectation weakening or missing rows.",
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Closed by owner direction 2026-11-12 evening: c1 and c2 (the whole example corpus has receipts and runs green) removed; both stay enforced as the standing release gate on every admitted compiler. c3 and c4 (Embedded battery) are met at 566af3ae17."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 2 criteria from archived #2801: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
-        },
-        {
-          "at": "2026-09-30",
-          "by": "pip",
-          "text": "Evidence from SPJ mining (2026-09-30, target/debug/jet built 12:12 from a dirty tree): Examples/features/errors/todo_stop.jet (`fn missing() -> Int { #Todo }`) fails with E0355 \"`#Todo` cannot attach at the Statement site\"; golden expects E3011. Separately, E0355's Fix (\"Move `#Todo` to one of its registered sites\") never names the working spelling; when restoring #Todo, make the Fix show `return #Todo` or accept the block tail. Report: Docs/research/mine-for-jet-2026-09-30-spj-papers.md."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Overnight proof 2026-09-29: FAIL. Worker (WaveBCorpus) status was partial with criteria_met_after_proof=[]; the plan's first named fixes (Core/http/http.jet:457 and http_serve_entry.jet) are not in the tree."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-host-runtime."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0 triage 2026-09-28 (jetpack2a, Opus 5.5): C_RETARGET. Criterion 1 (sweep receipts) is met; criterion 2 (every applicable example runs) is open. The old receipts are stale against the current binary, and the repo-wide D-TYPE-SUFFIX1/D-CAP-RECEIVER1/D-PREP/D-FENCE2 codemods invalidate them again. Known live Core failure: Core/http/http.jet:457 calls server.serve with 2 args, but it takes 4. Evidence: Core/http/http.jet:456-457 vs Core/http/server.jet:24 (serve(addr, mux, tls, deadline)); card log (binary sha mismatch 266535... vs cbaeb13...); Compiler/Bootstrap/check.sh (Jet compiler checked by the host jet only)"
-        },
-        {
-          "at": "2026-09-28",
-          "by": "Pip",
-          "text": "mine-for-jet 2026-09-28 (target/debug/jet 13:07, d4bb652df plus working tree; Core/http unmodified): jet check fails on Examples/features/net/http_serve_entry.jet and http_routes.jet. Both report E0104 inside Core: Core/http/http.jet:457 calls core.http.server.serve(addr, mux) with 2 args while server.serve (Core/http/server.jet:24) declares 4. http_serve_entry also passes a closure where serve wants HTTPMux, and wraps the blocking call in #Unsafe(\"core.http.serve blocks until the listener exits\"), which uses the unsafe gate for something that is not memory-unsafe. Also Examples/features/tooling/app_live.jet fails E2402 (tracked on #3700)."
-        },
-        {
-          "at": "2026-09-28",
-          "by": "Pip",
-          "text": "Triage 2026-09-28 (Luna 5.6 high legwork, Pip reviewed): RETARGET_JET. The corpus is not green and criterion 2 remains open (~/.cache/jet-luna/triage/bugs-2.json:895-923), making this a still-valid compiler stability obligation. The Jet compiler assembly exists (Compiler/Bootstrap/sources.list:1-4, 24-35), but its end-to-end program-running equivalent is only partial and unverified. Evidence: ~/.cache/jet-luna/triage/bugs-2.json:893-894 defines the owner-ordered 1003-file corpus sweep; criterion 1 is met but criterion 2 remains open at :895-907. ; ~/.cache/jet-luna/triage/bugs-2.json:916-923 says the retained receipts use a stale compiler hash and records nonzero/timeout outcomes, so no corpus-green claim exists. ; Compiler/Bootstrap/sources.list:1-4 identifies the Jet-authored compiler assembly and explicitly excludes only native host glue/Rust bootstrap runner; :24-35 includes Jet optimizer passes in that compiler. Jet target: Compiler/JetDriver/Source/Driver/Pipeline.jet, Compiler/JetCodegen/Source/Codegen/, Compiler/JetEval/Source/."
-        },
-        {
-          "at": "2026-09-27",
-          "by": "Pip",
-          "text": "Cleanup 2026-09-27 (owner-directed): all side worktrees and non-master branches were removed from the repo. Committed history is preserved in ~/.cache/jet-luna/branch-archive/unmerged-2026-09-27.bundle (all 38 branch heads; list in branches-2026-09-27.txt); each worktree's uncommitted diff and untracked files are in ~/.cache/jet-luna/branch-archive/worktrees-2026-09-27/. Restore a branch with: git fetch <bundle> <branch>:<branch>."
-        },
-        {
-          "at": "2026-09-21",
-          "by": "Main",
-          "text": "The retained examples106 ICE signatures are source-stale: receipts use binary sha256 266535..., while current target/debug/jet is cbaeb13.... The dominant handle-method and E3216 groups map to routes already present. The remaining selected-entry signature points to TIR entry-name/TFunc.key normalization, but no live repro was run in this implementation wave; criterion 2 remains open."
-        },
-        {
-          "at": "2026-09-20",
-          "by": "Main",
-          "text": "Current retained corpus evidence remains complete but non-green: examples106 summary records 1003 discovered, 905 executed, 98 package manifests, no missing receipts, exit0=268 with 637 nonzero outcomes (101=258, 1=359, 70=12, signal6=2, signal11=3, timeout124=3). Criterion 2 therefore remains open; no corpus-green claim or retry loop. Continue independent closure cards while preserving this evidence."
-        },
-        {
-          "at": "2026-09-15",
-          "by": "Main",
-          "text": "tooling/debug_native stale fallibility is migrated: fs.write/fs.remove now use explicit panic fallbacks and preserve success output. Its focused golden no longer fails the interrupt unsafe scan after #3431 criterion 1; the only current blocker is #3416 record-budget exhaustion at tests/golden.rs:903. No rerun beyond the two-cycle cap."
-        },
-        {
-          "at": "2026-09-15",
-          "by": "Main",
-          "text": "Non-feature census completed: learn/embedded/continuity 65; suites/canon/Jetpack/performance 21; FFI/interop 65. Canonical example-only migrations retained with direct check/run progress. Exact blockers include foreign binding provenance/entry resolution ICEs, missing target toolchains/Jetpack locks, typed-TIR cursor/decode failures, DataEvent constructors, HTTP write_bytes ICE, and performance budget target gaps. Receipts: agent://ExamplesLearnEmbeddedWave, agent://ExamplesSuitesJetpackWave, agent://ExamplesFfiInteropWave. Together with the 870-feature wave, current accounting covers 1021 assigned .jet paths; criterion 2 remains open on classified failures."
-        },
-        {
-          "at": "2026-09-15",
-          "by": "Main",
-          "text": "2026-09-15 successful-run golden review: added/updated 15 deterministic outputs (text/math 3, serde/tooling 5, concurrency/net 7), each byte-exact against one confirming direct run. Language/core 11, text/math 10, systems 10, IO/errors 7, and tooling app_live remained unchanged because current rc0 output contradicts ratified/source contracts; these are runtime bugs, not golden drift. IO self-referential testing_projection remains without a golden because adding it changes its own corpus count. Receipts: agent://LanguageCoreGoldenReview, agent://TextMathGoldenReview, agent://SystemsGoldenReview, agent://IoErrorsGoldenReview; serde review direct-byte receipt pending completion. Criterion 2 remains open; dedup/root repair lanes are active."
-        },
-        {
-          "at": "2026-09-15",
-          "by": "Main",
-          "text": "2026-09-14 feature-source census wave exercised 870 assigned .jet files across language/core, collections, text/math/comptime/reflection, IO/errors, serde/tooling/CLI/devloop, memory/lowlevel/parsing/ICE, concurrency/net/time/crypto, and web/packages/game. Cluster receipts: ~/.cache/jet-luna/assigned-language-core-receipt.json; ~/.cache/jet-test-scratch/text-math-comptime-reflection/final-receipt.json; ~/.cache/jet-test-scratch/serde-tooling-cli-devloop-3065; ~/.cache/jet-test-scratch/examples-systems-wave/final-receipt.json; plus worker exact reports for remaining clusters. Proven example-only edits retained; unproven experiments reverted. Many root failures remain, so criterion 2 stays open. Follow-up sweep owns every .jet outside examples/features and successful-output golden review."
-        },
-        {
-          "at": "2026-09-15",
-          "by": "Main",
-          "text": "Seven disjoint Luna restoration lanes are executing the shipped example corpus by directory. Each lane continues past failures, permits at most two direct-run repair cycles per root, never invents goldens, and returns exact source-backed classifications/blockers."
-        },
-        {
-          "at": "2026-09-11",
-          "by": "agent",
-          "text": "Fresh build plus six guarded runs now pass unchanged rawptr and lowlevel goldens on default JIT, explicit interpreter, and native release: ~/.cache/jet-luna/raw118-proof.json. Canonical prefix *cell replaces accidental double address-taking in the examples; MIR raw-address lowering, native Ptr representation, and audited dereference preserve the stored 1337 value. Eighteen error-family examples are migrated without golden changes; focused replay is in flight. Generated foreign-language provenance repair is integrated. Luna Primitive120 and Cli120 own disjoint remaining route and CLI invocation repairs. Criterion 2 remains open; no corpus-green claim."
-        },
-        {
-          "at": "2026-09-11",
-          "by": "agent",
-          "text": "Three callable examples now fully pass existing goldens on default JIT, interpreter, and native release: bare_lambda_param, trailing_block, callbacks. Evidence repair110 and repair113 receipts under ~/.cache/jet-luna. Native failure was an uninitialized Unit SSA result after print, not a callable lifetime bug: native Print now yields Unit through normal result materialization. Stored fields use canonical Field + FnValue calls; obsolete FnFieldCall removed. Native callable wrapper supplies opaque Rust Debug without requiring captures to be Debug. Raw pointers are only interpreter-green; JIT wrong-value and native Ptr type failures stay open with Raw112."
-        },
-        {
-          "at": "2026-09-11",
-          "by": "agent",
-          "text": "Follow-on tier proof callable109: bare_lambda_param and trailing_block now match existing goldens in default JIT and interpreter. Native release invokes each callback once, then panics MIR value; native closure lifetime repair remains required. callbacks now reaches a second root: stored-field invocation bypasses canonical effective function-result carrier. Main is cutting over field calls to ordinary checked Field + FnValue invocation and removing the redundant FnFieldCall variant. Nine-run receipts ~/.cache/jet-luna/callable109-proof.json; no closure claim."
-        },
-        {
-          "at": "2026-09-11",
-          "by": "agent",
-          "text": "Integrated the checked no-return indirect-call repair in jet-jit functions_compile.rs. Fresh build and actual default jet run both pass existing goldens for basics/bare_lambda_param.jet (1,2,3,60) and syntax/trailing_block.jet (HI,Hello twice), previously exit101. Evidence ~/.cache/jet-luna/indirect107-proof.json. Unit callbacks keep void Cranelift signatures and side effects; value-returning callbacks retain result carriers. Remaining examples still open."
-        },
-        {
-          "at": "2026-09-11",
-          "by": "agent",
-          "text": "Sweep complete: exit0=268, exit101=258, exit1=359, exit70=12, SIGABRT=2, SIGSEGV=3, timeout=3. Nonzero outcomes are not all compiler defects: retain and classify existing expected-error demonstrations and helper/config inputs without hiding any ICE. Luna Indirect106 and Field106 are repairing two observed callable causes on disjoint paths; all unrelated stability proof is paused until examples are green."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 3,
-          "text": "(was #2801 c2) Every library part is exercised in the battery/example source; hardware/provider-dependent parts and their exact open gates are explicitly named, without a host replay being claimed as hardware proof [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G12Docs-11 566af3ae17, proved by Lander3 before landing. tests/guards/embedded_battery.jet 'embedded' rc 0. Battery golden (jet test Compiler --profile golden Examples/LowLevel/Embedded/Battery/run.jet) rc 0 at o0/o1/o2. The replay reaches every battery function and verifies a real Ed25519 signature; the probe pkg is removed, and the 7 hardware/provider gates are named (G2-G7, E3302). AgentDocFlags and UnsafeRatchet rc 0. The corpus policy line (5) was base red from the earlier landing G1Lead-4-startup-r; that check passed 12/12 on b4 before that landing (G12Docs-2), and the base red is routed as its own fix.",
-          "at": "2026-11-11T21:19:36.568Z"
-        },
-        {
-          "n": 4,
-          "text": "(was #2801 c3) The canonical Embedded battery/example replaces the probe as the executable source specification; documentation linkage and execution proof remain explicitly tracked [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G12Docs-11 566af3ae17, proved by Lander3 before landing. tests/guards/embedded_battery.jet 'embedded' rc 0. Battery golden (jet test Compiler --profile golden Examples/LowLevel/Embedded/Battery/run.jet) rc 0 at o0/o1/o2. The replay reaches every battery function and verifies a real Ed25519 signature; the probe pkg is removed, and the 7 hardware/provider gates are named (G2-G7, E3302). AgentDocFlags and UnsafeRatchet rc 0. The corpus policy line (5) was base red from the earlier landing G1Lead-4-startup-r; that check passed 12/12 on b4 before that landing (G12Docs-2), and the base red is routed as its own fix.",
-          "at": "2026-11-11T21:19:37.500Z"
-        }
-      ],
-      "refs": [
-        "3019",
-        "3038",
-        "3039",
-        "3043",
-        "3045",
-        "3048",
-        "3049",
-        "3059",
-        "3061",
-        "3062",
-        "Compiler/JetDriver/Source/Driver/Pipeline.jet",
-        "Compiler/JetCodegen/Source/Codegen/",
-        "Compiler/JetEval/Source/"
-      ],
-      "tags": [
-        "retarget-jet",
-        "triage-2026-09-28",
-        "retargeted",
-        "batch-host-runtime",
-        "wayfinder:task"
-      ],
-      "parentId": "c0max8v8",
-      "needsAcceptance": false,
-      "created": "2026-09-11T11:38:15.802Z",
-      "updated": "2026-11-13T01:01:01.203Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G12"
-      ],
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-13T01:01:01.203Z"
     },
     {
       "id": "c0p39lw2",
@@ -86539,11 +86352,12 @@
         {
           "n": 7,
           "text": "Routes, data queries, forms, tables and stores run on one reactive app runtime: one example app uses all five, and its golden passes on O0, O1, O2 and web. Proof: `jet test Compiler --profile golden --filter Web/AppSuite`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:52:21.482Z"
+          "evidence": "Moved to #6445 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:49.925Z",
+          "closure": "duplicate"
         },
         {
           "n": 8,
@@ -86706,11 +86520,12 @@
         {
           "n": 31,
           "text": "The 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun on the built framework against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel; every gap it lists is closed or explained on a card, and the rerun is committed as a dated Docs/research report. Its timing cells belong to G11 (#2858). Proof: `git ls-files \"Docs/research/*jet-dev-vs-incumbents*\"` names the dated rerun report.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:49.624Z"
+          "evidence": "Moved to #2756 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:53.450Z",
+          "closure": "duplicate"
         },
         {
           "n": 32,
@@ -86744,29 +86559,32 @@
         {
           "n": 35,
           "text": "One app package serves web, desktop and phones (D-ONEAPP-MODEL1=A): one example app builds for web and Linux desktop from the same source, and both goldens pass. Proof: `jet test Compiler --profile cases --filter web_app/one_source_web_and_linux`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:31.199Z"
+          "evidence": "Moved to #6445 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:00:57.261Z",
+          "closure": "duplicate"
         },
         {
           "n": 36,
           "text": "A screen calls a marked server method like a plain function (D-SERVER-FN1=A, in the D-WEBAPP-SHAPE1=A form of app.Remote<S> and #App.SignedIn): the call crosses to the server with typed arguments and comes back with a typed error. Proof: `jet test Compiler --profile cases --filter web_app/remote_call_typed_errors`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:49:32.256Z"
+          "evidence": "Moved to #6445 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:01.264Z",
+          "closure": "duplicate"
         },
         {
           "n": 37,
           "text": "Examples/features/ui/reactive_observable.jet shows same-value notification, derived order and disposal with no version-cap loss. Proof: `jet test Compiler --profile golden --filter ui/reactive_observable` on O0, O1, O2 and web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:19:53.330Z"
+          "evidence": "Moved to #6821 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:06.131Z",
+          "closure": "duplicate"
         },
         {
           "n": 38,
@@ -86780,11 +86598,12 @@
         {
           "n": 39,
           "text": "Examples/Apps/UI/AsyncCommand proves the same output on web once task groups run there (#5201 c7): jet test Compiler --profile golden --filter UI/AsyncCommand includes the web tier and passes. Depends on #5201 c7; O0/O1/O2 are covered by c38.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:04:07.947Z"
+          "evidence": "Moved to #6821 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:09.082Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -86799,7 +86618,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T00:55:19.476Z",
-      "updated": "2026-11-16T01:00:46.293Z",
+      "updated": "2026-11-16T01:01:09.082Z",
       "updatedBy": "Main",
       "criteriaLastN": 39
     },
@@ -87481,20 +87300,22 @@
         {
           "n": 2,
           "text": "Owner ruling on C-G5-1: the formatter keeps one blank line after a file's leading comment block, so the header never merges into the first item's comment or doc (probes c01, c10, c13). A formatter case pins it, and jet fmt over Examples/ is unchanged apart from restored blank lines. Proof: `jet test Compiler --profile cases --filter fmt/leading_comment_block_keeps_blank_line`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:44.917Z"
+          "evidence": "Moved to #6898 c16, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:12.894Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "Comment spellings come from the syntax registry (I7): the lexer and the about 30 comment scanners read COMMENT_PREFIX, BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE (CoreSurface.jet:189-195, read by no Jet code today) and a new registry row for the /// doc comment; no Jet source types the literal \"//\" or \"///\" for comment scanning. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd). Proof: git grep for a quoted `//` or `///` literal in Compiler finds only the registry rows, and `jet test Compiler --profile cases --filter fmt/` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:45.909Z"
+          "evidence": "Moved to #6898 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:16.272Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
@@ -87535,11 +87356,12 @@
         {
           "n": 8,
           "text": "Each syntax change this card makes (c5's //! ruling and c7's /% row) lands with its Data/Syntax registry row, a syntax-decisions.md log entry, editor grammars regenerated by jet self devtools grammars and re-blessed snapshots, and the syntax-ratification chore check passes. Proof: `jet test tests/guards --filter syntax_ratification`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:24:46.861Z"
+          "evidence": "Moved to #6898 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:19.477Z",
+          "closure": "duplicate"
         },
         {
           "n": 13,
@@ -87562,8 +87384,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-15T04:25:17.003Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T01:01:19.477Z",
+      "updatedBy": "Main",
       "criteriaLastN": 13
     },
     {
@@ -89047,29 +88869,32 @@
         {
           "n": 4,
           "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences. Proof: `jet test Compiler --profile cases --filter runtime/declared_rows_match` shows zero differences.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:50.551Z"
+          "evidence": "Moved to #6976 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:22.745Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
           "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime. Proof: `git grep -n dispatcher_row -- Compiler/Prelude/Core.jet` prints nothing, and `jet test Compiler --profile golden --filter runtime/one_call_per_core_module` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:51.466Z"
+          "evidence": "Moved to #6880 c31, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:25.694Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
           "text": "A safe package that names a runtime function that isn't pub fails with the ordinary visibility diagnostic, and reaching a runtime C symbol needs #Import(c) inside #Unsafe. Proof: a UI snapshot for each.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:43:31.970Z"
+          "evidence": "Moved to #6976 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:28.649Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
@@ -89083,11 +88908,12 @@
         {
           "n": 8,
           "text": "The runtime is an ordinary library (D-HOST-LEAF1=E) and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted, so Core's runtime calls take the ordinary call path. Proof: `git grep -n -E 'IR_RUNTIME_ROUTES|route\\.export' -- Compiler` prints nothing and `jet test Compiler --profile golden` passes on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:47:01.266Z"
+          "evidence": "Moved to #6976 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:32.494Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
@@ -89101,20 +88927,22 @@
         {
           "n": 10,
           "text": "Every capability-only Core dispatcher row (Compiler/Prelude/Core.jet .with_ui_capabilities, 18 rows on dev 2dff7789f5 per TlsLead3's count: font shaping, ui.host open_file/save_file/shortcut/accessibility, clipboard x4, IME and drag-drop polls, shortcuts binding/register/dispatch/poll, accessibility attach/project, and others) and the internal CoreCallRecord.ui_capabilities field are the one remaining compiler-owned twin after c5 (Main, 2026-11-11, option A: kept as the capability carrier with vocabulary generated from UICapability, preserving every current requirement). They're deleted once a Core declaration can carry a UI capability itself. That needs a declaration-level spelling that no registered marker or effect row provides today (UI.* are not effect roots), which is new syntax; whether to add it and delete the twin is on Main's ballot list (2026-11-15). Proof when it lands: no CORE_CALLS special case in Loader.jet:256-263, and the UI snapshots for a missing capability on a constructor, a wrapper and a user wrapper are unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:33:56.715Z"
+          "evidence": "Moved to #6447 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:36.448Z",
+          "closure": "duplicate"
         },
         {
           "n": 11,
           "text": "The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority_right_covers), not a C import. Compiler/JetFoundation/Source/Policy/EffectScope.jet declares no #Import(c) and no #Unsafe, tests/guards/c_imports.jet has no CI_ALLOWED row for it, the C-string export jet_authority_covers is gone, and jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet passes the 33-row covers table on a jet built with it. SUBs: G8Scope-1c (any train), then G8Scope-1d (after a seed with 1c). Placed on #6615 rather than #6129 so this follow-up to G8Scope-1b's interim CI_ALLOWED row doesn't hold G8's closure. Proof: `jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet` passes the 33-row table and `git grep -n jet_authority_covers -- Compiler` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:46:52.361Z"
+          "evidence": "Moved to #6976 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:39.518Z",
+          "closure": "duplicate"
         },
         {
           "n": 12,
@@ -89149,20 +88977,22 @@
         {
           "n": 16,
           "text": "Sema classifies the reachable Prelude closure into core, alloc and hosted layers (D-FREESTAND-PRELUDE1=A), and a program that reaches a layer its target lacks is refused with a registered error. Proof: `jet test Compiler --profile ui --filter freestanding_missing_layer_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:45:52.340Z"
+          "evidence": "Moved to #6976 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:43.103Z",
+          "closure": "duplicate"
         },
         {
           "n": 17,
           "text": "The five freestanding witnesses (heap_free_core, allocator_firmware, browser_wasm, wasi, hosted_default) run with target-selected marshalling around the one Prelude on their applicable tiers, with no second Prelude. Proof: `jet test Compiler --profile cases --filter freestanding_witness_`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:45:53.381Z"
+          "evidence": "Moved to #6144 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:46.175Z",
+          "closure": "duplicate"
         },
         {
           "n": 18,
@@ -89189,8 +89019,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-15T11:36:03.134Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-16T01:01:46.175Z",
+      "updatedBy": "Main",
       "criteriaLastN": 18
     },
     {
@@ -89700,20 +89530,22 @@
         {
           "n": 43,
           "text": "Canvas edit actions read fallibility, defaults and submodule membership from the shared Core-call record (the typed Core action catalog, D-CANVAS-CORECATALOG1=C). Proof: scenario `core_action_catalog_facts`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:26.085Z"
+          "evidence": "Moved to #6913 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:49.390Z",
+          "closure": "duplicate"
         },
         {
           "n": 44,
           "text": "No private list of Core members remains in Compiler/JetDevserver/Source/Canvas: every Core name comes from the shared Core-call record. Proof: review of `git grep -n -E '\"(push|len|insert|remove|get)\"' -- Compiler/JetDevserver/Source/Canvas` finds no member table.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:26.961Z"
+          "evidence": "Moved to #6914 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:53.389Z",
+          "closure": "duplicate"
         },
         {
           "n": 45,
@@ -89818,29 +89650,32 @@
         {
           "n": 55,
           "text": "Canvas/SchemaApi.jet imports no individual edit operation and matches no edit-operation name; after source selection it crosses one private edit-transaction function. Proof: `git grep -n -E 'EditActions|op_name' -- Compiler/JetDevserver/Source/Canvas/SchemaApi.jet` prints only the one transaction call.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:27.848Z"
+          "evidence": "Moved to #6911 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:57.131Z",
+          "closure": "duplicate"
         },
         {
           "n": 56,
           "text": "The edit-transaction module owns request decoding, validation, projection, rewrite, format, compiler check, stale-revision check and atomic commit, and imports no transaction facts from the schema API. Proof: `git grep -n 'SchemaApi' -- Compiler/JetDevserver/Source/Canvas/ProjectTransactions.jet` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:28.923Z"
+          "evidence": "Moved to #6911 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:02:02.253Z",
+          "closure": "duplicate"
         },
         {
           "n": 57,
           "text": "Every existing Canvas edit protocol name, schema version, JSON field, error and source result is unchanged through `apply_transaction_json`. Proof: `jet test Compiler --profile cases --filter canvas_cli_lifecycle/jet_dev_canvas_applies_and_refuses_source_transactions`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:29.844Z"
+          "evidence": "Moved to #6911 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:02:06.007Z",
+          "closure": "duplicate"
         },
         {
           "n": 58,
@@ -89895,29 +89730,32 @@
         {
           "n": 63,
           "text": "Canvas and the dev server find functions and spans from parser nodes, never by scanning source lines. Proof: `git grep -n -E 'split\\(\"\\\\n\"\\)|\\.lines\\(' -- Compiler/JetDevserver/Source/Canvas` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:24.362Z"
+          "evidence": "Moved to #6911 c13, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:02:09.659Z",
+          "closure": "duplicate"
         },
         {
           "n": 64,
           "text": "A function whose `fn` keyword follows a marker or comment on the same line appears as a Canvas graph. Proof: scenario `fn_after_marker_on_same_line`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:03:25.219Z"
+          "evidence": "Moved to #6911 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:02:13.166Z",
+          "closure": "duplicate"
         },
         {
           "n": 66,
           "text": "The 88 canvas scenarios deleted with Tools/canvas-test/scenario.mjs in the #6035 c3 cutover (last commit logged on this card) are restored, each keeping its assertions and messages, as the original driver or as Tools/canvas-test/Harness.jet scenarios. Proof: every scenario passes on the running canvas (`jet run Tools/canvas-test/Run.jet -- scenario --scenario N` for each ported N, or the restored driver for the rest).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:22:56.622Z"
+          "evidence": "Moved to #6913 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:02:16.116Z",
+          "closure": "duplicate"
         },
         {
           "n": 67,
@@ -89968,8 +89806,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:23:54.761Z",
-      "updated": "2026-11-15T04:04:51.932Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-16T01:02:16.116Z",
+      "updatedBy": "Main",
       "criteriaLastN": 70
     },
     {
@@ -221583,19 +221421,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q0of0tty",
-      "cardId": "c08fc2sx",
-      "decisionId": null,
-      "by": "SolOrchestrator",
-      "kind": "message",
-      "text": "Sol orchestration campaign started: 46 active bug cards in scope; e9 jetos and e13 Cross Platform excluded. Wave 1 batches correctness/ICE implementation across disjoint paths before one rebuild. Current runner evidence: 4 targeted examples passing, 5 targeted open; corpus baseline 71 failed, 37 no-match, 2 timeout. A read-only sentinel will audit throughput and loops every 30 minutes.",
-      "status": "done",
-      "answer": "",
-      "created": "2026-09-19T22:15:16.938Z",
-      "completedAt": "2026-09-20T07:04:49.227Z",
-      "doneBy": "owner"
-    },
-    {
       "id": "qx6kzu61",
       "cardId": "c0meo2tr",
       "decisionId": "D-CAP-RECEIVER1",
@@ -224428,6 +224253,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T01:02:16.116Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#66"
+    },
+    {
+      "at": "2026-11-16T01:02:13.166Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-16T01:02:09.660Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-16T01:02:06.008Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-16T01:02:02.253Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#56"
+    },
+    {
+      "at": "2026-11-16T01:01:57.131Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#55"
+    },
+    {
+      "at": "2026-11-16T01:01:53.389Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-16T01:01:49.390Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02vsnvm",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-16T01:01:46.175Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-16T01:01:43.103Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-16T01:01:39.518Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-16T01:01:36.448Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-16T01:01:32.495Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T01:01:28.649Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-16T01:01:25.694Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-16T01:01:22.745Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T01:01:19.478Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-16T01:01:16.272Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T01:01:12.894Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T01:01:09.082Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-16T01:01:06.131Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-16T01:01:01.264Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-16T01:00:57.261Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-16T01:00:53.451Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-16T01:00:49.925Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vxf4u0",
+      "note": "#7"
+    },
     {
       "at": "2026-11-16T01:00:46.293Z",
       "by": "Main",
