@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108373,
+    "rev": 108375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97780,6 +97780,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "A/B p201 → p202 (abspans, RunColdContext jet check, medians): sema.effects 87.05 → 28.85 ms (p200: 34), sema.finalize 288.3 → 230.6 ms, core_demand 60.6 → 59.0, load 79.1 → 79.2. The p201 sema.effects regression (67399230a6) is reverted by c9c19b4d11."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "c20 receipt on the p202 batch compiler (dev 7fbaac6e87, jet a0.0.45-dev, identity 89ba7aff…907e): Tools/perf/core-strace/run.jet. Out of tree, jet run hello.jet: 507 file calls, 0 on the toolchain tree, PASS. Checkout, jet run Examples/Basics/Hello.jet: 830 file calls, 0 on the tree, PASS. Golden half, p202 suite: 4965 PASS, 3 FAIL; all 3 are Examples/Apps/Web/AppTypedArgs.jet o0/o1/o2 (exit -1 at serve(port: 9000)). That is a golden-runner host-port spawn fault since p201, not Core, and it is being fixed. c20 is met once a golden run on O0/O1/O2 is clean (target: p203)."
         },
         {
@@ -98182,7 +98187,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T03:48:03.754Z",
+      "updated": "2026-11-16T03:49:55.987Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
     },
@@ -221135,6 +221140,20 @@
   ],
   "events": [
     {
+      "at": "2026-11-16T03:49:55.987Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T03:49:54.911Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing045fkvf",
+      "note": "p202 landed: taint-walk revert, Core interface step, c1 met"
+    },
+    {
       "at": "2026-11-16T03:48:30.594Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -225593,6 +225612,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing045fkvf",
+      "title": "p202 landed: taint-walk revert, Core interface step, c1 met",
+      "body": "## p202 landed (dev 7fbaac6e87, 11 commits)\n\n**What landed:**\n- **Precompiled Core:**\n  - the taint-walk revert (it fixes the p201 sema.effects regression);\n  - the lazy Core interface step (r2);\n  - five fixed-cost cuts in the driver and loader: plan-lazy precheck, taint-walker state, launch environ, link-with-command move, and the web-target precheck;\n  - cold rodata placed last;\n  - the regenerated hot-text list (11,484 functions).\n- **Test harness:** the minted-failure Trail snapshot fix, and host networking for golden rows that spawn a server.\n\n**Suite against p201:** no new failures. Fixed: MintedFailureLeavesRun on o0/o1/o2.\n- ui 2839 pass / 17 fail;\n- golden 4965 / 3;\n- core 2405 / 1;\n- cases 4767 / 133.\n\nThe 3 golden FAILs are AppTypedArgs on o0/o1/o2. The row has never passed: p198/p199 ERROR, p200/p201 poll deadline, p202 the `wait` on a KILLed server compared against exit 0. Its fix (one case line) is in p203.\n\n**Speed, p201 → p202 (A/B spans, RunColdContext `jet check`):**\n- sema.effects 87.1 → 28.9 ms (p200 was 34);\n- sema.finalize 288 → 231 ms;\n- rcc wall 0.60 → 0.55 s at 314 MB;\n- InspectBuild check 12.4 s at 3.04 GB.\n\n**Precompiled Core receipts:**\n- **#6759 c1: met.** comptime.bodies is 0.1 ms on both twins (1.26 s and 0.29 s on seed-b9). One comptime child per compilation, and all 20 Comptime examples match their goldens.\n- **#6759 c20, strace half: PASS.** 0 Core or Prelude file calls in and out of the checkout. It closes on a clean O0/O1/O2 golden run (p203).\n\n**Board:**\n- #6978 (interned TypeIDs) moved to G11 by the speed-to-G11 order: days of hand work with a speed payoff. Its self-contained first part lands in p203.\n- PrecompiledCore-4 moves to G6 #6979, the `#Inline(Always)` guarantee.\n- **Any ballot:**\n  - The first fresh review failed the draft, and its defects are filed as criteria on #6727, #6839, #6845 and #6833.\n  - The redesign now recommends keeping the ratified rejection (no Any); a second fresh review is running.\n",
+      "by": "Main",
+      "created": "2026-11-16T03:49:54.911Z",
+      "sections": []
+    },
     {
       "id": "briefing0tudovo",
       "title": "Cycle p200: 7 landed; 4 regressions sent back; p201 running",
