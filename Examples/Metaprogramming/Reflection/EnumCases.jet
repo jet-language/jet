@@ -1,0 +1,57 @@
+// `T.reflect().cases` lists an enum's leaf cases in declaration order. A case
+// inside a group is one leaf whose path runs through the group. Its wire name
+// is the name serialization writes, its payload reads as a CasePayload, and a
+// number it writes reads as its discriminant. Reading the cases builds no
+// value of the enum, and a struct has none.
+#[Codable, Rename(.Kebab)]
+Command: enum {
+    Quit
+    #Rename("say") Speak(String)
+    MoveBy(dx: Int, dy: Int)
+}
+
+Pane: enum {
+    Window {
+        OpenFile(String)
+        CloseAll
+    }
+    Help
+}
+
+#Layout(U8)
+Access: enum {
+    Read = 4
+    Write = 2
+    Exec
+}
+
+Point: struct {
+    x: Int
+}
+
+payload_text: fn(payload: CasePayload) -> String {
+    if payload == {
+        .Unit -> "no payload"
+        .Single(held) -> "one {held.name}"
+        .Named(fields) -> "fields {(loop field in fields -> "{field.name}: {field.type.name}").join(", ")}"
+    }
+}
+
+show_cases: fn(info: TypeInfo) {
+    print("{info.name}: {info.cases.len()} cases")
+    loop row in info.cases {
+        number: if row.discriminant == .Val(value) -> " = {value}" else -> ""
+        markers: (loop marker in row.markers -> "#{marker.name}").join(" ")
+        print("  {row.name}{number} at {row.path}, wire {row.wire_name}, {payload_text(row.payload)}, markers [{markers}]")
+    }
+}
+
+FIRST_CASE: #run Command.reflect().cases[0].path
+
+run: fn() {
+    show_cases(Command.reflect())
+    show_cases(Pane.reflect())
+    show_cases(Access.reflect())
+    show_cases(Point.reflect())
+    print("folded while checking: {FIRST_CASE}")
+}

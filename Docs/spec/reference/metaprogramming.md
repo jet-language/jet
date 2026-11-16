@@ -363,6 +363,20 @@ of the type it describes, the one a field of that type reads as its `type`,
 so `field.type.identity == Ore.reflect().identity.identity` holds for a field
 of type `Ore`.
 
+An enum's `cases` is a `[CaseInfo]`, one per leaf case in declaration order;
+every other type's is empty. A case inside a group is one leaf: in
+`P: enum { Quit, Action { Text(String) } }` the case `Action.Text` has the
+`name` `Text` and the `path` `main.P.Action.Text`, the module, the enum and
+the group path. Each `CaseInfo` also carries its `wire_name`, the name
+serialization writes (the case's own `#Rename` text, else its name in the
+enum's `#Rename(.Case)` casing); its `payload`, a `CasePayload`: `.Unit`,
+`.Single(TypeId)` for one positional value, or `.Named([FieldInfo])` for
+named fields in declaration order; its `discriminant`, the number the case
+writes (`Write = 4` reads `Val(4)`, a case that writes none reads `None`);
+its `markers`; and the `span` of its name. Reading a case builds no payload
+value
+([`EnumCases`](../../../Examples/Metaprogramming/Reflection/EnumCases.jet)).
+
 A `FunctionInfo` and a `MethodInfo` share one typed contract: `signature` is
 a `CallableSignature`. Its `params` is a `[ParamInfo]` in declaration order,
 the receiver included; its `return_type` is the success type the callable
