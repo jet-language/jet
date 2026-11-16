@@ -38268,14 +38268,6 @@ impl F32.Roundable {
     }
 }
 
-impl Decimal.Roundable {
-    rounded: fn(self, mode: Rounding) -> Decimal Never! { decimal_rounded(self, mode) }
-}
-
-impl Fraction.Roundable {
-    rounded: fn(self, mode: Rounding) -> Fraction Never! { fraction_rounded(self, mode) }
-}
-
 impl Int.Roundable {
     rounded: fn(self, mode: Rounding) -> Int Never! { self }
 }
@@ -39680,6 +39672,10 @@ Fraction: struct {
     impl Display {
         display: fn(self) -> String { __fraction_to_string(self) }
     }
+
+    impl Roundable {
+        rounded: fn(self, mode: Rounding) -> Fraction Never! { fraction_rounded(self, mode) }
+    }
 }
 
 __fraction_new: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
@@ -39809,6 +39805,10 @@ Decimal: struct {
 
     impl Display {
         display: fn(self) -> String { __decimal_to_string(self) }
+    }
+
+    impl Roundable {
+        rounded: fn(self, mode: Rounding) -> Decimal Never! { decimal_rounded(self, mode) }
     }
 }
 

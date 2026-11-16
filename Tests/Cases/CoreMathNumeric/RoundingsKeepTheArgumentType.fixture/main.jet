@@ -7,12 +7,12 @@ use math: core.math
 // An amount in cents that rounds to whole units of 100.
 Cents: struct {
     value: Int
-}
 
-impl Cents.math.Roundable {
-    rounded: fn(self, mode: math.Rounding) -> Cents Never! {
-        units: math.fraction(self.value, 100) ?? panic("a hundred is not zero")
-        Cents{value: Int{units.rounded(mode)} * 100}
+    impl math.Roundable {
+        rounded: fn(self, mode: math.Rounding) -> Cents Never! {
+            units: math.fraction(self.value, 100) ?? panic("a hundred is not zero")
+            Cents{value: Int{units.rounded(mode)} * 100}
+        }
     }
 }
 

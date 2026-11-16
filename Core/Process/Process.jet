@@ -41,9 +41,7 @@ ProcessSignal: enum {
 SignalSubscription: struct {
     id: Int
     receiver: Receiver<ProcessSignal>
-}
 
-impl SignalSubscription {
     // Ends the subscription: a signal no other subscription holds takes its
     // earlier effect again, and `receiver` ends once its pending signals are read.
     close: fn(self) -[Exec]> Never! { rt.signal_close(self.id) }

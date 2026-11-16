@@ -9,6 +9,10 @@ SourceErr: enum {
 #Error
 TargetErr: enum {
     One
+
+    impl From(SourceErr) {
+        from: fn(error: SourceErr) -> TargetErr { return TargetErr.One }
+    }
 }
 
 #Error
@@ -19,10 +23,6 @@ OtherErr: enum {
 inferred: fn() -> Int { return Err("missing") }
 
 explicit: fn() -> Int SourceErr! { return Err(SourceErr.One) }
-
-impl TargetErr.From(SourceErr) {
-    from: fn(error: SourceErr) -> TargetErr { return TargetErr.One }
-}
 
 converted: fn() -> Int TargetErr! {
     explicit()

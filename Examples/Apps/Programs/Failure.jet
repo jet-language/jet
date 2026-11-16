@@ -15,13 +15,13 @@ ConfigFailure: enum {
 #Error
 AppFailure: enum {
     Config(String)
-}
 
-impl AppFailure.From(ConfigFailure) {
-    from: fn(error: ConfigFailure) -> AppFailure {
-        if error == {
-            .Missing -> return AppFailure.Config("missing")
-            .Invalid -> return AppFailure.Config("invalid")
+    impl From(ConfigFailure) {
+        from: fn(error: ConfigFailure) -> AppFailure {
+            if error == {
+                .Missing -> return AppFailure.Config("missing")
+                .Invalid -> return AppFailure.Config("invalid")
+            }
         }
     }
 }

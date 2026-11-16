@@ -2235,7 +2235,7 @@ empty, so a world and its tasks never read or change the process store.
 | --- | --- | --- |
 | `verify_jwt(token, key, audience, issuer, clock_skew)` | `Claims AuthError!` | Verify a three-part HS256 JWT with exact integer `exp`, optional `nbf`/`iat`, and audience/issuer checks. Omitting `issuer` skips the issuer check; a given issuer must equal `iss`. |
 | `verify_paseto(token, key, audience, issuer, clock_skew, footer, implicit)` | `Claims AuthError!` | Verify `v4.public` with a 32-byte Ed25519 public key; issuer, clock skew, footer, and implicit assertion are optional labeled arguments. |
-| `register_user(user_id, password_hash)` | `Unit Err!` | Register an identity with an already-computed password hash (`DB`). |
+| `register_user(user_id, password_hash)` | `Err!` | Register an identity with an already-computed password hash (`DB`). |
 | `password_login(user_id, password_hash, now_ms, ttl_ms)` | `Session Err!` | Validate credentials and issue a bounded session lifetime (`DB`, `Rand`). |
 | `oauth_begin(provider)` / `oauth_finish(state, assertion, now_ms, ttl_ms)` | state/session `Err!` | Start and finish the provider-backed OAuth assertion flow (`DB`, `Env`, `Rand`; `oauth_begin` also `Time`). |
 | `magic_link_issue(user_id, now_ms, ttl_ms)` / `magic_link_consume(token, now_ms, ttl_ms)` | token/session `Err!` | Issue and consume a token with a bounded lifetime (`DB`, `Rand`). |
@@ -2899,7 +2899,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.getoutput(spec)` | `-[Exec, Time.Wait]> String IOError!` | Capture output and return it without converting a nonzero exit into an exception. |
 | `process.getstatusoutput(spec)` | `-[Exec, Time.Wait]> (Int, String) IOError!` | Return the exit status and captured output. |
 | `process.stdin_text(spec, text)` | `-[Exec, Time.Wait]> Unit IOError!` | Feed text to a child, close its standard input, wait, and check it. |
-| `process.check(receipt)` | `Unit IOError!` | Convert a failed receipt to `IOError`, preserving timeout, resource-limit, exit-code, or signal information. |
+| `process.check(receipt)` | `IOError!` | Convert a failed receipt to `IOError`, preserving timeout, resource-limit, exit-code, or signal information. |
 | `process.status_ok(receipt)` | `Bool` | Test whether a receipt represents a successful exit. |
 | `process.failed(receipt)` / `process.exited(receipt)` | `Bool` | Inspect failure or normal process exit on a receipt. |
 | `process.exit_status(receipt)` | `Int` | A finished child's status as the shell's `$?` reports it: 124 when its timeout stopped it (as `timeout(1)` does), 128 + n after signal n, else its exit code. `Sh.status()` returns the same number. |
@@ -3137,8 +3137,8 @@ redacted receipt output.
 | `child.id()` | `Int` | Return the child identifier. |
 | `child.wait()` | `ProcessReceipt IOError!` | Wait for completion and return the receipt. |
 | `child.exited()` | `Bool IOError!` | Poll without waiting. |
-| `child.kill()` / `.terminate()` / `.interrupt()` | `Unit IOError!` | Send the corresponding termination request. |
-| `child.stdin.write(text)` / `child.stdin.write_bytes(bytes)` | `Unit IOError!` | Write every UTF-8 byte of the text, or every byte, to a streamed child input. Handing bytes to `write` is E0112, and its fix names `write_bytes`. |
+| `child.kill()` / `.terminate()` / `.interrupt()` | `IOError!` | Send the corresponding termination request. |
+| `child.stdin.write(text)` / `child.stdin.write_bytes(bytes)` | `IOError!` | Write every UTF-8 byte of the text, or every byte, to a streamed child input. Handing bytes to `write` is E0112, and its fix names `write_bytes`. |
 | `child.stdin.write_some(bytes)` | `Int IOError!` | Write once and return how many bytes the pipe took. |
 | `child.stdin.close()` | `Unit` | Close a streamed child input; repeated close is harmless. |
 | `child.stdout.read_bytes(limit)` / `child.stderr.read_bytes(limit)` | `[U8] IOError!` | Read up to `limit` bytes from the shared buffered pipe position; an empty list is end of input, and a limit below one is `IOError.InvalidInput` before any read. |
@@ -4209,7 +4209,7 @@ becomes a nested ordered object, and the keys keep the order written. A
 | `json.reader<R: Reader>(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader<R> EncodingError!` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
 | `json.writer<W: Writer>(output, limits, canonical)` | `JSONWriter<W> EncodingError!` | Construct a bounded event writer to any byte sink: a `FileWriter`, a socket, or a program's own `Writer` type. |
 | `JSONReader<R>.next()` | `DataEvent? EncodingError!` | Return the next event or stable end-of-input. |
-| `JSONWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output through the sink's `flush`, or validate and finish the stream. |
+| `JSONWriter<W>.write(event)` / `flush()` / `finish()` | `EncodingError!` | Write events, flush output through the sink's `flush`, or validate and finish the stream. |
 
 Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
 number lexemes until `Decode<T>` selects the destination representation. Its
@@ -4234,7 +4234,7 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.reader<R: Reader>(input, limits)` | `JSONLReader<R> EncodingError!` | Construct a bounded line stream over any byte source. |
 | `jsonl.writer<W: Writer>(output, limits)` | `JSONLWriter<W> EncodingError!` | Construct a bounded line writer to any byte sink. |
 | `JSONLReader<R>.next()` | `Dyn? EncodingError!` | Return the next row or stable end-of-input. |
-| `JSONLWriter<W>.write(value)` / `flush()` / `finish()` | `Unit EncodingError!` | Write records, flush output, or finish the stream. A record's LF is written before the next record, by `flush` or by `finish`, so a flushed sink ends on a whole line. |
+| `JSONLWriter<W>.write(value)` / `flush()` / `finish()` | `EncodingError!` | Write records, flush output, or finish the stream. A record's LF is written before the next record, by `flush` or by `finish`, so a flushed sink ends on a whole line. |
 
 ### `core.encoding.csv` — comma-separated rows
 
@@ -4309,7 +4309,7 @@ codec must not remove its native options or located error payloads.
 | `xml.reader<R: Reader>(input, limits, options)` | `XMLReader<R> EncodingError!` | Construct a bounded XML event reader over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `XMLError!` | Inspect attributes, content, expanded names, and the document root. |
 | `xml.writer<W: Writer>(output, limits, options)` | `XMLWriter<W> EncodingError!` | Construct a bounded XML event writer to any byte sink. |
-| `XMLWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write XML events, flush output, or validate and finish the stream. |
+| `XMLWriter<W>.write(event)` / `flush()` / `finish()` | `EncodingError!` | Write XML events, flush output, or validate and finish the stream. |
 
 XML rendering is fallible at both runtime and compile time. Invalid document
 trees return the located `XMLError`; callers must handle it explicitly rather
@@ -4340,7 +4340,7 @@ part; its helper functions are not exports of the public CBOR module.
 | `cbor.reader<R: Reader>(input, limits)` | `CBORReader<R> EncodingError!` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
 | `cbor.writer<W: Writer>(output, limits)` | `CBORWriter<W> EncodingError!` | Construct a bounded event writer to any byte sink. |
 | `CBORReader<R>.next()` | `DataEvent? EncodingError!` | Return the next event or stable end-of-input. |
-| `CBORWriter<W>.write(event)` / `flush()` / `finish()` | `Unit EncodingError!` | Write events, flush output, or validate and finish the stream. |
+| `CBORWriter<W>.write(event)` / `flush()` / `finish()` | `EncodingError!` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes
 
@@ -4568,7 +4568,7 @@ are terminal or revisioned lifecycle operations, not ordinary query filters.
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `loader.bind<T>(target, payload)` / `bind_text<T>(target, text)` | `Unit DataError!` | Bind provider bytes or text to an existing loader under its limits. |
+| `loader.bind<T>(target, payload)` / `bind_text<T>(target, text)` | `DataError!` | Bind provider bytes or text to an existing loader under its limits. |
 | `loader.authority(loader)` | `DataAuthority` | Inspect the loader authority. |
 | `loader.status(loader)` | `DataLoaderStatus` | Inspect freshness, source, snapshot, and error state. |
 | `loader.ready(loader)` | `Bool` | Test whether a usable snapshot is available. |
@@ -5245,7 +5245,7 @@ frames are the whole window.
 | `Window.frames() -> Frames` | frames | The display-paced frames; the stream ends after the frame that carries `.Close`. |
 | `Window.width()` / `.height()` / `.scale() -> Float` / `.failure() -> UIError?` / `.checksums() -> [Int]` | facts | The latest frame's size in pixels and pixels per logical unit, why the display ended the frames, and a headless window's per-frame FNV-1a checksums. |
 | `Window.cursor() -> UICursor` / `.set_cursor(cursor: UICursor)` | cursor | How the pointer looks over the window, `.Default` until set: the CSS cursor keywords (`Pointer`, `Text`, `Wait`, `Grab`, `ResizeNWSE`, … in `wp_cursor_shape_v1` order) and `Hidden`. Without `wp_cursor_shape_v1` the compositor keeps its cursor for every shape but `Hidden`. |
-| `Window.set_app_id(app_id: String) -> UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
+| `Window.set_app_id(app_id: String) UIError!` | — | Name the application, reverse-DNS (`"org.example.Notes"`), so the desktop matches its desktop entry for name, icon and grouping; `"dev.jet.app"` until set. `.Invalid` for an empty id or one with a NUL byte. |
 | `Window.set_icon(icon: UIIcon) -[Env]> UIError!` | — | Show `UIIcon{name, images}`: a theme icon name (`""` for none) and `UIIconImage{side, pixels}` images, `side` rows of `side` straight-alpha RGBA pixels, 1 to 1024 a side (`.Size` otherwise). An icon with no name and no images unsets it. Without `xdg_toplevel_icon_v1` the desktop entry's icon shows. |
 | `Window.clipboard_text() -[Env, Net, Time]> String UIError!` / `.set_clipboard_text(text: String) -[Net, Time]> UIError!` | clipboard | Paste and copy through the seat's `wl_data_device`. A paste reads the holder's text in its first type of `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `TEXT`, `STRING` through a pipe, waiting up to 2 s (`.Protocol` past that or for text that is not UTF-8, `.Size` past 16 MiB), and is `""` when the clipboard is empty or holds no text; the window's own copy comes back without a round trip. A copy offers the text as all five types at the latest input's serial (the compositor takes it only from the focused window) and answers each paste until another program copies. `.Unsupported` without `wl_data_device_manager`; a headless window keeps a clipboard of its own. The web host's clipboard stays `core.ui.host`'s `read_text` / `write_text`. |
 | `Window.set_text_input(area: UIRect?) -[Net, Time]> UIError!` | text input | The program's text field, for the compositor's input method (`zwp_text_input_v3`) to compose into: `area` is the caret's rectangle in pixels, where the input method shows its candidates, and `None` says there is no text field, which disables the text input and ends any composition. Without `zwp_text_input_v3`, and in a headless window, typing comes from the keyboard alone. |
@@ -6523,7 +6523,7 @@ panic or silent truncation.
 | `reader.read_f32_le()` / `read_f32_be()` | `F32 String!` | Read a 32-bit float. |
 | `reader.read_f64_le()` / `read_f64_be()` | `Float String!` | Read a 64-bit float. |
 | `reader.peek() -> U8 String!` | byte | Read without advancing. |
-| `reader.seek(position: Int)`, `reader.skip(n: Int)` | `Unit String!` | Move by an in-range position or count. |
+| `reader.seek(position: Int)`, `reader.skip(n: Int)` | `String!` | Move by an in-range position or count. |
 | `reader.take(n) -> [U8] String!` | bytes | Consume a known byte block. |
 | `reader.remaining() -> Int` / `reader.is_at_end() -> Bool` | scalar | Inspect unread bytes. |
 | `reader.take_pattern(pattern) -> (holes…) String!` | tuple | Match and consume a literal binary prefix. |
@@ -6673,8 +6673,8 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String NetError!` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | text/bytes | Read from a TCP stream. |
 | `tcp_read_text(stream, n) -[Net, Time.Wait]> String NetError!` | text | Read and decode up to `n` bytes. No byte is lost: a character the read cuts stays for the next read, and one that starts the read is read whole, up to 3 bytes past `n`. Bytes that are not UTF-8, and a character the end of the stream cuts, fail each text read and stay for `tcp_read_bytes`. |
 | `stream.read_into(buffer: &[U8], limit)` / `stream.read_into(buffer, limit, deadline:)` on `TCPStream` | `Int NetError!` | Append one read of up to `limit` bytes (at most 16 MiB) to the caller's `buffer` and return the count; 0 is the end of the stream, and a limit below one is `.InvalidInput`. The bytes go straight into the buffer, so a loop that clears and reuses one buffer allocates nothing per read. A carry an earlier text read left is appended first. |
-| `stream.read(limit)` / `stream.write(text)` on `TCPStream`, each also with `deadline:` | `String NetError!` / `Unit NetError!` | Read and decode up to `limit` bytes as `tcp_read_text` does, or write every UTF-8 byte of the text. |
-| `stream.read_bytes(limit)` / `stream.write_some(bytes)` / `stream.write_bytes(bytes)` on `TCPStream`, each also with `deadline:` | `[U8] NetError!` / `Int NetError!` / `Unit NetError!` | One bounded byte read, one partial write that returns the count taken, and a write of every byte. |
+| `stream.read(limit)` / `stream.write(text)` on `TCPStream`, each also with `deadline:` | `String NetError!` / `NetError!` | Read and decode up to `limit` bytes as `tcp_read_text` does, or write every UTF-8 byte of the text. |
+| `stream.read_bytes(limit)` / `stream.write_some(bytes)` / `stream.write_bytes(bytes)` on `TCPStream`, each also with `deadline:` | `[U8] NetError!` / `Int NetError!` / `NetError!` | One bounded byte read, one partial write that returns the count taken, and a write of every byte. |
 | `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit NetError!` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` | unit | Write every byte of the text or the bytes. |
 | `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit NetError!` | unit | Write every byte of the bytes or the text. |
 | `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit NetError!` / `tcp_close(stream) -[Net]> Unit NetError!` | — | Shut down or close a stream. |
@@ -6696,7 +6696,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_accept(listener) -[Net, Time.Wait]> UnixStream NetError!` / `unix_read(stream) -[Net, Time.Wait]> String NetError!` | stream/text | Accept or read a Unix stream. |
 | `unix_write(stream, text) -[Net, Time.Wait]> Unit NetError!` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] NetError!` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
 | `stream.read_into(buffer: &[U8], limit, deadline:)` on `UnixStream` | `Int NetError!` | The TCP `read_into` with an explicit deadline, retrying an interrupted read. |
-| `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` on `UnixStream` | `[U8] NetError!` / `Unit NetError!` | One bounded byte read, or a write of every byte. |
+| `stream.read_bytes(limit, deadline:)` / `stream.write_bytes(bytes, deadline:)` on `UnixStream` | `[U8] NetError!` / `NetError!` | One bounded byte read, or a write of every byte. |
 | `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit NetError!` / `unix_shutdown(stream, how) -[Net]> Unit NetError!` / `unix_close(stream) -[Net]> Unit NetError!` | — | Write all bytes or close the same Unix stream. |
 | `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit NetError!` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
 | `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage NetError!` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
@@ -7134,7 +7134,7 @@ those bounds and the enclosing source location, rather than a copied slice.
 | `sparse_show(sp: SparseTensor) -> String` / `sparse_mv(sp, x) -> Tensor ComputeError!` | sparse | Inspect or multiply CSR data. |
 | `serialize(tensor: Tensor) -> String ComputeError!` / `deserialize(text: String) -> Tensor ComputeError!` | text/tensor | Use the canonical checked tensor text format. |
 | `stream_new() -> ComputeStream`, `stream_new_on(target) -> ComputeStream ComputeError!` | stream | Create a CPU or explicitly requested stream. |
-| `stream_show(stream) -> String`, `stream_sync(stream) ComputeError!` | text/— | Inspect or synchronize a stream. |
+| `stream_show(stream) -> String`, `stream_sync(stream: ComputeStream) ComputeError!` | text/— | Inspect or synchronize a stream. |
 
 The tensor shape is checked for every operation. `fft` uses a radix-2 path or a
 bounded DFT for non-power-of-two sizes and emits interleaved real/imaginary

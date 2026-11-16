@@ -190,9 +190,7 @@ JetDevtoolsPanelDescriptor: struct {
     authority: JetDevtoolsPanelCapability
     supported_hosts: [JetDevtoolsHostKind]
     freshness: JetDevtoolsPanelFreshnessPolicy
-}
 
-impl JetDevtoolsPanelDescriptor {
     // A descriptor every host supports, ordered by its id's canonical order.
     canonical: fn(id: JetDevtoolsPanelID, &&required_capabilities: [JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
         JetDevtoolsPanelDescriptor{id, title: id.title(), order: id.canonical_order(), required_capabilities: required_capabilities.move(), authority, supported_hosts: JetDevtoolsHostKind.all(), freshness}
@@ -241,9 +239,7 @@ descriptors: fn() -> [JetDevtoolsPanelDescriptor] Never! {
 JetDevtoolsPanelUnavailableReason: enum {
     UnsupportedHost(host: JetDevtoolsHostKind)
     MissingCapability(capability: JetDevtoolsPanelCapability)
-}
 
-impl JetDevtoolsPanelUnavailableReason {
     as_str: fn(self) -> String Never! {
         if self == {
             .UnsupportedHost(_) -> "unsupported-host"
@@ -269,9 +265,7 @@ impl JetDevtoolsPanelUnavailableReason {
 JetDevtoolsPanelAvailability: struct {
     descriptor: JetDevtoolsPanelDescriptor
     reasons: [JetDevtoolsPanelUnavailableReason]
-}
 
-impl JetDevtoolsPanelAvailability {
     is_available: fn(self) -> Bool Never! { self.reasons.len() == 0 }
     unavailable_reasons: fn(self) -> [JetDevtoolsPanelUnavailableReason] Never! { self.reasons }
 }
@@ -308,9 +302,7 @@ impl JetDevtoolsPanelCatalogError {
 // One validated first-party panel catalog, in ascending order.
 JetDevtoolsPanelCatalog: struct {
     descriptor_list: [JetDevtoolsPanelDescriptor]
-}
 
-impl JetDevtoolsPanelCatalog {
     // Validate `descriptors` and keep them sorted by their unique order.
     new: fn(&&descriptors: [JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
         if descriptors.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.Empty)

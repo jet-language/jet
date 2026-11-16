@@ -223,9 +223,16 @@ s6_retirement_reviewed_parses: fn(source: String) -> Bool {
 // Documentation quotes types (`Int?`) and contracts (`-> Int IOError!`) on
 // their own, and the Core coverage ratchet stores signatures without `fn`
 // (`(value: String) -> [U8]?`), so a snippet gets a parse as statements, as a
-// type, as a signature tail, as a signature and as a parameter list.
+// type, as a signature tail, as a signature and as a parameter list. A
+// reference row names the function before its parameters
+// (`table.delete(key: K) -[DB]> DBError!`), so that shape parses without
+// the name.
 s6_retirement_reviewed_snippet_current: fn(source: String) -> Bool {
-    shapes: [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}", "probe: fn{source} {{}}"}
+    shapes := [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}", "probe: fn{source} {{}}"}
+    open: s6_retirement_reviewed_find(source, "(", 0)
+    if open > 0 && !s6_retirement_reviewed_slice(source, 0, open).contains(" ") {
+        shapes.push("probe: fn{s6_retirement_reviewed_slice(source, open, source.bytes().len())} {{}}")
+    }
     loop shape in shapes {
         if s6_retirement_reviewed_parses(shape) -> return true
     }
@@ -284,7 +291,7 @@ s6_retirement_reviewed_line_current: fn(line: String) -> Bool {
 }
 
 // The canonical rewrites of a candidate on its line: drop it (propagation
-// `read()?` after a call, an index or a literal; a bare `!`; a name such as
+// `items[0]?` after an index or a literal; a bare `!`; a name such as
 // `Apply? [y/N]` is prose or a type, never a propagation the parser can confirm), move a `!` behind the following token (`T ! E` to `T E!`), and
 // for a `?` between two tokens, attach it to the left one and fail with the
 // right one (`T ? E` to `T? E!`).
@@ -341,9 +348,11 @@ s6_retirement_reviewed_hits: fn(source: String) -> [S6RetirementReviewedHit] {
 
 s6_retirement_reviewed_detector_law: fn() {
     // `value: !IOError` left the current list: the parser rejects it (E0003).
-    current: "maybe: fn() -> Int? {{ None }}\ntyped: fn() -> Int IOError! {{ 1 }}\nunion: fn() -> Int (DbError | TimeoutError)! {{ 1 }}\nunit: fn() IOError! {{}}\ncontext: fn() -> Int IOError! {{ read()?(\"loading\") }}\nhandled: fn() -> Int IOError! {{ if value == {{ .Ok(ok) -> ok, .Err(failure) -> 0 }} }}\nif !ready -> print(\"ready\")\n"
+    // A call's `read()?` is the mark `#Policy(failures: .Explicit)` asks for:
+    // the parser takes it, and sema refuses it outside the policy.
+    current: "maybe: fn() -> Int? {{ None }}\ntyped: fn() -> Int IOError! {{ 1 }}\nunion: fn() -> Int (DbError | TimeoutError)! {{ 1 }}\nunit: fn() IOError! {{}}\ncontext: fn() -> Int IOError! {{ read()?(\"loading\") }}\nmarked: fn() -> Int IOError! {{ read()? }}\nhandled: fn() -> Int IOError! {{ if value == {{ .Ok(ok) -> ok, .Err(failure) -> 0 }} }}\nif !ready -> print(\"ready\")\n"
     assert_eq(s6_retirement_reviewed_hits(current).len(), 0)
-    snippets: [String]{"Int?", "[String]?", "-> Int IOError!", "Int (DbError | TimeoutError)!", "first: fn(flag: Bool) -> Int?", "empty: Int?{{None}}", "Apply? [y/N]", "/reconnect?cursor=<sequence>", "{{2,5}}?", "exact: fn() -> Decimal Never! {{ math.decimal(\\\"1.20\\\") }}"}
+    snippets: [String]{"Int?", "[String]?", "-> Int IOError!", "Int (DbError | TimeoutError)!", "first: fn(flag: Bool) -> Int?", "empty: Int?{{None}}", "Apply? [y/N]", "/reconnect?cursor=<sequence>", "{{2,5}}?", "exact: fn() -> Decimal Never! {{ math.decimal(\\\"1.20\\\") }}", "table.delete(key: K) -[DB.Read, DB.Write]> DBError!", "commit() -[DB]> DBError!"}
     loop snippet in snippets {
         assert(s6_retirement_reviewed_hits(snippet).len() == 0, "current failure syntax misread: {snippet}")
     }
@@ -356,19 +365,19 @@ s6_retirement_reviewed_detector_law: fn() {
         "infix_bang: fn() -> Int ! Error {{ 1 }}\n",
         "infix_question: fn() -> Int ? Error {{ 1 }}\n",
         "bare: fn() ! {{}}\n",
-        "propagated: fn() -> Int {{ read()? }}\n",
+        "propagated: fn() -> Int {{ items[0]? }}\n",
         "literal_propagation: fn() -> Bool {{ true? }}\n",
         "string_propagation: fn() -> String {{ \"value\"? }}\n",
-        "run: fn() {{ x: read()? }}\n",
+        "run: fn() {{ x: items[0]? }}\n",
         "T ! E",
-        "if load(path)? == {{",
+        "if items[0]? == {{",
     }
     loop source in retired {
         assert(s6_retirement_reviewed_hits(source).len() > 0, "retired failure syntax missed: {source}")
     }
     // An unrelated parse error leaves current lines current and retired lines retired.
     assert_eq(s6_retirement_reviewed_hits("ok: fn() -> Int? {{ None }}\nbroken: fn( {{\n").len(), 0)
-    assert(s6_retirement_reviewed_hits("ok: fn() -> Int? {{ None }}\nbad: fn() {{ x: read()? }}\nbroken: fn( {{\n").len() == 1, "a retired line beside an unrelated parse error is missed")
+    assert(s6_retirement_reviewed_hits("ok: fn() -> Int? {{ None }}\nbad: fn() {{ x: items[0]? }}\nbroken: fn( {{\n").len() == 1, "a retired line beside an unrelated parse error is missed")
 }
 
 s6_retirement_reviewed_fence: fn(line: String) -> S6RetirementReviewedFence? {

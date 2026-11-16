@@ -1,6 +1,10 @@
 #Error
 DomainError: struct {
     reason: String
+
+    impl From(SourceError) {
+        from: fn(error: SourceError) -> DomainError { return DomainError{reason: "converted"} }
+    }
 }
 
 #Error
@@ -42,10 +46,6 @@ implicit_failure: fn(fail: Bool) -> DomainError {
 nested_locally_handled: fn(fail: Bool) -> DomainError DomainError! {
     recovered := implicit_failure(fail) ?? DomainError{reason: "handled default"}
     return Err(recovered)
-}
-
-impl DomainError.From(SourceError) {
-    from: fn(error: SourceError) -> DomainError { return DomainError{reason: "converted"} }
 }
 
 declared_failure: fn(fail: Bool) -> DomainError SourceError! {

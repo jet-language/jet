@@ -6,26 +6,26 @@ Reuser: struct {
     region: mem.Region
     kept: [mem.Block]
     taken: Int
-}
 
-impl Reuser.mem.Allocator {
-    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
-        self.taken += 1
-        loop i in 0..<self.kept.len() {
-            if self.kept[i].size() >= size && self.kept[i].address() & align - 1 == 0 {
-                return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
+    impl mem.Allocator {
+        allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+            self.taken += 1
+            loop i in 0..<self.kept.len() {
+                if self.kept[i].size() >= size && self.kept[i].address() & align - 1 == 0 {
+                    return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
+                }
             }
+            block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Reuser"})
+            Ok(block)
         }
-        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Reuser"})
-        Ok(block)
-    }
 
-    release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
+        release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
 
-    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
-        if new_size <= 0 || new_size >= block.size() -> return false
-        self.kept.push(block.split(new_size))
-        true
+        resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+            if new_size <= 0 || new_size >= block.size() -> return false
+            self.kept.push(block.split(new_size))
+            true
+        }
     }
 }
 

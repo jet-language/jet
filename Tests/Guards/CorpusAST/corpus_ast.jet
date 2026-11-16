@@ -1377,6 +1377,8 @@ policy_has_anchored_regex_capture: fn(program: Program, aliases: [String:String]
     false
 }
 
+// A tagged field (`token: #Secret String`) has a storage codec but no wire
+// codec, so the structural derive leaves its type out and `#Codable` opts it in.
 policy_bare_structural_codable: fn(structure: StructDef) -> Bool {
     if structure.type_params.len() != 0 || structure.type_markers.len() != 1 || structure.is_published_schema {
         return false
@@ -1384,7 +1386,7 @@ policy_bare_structural_codable: fn(structure: StructDef) -> Bool {
     marker: structure.type_markers[0]
     if marker.name != "Codable" || marker.negated -> return false
     loop field in structure.fields {
-        if field.serde_markers.len() != 0 || field.computed != None || field.default != None {
+        if field.serde_markers.len() != 0 || field.computed != None || field.default != None || field.ty == .Tagged(_, _) {
             return false
         }
     }

@@ -7,26 +7,26 @@ use core.[mem, target]
 Stack: struct {
     region: mem.Region
     kept: [mem.Block]
-}
 
-impl Stack.mem.Allocator {
-    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
-        Ok(self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Stack"}))
+    impl mem.Allocator {
+        allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+            Ok(self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Stack"}))
+        }
+
+        release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
+
+        resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! { false }
     }
-
-    release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
-
-    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! { false }
 }
 
-Toy: struct {}
-
-impl Toy.target.Machine {
-    facts: target.MachineFacts{
-        triple: "toy-none-elf",
-        layout: target.MachineLayout{pointer_bits: 32, word_bits: 32, cache_line: 16, atomic_bits: 32},
-        allocator: None,
-        panic: None,
+Toy: struct {
+    impl target.Machine {
+        facts: target.MachineFacts{
+            triple: "toy-none-elf",
+            layout: target.MachineLayout{pointer_bits: 32, word_bits: 32, cache_line: 16, atomic_bits: 32},
+            allocator: None,
+            panic: None,
+        }
     }
 }
 
