@@ -11933,9 +11933,12 @@ sema_program_entry_script: fn(graph: SemaRegistrationGraph, statements: [SemaPro
 }
 
 // The entries `imports` and `items` declare in module row `row`, nested
-// modules included. The `run: fn` sema_script_entry generates, whose name is
-// zero-width at the first statement, is its file's top-level statements. A
-// `separate_entry` file's own top-level `run: fn` is not one of them.
+// modules included: a nested module's `run: fn` is either still in its body
+// or, once sema_inline_modules_lower has lifted it, a top-level function
+// whose lifted name reads back as `run`. The `run: fn` sema_script_entry
+// generates, whose name is zero-width at the first statement, is its file's
+// top-level statements. A `separate_entry` file's own top-level `run: fn` is
+// not one of them.
 sema_program_entry_sites: fn(row: Int, imports: [ImportDecl], items: [Item], statements: &[SemaProgramEntrySite], runs: &[SemaProgramEntrySite], separate_entry: Bool) Never! {
     loop declaration in imports {
         loop binding in import_walk_bindings(declaration) {
@@ -11948,7 +11951,7 @@ sema_program_entry_sites: fn(row: Int, imports: [ImportDecl], items: [Item], sta
         if item == .CodeModule(definition) && definition.body == .Val(body) {
             sema_program_entry_sites(row, definition.imports, body, statements, runs, separate_entry: false)
         }
-        if item == .Func(function) && function.name == "run" && function.external_type == None && !separate_entry {
+        if item == .Func(function) && function.external_type == None && ((function.name == "run" && !separate_entry) || (function.name != "run" && sema_inline_member_source_name(function.name) == "run")) {
             generated: function.name_span.start == function.name_span.end
             site: SemaProgramEntrySite{row: row, span: if generated -> function.span else -> function.name_span, kind: if generated -> "top-level statements" else -> "`run: fn`"}
             if generated -> statements.push(site) else -> runs.push(site)
