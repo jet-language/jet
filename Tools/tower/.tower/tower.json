@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108503,
+    "rev": 108506,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -103324,12 +103324,12 @@
         },
         {
           "n": 42,
-          "text": "A lent result through dynamic dispatch keeps its loan and is not silently copied. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the result lives is E0212, as the same loan on a struct method already is (probe w03d). Today it compiles with no E0212, and the result is a hidden copy: it reads 41 after the stored Point was bumped to 141, the IR of Point.point allocates and copies, and jet audit reports no copy (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probes y01_trait_loan_then_mutate.jet (with its .ir.out), y01d and y02 in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes; earlier w03b/w03c in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of the E0212 on the trait-dispatch form, a cases row of the legal use reading through the loan with no copy (jet audit shows none), and a sweep of every dyn-dispatch call site carrying a from-self return.",
+          "text": "A lent result through dynamic dispatch keeps its loan and is not silently copied. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while the result lives is E0212, as the same loan on a struct method already is (probe w03d). p208 compiled it with no E0212; since p210 (c1fca7426c) w03b, w03c and y01 are E0212 on every tier, so the check half holds. The result is still a hidden copy: it reads 41 after the stored Point was bumped to 141, the IR of Point.point allocates and copies, and jet audit reports no copy (p208, O0/O1/O2 alike; D-PRIM-ANY1 review 6, probes y01_trait_loan_then_mutate.jet (with its .ir.out), y01d and y02 in $JET_SCRATCH_ROOT/lanes/AnyReview6/probes; earlier w03b/w03c in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes). Proof: a UI snapshot of the E0212 on the trait-dispatch form, a cases row of the legal use reading through the loan with no copy (jet audit shows none), and a sweep of every dyn-dispatch call site carrying a from-self return.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T06:26:26.394Z"
+          "at": "2026-11-16T08:24:49.467Z"
         },
         {
           "n": 43,
@@ -103396,12 +103396,12 @@
         },
         {
           "n": 50,
-          "text": "A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2055-2056: captures keep the view fact). Today the lambda form lets the owner move with no error (p209; D-PRIM-ANY1 review 8, probe a01 against a01b in $JET_SCRATCH_ROOT/lanes/AnyReview8/probes). Safe today only because the view is a copy; once #6839 c46 lowers views to pointers this reads freed memory. Proof: a UI snapshot of the refusal and a cases row of the legal capture. Also stored and returned lambdas that capture a view outlive the owner's move today (review 9, probes e02 and e03 in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Stored lambdas clone their captures, so either the capture stays a loan with E0212 on the owner's move, or the clone is a written, audited copy.",
+          "text": "A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2058-2059 (at dev 7f902dd915): captures keep the view fact). Today the lambda form lets the owner move with no error (p209; D-PRIM-ANY1 review 8, probe a01 against a01b in $JET_SCRATCH_ROOT/lanes/AnyReview8/probes). Safe today only because the view is a copy; once #6839 c46 lowers views to pointers this reads freed memory. Proof: a UI snapshot of the refusal and a cases row of the legal capture. Also stored and returned lambdas that capture a view outlive the owner's move today (review 9, probes e02 and e03 in $JET_SCRATCH_ROOT/lanes/AnyReview9/probes). Stored lambdas clone their captures, so the capture stays a loan: moving or rewriting the owner while the lambda lives is E0212 (D-PRIM-ANY1 ballot ¶48 at round 10: every holder keeps the owner borrowed).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T07:40:13.965Z"
+          "at": "2026-11-16T08:24:43.919Z"
         },
         {
           "n": 51,
@@ -103450,12 +103450,12 @@
         },
         {
           "n": 56,
-          "text": "A from result or an arm binding chosen by a value-producing if or table keeps its owner borrowed: with got: pick(item), w: if flag -> got else -> None (h06), the call itself in a branch, w: if flag -> pick(item) else -> None (h09), the same view in both branches (h08), a table's value (h10) or an arm binding (h11), moving or rewriting the owner while w lives is E0212, as it is for a second local (h01) or a relay through a from function (h03). Today each compiles, the move prints the old value, and rewriting the owner leaves w reading 41 (h12). spec.md:2054-2055 keeps invalidation through control-flow joins and 2065-2066 unions branch sources (dev a1c3325a65). Safe today only because views are copies; #6839 c46 must not lower views to pointers until this holds (p209 and p210, O0/O1/O2 alike; D-PRIM-ANY1 review 10, probes in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes). Proof: a UI snapshot per form and a cases row of the legal use.",
+          "text": "A from result or an arm binding chosen by a value-producing if or table keeps its owner borrowed: with got: pick(item), w: if flag -> got else -> None (h06), the call itself in a branch, w: if flag -> pick(item) else -> None (h09), the same view in both branches (h08), a table's value (h10) or an arm binding (h11), moving or rewriting the owner while w lives is E0212, as it is for a second local (h01) or a relay through a from function (h03). Today each compiles, the move prints the old value, and rewriting the owner leaves w reading 41 (h12). spec.md:2057-2058 keeps invalidation through control-flow joins and 2068-2069 unions branch sources (dev 7f902dd915). Safe today only because views are copies; #6839 c46 must not lower views to pointers until this holds (p209 and p210, O0/O1/O2 alike; D-PRIM-ANY1 review 10, probes in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes). Proof: a UI snapshot per form and a cases row of the legal use.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T08:07:54.640Z"
+          "at": "2026-11-16T08:24:46.613Z"
         },
         {
           "n": 57,
@@ -103475,7 +103475,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-16T08:08:01.044Z",
+      "updated": "2026-11-16T08:24:49.467Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -221023,6 +221023,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T08:24:49.467Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#42: p210 landed the check half (D-PRIM-ANY1 review 10); was: A lent result through dynamic dispatch keeps its loan and is not silently copied. With a trait method point: fn(self) -> Point? from self called on a [Shown] element, moving or mutating the list while"
+    },
+    {
+      "at": "2026-11-16T08:24:46.613Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#56: Spec cites at 7f902dd915; was: A from result or an arm binding chosen by a value-producing if or table keeps its owner borrowed: with got: pick(item), w: if flag -> got else -> None (h06), the call itself in a branch, w: if flag ->"
+    },
+    {
+      "at": "2026-11-16T08:24:43.919Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#50: Spec cites at 7f902dd915; the copy alternative dropped to match the ballot's every-holder rule (D-PRIM-ANY1 round 10); was: A from view captured by a lambda keeps its loan: moving or writing the owner while the lambda that holds the view lives is E0212, as it is without the lambda (spec.md:2055-2056: captures keep the view"
+    },
     {
       "at": "2026-11-16T08:17:59.852Z",
       "by": "Main",
