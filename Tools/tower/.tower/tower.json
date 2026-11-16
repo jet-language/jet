@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6980,
-    "rev": 108481,
+    "rev": 108492,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27300,6 +27300,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "p210 landed n15 step 1 (cecfbab8c7): CoreEnumCases --check passes on the gate tree (174 lists from Core sources, 15 compiler-owned). c5's template cutover (ccf4ad95e7) regressed every enum with payload cases (generated right_<Case>_value bindings are E0107) and its own golden reflect/enum_cases_template fails (Signal.Paint.Stroke, E0119); GoalsA-1-4 is fixing it. c5 stays open."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "n15 shape (Main): the built-in enum case lists come from one table generated from the Core/*.jet enum declarations (a Jet generator with --write and --check that the lane check runs, committed with its sources), not from loading the declaring Core modules into every program. Compile speed ranks first, and the generated table is neither handwritten nor a second source. Sema, menus and IR read it; core_enum_variants is removed; the sourceless leaves and payload families join it as they become real Core enums."
         },
         {
@@ -27420,11 +27425,11 @@
         {
           "n": 14,
           "text": "`T.reflect().path` and a run-time `value.path` read the canonical path from the name ledger (D-NAME-REFLECT1=A) instead of concatenating module path and name (Reflection.jet today); `.name` stays the leaf; diagnostics use the leaf when it is unique and the path when ambiguous, and hover, project output and JSON use the same spelling. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectPaths`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:58.507Z"
+          "evidence": "`jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectPaths`: 3 rows (O0, O1, O2), 0 failed. Leaf-unless-ambiguous diagnostics: ui type_names_leaf_unless_ambiguous passes. Hover and JSON: cases lsp_hover_and_json_spell_an_inline_module_type_by_its_path passes. Project output: cases cli_parts_core 11 pass, and the other 5 are older known-failing budget and lua rows. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:13.343Z"
         },
         {
           "n": 15,
@@ -27516,7 +27521,7 @@
       "parentId": "c0apk7x9",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:55.371Z",
-      "updated": "2026-11-16T07:11:34.280Z",
+      "updated": "2026-11-16T08:01:19.161Z",
       "updatedBy": "Main",
       "workOrder": 171,
       "goals": [
@@ -101920,38 +101925,38 @@
         {
           "n": 1,
           "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:32.396Z"
+          "evidence": "`jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`: 1 row, 0 failed; also web_app/enqueued_job_runs_with_its_arguments passes. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:14.307Z"
         },
         {
           "n": 2,
           "text": "#App.Every(cron:) runs on one server at a time across replicas (a lease in the database) and a missed tick runs once at start-up. Proof: `jet test Compiler --profile cases --filter web_app/schedule_runs_once_across_replicas`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:09.468Z"
+          "evidence": "`jet test Compiler --profile cases --filter web_app/schedule_runs_once_across_replicas`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:15.281Z"
         },
         {
           "n": 3,
           "text": "Jobs and schedules are server-only: a client call to one is a compile error, and app.endpoints<Crew>() does not list them. Proof: `jet test Compiler --profile cases --filter web_app/job_is_not_an_endpoint`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:10.497Z"
+          "evidence": "`jet test Compiler --profile cases --filter web_app/job_is_not_an_endpoint`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:16.275Z"
         },
         {
           "n": 4,
           "text": "Jobs, schedules and webhooks run their queries as db.Who.System, and `jet inspect choices` lists each. Proof: `jet test Compiler --profile cases --filter web_app/system_runs_are_listed_by_inspect_choices`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T17:08:11.519Z"
+          "evidence": "`jet test Compiler --profile cases --filter web_app/system_runs_are_listed_by_inspect_choices`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:17.251Z"
         },
         {
           "n": 5,
@@ -102016,7 +102021,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-16T07:12:39.216Z",
+      "updated": "2026-11-16T08:01:17.251Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -104602,6 +104607,11 @@
         {
           "at": "2026-11-16",
           "by": "Main",
+          "text": "c16 (a) landed in p210 (7f6c05586e, 7f902dd915): by hand on the p210 gate tree, JET=<p210 jet> JETPACK_TEST_REPO_ROOT=<tree> jet test Jetpack/EnvModel/Tests/ModuleValueParity.jet passes 158 of 158. c16 stays open for (b): b1 is queued for p211, then b2-b7."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
           "text": "p209: c10 (06c5d8b172) ICEs: comptime_record_of_function_values exits 101 (ir.build unlowered: named function main.jet::double outside the checked program). PrecompiledCore-4 owns the fix (SUB PrecompiledCore-4-g6-c10-fix); c10 stays open."
         },
         {
@@ -104624,20 +104634,20 @@
         {
           "n": 1,
           "text": "Run-time-only reflection, unsupported holes, unsafe raw use, an unknown DSL owner or type and mutable observations each fail at compile time with their registered diagnostic, and compile-time and run-time results agree: every comptime_diff case passes with none marked known-failing. Proof: `jet test Compiler --profile cases --filter comptime_diff`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:42.975Z"
+          "evidence": "`jet test Compiler --profile cases --filter comptime_diff`: 164 rows, 0 failed, none known-failing. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:09.284Z"
         },
         {
           "n": 2,
           "text": "Self-cycles, longer cycles, missing or impure dependencies, invalid values and consumer disagreement among compile-time values each report the registered diagnostic at the owning source span, with UI snapshots. Proof: `jet test Compiler --profile ui --filter comptime_dependency_`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:42.975Z"
+          "evidence": "`jet test Compiler --profile ui --filter comptime_dependency_`: 9 rows, 0 failed (including comptime_dependency_handle_value, E1018). p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:10.316Z"
         },
         {
           "n": 3,
@@ -104678,11 +104688,11 @@
         {
           "n": 7,
           "text": "`#run`, `#if`, `#loop` and `#run fn` never fall back silently to run time, never claim false purity and never execute a generated body before it is checked. Proof: `jet test Compiler --profile cases --filter comptime_no_silent_fallback`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:42.975Z"
+          "evidence": "`jet test Compiler --profile cases --filter comptime_no_silent_fallback`: 4 rows, 0 failed; ui comptime_no_silent_fallback_run_fn_call (E1019) passes; goldens Metaprogramming/Comptime/PrepFn and tests/run/Foundations/Exact pass on O0, O1 and O2. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:11.340Z"
         },
         {
           "n": 8,
@@ -104705,11 +104715,11 @@
         {
           "n": 10,
           "text": "A compile-time record collection holding named function values registers and evaluates: a `#run` total over `[Op]`, where `Op: struct { name: String, f: fn(Int) -> Int }` holds two named functions, folds and calls each one with no E0107 (checked by a scratch probe on 2026-10-31; no repository case pins it yet). Proof: `jet test Compiler --profile cases --filter comptime_record_of_function_values`",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:18:20.433Z"
+          "evidence": "`jet test Compiler --profile cases --filter comptime_record_of_function_values`: 1 row, 0 failed. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T08:01:12.358Z"
         },
         {
           "n": 11,
@@ -104778,7 +104788,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:42.975Z",
-      "updated": "2026-11-16T07:12:48.421Z",
+      "updated": "2026-11-16T08:01:18.197Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -220967,6 +220977,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-16T08:01:19.161Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7t4qu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T08:01:18.197Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07ywjvi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-16T08:01:17.251Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-16T08:01:16.275Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-16T08:01:15.281Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T08:01:14.307Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0se7lpr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-16T08:01:13.343Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w7t4qu",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-16T08:01:12.358Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-16T08:01:11.340Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-16T08:01:10.316Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-16T08:01:09.284Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07ywjvi",
+      "note": "#1"
+    },
     {
       "at": "2026-11-16T07:58:34.533Z",
       "by": "Main",
