@@ -1,10 +1,12 @@
 // Compiler fact planes are written here. A plane is a field-less struct that
-// implements `Fact`: the compiler tracks it, and no value of it exists.
+// implements `Fact` (Core/Prelude/Prelude.jet): the compiler tracks it, and
+// no value of it exists. Value, scope and build planes share this one form.
 //
-// Each plane's `impl Fact` block names what it holds, its safe direction,
-// and every word that can move the fact away from safety (`gates`). Prover
-// planes name their publisher (`proved_by`) and still carry the same law
-// columns.
+// Each plane's `impl Fact` block gives the trait's constants: what the fact
+// attaches to (`holds`), its safe direction (`safe`), and every escape that
+// can move it the other way (`gates`, `Gate` values). Prover planes name
+// their publisher (`proved_by`) and still carry the same law constants. The
+// registry rows (JetFoundation RegistrationFacts.jet) are read from this text.
 
 // Compiler type planes are ordinary readable Prelude planes. `name` gives the
 // plane its dotted compiler namespace; `identity` states whether the plane
@@ -93,7 +95,7 @@ Exactness: struct {
     impl Fact {
         holds: .Value
         safe: .Gain
-        gates: [approx, rounded, raw, wrapping, saturating, checked]
+        gates: [.Approx, .Rounded, .Raw, .Wrapping, .Saturating, .Checked]
     }
 }
 
@@ -109,7 +111,7 @@ Taint: struct {
     impl Fact {
         holds: .Value
         safe: .Gain
-        gates: [Scrub]
+        gates: [.Marker(Scrub)]
     }
 }
 
@@ -117,7 +119,7 @@ Duty: struct {
     impl Fact {
         holds: .Value
         safe: .Discharge
-        gates: [detach, drop]
+        gates: [.Detach, .Drop]
     }
 }
 
@@ -125,7 +127,7 @@ Rights: struct {
     impl Fact {
         holds: .Scope
         safe: .Shrink
-        gates: [Unsafe, Impure, Grant]
+        gates: [.Marker(Unsafe), .Marker(Impure), .Grant]
     }
 }
 
@@ -133,7 +135,7 @@ PackagePolicy: struct {
     impl Fact {
         holds: .Scope
         safe: .Shrink
-        gates: [Unsafe, Grant]
+        gates: [.Marker(Unsafe), .Grant]
     }
 }
 
@@ -178,7 +180,7 @@ BuildSettings: struct {
         name: "Build.Settings"
         holds: .Build
         safe: .Shrink
-        gates: [Force]
+        gates: [.Force]
     }
 }
 
@@ -246,34 +248,34 @@ States: struct {
 Sendability: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
-        proved_by: ownership
+        proved_by: "ownership"
     }
 }
 
 ViewProvenance: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
-        proved_by: ownership
+        proved_by: "ownership"
     }
 }
 
 Movedness: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
-        proved_by: ownership
+        proved_by: "ownership"
     }
 }
 
 Attribution: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
     }
 }
@@ -281,7 +283,7 @@ Attribution: struct {
 Origin: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
     }
 }
@@ -289,7 +291,7 @@ Origin: struct {
 UnitScaleProvenance: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
     }
 }
@@ -297,7 +299,7 @@ UnitScaleProvenance: struct {
 Maturity: struct {
     impl Fact {
         holds: .Value
-        safe: .None
+        safe: .ReadOnly
         gates: []
     }
 }
@@ -311,7 +313,7 @@ StructureLiveness: struct {
         name: "Structure.Liveness"
         holds: .Build
         safe: .Gain
-        gates: ["_name"]
+        gates: [.UnderscoreName]
     }
 }
 
@@ -320,7 +322,7 @@ StructureLifecycle: struct {
         name: "Structure.Lifecycle"
         holds: .Build
         safe: .Shrink
-        gates: ["policy allow"]
+        gates: [.PolicyAllow]
     }
 }
 
@@ -329,7 +331,7 @@ StructureImportEdge: struct {
         name: "Structure.ImportEdge"
         holds: .Build
         safe: .Shrink
-        gates: ["manifest rule edit"]
+        gates: [.ManifestRuleEdit]
     }
 }
 
@@ -342,7 +344,7 @@ TargetAllocator: struct {
         name: "Target.Allocator"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -351,7 +353,7 @@ TargetMemory: struct {
         name: "Target.Memory"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -360,7 +362,7 @@ TargetAtomic64: struct {
         name: "Target.Atomic64"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -369,7 +371,7 @@ TargetMmio: struct {
         name: "Target.MMIO"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest, Unsafe]
+        gates: [.Provider, .Digest, .Marker(Unsafe)]
     }
 }
 
@@ -378,7 +380,7 @@ TargetHardware: struct {
         name: "Target.Hardware"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -387,7 +389,7 @@ TargetTimeWall: struct {
         name: "Time.Wall"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -396,7 +398,7 @@ TargetTimeMonotonic: struct {
         name: "Time.Monotonic"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -405,7 +407,7 @@ TargetTimeZoneData: struct {
         name: "Time.ZoneData"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -414,7 +416,7 @@ TargetTimeSleep: struct {
         name: "Time.Sleep"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -423,7 +425,7 @@ TargetEntropy: struct {
         name: "Rand.Entropy"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -432,7 +434,7 @@ TargetScheduler: struct {
         name: "Target.Scheduler"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -441,7 +443,7 @@ TargetIoRead: struct {
         name: "IO.Read"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -450,7 +452,7 @@ TargetIoWrite: struct {
         name: "IO.Write"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -459,7 +461,7 @@ TargetPanic: struct {
         name: "Target.Panic"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -468,7 +470,7 @@ TargetPanicReport: struct {
         name: "Panic.Report"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }
 
@@ -477,6 +479,6 @@ TargetStartup: struct {
         name: "Target.Startup"
         holds: .Build
         safe: .Gain
-        gates: [provider, digest]
+        gates: [.Provider, .Digest]
     }
 }

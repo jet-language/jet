@@ -906,6 +906,28 @@ view provenance, and maturity facts; consumers must use the registered fact
 record rather than infer a fact from a string. `fact_reads.jet` and
 `reflect-value.jet` are executable examples of those member names.
 
+A compiler fact plane is a field-less struct implementing the Prelude trait
+`Fact`, written in `Compiler/Prelude/Facts.jet`; no `fact` word exists. The
+plane's laws are the trait's constants: `holds` says what it attaches to
+(`FactTarget.Value`, `.Scope` or `.Build`, one form for all three), `safe`
+is the one direction it may move unaided (`FactDirection`), and `gates` lists
+the escapes that move it the other way as `Gate` values: one case per escape
+word, such as `.Approx` or `.PolicyAllow`, and `.Marker(Unsafe)` for an
+escape written as a marker. `name` gives a dotted registry name,
+`identity` marks a fact that is part of a type's identity, and `proved_by`
+names the read-only prover that publishes it. The compiler's fact registry is
+read from that file while the compiler builds.
+
+```jet
+Taint: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: [.Marker(Scrub)]
+    }
+}
+```
+
 ## The metadata contract
 
 The owner-controlled lexical ledger names these ratified fact roots

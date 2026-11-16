@@ -391,6 +391,65 @@ MarkerScope: enum {
     Block
 }
 
+// A compiler fact plane is a field-less struct that implements Fact: the
+// compiler tracks the fact, and no value of the struct exists. One form
+// serves value, scope and build facts; `holds` says which. The constants are
+// the plane's laws, each a value known while compiling, and only Jet's own
+// Prelude declares planes.
+Fact: trait {
+    // The plane's dotted compiler name. None: the struct's name.
+    name: String?{None}
+    // What the fact attaches to.
+    holds: FactTarget
+    // The way the fact may move without a gate.
+    safe: FactDirection
+    // Every escape that may move the fact the other way.
+    gates: [Gate]{[]}
+    // Whether the plane contributes to carrier identity.
+    identity: Bool{false}
+    // The prover that publishes the plane read-only. None: the checker.
+    proved_by: String?{None}
+}
+
+// What a fact attaches to: a value, a scope, or the build.
+FactTarget: enum {
+    Value
+    Scope
+    Build
+}
+
+// The way a fact may move without a gate: it may only be gained, only
+// shrink, or only be discharged, or it is read-only and never moves.
+FactDirection: enum {
+    Gain
+    Shrink
+    Discharge
+    ReadOnly
+}
+
+// An escape that moves a fact away from its safe direction: one case per
+// escape word (`approx`, `_name`, `policy allow`, the `grant:` of `#FX`, a
+// forced build setting, …), and `.Marker(Unsafe)` for an escape written as a
+// marker, whose type must be a marker.
+Gate: enum {
+    Approx
+    Rounded
+    Raw
+    Wrapping
+    Saturating
+    Checked
+    Detach
+    Drop
+    Provider
+    Digest
+    UnderscoreName
+    PolicyAllow
+    ManifestRuleEdit
+    Grant
+    Force
+    Marker(Type)
+}
+
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.

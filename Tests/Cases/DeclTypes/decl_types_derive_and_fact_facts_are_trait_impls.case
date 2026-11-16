@@ -1,0 +1,33 @@
+# A compiler fact plane is a field-less struct implementing the Prelude trait
+# `Fact`, and its laws are the trait's constants: `holds` (a FactTarget),
+# `safe` (a FactDirection) and `gates`, a list of Prelude `Gate` values, with
+# `.Marker(Unsafe)` for an escape written as a marker. Compiler/Prelude/Facts.jet
+# declares the value, scope and build planes in that one form, and the fact
+# registry `jet explain` reads is built from that file. The old
+# `fact Name(…)` declaration fails to parse like any unknown word.
+fixture: DeclTypesDeriveAndFactFactsAreTraitImpls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step value: jet explain Taint
+exit: 0
+stdout: ~ "attaches to a value." # holds: .Value
+stdout: ~ "tighten silently in the `gain` direction" # safe: .Gain
+stdout: ~ "to loosen it, write one of: Scrub" # gates: [.Marker(Scrub)]
+step scope: jet explain Rights
+exit: 0
+stdout: ~ "attaches to a scope." # holds: .Scope
+stdout: ~ "tighten silently in the `shrink` direction" # safe: .Shrink
+stdout: ~ "to loosen it, write one of: Unsafe, Impure, Grant" # two marker gates and a word gate
+step build: jet explain Target.MMIO
+exit: 0
+stdout: ~ "attaches to the build." # holds: .Build
+stdout: ~ "to loosen it, write one of: provider, digest, Unsafe" # word gates before a marker gate
+step prover: jet explain Sendability
+exit: 0
+stdout: ~ "the ownership prover publishes this row" # proved_by: "ownership"
+stdout: ~ "states no safe direction" # safe: .ReadOnly
+step word: jet check word/main.jet
+exit: 1
+stderr: ~ "`fact` is not a Jet word" # the declaration word is gone
+stderr: ~ "jet-lang.dev/e/E0003" # the ordinary parse code
+stderr: !~ "impl Fact" # no teaching diagnostic names the new form
