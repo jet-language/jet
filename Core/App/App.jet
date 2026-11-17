@@ -40,6 +40,7 @@ use {
     net: core.net
     core.net.[UnixListener, UnixStream]
     builtin: jet_builtins
+    core.ui.[UINode]
 }
 
 SYNC_MAX_SESSION: 256
@@ -4029,6 +4030,19 @@ priv app_open_folder_linux: fn() -[Env, FS.Read, Net, Time]> PickedFolder? Never
 priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
     __keep_notice(Notice{text: "Couldn't open a folder: {why}"})
     None
+}
+
+// `body`, taking the files a person drops on it: each one of a kind in
+// `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
+// with shows beside `body`, as a button's does. A native target delivers
+// drops through the window that shows `body`, and no native target shows
+// an app's `UINode` screens in a window yet, so each keeps a notice that
+// says so and gives `body` back as it is. A page's drop gives the browser's
+// File handles, which the page runtime can't give the app yet, so a call in
+// code whose target is the web output is a compile error.
+drop_files: fn(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode {
+    __keep_notice(Notice{text: "Couldn't take dropped files: this system's drop target is not built yet"})
+    body.copy()
 }
 
 // Asks the person where to save a file and writes `bytes` there, all at

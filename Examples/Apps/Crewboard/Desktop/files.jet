@@ -1,12 +1,15 @@
 // The desktop app's import: the person picks a CSV file in the system's
-// open dialog, and its rows become tasks in one call, so either every row
-// becomes a task or none does. A browser's file chooser answers after the
-// page's code has returned, so a web build of this file is a compile error
-// at `app.open_file`; the web app takes files through an upload instead.
+// open dialog, or drops CSV files on the board, and the rows of each file
+// become tasks in one call, so either every row becomes a task or none
+// does. A browser's file chooser answers after the page's code has
+// returned, and a page's drop gives the browser's own file handles, so a
+// web build of this file is a compile error at `app.open_file` and
+// `app.drop_files`; the web app takes files through an upload instead.
 use {
     app
     csv: core.encoding.csv
     logic
+    ui: core.ui
 }
 
 #Codable
@@ -45,6 +48,21 @@ import_tasks: fn(crew: app.Remote<logic.Crew>, project: String) -[Env, FS.Read, 
 import_file: fn(crew: app.Remote<logic.Crew>, project: String, file: app.PickedFile) -[FS.Read, Net, Time]> Int ImportError! {
     text: file.text() ?? return Err(ImportError.Unreadable(file.name.copy()))
     import_text(crew, project, text)
+}
+
+// The board, taking the CSV files the person drops on it from the file
+// manager: the rows of each become tasks, in order. A file that fails
+// stops there and shows its notice by the board.
+drop_csv: fn(crew: app.Remote<logic.Crew>, project: String, board: ui.UINode) -> ui.UINode {
+    app.drop_files(
+        board,
+        types: [app.FileType]{app.FileType.CSV},
+        on_drop: fn(dropped: [app.PickedFile]) {
+            loop file in dropped {
+                import_file(crew.copy(), project, file) ?? return Err(import_notice(err))
+            }
+        },
+    )
 }
 
 // Adds the rows of the CSV text `text`, with title and notes columns, to
