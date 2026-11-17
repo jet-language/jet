@@ -1137,8 +1137,8 @@ sema_marker_rules_check_stage_hook: fn(func: Func, marker: Marker, diagnostics: 
 
 // A moment hook names a row of COMPILER_EVENTS (`compiler.settled`), takes
 // the one payload that row's `compiler.Event` variant carries, and returns
-// the row's answer when it has one: a `build.link` hook returns the
-// `BuildAction` that links the output (E0930).
+// the row's answer when it has one: a `build.link` or `build.before_write`
+// hook returns the `BuildAction` Jet runs at that moment (E0930).
 sema_marker_rules_check_moment_hook: fn(func: Func, marker: Marker, moment: String, diagnostics: &[Diagnostic]) -> Bool {
     payload := ""
     answer := ""
@@ -1162,7 +1162,7 @@ sema_marker_rules_check_moment_hook: fn(func: Func, marker: Marker, moment: Stri
     if answer == "" -> return true
     returned: if func.return_type == .Val(ty) -> sema_marker_rules_unqualified_type(type_name(ty)) else -> ""
     if returned != answer {
-        diagnostics.push(sema_error("E0930", func.name_span, "a `{moment}` hook returns a `build.{answer}`", "Jet runs the step the hook returns in place of its own at that moment", "declare `{func.name}: fn(value: compiler.{payload}) -> build.{answer}`"))
+        diagnostics.push(sema_error("E0930", func.name_span, "a `{moment}` hook returns a `build.{answer}`", "Jet runs the step the hook returns at that moment", "declare `{func.name}: fn(value: compiler.{payload}) -> build.{answer}`"))
         return false
     }
     true

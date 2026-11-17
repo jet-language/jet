@@ -565,7 +565,10 @@ false when the compiler checked only part of the declaration. `LinkInputs.defaul
 is the step Jet's own link is, a core.build `BuildAction` with no command
 that reads the objects and libraries and makes the output; a `build.link`
 hook returns it, or another `BuildAction` that links the output (`jet build`
-runs it, spec "Output places, link inputs and targets"). In its JSON form a
+runs it, spec "Output places, link inputs and targets"). A
+`build.before_write` hook returns the `BuildAction` whose command turns the
+file at the `Artifact`'s `path` into the one at its `next`; `jet build` runs
+one for each `post_link` step. In its JSON form a
 `BuildAction`'s `allow` lists effect names (`["Exec"]`). In `jet build
 --json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as

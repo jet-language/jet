@@ -6096,8 +6096,22 @@ Example:
 [`Tests/Cases/BuildEntry/custom_link_step.case`](../../Tests/Cases/BuildEntry/custom_link_step.case).
 `jet run`, `jet test` and `jet dev` link their image in memory, and a web
 build writes a WebAssembly module, so each refuses a link hook with E2104.
-No command runs `post_link` steps yet, so every command refuses one with
-E2104.
+
+After the link, `jet build` runs each `post_link` step on the executable, in
+order, on every build. It moves the linked file to
+`.jet/build/link/<name>/post_link/<name>.0` and calls each hook on a
+core.compiler `Artifact` whose `output` is the executable's name, `path` the
+file before the step and `next` the file the step writes: the next
+`<name>.<n>` in that folder, and the executable itself for the last step.
+Each hook returns a `build.BuildAction` with a command, which runs as a link
+step's does: it reads `path`, must list `next` in its outputs, and uses the
+effects in `allow`, which the package, its workspace or `--allow` must
+grant. A hook path no function marked `#On(build.before_write)` declares, a
+hook that doesn't check, an action with no command, and a step that fails
+or writes no file are E3506, naming the executable and where `post_link` was
+written, and leave no executable. Example:
+[`Tests/Cases/BuildEntry/post_link_step_signs_artifact.case`](../../Tests/Cases/BuildEntry/post_link_step_signs_artifact.case).
+Every other command, and a web build, refuses a post-link step with E2104.
 
 ### Language server
 

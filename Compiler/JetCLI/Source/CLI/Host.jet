@@ -2058,8 +2058,9 @@ JetCLIBuilt: enum {
 // route (one route at every profile), and write it to the output directory
 // (jet_cli_output_dir_path) unless `command` is `run`, which runs the image
 // from memory. `name` is the file stem, or a build target's name. A link
-// step writes the image it links itself (jet_cli_link_step), with the
-// effects `invocation` grants.
+// step writes the image it links itself (jet_cli_link_step), and the
+// `post_link` steps then turn it into the executable written
+// (jet_cli_post_link_steps), with the effects `invocation` grants.
 jet_cli_build_binary: fn(file: String, name: String, command: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, invocation: JetCLIInvocationAuthority?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) {
         return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
@@ -2091,7 +2092,8 @@ jet_cli_build_binary: fn(file: String, name: String, command: String, color: Boo
             return JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
         }
     }
-    built
+    if built == .Failed(_) || build_options_value(options, "post_link") == "" -> return built
+    jet_cli_post_link_steps(file, options, result, snapshot, binary, invocation, color)
 }
 
 // The source root's `.jet/build` directory, where builds and runs that can't

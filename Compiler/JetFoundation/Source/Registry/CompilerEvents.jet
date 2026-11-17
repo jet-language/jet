@@ -10,7 +10,8 @@
 // One moment: its dotted name (`compiler.settled`), its `Event` variant, the
 // payload struct the variant carries, and what its hook returns: "" for
 // nothing, else the Core type whose value Jet acts on (`build.link`'s
-// `BuildAction`, the step that links the output).
+// `BuildAction`, the step that links the output; `build.before_write`'s,
+// the step that turns the linked file into the one written).
 CompilerEvent: struct {
     name: String,
     variant: String,
@@ -71,7 +72,7 @@ COMPILER_EVENTS: [CompilerEvent]{
     CompilerEvent{name: COMPILER_EVENT_BUILD_PLANNED, variant: "Planned", payload: "Plan"},
     CompilerEvent{name: COMPILER_EVENT_BUILD_ASSET, variant: "Asset", payload: "Asset"},
     CompilerEvent{name: COMPILER_EVENT_BUILD_LINK, variant: "Link", payload: "LinkInputs", answer: "BuildAction"},
-    CompilerEvent{name: COMPILER_EVENT_BUILD_BEFORE_WRITE, variant: "BeforeWrite", payload: "Artifact"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_BEFORE_WRITE, variant: "BeforeWrite", payload: "Artifact", answer: "BuildAction"},
     CompilerEvent{name: COMPILER_EVENT_BUILD_AFTER_WRITE, variant: "AfterWrite", payload: "Artifact"},
 }
 

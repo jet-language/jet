@@ -131,8 +131,9 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     {name: "link", kind: BuildOptionKind.Hook, values: [String]{"default"}, stock_build: "default", stock_run: "default", removes_check: [String]{}, help: "The link step of each executable: default, or a link hook such as tools.relink"},
     // The steps `jet build` runs on each linked executable, in order: each
     // names a `#On(build.before_write)` function whose build action turns the
-    // linked file into the one written. It runs none yet, so a non-empty
-    // value is refused (E2104).
+    // linked file into the one written. A run, a test and `jet dev` keep
+    // their image in memory, and a web build writes no linked executable, so
+    // each refuses a step (E2104).
     {name: "post_link", kind: BuildOptionKind.Hooks, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The hooks run on each linked executable, in order, such as tools.sign"},
 } }
 
@@ -873,9 +874,14 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
     if values[link].value != BUILD_OPTION_HOOK_DEFAULT && os.value == "web" {
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and a web build writes a WebAssembly module, which no native link step makes", fix: "drop it, or build for a native target"}
     }
+    // A post-link step turns the executable a native `jet build` linked into
+    // the one it writes; no other command or target writes one.
     post_link: build_option_index("post_link")
-    if values[post_link].value != "" {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and `jet {command}` runs none: it writes the image it links", fix: "drop it"}
+    if values[post_link].value != "" && command != "build" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and `jet {command}` writes none: only `jet build` runs them", fix: "drop it, or use `jet build`"}
+    }
+    if values[post_link].value != "" && os.value == "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and a web build writes a WebAssembly module, not a linked executable", fix: "drop it, or build for a native target"}
     }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
 }
@@ -942,12 +948,18 @@ BUILD_REUSE_SAVED_WORK: false
         .Resolved(given, _) -> {
             assert_eq(given.written.len(), 1)
             assert_eq(given.written[0].value, hooks)
-            if build_options_resolve("build", "", given.written) == {
-                .Resolved(_, _) -> { panic("`jet build` took a post_link hook it doesn't run") }
+            if build_options_resolve("run", "", given.written) == {
+                .Resolved(_, _) -> { panic("`jet run` took a post_link hook") }
                 .Refused(code, what, _) -> {
                     assert_eq(code, "E2104")
                     assert(what.contains("`--post-link=tools.sign --post-link=tools.notarize` names steps"))
                 }
+            }
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(options, _) -> {
+                    assert_eq(build_option_items(build_options_value(options, "post_link")), [String]{"tools.sign", "tools.notarize"})
+                }
+                .Refused(_, what, _) -> panic(what)
             }
         }
         .Refused(_, what, _) -> panic(what)

@@ -12657,22 +12657,22 @@ LinkStepFailed: struct {
     impl Diagnostic {
         code: "E3506",
         safety_class: .Soundness,
-        safety_reason: "The link step the build names failed, and Jet never links the executable another way, so there is no executable.",
-        expert_path: "none: the link step's cause is fixed",
+        safety_reason: "A link or post-link step the build names failed, and Jet never makes the executable another way, so there is no executable.",
+        expert_path: "none: the step's cause is fixed",
         stage: [.Build],
-        meaning: "A package's custom link step failed",
+        meaning: "A package's custom link or post-link step failed",
         detail: true,
 
         what: fn(self) -> String {
-            "The link step `{self.hook}` that {self.setting} names failed to link `{self.output}`."
+            "The link or post-link step `{self.hook}` that {self.setting} names failed on `{self.output}`."
         }
 
         why: fn(self) -> String {
-            "The `link` build option names a hook, a function marked `#On(build.link)`, that `jet build` calls on each executable's link inputs. Jet runs the `BuildAction` the hook returns in the build sandbox, or links in process when the action runs no command, and never falls back to another link, so the executable is the step's or none."
+            "The `link` build option names a hook, a function marked `#On(build.link)`, that `jet build` calls on each executable's link inputs, and `post_link` the hooks marked `#On(build.before_write)` that turn the linked file into the one written, in order. Jet runs the `BuildAction` each hook returns in the build sandbox, or links in process when a link action runs no command, and never falls back to another link or skips a step, so the executable is the steps' or none."
         }
 
         fix: fn(self) -> String {
-            "Fix the hook or the command its step runs, whose output follows, or write `link: default` to link with Jet."
+            "Fix the hook or the command its step runs, whose output follows, write `link: default` to link with Jet, or drop the step from `post_link`."
         }
     }
 }

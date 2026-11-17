@@ -27,7 +27,8 @@ JetCLIStoredBuild: enum {
 // jet_cli_build_binary and stored. `verbose` reports the runtime pack and the
 // cache decision as `[build]` lines. A store that can't be opened or written,
 // or saved work that isn't reused, leaves the build uncached, as does a link
-// step, which runs on every build. `invocation` grants a link step's effects.
+// or post-link step, which runs on every build. `invocation` grants those
+// steps' effects.
 jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool, invocation: JetCLIInvocationAuthority?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIStoredBuild Never! {
     log := ""
     if verbose {
@@ -39,16 +40,16 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
         if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
             return JetCLIStoredBuild.Failed{output: refused}
         }
-        if BUILD_REUSE_SAVED_WORK && !jet_cli_link_hooked(options) {
+        if BUILD_REUSE_SAVED_WORK && !jet_cli_link_steps(options) {
             key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
         }
         if {
             !BUILD_REUSE_SAVED_WORK -> {
                 if verbose -> log = "{log}[build] cache off -> every build compiles live\n"
             }
-            jet_cli_link_hooked(options) -> {
+            jet_cli_link_steps(options) -> {
                 if verbose {
-                    log = "{log}[build] cache off -> a link step links this executable on every build\n"
+                    log = "{log}[build] cache off -> a link or post-link step runs on every build\n"
                 }
             }
             key == "" -> {

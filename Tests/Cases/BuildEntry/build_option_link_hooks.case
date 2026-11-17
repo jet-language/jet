@@ -1,11 +1,11 @@
 # The link hook rows. `link` is `default` or a hook path and `post_link` a
 # list of hook paths, written unquoted in a profile, as flags (one
 # `--post-link` per step) and in `build: fn`. A value that is no hook path is
-# refused. Only `jet build` runs a link hook: one that returns
-# `inputs.default` links with Jet, and one no function marks
-# `#On(build.link)` is E3506. Every other command refuses a link hook, and
-# every command refuses a post-link step, with E2104 naming where it was
-# written.
+# refused. Only `jet build` runs link and post-link hooks: a link hook that
+# returns `inputs.default` links with Jet, and a hook no function marks
+# `#On(build.link)` or `#On(build.before_write)` is E3506, which leaves no
+# executable. Every other command refuses either hook with E2104 naming
+# where it was written.
 fixture: Fixtures/LinkHooks
 artifact: app
 env: NO_COLOR=1
@@ -30,16 +30,18 @@ stderr: ~ "`--link=relink` isn't a value of `link`" # a hook path names its modu
 stderr: ~ "default or a hook path such as tools.relink" # the fix names the shape
 step: jet build --post-link=tools.sign --post-link=tools.notarize app.jet
 cwd: open
-exit: 2
-stderr: ~ "`--post-link=tools.sign --post-link=tools.notarize` names steps to run on each linked executable" # each flag is one more step
+exit: nonzero
+stderr: ~ "`--post-link=tools.sign --post-link=tools.notarize` names `tools.sign`, which is no function marked `#On(build.before_write)`" # each flag is one more step, and the first runs first
+stderr: ~ "jet-lang.dev/e/E3506" # the post-link step's code
+file: open/.jet/build/app absent # a failed post-link step leaves no executable
 step: jet run --profile=relinked app.jet
 cwd: open
 exit: 2
 stderr: ~ "`link: tools.relink` in profile `relinked` of package.jet names a link hook, and `jet run` links every image itself" # the profile field is the site
-step: jet build --profile=signed app.jet
+step: jet run --profile=signed app.jet
 cwd: open
 exit: 2
-stderr: ~ "`post_link: [tools.sign]` in profile `signed` of package.jet names steps" # a profile lists its steps unquoted
+stderr: ~ "`post_link: [tools.sign]` in profile `signed` of package.jet names steps to run on each linked executable, and `jet run` writes none" # a profile lists its steps unquoted
 step: jet build --profile=bare app.jet
 cwd: refused_profile
 exit: 2

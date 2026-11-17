@@ -1,5 +1,5 @@
 Error [jet.LinkStepFailed]: `link: tools.relink` in profile `relinked` of package.jet names the link step `tools.relink`, which failed to link `.jet/build/run`: build action `link` exited with status 3
- Why: The `link` build option names a hook, a function marked `#On(build.link)`, that `jet build` calls on each executable's link inputs. Jet runs the `BuildAction` the hook returns in the build sandbox, or links in process when the action runs no command, and never falls back to another link, so the executable is the step's or none.
+ Why: The `link` build option names a hook, a function marked `#On(build.link)`, that `jet build` calls on each executable's link inputs, and `post_link` the hooks marked `#On(build.before_write)` that turn the linked file into the one written, in order. Jet runs the `BuildAction` each hook returns in the build sandbox, or links in process when a link action runs no command, and never falls back to another link or skips a step, so the executable is the steps' or none.
  Fix: Fix the hook or the command its step runs, or write `link: default` to link with Jet
 no linker for run
 More: jet-lang.dev/e/E3506

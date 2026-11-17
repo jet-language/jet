@@ -394,7 +394,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1220 | DependencyAuthorityExceeded | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:586 | the effect is added to the dependency's grant line |
 | E1221 | InvalidAuthorityBlock | Compiler/JetDriver/Source/Driver/Loader.jet:314 | `authority:` is written in its one block form |
 | E1222 | InvalidProgramAllocator | Compiler/JetDriver/Source/Driver/Loader.jet:815 | `mem.Heap` or a counting allocator over it with a valid cap |
-| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3421 | the file is readable and writable |
+| E1224 | PackageFileOperationFailed | Compiler/JetCLI/Source/CLI/Host.jet:3423 | the file is readable and writable |
 | E1227 | EngineProtocolMismatch | Compiler/JetCLI/Source/CLI/InspectB.jet:711 | `jet` and its engines come from one toolchain |
 | E1228 | MissingEngine | Compiler/JetCLI/Source/CLI/InspectB.jet:692 | install the engine with the toolchain |
 | E1230 | AmbiguousWorkspaceMember | Jetpack/CLI/Source/Output/RefErrorReport.jet:20 | a longer path or an `@source` names one member |
@@ -509,9 +509,9 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2116 | UnhandledSourceExtension | Compiler/JetCLI/Source/CLI/Front.jet:987 | pass a file the command takes |
 | E2117 | FlagNotASetting | Compiler/JetCLI/Source/CLI/CommandSettings.jet:223 | the flag is typed on the run that needs it |
 | E2118 | CcProjectInputsTooLarge | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:564 | the project root names the source directory |
-| E2119 | DeepCheckScopeMalformed | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:391 | the scope is a package name, then `::` and dotted names |
-| E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:399 | the scope names a declaration of this program |
-| E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:400 | the scope names declarations that hold deep checks |
+| E2119 | DeepCheckScopeMalformed | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:392 | the scope is a package name, then `::` and dotted names |
+| E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:400 | the scope names a declaration of this program |
+| E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:401 | the scope names declarations that hold deep checks |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:25 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:138 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:326 | the view's owner lives as long as the view |
@@ -610,7 +610,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:978 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCLI/Source/CLI/Crash.jet:119 | the recursion is bounded |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:1012 | the entry handles the failure |
-| E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:2816 | the fatal trap is fixed |
+| E3016 | OutputCheckNotRun | Compiler/JetCLI/Source/CLI/Host.jet:2818 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:906 | the policy owner changes the outer policy |
 | E3106 | InvalidUnsafeObligationMode | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:894 | a permitted obligation mode |
 | E3107 | MissingUnsafeObligation | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:1017 | the obligations are stated |
@@ -658,7 +658,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3503 | BuildAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:954 | declaration, gate and policy all grant it |
 | E3504 | BuildActionAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:952 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCLI/Source/CLI/BuildExecute.jet:180 | the action's cause is fixed |
-| E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:186 | the link step's cause is fixed |
+| E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:252 | the step's cause is fixed |
 | E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:501 | generate under another name |
 | E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:369 | one producer per module |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:169 | regenerate and lock again |
@@ -1597,7 +1597,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E3503 | BuildAuthorityDenied | soundness | The root build asks for authority one of its three checks does not grant. |
 | E3504 | BuildActionAuthorityDenied | soundness | The build action asks for authority nobody granted. |
 | E3505 | BuildProbeFailed | soundness | The probe or sandboxed action failed, and Jet never falls back to ambient execution, so there is no result. |
-| E3506 | LinkStepFailed | soundness | The link step the build names failed, and Jet never links the executable another way, so there is no executable. |
+| E3506 | LinkStepFailed | soundness | A link or post-link step the build names failed, and Jet never makes the executable another way, so there is no executable. |
 | E3510 | GeneratedModuleShadows | soundness | The generated module would replace written source, so what compiles would not be what was written. |
 | E3511 | GenerationCycle | soundness | Two producers for one module would make what compiles depend on which ran last. |
 | E3512 | LockedGenerationDrift | soundness | The generated input changed from the lock, so a `--locked` build would compile bytes nobody locked. |
