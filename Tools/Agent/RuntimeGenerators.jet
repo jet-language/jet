@@ -124,8 +124,8 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
         }
         .Err(error) -> problems.push(error.message)
     }
-    if read_stop_registry() == {
-        .Ok(text) -> { outputs.push(GeneratedFile{path: STOP_EXPORTS_TARGET_PATH, text: text}) }
+    if read_c_exports() == {
+        .Ok(text) -> { outputs.push(GeneratedFile{path: C_EXPORTS_TARGET_PATH, text: text}) }
         .Err(error) -> problems.push(error.message)
     }
     if read_host_errors() == {
@@ -1822,20 +1822,14 @@ read_needed_text: fn() -[FS]> [GeneratedFile] GeneratorError! {
     assert_eq(upper_hex(1114111), "10FFFF")
 }
 
-// The compiler's runtime stop facts: every #Export(c) function of
-// Compiler/JetRuntime/Source/*.jet whose direct named calls reach the panic
-// publication root, private helpers included. Rows are projected from the
-// sources, never authored. Foreign/member calls and address-call transports
-// are not edges here; their stop facts belong to the compiler's callback
-// analysis, and any call this projection cannot read is reported.
+// The runtime's C export table: every #Export(c) function of
+// Compiler/JetRuntime/Source/*.jet, projected from the sources, never
+// authored. Which of them can publish a stop is read from the runtime IR
+// at library build (JetIR BuildLibrary.jet ir_stop_exports), not here.
 
-STOP_EXPORTS_TARGET_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeStopExports.jet"
+C_EXPORTS_TARGET_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeCExports.jet"
 
 RUNTIME_SOURCE_DIRECTORY: "Compiler/JetRuntime/Source"
-
-PANIC_PUBLICATION_ROOT: "scheduler_panic_publish_record"
-
-BUILD_LIBRARY_PATH: "Compiler/JetIR/Source/BuildLibrary.jet"
 
 code_at: fn(code: [U8], at: Int) -> Int Never! {
     if at >= 0 && at < code.len() -> (Int{code[at]}) else -> 0 - 1
@@ -1939,285 +1933,6 @@ code_only: fn(source: String) -> String GeneratorError! {
     Ok(String.from_bytes_lossy(code))
 }
 
-// The start of the identifier that ends just before byte `end`, or -1 when
-// the word there does not start with a letter or `_`.
-identifier_start: fn(code: [U8], floor: Int, end: Int) -> Int Never! {
-    start := end
-    loop start > floor && is_name_byte(Int{code[start - 1]}) -> start -= 1
-    if start == end || !is_name_start_byte(Int{code[start]}) -> return 0 - 1
-    start
-}
-
-// Calls this projection cannot read: a generic call head `name<…>(` whose
-// `<` and `>` touch (spaced `a < b > (c)` is a comparison), and a computed
-// call `(…)(` / `[…](` on one line (a line break there ends the statement).
-unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
-    problems := [String]{}
-    loop at in 0..<code.len() {
-        if (Int{code[at]}) != 60 -> next
-        start: identifier_start(code, 0, at)
-        if start < 0 -> next
-        after: code_at(code, at + 1)
-        if after == 60 || after == 61 -> next
-        cursor := at + 1
-        depth := 1
-        loop cursor < code.len() && depth > 0 {
-            current: Int{code[cursor]}
-            if current == 123 || current == 125 || current == 59 -> break
-            if current == 60 -> depth += 1 else if current == 62 -> depth -= 1
-            cursor += 1
-        }
-        if depth == 0 && code_at(code, cursor) == 40 {
-            problems.push("{path}: unsupported generic call {byte_slice(String.from_bytes_lossy(code), start, at)}")
-        }
-    }
-    loop at in 0..<code.len() {
-        closer: Int{code[at]}
-        if closer != 41 && closer != 93 -> next
-        cursor := at + 1
-        loop cursor < code.len() && (Int{code[cursor]}) != 10 && is_space_byte(Int{code[cursor]}) {
-            cursor += 1
-        }
-        if code_at(code, cursor) == 40 {
-            problems.push("{path}: unsupported computed call")
-            break
-        }
-    }
-    problems
-}
-
-// One function head: where it starts, its name and the offset after `fn`
-// (`name: fn`) or after the name (a nested `fn name`) and the spaces that
-// follow it.
-FunctionHead: struct {
-    start: Int,
-    name: String,
-    end: Int,
-}
-
-// The `name: fn` head of a declaration starting the line at `line`: optional
-// `pub`/`priv` and markers, then `name: fn`; None for any other line.
-colon_function_head: fn(text: String, code: [U8], line: Int) -> FunctionHead? Never! {
-    at := line
-    loop code_at(code, at) == 32 || code_at(code, at) == 9 -> at += 1
-    modifiers: [String]{"pub", "priv"}
-    loop word in modifiers {
-        if !bytes_at(code, at, word) || !is_space_byte(code_at(code, at + byte_len(word))) -> next
-        at = skip_spaces(code, at + byte_len(word))
-        break
-    }
-    loop code_at(code, at) == 35 {
-        marker := at + 1
-        if !is_name_start_byte(code_at(code, marker)) -> return None
-        loop marker < code.len() && is_name_byte(Int{code[marker]}) -> marker += 1
-        if code_at(code, marker) == 40 {
-            loop marker < code.len() && code_at(code, marker) != 41 && code_at(code, marker) != 10 {
-                marker += 1
-            }
-            if code_at(code, marker) != 41 -> return None
-            marker += 1
-        }
-        spaced: skip_spaces(code, marker)
-        if spaced == marker -> return None
-        at = spaced
-    }
-    if !is_name_start_byte(code_at(code, at)) -> return None
-    name_start: at
-    loop at < code.len() && is_name_byte(Int{code[at]}) -> at += 1
-    name_end: at
-    if code_at(code, at) != 58 -> return None
-    at = skip_spaces(code, at + 1)
-    if !bytes_at(code, at, "fn") -> return None
-    Val(FunctionHead{start: line, name: byte_slice(text, name_start, name_end), end: skip_spaces(code, at + 2)})
-}
-
-// Every declaration `name: fn` that starts a line and every nested local
-// `fn name`, in source order.
-function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
-    heads := [FunctionHead]{}
-    at := 0
-    loop at + 1 < code.len() {
-        if at == 0 || (Int{code[at - 1]}) == 10 {
-            if colon_function_head(text, code, at) == {
-                .Val(head) -> {
-                    heads.push(head.copy())
-                    at = head.end
-                    next
-                }
-                .None -> {}
-            }
-        }
-        if (Int{code[at]}) != 102 || (Int{code[at + 1]}) != 110 || (at > 0 && is_name_byte(Int{code[at - 1]})) {
-            at += 1
-            next
-        }
-        spaced: skip_spaces(code, at + 2)
-        if spaced == at + 2 || spaced >= code.len() || !is_name_start_byte(Int{code[spaced]}) {
-            at += 1
-            next
-        }
-        name_end := spaced
-        loop name_end < code.len() && is_name_byte(Int{code[name_end]}) -> name_end += 1
-        end: skip_spaces(code, name_end)
-        heads.push(FunctionHead{start: at, name: byte_slice(text, spaced, name_end), end: end})
-        at = end
-    }
-    heads
-}
-
-// The identifiers of `code[from..<to]` that start a word and are followed,
-// after optional spaces, by `:` (`assign` false), or that start a line and
-// are followed, after optional spaces or tabs, by `:` (true).
-bound_names: fn(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [String] Never! {
-    names := [String]{}
-    at := from
-    loop at < to {
-        if !is_name_byte(Int{code[at]}) {
-            at += 1
-            next
-        }
-        start: at
-        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
-        if !is_name_start_byte(Int{code[start]}) -> next
-        cursor := at
-        if assign {
-            before := start
-            loop before > from && (code_at(code, before - 1) == 32 || code_at(code, before - 1) == 9) {
-                before -= 1
-            }
-            if before > from && code_at(code, before - 1) != 10 -> next
-            loop cursor < to && (code_at(code, cursor) == 32 || code_at(code, cursor) == 9) {
-                cursor += 1
-            }
-        } else {
-            loop cursor < to && is_space_byte(Int{code[cursor]}) -> cursor += 1
-        }
-        if cursor >= to || (Int{code[cursor]}) != 58 -> next
-        names.push(byte_slice(text, start, at))
-    }
-    names
-}
-
-// The direct named calls of `code[from..<to]`: identifiers followed on the same
-// line by `(`, except member calls (`.name(`). `open` is the offset after `(`.
-NamedCall: struct {
-    name: String,
-    open: Int,
-}
-
-named_calls: fn(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Never! {
-    calls := [NamedCall]{}
-    at := from
-    loop at < to {
-        if !is_name_byte(Int{code[at]}) {
-            at += 1
-            next
-        }
-        start: at
-        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
-        if !is_name_start_byte(Int{code[start]}) -> next
-        cursor := at
-        loop cursor < to && (Int{code[cursor]}) != 10 && is_space_byte(Int{code[cursor]}) {
-            cursor += 1
-        }
-        if cursor >= to || (Int{code[cursor]}) != 40 -> next
-        before := start
-        loop before > from && is_space_byte(Int{code[before - 1]}) -> before -= 1
-        if before > from && (Int{code[before - 1]}) == 46 -> next
-        calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
-    }
-    calls
-}
-
-// The identifier starting at the first non-space byte from `at`, below `to`;
-// "" when none does.
-word_after: fn(text: String, code: [U8], at: Int, to: Int) -> String Never! {
-    start: skip_spaces(code, at)
-    if start >= to || !is_name_start_byte(Int{code[start]}) -> return ""
-    end := start
-    loop end < to && is_name_byte(Int{code[end]}) -> end += 1
-    byte_slice(text, start, end)
-}
-
-// A stop rail behind a hook: a code word named `<name>_rail_code` that
-// holds a checked function address (JetIR BuildLibrary.jet's FunctionAddress
-// rows). `<word> = rt_x_address()` installs it, and a function that calls
-// through the word (`coll_callN(word, ...)` or `os_callN`, directly or
-// through a local bound to it) calls every export installed there: those
-// calls are named edges too, so a rail behind a hook keeps its callers'
-// stop facts. Other code words stay callback effects, outside the graph.
-RailInstall: struct {
-    word: String,
-    address: String,
-}
-
-rail_installs: fn(text: String, code: [U8]) -> [RailInstall] Never! {
-    installs := [RailInstall]{}
-    at := 0
-    loop at < code.len() {
-        if !is_name_byte(Int{code[at]}) {
-            at += 1
-            next
-        }
-        start: at
-        loop at < code.len() && is_name_byte(Int{code[at]}) -> at += 1
-        if !is_name_start_byte(Int{code[start]}) -> next
-        word: byte_slice(text, start, at)
-        if !word.ends_with("_rail_code") -> next
-        equals: skip_spaces(code, at)
-        if code_at(code, equals) != 61 || code_at(code, equals + 1) == 61 -> next
-        address_at: skip_spaces(code, equals + 1)
-        address: word_after(text, code, address_at, code.len())
-        if !address.starts_with("rt_") || !address.ends_with("_address") -> next
-        open: skip_spaces(code, address_at + byte_len(address))
-        if code_at(code, open) != 40 || code_at(code, skip_spaces(code, open + 1)) != 41 -> next
-        installs.push(RailInstall{word: word, address: address})
-    }
-    installs
-}
-
-// The `_rail_code` word the local `name` is bound to (`name: word` or
-// `name := word`) in `code[from..<to]`, or "".
-rail_binding: fn(text: String, code: [U8], from: Int, to: Int, name: String) -> String Never! {
-    at := from
-    loop at < to {
-        if !is_name_byte(Int{code[at]}) {
-            at += 1
-            next
-        }
-        start: at
-        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
-        if !is_name_start_byte(Int{code[start]}) || byte_slice(text, start, at) != name -> next
-        colon: skip_spaces(code, at)
-        if colon + 1 >= to || code_at(code, colon) != 58 -> next
-        value_at: if code_at(code, colon + 1) == 61 -> colon + 2 else -> colon + 1
-        bound: word_after(text, code, value_at, to)
-        if bound.ends_with("_rail_code") -> return bound
-    }
-    ""
-}
-
-// JetIR BuildLibrary.jet's checked function addresses: `rt_x_address` -> the
-// export it resolves to.
-runtime_function_addresses: fn(source: String) -> [String:String] Never! {
-    addresses := [String:String]{}
-    name_marker: "{{name: \""
-    symbol_marker: ".FunctionAddress{{symbol: \""
-    loop line in source.split("\n") {
-        trimmed: line.trim()
-        if !trimmed.starts_with("{name_marker}rt_") -> next
-        rest: byte_tail(trimmed, byte_len(name_marker))
-        name_end: rest.find("\"")
-        symbol_at: rest.find(symbol_marker)
-        if name_end < 0 || symbol_at < 0 -> next
-        symbol: byte_tail(rest, symbol_at + byte_len(symbol_marker))
-        symbol_end: symbol.find("\"")
-        if symbol_end < 0 -> next
-        addresses[byte_slice(rest, 0, name_end)] = byte_slice(symbol, 0, symbol_end)
-    }
-    addresses
-}
-
 // The index of the byte that closes the group opened just before `from`
 // (`open`/`close` nesting), searching below `limit`; -1 when unclosed.
 group_end: fn(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int Never! {
@@ -2232,178 +1947,44 @@ group_end: fn(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int N
     at
 }
 
-// The sorted #Export(c) symbols whose named-call closure reaches the panic
-// publication root; every unreadable source is reported at once. Calls
-// through a stop rail's hook (RailInstall) are named calls of every export
-// installed there; `addresses` resolves the installs.
-runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -> [String] GeneratorError! {
+// Every #Export(c) symbol of `sources`, sorted: the runtime's C export
+// table. Every unreadable source and repeated export is reported at once.
+runtime_c_export_names: fn(sources: [RuntimeSource]) -> [String] GeneratorError! {
     problems := [String]{}
-    exports := [String]{}
-    order := [String]{}
-    functions := [String:[String]]{}
-    installed := [String:[String]]{}
-    rail_calls := [String:[String]]{}
-    loop source in sources {
-        path: source.path
-        text: if code_only(source.text) == {
-            .Ok(masked) -> masked
-            .Err(error) -> {
-                problems.push("{path}: {error.message}")
-                next
-            }
-        }
-        code: text.bytes()
-        loop problem in unsupported_calls(code, path) -> problems.push(problem)
-        loop install in rail_installs(text, code) {
-            symbol: addresses.get(install.address) ?? ""
-            if symbol == "" {
-                problems.push("unknown runtime function address {install.address} installed in {install.word}")
-                next
-            }
-            symbols := installed.get(install.word) ?? [String]{}
-            if !symbols.contains(symbol) -> symbols.push(symbol)
-            installed[install.word] = symbols
-        }
-        parsed: runtime_exports(text, path)
-        loop problem in parsed.problems -> problems.push(problem)
-        loop export in parsed.exports {
-            if exports.contains(export.name) {
-                problems.push("duplicate runtime #Export(c) {export.name}")
-                next
-            }
-            exports.push(export.name)
-        }
-        heads: function_heads(text, code)
-        loop index in 0..<heads.len() {
-            head: heads[index]
-            limit: if index + 1 < heads.len() -> heads[index + 1].start else -> code.len()
-            if code_at(code, head.end) != 40 {
-                problems.push("{path}: unsupported function declaration {head.name}")
-                next
-            }
-            parameters_end: group_end(code, head.end + 1, limit, 40, 41)
-            if parameters_end < 0 {
-                problems.push("{path}: unclosed {head.name} parameters")
-                next
-            }
-            at := parameters_end
-            loop at < limit && (Int{code[at]}) != 123 && (Int{code[at]}) != 61 -> at += 1
-            if code_at(code, at) == 61 && at < limit -> next
-            if at >= limit {
-                problems.push("{path}: missing {head.name} body")
-                next
-            }
-            body_start: at + 1
-            body_end: group_end(code, body_start, limit, 123, 125)
-            if body_end < 0 {
-                problems.push("{path}: unclosed {head.name} body")
-                next
-            }
-            if functions.has_key(head.name) {
-                problems.push("duplicate runtime function {head.name}")
-                next
-            }
-            bound := bound_names(text, code, head.end + 1, parameters_end - 1, false)
-            loop name in bound_names(text, code, body_start, body_end - 1, true) -> bound.push(name)
-            calls := [String]{}
-            words := [String]{}
-            loop call in named_calls(text, code, body_start, body_end - 1) {
-                if bound.contains(call.name) {
-                    problems.push("{path}: unsupported bound-value call {call.name} in {head.name}")
-                    next
-                }
-                calls.push(call.name)
-                if !call.name.starts_with("coll_call") && !call.name.starts_with("os_call") -> next
-                argument: word_after(text, code, call.open, body_end - 1)
-                word: if argument.ends_with("_rail_code") -> argument else -> rail_binding(text, code, body_start, body_end - 1, argument)
-                if word != "" && !words.contains(word) -> words.push(word)
-            }
-            if words.len() > 0 -> rail_calls[head.name] = words
-            order.push(head.name)
-            functions[head.name] = calls
-        }
-    }
-    if !functions.has_key(PANIC_PUBLICATION_ROOT) {
-        problems.push("missing runtime panic publication root")
-    }
-    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
-    loop name in order {
-        words: rail_calls.get(name) ?? [String]{}
-        if words.len() == 0 -> next
-        calls := functions.get(name) ?? [String]{}
-        loop word in words {
-            symbols: installed.get(word) ?? [String]{}
-            loop symbol in symbols -> calls.push(symbol)
-        }
-        functions[name] = calls
-    }
-    callers := [String:[String]]{}
-    loop name in order {
-        seen := [String]{}
-        calls: functions.get(name) ?? [String]{}
-        loop callee in calls {
-            if seen.contains(callee) || !functions.has_key(callee) -> next
-            seen.push(callee.copy())
-            list := callers.get(callee) ?? [String]{}
-            list.push(name.copy())
-            callers[callee] = list
-        }
-    }
-    reached := [String]{PANIC_PUBLICATION_ROOT}
-    cursor := 0
-    loop cursor < reached.len() {
-        callee: reached[cursor]
-        cursor += 1
-        reaching: callers.get(callee) ?? [String]{}
-        loop caller in reaching {
-            if !reached.contains(caller) -> reached.push(caller)
-        }
-    }
-    symbols := [String]{}
-    loop name in exports {
-        if reached.contains(name) -> symbols.push(name)
-    }
-    symbols.sort()
-    Ok(symbols)
-}
-
-// Every #Export(c) symbol of `sources`, sorted: the runtime's C export table.
-// runtime_stop_exports has already reported any unreadable source.
-runtime_c_export_names: fn(sources: [RuntimeSource]) -> [String] Never! {
     names := [String]{}
     loop source in sources {
-        if code_only(source.text) == .Ok(text) {
-            loop export in runtime_exports(text, source.path).exports {
-                if !names.contains(export.name) -> names.push(export.name)
+        if code_only(source.text) == {
+            .Ok(text) -> {
+                parsed: runtime_exports(text, source.path)
+                loop problem in parsed.problems -> problems.push(problem)
+                loop export in parsed.exports {
+                    if names.contains(export.name) {
+                        problems.push("duplicate runtime #Export(c) {export.name}")
+                    } else { names.push(export.name) }
+                }
             }
+            .Err(error) -> problems.push("{source.path}: {error.message}")
         }
     }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     names.sort()
-    names
+    Ok(names)
 }
 
-render_stop_registry: fn(exports: [String], symbols: [String]) -> String Never! {
+render_c_exports: fn(exports: [String]) -> String Never! {
     lines := [String]{
         "// Generated by Tools/Agent/RuntimeGenerators.jet; do not edit.",
-        "// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.",
-        "// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.",
-        "// Both compiler halves consume these Panic stop facts, not returned Results.",
+        "// Every #Export(c) function of JetRuntime/Source/*.jet: the runtime's C export table.",
         "// The symbols land as literal data: no compile-time execution host is needed.",
-        "RUNTIME_STOP_EXPORTS: #run {{ [String]{{",
+        "RUNTIME_C_EXPORTS: #run {{ [String]{{",
     }
-    loop symbol in symbols -> lines.push("    \"{symbol}\",")
-    tail: [String]{"}} }}", "", "runtime_export_can_stop: fn(symbol: String) -> Bool Never! {{", "    loop candidate in RUNTIME_STOP_EXPORTS {{", "        if candidate == symbol -> return true", "    }}", "    false", "}}"}
-    loop line in tail -> lines.push(line)
-    lines.push("")
-    lines.push("// Every #Export(c) function of JetRuntime/Source/*.jet: the runtime's C export table.")
-    lines.push("RUNTIME_C_EXPORTS: #run {{ [String]{{")
     loop symbol in exports -> lines.push("    \"{symbol}\",")
-    export_tail: [String]{"}} }}", "", "runtime_c_export: fn(symbol: String) -> Bool Never! {{", "    loop candidate in RUNTIME_C_EXPORTS {{", "        if candidate == symbol -> return true", "    }}", "    false", "}}"}
-    loop line in export_tail -> lines.push(line)
+    tail: [String]{"}} }}", "", "runtime_c_export: fn(symbol: String) -> Bool Never! {{", "    loop candidate in RUNTIME_C_EXPORTS {{", "        if candidate == symbol -> return true", "    }}", "    false", "}}"}
+    loop line in tail -> lines.push(line)
     "{lines.join("\n")}\n"
 }
 
-read_stop_registry: fn() -[FS]> String GeneratorError! {
+read_c_exports: fn() -[FS]> String GeneratorError! {
     names := [String]{}
     listed: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
     loop entry in listed {
@@ -2415,120 +1996,30 @@ read_stop_registry: fn() -[FS]> String GeneratorError! {
         text: files.read("{RUNTIME_SOURCE_DIRECTORY}/{name}") ?? return Err(generator_fail("cannot read {RUNTIME_SOURCE_DIRECTORY}/{name}: {err}"))
         sources.push(RuntimeSource{path: name, text: text})
     }
-    library: files.read(BUILD_LIBRARY_PATH) ?? return Err(generator_fail("cannot read {BUILD_LIBRARY_PATH}: {err}"))
-    symbols: runtime_stop_exports(sources, runtime_function_addresses(library)) ?? return Err(err)
-    Ok(render_stop_registry(runtime_c_export_names(sources), symbols))
+    exports: runtime_c_export_names(sources) ?? return Err(err)
+    Ok(render_c_exports(exports))
 }
 
-STOP_FIXTURE_ROOT: "scheduler_panic_publish_record: fn(record: I64) -> Bool {{ false }}\nrt_task_panic_publish: fn(message: I64, length: I64, form: I64) -> Bool {{ scheduler_panic_publish_record(message) }}\n"
-
-stop_closure: fn(source: String) -> [String] GeneratorError! {
-    runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}, [String:String]{})
+#Test("the C export table is every #Export(c) symbol, sorted, as literal data") {
+    source: "#Export(c) stopped: fn() {{ helper() }}\n// #Export(c) commented: fn() {{}}\nnote: \"#Export(c) quoted: fn() {{}}\"\n#Export(c)\nplain: fn() {{}}"
+    exports: runtime_c_export_names([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: source}}) ?? panic("the export table failed: {err.message}")
+    expected: "// Generated by Tools/Agent/RuntimeGenerators.jet; do not edit.\n// Every #Export(c) function of JetRuntime/Source/*.jet: the runtime's C export table.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_C_EXPORTS: #run {{ [String]{{\n    \"plain\",\n    \"stopped\",\n}} }}\n\nruntime_c_export: fn(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_C_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
+    assert_eq(render_c_exports(exports), expected)
 }
 
-closure_text: fn(source: String) -> String Never! {
-    if stop_closure(source) == {
-        .Ok(symbols) -> symbols.join(",")
-        .Err(error) -> "error: {error.message}"
-    }
-}
-
-#Test("private named-call closure includes same-line and separate-line exports, sorted") {
-    source: "\nprivate_stop: fn() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}\nmiddle: fn() {{ private_stop() }}\n#Export(c) z_export: fn() {{ middle() }}\n#Export(c)\na_export: fn() {{ private_stop() }}\n#Export(c) ordinary: fn() -> I64 {{ I64{{0}} }}\n"
-    assert_eq(closure_text(source), "a_export,z_export")
-}
-
-#Test("connected recursion converges and disconnected recursion is not a stop") {
-    source: "\nleft: fn() {{ right() }}\nright: fn() {{\n    left()\n    rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n}}\nunrelated_a: fn() {{ unrelated_b() }}\nunrelated_b: fn() {{ unrelated_a() }}\n#Export(c) stopped: fn() {{ left() }}\n#Export(c) ordinary: fn() {{ unrelated_a() }}\n"
-    assert_eq(closure_text(source), "stopped")
-}
-
-#Test("nested comments, multibyte text and literal prose cannot add declarations or calls") {
-    source: "\n// λ and 𐐀 do not shift the following source offsets.\n/* outer /* #Export(c) fake: fn() {{ rt_task_panic_publish(0, 0, 0) }} */ comment */\n#Export(c) ordinary: fn() {{\n    // rt_task_panic_publish(0, 0, 0)\n    message: \"rt_task_panic_publish(0, 0, 0), \\\"quoted\\\"\"\n    escaped: \"{{{{rt_task_panic_publish(0, 0, 0)}}}}\"\n    triple: \"\"\"\n#Export(c) fake_text: fn() {{{{ rt_task_panic_publish(0, 0, 0) }}}}\n\"\"\"\n    char: '{{'\n}}\n"
-    assert_eq(closure_text(source), "")
-}
-
-#Test("actual string interpolation expressions are calls, not prose") {
-    helper: "\nhelper: fn() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}\n#Export(c) interpolated: fn() {{ message: \"value {{helper()}}\" }}\n"
-    assert_eq(closure_text(helper), "interpolated")
-    cr: String.from_bytes_lossy([U8]{U8{13}})
-    raw_mode: "#Export(c) interpolated: fn() {{ message: \"\"\"value {{rt_task_panic_publish // comment{cr}\n (I64{{0}}, I64{{0}}, I64{{0}})}}\"\"\" }}"
-    assert_eq(closure_text(raw_mode), "interpolated")
-    ordinary: "#Export(c) ordinary: fn() {{ rt_task_panic_publish /* comment */{cr}\n (I64{{0}}, I64{{0}}, I64{{0}}) }}"
-    assert_eq(closure_text(ordinary), "")
-}
-
-#Test("an imported declaration cannot adopt the following global initializer as its body") {
-    source: "\n#Import(c) imported: fn(value: I64) = \"imported\"\nGLOBAL: #run {{ I64{{0}} }}\n#Export(c) ordinary: fn() {{ imported(I64{{0}}) }}\n"
-    assert_eq(closure_text(source), "")
-}
-
-#Test("cross-file private calls and typed literals retain balanced function boundaries") {
+#Test("an unreadable runtime source or a repeated export fails the whole table") {
     sources: [RuntimeSource]{
-        RuntimeSource{path: "Root.jet", text: "{STOP_FIXTURE_ROOT}helper: fn() {{\n    value: I64{{0}}\n    rt_task_panic_publish(value, value, value)\n}}"},
-        RuntimeSource{path: "Caller.jet", text: "#Export(c) caller: fn() {{ if true {{ helper() }} }}"},
+        RuntimeSource{path: "Broken.jet", text: "/* unclosed"},
+        RuntimeSource{path: "One.jet", text: "#Export(c) twice: fn() {{}}"},
+        RuntimeSource{path: "Two.jet", text: "#Export(c) twice: fn() {{}}"},
     }
-    symbols: runtime_stop_exports(sources, [String:String]{}) ?? panic("the closure failed: {err.message}")
-    assert_eq(symbols.join(","), "caller")
-}
-
-#Test("one actual sink includes Task, Root, Sentry, Parallel and public record callers, not stop snapshots") {
-    source: "\n#Export(c) task: fn() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}\nroot_owned: fn() {{ scheduler_panic_publish_record(I64{{0}}) }}\n#Export(c) root: fn() {{ root_owned() }}\n#Export(c) sentry: fn() {{ scheduler_panic_publish_record(I64{{0}}) }}\n#Export(c) parallel: fn() {{ if true {{ scheduler_panic_publish_record(I64{{0}}) }} }}\n#Export(c) control_publish: fn() {{ if true {{ scheduler_panic_publish_record(I64{{0}}) }} }}\n#Export(c) status: fn() {{ I64{{0}} }}\n#Export(c) cleanup_enter: fn() {{ status() }}\n#Export(c) cleanup_leave: fn() {{}}\n"
-    assert_eq(closure_text(source), "control_publish,parallel,root,sentry,task")
-}
-
-#Test("generated registry is the exact literal symbol list") {
-    source: "#Export(c) stopped: fn() {{ rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}}) }}\n#Export(c) plain: fn() {{}}"
-    symbols: stop_closure(source) ?? panic("the closure failed: {err.message}")
-    exports: runtime_c_export_names([RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: source}})
-    assert_eq(exports.join(","), "plain,stopped")
-    expected: "// Generated by Tools/Agent/RuntimeGenerators.jet; do not edit.\n// Named-call closure from scheduler_panic_publish_record in JetRuntime/Source/*.jet.\n// Direct named calls and stop-rail hooks (_rail_code words) only; other foreign/dynamic callback effects are separate.\n// Both compiler halves consume these Panic stop facts, not returned Results.\n// The symbols land as literal data: no compile-time execution host is needed.\nRUNTIME_STOP_EXPORTS: #run {{ [String]{{\n    \"stopped\",\n}} }}\n\nruntime_export_can_stop: fn(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_STOP_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n\n// Every #Export(c) function of JetRuntime/Source/*.jet: the runtime's C export table.\nRUNTIME_C_EXPORTS: #run {{ [String]{{\n    \"plain\",\n    \"stopped\",\n}} }}\n\nruntime_c_export: fn(symbol: String) -> Bool Never! {{\n    loop candidate in RUNTIME_C_EXPORTS {{\n        if candidate == symbol -> return true\n    }}\n    false\n}}\n"
-    assert_eq(render_stop_registry(exports, symbols), expected)
-}
-
-#Test("shift and less-or-equal operators cannot open generic call arguments") {
-    source: "\nrotate: fn(word: I64, shift: I64) -> I64 {{\n    ((word << shift) | word >> (I64{{32}} - shift)) & I64{{0xffffffff}}\n}}\n#Export(c) ordinary: fn(word: I64) -> I64 {{ rotate(word, I64{{7}}) }}\n#Export(c) checked: fn(word: I64, limit: I64) {{\n    if word <= (limit) -> rt_task_panic_publish(word, word, word)\n}}\n"
-    assert_eq(closure_text(source), "checked")
-}
-
-#Test("spaced comparisons followed by a later '> (' are not generic call heads") {
-    source: "\nadvance: fn(at: I64, length: I64, data: I64) -> I64 {{\n    loop at < length && data > (I64{{32}}) -> at += I64{{1}}\n    at\n}}\n#Export(c) ordinary: fn(at: I64, length: I64) -> I64 {{ advance(at, length, I64{{0}}) }}\n#Export(c) checked: fn(value: I64) {{ rt_task_panic_publish(value, value, value) }}\n"
-    assert_eq(closure_text(source), "checked")
-    assert(closure_text("#Export(c) generic_caller: fn() {{ external<T>(I64{{0}}) }}").contains("unsupported generic call external"))
-}
-
-#Test("missing publication root or malformed source fails instead of emitting incomplete facts") {
-    if runtime_stop_exports([RuntimeSource]{RuntimeSource{path: "Missing.jet", text: "#Export(c) ordinary: fn() {{}}"}}, [String:String]{}) == {
+    if runtime_c_export_names(sources) == {
         .Ok(_) -> { assert(false) }
-        .Err(error) -> assert(error.message.contains("missing runtime panic publication root"))
+        .Err(error) -> {
+            assert(error.message.contains("Broken.jet: unclosed runtime source comment"))
+            assert(error.message.contains("duplicate runtime #Export(c) twice"))
+        }
     }
-    assert(closure_text("broken: fn() {{").contains("unclosed broken body"))
-    assert(closure_text("/* unclosed").contains("unclosed runtime source comment"))
-    generic: closure_text("generic: fn<T>(value: T) {{ value }}")
-    assert(generic.contains("unsupported generic call") || generic.contains("unsupported function declaration"))
-    assert(closure_text("#Export(c) generic_caller: fn() {{ external<T<U>>() }}").contains("unsupported generic call"))
-    assert(closure_text("indirect: fn(callback: I64) {{ callback() }}").contains("unsupported bound-value call callback"))
-    assert(closure_text("indirect: fn() {{ callback: helper\n callback() }}").contains("unsupported bound-value call callback"))
-    assert(closure_text("indirect: fn() {{ (callback)() }}").contains("unsupported computed call"))
-    cr: String.from_bytes_lossy([U8]{U8{13}})
-    assert(closure_text("indirect: fn() {{ text: \"\"\"{{(callback) /* comment{cr}\n */ ()}}\"\"\" }}").contains("unsupported computed call"))
-    assert(closure_text("indirect: fn() {{ callbacks[I64{{0}}]() }}").contains("unsupported computed call"))
-    assert_eq(closure_text("#Export(c) foreign_member: fn() {{ foreign.rt_task_panic_publish() }}"), "")
-    assert_eq(closure_text("#Export(c) arms: fn() {{ if {{\n true -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n (true) -> rt_task_panic_publish(I64{{0}}, I64{{0}}, I64{{0}})\n }} }}"), "arms")
-    assert_eq(closure_text("ordinary: fn(left: I64, right: I64) -> Bool {{\n if left != right -> return (left ^ I64{{1}}) < (right ^ I64{{1}}){cr}\n (left ^ I64{{0}}) < (right ^ I64{{0}})\n }}"), "")
-}
-
-#Test("a stop-rail hook is a named edge to every export installed in it; other code words are not") {
-    source: "\ntrap_root_rail_code := I64{{0}}\nprint_code := I64{{0}}\ncoll_call3: fn(code: I64, a: I64, b: I64, c: I64) -> I64 {{ I64{{0}} }}\ninstall: fn() {{\n    trap_root_rail_code = rt_root_address()\n    print_code = rt_other_address()\n}}\n#Export(c) root_half: fn(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) other_half: fn(op: I64) -> I64 {{\n    rt_task_panic_publish(op, op, op)\n    I64{{1}}\n}}\n#Export(c) direct: fn() {{ _ := coll_call3(trap_root_rail_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n#Export(c) bound: fn() {{\n    rail: trap_root_rail_code\n    _ := coll_call3(rail, I64{{0}}, I64{{0}}, I64{{0}})\n}}\n#Export(c) callback: fn() {{ _ := coll_call3(print_code, I64{{0}}, I64{{0}}, I64{{0}}) }}\n"
-    addresses := [String:String]{}
-    addresses["rt_root_address"] = "root_half"
-    addresses["rt_other_address"] = "other_half"
-    sources: [RuntimeSource]{RuntimeSource{path: "Fixture.jet", text: "{STOP_FIXTURE_ROOT}{source}"}}
-    symbols: runtime_stop_exports(sources, addresses) ?? panic("the closure failed: {err.message}")
-    assert_eq(symbols.join(","), "bound,direct,other_half,root_half")
-    assert(closure_text(source).contains("unknown runtime function address rt_root_address installed in trap_root_rail_code"))
-    library: "        {{name: \"rt_root_address\", shape: .FunctionAddress{{symbol: \"root_half\", arity: 1}}}},\n"
-    assert_eq(runtime_function_addresses(library).get("rt_root_address") ?? "", "root_half")
 }
 
 // The runtime pack's strerror text, from pinned musl 1.2.5 assets (never a

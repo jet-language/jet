@@ -154,11 +154,29 @@ runtime's own calls and function addresses, one per line. A lifecycle hook
 that can reach one runs whenever the program keeps one of its guard
 storages, so the exports that can reach such a storage are listed too; the
 receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
-(`jet-native-runtime/v5`) and every pack reader verifies it. `jet build`
+(`jet-native-runtime/v6`) and every pack reader verifies it. `jet build`
 selects a program's inline RC updates without the lock prefix only when
 that receipt was read, neither the program nor its `main` calls an export it
 names, every foreign C call is a vetted libc leaf, and the program has no
 foreign assembly and no plugin; otherwise the updates stay locked.
+
+It also writes `runtime.stops`, the stops receipt: the exports whose call
+can reach the stop publisher (`scheduler_control_publish`) in the runtime IR
+as built, before inlining, one per line. Edges are direct calls and the code
+words the runtime calls: a code word resolves to the functions whose
+addresses the library installs in a rail cell no other code reaches, or to
+what its caller passes. A call through code the library cannot resolve (a
+closure's, an escaped cell's, an export's code parameter) and an export a
+program may define in its place can stop. Allocation failure, the checked
+heap's misuse report, capacity panic and invalid layout end the process,
+so they are cut. A program's memory hooks (a context allocator's handler,
+the checked heap's allocation observers, a value's clone and drop glue, a
+context value's or error payload's release) are cut too: a stop one
+publishes is taken at the program's next stop check, so allocation,
+freeing, cloning and dropping take no poll. Its digest is
+part of the pack identity. A program polls for a stop after every runtime
+call but those to an export the receipt leaves out; without the receipt
+every call polls.
 
 Runtime-pack roots are the public defined C-ABI globals of standalone Jet
 runtime objects and explicit extra roots. The Jet object writer publishes
@@ -345,8 +363,8 @@ the batch's object would bind to, byte for byte, with no object in between,
 and takes the object route only when that route would report an error.
 The step runs no C compiler or archiver, and the pack
 packages no C platform archives, which a program with C takes from jet's C
-toolchain pack (foreign C, below). The key (`jet-native-runtime/v5`) hashes
-the source inventory, checked ABI, thread receipt, lifecycle and backend
+toolchain pack (foreign C, below). The key (`jet-native-runtime/v6`) hashes
+the source inventory, checked ABI, thread and stops receipts, lifecycle and backend
 inputs, and the Core object, export list and thread receipt. The accompanying `provenance.json` records each input digest, the
 pack, image and Core digests and zero Rust or LLVM-generated Jet objects.
 Packaging first checks a separate recipe digest of the runtime sources, backend,

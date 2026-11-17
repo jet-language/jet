@@ -592,13 +592,24 @@ Exact-Int arithmetic and native narrowing use that same publication path.
 Runtime marshaling checks each narrowing before subsequent syscalls, allocations,
 or output-slot initialization; moved constructor children and select inputs are
 released on the stopped path, while borrowed inputs remain caller-owned.
-Compiler runtime-call stop facts are generated from the direct named-call closure
-of the runtime's panic publication entry, including private helpers. The
-projection rejects generic declarations/calls and computed or bound-value calls;
-foreign/member calls and address-call transports are not semantic callback edges.
-Callback stop analysis remains the compiler's responsibility. Both compiler
-halves consume `Registry/RuntimeStopExports.jet`; the runtime generator freshness
-gate checks this projection instead of maintaining a parallel symbol list.
+Which runtime calls a program polls after is read from the runtime IR at
+library build: the stops receipt (`runtime.stops`, JetIR BuildLibrary.jet
+`ir_stop_exports`) lists the exports whose call can reach the stop
+publisher, private helpers and the runtime's rail cells included. A call
+through code the library cannot resolve can stop; allocation failure, a
+capacity overflow (a sequence's, a text's or an owner count's), an invalid
+layout and an internal defect (`jet_rt_unreachable`) end the process and
+are cut, and so are a program's memory hooks (an allocator's handler or
+observer, clone and drop glue, a context value's or error payload's
+release), whose stop the program takes at its next stop check
+(IR_STOP_DEFERRED). A buffer or memory route that finds a stop pending
+after a refused allocation or a hook returns with nothing built and
+leaves the stop to that check (Scheduler.jet `scheduler_stop_pending`),
+so the string builder, text clone and value allocation routes take no
+poll. The
+compiler polls after every runtime call but those the receipt leaves out
+(`ir_route_can_stop`), so no hand-kept or generated symbol list stands
+beside it.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.

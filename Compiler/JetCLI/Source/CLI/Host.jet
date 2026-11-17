@@ -735,6 +735,12 @@ JET_CLI_RUNTIME_EXPORTS_FILE: "runtime.exports"
 // (Request.jet, JetIR BuildLibrary.jet ir_thread_exports).
 JET_CLI_RUNTIME_THREADS_FILE: "runtime.threads"
 
+// Written by the toolchain build beside the pack: the exports whose call
+// can publish a stop, one per line (Request.jet, JetIR BuildLibrary.jet
+// ir_stop_exports); a program polls after no other export's call
+// (jet_cli_runtime_quiet_routes).
+JET_CLI_RUNTIME_STOPS_FILE: "runtime.stops"
+
 // Written by the toolchain build beside the pack (Toolchain/RuntimePack.jet):
 // the Core library's globals, one `symbol<TAB>key<TAB>IR signature` row
 // each, sorted by symbol (JetIR BuildCore.jet ir_core_exports_text), which a
@@ -796,6 +802,7 @@ JET_CLI_RUNTIME_PART_FILES: [String]{
     JET_CLI_RUNTIME_KEY_FILE,
     JET_CLI_RUNTIME_EXPORTS_FILE,
     JET_CLI_RUNTIME_THREADS_FILE,
+    JET_CLI_RUNTIME_STOPS_FILE,
     JET_CLI_CORE_EXPORTS_FILE,
     JET_CLI_CORE_THREADS_FILE,
     JET_CLI_CORE_FACTS_FILE,
@@ -1403,9 +1410,10 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
 }
 
 // The runtime's key, its exports file's bytes (one exported symbol per
-// line) and its thread receipt's (JET_CLI_RUNTIME_THREADS_FILE; None when
-// it can't be read), else the failure jet_cli_native_object reports where
-// it reads them. When the program binds its Core calls to the Core
+// line), its thread receipt's (JET_CLI_RUNTIME_THREADS_FILE) and its stops
+// receipt's (JET_CLI_RUNTIME_STOPS_FILE; each None when it, or a file
+// before it, can't be read), else the failure jet_cli_native_object reports
+// where it reads them. When the program binds its Core calls to the Core
 // library's code (jet_cli_native_executable), `core` holds the Core exports
 // (JET_CLI_CORE_EXPORTS_FILE) and `core_threads` the Core thread receipt.
 JetCLIRuntimeExports: struct {
@@ -1413,6 +1421,7 @@ JetCLIRuntimeExports: struct {
     exports: [U8],
     threads: [U8]?,
     failure: JetCLINativeFailure?,
+    stops: [U8]?{None},
     core: IRCoreImage?{None},
     core_threads: [U8]?{None},
 }
@@ -1421,7 +1430,26 @@ jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExport
     key: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_KEY_FILE)}"})}
     exports: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_EXPORTS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports: {err.message}"})}
     threads: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_THREADS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
-    JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
+    stops: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_STOPS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
+    JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None, stops: Val(stops)}
+}
+
+// The runtime routes no stop poll follows in a program built over `runtime`
+// (IRChecks.quiet_routes): its exports that its stops receipt leaves out.
+// None without the receipt: every route polls.
+jet_cli_runtime_quiet_routes: fn(runtime: JetCLIRuntimeExports) -> [String:Bool] Never! {
+    quiet := [String:Bool]{}
+    receipt: runtime.stops ?? return quiet
+    stops: String.from_bytes(receipt) ?? return quiet
+    exports: String.from_bytes(runtime.exports) ?? return quiet
+    stopping := [String:Bool]{}
+    stop_rows: stops.split("\n").to_list()
+    loop symbol in stop_rows.move() -> stopping[symbol] = true
+    export_rows: exports.split("\n").to_list()
+    loop symbol in export_rows.move() {
+        if symbol != "" && stopping.get(symbol) == None -> quiet[symbol] = true
+    }
+    quiet
 }
 
 // Whether program `m` provably runs on one thread only, so x86-64 selection
@@ -1577,6 +1605,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // A program bound to the runtime image calls the Core code there
     // (jet_cli_native_executable): its Core calls build as calls of it.
     checks.core = runtime.core
+    checks.quiet_routes = jet_cli_runtime_quiet_routes(runtime)
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper

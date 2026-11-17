@@ -95,7 +95,7 @@ err_rows_append: fn(list: I64, stride: I64) -> I64 {
     if count == capacity {
         next_capacity: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         if (next_capacity < capacity || next_capacity > I64{9223372036854775807} /% stride) {
-            rt_text_capacity_stop()
+            rt_seq_capacity_overflow_stop()
         }
         fresh: jet_rt_alloc(next_capacity * stride, I64{8})
         rt_text_bytes_copy(fresh, data, count * stride)

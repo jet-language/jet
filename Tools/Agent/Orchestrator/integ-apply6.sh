@@ -118,7 +118,7 @@ for p in ${INTEG_POST:-}; do
 done
 # Regenerate every generated file an applied SUB touched, with the seed, from the composed sources.
 C=$(readlink -f "$JET_SEED")
-# The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime export,
+# The runtime generator outputs (RuntimeCExports and the rest) go stale whenever a SUB changes a runtime export,
 # and no SUB names them: regenerate them in every batch.
 printf "Tools/Agent/RuntimeGenerators.jet\tall\n" >> "$I/generators"
 for gen in $(awk -F'\t' '{print $1}' "$I/generators" | sort -u); do

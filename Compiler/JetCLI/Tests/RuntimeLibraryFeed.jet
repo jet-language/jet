@@ -35,6 +35,8 @@ use {
         panic("the library feed failed: {built.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })} {cli_files.read("{prefix}.issues") ?? ""}")
     }
     assert_eq(cli_files.read("{prefix}.exports") ?? panic("read the export list: {err}"), "run")
+    // A unit without the scheduler's stop publisher: no export can stop.
+    assert_eq(cli_files.read("{prefix}.stops") ?? panic("read the stops receipt: {err}"), "")
     assert((cli_files.read_bytes("{prefix}.o") ?? panic("read the library object: {err}")).len() > 0)
     cli_files.remove_all(root) ?? panic("library feed cleanup")
 }

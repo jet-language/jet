@@ -214,6 +214,10 @@ IRX64Cold: struct {
     // Route, Compare: the Int operands dropped right after the operation
     // (ir_x64_operand_drops), dropped here before going back.
     drops: [Int],
+    // Route, Call: the slow path of a route open-coded right before a stop
+    // point falls into that poll's slow path, laid out next, instead of
+    // going back to `resume` (ir_x64_stop_point).
+    falls: Bool,
 }
 
 // A stop point's edge: If `at` (its End at `end`), entered from the hot
@@ -300,6 +304,11 @@ IRX64Emitter: struct {
     // .dynamic).
     below: Int,
     dynamic: Bool,
+    // The CallRuntime last selected with its runtime call only on a slow
+    // path, after an inline fast path (ir_x64_inline_route, ir_x64_word_int,
+    // ir_x64_checked_fixed), for the stop point right after it
+    // (ir_x64_stop_point); -1 for none.
+    routed: Int,
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -864,7 +873,7 @@ ir_x64_helper: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // Slow paths.
 
 ir_x64_cold: fn(kind: IRX64ColdKind, sites: [Int]) -> IRX64Cold Never! {
-    IRX64Cold{kind: kind, sites: sites, resume: -1, symbol: "", left: -1, left_imm: 0, right: -1, right_imm: 0, dst: -1, cond: X64Cond.E, text: -1, direction: 0, unsigned: 0, width: 0, line: 0, pad: -1, at: -1, drops: [Int]{}}
+    IRX64Cold{kind: kind, sites: sites, resume: -1, symbol: "", left: -1, left_imm: 0, right: -1, right_imm: 0, dst: -1, cond: X64Cond.E, text: -1, direction: 0, unsigned: 0, width: 0, line: 0, pad: -1, at: -1, drops: [Int]{}, falls: false}
 }
 
 // `jo` when `reg` is not an inline Int (bits 63 and 62 differ), through rdx.
@@ -1005,7 +1014,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, false)
                 if cold.dst >= 0 -> ir_x64_store(e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_cold_drops(e, m, f, al, cold.drops)
-                ir_x64_jump_to(e, cold.resume)
+                if !cold.falls -> ir_x64_jump_to(e, cold.resume)
             }
             .LocatedRoute -> {
                 path: tables.texts.get(f.source_file) ?? -1
@@ -1125,7 +1134,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             .Call -> {
                 at: cold.left
                 ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
-                ir_x64_jump_to(e, cold.resume)
+                if !cold.falls -> ir_x64_jump_to(e, cold.resume)
             }
             .Poll -> {
                 at: cold.left
@@ -3575,9 +3584,11 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                 atomic != "" -> ir_x64_atomic(e, m, f, al, at, atomic)
                 leaf && (symbol == "jet_int_owned_to_i64" || symbol == "jet_rt_int_clone") -> {
                     ir_x64_inline_route(e, m, f, al, symbol, f.args[f.b[at]], dst)
+                    e.routed = at
                 }
                 leaf && symbol == "jet_int_owned_from_i64" -> {
                     ir_x64_word_int(e, m, f, al, f.args[f.b[at]], dst)
+                    e.routed = at
                 }
                 leaf && symbol == "jet_rt_block_unique" -> {
                     ir_x64_block_unique(e, m, f, al, at, f.args[f.b[at]])
@@ -3588,7 +3599,9 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                 f.c[at] == 1 && dst < 0 && symbol == "jet_rt_block_retain" -> {
                     ir_x64_block_retain(e, m, f, al, f.args[f.b[at]])
                 }
-                (symbol == "jet_int_checked_fixed" || symbol == "jet_int_native_i64_at") && ir_x64_checked_fixed(e, m, f, al, at, symbol) -> {}
+                (symbol == "jet_int_checked_fixed" || symbol == "jet_int_native_i64_at") && ir_x64_checked_fixed(e, m, f, al, at, symbol) -> {
+                    e.routed = at
+                }
                 symbol == "jet_std_math_fma" && ir_x64_fma(e, m, f, al, tables, at) -> {}
                 entry != "" -> {
                     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
@@ -3710,7 +3723,10 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // calls nothing pays a load, a
 // test and a branch per iteration and a recursion the same per entry; the
 // poll's call is a slow path (IRX64ColdKind.Poll) that takes the edge or
-// comes back. In a loop any other poll's tests run inline first
+// comes back. Right after a runtime route the selector open-codes
+// (IRX64Emitter.routed), that route's slow path falls into the poll's: a
+// stop poll keeps no hot code and a turn its armed word. In a loop any
+// other poll's tests run inline first
 // (ir_x64_stop_quiet). The edge goes after the epilogue (ir_x64_pads); one
 // only slow paths enter has no hot branch of its own. A trap poll
 // keeps no hot code: the slow paths that publish a numeric stop (colds from
@@ -3738,6 +3754,9 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         }
     }
     if f.a[at] == trap && !wired -> return f.c[branch]
+    // The slow path of a route open-coded at `at - 1`, when it has one, is
+    // colds[traps], the last one so far.
+    routed: at > 0 && e.routed == at - 1 && e.colds.len() - traps <= 1
     site := -1
     if !wired {
         skips := [Int]{}
@@ -3746,15 +3765,24 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
-        } else if f.a[at] != trap && !ir_opt_polls_checks_call(f, poll, trap, turn, at) {
+        } else if f.a[at] != trap && (routed || !ir_opt_polls_checks_call(f, poll, trap, turn, at)) {
             // A poll that checks no call can observe only what another task
             // asked for, which arms the runtime's word first: the hot path
             // is its load, test and branch, and the poll's call, its test
             // and the branch to the edge are a slow path (IRX64ColdKind.Poll).
-            flag: x64_load_rip(e.code, X64_RAX)
-            e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
-            x64_test_rr(e.code, X64_RAX, X64_RAX)
-            cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{x64_jcc_rel32(e.code, X64Cond.NE)})
+            // Right after a runtime route the selector calls only on a slow
+            // path (IRX64Emitter.routed), only that path can publish a stop:
+            // it falls into the poll's slow path (IRX64Cold.falls), and a
+            // stop poll keeps no hot code; a turn keeps its armed word.
+            cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{})
+            falls: routed && e.colds.len() > traps
+            if !falls || f.a[at] == turn {
+                flag: x64_load_rip(e.code, X64_RAX)
+                e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
+                x64_test_rr(e.code, X64_RAX, X64_RAX)
+                cold.sites.push(x64_jcc_rel32(e.code, X64Cond.NE))
+            }
+            if falls -> e.colds[traps].falls = true
             cold.resume = e.code.bytes.len()
             cold.left = at
             cold.pad = branch
@@ -4913,7 +4941,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     al: ir_x64_allocate(m, f)
     checked: ir_timing_marked(f)
     logged: tables.logged
-    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false}
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
@@ -6401,6 +6429,56 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     named: ir_x64_tables(fixed)
     assert(named.texts.get(IR_X64_DIVIDED_BY_ZERO) != None && named.texts.get(ir_x64_overflow_message("div")) != None)
     assert(named.texts.get(ir_x64_overflow_message("add")) == None)
+}
+
+// A runtime route the selector runs inline, calling the runtime only for a
+// big Int (jet_int_owned_to_i64), can publish a stop only on that slow path:
+// the stop point right after it polls there, after the route's call. A stop
+// poll keeps no hot code; a turn keeps its armed-word check.
+#Test("A stop point after an inline route polls on the route's slow path") {
+    loop key in ([String]{IR_STOP_POLL_KEY, IR_STOP_TURN_KEY}) {
+        m := ir_module_new()
+        m.stop_points = true
+        int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        route: ir_intern_name(m, "jet_int_owned_to_i64")
+        poll: ir_stop_poll(m, key)
+        f := ir_function_new("at", "test:route.jet::at", "", "route.jet", 1)
+        x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        f.result = word
+        w: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        value: ir_args(f, [Int]{x})
+        _ := ir_emit(f, IROp.CallRuntime, w, route, value, 1, 2)
+        none: ir_args(f, [Int]{})
+        _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 2)
+        _ := ir_open_if(f, stopped, 2)
+        _ := ir_emit(f, IROp.Return, -1, w, -1, -1, 2)
+        ir_end(f, 2)
+        _ := ir_emit(f, IROp.Return, -1, w, -1, -1, 3)
+        m.functions.push(f)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function
+        route_at := -1
+        poll_at := -1
+        armed := 0
+        loop reloc in compiled.relocs {
+            if reloc.target == {
+                .Runtime(symbol) -> {
+                    if symbol == "jet_int_owned_to_i64" -> route_at = reloc.at
+                }
+                .Function(id) -> {
+                    if id.value == poll -> poll_at = reloc.at
+                }
+                .RuntimeData(symbol) -> {
+                    if symbol == IR_X64_CHECKS_ARMED_SYMBOL -> armed += 1
+                }
+                .Data(_) -> {}
+            }
+        }
+        assert(route_at >= 0 && poll_at > route_at)
+        assert_eq(armed, if key == IR_STOP_TURN_KEY -> 1 else -> 0)
+    }
 }
 
 // Two stop edges, each `jet_rt_cleanup_enter`, its leave and a branch out

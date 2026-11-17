@@ -241,7 +241,7 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
 // from the composed sources.
 regenerate: fn(tree: String, integ: String) {
     seed: files.canonicalize(roots.roots()["JET_SEED"])
-    // The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime
+    // The runtime generator outputs (RuntimeCExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/Agent/RuntimeGenerators.jet\tall\n")
     names := files.read("{integ}/generators").lines().map(fn(line) { line.partition("\t").head })

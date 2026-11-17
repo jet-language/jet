@@ -1,0 +1,157 @@
+// The runtime's stops receipt (BuildLibrary.jet ir_stop_exports): the
+// exports whose call can publish a stop, through direct calls, the code
+// words the library calls and the rail cells it installs them in, never
+// through a function that ends the process or runs a program's memory hook.
+use jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IRSlotKind, IR_STOP_PUBLISH, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_slot, ir_stop_exports]
+
+stop_test_fn: fn(name: String, params: Int, temps: Int) -> IRFunction {
+    f := ir_function_new(name, name, name, "rt.jet", 1)
+    loop _ in 0..<params -> _ := ir_slot(f, 0, IRSlotKind.Param, -1, 1)
+    loop _ in 0..<temps -> _ := ir_slot(f, 0, IRSlotKind.Temp, -1, 1)
+    f
+}
+
+stop_test_call: fn(f: &IRFunction, callee: Int, args: [Int]) {
+    start: ir_args(f, args)
+    _ := ir_emit(f, IROp.Call, -1, callee, start, args.len(), 1)
+}
+
+// A function that loads rail cell `data` into its temp and calls it
+// through the address call leaf `leaf`.
+stop_test_fire: fn(name: String, leaf: Int, data: Int) -> IRFunction {
+    f := stop_test_fn(name, 0, 2)
+    _ := ir_emit(f, IROp.DataAddress, 0, data, -1, -1, 1)
+    _ := ir_emit(f, IROp.Load, 1, 0, 0, -1, 1)
+    stop_test_call(f, leaf, [Int]{1, 1})
+    f
+}
+
+// A function that stores function `installed`'s address in rail cell `data`.
+stop_test_install: fn(name: String, data: Int, installed: Int) -> IRFunction {
+    f := stop_test_fn(name, 0, 2)
+    _ := ir_emit(f, IROp.FunctionAddress, 0, installed, -1, -1, 1)
+    _ := ir_emit(f, IROp.DataAddress, 1, data, -1, -1, 1)
+    _ := ir_emit(f, IROp.Store, -1, 1, 0, 0, 1)
+    f
+}
+
+stop_test_export: fn(function: Int, symbol: String) -> IRLibraryExport {
+    IRLibraryExport{function: function, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}}
+}
+
+// The library: 0 publishes, 1 is the address call leaf, 2 forwards its code
+// parameter to it, 3 stops through 0 and 6 is quiet; cell 0 holds 3, cell 1
+// holds 6 and cell 2 whatever jet_rt_arm is passed.
+stop_test_library: fn() -> IRModule {
+    m := ir_module_new()
+    loop _ in 0..<3 -> m.data.push([U8]{})
+    m.functions.push(stop_test_fn(IR_STOP_PUBLISH, 2, 0))
+    leaf := stop_test_fn("os_call1_i64", 2, 0)
+    leaf.asm = Val(IRAsmLeaf{code: [U8]{0xff, 0xd0}, regs: [Int]{}, result: 0})
+    m.functions.push(leaf)
+    forward := stop_test_fn("coll_call1", 2, 0)
+    stop_test_call(forward, 1, [Int]{0, 1})
+    m.functions.push(forward)
+    handler := stop_test_fn("handler", 1, 0)
+    stop_test_call(handler, 0, [Int]{0, 0})
+    m.functions.push(handler)
+    m.functions.push(stop_test_install("install", 0, 3))
+    // 5: calls cell 0 through the forwarding wrapper.
+    fire := stop_test_fn("fire", 0, 2)
+    _ := ir_emit(fire, IROp.DataAddress, 0, 0, -1, -1, 1)
+    _ := ir_emit(fire, IROp.Load, 1, 0, 0, -1, 1)
+    stop_test_call(fire, 2, [Int]{1, 1})
+    m.functions.push(fire)
+    m.functions.push(stop_test_fn("pure", 1, 0))
+    m.functions.push(stop_test_install("install_quiet", 1, 6))
+    // 8: calls cell 1, which holds only the quiet function.
+    m.functions.push(stop_test_fire("quiet_rail", 1, 1))
+    // 9 ends the process; 10 reaches a stop only through it.
+    fatal := stop_test_fn("alloc_out_of_memory", 1, 0)
+    stop_test_call(fatal, 0, [Int]{0, 0})
+    m.functions.push(fatal)
+    alloc := stop_test_fn("alloc", 1, 0)
+    stop_test_call(alloc, 9, [Int]{0})
+    m.functions.push(alloc)
+    // 11: calls a code word read from the heap, a closure's: unknown code.
+    callback := stop_test_fn("callback", 1, 1)
+    _ := ir_emit(callback, IROp.Load, 1, 0, 8, -1, 1)
+    stop_test_call(callback, 1, [Int]{1, 0})
+    m.functions.push(callback)
+    // 12: stores the code it is passed in cell 2; 13 calls cell 2.
+    arm := stop_test_fn("arm", 1, 1)
+    _ := ir_emit(arm, IROp.DataAddress, 1, 2, -1, -1, 1)
+    _ := ir_emit(arm, IROp.Store, -1, 1, 0, 0, 1)
+    m.functions.push(arm)
+    m.functions.push(stop_test_fire("fire_armed", 1, 2))
+    // 14: calls the publisher through the runtime route of export 3's symbol.
+    sleep := stop_test_fn("sleep", 0, 0)
+    route: ir_intern_name(m, "jet_rt_handler")
+    _ := ir_emit(sleep, IROp.CallRuntime, -1, route, 0, 0, 1)
+    m.functions.push(sleep)
+    m
+}
+
+stop_test_exports: fn() -> [IRLibraryExport] {
+    [IRLibraryExport]{
+        stop_test_export(3, "jet_rt_handler"),
+        stop_test_export(5, "jet_rt_fire"),
+        stop_test_export(6, "jet_rt_pure"),
+        stop_test_export(8, "jet_rt_quiet_rail"),
+        stop_test_export(10, "jet_rt_alloc"),
+        stop_test_export(11, "jet_rt_callback"),
+        stop_test_export(12, "jet_rt_arm"),
+        stop_test_export(13, "jet_rt_fire_armed"),
+        stop_test_export(14, "jet_rt_sleep"),
+    }
+}
+
+#Test("the stops receipt names the exports that reach the publisher, through rails, forwarded code and routes") {
+    receipt: ir_stop_exports(stop_test_library(), stop_test_exports())
+    assert_eq(receipt, ["jet_rt_callback", "jet_rt_fire", "jet_rt_fire_armed", "jet_rt_handler", "jet_rt_sleep"])
+}
+
+#Test("a rail cell whose address escapes can hold any code, so a call through it can stop") {
+    m := stop_test_library()
+    leak := stop_test_fn("leak", 0, 1)
+    _ := ir_emit(leak, IROp.DataAddress, 0, 1, -1, -1, 1)
+    route: ir_intern_name(m, "memcpy")
+    start: ir_args(leak, [Int]{0})
+    _ := ir_emit(leak, IROp.CallRuntime, -1, route, start, 1, 1)
+    m.functions.push(leak)
+    receipt: ir_stop_exports(m, stop_test_exports())
+    assert(receipt.contains("jet_rt_quiet_rail"))
+    assert(!receipt.contains("jet_rt_pure"))
+}
+
+#Test("an export a program may define in its place can run program code, which can stop") {
+    m := stop_test_library()
+    m.functions[6].host_symbol = "jet_rt_pure"
+    receipt: ir_stop_exports(m, stop_test_exports())
+    assert(receipt.contains("jet_rt_pure"))
+    assert(receipt.contains("jet_rt_quiet_rail"))
+}
+
+#Test("a route that runs a program's memory hook takes the hook's stop at the program's next check") {
+    m := stop_test_library()
+    // 15: a value's drop glue, which calls a code word read from the heap;
+    // 16 drops through it.
+    glue := stop_test_fn("coll_slot_drop", 1, 1)
+    _ := ir_emit(glue, IROp.Load, 1, 0, 8, -1, 1)
+    stop_test_call(glue, 1, [Int]{1, 0})
+    m.functions.push(glue)
+    drop := stop_test_fn("drop", 1, 0)
+    stop_test_call(drop, 15, [Int]{0})
+    m.functions.push(drop)
+    exports := stop_test_exports()
+    exports.push(stop_test_export(16, "jet_rt_value_drop"))
+    receipt: ir_stop_exports(m, exports)
+    assert(!receipt.contains("jet_rt_value_drop"))
+    assert(receipt.contains("jet_rt_callback"))
+}
+
+#Test("a library without the stop publisher, a runtime fixture's unit, has no export that can stop") {
+    m := stop_test_library()
+    m.functions[0].name = "scheduler_elsewhere"
+    assert_eq(ir_stop_exports(m, stop_test_exports()).len(), 0)
+}

@@ -541,12 +541,304 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]
         }
         if !added -> break
     }
+    ir_reached_exports(exports, reaches)
+}
+
+// The symbols of `exports` whose function `reaches` marks, sorted: a
+// receipt's rows.
+ir_reached_exports: fn(exports: [IRLibraryExport], reaches: [Bool]) -> [String] Never! {
     symbols := [String]{}
     loop row in exports {
         if reaches[row.function] -> symbols.push(row.symbol.copy())
     }
     symbols.sort()
     symbols
+}
+
+// The runtime function that publishes a stop to a task's control block
+// (JetRuntime Scheduler.jet): every stop a runtime route delivers, the
+// task's own or one another task or thread publishes for it, is published
+// there.
+IR_STOP_PUBLISH: "scheduler_control_publish"
+
+// The runtime functions that end the process rather than publish a stop
+// the calling program takes: allocation failure and the checked heap's
+// misuse report (JetRuntime Alloc.jet), a capacity overflow (a sequence's,
+// a text's or an owner count's), an invalid box layout and an internal
+// defect (Trap.jet). The stops receipt never goes through them, so a route
+// that can stop only by one of them takes no poll.
+IR_STOP_FATAL: [String]{"alloc_out_of_memory", "alloc_check_fail", "rt_seq_capacity_overflow_stop", "rt_trap_invalid_box_layout", "jet_rt_unreachable"}
+
+// The runtime functions that run a program's memory hooks: a context
+// allocator's handler and its release and the checked heap's allocation
+// observers (JetRuntime Alloc.jet), a value's clone and drop glue
+// (Collections.jet), a context value's release (Context.jet) and an error
+// payload's release (Err.jet). A stop that hook publishes stays pending,
+// and the program takes it at its next stop check (an allocation it
+// interrupts takes its buffer from the program heap), so allocation,
+// freeing, cloning and dropping take no poll after them. The stops receipt
+// never goes through these functions.
+IR_STOP_DEFERRED: [String]{"alloc_user_call", "alloc_user_drop", "jet_rt_alloc_check_take", "jet_rt_alloc_check_give", "coll_slot_clone", "coll_slot_drop", "context_values_release", "err_payload_release"}
+
+// The start of the name of each `#FFI(asm)` leaf that calls the code
+// address its first argument holds (JetBackend OS/Linux.jet).
+IR_ADDRESS_CALL_PREFIX: "os_call"
+
+// Where a code word comes from, as ir_code_sources traces a slot back: a
+// function's address, the word at offset 0 of module storage (a rail
+// cell, by its data row), a parameter of the function, or anything else.
+IRCodeSource: enum {
+    Function(id: Int),
+    Cell(data: Int),
+    Param(index: Int),
+    Unknown,
+}
+
+// An IRCodeFlow's role: the code word is called. Any other role is the data
+// row of the rail cell the word is stored in.
+IR_CODE_CALLED: -1
+
+// A code word function `function` calls or stores (`role`), from `source`.
+IRCodeFlow: struct {
+    function: Int,
+    source: IRCodeSource,
+    role: Int,
+}
+
+// The stops receipt of the runtime library `m` (`<prefix>.stops`): the
+// exports whose call can publish a stop, sorted, after whose call a
+// program polls (Build.jet ir_route_can_stop). It is read from the library
+// as built, before the optimizer's inlining folds the functions it names.
+// An export can stop when it reaches IR_STOP_PUBLISH through direct calls,
+// the routes the library defines and the code words it calls, never
+// through an IR_STOP_FATAL function or an IR_STOP_DEFERRED hook. A called
+// code word is traced back in its function (ir_code_sources): a function's
+// address calls that function; a rail cell calls each function whose
+// address the library stores in it; a parameter calls what each caller
+// passes there. A word from anywhere else (a closure's code, a word a call
+// returned), a cell whose address escapes or that holds any other word, a
+// word an export or an address-taken function is passed, and a function a
+// program or host may define in an export's place (IRFunction.host_symbol)
+// can run program code, which can stop. A C symbol the library calls is a
+// leaf; a thread, signal handler or fiber it starts publishes no stop to
+// its caller. Empty when the library defines no IR_STOP_PUBLISH (a runtime
+// fixture's unit without the scheduler), so none of its exports can stop.
+ir_stop_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+    count: m.functions.len()
+    // Per name row, the export function a CallRuntime of it reaches (-1: a
+    // C symbol).
+    name_callees := loop _ in m.names -> -1
+    loop row in exports {
+        if name_rows_value(m.name_rows, row.symbol) == .Val(at) -> name_callees[at] = row.function
+    }
+    writes: loop f in m.functions -> ir_slot_writes(f)
+    // Per function and parameter, the uses of the code word passed there,
+    // grown until every caller's flows are known.
+    uses := [[[Int]]]{}
+    loop f in m.functions {
+        params := loop _ in 0..<f.param_count -> [Int]{}
+        if f.asm != None && f.name.starts_with(IR_ADDRESS_CALL_PREFIX) && f.param_count > 0 {
+            params[0].push(IR_CODE_CALLED)
+        }
+        uses.push(params.move())
+    }
+    flows := [IRCodeFlow]{}
+    loop {
+        flows.clear()
+        loop id in 0..<count -> ir_code_flows(m, id, writes[id], uses, name_callees, flows)
+        grown := false
+        loop flow in flows {
+            if flow.source == .Param(index) {
+                if !uses[flow.function][index].contains(flow.role) {
+                    uses[flow.function][index].push(flow.role)
+                    grown = true
+                }
+            }
+        }
+        if !grown -> break
+    }
+    callers := loop _ in 0..<count -> [Int]{}
+    roots := loop f in m.functions -> f.host_symbol != ""
+    entries := loop f in m.functions -> f.host_symbol != ""
+    loop row in exports -> entries[row.function] = true
+    installs := loop _ in m.data -> [Int]{}
+    tainted := loop _ in m.data -> false
+    reads := [Int]{}
+    loop (id, f) in m.functions {
+        loop (at, op) in f.op {
+            callee := -1
+            if op == .Call -> callee = f.a[at]
+            if op == .CallRuntime -> callee = name_callees[f.a[at]]
+            if callee >= 0 && callee < count -> callers[callee].push(id)
+            if op == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> entries[f.a[at]] = true
+            // A cell's address read by anything but a Load, the base of a
+            // Store or a copy escapes: the code it holds is unknown.
+            if op == .Load || op == .Copy || op == .Move -> next
+            ir_x64_reads_into(f, at, reads)
+            loop (index, slot) in reads {
+                if (op == .Store || op == .StreamStore) && index == 0 -> next
+                data: ir_code_cell(f, writes[id], slot)
+                if data >= 0 && data < tainted.len() -> tainted[data] = true
+            }
+        }
+    }
+    // A function that calls the code word a rail cell holds, and beside it
+    // the cell's data row.
+    called_by := [Int]{}
+    called_cells := [Int]{}
+    loop flow in flows {
+        if flow.source == {
+            .Function(id) -> {
+                if id < 0 || id >= count -> next
+                if flow.role == IR_CODE_CALLED -> callers[id].push(flow.function) else {
+                    installs[flow.role].push(id)
+                }
+            }
+            .Cell(data) -> {
+                if flow.role == IR_CODE_CALLED {
+                    called_by.push(flow.function)
+                    called_cells.push(data)
+                } else { tainted[flow.role] = true }
+            }
+            .Param(_) -> {}
+            .Unknown -> {
+                if flow.role == IR_CODE_CALLED -> roots[flow.function] = true else {
+                    tainted[flow.role] = true
+                }
+            }
+        }
+    }
+    // An export's or address-taken function's parameter holds whatever its
+    // caller passes, which the library cannot see.
+    loop (id, params) in uses {
+        if !entries[id] -> next
+        loop param_uses in params {
+            loop role in param_uses {
+                if role == IR_CODE_CALLED -> roots[id] = true else -> tainted[role] = true
+            }
+        }
+    }
+    loop (pair, caller) in called_by {
+        data: called_cells[pair]
+        if data < 0 || data >= tainted.len() || tainted[data] -> roots[caller] = true else {
+            loop callee in installs[data] -> callers[callee].push(caller)
+        }
+    }
+    // A route reaches no stop through a fatal function or a deferred hook.
+    fatal: loop f in m.functions -> IR_STOP_FATAL.contains(f.name) || IR_STOP_DEFERRED.contains(f.name)
+    published := false
+    reaches := [Bool]{}
+    work := [Int]{}
+    loop (id, f) in m.functions {
+        sink: f.name == IR_STOP_PUBLISH
+        if sink -> published = true
+        starts: (sink || roots[id]) && !fatal[id]
+        reaches.push(starts)
+        if starts -> work.push(id)
+    }
+    if !published -> return [String]{}
+    head := 0
+    loop head < work.len() {
+        id: work[head]
+        head += 1
+        loop caller in callers[id] {
+            if reaches[caller] || fatal[caller] -> next
+            reaches[caller] = true
+            work.push(caller)
+        }
+    }
+    ir_reached_exports(exports, reaches)
+}
+
+// Per slot of `f`, the instructions that write it.
+ir_slot_writes: fn(f: IRFunction) -> [[Int]] Never! {
+    writes := loop _ in f.slot_type -> [Int]{}
+    loop at in 0..<f.op.len() {
+        slot: ir_x64_write(f, at)
+        if slot >= 0 && slot < writes.len() -> writes[slot].push(at)
+    }
+    writes
+}
+
+// The data row of the module storage whose address slot `slot` of `f`
+// holds wherever it is read (a DataAddress, or a copy of one), else -1;
+// `writes` is f's ir_slot_writes.
+ir_code_cell: fn(f: IRFunction, writes: [[Int]], slot: Int) -> Int Never! {
+    row := -1
+    seen := [Int]{}
+    work := [Int]{slot}
+    loop {
+        at := work.pop() ?? break
+        if seen.contains(at) -> next
+        seen.push(at)
+        if at < f.param_count || at >= writes.len() || writes[at].len() == 0 -> return -1
+        loop index in writes[at] {
+            op: f.op[index]
+            if op == .Copy || op == .Move -> work.push(f.a[index]) else if op == .DataAddress && (row < 0 || row == f.a[index]) {
+                row = f.a[index]
+            } else { return -1 }
+        }
+    }
+    row
+}
+
+// Where the code word slot `slot` of `f` holds can come from, traced back
+// through copies and numeric conversions to each write of it; a parameter
+// is its own source. A constant 0 is no code.
+ir_code_sources: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [IRCodeSource] Never! {
+    found := [IRCodeSource]{}
+    seen := [Int]{}
+    work := [Int]{slot}
+    loop {
+        at := work.pop() ?? break
+        if at < 0 || at >= writes.len() {
+            found.push(IRCodeSource.Unknown)
+            next
+        }
+        if seen.contains(at) -> next
+        seen.push(at)
+        if at < f.param_count -> found.push(IRCodeSource.Param{index: at})
+        loop index in writes[at] {
+            op: f.op[index]
+            if op == .Copy || op == .Move || op == .Convert -> work.push(f.a[index]) else if op == .FunctionAddress {
+                found.push(IRCodeSource.Function{id: f.a[index]})
+            } else if op == .Load && f.b[index] == 0 && ir_code_cell(f, writes, f.a[index]) >= 0 {
+                found.push(IRCodeSource.Cell{data: ir_code_cell(f, writes, f.a[index])})
+            } else if op != .Const || f.a[index] != 0 { found.push(IRCodeSource.Unknown) }
+        }
+    }
+    found
+}
+
+// The code word flows of function `id` onto `flows`: the word each address
+// call calls (an IR_ADDRESS_CALL_PREFIX leaf's first argument, any
+// argument a callee's parameter calls or stores as `uses` has it, a
+// CallIndirect's callee) and the word each Store puts in a rail cell, by
+// their sources. `writes` is the function's ir_slot_writes and
+// `name_callees` the function a CallRuntime of each name row reaches.
+ir_code_flows: fn(m: IRModule, id: Int, writes: [[Int]], uses: [[[Int]]], name_callees: [Int], flows: &[IRCodeFlow]) Never! {
+    f: m.functions[id]
+    loop (at, op) in f.op {
+        if op == .CallIndirect -> ir_code_flow(f, id, writes, f.a[at], IR_CODE_CALLED, flows) else if op == .Store && f.b[at] == 0 {
+            data: ir_code_cell(f, writes, f.a[at])
+            if data >= 0 -> ir_code_flow(f, id, writes, f.c[at], data, flows)
+        } else if op == .Call || op == .CallRuntime {
+            callee: if op == .Call -> f.a[at] else -> name_callees[f.a[at]]
+            if callee < 0 || callee >= uses.len() -> next
+            loop (index, param_uses) in uses[callee] {
+                if index >= f.c[at] -> break
+                loop role in param_uses {
+                    ir_code_flow(f, id, writes, f.args[f.b[at] + index], role, flows)
+                }
+            }
+        }
+    }
+}
+
+ir_code_flow: fn(f: IRFunction, id: Int, writes: [[Int]], slot: Int, role: Int, flows: &[IRCodeFlow]) Never! {
+    loop source in ir_code_sources(f, writes, slot) {
+        flows.push(IRCodeFlow{function: id, source: source, role: role})
+    }
 }
 
 // Ordered process-lifecycle hooks of the library object. Each row is

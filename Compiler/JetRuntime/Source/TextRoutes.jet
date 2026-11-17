@@ -80,7 +80,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
 #Export(c) jet_string_chars: fn(value: I64, output: I64) -> I64 {
     count: jet_char_len(value)
     if (count > I64{1152921504606846975}) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     words: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
@@ -112,7 +112,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
         count += I64{1}
     }
     if (count > I64{1152921504606846975}) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     words: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
@@ -155,7 +155,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
         at += width
     }
     if (count > I64{1152921504606846975}) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     words: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
@@ -189,7 +189,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     times: if (native < I64{0}) -> I64{0} else -> native
     if (times == I64{0} || length == I64{0}) { return rt_text_builder_with_capacity(I64{0}) }
     if (times > I64{9223372036854775807} /% length) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     total: length * times
@@ -224,7 +224,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     if (matches == I64{0}) { return jet_rt_string_clone(value) }
     remaining: length - matches * width
     if (replacement != I64{0} && matches > (I64{9223372036854775807} - remaining) /% replacement) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     result: rt_text_builder_with_capacity(remaining + matches * replacement)

@@ -1,0 +1,61 @@
+# A stop poll follows a runtime call only when the runtime's stops receipt
+# (runtime.stops, read from the runtime IR at library build: JetIR
+# BuildLibrary.jet ir_stop_exports) names the export, or the callee is no
+# runtime export. `shown` converts an Int to text (jet_rt_int_to_string),
+# which reaches no stop publisher, so nothing polls after it; `joined` builds
+# text (jet_rt_string_builder_*), whose growth leaves a pending stop to the
+# next check and whose capacity overflow ends the process, so it reaches
+# none either; `wait` sleeps, which can deliver a cancellation or a deadline,
+# so a poll follows. At -O0 `jet inspect decisions` prints each function's
+# slot IR twice, before and after the passes, so each poll counts twice.
+fixture: Fixtures/StopPollFollowsTheRuntimeStopsReceipt
+env: NO_COLOR=1
+step: jet inspect decisions -O0 main.jet
+env: JET_OPT_DUMP=shown
+exit: 0
+stdout: ~ "call_runtime jet_rt_int_to_string (" # the Int's text conversion
+stdout: count "jet_ir_stop_poll" = 0 # no poll follows it
+step: jet inspect decisions -O1 main.jet
+env: JET_OPT_DUMP=shown
+exit: 0
+stdout: count "jet_ir_stop_poll" = 0 # nor at O1
+step: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=shown
+exit: 0
+stdout: count "jet_ir_stop_poll" = 0 # nor at O2
+step: jet inspect decisions -O0 main.jet
+env: JET_OPT_DUMP=joined
+exit: 0
+stdout: ~ "call_runtime jet_rt_string_builder_push" # the text builder's buffer growth
+stdout: count "jet_ir_stop_poll" = 0 # no poll follows it
+step: jet inspect decisions -O1 main.jet
+env: JET_OPT_DUMP=joined
+exit: 0
+stdout: count "jet_ir_stop_poll" = 0 # nor at O1
+step: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=joined
+exit: 0
+stdout: count "jet_ir_stop_poll" = 0 # nor at O2
+step: jet inspect decisions -O0 main.jet
+env: JET_OPT_DUMP=wait
+exit: 0
+stdout: count "jet_ir_stop_poll" >= 2 # the poll after the sleep, printed twice
+step: jet inspect decisions -O1 main.jet
+env: JET_OPT_DUMP=wait
+exit: 0
+stdout: count "jet_ir_stop_poll" >= 1 # it stays at O1
+step: jet inspect decisions --release main.jet
+env: JET_OPT_DUMP=wait
+exit: 0
+stdout: count "jet_ir_stop_poll" >= 1 # and at O2
+step run: jet run main.jet
+exit: 0
+stdout: = "4, 2\n"
+step release: jet run --release main.jet
+exit: 0
+stdout: == run
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == run

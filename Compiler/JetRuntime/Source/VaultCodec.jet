@@ -298,7 +298,7 @@ vault_encode_pairs: fn(pairs: I64) -> I64 {
         key_len: rt_text_len(key)
         value_len: rt_text_len(value)
         if (key_len > I64{9223372036854775799} - length || value_len > I64{9223372036854775799} - length - key_len) {
-            rt_text_capacity_stop()
+            rt_seq_capacity_overflow_stop()
         }
         length += I64{8} + key_len + value_len
         at += I64{1}

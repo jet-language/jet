@@ -173,7 +173,7 @@ context_user_carrier: fn() -> I64 {
 // back and counts as a refusal, and the region's record then names
 // `carrier`, so context_user_owner finds the allocator again at the give.
 context_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
-    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    if (scheduler_stop_pending() != I64{0}) { return I64{0} }
     block: alloc_user_call(carrier, ALLOC_USER_TAKE, size, align)
     if (block == I64{0}) { return I64{0} }
     last: wrapping(block + (if (size == I64{0}) -> I64{0} else -> wrapping(size - I64{1})))

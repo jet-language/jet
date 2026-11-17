@@ -166,7 +166,7 @@ scheduler_text_concat: fn(left: I64, right: I64) -> I64 {
     a: sync_load(wrapping(left + I64{8}))
     b: sync_load(wrapping(right + I64{8}))
     if (b > I64{9223372036854775807} - a) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     result: scheduler_text_new(a + b)
@@ -732,6 +732,15 @@ scheduler_delivered_status: fn() -> I64 {
     if (control != I64{0}) { scheduler_check_loops(control) }
     scheduler_delivered_status()
 }
+
+// Whether a stop is delivered to the running task, the word
+// jet_rt_session_propagate answers, read without its turn or its attention:
+// a buffer or memory route's check after a refused allocation or a memory
+// hook, whose stop is already published. Neither the carrier nor a cancel
+// or pause another task asked for is taken there; the program's next stop
+// check takes them, so such a route publishes no stop of its own and no
+// poll follows its call (JetIR BuildLibrary.jet ir_stop_exports).
+scheduler_stop_pending: fn() -> I64 { scheduler_delivered_status() }
 
 // The turn poll's routine (JetIR IR.jet IR_STOP_TURN_KEY): at a loop's
 // turn or a recursive body's entry a passed deadline is delivered too.
