@@ -12,7 +12,12 @@ QUEUE: Shared{RunQueue{held: [I64]{}, pushes: 0}}
     QUEUE.pushes += 1
 }
 
-#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 { QUEUE.held.remove(0) ?? I64{0} }
+// `remove` takes an item by value; each task handle is distinct, so removing
+// the front handle's value takes the front.
+#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {
+    front: QUEUE.held.get(0) ?? return I64{0}
+    QUEUE.held.remove(front) ?? I64{0}
+}
 
 double: fn(value: Int) -> Int { value * 2 }
 

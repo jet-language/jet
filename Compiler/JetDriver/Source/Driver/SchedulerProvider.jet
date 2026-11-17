@@ -16,7 +16,7 @@
 // entry file does not declare (a compiler machine, a profile another package
 // gives) binds nothing here.
 use {
-    jet_foundation.[Item, Program, StructDef]
+    jet_foundation.[Expr, ExprField, Item, Program, StructDef]
     jet_parser.[parse_generated_source]
     jet_pkg_model.[PackageParseError, pkg_parse_target_profiles, pkg_record_body, pkg_retired_record_head_spans]
 }
@@ -64,20 +64,28 @@ jet_driver_profile_scheduler: fn(definition: StructDef) -> String? Never! {
         if block.trait_name != "Machine" && !block.trait_name.ends_with(".Machine") -> next
         loop constant in block.constants {
             if constant.name != "facts" -> next
-            if constant.value == .StructLit(_, _, _, _, fields, _, _, _) {
-                loop field in fields {
-                    if field.name != "scheduler" -> next
-                    if field.value == .Str(parts, _, _) {
-                        if parts.len() == 1 && parts[0] == .Lit(text) && jet_driver_provider_type_name(text) {
-                            return Val(text)
-                        }
+            loop field in jet_driver_record_fields(constant.value) {
+                if field.name != "scheduler" -> next
+                if field.value == .Str(parts, _, _) {
+                    if parts.len() == 1 && parts[0] == .Lit(text) && jet_driver_provider_type_name(text) {
+                        return Val(text)
                     }
-                    return None
                 }
+                return None
             }
         }
     }
     None
+}
+
+// The fields a record literal writes: `MachineFacts{…}` parses as a typed
+// literal with a field body; a struct literal carries its fields itself.
+jet_driver_record_fields: fn(value: Expr) -> [ExprField] Never! {
+    if value == .StructLit(_, _, _, _, fields, _, _, _) -> return fields
+    if value == .TypedLit(_, body, _, _) {
+        if body == .Fields(fields) -> return fields
+    }
+    [ExprField]{}
 }
 
 // A type as the entry spells it: dotted identifier components.
