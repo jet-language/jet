@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111942,
+    "rev": 111950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55735,11 +55735,11 @@
         {
           "n": 2,
           "text": "`--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads. Proof: `jet test Compiler --profile cases --filter CLICommands/build_trace_phases` and `--filter cli_commands/build_trace_file_is_chrome_trace`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:56:55.436Z"
+          "evidence": "Holds on dev 72f6b3bb9c: on batch compiler p275, `jet test Compiler --profile cases --filter CLICommands/build_trace` passes 2 of 2, build_trace_phases and build_trace_file_is_chrome_trace (proof row sp-trace in cycle p275).",
+          "at": "2026-11-17T20:34:13.580Z"
         }
       ],
       "refs": [],
@@ -55753,7 +55753,7 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-17T01:41:04.613Z",
+      "updated": "2026-11-17T20:34:13.580Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -90694,7 +90694,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -90703,6 +90703,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on dev dbf05f4ced (p276): the cost CLI cases pass."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -90736,17 +90741,17 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "6d50143539 (CoreCliLead-2): lint --cost and explain --cost are unbuilt forms (E2104 naming #6652). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), cases cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs, cost_cli_rejects_incomplete_reachable_projection and cost_cli_projects_generic_specializations report KNOWN-FAILING #6652, and the kit has 0 ERROR rows for the cost surface.",
-          "at": "2026-11-07T07:51:53.513Z"
+          "evidence": "Holds on dev dbf05f4ced (batch compiler p276 suite): `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` passes 3 of 3 (cost_cli_projects_generic_specializations, cost_cli_projects_generic_and_foreign_calls_completely, cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs), and `--profile ui --filter E2104` passes 1 of 1 (inspect_target_live_scope_e2104). The cost surface is built, so no case reaches exit 101 or KNOWN-FAILING.",
+          "at": "2026-11-17T21:05:49.686Z"
         },
         {
           "n": 2,
           "text": "The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cost and the L2510 view-into-owned-slot lint are built; both cost cases PASS on a release kit. Proof: `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` and `jet test Compiler --profile ui --filter E2104`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:00.473Z"
+          "evidence": "Holds on dev dbf05f4ced (batch compiler p276 suite): `jet test Compiler --profile cases --filter CLIPartsSurface/cost_cli_` passes 3 of 3 (cost_cli_projects_generic_specializations, cost_cli_projects_generic_and_foreign_calls_completely, cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs), and `--profile ui --filter E2104` passes 1 of 1 (inspect_target_live_scope_e2104). The cost surface is built, so no case reaches exit 101 or KNOWN-FAILING.",
+          "at": "2026-11-17T21:05:50.659Z"
         }
       ],
       "refs": [],
@@ -90754,9 +90759,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-17T15:30:05.338Z",
+      "updated": "2026-11-17T21:05:52.430Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T21:05:52.430Z"
     },
     {
       "id": "c0m4deiq",
@@ -103594,12 +103600,11 @@
         {
           "n": 6,
           "text": "Every in-repository file follows D-BRACE-LAYOUT1. Proof: `jet fmt --check Core Compiler Jetpack Tools Examples tests` reports no brace-layout difference.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:29:41.039Z",
-          "blockedBy": "#6898"
+          "evidence": "Holds on dev 72f6b3bb9c (batch compiler p275): jet fmt --check Core Compiler Jetpack Tools Examples Tests reports no formatting or brace-layout difference. Its only output is 280 parse errors, every one in a deliberately invalid fixture or input (Tests/Cases/*fixture*, Tests/AgentWorkloads/inputs, Tools/Gauntlet/*/Fixtures), plus 2 BranchArmTable warnings. The exit code is 1 only because of those parse errors.",
+          "at": "2026-11-17T20:33:13.809Z"
         },
         {
           "n": 7,
@@ -103682,7 +103687,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-17T11:48:14.244Z",
+      "updated": "2026-11-17T20:33:13.809Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -111737,20 +111742,20 @@
         {
           "n": 1,
           "text": "Int.parse's error type, ParseError, has a declaration in Core, so a `??` handler can name it. Proof: `jet test Compiler --profile cases --filter Errors/parse_error_named_in_handler` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:04.249Z"
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:53.444Z"
         },
         {
           "n": 2,
           "text": "Inside a `??` handler, `{err}`, `{err:Debug}` and `err.message` all render a Core error value on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:05.220Z",
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:54.440Z",
           "proof": {
             "profile": "cases",
             "filter": "Errors/core_error_renders_in_handler"
@@ -111759,11 +111764,11 @@
         {
           "n": 3,
           "text": "The fixes suggested by E0915 and E0112 never propose a spelling that fails for the same value, and each suggested fix compiles. Proof: `jet test Compiler --profile ui --filter E0915_fix_compiles` and `--filter E0112_fix_compiles`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:06:31.841Z"
+          "evidence": "Holds on dev dbf05f4ced (p276 suite): `jet test Compiler --profile cases --filter Errors/` passes parse_error_named_in_handler and core_error_renders_in_handler, and `--profile ui` passes E0915_fix_compiles and E0112_fix_compiles at o0, o1 and o2 (fixed companion run exit 0). Landed in 4315716f03.",
+          "at": "2026-11-17T21:05:55.469Z"
         }
       ],
       "refs": [],
@@ -111774,7 +111779,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:31.841Z",
-      "updated": "2026-11-17T01:49:52.980Z",
+      "updated": "2026-11-17T21:05:55.469Z",
       "updatedBy": "Main"
     },
     {
@@ -215840,6 +215845,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T21:05:55.469Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hicd7a",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T21:05:54.440Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hicd7a",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T21:05:53.444Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hicd7a",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T21:05:52.430Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T21:05:50.659Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zlsxzv",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T21:05:49.686Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zlsxzv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T20:34:13.580Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hnphts",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T20:33:13.809Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01gyy9b",
+      "note": "#6"
+    },
     {
       "at": "2026-11-17T20:27:04.886Z",
       "by": "owner",
