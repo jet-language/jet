@@ -5788,7 +5788,7 @@ tasks never read or change the process registry. The module source is
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
-| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep, as `LIFECYCLE` hears them; give back the graph. See below. |
+| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; in a page when it takes the focus again, and when the browser resumes it; as `LIFECYCLE` hears them; give back the graph. See below. |
 | `phase() -> Phase?` | phase | The app's phase: its run (`instance`), the observation's `sequence`, its `visibility` (`Visibility`: `Visible`, `Hidden`, `Unknown`) and `execution` (`Execution`: `Running`, `Suspending`, `Unknown`); `None` before `graph.launch()` and once the app's window closed. See below. |
 | `LIFECYCLE: Event<LifecycleEvent>` | event | Each change of the app's phase, in order, one at a time: a `LifecycleEvent` with its `instance`, `sequence`, `reason` (`LifecycleReason`: `VisibilityChanged`, `SleepPreparing`, `Woke`, `FocusRegained`, `Closing`) and the phases `before` and `after`. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
@@ -6487,7 +6487,9 @@ does (core.event).
 back, as a `LIFECYCLE` listener for the graph's life. Losing the focus or
 the machine preparing to sleep takes the app away; the focus regained or
 the wake after that brings it back. The window being shown again does
-not. A resume runs in a task of its own, so the window never waits on it.
+not. In a page the same holds for the page's focus and for the browser
+freezing the page and resuming it. A resume runs in a task of its own,
+so the window never waits on it.
 
 Each resume, with or without `on_resume`, first sends the writes the
 device queued (`graph.offline(.Queue)`), then re-runs every live binding
@@ -6495,9 +6497,9 @@ at its next read, so the screen shows what changed while the app was
 away; the app writes no code for this. Only then does `on_resume` run. When
 `on_resume` fails, its `Notice` shows on a red bar over the top of the
 window that came back, until a click on the bar dismisses it; with no
-window open it joins `app.notices()`. A launched app follows the
-machine's sleep. A desktop with no system bus or no logind resumes on the
-focus alone.
+window open (always, in a page) it joins `app.notices()`. A launched app
+follows the machine's sleep. A desktop with no system bus or no logind
+resumes on the focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the
