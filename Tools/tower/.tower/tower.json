@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111698,
+    "rev": 111700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -51644,101 +51644,6 @@
       "completedAt": "2026-11-14T05:05:16.920Z"
     },
     {
-      "id": "c0w1f3xa",
-      "num": 4636,
-      "title": "Build the ratified strong pause: pause(mode: .CheckLoops) and one shared back-edge check on every engine",
-      "body": "D-TASK-PAUSE-TIER1=E (ratified 2026-07-31) gives experts a strong pause: `handle.pause(mode: .CheckLoops)` stops a task at its next loop back-edge on every engine, while default pause stays at wait points. It is unbuilt. Exercised on release jet dev-05ea86f65: `t.pause(mode: .CheckLoops)` is rejected with E0764 ('pause has no parameter labelled mode'). Source reading at master 3e5349196: Prelude Scheduler.rs:1343-1359 defines `jet_scheduler_loop_pause_check` and nothing calls it. Today a busy task also ignores cancellation, #Context deadlines and fair turns until it waits: task.race drains a busy loser by blocking on it (TaskGroup.rs:485-498, Scheduler.rs:3956-3959), while plugins already stop runaway guests with Wasmtime epoch interruption (Plugin.rs:240-243, 1372-1406). Sources: Riot talk IxQ586TS8Gw 45:46-48:32 ('a while-true actor bricks the scheduler'); BEAM talk RntfkL8lUY4 ('a greedy green thread can never block the scheduler'). This card builds the one shared back-edge mechanism. Ballot D-TASK-SLICE1 decides whether cancellation, deadlines and fair turns also use it by default.\n\nFresh review 2026-10-05: this card builds only ratified D-TASK-PAUSE-TIER1=E, which needs no vote. Whether cancellation, deadlines and fair turns also use these sites is ballot D-TASK-SLICE1 on its own card (key N-TASKSLICE), so this work is never blocked by that vote.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "1. Register `pause(mode:)` and `PauseMode` once; the self-hosted compiler accepts the same form. 2. One per-worker attention word; back-edge and recursive-entry checks emitted from one shared lowering rule on every engine and optimisation level; strip-mine counted loops; elide checks in loops that already reach a wait point. 3. Strong pause delivers through the existing Prelude hook. 4. Leave the attention word ready for D-TASK-SLICE1 delivery without turning any default on. 5. Measure under the strict performance gate on the #2254 hot-loop kernels before any default turns on.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (bddd8905d3, edcd16c03d)."
-        },
-        {
-          "at": "2026-10-06",
-          "by": "Pip",
-          "text": "N-TASKLOOP: a detached task spinning without a wait point keeps the process alive after run returns; other tasks still progress (APICompLangB r4_spin_starvation: rc 124 after 40 s). jet check on `loop { n += 1 }` in a spawned fn reports no problems (p09). Add the exit contract for detached tasks at run return."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A golden spawns a task running `loop { n += 1 }`, calls `handle.pause(mode: .CheckLoops)`, observes `paused=true` within a bounded wait, then resumes and cancels it; identical on every execution level.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). Case task_control_tiers/pause_holds_a_busy_loop_only_under_check_loops_on_every_tier 1/0 on the gate-p43 jet (O0, O1, O2, AOT and web steps): a task running loop { n += 1 } prints \"pause(mode: .CheckLoops) holds it: true\" within a bounded wait, then resumes and cancels (\"cancel stopped it\"). Golden Concurrency/TaskControls 3/0.",
-          "at": "2026-11-14T04:15:34.700Z"
-        },
-        {
-          "n": 2,
-          "text": "The same program with default `pause()` documents that the loop keeps running (wait-point law), with identical output on every level.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). The same case prints \"pause() leaves it running: true\" (the wait-point law) on every level; golden Concurrency/TaskControls 3/0 (gate-p43).",
-          "at": "2026-11-14T04:15:36.674Z"
-        },
-        {
-          "n": 3,
-          "text": "The back-edge check comes from one shared lowering rule; a test fails if any engine omits it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). One lowering rule, JetIR Build.jet ir_loop_check. The case's jet inspect decisions steps (basic and release) count the stop poll in spin, and its web step greps the wasm for the poll routine, so an engine or pass that drops the check fails the case (1/0 on gate-p43).",
-          "at": "2026-11-14T04:15:38.617Z"
-        },
-        {
-          "n": 5,
-          "text": "Spec, core-library and examples updated; no second cancellation or scheduling mechanism is added.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). Docs/spec/spec.md:3771-3773 and core-library.md:4628 state the strong pause once; Examples/Concurrency/TaskControls.jet uses .CheckLoops; cancellation uses only the existing stop poll, with no second mechanism.",
-          "at": "2026-11-14T04:15:40.111Z"
-        }
-      ],
-      "refs": [
-        "D-TASK-PAUSE-TIER1",
-        "D-TASK-SLICE1",
-        "D-CANCELMODEL1",
-        "D-FOUND-LIFECYCLE1",
-        "D-CORE-PLUGINLIMITS1",
-        "#1359",
-        "#2787",
-        "#3239",
-        "#2254",
-        "#4593"
-      ],
-      "tags": [
-        "concurrency",
-        "runtime",
-        "scheduler",
-        "performance-gate",
-        "mine-2026-10-05",
-        "wayfinder:task"
-      ],
-      "parentId": "c0j2afiq",
-      "needsAcceptance": false,
-      "created": "2026-10-05T21:07:57.670Z",
-      "updated": "2026-11-14T04:15:44.361Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-14T04:15:44.361Z"
-    },
-    {
       "id": "c08u6j84",
       "num": 4637,
       "title": "Busy tasks honour cancellation, deadlines and fair turns at loop turns (ballot D-TASK-SLICE1)",
@@ -56205,12 +56110,12 @@
         },
         {
           "n": 5,
-          "text": "Removing checks build-wide or per scope (audit rows E12-E17: a check field set to `off`, or `#Unchecked` inside `#Unsafe`) is the audited `check_removal` gate, which any package or organization may forbid; under a forbidding policy the removal is refused with a registered error (D-JAI-EXPERT1=A, D-JAI-BUILDOPT1).",
+          "text": "Removing checks through a build setting (audit rows E12-E17: a check field set to `off`) is the audited `check_removal` gate, which any package or organization may forbid, including a loose file's inline `package:` policy; under a forbidding policy the removal is refused with a registered error (D-JAI-EXPERT1=A, D-JAI-BUILDOPT1).  proof: jet test Compiler --profile ui --filter check_removal_gate_forbidden",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T02:34:06.397Z",
+          "at": "2026-11-17T04:24:35.291Z",
           "proof": {
             "profile": "ui",
             "filter": "check_removal_gate_forbidden"
@@ -56232,7 +56137,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-17T04:07:23.577Z",
+      "updated": "2026-11-17T04:24:35.291Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -75342,12 +75247,12 @@
         },
         {
           "n": 9,
-          "text": "D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check only in its scope. Proof: `jet test Compiler --profile golden --filter Memory/UncheckedBoundsScope` on O0, O1 and O2. (The flag removal and the every-tier index stop are UBFLAG and UBINDEX.)",
+          "text": "D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check only in its scope, and it is the audited `check_removal` gate: under a package or organization policy that forbids check removal, `#Unchecked` is refused with a registered error (moved from #5022 c5). Proof: `jet test Compiler --profile golden --filter Memory/UncheckedBoundsScope` on O0, O1 and O2 and `jet test Compiler --profile ui --filter unchecked_gate_forbidden`. (The flag removal and the every-tier index stop are UBFLAG and UBINDEX.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T12:59:40.174Z"
+          "at": "2026-11-17T04:24:38.211Z"
         },
         {
           "n": 10,
@@ -75377,7 +75282,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-17T01:42:19.676Z",
+      "updated": "2026-11-17T04:24:38.211Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -85770,108 +85675,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 6,
       "completedAt": "2026-11-17T02:09:53.426Z"
-    },
-    {
-      "id": "c0y5r79w",
-      "num": 6539,
-      "title": "Build the ratified #Deadline(Duration | Instant) block and migrate every #Context(deadline:) fixture",
-      "body": "D-DEADLINE-ONE1 (ratified A, on #4022) adds #Deadline(Duration | Instant) on a block or function. It retires #Context(deadline:), the six timeout setters and the ten timeout arguments, with no teaching errors (the owner's 2026-11-06 order overrides that part of D-DEADLINE-ONE1; migration support is set during v1 release preparation, #6068). Neither the syntax registry nor the Prelude has a Deadline marker on dev 163d4852ad, and no card owned the build. Test impact found by CardClose-1, 2026-11-01: tests/cases/…/parallel_collection_adapters_select_across_runtime_failure_carriers.fixture/main.jet:7 writes #Context(deadline: time.now() - 1). time.now() returns a DateTime and Context.deadline is Int, so the fixture gets E0360 (no DateTime '-') and E0930. At least 6 more fixtures use the same spelling: taskgroup_params native_deadline, core_net_tcp_expired_deadlines, http_client_law, async_event_*. Per the greenfield cutover, build the block and migrate every caller, fixture and doc in one change.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met; c3 by 08658dd26a (batch 33), c4 by edcd16c03d (batch 39)."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Reopened: the E1102 census found an ICE on #Deadline on a function (new c3). G3Core-2 owns it."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Every criterion met. c1 closed with G3Core2-6539c1 at c88a17155a (dev), and c2 with G3Core2-6539c2 in batch 20 plus 6c77d0d369."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "c1, checked by Main 2026-11-14 on dev 7a649c3166. parallel_collection_adapters is 3/0 in b20proofs, including _select_across_runtime_failure_carriers, which runs o0, o1 and o2 inside one row. git grep of `#Context(deadline` over Compiler, Core, Examples and tests gives 0 hits; the only hits are historical evidence in Tools/agent-eval and Docs/audits. One item is left: Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:878 CTX_FIELD_DEADLINE \"deadline\" is a dead registry row for the retired spelling, with no reader. It goes to G3Core-2; c1 is met once it is removed."
-        },
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Decision (Main, 2026-11-13): Examples/Concurrency/ContextTaskInherit keeps its 20 ms deadline (G3Core2-concfix). A 0 ms deadline has expired by the time the spawned task first polls, so E3003 from the post-call poll is the correct meaning. Splitting the loop or entry check from the post-call poll in the IR (Build ir_loop_check, the OptStops fold, X64Select, JetWeb) is not needed for c2, and it is not scheduled. c2`s fix (G3Core2-6539c2) is runtime only: a wait that returns its typed timeout clears the DEADLINE attention bit, so the poll after it does not also raise E3003."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c1 wording vs D-LANG-MIGRATE1=A (Main, 2026-11-12): ratified decisions outrank criterion wording. Removing #Context(deadline:) is a breaking change, so it lands with a jet fix rewrite to #Deadline(...) registered, while the error still teaches no retired spelling. \"No fix rules\" in c1 is read as \"no teaching text\". G3Core-1 is being restaged as 1b with the rewrite and a sweep statement."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06 (owner ruling): no teaching errors for retired spellings, API or library paths until v1 release preparation (#6068). This overrides the teaching-error part of D-DEADLINE-ONE1; the #Deadline block itself stands."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "#Deadline(Duration | Instant) is registered and implemented per D-DEADLINE-ONE1 on every tier. #Context(deadline:), the six setters and the ten timeout arguments are removed with no teaching errors, snapshots or jet fix rules (owner 2026-11-06). Every fixture that used #Context(deadline:) is migrated, and parallel_collection_adapters_select_across_runtime_failure_carriers passes on o0/o1/o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "#Deadline was built in 8ae0a4d3cf (G3Core-1c) with its grammars in 0cb4e5f19b. G3Core2-6539c1 at c88a17155a (light13) removes the last trace of #Context(deadline:), the dead CTX_FIELD_DEADLINE registry row. git grep of `#Context(deadline` over Compiler, Core, Examples and tests on dev 4b0ea9247d gives 0 hits; only historical evidence in Docs/audits and Tools/agent-eval remains. b20proofs on the batch-20 jet: core_and_closures/parallel_collection_adapters 3/0, including _select_across_runtime_failure_carriers, which runs o0, o1 and o2 in one row. light13 guards on the batch-25 jet: grammar, syntax-row and decision_ids guards PASS.",
-          "at": "2026-11-14T02:44:28.445Z"
-        },
-        {
-          "n": 2,
-          "text": "A Core I/O loop that already honours the task deadline (the Jet DNS resolver under #Deadline) returns its typed timeout, as D-DEADLINE1 specifies, instead of the busy-loop deadline poll (Scheduler.jet scheduler_check_loop_deadline) stopping it with E3003 \"waiting in a loop\". Proof: jet test Compiler --profile cases --filter corelib_net/system_resolver_follows_go_against_a_local_dns_server passes, with its known-failing row removed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G3Core2-6539c2 landed in batch 20 together with Lander`s KF-row removal 6c77d0d369 (which drops the c9ef21c446 row). b20proofs on the batch-20 jet (gate-p26, dev 0a72518be8): jet test Compiler --profile cases --filter corelib_net/system_resolver_follows_go_against_a_local_dns_server PASS 1/0, with no known-failing row; corelib_net/ 15/0 + 1 KF (net_http_service_policy_tests_pass, unrelated); ContextTaskInherit 3/0.",
-          "at": "2026-11-14T02:25:05.812Z"
-        },
-        {
-          "n": 3,
-          "text": "The self-hosted checker accepts #Deadline on a function declaration: `jet check` of prim-capabilities/net_guest_pkg and Tools/ci/CompiledWorkloadPeerProbe.jet ICEs on the gate-p33 jet with \"sema.body totality: … the function marker `#Deadline` is not supported by the self-hosted checker yet\" (exit 101), found by the E1102 census. Proof: both check rc 0, plus a case with #Deadline on a function on o0, o1 and o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "08658dd26a (batch 33): a #Deadline function checks, and an Instant from Core time binds a deadline. On the gate-p39 jet: jet check of prim-capabilities net_guest_pkg rc 0, jet check Tools/ci/CompiledWorkloadPeerProbe.jet rc 0, case deadline_marker_bounds_blocks 1/0, cases deadline 23/2/3KF (both FAILs are also red on gate-p38: tcp_expired, see c4, and os_interrupt_deadline).",
-          "at": "2026-11-14T03:49:24.780Z"
-        },
-        {
-          "n": 4,
-          "text": "c2 regressed: core_net_tcp_expired_deadlines_return_typed_timeouts exits 70 with E3003, because every stop poll (not only loop heads) delivers a passed #Deadline (jet_rt_session_propagate -> scheduler_check_loop_deadline \"a loop\"), so a typed TCP timeout escapes as a stop. Fix (G3Core-2 poll-split, which also meets #4637 c6): a separate loop-head poll key through IR, X64Select, web and the runtime. Proof: cases core_net_tcp_expired (5 rows) and core_net_dns, golden Concurrency/, and nonpositive_sleeps with exact lines, on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "edcd16c03d (G3Core2-pollsplit, batch 39, dev ef5c72b4d6..6f6a4ccf58): only a loop turn or a recursive entry reports a passed deadline as \"a loop\"; every other stop poll leaves the deadline to the typed I/O path. On the gate-p45 jet: the 5 core_net_tcp_expired_deadlines rows each 1/0, cases deadline 24/0/3KF (was 23/2), core_os_interrupt_deadline 1/0, the busy loop and busy recursion cancel rows 1/0, a_failure_journey 1/0, golden Concurrency/ 186/0 apart from the 3 base BusyTurns TIMEOUTs.",
-          "at": "2026-11-14T04:19:18.394Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T09:12:58.999Z",
-      "updated": "2026-11-14T04:19:27.461Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-14T04:19:27.461Z"
     },
     {
       "id": "c0wtvbj7",
@@ -222033,6 +221836,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T04:24:38.211Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0sg79an",
+      "note": "#9: Takes the per-scope check_removal gate half of #5022 c5, which needs this block to exist.; was: D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check on"
+    },
+    {
+      "at": "2026-11-17T04:24:35.292Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04pd50v",
+      "note": "#5: The per-scope half (#Unchecked inside #Unsafe) is D-UB-BOUNDARY1=A work owned by #6323 c9 (E22), where the gate requirement moves; the build-wide setting itself is retired by #6323 c10.; was: Removing checks build-wide or per scope (audit rows E12-E17: a check field set to `off`, or `#Unchecked` inside `#Unsafe`) is the audited `check_removal` gate, which any package or organization may fo"
+    },
     {
       "at": "2026-11-17T04:07:23.577Z",
       "by": "Main",
