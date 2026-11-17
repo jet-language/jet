@@ -417,12 +417,24 @@ priv QueryState: struct {
 // `__limits` bound the query's sorts, groups and output: a query over a
 // reader's stream keeps that reader's limits, every other source starts at
 // `DataLimits.safe()`, and each derived query inherits its source's.
+// `__take`, set by `limit`, is how many of its cell's rows it gives.
 Query: struct<T> {
     __steps: [String],
     __one_shot: Bool,
     __limits: DataLimits,
     __state: Shared<QueryState>,
     __cell: Shared<QueryCell<T>>,
+    __take: Int?,
+
+    // The first `count` rows the query gives, in its order; a count below
+    // one gives none. A table's query gives the rows its row policy let the
+    // caller read, so a limit counts those and a page is full whenever the
+    // caller may read enough rows. The limited query reads its source as
+    // the source reads, without a filter after it narrowing that read.
+    limit: fn(self, count: Int) -> Query<T> Never! {
+        most: if self.__take == .Val(held) && held < count -> held else -> count
+        Query<T>{__steps: query_steps(self.__steps, "limit"), __one_shot: self.__one_shot, __limits: self.__limits.copy(), __state: self.__state.copy(), __cell: self.__cell.copy(), __take: Val(most)}
+    }
 }
 
 priv QueryKeyCell: struct<T, K> {
@@ -744,7 +756,7 @@ priv query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run:
 }
 
 priv query_narrowing: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&fn(String, [String]) -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move()}}}
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: Shared{QueryState{consumed: false}}, __cell: Shared{QueryCell<T>{run: run.move()}}, __take: None}
 }
 
 priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -758,6 +770,9 @@ priv query_steps: fn(steps: [String], step: String) -> [String] Never! {
 priv query_rows: fn<T>(query: Query<T>) -> [T] DataError! { query_read<T>(query, "", [String]{}) }
 
 // The rows a query produces that the SQL `condition` may hold for (QueryCell).
+// A limited query (`__take`) reads its cell unnarrowed: the rows it gives
+// are the first of all its cell's, which a condition after it may not
+// choose.
 priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> [T] DataError! {
     if query.__one_shot {
         state := query.__state.guard_edit()
@@ -767,7 +782,14 @@ priv query_read: fn<T>(query: Query<T>, condition: String, values: [String]) -> 
         state.value.consumed = true
     }
     cell: query.__cell.guard_read()
-    cell.value.run(condition, values)
+    most: query.__take ?? return cell.value.run(condition, values)
+    rows: cell.value.run("", [String]{}) ?? return Err(err)
+    out := [T]{}
+    loop row in rows {
+        if out.len() >= most -> break
+        out.push(row.copy())
+    }
+    Ok(out)
 }
 
 // A reusable query over a source that reads its rows narrowed by a SQL
@@ -1549,6 +1571,32 @@ __query_test_sales: fn() -> [QueryTestSale] Never! {
     sorted: __query_sort_by<QueryTestSale>(source, fn(sale) { sale.item })
     _: __query_collect<QueryTestSale>(__query_filter<QueryTestSale>(sorted, "price > CAST(? AS INTEGER)", [String]{"50"}, fn(sale) { sale.cents > 50 })) ?? panic("the sorted query collects")
     assert_eq(asked.guard_read().value, [String]{"(price < CAST(? AS INTEGER)) AND (item = ?) 100,core", " "})
+}
+
+#Test("a limit keeps the first rows its query gives, after every filter before it and before every filter after it") {
+    rows: __query_test_sales()
+    big: __query_filter<QueryTestSale>(query<QueryTestSale>(rows), "", [String]{}, fn(sale) { sale.cents >= 80 })
+    first: big.limit(2)
+    assert_eq(__query_plan<QueryTestSale>(first), [String]{"scan", "filter", "limit"})
+    kept: __query_collect<QueryTestSale>(first) ?? panic("the limited query collects")
+    assert_eq(kept.len(), 2)
+    assert_eq(kept[0].item, "tools")
+    assert_eq(kept[1].item, "apps")
+    assert_eq((__query_collect<QueryTestSale>(big.limit(10)) ?? panic("a large limit")).len(), 3)
+    assert_eq((__query_collect<QueryTestSale>(big.limit(0)) ?? panic("a zero limit")).len(), 0)
+    assert_eq((__query_collect<QueryTestSale>(first.limit(5)) ?? panic("a wider limit after a limit")).len(), 2)
+    asked: Shared{[String]{}}
+    source: __query_narrowed<QueryTestSale>("table", fn(condition: String, values: [String]) {
+        seen := asked.guard_edit()
+        seen.value.push("{condition} {values.join(",")}")
+        Ok(__query_test_sales())
+    })
+    core: __query_filter<QueryTestSale>(source.limit(2), "item = ?", [String]{"core"}, fn(sale) { sale.item == "core" })
+    assert_eq(__query_plan<QueryTestSale>(core), [String]{"table", "limit", "filter"})
+    found: __query_collect<QueryTestSale>(core) ?? panic("a filter after a limit collects")
+    assert_eq(found.len(), 1)
+    assert_eq(found[0].cents, 40)
+    assert_eq(asked.guard_read().value, [String]{" "})
 }
 
 #Test("schema columns keep their order, nullability and column identity") {

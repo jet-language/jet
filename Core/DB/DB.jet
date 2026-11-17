@@ -1063,6 +1063,10 @@ TABLE_ROW_COLUMN: "jet_row"
 
 TABLE_KEY_COLUMN: "key"
 
+// The most keys one read of `Table.get_many` asks for, which keeps its
+// condition well inside the engine's bounds on bound values and depth.
+TABLE_KEYS_PER_READ: 200
+
 // The operation a table's row policy judges.
 #Equatable
 Op: enum {
@@ -1139,6 +1143,39 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             .Err(failure) -> return Err(failure)
         }
         Ok(None)
+    }
+
+    // The rows under `keys` that the caller may read, in key order, each
+    // once; a key no row holds, or whose row the policy refuses, gives none.
+    // It is how a list loads the rows it refers to, such as the profiles of
+    // a project's members: one read for up to TABLE_KEYS_PER_READ keys, not
+    // one per key. The row policy judges each row as `get` judges one, and
+    // reads a key it looks up once for all of them.
+    get_many: fn(self, keys: [K]) -[DB.Read]> [T] DBError! {
+        sorted := keys.copy()
+        sorted.sort_by(fn(left: K, right: K) { left <=> right })
+        unique := [K]{}
+        loop key in sorted {
+            if unique.len() == 0 || (unique[unique.len() - 1] <=> key) != Ordering.Equal {
+                unique.push(key.copy())
+            }
+        }
+        stored := [[String:DBValue]]{}
+        at := 0
+        loop at < unique.len() {
+            end: if at + TABLE_KEYS_PER_READ < unique.len() -> at + TABLE_KEYS_PER_READ else -> unique.len()
+            terms := [String]{}
+            values := [DBValue]{}
+            loop index in at..<end {
+                cells: table_cells(self.name, unique[index].encode()) ?? return Err(err)
+                terms.push("({table_match(cells)})")
+                values.extend(table_values(cells))
+            }
+            rows: table_rows<K, T>(self, terms.join(" OR "), values, None) ?? return Err(err)
+            stored.extend(rows)
+            at = end
+        }
+        table_readable<K, T>(self, stored, table_who())
     }
 
     // Adds `row`, whose key no row may hold yet. A taken key is `Exists`
@@ -1223,7 +1260,8 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         table: self.again()
         deferred: data.__query_narrowed<T>("table", fn(condition: String, values: [String]) {
             stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
-            table_readable<K, T>(table, stored_rows, who)
+            rows: table_readable<K, T>(table, stored_rows, who) ?? return Err(table_data_error(err))
+            Ok(rows)
         })
         Ok(deferred)
     }
@@ -1249,7 +1287,8 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         // the search gives, so the search does not narrow its read by it.
         deferred: data.__query_narrowed<T>("search", fn(_: String, _: [String]) {
             stored_rows: table_found<K, T>(table, terms.copy()) ?? return Err(table_data_error(err))
-            table_readable<K, T>(table, stored_rows, who)
+            rows: table_readable<K, T>(table, stored_rows, who) ?? return Err(table_data_error(err))
+            Ok(rows)
         })
         Ok(deferred)
     }
@@ -1465,12 +1504,12 @@ priv db_judging: fn(state: Shared<DBState>, judging: Int, batch: Int) Never! {
 }
 
 // The rows of `stored_rows` that the row policy lets `who` read, decoded and
-// in key order, as a table's `query` and `search` give them. The policy reads
-// a key once for all of them (`db_judging`).
-priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]], who: Who) -[DB.Read]> [T] data.DataError! {
+// in key order, as a table's `query`, `search` and `get_many` give them. The
+// policy reads a key once for all of them (`db_judging`).
+priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]], who: Who) -[DB.Read]> [T] DBError! {
     keyed := [{key: K, row: T}]{}
     loop stored in stored_rows {
-        row: table_decode<T>(stored) ?? return Err(table_data_error(err))
+        row: table_decode<T>(stored) ?? return Err(err)
         keyed.push({key: table.key_of(row.copy()), row: row})
     }
     keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
@@ -1479,7 +1518,7 @@ priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(ta
     loop entry in keyed {
         allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? {
             db_judging(table.state, 0, -1)
-            return Err(table_data_error(err))
+            return Err(err)
         }
         if allowed -> out.push(entry.row.copy())
     }
@@ -2992,6 +3031,37 @@ priv look_test_count: fn(tasks: Table<Int, LookTestTask>) -[DB.Read]> Int DBErro
     assert_eq(after.rows, 0)
     assert_eq(after.statements, two_keys.statements)
     open_tx.commit() ?? panic("commit")
+}
+
+// The ids of the rows under `keys` that mia may read, and how many
+// statements the read runs.
+priv look_test_many: fn(store: Store, tasks: Table<Int, LookTestTask>, keys: [Int]) -[DB.Read]> {ids: [Int], statements: Int} Never! {
+    before: store.statements()
+    held: tasks.again()
+    wanted: keys.copy()
+    rows: app.as_caller(auth.AccountID.from_string("mia"), fn() { held.get_many(wanted) }) ?? panic("the tasks read: {err}")
+    ids := [Int]{}
+    loop row in rows -> ids.push(row.id)
+    {ids: ids, statements: store.statements() - before}
+}
+
+#Test("get_many reads the rows under its keys in one read, each once and in key order, that the policy lets the caller read") {
+    store: open_memory()
+    members: look_test_members(store)
+    plain: store.table("look_test_tasks", key: fn(row: LookTestTask) { row.id })
+    tasks: plain.guard(look_test_policy)
+    _: members.add(LookTestMember{project: 1, account: "mia"}) ?? panic("add the member: {err}")
+    loop id in 1..<7 {
+        project: if id <= 4 -> 1 else -> 2
+        _: plain.add(LookTestTask{id: id, project: project}) ?? panic("add task {id}: {err}")
+    }
+    one: look_test_many(store, tasks, [Int]{3})
+    assert_eq(one.ids, [Int]{3})
+    many: look_test_many(store, tasks, [Int]{4, 1, 3, 1, 99, 2})
+    assert_eq(many.ids, [Int]{1, 2, 3, 4})
+    assert_eq(many.statements, one.statements)
+    assert_eq(look_test_many(store, tasks, [Int]{5, 6}).ids, [Int]{})
+    assert_eq(look_test_many(store, tasks, [Int]{}).ids, [Int]{})
 }
 
 // The titles `binding` holds.

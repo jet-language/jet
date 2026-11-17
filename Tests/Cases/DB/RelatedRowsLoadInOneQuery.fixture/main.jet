@@ -1,0 +1,222 @@
+// A Crewboard-shaped service over typed tables with row policies: a
+// project's board loads its tasks, its members and each member's profile.
+// The profiles a board's members refer to come in one read
+// (`Table.get_many`), and each policy looks the caller's member row up once
+// per read, so a board costs as many statements with six members as with
+// two. A limit counts the rows the policy let through.
+use {
+    app
+    auth: core.auth
+    db: core.db
+}
+
+#Codable
+Project: struct {
+    id: Int,
+    name: String,
+}
+
+#Codable
+Task: struct {
+    id: Int,
+    project: Int,
+    title: String,
+}
+
+#[Codable, Comparable]
+MemberKey: struct {
+    project: Int,
+    account: String,
+}
+
+#Codable
+Member: struct {
+    project: Int,
+    account: String,
+}
+
+#Codable
+Profile: struct {
+    account: String,
+    name: String,
+}
+
+Board: struct {
+    project: String,
+    tasks: [String],
+    members: [String],
+}
+
+mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
+
+// The caller's account, or None for the system and for no one.
+account_of: fn(who: db.Who) -> String? {
+    if who == {
+        .Account(account) -> Val(account.raw())
+        .System | .Anonymous -> None
+    }
+}
+
+members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
+    store.table("members", key: fn(row: Member) { MemberKey{project: row.project, account: row.account} })
+}
+
+// Whether the caller is a member of `project`: one key lookup.
+member_may: fn(store: db.Store, project: Int, who: db.Who) -[DB.Read]> Bool db.DBError! {
+    account: account_of(who) ?? return Ok(false)
+    if members_in(store).get(MemberKey{project: project, account: account}) == {
+        .Ok(found) -> Ok(found != None)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// Members read a project, its tasks and its members.
+project_policy: fn(row: Project, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    member_may(store, row.id, who)
+}
+
+task_policy: fn(row: Task, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    member_may(store, row.project, who)
+}
+
+member_policy: fn(row: Member, _op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
+    member_may(store, row.project, who)
+}
+
+// Any signed-in account reads the profiles.
+profile_policy: fn(_row: Profile, _op: db.Op, who: db.Who, _store: db.Store) -[DB.Read]> Bool db.DBError! {
+    Ok(account_of(who) != None)
+}
+
+// The store each step opens the guarded tables from. A lambda owns what it
+// captures, so a step opens a table rather than capturing it.
+Stores: struct {
+    store: db.Store?,
+}
+
+STORE: Shared{Stores{store: None}}
+
+the_store: fn() -> db.Store {
+    stores: STORE.guard_read()
+    stores.value.store ?? panic("the store is open")
+}
+
+projects: fn() -> db.Table<Int, Project> {
+    the_store().table("projects", key: fn(row: Project) { row.id }).guard(project_policy)
+}
+
+tasks: fn() -> db.Table<Int, Task> {
+    the_store().table("tasks", key: fn(row: Task) { row.id }).guard(task_policy)
+}
+
+members: fn() -> db.Table<MemberKey, Member> { members_in(the_store()).guard(member_policy) }
+
+profiles: fn() -> db.Table<String, Profile> {
+    the_store().table("profiles", key: fn(row: Profile) { row.account }).guard(profile_policy)
+}
+
+// The board of `project`: its tasks, and its members by their profile names,
+// which one read of the profiles table loads.
+board: fn(project: Int) -[DB.Read]> Board db.DBError! {
+    name: if projects().get(project) == {
+        .Ok(found) -> if found == {
+            .Val(row) -> row.name
+            .None -> "unknown"
+        }
+        .Err(failure) -> {
+            return Err(failure)
+        }
+    }
+    task_query: tasks().query() ?? return Err(err)
+    task_rows: task_query.filter(fn(row: Task) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
+    titles := [String]{}
+    loop row in task_rows -> titles.push(row.title)
+    member_query: members().query() ?? return Err(err)
+    member_rows: member_query.filter(fn(row: Member) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
+    accounts := [String]{}
+    loop row in member_rows -> accounts.push(row.account)
+    found: profiles().get_many(accounts) ?? return Err(err)
+    names := [String]{}
+    loop row in found -> names.push(row.name)
+    Ok(Board{project: name, tasks: titles, members: names})
+}
+
+// The names of `project`'s members, each profile read on its own.
+names_one_by_one: fn(project: Int) -[DB.Read]> [String] db.DBError! {
+    member_query: members().query() ?? return Err(err)
+    member_rows: member_query.filter(fn(row: Member) { row.project == project }).collect() ?? return Err(db.DBError.Failed(err.reason))
+    names := [String]{}
+    loop row in member_rows {
+        if profiles().get(row.account) == {
+            .Ok(found) -> {
+                if found == .Val(profile) -> names.push(profile.name)
+            }
+            .Err(failure) -> return Err(failure)
+        }
+    }
+    Ok(names)
+}
+
+// mia's board of `project`, and the statements it ran.
+board_as_mia: fn(project: Int) -> {shown: String, statements: Int} {
+    before: the_store().statements()
+    shown: if app.as_caller(mia(), fn() { board(project) }) == {
+        .Ok(found) -> "{found.project}: tasks [{found.tasks.join(", ")}], members [{found.members.join(", ")}]"
+        .Err(failure) -> failure.message()
+    }
+    {shown: shown, statements: the_store().statements() - before}
+}
+
+// The statements reading `project`'s member names one profile at a time runs.
+one_by_one_as_mia: fn(project: Int) -> Int {
+    before: the_store().statements()
+    _: app.as_caller(mia(), fn() { names_one_by_one(project) }) ?? panic("the names read: {err}")
+    the_store().statements() - before
+}
+
+// The titles of the first `count` tasks mia may read, in key order.
+first_tasks: fn(count: Int) -[DB.Read]> String {
+    query: tasks().query() ?? return "unreadable"
+    first: query.limit(count)
+    rows: first.collect() ?? return "uncollected"
+    titles := [String]{}
+    loop row in rows -> titles.push(row.title)
+    "[{titles.join(", ")}]"
+}
+
+open_store: fn() {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(db.open_memory())
+}
+
+run: fn() {
+    open_store()
+
+    app.as_system(fn() {
+        _: projects().add(Project{id: 1, name: "Gate repair"}) ?? panic("add: {err}")
+        _: projects().add(Project{id: 2, name: "Spring fair"}) ?? panic("add: {err}")
+        _: projects().add(Project{id: 3, name: "Board only"}) ?? panic("add: {err}")
+        _: tasks().add(Task{id: 1, project: 3, title: "Hidden one"}) ?? panic("add: {err}")
+        _: tasks().add(Task{id: 2, project: 3, title: "Hidden two"}) ?? panic("add: {err}")
+        _: tasks().add(Task{id: 3, project: 1, title: "Fix the gate"}) ?? panic("add: {err}")
+        _: tasks().add(Task{id: 4, project: 1, title: "Paint the gate"}) ?? panic("add: {err}")
+        _: tasks().add(Task{id: 5, project: 2, title: "Book the hall"}) ?? panic("add: {err}")
+        pair: [String]{"mia", "ben"}
+        loop account in pair {
+            _: members().add(Member{project: 1, account: account.copy()}) ?? panic("add: {err}")
+        }
+        crew: [String]{"mia", "ben", "cy", "dee", "eve", "fay"}
+        loop account in crew {
+            _: members().add(Member{project: 2, account: account.copy()}) ?? panic("add: {err}")
+            _: profiles().add(Profile{account: account.copy(), name: "{account} (profile)"}) ?? panic("add: {err}")
+        }
+    })
+
+    two: board_as_mia(1)
+    six: board_as_mia(2)
+    print(two.shown)
+    print(six.shown)
+    print("a board of six members runs as many statements as one of two: {six.statements == two.statements}")
+    print("reading each member's profile on its own runs more for six: {one_by_one_as_mia(2) > one_by_one_as_mia(1)}")
+    print("mia's first two tasks: {app.as_caller(mia(), fn() { first_tasks(2) })}")
+}

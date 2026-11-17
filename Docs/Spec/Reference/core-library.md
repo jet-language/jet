@@ -4639,6 +4639,10 @@ run: fn() {
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
 deterministic operation names; `collect()` materializes `[T] DataError!`.
+`limit(count)` keeps the first `count` rows the query gives, in its order,
+after every step before it, and a step after it works on those rows only:
+over a guarded table's `query()` or `search()` it counts the rows the row
+policy let the caller read.
 The source `query(rows)` facade constructs the shared deferred carrier through
 the data provider, rather than rebuilding its private storage as a source
 record. Filter, sort, and grouping selectors receive an owned row value at
@@ -7482,6 +7486,7 @@ subquery from another table) is refused.
 | `store.with_policy(policy: RowPolicy, user: String) -[DB]> DBScope` | scope | The scope a row policy narrows to `user`. |
 | `store.table(name: String, key: fn(T) -[]> K, search: (fn(T) -[]> String)?{None}) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function; a pure `search` function gives the text its search index keeps. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
+| `table.get_many(keys: [K]) -[DB.Read]> [T] DBError!` | rows | Read the rows under `keys` the caller may read, each once and in key order, in one statement per 200 keys. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) -[DB.Read, DB.Write]> DBError!` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
@@ -7539,8 +7544,8 @@ are one per field of the encoded key (one `key` column when `K` is a scalar),
 which together form the primary key, and a `jet_row` column holding the row's
 JSON encoding through the storage codec, so `#Secret` fields are kept there
 while the row's wire form leaves them off. The first write creates the
-table; reading a table that was never written finds no rows. `get` and
-`query` carry `DB.Read`, and `add`,
+table; reading a table that was never written finds no rows. `get`,
+`get_many` and `query` carry `DB.Read`, and `add`,
 `put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
 table's row policy, which reads), so a function that writes a table must
 allow `DB.Write` (E0740 otherwise). A `get`, or a `query` collected, while an
@@ -7606,6 +7611,16 @@ row older than the transaction's own writes, and judging a project's tasks
 reads the caller's member row once, however many tasks there are. An
 `app.live` binding runs as the caller that made it, whoever reads it, and
 two callers' bindings of one query never share a result.
+
+`get_many(keys)` loads the rows a list refers to, such as the profiles of a
+project's members, in one statement (a condition over the keys' columns, up
+to 200 keys a statement) rather than one `get` per key. Each key gives its
+row once, in key order, and a key no row holds gives nothing. The row policy
+judges each row it read as it judges a `query`'s, reading a key it looks up
+once for all of them, so the statements a page that loads its related rows
+runs, its policies' included, do not grow with the rows it shows. A
+`limit` on a guarded table's query counts only the rows the policy let the
+caller read.
 
 A table made with `search: Val(text_of)` keeps a search index: a side table
 `<name>__jet_search` holding each row's key columns and one `jet_word` row per

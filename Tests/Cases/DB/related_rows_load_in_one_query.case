@@ -1,0 +1,18 @@
+# A project's board loads the profiles its members refer to in one read
+# (Table.get_many), and each row policy looks the caller's member row up
+# once per read, so the board runs as many statements with six members as
+# with two, policies included. A limit counts the rows the policy let
+# through. The same lines print at O0, O1 and O2.
+fixture: RelatedRowsLoadInOneQuery.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = related_rows_load_in_one_query.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default
