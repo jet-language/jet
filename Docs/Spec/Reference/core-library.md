@@ -536,6 +536,36 @@ use compiler: core.compiler
 }
 ```
 
+#### Compiler events
+
+`Event` lists every public moment of a compile and a build, each with one
+payload. `#On` hooks, the ordered `stages()` view, `jet build --json` and the
+session wire name a moment the same way and carry the same fields. The
+compiler's registry rows (`COMPILER_EVENTS`) are the one list; the `--json`
+schema is generated from them.
+
+| Moment | Variant | Payload fields |
+| --- | --- | --- |
+| `compiler.parsed` | `Parsed(file: File)` | `path`, `module` |
+| `compiler.imported` | `Imported(loaded: Module)` | `name`, `files` |
+| `compiler.declared` | `Declared(declaration: Declaration)` | `name`, `module`, `calls`, `complete` |
+| `compiler.checked` | `Checked(program: CheckedProgram)` | `declarations` |
+| `compiler.settled` | `Settled(round: Round)` | `round` (from 1, at most 16), `program`, `new_items` |
+| `compiler.emitted` | `Emitted(artifact: Artifact)` | `output`, `path`, `next` (`""`) |
+| `compiler.finished` | `Finished(outcome: Outcome)` | `ok`, `errors`, `warnings` |
+| `build.planned` | `Planned(plan: Plan)` | `outputs`, `steps` |
+| `build.asset` | `Asset(asset: Asset)` | `path`, `kind` |
+| `build.link` | `Link(inputs: LinkInputs)` | `objects`, `libraries`, `args`, `output_name`, `output`, `default` |
+| `build.before_write` | `BeforeWrite(artifact: Artifact)` | `output`, `path`, `next` |
+| `build.after_write` | `AfterWrite(artifact: Artifact)` | `output`, `path`, `next` (`""`) |
+
+`Declaration.calls` names the functions a declaration calls directly, by
+resolved name; a call through a function value is not in it. `complete` is
+false when the compiler checked only part of the declaration. `LinkInputs.default`
+is the command Jet's own link runs, so a hook that changes one argument keeps
+the rest. In `jet build --json`, a moment is one line,
+`{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
+
 ### `core.meta` — module and package metadata
 
 Every module has a `Module` value and every package a `Package` value, and the

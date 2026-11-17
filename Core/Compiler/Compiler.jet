@@ -269,6 +269,111 @@ QueryTime: struct {
     elapsed_ms: Int,
 }
 
+/// A file the compiler parsed (`compiler.parsed`): its path and the module
+/// it declares.
+File: struct {
+    path: String,
+    module: String,
+}
+
+/// A module the load resolved (`compiler.imported`), once each: its dotted
+/// name and the files that make it, in path order.
+Module: struct {
+    name: String,
+    files: [String],
+}
+
+/// One checked declaration (`compiler.declared`): its name, its module's
+/// dotted path, and the functions it calls directly, by resolved name. A call
+/// through a function value is not in `calls`. `complete` is false when the
+/// compiler checked only part of it, so a hook can tell a short list from a
+/// filtered one.
+Declaration: struct {
+    name: String,
+    module: String,
+    calls: [String],
+    complete: Bool,
+}
+
+/// The checked program (`compiler.checked`): every declaration, in module
+/// path then declaration order.
+CheckedProgram: struct {
+    declarations: [Declaration],
+}
+
+/// One settle round (`compiler.settled`): its number, from 1, the program as
+/// it stands, and the declarations the round added. A program settles in at
+/// most 16 rounds.
+Round: struct {
+    round: Int,
+    program: CheckedProgram,
+    new_items: [Declaration],
+}
+
+/// A file a build makes (`compiler.emitted`, `build.before_write`,
+/// `build.after_write`): the output it belongs to and the file's path. At
+/// `build.before_write`, `next` is the path the step writes the final file
+/// to; it is "" at the other moments.
+Artifact: struct {
+    output: String,
+    path: String,
+    next: String,
+}
+
+/// How a compile ended (`compiler.finished`): whether it succeeded and how
+/// many errors and warnings it reported.
+Outcome: struct {
+    ok: Bool,
+    errors: Int,
+    warnings: Int,
+}
+
+/// The plan a build settled (`build.planned`): the outputs it makes and the
+/// steps it runs, by name, in plan order.
+Plan: struct {
+    outputs: [String],
+    steps: [String],
+}
+
+/// An asset of the build graph (`build.asset`): its path and its kind as the
+/// plan declares it.
+Asset: struct {
+    path: String,
+    kind: String,
+}
+
+/// What one output's link reads (`build.link`): the object files and
+/// libraries, the link arguments, the output's name and path, and `default`,
+/// the command Jet's own link runs, so a hook that changes one argument keeps
+/// the rest.
+LinkInputs: struct {
+    objects: [String],
+    libraries: [String],
+    args: [String],
+    output_name: String,
+    output: String,
+    default: [String],
+}
+
+/// Every public moment of a compile and a build, with its payload. Hooks
+/// (`#On(compiler.settled)`), the ordered `stages()` view and `jet build
+/// --json` name a moment by its registry row: `compiler.parsed` is `Parsed`,
+/// `build.before_write` is `BeforeWrite`.
+Event: enum {
+    Parsed(file: File),
+    Imported(loaded: Module),
+    Declared(declaration: Declaration),
+    Checked(program: CheckedProgram),
+    Settled(round: Round),
+    Emitted(artifact: Artifact),
+    Finished(outcome: Outcome),
+    Planned(plan: Plan),
+    Asset(asset: Asset),
+    Link(inputs: LinkInputs),
+    BeforeWrite(artifact: Artifact),
+    AfterWrite(artifact: Artifact),
+}
+
 /// The facts of `kind` in `source`, in the source's canonical order: a
 /// program's types, then its functions, each in declaration order; a run's
 /// claim, then its sections in name order, then its record links in the
