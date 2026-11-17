@@ -31868,6 +31868,590 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-06",
       "retiredAt": "2026-11-17T04:55:29.014Z"
+    },
+    {
+      "id": "D-STDOUT-BUFFER1",
+      "cardId": "c0j8dr0e",
+      "group": "core",
+      "title": "When printed text leaves the program",
+      "situation": "When a program prints, the text can go straight to the screen or file, or wait in a small holding area and leave in larger batches. Today Jet sends every print immediately, even into a file or pipe, so printing a million lines makes a million system calls and stdout.flush() does nothing. You decide when printed text leaves the program; we recommend sending it at each line on a terminal and in batches into files and pipes.",
+      "gist": "Should printed text leave the program at every print, at every line, or in batches when it goes to a file?",
+      "lesson": "A buffer is a holding area for output. Writing it out is called flushing. Today every print flushes at once, even into a file. A flushes each line on a terminal and batches output into files and pipes, and it always flushes before the program waits, reads input, starts a child or exits. B flushes every line everywhere. C keeps today's flush on every print.",
+      "explainer": "Programs print a little at a time. Sending each piece to the operating system costs a system call, which is slow compared with copying text into memory. Most languages keep a small buffer and send it in batches, then flush it at sensible moments.\n\nToday Jet flushes after every print on every stream. On a terminal that is harmless. Into a file or a pipe it multiplies system calls, and the stream's flush method has no work left to do.\n\nOption A follows the rule C and Python have used for decades. On a terminal, text leaves at each line ending, so a person sees whole lines at once. Into a file or pipe, text leaves in batches.\n\nA also flushes before every moment where waiting text could confuse anyone. That includes before the program reads input, sleeps or waits on the network, starts a child process, writes to stderr, stops with an error, or exits. stderr itself keeps flushing on every write, so error text is never held back.\n\nOption B flushes at every line everywhere, as Rust does. Option C keeps today's rule and documents flush as having nothing to do.",
+      "story": "Dev writes a log converter that prints two million lines into a file with jet run convert.jet > out.txt. It takes far longer than the same loop in Python or C. The time goes to two million separate writes, and calling stdout.flush() at the end changes nothing.",
+      "inWild": "/* C: stdout is line buffered on a terminal and fully buffered otherwise.\n   https://pubs.opengroup.org/onlinepubs/9799919799/functions/stdin.html */\nfor (int i = 0; i < 2000000; i++) printf(\"%d\\n\", i);   // few write calls into a file\n\n# Python: the same rule; stderr is line buffered (3.9+)\n# https://docs.python.org/3/library/sys.html#sys.stdout",
+      "detail": "Current state: every non-empty stdout and stderr write flushes, even into files and pipes. The flush flag passed down is dead, so stdout.flush() is a no-op in practice (cpp-craft F3b; Term.rs:152-177; FSIoEnvOsTesting.rs:279-326). The native image runtime also prints text and newline as two writes (card #4013). D-COREIO1=A gives core.io ownership of the standard streams and flush, and says nothing about the default policy.\n\nCard #4634 asks to measure, then fix. The measurement belongs to that card. The default itself is an owner choice because every program observes it in output order, crash output and speed.\n\nSources: The Cherno, 31 nooby C++ habits (i_wDa2AS_8w 00:43), where std::endl flushing every line is the first habit to drop (claims cpp-craft:I02, R02).\n\nProven approaches. C stdio buffers stdout by line on a terminal and fully otherwise, and leaves stderr unbuffered (POSIX stdin(3)). Python uses the same split, and since 3.9 makes stderr line buffered. Rust's stdout is a LineWriter everywhere, so output into pipes still pays one write per line unless the program wraps it in a BufWriter. Go's os.Stdout is unbuffered, so heavy output needs bufio by hand.\n\nKnown failure of plain buffering: a prompt without a newline stays hidden before input, and buffered output can be lost when a program aborts. Option A removes both. It flushes before input and blocking waits, and the stop path flushes before printing its report.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Lines on a terminal, batches into files and pipes",
+          "detail": "On a terminal, stdout flushes at each line ending. Into a file or pipe it flushes when its buffer fills. Every stream also flushes before the program reads input, sleeps or waits, starts a child process, writes to stderr, stops with an error, or exits. stderr flushes every write. stdout.flush() forces a flush at any time.",
+          "technical": "core.io keeps one buffer per standard stream in the shared runtime, chosen once from the TTY fact (D-CORE-TERMSTDIN1). The scheduler's blocking points, process spawn, the stop and panic report path and process exit call one flush hook. Every tier shares the rule through the one-runtime law (D-EXEC1). The image runtime's two-write print becomes one buffered write.",
+          "code": "loop i in 0..1_999_999 { print(i) }\n// jet run convert.jet > out.txt: batched writes\n\nio.stdout.write(\"Name? \")\nname :: io.read_line() ?? \"\"   // prompt shown first"
+        },
+        {
+          "key": "B",
+          "name": "Flush at every line everywhere",
+          "detail": "stdout flushes at each line ending on a terminal and into files and pipes. stderr flushes every write. Output that prints many short lines still makes one system call per line.",
+          "technical": "One line-buffered writer for stdout on every target, as Rust's LineWriter. No TTY check. Large line-oriented output into files keeps most of today's system-call count.",
+          "code": "loop i in 0..1_999_999 { print(i) }\n// jet run convert.jet > out.txt: one write per line"
+        },
+        {
+          "key": "C",
+          "name": "Keep flushing every print",
+          "detail": "Today's rule stays. Every write leaves at once on every stream. stdout.flush() is documented as having nothing to do. Programs that need speed wrap the stream in their own buffer.",
+          "technical": "No runtime change. Documentation records flush as a no-op for the standard streams.",
+          "code": "loop i in 0..1_999_999 { print(i) }\n// one or two writes per print\n&io.stdout.flush()   // nothing to do"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C",
+          "note": "stdout is line buffered on a terminal and fully buffered into files and pipes; stderr is unbuffered.",
+          "code": "// POSIX stdin(3)\nprintf(\"%d\\n\", i);   // terminal: per line; file: per buffer\nfflush(stdout);       // force"
+        },
+        {
+          "lang": "Python",
+          "note": "The same terminal versus file split; stderr is line buffered since 3.9.",
+          "code": "# https://docs.python.org/3/library/sys.html#sys.stdout\nprint(i)                  # batched into a file\nprint(i, flush=True)      # force"
+        },
+        {
+          "lang": "Rust",
+          "note": "stdout is line buffered everywhere, which keeps one write per line into pipes.",
+          "code": "// std::io::Stdout wraps LineWriter\nprintln!(\"{i}\");   // one write per line, even into a file\n// fast path: BufWriter::new(stdout().lock())"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives people whole lines on a terminal and gives files and pipes batched writes, the split C and Python proved over decades. Flushing before every wait, child, error report and exit removes the classic hidden-prompt and lost-output failures.",
+        "tradeoff": "Two programs writing into the same pipe may see their lines grouped differently than today.",
+        "gains": [
+          "Large output into files stops paying one system call per print.",
+          "stdout.flush() does real work again.",
+          "Prompts and crash reports still appear in order."
+        ],
+        "losses": [
+          {
+            "loss": "Output written into a shared pipe by a parent and a child can group differently than today.",
+            "mitigation": "Every stream flushes before a child process starts and before waiting on it, so parent output written before the spawn always comes first."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps one system call per line into files, which is most of today's cost for line-oriented output."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the cost and leaves a flush method that never does anything."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Measure on card #4634 first: system-call counts with strace and matched timings for one and two million printed lines into a file, a pipe and a terminal.\n\nCheck that a prompt written without a newline appears before read_line returns. Check that output printed before a stop, a panic, a child spawn and exit appears in order in a captured pipe, on every tier.\n\nCheck that stderr writes are never delayed. Check that stdout.flush() empties the buffer, and that the image runtime prints one write per print call.",
+      "surface": {
+        "gist": "Should printed text leave the program at every print, at every line, or in batches when it goes to a file?",
+        "lesson": "Flushing sends held output to the screen or file. Today every print flushes at once, even into a file. A flushes per line on a terminal and in batches into files, and always before waiting, input or exit. B flushes every line everywhere. C keeps today's rule.",
+        "trio": {
+          "current": {
+            "note": "Every print is its own system call, even into a file; flush does nothing.",
+            "code": "loop i in 0..1_999_999 { print(i) }\n// > out.txt: about two million writes\n&io.stdout.flush()   // no effect"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Lines on a terminal, batches into files.",
+            "code": "for i in range(2_000_000): print(i)\n# python3 conv.py > out.txt: batched writes"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Lines on screen, batches into files",
+            "gist": "Terminal output leaves per line; file and pipe output leaves in batches.",
+            "gains": [
+              "Large file output gets fast.",
+              "Prompts and crash reports stay in order."
+            ],
+            "losses": [
+              "Parent and child lines in one pipe may group differently."
+            ],
+            "proposed": {
+              "code": "loop i in 0..1_999_999 { print(i) }\n// > out.txt: batched\nio.stdout.write(\"Name? \")\nname :: io.read_line() ?? \"\"   // prompt shown first"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Every line, everywhere",
+            "gist": "stdout leaves at each line ending, into files too.",
+            "gains": [
+              "Same timing on a terminal and in a file."
+            ],
+            "losses": [
+              "Still one system call per line into files."
+            ],
+            "proposed": {
+              "code": "loop i in 0..1_999_999 { print(i) }\n// > out.txt: one write per line"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Every print, as today",
+            "gist": "Nothing is held back; flush has nothing to do.",
+            "gains": [
+              "No behavior changes."
+            ],
+            "losses": [
+              "Large output stays slow.",
+              "flush stays a method that does nothing."
+            ],
+            "proposed": {
+              "code": "loop i in 0..1_999_999 { print(i) }\n// one write per print"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A uses the terminal-versus-file rule that C and Python proved. It flushes before every wait, child, error report and exit, so nothing goes missing.",
+          "gains": [
+            "Fast output into files and pipes.",
+            "flush works again."
+          ],
+          "losses": [
+            {
+              "loss": "Parent and child lines in one pipe may group differently.",
+              "mitigation": "Streams flush before a child starts and before waiting on it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps one system call per line into files."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps the cost and a flush that does nothing."
+            }
+          ],
+          "tradeoff": "Shared-pipe line grouping may change."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Output written into a shared pipe by a parent and a child can group differently than today.",
+          "attempts": [
+            "Flush on every write into pipes only. Rejected: pipes are where the large outputs go.",
+            "Flush at every point where another process or person could observe order: before spawn, wait, input, stderr writes, stops and exit. Kept."
+          ]
+        },
+        {
+          "loss": "A long-running program writing a log file shows lines late to someone watching it.",
+          "attempts": [
+            "Flush on a timer. Rejected: a hidden timer adds a thread and makes output timing nondeterministic.",
+            "Flush whenever the program blocks waiting for time, input or the network. Kept: an idle program has flushed everything it printed."
+          ]
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T00:57:52.795Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-07",
+      "retiredAt": "2026-11-17T05:18:28.964Z"
+    },
+    {
+      "id": "D-TASK-SLICE1",
+      "cardId": "c08u6j84",
+      "group": "runtime",
+      "title": "A busy task still stops on time and lets others run",
+      "situation": "Jet runs many small tasks on a few processor threads, and a task stops or gives way only when it waits, such as on a timer or the network. A loop that never waits keeps its thread, so a deadline cannot stop a runaway handler, a cancelled race loser holds up the winner, and busy tasks can starve the server. You decide whether each loop turn also becomes a place where cancellation, deadlines and fair turns can land. We recommend one cheap check per loop turn, switched on only after a speed gate shows no slowdown.",
+      "gist": "Should cancellation, deadlines and fair turns reach a task that is busy in a loop and never waits?",
+      "lesson": "A task is a small piece of work that runs alongside others; Jet runs many tasks on a few processor threads. A wait point is where a task already pauses, such as sleep, a channel receive or network input. Today cancellation, deadlines and turn-taking happen only at wait points, so a loop that never waits runs to its end no matter what. The choice is whether a loop's turn back to its top also becomes a safe stopping place.",
+      "explainer": "Plain words first. A task is a small job, such as handling one web request. Jet runs thousands of tasks on a few processor threads, one per processor core, and switches between tasks when one of them waits.\n\nA wait point is a place where a task already stops for a moment: a sleep, a channel receive, a network read, or waiting for another task. Today those are the only places where Jet can cancel a task, report a missed deadline, or let another task have the thread.\n\nA busy loop is a loop that computes without waiting, such as adding up a billion numbers. Under today's rule it keeps its thread until it finishes. If a deadline passes, nothing notices. If the task lost a race, the race still waits for it.\n\nA time slice is a short turn, such as ten milliseconds. Fair sharing means a task that used its whole slice gives the thread to waiting tasks and then continues later.\n\nThe check proposed in A is one memory read and one branch at the bottom of a loop. Loops that count over a known range check once per block of iterations, not every time, the way Java's optimizing compiler has done since Java 10.",
+      "story": "Ravi runs a Jet API with a one-second request deadline. One customer uploads a pathological input, and a parsing loop in his handler runs for twenty minutes. The deadline never fires, the request never ends, and on deploy the server cannot drain, so it is killed without cleanup. A second such request leaves only the other cores for every other customer.",
+      "inWild": "// Go 1.14 release notes, runtime section (https://go.dev/doc/go1.14):\n// \"Goroutines are now asynchronously preemptible. As a result, loops without\n// function calls no longer potentially deadlock the scheduler or significantly\n// delay garbage collection.\"\ngo func() { for { n++ } }()   // since Go 1.14 other goroutines keep running\n\n// Erlang: every process runs on a reduction budget, so a busy loop cannot\n// hold a scheduler. Native code must return within about 1 ms or be marked\n// dirty (https://www.erlang.org/doc/apps/erts/erl_nif.html, Long-running NIFs).",
+      "detail": "Code facts come from source reading of the checkout at the time of drafting. Nothing here was executed.\n\nLaw today. core.tasks is cooperative: \"the scheduler does not turn a blocking computation into preemptive parallelism\" (Docs/spec/reference/core-library.md:2609-2611). The scheduler is M:N with no async coloring (Docs/spec/spec.md:2302-2306, D-ASYNCRT1=A, which chose Go's goroutine model). Cancellation unwinds only at wait points (spec.md:2107-2111, D-CANCELMODEL1=C).\n\nD-FOUND-LIFECYCLE1=A states the consequence as its tradeoff: \"a CPU-bound handler notices its deadline at its next wait point\". D-TASK-PAUSE-TIER1=E kept pause at wait points by default. It also ratified an optional strong mode, mode: .CheckLoops, with portable back-edge checks on every engine.\n\nRuntime today. The shared scheduler runs one work-stealing worker per core and has no time-slice preemption (crates/jet-codegen/src/Prelude/Scheduler.rs:3669-3805). task.all, task.race and task.any cancel losers and then drain them (crates/jet-codegen/src/Prelude/TaskGroup.rs:485-498). A drain blocks on the child's result (Scheduler.rs:3956-3959).\n\nSo a cancelled child that never reaches a wait point is joined only when it ends by itself. The race result, a parent deadline and E3003 all wait for it (Scheduler.rs:4032-4056).\n\nInside Jet already. Sandbox plugins, build plugins and compiler extensions enable Wasmtime epoch interruption (Prelude/Plugin.rs:240-243 and 1372-1406, BuildPlugin.rs:26-28, CompilerExtension.rs:90-93). They stop a guest that passes its time limit, two seconds per call by default (D-CORE-PLUGINLIMITS1=A). Epoch interruption is a counter check at loop back-edges and function entries.\n\nThe REPL interpreter already polls before each instruction, so Ctrl-C returns within 100 ms (spec.md:3363-3366, D-FE-REPL-INTERRUPT1=A). The only Jet code a runaway loop can hold forever is ordinary compiled Jet code.\n\nWhat this does not cover. Foreign C and C++ calls already run on worker threads (Docs/spec/reference/mixed-repo.md:101-102). A deadline that passes during one is delivered when it returns, in every option. Memory per request is a separate question.\nPrior owner ruling. D-TASK-PAUSE-TIER1 rejected its option C because forced checks on every pause tax the default fast path. This ballot keeps that ruling for pause.\n\nThis ballot asks a different question. Should cancellation, deadlines and fair turns use the back-edge sites that the ratified strong pause (.CheckLoops) already requires on every engine? Option A turns its default on only after the hot-loop speed gate shows no measurable slowdown. Counted loops check once per block. Loops that already wait need no check. If the gate fails, the sites stay opt-in and the D-FOUND-LIFECYCLE1=A tradeoff stands.\n\nIndependent of the vote, strong pause is ratified but unbuilt. pause(mode: .CheckLoops) is rejected with E0764, and no engine calls the Prelude loop pause hook. Building that shared back-edge check is repair work on the owning card whichever option wins.\n\nMerged sources (2026-10-05 mining). RntfkL8lUY4: BEAM promises a greedy green thread never blocks the scheduler, and a bad regex must not either. IxQ586TS8Gw 45:46-48:32: in Riot, a while-true actor bricks a cooperative scheduler, so the speaker wants compiler-inserted yields. The same talk records the dissent that preemptive scheduling beats polite yields.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Loops are stop points",
+          "detail": "Every engine checks one per-thread attention flag where a loop returns to its top and on entry to a function that can call itself. The check is one load and one branch. A loop over a known range checks once per block of iterations instead of every time.\n\nWhen the flag is set, the task does what it would do at a wait point. A pending cancellation or blown deadline unwinds with Drop cleanup, a strong pause stops, and a task past its time slice gives its thread to waiting tasks and continues later. #Shield keeps deferring cancellation and deadlines exactly as today.\n\nBeginners write nothing new: deadlines and races just work for busy code. The default is switched on only after the hot-loop speed gate shows no measurable slowdown; until then today's rule stays, so no program gets slower.",
+          "technical": "Amends D-CANCELMODEL1=C: delivery points become wait points plus loop back-edges and recursive entries. Amends the stated tradeoff of D-FOUND-LIFECYCLE1=A. Under D-TASK-PAUSE-TIER1=E the .CheckLoops sites become the default sites for cancel, deadline and fairness; pause may keep its wait-point default.\n\nThe mechanism follows Wasmtime epoch interruption, which Jet already uses for plugins. A timer thread raises a worker's attention word when its task has run past the slice while runnable work waits. cancel() and an expired #Context deadline raise the target task's word directly.\n\nCounted loops are strip-mined as in HotSpot C2 loop strip mining (JDK-8186027, Java 10): the inner block runs check-free and the outer loop checks. Checks are elided in loops whose body already reaches a wait point or a checked call on every iteration. One Prelude delivery function serves every engine, and the interpreter keeps its per-instruction poll.\n\nSafety argument: the unwind lands only between iterations. That is a statement boundary where an index or arithmetic panic can already unwind today. Shared-state critical sections keep #Shield.",
+          "code": "fn cached() -> Int { return 42 }\n\nfn slow_count(n: Int) -> Int {\n    total := 0\n    i := 0\n    loop i < n {          // busy: never waits\n        total += i % 7\n        i += 1\n    }\n    return total\n}\n\nfn run() {\n    answer :: (task.race { cached(), slow_count(50_000_000_000) }) ?? 0\n    print(answer)   // A: prints 42 at once; the loser stops at its next loop turn\n}"
+        },
+        {
+          "key": "B",
+          "name": "Fair turns only",
+          "detail": "The runtime interrupts a task that used its whole time slice with an operating-system signal and runs other tasks, then resumes it later. Loops get no added check, so tight loops run at full speed. This is how Go solved starvation in Go 1.14.\n\nCancellation and deadlines still land only at wait points. A busy race loser still keeps the race waiting, and a runaway handler still ignores its deadline and blocks a clean shutdown.",
+          "technical": "Signal-driven preemption needs the runtime to suspend a task at an arbitrary instruction and switch stacks from a signal handler. Runtime locks and allocation need no-preempt regions. Go's design (proposal 24543) also needed safe-point metadata for its garbage collector. Jet's ownership model needs less of that, but each engine still needs its own signal and context-switch path, and Windows needs SuspendThread. Unwinding at an arbitrary instruction is not safe, so this cannot deliver cancellation.",
+          "code": "fn cached() -> Int { return 42 }\n\nfn slow_count(n: Int) -> Int {\n    total := 0\n    i := 0\n    loop i < n {          // busy: never waits\n        total += i % 7\n        i += 1\n    }\n    return total\n}\n\nfn run() {\n    answer :: (task.race { cached(), slow_count(50_000_000_000) }) ?? 0\n    print(answer)   // B: other tasks keep running, but 42 still waits for slow_count\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep waits as the only stop points, and warn",
+          "detail": "The rule stays as today. The compiler adds a warning for a loop that never waits inside task or request-handler code, and the docs teach calling tasks.yield_now() in long loops.\n\nThere is no runtime cost. Every author and every library must remember the call, including text parsing, sorting and decoding loops the author never wrote.",
+          "technical": "A lint over loop bodies with no reachable wait point, scoped to task bodies and handlers. Library loops are reached through calls, so the lint either floods or misses them. Tokio documents the same rule and states it will not detect blocking tasks (tokio.rs/blog/2020-04-preemption).",
+          "code": "fn cached() -> Int { return 42 }\n\nfn slow_count(n: Int) -> Int {\n    total := 0\n    i := 0\n    loop i < n {\n        total += i % 7\n        i += 1\n        if i % 100_000 == 0 -> tasks.yield_now()   // C: the author must remember\n    }\n    return total\n}\n\nfn run() {\n    answer :: (task.race { cached(), slow_count(50_000_000_000) }) ?? 0\n    print(answer)   // C: 42 soon, only because the loop yields by hand\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go first used cooperative turns, and tight loops could hang the scheduler for five years. A loop check cost a 7.8% geomean slowdown in 2017 tests. Go 1.14 then switched to signal preemption, but cancellation by context stayed cooperative.",
+          "code": "// https://go.googlesource.com/proposal/+/master/design/24543-non-cooperative-preemption.md\n// \"the geomean slow-down on a large suite of benchmarks is 7.8%\" (fault-based loop preemption)\nctx, cancel := context.WithTimeout(ctx, time.Second)\nfor !done(ctx) { work() }   // the loop must still check ctx itself"
+        },
+        {
+          "lang": "Erlang",
+          "note": "The BEAM preempts every process on a reduction budget, so a hot loop or a slow regular expression cannot block a scheduler. Native code must return within about a millisecond or run on dirty schedulers.",
+          "code": "%% https://www.erlang.org/doc/apps/erts/erl_nif.html#long-running-nifs\nloop(N) -> loop(N + 1).   % other processes keep running; exit(Pid, kill) stops it"
+        },
+        {
+          "lang": "Wasmtime",
+          "note": "Epoch interruption loads one counter and compares it at loop back-edges and function entries. It measured about twice as fast as fuel counting, and one mechanism can yield, trap or call back. Jet's plugin host already uses it.",
+          "code": "// https://github.com/bytecodealliance/wasmtime/pull/3699\nconfig.epoch_interruption(true);\nstore.set_epoch_deadline(1);\nstore.epoch_deadline_async_yield_and_update(1); // timeslice: yield, then continue"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes deadlines, races, cancellation and fair sharing work for busy code with no new syntax. It uses the check Jet already runs for plugins and already ratified for strong pause. The speed gate means no program gets slower to get it.",
+        "gains": [
+          "A request deadline stops a runaway handler and a clean shutdown can drain it.",
+          "task.race returns when the winner finishes, not when the slowest loser does.",
+          "Busy requests share the processor, so one heavy input cannot stall the server."
+        ],
+        "losses": [
+          {
+            "loss": "Loops that never wait run one extra check, which the Go team measured as costly in its tightest loops.",
+            "mitigation": "Counted loops check once per block and loops that already wait need no check. The default turns on only after the hot-loop speed gate shows no measurable slowdown."
+          },
+          {
+            "loss": "Cancellation can now land between two loop turns, not only at a wait.",
+            "mitigation": "It lands only at a whole-turn boundary where a panic can already unwind today, Drop cleanup still runs, and #Shield still keeps critical sections whole."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B stops starvation but leaves deadlines, races and shutdown waiting on busy code, and it needs a separate signal and stack-switch path on every engine."
+          },
+          {
+            "key": "C",
+            "reason": "C makes every author and library remember a manual call, and the warning cannot see loops inside library code."
+          }
+        ],
+        "tradeoff": "A asks Jet to build a strip-mined loop check that passes the hot-loop speed gate. In return, every Jet task honours its deadline, cancellation and fair share whether or not it waits."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Build the gate first. Take the hot-loop gauntlet cells from card #2254 plus a counted sum, a while loop over a linked structure, recursive Fibonacci, a regex scan and a JSON decode of a large input. Run each as a paired program with the check on and off in the same release profile, and compare against Rust. The default turns on only where every cell stays within the strict performance gate.\n\nThen check behaviour on every engine. A task.race between an immediate value and a busy loop returns the value within one slice. A #Context deadline of 20 ms around a busy loop reports E3003 within one slice and runs Drop cleanup. A cancelled busy task inside #Shield finishes the shielded block first.\n\nEight busy tasks plus one sleeping task on a two-core machine still wake the sleeper within a few slices. SIGTERM during a busy handler drains within the serve deadline. Strong pause keeps working. A loop that already waits on every turn shows no added check in the generated code.",
+      "surface": {
+        "gist": "Should deadlines, cancellation and fair turns reach a task that is busy in a loop and never waits?",
+        "lesson": "Jet runs many small tasks on a few processor threads. Today a task stops or gives way only when it waits, such as sleeping or reading the network. A loop that never waits keeps its thread until it ends, so deadlines, races and shutdown wait for it. A makes each loop turn a safe stopping place.",
+        "trio": {
+          "current": {
+            "note": "Today the race waits for the busy loser to finish by itself.",
+            "code": "fn slow_count(n: Int) -> Int {\n    total := 0\n    loop i in 0..<n { total += i % 7 }   // busy: never waits\n    return total\n}\nprint((task.race { cached(), slow_count(50_000_000_000) }) ?? 0)   // 42 only after slow_count ends"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Since Go 1.14 a busy loop no longer blocks other goroutines.",
+            "code": "// https://go.dev/doc/go1.14 (runtime)\n// \"loops without function calls no longer potentially\n//  deadlock the scheduler\"\ngo func() { for { n++ } }()   // other goroutines keep running"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Loops are stop points",
+            "gist": "Each loop turn checks one cheap flag for cancellation, deadlines and fair turns.",
+            "gains": [
+              "Deadlines and races work for busy code.",
+              "Busy requests share the processor fairly.",
+              "No new syntax; plugins already work this way."
+            ],
+            "losses": [
+              "One cheap check in loops that never wait.",
+              "Cancellation may land between loop turns."
+            ],
+            "proposed": {
+              "code": "answer :: (task.race { cached(), slow_count(50_000_000_000) }) ?? 0\nprint(answer)   // 42 at once; the loser stops at its next loop turn"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Fair turns only",
+            "gist": "The runtime interrupts long turns so others run, but stopping still waits for a wait point.",
+            "gains": [
+              "No added check in any loop.",
+              "Busy tasks no longer starve others."
+            ],
+            "losses": [
+              "Deadlines and races still wait for busy code.",
+              "Needs a separate interrupt path on every engine."
+            ],
+            "proposed": {
+              "code": "answer :: (task.race { cached(), slow_count(50_000_000_000) }) ?? 0\nprint(answer)   // others keep running, but 42 waits for slow_count"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep waits only, and warn",
+            "gist": "The rule stays; a warning asks authors to yield by hand inside long loops.",
+            "gains": [
+              "No runtime cost at all."
+            ],
+            "losses": [
+              "Every author and library must remember to yield.",
+              "The warning cannot see loops inside libraries."
+            ],
+            "proposed": {
+              "code": "loop i < n {\n    total += i % 7\n    i += 1\n    if i % 100_000 == 0 -> tasks.yield_now()   // by hand\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes deadlines, races, cancellation and fair sharing work for busy code with no new syntax, using the check Jet already runs for plugins.",
+          "gains": [
+            "Runaway handlers stop at their deadline.",
+            "Races return when the winner finishes.",
+            "One heavy request cannot stall the server."
+          ],
+          "losses": [
+            {
+              "loss": "One cheap check in loops that never wait.",
+              "mitigation": "Counted loops check once per block, and it ships only after the speed gate shows no slowdown."
+            },
+            {
+              "loss": "Cancellation may land between two loop turns.",
+              "mitigation": "Only at a whole-turn boundary where panics already unwind; cleanup runs and #Shield still protects."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B ends starvation but deadlines, races and shutdown still wait for busy code."
+            },
+            {
+              "key": "C",
+              "reason": "C relies on every author remembering, and cannot see library loops."
+            }
+          ],
+          "tradeoff": "Building a gated loop check buys deadlines, cancellation and fair turns that reach every task."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-05T21:09:26.493Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-05",
+      "retiredAt": "2026-11-17T05:18:28.964Z"
+    },
+    {
+      "id": "D-GROUP-CANCEL1",
+      "cardId": "c08u6j84",
+      "group": "runtime",
+      "title": "Cancelling a task that has a task group open: cancel the group's children too, let them finish first, or keep today's lost cancel",
+      "situation": "A task group is a block that starts several tasks and waits for all of them at its closing brace. Today, cancelling a task that is waiting at such a brace does not reach the tasks inside the group. Those children run to their end, and then the cancelled task carries on as if nothing happened, so its join reports success and the cancel is lost. A child that waits forever, such as a server loop, makes that cancel hang for good. This matters for anyone who stops a job made of parallel parts: a crawler, a fan-out request, a test that times out. You are asked what a cancel does to the children of a group the cancelled task has open. We recommend that it cancels them, waits for their cleanup, and then the task stops as cancelled.",
+      "gist": "What should cancelling a task do to the tasks inside a group that task has open?",
+      "lesson": "A task group waits for every task it started before its block ends. When the task that opened the group is cancelled, the children can be cancelled with it. They can instead be left to finish before the cancel lands. Or they can be left alone as today, where the cancel is lost.",
+      "explainer": "Words used here. A task is work that runs alongside the rest of the program. A task group is a block, written task.group name { ... }, that starts child tasks and waits for all of them at its closing brace.\n\nCancel asks a task to stop. The task notices at its next wait, such as a sleep, a channel read, a network read or waiting for another task. It then unwinds: it leaves its functions and runs its cleanup on the way out. Join waits for a task and gives back its result, or a failure such as Cancelled.",
+      "story": "Mia's command-line tool fetches twenty pages in a task group, inside a job task. When the user presses Ctrl-C, or her two-second time limit runs out, she cancels the job. Today the twenty fetches keep going to the end. Then the job prints that all pages were fetched, and its join says it succeeded.\n\nUnder A the fetches stop at their next network wait, close their connections, and the job's join reports Cancelled within moments. Under B the job waits for all twenty fetches, then reports Cancelled. Under C nothing changes.",
+      "inWild": "// Swift: cancelling the parent task cancels every child task in its task group.\nlet job = Task {\n    await withTaskGroup(of: Void.self) { group in\n        group.addTask { await fetch(\"a\") }\n        group.addTask { await fetch(\"b\") }\n    }\n}\njob.cancel()   // both fetches see the cancel at their next await",
+      "detail": "What this ballot decides. What happens to the children of a task.group block when the task that opened the block is cancelled while the block is open.\n\nWhat the rules say today. spec.md, Task completion and cancellation: cancellation lands at wait points, and task join is one of them (D-CANCELMODEL1=C). spec.md, Structured tasks and combinators: the group owns and joins every child created in its body (D-CONC-SPAWN1=D). task.all cancels remaining children on a failure, and task.race and task.any cancel the losers.\n\nD-NURSERY1=A says work created inside the scope must finish, be cancelled, or report an error before the scope exits, without choosing which. No ratified rule says whether cancelling the opener reaches the group's children. process.on_signal cancels every live task, which is a separate path.\n\nWhat the code does today. Compiler/JetRuntime/Source/TaskGroup.jet task_group_close cancels the group's children only when the closing task's deadline has expired (status 2). Otherwise it calls task_drain on each child, and task_drain (Task.jet) is a plain futex wait with no cancellation check. So the closing brace is not a stop point for the opener.\n\nThe combinators already cancel their children when the waiting task is cancelled: task_selection_wait_check delivers the cancel and task_selection_drain(handles, count, true) cancels every child.\n\nSeed run. Seed b14, at --optimize=none. A parent task opens a group whose one child sleeps 3 s. run cancels the parent after 100 ms and joins it. Output: child finished its sleep, then parent closed its group, then parent joined Ok, and the join took at least 2 s. The cancel was lost, and the parent's code after the group ran.\n\nRelation to other ballots. D-TASK-SLICE1=A makes loop turns stop points, so under option A a busy child also stops promptly. D-EXIT-TASKS1 covers detached tasks at process exit. Detached tasks are not group children and are untouched here.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cancel flows down to the group's children",
+          "detail": "Cancelling a task also cancels every child of each task group it has open, and their own groups' children, all the way down. Each child stops at its next wait and runs its cleanup. The group's closing brace still waits for all of them, so no child outlives its group. Then the cancelled task itself unwinds, and its join reports Cancelled.\n\nA child that must finish a step it started puts that step in #Shield, which already delays a cancel until the step is done. This is what task.all, task.race and task.any already do with their children, and what a group already does when its deadline passes.\n\nThe cost of A. A child stopped in the middle of a step that is not in #Shield leaves that step half done: a file half written, a request half sent. Its cleanup still runs, so the file is closed and the connection dropped, but the half-done work is not undone. Steps that must not stop halfway go in #Shield.",
+          "technical": "The cancel of a task walks the groups it has open and cancels each unfinished child (scheduler_control_cancel), recursively. This is what task_group_close already does under an expired deadline. A task records its open groups, so a cancel that arrives while it is already parked at the closing brace still reaches them.\n\ntask_group_close cancels the children when the closer is cancelled and not shielded, waits for all of them, then delivers the pending cancel so the closer unwinds as Cancelled. A closer inside #Shield keeps today's behaviour until the shield ends. spec.md gains one sentence in Task completion and cancellation and one in Structured tasks and combinators.\n\nCost. A cancel walks only the unfinished descendants in open groups: one step per such task, paid once per cancel. Each group's child list is read under that group's own lock, and the cancels are sent after the lock is released, as the deadline path already does. A task that is never cancelled pays one list push and one pop per task.group block, to record the open group.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// A prints: job stopped\n// Both fetches stop at their sleep and clean up; nothing else prints."
+        },
+        {
+          "key": "B",
+          "name": "Children finish first, then the cancel lands",
+          "detail": "The group's children are not cancelled. They run to their own end, the closing brace waits for them as it does today, and then the cancelled task unwinds and its join reports Cancelled. The cancel is no longer lost, but it takes as long as the slowest child. A child that waits forever, such as a server's accept loop, makes the cancel hang, so the author must stop such children by hand through a channel or a flag.\n\nB keeps the ratified rule that waiting for a task is a stop point; it only delays the cancel.",
+          "technical": "task_group_close keeps task_drain without cancelling children, then delivers the closer's pending cancel. Group children differ from task.all, task.race and task.any children, which are cancelled. B does not amend D-CANCELMODEL1=C: the cancel still lands at the closing brace, which is a task join, only after the children end.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// B prints, after 3 seconds: fetched a, fetched b, job stopped"
+        },
+        {
+          "key": "C",
+          "name": "Keep today's behaviour",
+          "detail": "The group's closing brace is not a stop point. The children run to their end, and then the cancelled task carries on with the code after the group as if it had never been cancelled. Its join reports success. A child that waits forever hangs the cancel. Choosing C amends a ratified rule: today waiting for a task is a place where a cancel lands, and C makes the group's closing brace an exception.",
+          "technical": "No change to task_group_close or task_drain. spec.md must then name the group's closing brace as an exception to task join being a wait point. C amends the ratified D-CANCELMODEL1=C, which lists task join among the wait points where a cancel lands.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// C prints, after 3 seconds: fetched a, fetched b, all pages fetched\n// The join succeeds; the cancel was lost."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Cancelling a task cancels every child task in its task groups; children check at their next await.",
+          "code": "job.cancel()   // the group's addTask children are cancelled too"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Cancelling a parent Job cancels all of its children, and the parent completes only after they finish unwinding.",
+          "code": "val job = launch { coroutineScope { launch { fetch(\"a\") }; launch { fetch(\"b\") } } }\njob.cancel()"
+        },
+        {
+          "lang": "Python Trio",
+          "note": "Cancelling a scope cancels everything inside it, including every task in a nursery opened there.",
+          "code": "with trio.move_on_after(2):\n    async with trio.open_nursery() as n:\n        n.start_soon(fetch, \"a\")\n        n.start_soon(fetch, \"b\")"
+        },
+        {
+          "lang": "Go",
+          "note": "Cancellation is explicit. A context's cancel reaches every context derived from it (pkg.go.dev/context: \"When a Context is canceled, all Contexts derived from it are also canceled\"). But a goroutine sees it only if it was passed that context and checks Done(). A goroutine that was not passed it runs on. This is the strongest case for B or C: nothing stops without being told in the code. Go also has no group that must outlive its children, so a forgotten goroutine is a leak, not a hang.",
+          "code": "ctx, cancel := context.WithCancel(parent)\ngo fetch(ctx, \"a\")   // stops only if fetch checks ctx.Done()\ngo fetch(ctx, \"b\")\ncancel()"
+        },
+        {
+          "lang": "Java 21",
+          "note": "StructuredTaskScope (JEP 453, preview; docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/StructuredTaskScope.html). shutdown() interrupts every unfinished subtask, and join() and close() wait for all of them. An owner interrupted while waiting in join() gets InterruptedException, and closing the scope then shuts it down, so the subtasks are interrupted and awaited, as in A.",
+          "code": "try (var scope = new StructuredTaskScope<String>()) {\n    scope.fork(() -> fetch(\"a\"));\n    scope.fork(() -> fetch(\"b\"));\n    scope.join();   // owner interrupted here: close() interrupts both forks\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A cancel means the whole job stops, children included, and nothing outlives its group. It matches how Jet's own task.all, task.race and task.any already treat their children, and how Swift, Kotlin and Trio treat groups.",
+        "gains": [
+          "A cancelled job stops promptly, with every child's cleanup run.",
+          "The cancel is never lost: the join reports Cancelled.",
+          "A child that waits forever no longer hangs a cancel.",
+          "Groups and task.all, task.race and task.any follow one rule."
+        ],
+        "losses": [
+          {
+            "loss": "A child's unfinished work is cut short when its group's opener is cancelled.",
+            "mitigation": "Work that must outlive the job is started with detach() instead, so it is not a group child."
+          },
+          {
+            "loss": "A child stopped mid-step outside #Shield leaves that step half done, such as a half-written file or a half-sent request.",
+            "mitigation": "Steps that must not stop halfway go in #Shield, which already delays a cancel until the step ends. Cleanup still runs either way, so files close and connections drop."
+          },
+          {
+            "loss": "Each cancel walks the unfinished tasks in open groups.",
+            "mitigation": "The walk is one step per unfinished descendant, paid once per cancel, with each group's lock held only to copy its list. Tasks never cancelled pay one push and pop per group."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the cancel but makes it wait for the slowest child, and a child that waits forever hangs it. It also gives groups a different rule from task.all, task.race and task.any. Go's explicit style favours B, but Go has no group that must wait for its children, so it never hangs."
+          },
+          {
+            "key": "C",
+            "reason": "C silently loses the cancel and reports success for a job that was asked to stop. It also amends the ratified rule that waiting for a task is a stop point."
+          }
+        ],
+        "tradeoff": "A child's in-progress work stops with its job, and #Shield keeps the steps that must finish."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main attacked A against Go explicit contexts and Java StructuredTaskScope, the cancel-walk cost, and work cut mid-step outside Shield; each is now stated as a cost with its mitigation. C is shown to amend D-CANCELMODEL1, and B delays but keeps the cancel."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a task with an open task group is cancelled, what happens to the group's tasks?",
+        "lesson": "A task group waits for all the tasks it started. Today, cancelling the task that opened it does not reach those tasks: they run to the end, and the cancel is then lost. This vote picks what a cancel does to them.",
+        "trio": {
+          "current": {
+            "note": "Today the fetches finish, the job carries on, and its join succeeds.",
+            "code": "job: task fetch_all()     // opens a group of fetches\ntime.sleep(100ms)\njob.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, all pages fetched"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Cancelling the parent task cancels every task in its group.",
+            "code": "job.cancel()   // the group's child tasks are cancelled too"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cancel the group's tasks too",
+            "gist": "The cancel reaches every task in the group; then the job stops as cancelled.",
+            "gains": [
+              "The whole job stops promptly, with cleanup.",
+              "The join reports Cancelled."
+            ],
+            "losses": [
+              "Unfinished work inside the group is cut short."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: job stopped"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Let them finish first",
+            "gist": "The group's tasks run to their end; then the job stops as cancelled.",
+            "gains": [
+              "The cancel is no longer lost."
+            ],
+            "losses": [
+              "The cancel waits for the slowest task.",
+              "A task that waits forever hangs it."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, job stopped"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today's behaviour",
+            "gist": "The group's tasks finish and the job carries on as if not cancelled.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "The cancel is lost and the join succeeds.",
+              "A task that waits forever hangs it.",
+              "It amends the rule that joins are stop points."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, all pages fetched"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A cancel stops the whole job, nothing outlives its group, and groups follow the same rule as task.all, task.race and task.any.",
+          "gains": [
+            "Prompt stop with every task's cleanup.",
+            "The cancel is never lost."
+          ],
+          "losses": [
+            {
+              "loss": "A child stopped mid-step can leave half-done work.",
+              "mitigation": "Put steps that must finish in #Shield; cleanup still runs either way."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "The cancel waits for the slowest task and can hang."
+            },
+            {
+              "key": "C",
+              "reason": "The cancel is silently lost, against the rule that joins are stop points."
+            }
+          ],
+          "tradeoff": "Work in progress stops with its job; #Shield keeps the steps that must finish."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T07:31:16.570Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13",
+      "retiredAt": "2026-11-17T05:18:28.964Z"
     }
   ]
 }

@@ -104023,6 +104023,211 @@
       "completedAt": "2026-11-14T04:31:20.379Z",
       "questions": [],
       "retiredAt": "2026-11-17T04:55:29.015Z"
+    },
+    {
+      "id": "c0j8dr0e",
+      "num": 4634,
+      "title": "Stdout buffering: terminal lines, file/pipe batches, meaningful flush and ordered stops",
+      "body": "mCoding (i_wDa2AS_8w 00:43-00:54) lists std::endl in a loop as a beginner habit because it flushes every line. Jet does this for every program with no opt-out: jet_term_write_stdout_bytes (Prelude Term.rs:152-161) flushes when `flush || !bytes.is_empty() || is_terminal`, and every print frame is non-empty, so every print, stdout.write and stdout.write_line flushes even into a file or pipe. The flush argument is dead (Term.rs:158; FSIoEnvOsTesting.rs:279-301 pass false and still flush) and the explicit stdout.flush() that D-COREIO1's story relies on does nothing. The stated reason (Term.rs:156-157) is stdout/stderr ordering on one sink, which can be kept without per-write flushing: buffer stdout only when it is not a terminal and flush before any stderr write, stdin read, child process start, runtime stop report, exit and explicit flush. Source reading only; cost unmeasured. Under D-EXEC1 the policy belongs to the one runtime (#4013).\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-STDOUT-BUFFER1=A\nMeasurement-before-change receipts include syscall counts and matched timings for 1M/2M lines/file/pipe/terminal; one shared Jet stdout buffering policy selected from TTY fact; stderr never delayed; flush occurs before every named boundary including first report/stderr; prompt visible before input; explicit flush works; native image print issues one buffered write; existing interleaving and stop-prefix goldens retained.\nPaths: Compiler/JetRuntime/Source/Host.jet [new L7a planned file] one standard stdout buffer/TTY fact and flush entry; Trap.jet before first stderr/report/exit; scheduler/input/process blocking/spawn hooks; Compiler/JetBackend/Source/Image/Runtime.jet print path; Core/term/term.jet standard stream facade\nRegistry/spec/UI/goldens: Legacy Syntax.rs IO names unchanged; Jet std-stream/runtime route rows cite D-STDOUT-BUFFER1=A + D-COREIO1/D-EXEC1; no new syntax; raw TTY authority D-CORE-TERMSTDIN1; Docs/spec/reference/core-library.md io/stdout/flush; syntax-decisions D-STDOUT-BUFFER1; runtime architecture buffered stream/ordering contract; No new compile diagnostic; captured pipe golden for prompt-before-read, stdout/stderr interleave and stop/panic reports; runtime report snapshots unchanged except policy-required delivery; Measure syscall counts and matched 1M/2M lines to terminal/file/pipe FIRST; functional explicit flush; flush before input/block/spawn/stderr/stop/panic/exit; immediate stderr; image print one buffered call\nTiming: JET RUNTIME PORT NOW, RtL7 owns buffering; minimal both-half port/seed seam allowed #29 and dies at cutover. Actual Jet flush/buffer layer REQUIRED #31; frozen Rust flush is only a tracked temporary seed/verification path. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: RtPanic1 currently writes stderr directly and needs shared flush entry before first report; RuntimeJet2 says temporary Rust flush until L7a. #27 allows existing landing only, not permanent Rust dependency. New default is NOT per-write flush.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "1. Matched programs: one million short print lines, and one million single-character stdout.write calls, each to a file and to a pipe, cold and warm, under the strict performance gate; record binary identity, backend level, wall and CPU time and write-syscall counts. 2. Compare with one String printed once and with C stdio and Python (block-buffered when piped). 3. Fixtures for the interleavings the current rule protects (2>&1 to one file, child inheriting stdout, runtime stop report). 4. If the cost is material, raise an owner ballot on piped-output timing; otherwise record the numbers and delete the dead flush path so the contract matches behavior.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met (c3 decision with 3e02c94923 and 10acaaaa23; c4 c7e3b4eec3; c5 585db1bd73; c6 10acaaaa23)."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-STDOUT-BUFFER1=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: RtL7 (current live stdio owner, direct reply); RuntimeJet2 S5 reviewer; RtPanic1 Trap; NativeInteg2 image-runtime integration. Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        },
+        {
+          "at": "2026-10-06",
+          "by": "Pip",
+          "text": "stream.flush() exists but means nothing while every write flushes (APICompCraft i_wDa2AS_8w row). The default policy is balloted as D-STDOUT-BUFFER1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "Interleaving fixtures pass unchanged on every execution level.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "c7e3b4eec3 (stdout buffer policy). On the gate-p43 jet: cases terminal/ PASS 11, FAIL 0, KF 2 (#4260 and #3594, unrelated). The interleaving rows stdout_buffer_keeps_stream_order_on_every_level, terminal_parity_matches_non_tty_golden_and_stream_order and stdout_write_bytes_is_byte_exact_and_ordered_with_print pass on none, basic and full. The parity .merged golden is untouched; stdout_buffer`s .merged changed only the stop report`s source line (15 to 18, from the fixture edit), not the stream order.",
+          "at": "2026-11-14T04:25:53.018Z"
+        },
+        {
+          "n": 3,
+          "text": "Either an owner ballot exists for buffered piped output, or the dead flush parameter path is removed and documented behavior matches.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-STDOUT-BUFFER1 is ratified (outcome A, 2026-10-07) as the ballot for buffered piped output, and the dead flush path is removed by 3e02c94923 and 10acaaaa23; the buffer policy is c7e3b4eec3.",
+          "at": "2026-11-14T05:05:12.801Z",
+          "closure": "decision"
+        },
+        {
+          "n": 4,
+          "text": "Any flush-policy change lands in the Jet-owned runtime under #4013 (Rust freeze 2026-10-01); the Rust Prelude is not extended.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The flush policy lives in the Jet-owned runtime: c7e3b4eec3 (the one buffer policy) and 10acaaaa23 (jet.runtime.term), Compiler/JetRuntime/Source/HostStdio.jet. There is no Rust Prelude to extend.",
+          "at": "2026-11-14T05:05:14.634Z"
+        },
+        {
+          "n": 5,
+          "text": "D-STDOUT-BUFFER1=A: Measurement-before-change receipts include syscall counts and matched timings for 1M/2M lines/file/pipe/terminal; one shared Jet stdout buffering policy selected from TTY fact; stderr never delayed; flush occurs before every named boundary including first report/stderr; prompt visible before input; explicit flush works; native image print issues one buffered write; existing interleaving and stop-prefix goldens retained.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "585db1bd73 (light37) adds the explicit-flush case; the rest holds on dev. G3Core-2 ran Tools/perf/stdout-buffer/run.sh --jet <gate-p45 jet> --runs 3 on an export of f27b382429: rc 0, 36 PASS, 0 FAIL. fd-1 writes under strace, Jet against the old per-write flush: file and pipe 1M lines 1452 vs 1,000,000; 2M lines 3039 vs 2,000,000; chars 123 and 245 vs 1M+1 and 2M+1; a terminal gets one write per LF. Best walls: 1M file lines 65 ms vs 589 ms (per-write flush) and 2132 ms (python3); 2M pipe lines 124 ms vs 1650 and 4713 ms. Receipts in $JET_SCRATCH_ROOT/lanes/Main/inbox/G3Core2-stdout-receipts/. On the gate-p48 jet: cases terminal/stdout_flush_shows_piped_lines_before_the_program_ends 1/0 (an explicit out.flush() makes exactly the two earlier lines visible on a pipe at none, basic and full) and stdout_buffer_keeps_stream_order_on_every_level 1/0 (stdout is flushed before the first plain eprint and the stop report on o0, o1 and o2). On p43/p45, terminal/ 11/0: one policy chosen by the TTY fact, the prompt visible before input, and the .merged golden unchanged.",
+          "at": "2026-11-14T05:04:36.805Z"
+        },
+        {
+          "n": 6,
+          "text": "The jet.runtime.term flush argument, now always false after G3Core2-stdout-buffer, is removed from the runtime registry, Core/Term.jet and every caller in one cutover once the seed accepts the 2-argument call. Proof: git grep finds no flush argument on jet.runtime.term, and the stdout cases pass at none, basic and full.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "10acaaaa23 (batch 42, dev f365e457fc..348035e478): jet.runtime.term drops stdio_write and stdio_bytes (the writes with the always-false flush argument) from the runtime registry, Core/Term and every caller in one cutover. git grep `stdio_(write|bytes)(` finds only the 6 Stdout and Stderr wrappers in Core/Term/Term.jet:117-144, none with a flush argument. The terminal8_write_stdout and stderr flush flag is a different, live argument (true at every Core and Picker caller) and stays. On the gate-p48 jet: RuntimeGenerators --check rc 0; cases terminal/ 11/0, 2 KF; the stdout cases at --optimize=none, basic and full 11/0; ui runtime_interface/ 9/0; golden Basics/ 165/0.",
+          "at": "2026-11-14T05:02:22.799Z"
+        }
+      ],
+      "refs": [
+        "D-COREIO1",
+        "D-VERDICT-1321-1",
+        "D-EXEC1",
+        "#4013"
+      ],
+      "tags": [
+        "runtime",
+        "io",
+        "performance",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c0a59ow3",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:54.718Z",
+      "updated": "2026-11-14T05:05:16.920Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T05:05:16.920Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T05:18:28.963Z"
+    },
+    {
+      "id": "c08u6j84",
+      "num": 4637,
+      "title": "Busy tasks honour cancellation, deadlines and fair turns at loop turns (ballot D-TASK-SLICE1)",
+      "body": "Host card for owner ballot D-TASK-SLICE1, split by the fresh review (2026-10-05) from the strong-pause build (key N-TASKLOOP) so ratified work is not held by this vote.\n\nToday a task that never waits ignores cancellation, #Context deadlines and fair turns: task.race drains a busy loser by blocking on it (TaskGroup.rs:485-498, Scheduler.rs:3956-3959), a request deadline cannot stop a runaway handler, and busy tasks can starve others. D-FOUND-LIFECYCLE1=A states this as its tradeoff. Plugins already stop runaway guests by epoch interruption (Plugin.rs:240-243, D-CORE-PLUGINLIMITS1=A). Sources: Riot talk IxQ586TS8Gw 45:46-48:32 (a while-true actor bricks a cooperative scheduler), BEAM reduction budgets (RntfkL8lUY4), Go 1.14 asynchronous preemption.\n\nImplement only the ratified outcome, through the back-edge sites built by N-TASKLOOP and the D-CANCELMODEL1 unwind path.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c0w1f3xa"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met (c2 and c4 by f3ef655a4c, c5 3627b6c11b, c6 d049ae24d9)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-TASK-SLICE1 is ratified and this card implements only its outcome.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-TASK-SLICE1 is ratified (outcome A, 2026-10-05); this card built only its outcome: edcd16c03d, 08130d813a, 3627b6c11b and f3ef655a4c.",
+          "at": "2026-11-14T05:08:04.231Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "D-TASK-SLICE1 is ratified and its outcome is implemented: for A, task.race/any/all return within one slice of their decision when a loser is busy, a #Context deadline and SIGTERM drain stop a busy handler with Drop cleanup, and busy tasks cannot starve a runnable task beyond a bounded number of slices.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-TASK-SLICE1 is ratified (A) and built: edcd16c03d (the loop-turn and recursive-entry polls), 08130d813a (a carrier whose fiber gave its turn starts a queued task first) and f3ef655a4c (light38, the rows for the remaining clauses). On the gate-p48 jet, each 1/0: any_all_and_a_deadline_block_stop_a_busy_task_on_every_tier (task.any and task.all with a spinning branch, and a busy #Deadline(20ms) block stops after its defer close, at O0, O1, O2 and aot); a_cancel_or_deadline_stops_a_busy_loop_at_its_next_iteration_on_every_tier (task.race with a busy loser, a cancel with defer cleanup, task.timeout); process_signal_drain/sigterm_stops_a_busy_handler_through_its_cleanup (a SIGTERM drain stops a spinning on_signal(.Term) handler within 1 s, with its close and a cancelled join); run_returning_stops_a_busy_detached_task_through_its_cleanup; busy_tasks_on_every_carrier_give_a_quick_task_its_turn. On gate-p47: more_busy_tasks_than_carriers_still_start_a_queued_task 1/0 and golden BusyTurns 3/0. On gate-p48: golden CancelCleanup 3/0.",
+          "at": "2026-11-14T05:07:47.739Z"
+        },
+        {
+          "n": 4,
+          "text": "Spec (D-FOUND-LIFECYCLE1 tradeoff, D-CANCELMODEL1), core-library and examples state the ratified rule once; no second cancellation or scheduling mechanism is added.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "f3ef655a4c (light38): spec.md:3802 and architecture.md:1301 no longer say a task with no wait point is abandoned at exit (busy tasks stop at their check); spec.md:4125`s second statement of D-GROUP-CANCEL1 now points at the cancellation rules; the CancelCleanup example header and the README say \"wait points and loop checks\". Fair turns are stated once (spec.md:4199) and cancel and deadline once (spec.md:3782-3797), and Core`s on_signal row and the core-library pause and cancel row agree. No second mechanism is added: one poll kind per loop turn or recursive entry (edcd16c03d) and one group-cancel record (3627b6c11b).",
+          "at": "2026-11-14T05:07:49.036Z"
+        },
+        {
+          "n": 5,
+          "text": "D-GROUP-CANCEL1=A is built (ratified 2026-11-13). Cancelling a task cancels every unfinished child of each task group it has open, recursively. The group's closing brace still waits for all of them, and the task then unwinds with its join reporting Cancelled. #Shield delays it as today. A task records its open groups, so a cancel that arrives while it is parked at the brace still reaches them. spec.md gains the two sentences. Proof: cases for nested groups, a shielded child and a cancel at the brace, on O0, O1, O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "3627b6c11b (on dev): D-GROUP-CANCEL1=A built in TaskGroup.jet and the Scheduler`s openGroups record, with the two spec.md sentences. On the gate-p45 jet: case task_control_tiers/a_cancel_reaches_the_children_of_every_open_group_on_every_tier 1/0 (nested groups with a grandchild under an inner group; the cancel arrives while the opener is parked at the brace; a #Shield child finishes its sleep). The same fixture built at none, basic and full prints identical output with rc 0: \"opener: cancelled / opener stopped early: true / shielded child: finished its sleep / shielded opener: cancelled\" (G3Core-2 run).",
+          "at": "2026-11-14T04:57:07.779Z"
+        },
+        {
+          "n": 6,
+          "text": "A deadline or cancel delivered at a stop poll names the wait or operation that polled. Since b7ef696d5a, every stop poll reports an elapsed deadline as \"waiting in a loop\", including the polls Core time.sleep makes before its wait (after jet_rt_record_get_duration_ns and jet_int_checked_fixed) and a spawn`s post-call poll. Polls after read-only or trap-only runtime calls must not deliver as \"a loop\": a second poll kind in JetIR. Proof: cases nonpositive_sleeps_check_the_task_deadline with exact stderr lines (no `~` prefix match) on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "edcd16c03d (batch 39, the second poll kind: only a loop turn or a recursive entry reports \"a loop\") plus d049ae24d9 (light33, exact whole-stream stderr). Case nonpositive_sleeps_check_the_task_deadline 1/0: all 9 steps match a sibling .stderr byte for byte (\"deadline exceeded while waiting in time sleep\", with its Why, Fix and More lines) on o0, o1 and o2, with no ~ prefix match.",
+          "at": "2026-11-14T04:31:22.943Z"
+        }
+      ],
+      "refs": [
+        "D-TASK-SLICE1",
+        "D-TASK-PAUSE-TIER1",
+        "D-FOUND-LIFECYCLE1",
+        "D-CORE-PLUGINLIMITS1",
+        "#3239",
+        "#2254"
+      ],
+      "tags": [
+        "concurrency",
+        "runtime",
+        "scheduler",
+        "owner-choice",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c0j2afiq",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:58.443Z",
+      "updated": "2026-11-14T05:08:06.591Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T05:08:06.590Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T05:18:28.964Z"
     }
   ]
 }
