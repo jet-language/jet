@@ -196,45 +196,6 @@ ir_handle_dynamic_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
             return Val(ir_handle_h("jet_math_{type_name}_{method}", mask))
         }
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
-        .ProcessSpecMethod(method, declared_count) -> {
-            if declared_count != argument_count -> return None
-            if method == {
-                "cwd" -> return Val(ir_handle_h("jet_process_spec_cwd", [Bool]{false, true}))
-                "arg" -> return Val(ir_handle_h("jet_process_spec_arg", [Bool]{false, true}))
-                "args_extend" -> return Val(ir_handle_h("jet_process_spec_args_extend", [Bool]{false, true}))
-                "env" -> return Val(ir_handle_h("jet_process_spec_env", [Bool]{false, true, true}))
-                "env_remove" -> return Val(ir_handle_h("jet_process_spec_env_remove", [Bool]{false, true}))
-                "env_clear" -> return Val(ir_handle_h("jet_process_spec_env_clear", [Bool]{false}))
-                "stdin" -> return Val(ir_handle_h("jet_process_spec_stdin", [Bool]{false, true}))
-                "stdout" -> return Val(ir_handle_h("jet_process_spec_stdout", [Bool]{false, true}))
-                "stderr" -> return Val(ir_handle_h("jet_process_spec_stderr", [Bool]{false, true}))
-                "timeout" -> return Val(ir_handle_h("jet_process_spec_timeout", [Bool]{false, true}))
-                "output_limit" -> return Val(ir_handle_h("jet_process_spec_output_limit", [Bool]{false, false}))
-                "cpu_time_limit" -> return Val(ir_handle_h("jet_process_spec_cpu_time_limit", [Bool]{false, true}))
-                "memory_limit" -> return Val(ir_handle_h("jet_process_spec_memory_limit", [Bool]{false, false}))
-                "memory_scope" -> return Val(ir_handle_h("jet_process_spec_memory_scope", [Bool]{false, false}))
-                "open_file_limit" -> return Val(ir_handle_h("jet_process_spec_open_file_limit", [Bool]{false, false}))
-                "cpu_affinity" -> return Val(ir_handle_h("jet_process_spec_cpu_affinity", [Bool]{false, true}))
-                "io_priority" -> return Val(ir_handle_h("jet_process_spec_io_priority", [Bool]{false, false}))
-                "io_idle" -> return Val(ir_handle_h("jet_process_spec_io_idle", [Bool]{false}))
-                "detached" -> return Val(ir_handle_h("jet_process_spec_detached", [Bool]{false}))
-                "terminal" -> {
-                    if argument_count == 0 {
-                        return Val(ir_handle_h("jet_process_spec_terminal", [Bool]{false}))
-                    }
-                    if argument_count == 1 {
-                        return Val(ir_handle_h("jet_process_spec_terminal_with_policy", [Bool]{false, true}))
-                    }
-                    return None
-                }
-                "under" -> return Val(ir_handle_h("jet_std_process_spec_under", [Bool]{false, true}))
-                "plan" -> return Val(ir_handle_h("jet_process_spec_plan", [Bool]{true}))
-                "run" -> return Val(ir_handle_h("jet_process_spec_run", [Bool]{true}))
-                "run_checked" -> return Val(ir_handle_h("jet_process_spec_run_checked", [Bool]{true}))
-                "spawn" -> return Val(ir_handle_h("jet_process_spec_spawn", [Bool]{true}))
-                else -> return None
-            }
-        }
         .HTTPServerMethod(kind, method) -> {
             if kind == "WsConn" {
                 if method == {
@@ -452,6 +413,6 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
             return Val(ir_handle_h("jet_std::JetReceiver::close", [Bool]{true}))
         }
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
-        .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .TaskJoin | .MathMethod(_, _) | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
+        .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .TaskJoin | .MathMethod(_, _) | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
     }
 }
