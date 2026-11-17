@@ -128,8 +128,9 @@ Once: struct {
     new: fn() -> Once Never! { {done: Shared{false}} }
 
     /// Runs `work` unless this Once has already run it; true when this call
-    /// ran it. The work must not call the same Once.
-    call: fn(self, work: fn()) -> Bool Never! {
+    /// ran it. The work must not call the same Once. A failure of `work` is
+    /// this call's, unchanged, and leaves the work not yet run.
+    call: fn<E>(self, work: fn() E!) -> Bool E! {
         guard := self.done.guard_edit()
         if guard.value -> return false
         work()

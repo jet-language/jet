@@ -2,13 +2,14 @@
 # (`(ShopError | E)!`), and each call reads it at its binding: `E = Never`
 # leaves `ShopError` alone, `E = ShopError` adds nothing, `E = KeyError` joins
 # it, and `E = ShopError | KeyError` adds no second `ShopError`. Each failure
-# reaches the caller as the member it is, on every tier.
+# reaches the caller as the member it is, on every tier, whether the caller
+# writes the union in the callee's member order, in its own, or nowhere.
 fixture: GenericFailureUnionReadsItsBinding.fixture
 step check: jet check main.jet
 exit: 0
 step run: jet run main.jet
 exit: 0
-stdout: = "3\n-1\n2\n-2\ntotal 5\nkey\nshop\nshop\nkey\ntotal 3\n"
+stdout: = "3\n-1\n2\n-2\ntotal 5\nkey\nshop\nshop\nkey\ntotal 3\n2\n-4\n-5\n"
 step o0: jet run -O0 main.jet
 exit: 0
 stdout: == run

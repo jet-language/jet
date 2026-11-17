@@ -234,7 +234,7 @@ run: fn() (NetError | HTTPError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     serving: task {
-        app.as_caller<Int>(ann(), fn() {
+        app.as_caller<Int, Never>(ann(), fn() {
             answered := 0
             loop _ in 0..<4 {
                 if served.serve_once(listener) == .Ok(_) -> answered += 1

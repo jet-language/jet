@@ -112,14 +112,14 @@ priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB
     store: db.open_memory()
     mia_adds: table_notes(store)
     assert(
-        app.as_caller<Bool>(mia(), fn() {
+        app.as_caller<Bool, Never>(mia(), fn() {
             _: mia_adds.add(TableNote{id: 1, owner: mia(), text: "mine"}) ?? panic("mia adds her note")
             app.maybe_caller() == Val(mia())
         }),
     )
     ben_adds: table_notes(store)
     assert(
-        app.as_caller<Bool>(ben(), fn() {
+        app.as_caller<Bool, Never>(ben(), fn() {
             forged: table_note_refused(ben_adds.add(TableNote{id: 2, owner: mia(), text: "forged"}))
             _: ben_adds.add(TableNote{id: 2, owner: ben(), text: "his"}) ?? panic("ben adds his note")
             forged && table_note_hidden(ben_adds, 1) && table_note_count(ben_adds) == 1
@@ -138,14 +138,14 @@ priv table_note_kept: fn(notes: db.Table<Int, TableNote>, id: Int) -[DB.Read, DB
     // A put over a row is judged on the stored row and on the new one.
     ben_takes: table_notes(store)
     assert(
-        app.as_caller<Bool>(ben(), fn() {
+        app.as_caller<Bool, Never>(ben(), fn() {
             taken: table_note_refused(ben_takes.put(TableNote{id: 1, owner: ben(), text: "taken"}))
             taken && table_note_kept(ben_takes, 1)
         }),
     )
     mia_edits: table_notes(store)
     assert(
-        app.as_caller<Bool>(mia(), fn() {
+        app.as_caller<Bool, Never>(mia(), fn() {
             given: table_note_refused(mia_edits.put(TableNote{id: 1, owner: ben(), text: "given"}))
             _: mia_edits.put(TableNote{id: 1, owner: mia(), text: "edited"}) ?? panic("mia edits her note")
             mia_edits.delete(1) ?? panic("mia deletes her note")
@@ -167,14 +167,14 @@ priv table_note_answer: fn(result: TableNote db.DBError!) -> String {
 #Test("an add on a taken key is Exists to a caller who may read the row there, and Denied to one who may not") {
     store: db.open_memory()
     mia_adds: table_notes(store)
-    first: app.as_caller<String>(mia(), fn() { table_note_answer(mia_adds.add(TableNote{id: 1, owner: mia(), text: "mine"})) })
+    first: app.as_caller<String, Never>(mia(), fn() { table_note_answer(mia_adds.add(TableNote{id: 1, owner: mia(), text: "mine"})) })
     assert_eq(first, "added")
     mia_again: table_notes(store)
-    again: app.as_caller<String>(mia(), fn() { table_note_answer(mia_again.add(TableNote{id: 1, owner: mia(), text: "again"})) })
+    again: app.as_caller<String, Never>(mia(), fn() { table_note_answer(mia_again.add(TableNote{id: 1, owner: mia(), text: "again"})) })
     assert_eq(again, db.DBError.Exists.message())
     // Ben may add a note of his own, but not learn that mia's key is taken.
     ben_adds: table_notes(store)
-    taken: app.as_caller<String>(ben(), fn() { table_note_answer(ben_adds.add(TableNote{id: 1, owner: ben(), text: "his"})) })
+    taken: app.as_caller<String, Never>(ben(), fn() { table_note_answer(ben_adds.add(TableNote{id: 1, owner: ben(), text: "his"})) })
     assert_eq(taken, db.DBError.Denied.message())
     system_reads: table_notes(store)
     assert_eq(app.as_system(fn() { (system_reads.get(1) ?? panic("the note reads")).text }), "mine")

@@ -4616,9 +4616,9 @@ run: fn() {
 | `rolling_mean(values, window)` | `[Float] DataError!` | Compute a bounded rolling mean. |
 | `query(rows)` | `Query<T>` | Start a deterministic query plan under `DataLimits.safe()`. |
 | `query(stream)` | `Query<T>` | Start a one-shot query over a stream's remaining rows, under the `DataLimits` of the reader that made the stream. |
-| `inner_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, U>] DataError!` | Preserve duplicate matches. |
-| `left_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, U?>] DataError!` | Retain unmatched left rows as `U?`. |
-| `pivot_sum(rows, fn(row) { key }, fn(row) { column }, fn(row) { value })` | `[DataPivotCell] DataError!` | Group and sum by a row and column key. |
+| `inner_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, U>] (DataError \| E)!` | Preserve duplicate matches; a key callback's failure `E` passes through unchanged. |
+| `left_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, U?>] (DataError \| E)!` | Retain unmatched left rows as `U?`; a key callback's failure `E` passes through unchanged. |
+| `pivot_sum(rows, fn(row) { key }, fn(row) { column }, fn(row) { value })` | `[DataPivotCell] (DataError \| E)!` | Group and sum by a row and column key; a callback's failure `E` passes through unchanged. |
 | `plot<T>(rows)` | `JetDataPlot<T> DataError!` | Build a bounded plot plan from encodable rows. |
 | `inspect(plot)` / `inspect_json(plot)` | inspection / `String DataError!` | Inspect a plot plan as text or JSON. |
 | `text(plot)` / `svg(plot)` | `String DataError!` | Render plot text or SVG. |
@@ -4935,7 +4935,7 @@ sendability rules. The implementation is in
 | `sleep(ms: Int) -[Time.Wait]>` | — | Wait for `ms` milliseconds (none when negative) before returning. |
 | `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
 | `Once.new() -> Once` | once | Work that runs at most once across the tasks sharing it (`pthread_once`, `call_once`). |
-| `once.call(work: fn()) -> Bool` | ran | Run `work` unless this Once already ran it; `true` when this call ran it. A caller arriving while it runs waits for it. |
+| `once.call(work: fn() E!) -> Bool E!` | ran | Run `work` unless this Once already ran it; `true` when this call ran it. A caller arriving while it runs waits for it. A failure of `work` is the call's, and leaves the work not yet run. |
 | `once.is_done() -> Bool` | done | Whether the work has run. |
 | `Semaphore.new(count: Int) -> Semaphore` | semaphore | A counting semaphore holding `count` units (none when negative). |
 | `semaphore.acquire() -[Time.Wait]> Bool` | taken | Take a unit, waiting until one is free; `false` when the wait ends without one, as when the task is canceled. |
@@ -5202,8 +5202,9 @@ used repeatedly, and call `escape` for literal user input.
 Methods on `Regex` take the receiver as the pattern of the free function of
 the same name: `is_match`, `full_match`, `match_full`, `match`, `find`, `find_all`,
 `matches`, `split`, `split_limit`, `replace`, `replace_first`, plus
-`replace_all_with(text, replacer: fn(Match) -> String)`, which replaces every
-match with what `replacer` returns for it. Methods on `Match`:
+`replace_all_with(text, replacer: fn(Match) -> String E!)`, which replaces every
+match with what `replacer` returns for it and fails with what `replacer` fails
+with. Methods on `Match`:
 
 | Method | Result | Description |
 |---|---|---|
@@ -5682,8 +5683,8 @@ tasks never read or change the process registry. The module source is
 | `notices() -> [Notice]` | notices | The app's notice list, oldest first: the notices with no control to sit beside, each kept until it is dismissed (see `app.Notice` below). |
 | `field_error(at: String, reason: String) -> FieldError` | error | A field error a method reports for its argument: `path` is `at`, the path of the field in that argument, and `reason` says what is wrong with it. |
 | `new_id() -[Rand, Time]> String` | ID | A fresh UUIDv7 as lowercase text: the Unix millisecond it was made, then 74 random bits. A client names a row it creates with it, so a row made offline has its final ID at once; a later ID sorts after it. It panics when the system has no random source. |
-| `as_caller<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for `account`, and give what it gives. `run` handles its own failures. |
-| `as_system<R>(run: fn() -> R Never!) -> R Never!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does. |
+| `as_caller<R, E>(account: auth.AccountID, run: fn() -> R E!) -> R E!` | `R` | Run `run` acting for `account`, and give what it gives; a failure of `run` is the call's, unchanged. |
+| `as_system<R, E>(run: fn() -> R E!) -> R E!` | `R` | Run `run` acting for the server itself, which no row policy limits, as a job or a schedule does; a failure of `run` is the call's, unchanged. |
 | `maybe_caller() -> auth.AccountID?` | account | The account this task acts for: `None` for the system or no one. |
 | `caller() -> auth.AccountID` | account | The signed-in account this task acts for. Accepted only on a path that starts at an `#App.SignedIn` method or inside `as_caller`; see below. |
 | `enqueue(fn() { self.job(args...) })` | — | Queue one call of the service's `#App.Job` method `job`, with its arguments evaluated and encoded here; it runs after the call that queued it commits. See below. |
@@ -6839,11 +6840,13 @@ transaction/event lengths, history limit, cursor, generation, and capture state;
 the generic state payload.
 
 `transaction`, `update`, `batch`, `optimistic` and `patch` (and the `transact`
-receiver) take `apply: fn(&T)`: the callback receives the current value as a
+receiver) take `apply: fn(&T) E!`: the callback receives the current value as a
 written parameter and changes it in place, as in
 `store.transact("add item", fn(cart: &Cart) { cart.items.push(item) })`. The
 store then holds the changed value and records one transaction from the value
-before it. A store is built on one `core.reactive` signal (D-DX-STORE1):
+before it; a failure of `apply` is the call's, unchanged, and leaves the store
+as it was.
+A store is built on one `core.reactive` signal (D-DX-STORE1):
 `signal` and `state_signal` return that typed `Signal<T>`, not a textual
 generation token, and its observers see one update per transaction, after the
 callback returns. `optimistic` and `patch` keep the value from before the

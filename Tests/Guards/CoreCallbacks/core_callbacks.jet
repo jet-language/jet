@@ -1,0 +1,200 @@
+// Every Core function that calls a callback it is passed takes the callback's
+// failure as a type parameter of its own and fails with it: the callback is
+// `fn(T) -> U E!`, and the function fails with `E`, or with a union that
+// holds `E` beside its own failures. A `Never` callback binds `E = Never` and
+// the function fails only with its own; nothing is converted on the way.
+// The guard reads each public function, and each public method of a type the
+// module owns, of every Core.rows source module, parsed as the compiler reads
+// Core; a name that starts with `_` is the compiler's own. A function whose
+// callback's failure is not its caller's is listed in CORE_CALLBACKS_REVIEWED
+// with the reason.
+use {
+    jet_foundation.[CORE_DECLARATIONS, CoreDeclarationSource, Func, Type, type_name]
+    jet_parser.[parse_generated_source]
+    corpus_manifest.[guards_enter_root]
+    cc_files: core.files
+}
+
+// A Core function whose callback fails with no type parameter of its own:
+// `name` is the function, `why` whose failure the callback's is.
+CoreCallbackReviewed: struct {
+    name: String,
+    why: String,
+}
+
+CC_KEPT_BY_APP: "kept: the app runs it later and shows its Notice"
+
+CC_RUN_BY_RUNTIME: "kept: the runtime calls it later, outside any caller"
+
+CC_TYPED_BY_COMPILER: "typed by the compiler's own signature of the call, which gains the callback's failure with the Core one"
+
+CORE_CALLBACKS_REVIEWED: [CoreCallbackReviewed]{
+    {name: "app.App.background", why: CC_KEPT_BY_APP},
+    {name: "app.App.tray", why: CC_KEPT_BY_APP},
+    {name: "app.App.menu_bar", why: CC_KEPT_BY_APP},
+    {name: "app.App.lifecycle", why: CC_KEPT_BY_APP},
+    {name: "app.item", why: CC_KEPT_BY_APP},
+    {name: "app.drop_files", why: CC_KEPT_BY_APP},
+    {name: "core.db.Store.table", why: "kept: the table calls its key on each row it writes"},
+    {name: "core.db.Table.guard", why: "kept: the table asks its policy on each read and write, which fail with DBError"},
+    {name: "core.rt.callback", why: CC_RUN_BY_RUNTIME},
+    {name: "core.sys.atexit", why: CC_RUN_BY_RUNTIME},
+    {name: "core.sys.on_interrupt", why: CC_RUN_BY_RUNTIME},
+    {name: "core.browser.host.on", why: CC_RUN_BY_RUNTIME},
+    {name: "core.testing.world", why: "the runtime runs the body in a deterministic world and reports its failure as the test's"},
+    {name: "core.service.worker", why: "kept by name: the started tree runs the worker's handler, outside the call that declares it"},
+    {name: "core.ui.preview", why: "kept: the preview tool renders the body later"},
+    {name: "core.ui.playground", why: "kept: the preview tool renders the body later"},
+    {name: "core.web.table.column", why: "kept: the table projects each row through it when it renders"},
+    {name: "core.web.table.with_server_page", why: "kept: the table loads each page through it, and a page fails with WebTableError"},
+    {name: "core.browser.run_case", why: "a failure of the body is the attempt's outcome, recorded and retried, not the call's"},
+    {name: "core.web.serve", why: "a failure of `build` stops the program before any socket binds"},
+    {name: "core.web.bind", why: "a failure of `build` stops the program before any socket binds"},
+    {name: "core.crypto.vault.ExpiringSecret.with", why: CC_TYPED_BY_COMPILER},
+    {name: "core.data.track", why: "never called: the key only names the tracked rows' key type"},
+    {name: "core.testing.histories", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.router.route", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.router.route_with_search_codec", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.router.not_found", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.forms.typed_set_async_validator", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.forms.typed_validate_field", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.query.WebQuery.retry", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.query.retry", why: CC_TYPED_BY_COMPILER},
+    {name: "core.web.table.update_row", why: CC_TYPED_BY_COMPILER},
+}
+
+// What the guard read: each problem, and the name of every function it
+// checked that takes a callback.
+CoreCallbackFindings: struct {
+    problems: [String],
+    callers: [String],
+}
+
+// The callback `ty` is (`fn(..)`, or `fn(..)?`), else None.
+cc_callback: fn(ty: Type) -> Type? Never! {
+    if ty == .Option(inner) -> return cc_callback(inner)
+    if ty == .Fn(_, _, _, _, _, _) -> return Val(ty)
+    None
+}
+
+// The failure of a function whose result is `ty`, or None when it fails with
+// nothing it names.
+cc_failure: fn(ty: Type?) -> Type? Never! {
+    result: ty ?? return None
+    if result == .Result(_, err) -> return Val(err)
+    None
+}
+
+// Whether `failure` is the type parameter `name`, or a union holding it.
+cc_holds: fn(failure: Type?, name: String) -> Bool Never! {
+    found: failure ?? return false
+    if found == .Named(member) -> return member == name
+    if found == .Union(members) {
+        loop member in members {
+            if member == .Named(written) && written == name -> return true
+        }
+    }
+    false
+}
+
+cc_public: fn(name: String) -> Bool Never! { !name.starts_with("_") }
+
+// What is wrong with `function`, called `name`, by the rule above. `callers`
+// gains `name` when the function takes a callback.
+cc_problems: fn(name: String, function: Func, callers: &[String]) -> [String] Never! {
+    own := [String]{}
+    loop param in function.type_params -> own.push("{param.name}")
+    problems := [String]{}
+    bound := [String]{}
+    loop param in function.params {
+        callback: cc_callback(param.ty) ?? next
+        if !callers.contains(name) -> callers.push("{name}")
+        ret: if callback == .Fn(_, written, _, _, _, _) -> written else -> None
+        failure: cc_failure(ret)
+        if failure == .Val(.Named(parameter)) && own.contains(parameter) {
+            bound.push("{parameter}")
+            next
+        }
+        problems.push("{name}: the callback `{param.name}: {type_name(callback)}` fails with no type parameter of its own")
+    }
+    loop parameter in bound {
+        if !cc_holds(cc_failure(function.return_type), parameter) {
+            problems.push("{name}: its callback fails with `{parameter}`, and it does not")
+        }
+    }
+    problems
+}
+
+// Whether `name` is a reviewed function.
+cc_reviewed: fn(name: String) -> Bool Never! {
+    loop reviewed in CORE_CALLBACKS_REVIEWED {
+        if reviewed.name == name -> return true
+    }
+    false
+}
+
+cc_check: fn(name: String, function: Func, out: &CoreCallbackFindings) {
+    found: cc_problems(name, function, out.callers)
+    if !cc_reviewed(name) {
+        loop problem in found -> out.problems.push(problem)
+        return
+    }
+    if found.is_empty() {
+        out.problems.push("{name}: its callbacks carry their failure parameter, so CORE_CALLBACKS_REVIEWED no longer lists it")
+    }
+}
+
+cc_check_methods: fn(row: CoreDeclarationSource, owner: String, methods: [Func], out: &CoreCallbackFindings) {
+    if !row.owned_types.contains(owner) {
+        return
+    }
+    loop method in methods {
+        if cc_public(method.name) {
+            cc_check("{row.module_name}.{owner}.{method.name}", method, out)
+        }
+    }
+}
+
+// The findings over `source`, the text of the source module `row`.
+cc_read: fn(row: CoreDeclarationSource, source: String, out: &CoreCallbackFindings) {
+    parsed: parse_generated_source(source.bytes())
+    loop item in parsed.program.items {
+        if item == .Func(function) && row.members.contains(function.name) && cc_public(function.name) {
+            cc_check("{row.module_name}.{function.name}", function, out)
+        }
+        if item == .Struct(value) -> cc_check_methods(row, value.name, value.methods, out)
+        if item == .Enum(value) -> cc_check_methods(row, value.name, value.methods, out)
+        if item == .Impl(value) && value.trait_name == None {
+            cc_check_methods(row, value.type_name, value.methods, out)
+        }
+    }
+}
+
+#Test("every Core function that calls a callback fails with the callback's own failure") {
+    guards_enter_root()
+    out := CoreCallbackFindings{problems: [String]{}, callers: [String]{}}
+    loop row in CORE_DECLARATIONS.source_rows {
+        if row.runtime -> next
+        cc_read(row, cc_files.read(row.path) ?? panic("read {row.path}: {err}"), out)
+    }
+    assert(out.callers.len() > 20, "the guard must find Core's callbacks, found {out.callers.len()}")
+    stale := [String]{}
+    loop reviewed in CORE_CALLBACKS_REVIEWED {
+        if !out.callers.contains(reviewed.name) -> stale.push("{reviewed.name}")
+    }
+    assert(stale.is_empty(), "CORE_CALLBACKS_REVIEWED names functions that take no callback: {stale.join(", ")}")
+    assert(out.problems.is_empty(), "{out.problems.len()} Core callback(s) lack their failure type parameter `E` (write `fn(T) -> U E!` and fail with `E`):\n{out.problems.join("\n")}")
+}
+
+#Test("a callback without its function's own failure parameter is named") {
+    planted: "sort: fn<T, E>(rows: [T], key: fn(T) -> String E!) -> [T] E! {{ rows }}\nshop: fn<E>(work: fn() -> Int E!) -> Int (ShopError | E)! {{ 0 }}\nkeep: fn(work: fn() -> Int ShopError!) -> Int Never! {{ 0 }}\nplain: fn<T>(rows: [T], key: fn(T) -> String) -> [T] Never! {{ rows }}\nlost: fn<T, E>(rows: [T], key: fn(T) -> String E!) -> [T] Never! {{ rows }}\nlater: fn(handler: fn()?) Never! {{}}\n"
+    row: CoreDeclarationSource{module_name: "core.planted", alias: "", path: "planted.jet", owner: "", members: [String]{"sort", "shop", "keep", "plain", "lost", "later"}, owned_types: [String]{}, impl_types: [String]{}, runtime: false, line: 0}
+    out := CoreCallbackFindings{problems: [String]{}, callers: [String]{}}
+    cc_read(row, planted, out)
+    assert_eq(out.callers, [String]{"core.planted.sort", "core.planted.shop", "core.planted.keep", "core.planted.plain", "core.planted.lost", "core.planted.later"})
+    assert_eq(out.problems.len(), 4)
+    assert(out.problems[0].starts_with("core.planted.keep: the callback `work: "))
+    assert(out.problems[1].starts_with("core.planted.plain: the callback `key: "))
+    assert_eq(out.problems[2], "core.planted.lost: its callback fails with `E`, and it does not")
+    assert(out.problems[3].starts_with("core.planted.later: the callback `handler: "))
+}

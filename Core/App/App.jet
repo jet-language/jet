@@ -1531,16 +1531,16 @@ ActingRuns: struct {
 ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
 
 // Runs `run` acting for the account `account` and gives what it gives; the
-// account is `maybe_caller()` within it. `run` handles its own failures, so
-// a caller with any failure contract may call this.
-as_caller: fn<R>(account: auth.AccountID, run: fn() -> R Never!) -> R Never! {
+// account is `maybe_caller()` within it. A failure of `run` is this call's,
+// unchanged.
+as_caller: fn<R, E>(account: auth.AccountID, run: fn() -> R E!) -> R E! {
     acting_within(Val(Acting.Account(account.copy())), run)
 }
 
 // Runs `run` acting for the server itself, which no row policy limits, and
 // gives what it gives. A job or a schedule that reads every row runs so; a
 // request never does.
-as_system: fn<R>(run: fn() -> R Never!) -> R Never! { acting_within(Val(Acting.System), run) }
+as_system: fn<R, E>(run: fn() -> R E!) -> R E! { acting_within(Val(Acting.System), run) }
 
 // The account this task acts for: None when it acts for the system or for
 // no one.
@@ -1557,7 +1557,7 @@ caller: fn() -> auth.AccountID Never! {
     maybe_caller() ?? panic("app.caller() ran acting for no account")
 }
 
-priv acting_within: fn<R>(acting: Acting?, run: fn() -> R Never!) -> R Never! {
+priv acting_within: fn<R, E>(acting: Acting?, run: fn() -> R E!) -> R E! {
     me: tasks.current_task()
     acting_begin(me, acting)
     defer acting_end(me)
@@ -1629,7 +1629,7 @@ priv(package) callers: module {
     ann: auth.AccountID.from_string("ann")
     ben: auth.AccountID.from_string("ben")
     assert_eq(maybe_caller(), auth.AccountID?{None})
-    seen: as_caller<String>(ann, fn() {
+    seen: as_caller<String, Never>(ann, fn() {
         assert(as_system(fn() { callers.system() }))
         assert_eq(as_system(fn() { maybe_caller() }), auth.AccountID?{None})
         nested: auth.AccountID.from_string("ben")
@@ -6921,7 +6921,7 @@ priv job_attempt: fn(job: CallJob, key: String, outbox: Shared<CallOutbox>?) -> 
         kept: store.guard_read()
         transactions.deliver(call, CallDelivery{id: "job:{key}", at: kept.value.now() /% 1000})
     }
-    reply: as_system<String>(fn() {
+    reply: as_system<String, Never>(fn() {
         held: job.run.guard_read()
         job_reply(held.value.call, job.args)
     })
@@ -7021,7 +7021,7 @@ priv schedule_tick: fn(name: String, due: Int, run: fn(RemoteArgs) -> String [Fi
     loop _ in 0..<transactions.attempts() {
         call: transactions.begin() ?? panic("a schedule's task runs no other call")
         transactions.schedule(call, CallTick{schedule: name.copy(), due: due * 60})
-        reply: as_system<String>(fn() { job_reply(run, "[]") })
+        reply: as_system<String, Never>(fn() { job_reply(run, "[]") })
         if transactions.end(call, !reply.starts_with("{{\"err\":")) {
             return
         }
