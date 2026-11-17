@@ -5713,6 +5713,7 @@ tasks never read or change the process registry. The module source is
 | `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
 | `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window. See below. |
+| `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6451,6 +6452,21 @@ browser's own file handles, which the page runtime can't hand to the app
 yet, so `app.drop_files` in code whose target is the web output is a
 compile error, E-APP-TARGET-FEATURE.
 
+`app.context_menu(body, items)` gives `body` back with a context menu
+holding `items`, made as a menu bar's are (`app.item`, `app.separator()`,
+`app.quit_item()`). On Linux the app's window (`graph.window`) opens it
+where the person right-clicks on `body`, over the screen, at the pointer
+and moved only as far as it must be to fit in the window. A click on an
+item runs it as the menu bar runs it, and closes the menu; a click
+elsewhere or Escape closes it too, and that click or key reaches nothing
+else. A right-click opens the menu of the body under the pointer, if it has
+one. A separator, or an item not `enabled`, can't be chosen. An item's run
+that fails adds its `Notice` to `app.notices()`. The other native targets
+keep a notice saying their context menu is not built yet and give `body`
+back as it is. The page runtime can't open the app's menu in place of the
+browser's yet, so `app.context_menu` in code whose target is the web output
+is a compile error, E-APP-TARGET-FEATURE.
+
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
 that was there whole. It is true once the file is written. The dialog
@@ -6572,7 +6588,10 @@ write refused after its screen closed, joins the app's notice list, which
 `app.notices()` reads. The list keeps each notice, in order, until it is
 dismissed. It lives where the write queue does: the device store on a
 native target, which keeps it across restarts, or the World's own cell
-inside a deterministic world.
+inside a deterministic world. On Linux the app's window shows the newest
+notice in the list on a dark red bar across its bottom, from the frame
+after the notice is kept, on every screen; a click on the bar dismisses
+that notice.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

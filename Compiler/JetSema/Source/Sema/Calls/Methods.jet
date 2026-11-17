@@ -1584,7 +1584,7 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "open_settings" | "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" -> {
+        "open_settings" | "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "context_menu" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         "notify" -> {
@@ -1601,9 +1601,10 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
 // A browser asks for a device permission itself, when a page first uses
 // the device, and keeps no settings page of the app's; it shows a page's
 // notification only while the page is open; its file chooser answers after
-// the page's code has returned; and a page's drop gives its own file
-// handles. So a device call on an app whose resolved target is the web
-// output is refused, never dropped or answered for the browser.
+// the page's code has returned; a page's drop gives its own file handles;
+// and the page runtime opens no context menu of the app's yet. So a device
+// call on an app whose resolved target is the web output is refused, never
+// dropped or answered for the browser.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1626,6 +1627,10 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         if member == "drop_files" {
             why = "A page's drop gives the browser's own file handles, and the page runtime can't hand them to the app yet, so the web output has no `{alias}.drop_files` to run; making up the dropped files would be wrong."
             fix = "On the web, take the files from the page's file input in an upload endpoint, a method with an `app.Upload` argument. Keep `{alias}.drop_files` for a native build."
+        }
+        if member == "context_menu" {
+            why = "A page's right-click opens the browser's own menu, and the page runtime can't open the app's menu in its place yet, so the web output has no `{alias}.context_menu` to run; dropping the menu would lose its items."
+            fix = "On the web, put the menu's items in the screen as buttons. Keep `{alias}.context_menu` for a native build."
         }
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
     }

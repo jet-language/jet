@@ -153,6 +153,9 @@ UINode: struct {
     // The id the app keeps the handler of files dropped on the node under
     // (`__taking_files`); 0 for none.
     priv files: Int,
+    // The id the app keeps the node's context menu under (`__with_menu`);
+    // 0 for none.
+    priv menu: Int,
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -194,7 +197,22 @@ UINode: struct {
     // `frame`, in pixels, the tree laid out as `__draw` lays it out; 0 for
     // none.
     __files_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
-        internal.files_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale)
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, false)
+    }
+
+    // The tree as a body with a context menu, which the app keeps under
+    // `menu` (`app.context_menu`).
+    __with_menu: fn(self, menu: Int) -> UINode Never! {
+        result := self.copy()
+        result.menu = menu
+        result
+    }
+
+    // The id of the innermost body with a context menu (`__with_menu`)
+    // under the point (x, y) of a native window's `frame`, in pixels, as
+    // `__files_at` finds a body that takes files; 0 for none.
+    __menu_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, true)
     }
 
     // The text of the text input that is node `focused` of the tree's focus
@@ -255,6 +273,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         click: 0,
         drop: 0,
         files: 0,
+        menu: 0,
     }
 }
 
@@ -1459,6 +1478,42 @@ Frame: struct {
         internal.shortcut_pressed(shortcut, key, internal.held_modifiers(self))
     }
 
+    // `units` in the frame's pixels, at its scale.
+    __pixels: fn(self, units: Int) -> Int Never! { internal.pixel(Float{units}, self.scale) }
+
+    // Draws a menu over the frame (`app.context_menu`), in pixels: a light
+    // panel at (x, y), `width` wide, with a gray border and a row `row`
+    // high for each of `labels`, the label in black, or in gray when it
+    // is not `enabled`, and an empty label a gray separator line.
+    __draw_menu: fn(self, x: Int, y: Int, width: Int, row: Int, labels: [String], enabled: [Bool]) Never! {
+        gray: Color{r: 136, g: 136, b: 136, a: 255}
+        height: row * labels.len()
+        self.draw_rectangle(x, y, width, height, Color{r: 245, g: 245, b: 245, a: 255})
+        self.draw_rectangle_lines(x, y, width, height, gray)
+        pad: self.__pixels(8)
+        size: self.__pixels(16)
+        loop (index, label) in labels {
+            top: y + index * row
+            if label == "" {
+                middle: top + row /% 2
+                self.draw_line(x + pad, middle, x + width - pad, middle, gray)
+                next
+            }
+            ink: if index < enabled.len() && enabled[index] -> Color{r: 0, g: 0, b: 0, a: 255} else -> gray
+            self.draw_text(label, x + pad, top + (row - size) /% 2, size, ink)
+        }
+    }
+
+    // Draws `text` over the bottom of the frame on a dark red bar `bar`
+    // pixels high, in white: how a native window shows the app's newest
+    // notice.
+    __draw_notice: fn(self, text: String, bar: Int) Never! {
+        top: if self.height > bar -> self.height - bar else -> 0
+        self.draw_rectangle(0, top, self.width, self.height - top, Color{r: 153, g: 27, b: 27, a: 255})
+        size: self.__pixels(16)
+        self.draw_text(text, self.__pixels(8), top + (self.height - top - size) /% 2, size, Color{r: 255, g: 255, b: 255, a: 255})
+    }
+
     is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool {
         self.buttons.contains(button)
     }
@@ -1767,6 +1822,7 @@ priv internal: module {
             click: 0,
             drop: 0,
             files: 0,
+            menu: 0,
         }
     }
 
@@ -2017,22 +2073,23 @@ priv internal: module {
         None
     }
 
-    // `UINode.__files_at`, at (x, y) in units: the innermost node laid out
-    // over the point that takes dropped files gives its id, a box's
-    // children laid out as `placed_leaves` lays them out.
-    files_at: fn(node: UINode, frame: Rect, x: Float, y: Float) -> Int Never! {
+    // `UINode.__files_at` and `UINode.__menu_at`, at (x, y) in units: the
+    // innermost node laid out over the point that takes dropped files, or
+    // with `menus` that has a context menu, gives its id, a box's children
+    // laid out as `placed_leaves` lays them out.
+    held_at: fn(node: UINode, frame: Rect, x: Float, y: Float, menus: Bool) -> Int Never! {
         if x < frame.x || x >= frame.x + frame.width || y < frame.y || y >= frame.y + frame.height {
             return 0
         }
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                inner: files_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y)
+                inner: held_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y, menus)
                 if inner != 0 -> return inner
                 at += child.height
             }
         }
-        node.files
+        if menus -> node.menu else -> node.files
     }
 
     // `node` with its leaf `target`, counted in paint order
@@ -2354,15 +2411,21 @@ priv html_name: fn(tree: UINode) -> String Never! {
     assert_eq(seen, [String]{"false -1 ab 2.0 6.0", "true 0 abd 3.0 6.0", "false 1 abd 3.0 6.0", "false 0 abd 3.0 6.0", "false 0 abd 3.0 6.0"})
 }
 
-#Test("a native window finds the innermost body that takes dropped files under a point") {
+#Test("a native window finds the innermost body that takes dropped files, or has a context menu, under a point") {
     // A 10x4 panel over a body of its own, then a one-unit button.
     panel: node_color("", 10.0, 4.0, Color{r: 0, g: 0, b: 255, a: 255}).__taking_files(2)
     tree: box([panel, button("Go")]).__taking_files(1)
     whole: Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
-    assert_eq(internal.files_at(tree, whole, 3.0, 2.0), 2)
-    assert_eq(internal.files_at(tree, whole, 3.0, 4.5), 1)
-    assert_eq(internal.files_at(tree, whole, 3.0, 5.0), 0)
-    assert_eq(internal.files_at(box([text("plain")]), whole, 1.0, 0.0), 0)
+    assert_eq(internal.held_at(tree, whole, 3.0, 2.0, false), 2)
+    assert_eq(internal.held_at(tree, whole, 3.0, 4.5, false), 1)
+    assert_eq(internal.held_at(tree, whole, 3.0, 5.0, false), 0)
+    assert_eq(internal.held_at(box([text("plain")]), whole, 1.0, 0.0, false), 0)
+    // The panel's menu, inside a body that takes files: a point on the
+    // panel finds the menu, and the button's point finds none.
+    menus: box([panel.__with_menu(3), button("Go")]).__taking_files(1)
+    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, true), 3)
+    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, false), 2)
+    assert_eq(internal.held_at(menus, whole, 3.0, 4.5, true), 0)
 }
 
 #Test("a native window's key matches a button's shortcut as a page's does") {

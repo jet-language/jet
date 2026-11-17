@@ -462,7 +462,8 @@ priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U
     true
 }
 
-// Adds `notice` to the end of the app's notice list.
+// Adds `notice` to the end of the app's notice list, which the app's
+// window then shows (`app_window_noticed`).
 __keep_notice: fn(notice: Notice) {
     loop {
         seen: notice_cell_load()
@@ -470,6 +471,7 @@ __keep_notice: fn(notice: Notice) {
         live_put(kept, notice.text)
         live_put(kept, if notice.retry -> "1" else -> "0")
         if notice_cell_replace(seen, kept) {
+            app_window_noticed()
             return
         }
     }
@@ -4262,6 +4264,151 @@ priv app_drop_once: fn(run: fn([PickedFile]) Notice!, dropped: [PickedFile]) Nev
     if run(dropped) == .Err(notice) -> __keep_notice(notice)
 }
 
+// `body` with the context menu `items`, which opens where the person
+// right-clicks on `body`: choosing an item runs it as a menu bar's item
+// runs (`item`, `edit_menu`, `window_menu`), and an item's run that fails
+// adds its notice to the app's notice list (`notices`), which the window
+// shows. On Linux the app's window (`App.window`) opens it over the
+// screen (`app_window_run`); the other native targets keep a notice that
+// says their context menu is not built yet and give `body` back as it is.
+// The page runtime can't open one yet, so a call in code whose target is
+// the web output is a compile error.
+context_menu: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
+    #if #build.target.os == {
+        .Linux -> { return app_context_target(body, items) }
+        .MacOS -> { return app_no_context_menu(body) }
+        .Windows -> { return app_no_context_menu(body) }
+        .Web -> { return app_no_context_menu(body) }
+        .Wasm -> { return app_no_context_menu(body) }
+        .Freestanding -> { return app_no_context_menu(body) }
+    }
+}
+
+// The context menus of the bodies in the tree the window shows, each
+// one's id one past its index (`app_window_tree` starts them over).
+priv APP_CONTEXT_MENUS: Shared{[AppContextMenu]{}}
+
+priv AppContextMenu: struct {
+    items: [MenuItem],
+}
+
+// A context menu open in the window, in window pixels: its top left
+// corner, its width, the height of one of its rows, and its items.
+priv AppOpenMenu: struct {
+    x: Int,
+    y: Int,
+    width: Int,
+    row: Int,
+    items: [MenuItem],
+}
+
+// One row of a context menu, and the width of each character of a label
+// beside the padding before it, in units (`ui.Frame` pixels at scale 1).
+priv APP_MENU_ROW: 24
+
+priv APP_MENU_CHAR: 9
+
+priv APP_MENU_PAD: 8
+
+// `body` as one whose context menu the window opens with `items`.
+priv app_context_target: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
+    held: APP_CONTEXT_MENUS.guard_edit()
+    held.value.push(AppContextMenu{items: items.copy()})
+    body.__with_menu(held.value.len())
+}
+
+// Keeps the notice that this target opens no context menu; gives `body`.
+priv app_no_context_menu: fn(body: UINode) -> UINode Never! {
+    __keep_notice(Notice{text: "Couldn't add a context menu: this system's context menu is not built yet"})
+    body.copy()
+}
+
+// Starts the window's context menus over, for a tree opened anew.
+priv app_context_menus_clear: fn() Never! {
+    held: APP_CONTEXT_MENUS.guard_edit()
+    held.value.clear()
+}
+
+// The context menu whose id is `id`, opened at the pointer of `frame`,
+// moved left and up as far as it must be to fit in the window; None when
+// the shown tree has no such menu, or it has no items.
+priv app_context_open: fn(frame: ui.Frame, id: Int) -> AppOpenMenu? Never! {
+    held: APP_CONTEXT_MENUS.guard_read()
+    if id < 1 || id > held.value.len() -> return None
+    items: held.value[id - 1].items.copy()
+    if items.len() == 0 -> return None
+    widest := 0
+    loop item in items {
+        length: item.label.chars().len()
+        if length > widest -> widest = length
+    }
+    width: frame.__pixels(widest * APP_MENU_CHAR + 2 * APP_MENU_PAD)
+    row: frame.__pixels(APP_MENU_ROW)
+    x: app_menu_fit(frame.get_mouse_x(), width, frame.width)
+    y: app_menu_fit(frame.get_mouse_y(), row * items.len(), frame.height)
+    Val(AppOpenMenu{x: x, y: y, width: width, row: row, items: items})
+}
+
+// Where a span `size` long that starts at `at` starts so it ends in
+// `room`, as near `at` as it can.
+priv app_menu_fit: fn(at: Int, size: Int, room: Int) -> Int Never! {
+    if at + size <= room -> return at
+    if size >= room -> return 0
+    room - size
+}
+
+// The item of the open menu `open` under the pointer of `frame`, if it
+// is one the person can choose.
+priv app_context_chosen: fn(frame: ui.Frame, open: AppOpenMenu?) -> MenuItem? Never! {
+    menu: open ?? return None
+    x: frame.get_mouse_x()
+    y: frame.get_mouse_y()
+    if x < menu.x || x >= menu.x + menu.width || y < menu.y || menu.row < 1 -> return None
+    index: (y - menu.y) /% menu.row
+    if index >= menu.items.len() -> return None
+    item: menu.items[index]
+    if !item.enabled || item.kind == .Separator || item.kind == .Notice -> return None
+    Val(item.copy())
+}
+
+// Draws the open menu `menu` into `frame`, over the screen
+// (`Frame.__draw_menu`): a separator is a row with no label, and an item
+// that can't be chosen shows in gray.
+priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
+    labels := [String]{}
+    enabled := [Bool]{}
+    loop item in menu.items {
+        labels.push(if item.kind == .Separator -> "" else -> item.label.copy())
+        enabled.push(item.enabled && item.kind != .Separator && item.kind != .Notice)
+    }
+    frame.__draw_menu(menu.x, menu.y, menu.width, menu.row, labels, enabled)
+}
+
+// The height of the bar the window shows the app's newest notice in, at
+// its bottom (`Frame.__draw_notice`), in units.
+priv APP_NOTICE_BAR: 24
+
+// Draws the app's newest notice (`notices`) into `frame`, on a bar over
+// the bottom of the screen, which a click dismisses
+// (`app_notice_dismissed`). Nothing when there is none.
+priv app_notice_draw: fn(frame: ui.Frame) Never! {
+    listed: notices()
+    if listed.len() == 0 {
+        return
+    }
+    frame.__draw_notice(listed[listed.len() - 1].text, frame.__pixels(APP_NOTICE_BAR))
+}
+
+// Whether the pointer of `frame` is on the bar the window shows the
+// newest notice in; if it is, the notice is dismissed (`__dismiss`).
+priv app_notice_dismissed: fn(frame: ui.Frame) -> Bool Never! {
+    listed: notices()
+    if listed.len() == 0 -> return false
+    if frame.get_mouse_y() < frame.height - frame.__pixels(APP_NOTICE_BAR) -> return false
+    __dismiss(listed.len() - 1)
+    true
+}
+
 // Whether the file named `name` is of a kind in `types`, as a file
 // dialog matches it (`app_file_filter`): its name ends as one of the
 // kind's patterns, in any case.
@@ -4764,11 +4911,38 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     focused := -1
     drawn := false
     shown := AppCurrent?{None}
+    open := AppOpenMenu?{None}
     loop frame in window.frames() {
         stale := !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
             if event == .Drop(x, y, items) -> app_window_drop(tree.__files_at(frame, x, y), items)
+            if event == .PointerDown(.Right) {
+                open = app_context_open(frame, tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y()))
+                stale = true
+                next
+            }
+            if open == .Val(_) {
+                // An open context menu takes the next click and Escape.
+                if event == .PointerDown(.Left) {
+                    chosen: app_context_chosen(frame, open)
+                    open = None
+                    stale = true
+                    if chosen == .Val(item) {
+                        _: app_window_choose(window, frame, tree, focused, item)
+                    }
+                    next
+                }
+                if event == .KeyDown(.Escape) {
+                    open = None
+                    stale = true
+                    next
+                }
+            }
+            if event == .PointerDown(.Left) && app_notice_dismissed(frame) {
+                stale = true
+                next
+            }
             if event == .KeyDown(key) {
                 if app_menu_bar_keyed(frame, key) == .Val(chosen) {
                     if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
@@ -4781,15 +4955,21 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         loop chosen in woken.acts {
             if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
         }
+        if woken.noticed -> stale = true
         now: app_graph_current()
         if now != shown || woken.stale {
-            if now != shown -> focused = -1
+            if now != shown {
+                focused = -1
+                open = None
+            }
             tree = app_window_tree(now)
             shown = now
             stale = true
         }
         if !stale -> next
         tree.__draw(frame)
+        if open == .Val(menu) -> app_context_draw(frame, menu)
+        app_notice_draw(frame)
         drawn = true
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
@@ -4937,10 +5117,12 @@ priv app_menu_bar_lost: fn(why: String) Never! {
 
 // The tree the window shows for the screen `now`, opened as `go` opens it,
 // so the bindings its view reads are the screen's route data: an empty box
-// before a screen opens and for the not-found state. The drop targets of
-// the tree shown before (`drop_files`) go with it.
+// before a screen opens and for the not-found state. The drop targets and
+// context menus of the tree shown before (`drop_files`, `context_menu`) go
+// with it.
 priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
     app_drops_clear()
+    app_context_menus_clear()
     current: now ?? return ui.box([UINode]{})
     screen: app_screen(current.state) ?? return ui.box([UINode]{})
     me: tasks.current_task()
@@ -4957,16 +5139,18 @@ priv app_window_lost: fn(why: String) Never! {
 
 // The window's wake (`app_window_watch`) while it shows; whether a live
 // binding of the screen it shows changed since it last opened the screen,
-// and the menu bar's items chosen for it to act on since its last frame
-// (`app_window_take`); and whether a wake waits for that frame.
+// whether the app kept a notice since its last frame, and the menu bar's
+// items chosen for it to act on since that frame (`app_window_take`); and
+// whether a wake waits for that frame.
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
+    noticed: Bool,
     acts: [MenuItem],
     woken: Bool,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, acts: [MenuItem]{}, woken: false}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, woken: false}}
 
 // Wakes the window's frames through `waker` (`Window.__waker`) each time a
 // change to the data its screen shows comes (`app_window_wake`): the code
@@ -4992,16 +5176,31 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
 }
 
 // What woke the window since the last call: whether a live binding of the
-// screen it shows changed, so it opens the screen again, and the menu
-// bar's items chosen for it to act on, in order.
-priv app_window_take: fn() -> {stale: Bool, acts: [MenuItem]} Never! {
+// screen it shows changed, so it opens the screen again, whether the app
+// kept a notice, so it draws the frame again, and the menu bar's items
+// chosen for it to act on, in order.
+priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem]} Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
+    noticed: held.value.noticed
     acts: held.value.acts.copy()
     held.value.stale = false
+    held.value.noticed = false
     held.value.acts = [MenuItem]{}
     held.value.woken = false
-    {stale: stale, acts: acts}
+    {stale: stale, noticed: noticed, acts: acts}
+}
+
+// Wakes the window's frames to draw the notice the app just kept
+// (`__keep_notice`) without opening the screen again, which may keep
+// the notice anew. Without a window it does nothing.
+priv app_window_noticed: fn() Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 {
+        return
+    }
+    held.value.noticed = true
+    app_window_rouse(held.value)
 }
 
 // Wakes the window's frames when one of the bindings `ids`, just

@@ -1,0 +1,67 @@
+// Crewboard in a Linux window, its board's panel with a context menu: Add
+// Task adds a task, then a separator, then Share, whose run fails. The
+// panel shows how many tasks Add Task added: blue for none, green for
+// more. The person right-clicks the panel and chooses Add Task, then
+// right-clicks it again and chooses Share, whose notice the window shows;
+// then the window closes, which ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Board: struct {
+    added: Int,
+}
+
+BOARD: Shared{Board{added: 0}}
+
+tasks_added: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.added)
+}
+
+add_task: fn() {
+    held := BOARD.guard_edit()
+    held.value.added += 1
+}
+
+// Add Task: one more task, which the board shows.
+new_task: fn() app.Notice! {
+    add_task()
+    app.invalidate(tasks_added)
+    Ok()
+}
+
+// Share: the board can't be shared, so its run fails.
+share: fn() app.Notice! { Err(app.Notice{text: "Couldn't share the board"}) }
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    added: if app.state(app.live(tasks_added)) == {
+        .Loaded(added) -> added
+        .Failed(_) | .Idle | .Loading -> 0
+    }
+    color: if added == 0 -> Color{r: 51, g: 102, b: 255, a: 255} else -> Color{r: 51, g: 153, b: 51, a: 255}
+    items: [app.MenuItem]{app.item("Add Task", fn() app.Notice! { new_task() }), app.separator(), app.item("Share", fn() app.Notice! { share() })}
+    ui.box([app.context_menu(ui.node_color("", 200.0, 30.0, color), items)])
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100)
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}
