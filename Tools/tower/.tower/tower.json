@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111400,
+    "rev": 111425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39,7 +39,8 @@
         "radar:e23",
         "radar:e24",
         "radar:e25",
-        "radar-cards"
+        "radar-cards",
+        "radar-sq"
       ]
     },
     "completionCursor": "2026-11-17T01:48:48.888Z"
@@ -112527,8 +112528,8 @@
       "title": "A notebook becomes a local app: `jet notebook --app` serves cells and controls from the running kernel, with isolated tabs and live edits",
       "body": "Destination: `jet notebook --app` starts a loopback server. It renders the notebook's cell outputs, layouts and controls from the running notebook kernel, with no second evaluator. Each browser tab has its own typed session state. Edits under `jet dev` update the running app and keep the state whose type did not change. A machine-readable receipt names the bind address, sharing, data reads and trust grants.\n\nWhy it matters: marimo and Streamlit users turn notebooks into apps. Jet does it from the same checked kernel.\n\nDepends on the notebook kernel, #6619.\n\nSource: #6619 c11-c14 (split 2026-11-15).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -112669,7 +112670,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:14:49.012Z",
-      "updated": "2026-11-16T13:13:59.622Z",
+      "updated": "2026-11-17T01:50:02.861Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -112679,8 +112680,8 @@
       "title": "Moves never copy: field, parameter, pattern, destructure and task-capture moves lower to moves in JetIR",
       "body": "Destination: every move the checker decides (a last use, a written `x.move()`, a destructure of an owned temporary, a pattern payload binding, a task argument or capture) lowers to a move in JetIR on O0, O1 and O2, and no copy appears without a sema decision.\n\nWhy: a hidden copy costs time and memory, and it breaks D-COPY-DEFAULT1=A (the compiler chooses moves when unmarked; `x.copy()` is the only way to ask for a copy). Returning several results must cost no more than output parameters (D-OUTPUT-RETURNS1=A). The copy ledger and the zero-unjustified-copy guard live on #3836; this card fixes the lowering that makes copies the checker never asked for.\n\nSource: map #5989 (board consolidation 2026-10-28), carrying folded cards #4562 (task moves, SP13), #4564 (stage-2 copy gaps), #4567 (frozen; destructure copies), #4569 (linear copy residues), #4916 (field moves), #5821 (task capture lifetime), #5031 (pattern payload copies) and #5041 (no implicit copies).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -112795,7 +112796,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:30:04.307Z",
-      "updated": "2026-11-16T13:14:07.199Z",
+      "updated": "2026-11-17T01:50:04.418Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -112805,8 +112806,8 @@
       "title": "Plain data is freed in one step: root regions and no exit teardown",
       "body": "Destination: dropping plain data (no Close, consume or scrub duty) is O(1) at its last use. Trees and lists of plain data are allocated from a region owned by their root or phase, so releasing the root frees the region in one step. At process exit, plain memory is not torn down; only values with duties (files, locks, connections, flush and commit protocols) still close.\n\nWhy: in the stage-1 self-compile profile, about 25% of all CPU time was the allocator's free path, almost all of it drop glue walking trees node by node (owner direction 2026-10-02, #4320).\n\nSource: #5989 c16, carried from #4320 by way of #4318 and #5041.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -112866,7 +112867,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:30:05.200Z",
-      "updated": "2026-11-16T13:14:11.024Z",
+      "updated": "2026-11-17T01:50:06.046Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -112876,8 +112877,8 @@
       "title": "Core crypto and service keys: the file-seal contract, one Secret mechanism, and no signing key derivable from a public token",
       "body": "Destination: Core/Crypto's file seal meets the JETC v2 contract and D-CRYPTO-ENVELOPE2=A's signatures, sealing works for an unprivileged user on every supported Linux kernel, every secret (crypto keys included) uses the one runtime Secret mechanism that wipes on Close and on crash, and no service signing key can be derived from a public token.\n\nWhy: these are the security defects the 2026-10 Core crypto and memory reviews found (I8: one mechanism per job).\n\nSource: #1387 c13-c15 and c18-c20, carried from folded #4777, #4841, #4861, #4863, #5891 and #4821. Two items are on Main's ballot list (2026-11-15): D-SERVICE-AUTH-KEY1 and D-EDPOINT-ORPHAN1.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -113015,7 +113016,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:34:48.239Z",
-      "updated": "2026-11-16T13:14:16.548Z",
+      "updated": "2026-11-17T01:50:08.478Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -113025,8 +113026,8 @@
       "title": "Channels and streams: every outcome stays distinct, no item is lost, and pipelines stay bounded",
       "body": "Destination: channel capacities, closing, cancellation and failure are distinct observable outcomes; streams never turn not-ready into end-of-stream, never lose an item or spin, and clean up through the task path when broken, dropped or failed; parallel stream helpers keep order rules and in-flight bounds; and `Sender.try_send` hands optional work to a background queue without waiting (D-CONC-BACKGROUND1=A).\n\nWhy: a lost item, a silent end-of-stream or an unbounded queue is a correctness bug that tests rarely see.\n\nSource: #3239 c13, c15, c21-c29 and c38 (carried from #3261, #3343, #3344-#3346, #3365-#3367 and #4451).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113249,7 +113250,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:58.858Z",
-      "updated": "2026-11-16T13:14:41.130Z",
+      "updated": "2026-11-17T01:50:10.738Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
     },
@@ -113259,8 +113260,8 @@
       "title": "Cancellation reaches everything: timers, idle loops, signals, deadlines, supervised restarts and job queues",
       "body": "Destination: after a cancel or shutdown, no timer, interval, scheduled job, signal handler, listener or supervised worker survives; an idle event loop costs almost nothing; root cancellation, signals, request deadlines, listener drain and stdin close share one Prelude semantics; supervised restarts follow the #1076 policy; and core.jobs runs its typed queue lifecycle through one owner.\n\nWhy: a producer that outlives its cancel leaks work and keeps a process alive.\n\nSource: #3239 c7, c8, c40, c50-c52 and c75 (carried from #3095, #3108, #4347, #6013 and #2787).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113356,7 +113357,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:37:59.765Z",
-      "updated": "2026-11-16T13:14:47.040Z",
+      "updated": "2026-11-17T01:50:13.159Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -113366,8 +113367,8 @@
       "title": "Atomics: exact Int and fixed-width atomics on one nonblocking store, and compare-and-swap without ABA",
       "body": "Destination: D-ATOMIC-WIDTH1=A is built. Exact Int and direct fixed-width atomics share one growable nonblocking numeric store, with no Atomic-specific pool, extra family, hidden lock or capacity setup, and compare-and-swap on an exact atomic validates the same raw word as its retained owner, so it cannot suffer ABA.\n\nSource: #3239 c30 and c36 (carried from #4266 and #4495).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -113409,7 +113410,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:00.697Z",
-      "updated": "2026-11-16T13:14:48.910Z",
+      "updated": "2026-11-17T01:50:15.943Z",
       "updatedBy": "Main"
     },
     {
@@ -113418,8 +113419,8 @@
       "title": "Core functions that call your callback fail with the callback's own failure type (D-CALLBACK-ERR1=A)",
       "body": "Destination: every Core function that calls a user function takes a failure type parameter `E`; the callback is `fn(T) -> U E!`, and the Core function fails with `E` (for example `sort: fn<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E!`). A callback that cannot fail, one with a single failure type, and one with a union including an API-owned failure all propagate unchanged.\n\nSource: #3239 c31 (carried from #4266); ratified D-CALLBACK-ERR1=A, Docs/spec/syntax-decisions.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -113452,7 +113453,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:01.643Z",
-      "updated": "2026-11-16T13:14:49.978Z",
+      "updated": "2026-11-17T01:50:18.485Z",
       "updatedBy": "Main"
     },
     {
@@ -113461,8 +113462,8 @@
       "title": "Restricted code and sandbox guests: one sandbox package kind, lent Authority, scoped file access and the Capabilities run case",
       "body": "Destination: `target: sandbox` is the only package-kind spelling (no `plugin` word left for it); a sandbox guest names the rights it needs and the host lends an Authority value tightened to a folder or host (D-FOUND-SANDBOX1=A); restricted code derives one opaque file scope from Authority while trusted scripts keep direct fs calls (D-FILES-SCOPE1=A); every tier calls the one canonical resource, no-follow and IOError policy; and the sandbox foundation runs end to end with a generated guest snapshot.\n\nWhy: a guest that can reach past its lent authority, or two spellings for one package kind, breaks the authority promise.\n\nSource: #4268 c4, c5, c33-c36, c41-c44 and c58 (ratified contracts from #1731, #2786 and #2805, and #6753 c2). Build-graph plugins are a different word and stay.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113648,7 +113649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:52.537Z",
-      "updated": "2026-11-16T13:15:03.528Z",
+      "updated": "2026-11-17T01:50:22.042Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -113658,8 +113659,8 @@
       "title": "Value tags are enforced: `#PII String` in type position, tag facts flow through dataflow, and only `#Scrub` removes a tag",
       "body": "Destination: D-QUAL4=A (a value tag in type position is written directly before the type, `#PII String`) and D-TAINT1=A (direct tag facts propagate through branches, containers and calls and are refused at the tag's denied destinations; D-TAG-SURFACE1 makes `#Scrub(Tag)` the only checked removal) are built, and secret provenance errors fire only on real secret leaks.\n\nWhy: a tag that drops silently through a container or a call is a false promise about where sensitive data can go.\n\nSource: #4268 c8, c9 and c25 (ratified contracts; #1333). Tag declarations as rows live on #6854 (G6).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113711,7 +113712,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:40:53.816Z",
-      "updated": "2026-11-16T13:15:06.358Z",
+      "updated": "2026-11-17T01:50:28.557Z",
       "updatedBy": "Main"
     },
     {
@@ -113720,8 +113721,8 @@
       "title": "Checked text values (SQL, HTML, Sh, URL, Path, DateTime) are built only from checked literals or an audited `.raw`, never from a runtime string in a public field",
       "body": "Destination: outside its defining module, a checked text value cannot be built by filling its public fields with runtime text (`SQL{text: s, values: v}`, `HTML{markup: s}` and the other checked heads); the checked literal or `.raw` (D-SQL-RAW1=A, the one audited gate) is the only way in, the text is read back through accessors, every `.raw` call in a package is listed, and checked literals keep working.\n\nWhy: a public field that accepts runtime text makes injection possible and the checked literal a false promise (I1).\n\nSource: #6277 c8-c11 (carried from #6402). D-SQL-RAW1's gate itself is #4520 c3.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113791,7 +113792,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:47:08.958Z",
-      "updated": "2026-11-16T13:15:09.328Z",
+      "updated": "2026-11-17T01:50:33.653Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -113801,8 +113802,8 @@
       "title": "The store is crash-safe and deterministic: one producer transaction, cycle-safe graph queries, concurrent open, parallel verify, and offline closure moves",
       "body": "Destination: every Jetpack producer registers objects, outputs, references and package records through one crash-recoverable transaction; reference, referrer and closure queries are deterministic and cycle-safe; N processes can open a fresh store at once; verification and hashing fan out across threads; and a toolchain closure over 1 GiB moves between Hangars with no network and no host Nix.\n\nWhy: the store is the ground truth for every build and environment; a torn write or a nondeterministic query poisons everything above it.\n\nSource: #6632 c2, c11, c12, c105 and c106 (carried from #3590, #420, #3578 and #3598).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -113997,7 +113998,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:23.499Z",
-      "updated": "2026-11-16T17:57:07.767Z",
+      "updated": "2026-11-17T01:50:37.546Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -114007,8 +114008,8 @@
       "title": "`fn build` graphs: every action fully declared and identified, failures before publication, typed probes, action policy, and the BuildPlan evaluator in Jet",
       "body": "Destination: programmable builds run in Jet. `fn build` is checked and its BuildPlan is evaluated in compile-time code (natively at O0); targets have dependencies, kinds and declared toolchains; each action's identity covers everything that affects it, so plan, cache, execution and receipt agree; anything undeclared or failing stops before publication; typed probes feed the plan; and actions run under declared policy, helpers, signing and resource pools.\n\nWhy: a build whose identity misses an input caches wrong results; one that publishes partial output makes broken artifacts look valid.\n\nSource: #6632 c14, c15, c19-c22, c39, c40, c73 and c91 (carried from #692, #1041, #1042, #427, #933, #3521/#3933 and #6096). Dependency builds (`b.include`) are on #6621, remote scheduling on #6026, build plugins on #6935.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -114122,7 +114123,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:25.149Z",
-      "updated": "2026-11-16T13:15:24.297Z",
+      "updated": "2026-11-17T01:50:41.279Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -114132,8 +114133,8 @@
       "title": "Build plugins: packaged Wasm components load with version negotiation, run isolated, and fail closed with full rollback",
       "body": "Destination: a build plugin ships as a packaged Wasm component; the driver loads it with interface version negotiation; package identity, component bytes, interface version, granted authority, limits, guest output, graph changes, provenance and receipt agree; and every hostile or failing plugin fails closed and rolls back fully. Build plugins are a build-graph word, unrelated to the sandbox package kind (that is #6930).\n\nSource: #6632 c23-c26 and c45 (carried from #695 and #1048).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -114194,7 +114195,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:26.468Z",
-      "updated": "2026-11-16T13:15:30.630Z",
+      "updated": "2026-11-17T01:50:45.199Z",
       "updatedBy": "Main"
     },
     {
@@ -114203,8 +114204,8 @@
       "title": "Existing builds import into the typed action graph: CMake and Make, Gradle, npm and Cargo",
       "body": "Destination: each legacy build system is an optional import into the shared typed action graph. Imported commands, tools, inputs, outputs, environment, dependencies, resources, cache identity and provenance are inspectable; policy can forbid the import (for example in CI); and a denial, unsupported construct, undeclared access, tool failure, path escape, nondeterminism or partial import fails clearly without running an unreviewed fallback command.\n\nWhy: teams adopt Jet over existing projects; an import that silently shells out defeats the graph's guarantees.\n\nSource: #6632 c41-c44 (carried from #694 and #1044-#1047, built in the retired Rust engine and not yet in Jet).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -114265,7 +114266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:27.668Z",
-      "updated": "2026-11-16T13:15:35.548Z",
+      "updated": "2026-11-17T01:50:48.823Z",
       "updatedBy": "Main"
     },
     {
@@ -114274,8 +114275,8 @@
       "title": "Environment lifecycle: one typed planner for dotenv, hooks, checks and reload, hash-bound trust, one deterministic environment graph, and services",
       "body": "Destination: one typed lifecycle planner covers dotenv, unset, on_enter, checks, reload and the D-ECO7 hook; first use asks for trust and grants bind role modules and plan hashes; background reload coalesces changes and applies a checked plan at the next prompt; composition, profiles, follows, lifecycle and locks resolve to one deterministic environment graph, and every failure keeps the previous usable environment; and service facts drive one observable lifecycle.\n\nSource: #6632 c27-c33 and c46 (carried from #784, #790, #793, #1069-#1073, #1083, #1085, #1090, #1093, #1094, #1103 and #1104).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -114389,7 +114390,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:28.786Z",
-      "updated": "2026-11-16T13:15:39.645Z",
+      "updated": "2026-11-17T01:50:52.691Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -114399,8 +114400,8 @@
       "title": "`jetpack env` and `jetpack use` are the shell verbs, `jet` dispatches engine verbs, and a warm environment entry takes under a second",
       "body": "Destination: the jet/jetpack boundary law holds (owner, 2026-08-25: `jet` acts on your code, `jetpack` on your environment; no `jet hangar`), the two shell verbs work, retired spellings are gone with only the generic unknown-command error, this repo's own env prepares cleanly, and a warm entry is near-instant.\n\nSource: #6632 c50, c53-c55, c76 and c83-c86 (carried from #2188, #2189, #2232, #2330 and #6418/#6419). c83-c86 need ProcessSpec.keep_open (#3594 c8); their cases are known-failing under #6419.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -114497,7 +114498,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:29.792Z",
-      "updated": "2026-11-16T13:15:47.695Z",
+      "updated": "2026-11-17T01:50:57.147Z",
       "updatedBy": "Main"
     },
     {
@@ -114506,8 +114507,8 @@
       "title": "Trust and secrets: the trust gate and repo secrets go through the vault, composed secrets and per-secret metadata work, and no write skips a policy gate",
       "body": "Destination: the trust gate, Jet pins and repo secrets use the one vault owner; composed secrets (D-JPK-SECRETCOMPOSE1=D) and per-secret metadata (D-JPK-SECRETMETA1=B, Docs/spec/spec.md) are built; the new secrets verbs are registered; and the Jet port of Jetpack refuses any write that skips a policy gate (E3415).\n\nSource: #6632 c3, c47-c49 and c108 (carried from #3634/#3667 and #1779).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -114631,7 +114632,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:30.745Z",
-      "updated": "2026-11-16T13:15:56.837Z",
+      "updated": "2026-11-17T01:51:02.923Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -114641,8 +114642,8 @@
       "title": "Registry: `jet registry publish`, `keygen` and `jet fetch` are built, publishing fails atomically and refuses confusable names, and credentials stay redacted",
       "body": "Destination: `jet registry publish` and `jet registry keygen` are built; publish failures are atomic and redact secrets; names within edit distance 1 of an existing name are refused (D-1912-NAME1=A); `jet fetch` and `jet fetch --locked` round-trip a foreign provider; and netrc credentials are parsed exactly and never leak.\n\nSource: #6632 c36, c75, c80, c107 and c109 (carried from #928, #6418, #1912 and #4268). The public-API promise checks are on #6860.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -114711,7 +114712,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:31.746Z",
-      "updated": "2026-11-16T13:16:00.249Z",
+      "updated": "2026-11-17T01:51:07.610Z",
       "updatedBy": "Main"
     },
     {
@@ -114720,8 +114721,8 @@
       "title": "User tools update to one exact verified release, keep a complete working generation through every failure, and drift is found at no cost",
       "body": "Destination: a user-tool update resolves, authorizes, acquires, hashes, realizes and activates one exact release for the next launch; origins, trust and authentication are gated before any request; known pins check identity and SHA-256 before and after the GET; raw assets, archives and app bundles need no manual hash, catalog entry or recipe edit; every failure keeps a complete working generation; and drift detection costs nothing on a normal command (owner ruling 2026-08-25: no shim).\n\nSource: #6632 c52 and c92-c104 (carried from #3032, #3033, #4275 and #2193). Proofs live in Store/Tests/ReleaseActivation.jet and the Jetpack Trust area.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -115051,7 +115052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:32.756Z",
-      "updated": "2026-11-16T13:16:08.713Z",
+      "updated": "2026-11-17T01:51:12.615Z",
       "updatedBy": "Main",
       "criteriaLastN": 34
     },
@@ -115061,8 +115062,8 @@
       "title": "The PowerShell adapter keeps foreign meaning through the real adapter, or refuses precisely",
       "body": "Destination: values, errors, shapes, widths, calling conventions and imported source keep their declared meaning through the real PowerShell adapter, and anything unsupported, a toolchain failure, an ABI mismatch or a non-equivalent import gets a precise error with provenance instead of a guessed translation.\n\nSource: #6632 c37 and c38 (carried from #986, the polyglot enterprise adapter for PowerShell, built in the retired Rust engine).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -115112,7 +115113,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:33.743Z",
-      "updated": "2026-11-16T13:16:12.290Z",
+      "updated": "2026-11-17T01:51:16.305Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -115122,8 +115123,8 @@
       "title": "The CLI battery builds, installs and passes its goldens, using only canonical library APIs",
       "body": "Destination: the first-party CLI battery (#CLI(Standard) root help with typed subcommands and ten options, config files and ignore-aware search, process streams with stdin writes and EOF, typed records through #Codable CSV, environment overlays and exact exit codes, jobs, script mode and a release install) and its typed executable consumer build, install and pass their goldens, and every consumer path uses canonical APIs.\n\nSource: #6632 c78 and c79 (carried from #2797 and #6418; #2797 met the source half in the retired Rust tree).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -115165,8 +115166,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:52:34.672Z",
-      "updated": "2026-11-15T04:52:34.672Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:51:20.577Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ioa1t9",
@@ -115174,8 +115175,8 @@
       "title": "Reading stdin line by line streams before EOF and leaves the unread tail in place",
       "body": "Destination: a program reading stdin line by line sees each line as it arrives, without waiting for EOF, can stop at a blank sentinel, and a later `io.readline` returns the next unread line, the same on O0, O1 and O2.\n\nSource: #6317 c25-c27 (carried from #2881 and #2923). The case is refused today by the kit's process-file-fd seam (#6317 c4).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -115217,7 +115218,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:54:42.678Z",
-      "updated": "2026-11-16T13:16:14.568Z",
+      "updated": "2026-11-17T01:51:26.379Z",
       "updatedBy": "Main"
     },
     {
@@ -115226,8 +115227,8 @@
       "title": "C imports marshal every C ABI shape on the native backend, and the C binder emits plain user-namespace declarations",
       "body": "Destination: `jet build` calls C functions with every supported ABI shape (F32 results, #Layout(c) structs by value, #Layout(c) enums, raw pointer parameters, #ABI(sysv64) imports, capability handles), C member lists resolve each library, the C binder emits user-namespace names and plain scalar returns, and the FFI example and the sqlite3 fixture run on every tier.\n\nWhy: C is the base boundary every other language reader builds on (D-FFI-PRIMS1=A, D-FFI-LANG1=A).\n\nSource: #6366 c12, c24, c34, c35 and c44, plus its known-failing rows for cffi_write_capability and c_member_lists. Design: Docs/proposals/ffi-perfect-boundary-2026-10-31.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -115329,7 +115330,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:30.778Z",
-      "updated": "2026-11-16T21:12:53.185Z",
+      "updated": "2026-11-17T01:51:31.263Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -218020,6 +218021,174 @@
   ],
   "events": [
     {
+      "at": "2026-11-17T01:51:31.264Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qqeaqb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:26.379Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ioa1t9",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:20.579Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0povfh0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:16.306Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0abvxai",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:12.615Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tzvhij",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:07.610Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0daqpmn",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:02.923Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wqva91",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:57.147Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gz9snm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:52.692Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00c8a58",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:48.823Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0huq0g8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:45.199Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y0053a",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:41.279Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c7739a",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:37.546Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kwu568",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:33.654Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02z1dax",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:28.557Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qtfr3u",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:22.042Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05nw9a0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:18.485Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ndv80x",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:15.943Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07qvm0k",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:13.160Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sbl400",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:10.738Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dbs1yh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:08.478Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sttk1s",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:06.046Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rw1zt7",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:04.418Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d4kf8m",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:50:02.861Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vtg2ov",
+      "note": "track,epoch"
+    },
+    {
       "at": "2026-11-17T01:50:00.994Z",
       "by": "Main",
       "action": "card.update",
@@ -221364,713 +221533,6 @@
       "action": "card.criteria-meet",
       "ref": "c0o8f1p4",
       "note": "#81"
-    },
-    {
-      "at": "2026-11-17T01:37:44.777Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#78"
-    },
-    {
-      "at": "2026-11-17T01:37:43.776Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nctuf1",
-      "note": "track,epoch,milestoneId"
-    },
-    {
-      "at": "2026-11-17T01:37:42.853Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-17T01:37:41.659Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-17T01:37:39.804Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T01:37:39.804Z"
-    },
-    {
-      "at": "2026-11-17T01:37:38.591Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e25",
-      "note": "G13 · Hillclimbing"
-    },
-    {
-      "at": "2026-11-17T01:37:37.619Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#67"
-    },
-    {
-      "at": "2026-11-17T01:37:36.594Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e24",
-      "note": "G11 · Speed and size"
-    },
-    {
-      "at": "2026-11-17T01:37:35.562Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-17T01:37:34.560Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e23",
-      "note": "G7 · Packages, configuration and replacing Nix"
-    },
-    {
-      "at": "2026-11-17T01:37:33.578Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-17T01:37:32.600Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e22",
-      "note": "G10 · Memory safety and soundness"
-    },
-    {
-      "at": "2026-11-17T01:37:31.596Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-17T01:37:30.601Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e21",
-      "note": "G3 · Core library completeness"
-    },
-    {
-      "at": "2026-11-17T01:37:29.620Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-17T01:37:28.649Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e20",
-      "note": "G5 · Developer experience: CLI, errors and editor"
-    },
-    {
-      "at": "2026-11-17T01:37:27.715Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-17T01:37:26.742Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e19",
-      "note": "G9 · Web, end to end, re-measured against competitors"
-    },
-    {
-      "at": "2026-11-17T01:37:25.764Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-17T01:37:24.768Z",
-      "by": "Main",
-      "action": "epoch.add",
-      "ref": "e18",
-      "note": "G6 · Declarations as types and metaprogramming"
-    },
-    {
-      "at": "2026-11-17T01:37:23.792Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-17T01:37:22.618Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-17T01:37:21.460Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-17T01:37:19.954Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-17T01:37:18.780Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-17T01:37:17.621Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-17T01:37:16.439Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-17T01:37:15.148Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-17T01:37:13.948Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-17T01:37:12.795Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-17T01:37:11.643Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-17T01:37:10.469Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-17T01:37:09.307Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-17T01:37:08.147Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-17T01:37:07.007Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-17T01:37:05.844Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-17T01:37:04.676Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-17T01:37:03.515Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-17T01:37:02.327Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-17T01:37:01.138Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-17T01:36:59.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-17T01:36:58.788Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-17T01:36:57.592Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-17T01:36:56.420Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-17T01:36:55.255Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-17T01:36:54.093Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-17T01:36:52.919Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-17T01:36:51.763Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-17T01:36:50.276Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-17T01:36:49.109Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-17T01:36:47.940Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-17T01:36:46.775Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-17T01:36:45.629Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-17T01:36:44.385Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-17T01:36:43.215Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-17T01:36:42.055Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T01:36:40.914Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T01:36:39.755Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T01:36:38.586Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#198"
-    },
-    {
-      "at": "2026-11-17T01:36:37.411Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#191"
-    },
-    {
-      "at": "2026-11-17T01:36:36.220Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#190"
-    },
-    {
-      "at": "2026-11-17T01:36:35.039Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#186"
-    },
-    {
-      "at": "2026-11-17T01:36:33.853Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#185"
-    },
-    {
-      "at": "2026-11-17T01:36:32.661Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#184"
-    },
-    {
-      "at": "2026-11-17T01:36:31.465Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#183"
-    },
-    {
-      "at": "2026-11-17T01:36:30.299Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#182"
-    },
-    {
-      "at": "2026-11-17T01:36:29.113Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#181"
-    },
-    {
-      "at": "2026-11-17T01:36:27.921Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#180"
-    },
-    {
-      "at": "2026-11-17T01:36:26.687Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#179"
-    },
-    {
-      "at": "2026-11-17T01:36:25.466Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#178"
-    },
-    {
-      "at": "2026-11-17T01:36:24.273Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#177"
-    },
-    {
-      "at": "2026-11-17T01:36:23.078Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#176"
-    },
-    {
-      "at": "2026-11-17T01:36:21.919Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#175"
-    },
-    {
-      "at": "2026-11-17T01:36:20.434Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#174"
-    },
-    {
-      "at": "2026-11-17T01:36:19.276Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#173"
-    },
-    {
-      "at": "2026-11-17T01:36:18.131Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#172"
-    },
-    {
-      "at": "2026-11-17T01:36:16.997Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#152"
-    },
-    {
-      "at": "2026-11-17T01:36:15.819Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#151"
-    },
-    {
-      "at": "2026-11-17T01:36:14.656Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#150"
-    },
-    {
-      "at": "2026-11-17T01:36:13.503Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#133"
-    },
-    {
-      "at": "2026-11-17T01:36:12.374Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#132"
-    },
-    {
-      "at": "2026-11-17T01:36:11.221Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#126"
-    },
-    {
-      "at": "2026-11-17T01:36:10.064Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#123"
-    },
-    {
-      "at": "2026-11-17T01:36:08.923Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#122"
-    },
-    {
-      "at": "2026-11-17T01:36:07.771Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#121"
-    },
-    {
-      "at": "2026-11-17T01:36:06.599Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#120"
-    },
-    {
-      "at": "2026-11-17T01:36:05.411Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#118"
-    },
-    {
-      "at": "2026-11-17T01:36:04.247Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#117"
-    },
-    {
-      "at": "2026-11-17T01:36:03.094Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#116"
-    },
-    {
-      "at": "2026-11-17T01:36:01.934Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#115"
-    },
-    {
-      "at": "2026-11-17T01:36:00.768Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#114"
-    },
-    {
-      "at": "2026-11-17T01:35:59.613Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#113"
-    },
-    {
-      "at": "2026-11-17T01:35:58.428Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#112"
-    },
-    {
-      "at": "2026-11-17T01:35:57.229Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#110"
-    },
-    {
-      "at": "2026-11-17T01:35:56.043Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#109"
-    },
-    {
-      "at": "2026-11-17T01:35:54.847Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#107"
-    },
-    {
-      "at": "2026-11-17T01:35:53.663Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#106"
-    },
-    {
-      "at": "2026-11-17T01:35:52.490Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#105"
-    },
-    {
-      "at": "2026-11-17T01:35:50.938Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#102"
-    },
-    {
-      "at": "2026-11-17T01:35:49.777Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#101"
-    },
-    {
-      "at": "2026-11-17T01:35:48.604Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#100"
     }
   ],
   "nextNum": 368,
