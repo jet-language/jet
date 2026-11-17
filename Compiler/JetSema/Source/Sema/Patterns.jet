@@ -3,48 +3,52 @@
 // Pattern checking deliberately consumes an already checked TExpr.  The
 // expression checker owns subject inference; this file owns only pattern
 // shape/type validation, recovery bindings, and TPattern construction.
-use jet_foundation.[
-    BindName,
-    BinEndian,
-    BinMatchPart,
-    Diagnostic,
-    Expr,
-    ListPatRest,
-    MapPatEntry,
-    NodeKind,
-    PatternTypeHead,
-    TListPatternRest,
-    PatSlot,
-    Pattern,
-    Span,
-    StrMatchPart,
-    StructPatField,
-    SymbolID,
-    SymbolKind,
-    TBinaryPatternPart,
-    TPatternBindingFact,
-    TPatternPosition,
-    TTextPatternPart,
-    TextEdit,
-    Type,
-    VariantField,
-    VariantPayload,
-    core_enum_payload_variants,
-    measure_literal_value,
-    core_enum_variant_payload,
-    core_enum_cases,
-    diagnostic_with_edit,
-    diagnostic_with_source_derived_suggestion,
-    type_identity_equal,
-    type_name,
-    type_union_member_payload,
-    type_union_member_tag,
-    type_union_member_tag_in,
-    type_unqualified_name,
-    type_unqualified_nominals,
-    expr_span,
-    module_is_core,
-]
+use {
+    jet_foundation.[
+        BindName,
+        BinEndian,
+        BinMatchPart,
+        Diagnostic,
+        Expr,
+        ListPatRest,
+        MapPatEntry,
+        NodeKind,
+        PatternTypeHead,
+        TGenericParam,
+        TListPatternRest,
+        PatSlot,
+        Pattern,
+        Span,
+        StrMatchPart,
+        StructPatField,
+        SymbolID,
+        SymbolKind,
+        TBinaryPatternPart,
+        TPatternBindingFact,
+        TPatternPosition,
+        TTextPatternPart,
+        TextEdit,
+        Type,
+        VariantField,
+        VariantPayload,
+        core_enum_payload_variants,
+        measure_literal_value,
+        core_enum_variant_payload,
+        core_enum_cases,
+        diagnostic_with_edit,
+        diagnostic_with_source_derived_suggestion,
+        type_identity_equal,
+        type_name,
+        type_union_member_payload,
+        type_union_member_tag,
+        type_union_member_tag_in,
+        type_unqualified_name,
+        type_unqualified_nominals,
+        expr_span,
+        module_is_core,
+    ]
+    jet_parser.[parse_type_text]
+}
 
 SemaCheckedPattern: struct {
     subject: TExpr,
@@ -155,10 +159,10 @@ sema_pattern_union_tag: fn(members: [Type], ty: Type) -> String Never! {
 // What a union arm's name names among the union's members: the members it
 // names (one, or several when members of one type or members whose types
 // share the arm's leaf name match), or else a type in scope that is no
-// member, by its canonical name. Neither means the name names nothing.
+// member. Neither means the name names nothing.
 SemaUnionArm: struct {
     indexes: [Int],
-    outside: String?,
+    outside: Type?,
 }
 
 // The canonical name of the source type `variant` names in type position in
@@ -181,6 +185,9 @@ sema_pattern_arm_type_name: fn(graph: SemaRegistrationGraph, caller: Int, varian
 // `Int | geo.Point` names `geo.Point` when no `Point` is in scope. A builtin
 // or compound member is named by its tag (`.Int`, `.M__String_`).
 sema_pattern_union_arm: fn(members: [Type], variant: String, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaUnionArm {
+    if variant.contains("<") {
+        return sema_pattern_union_instance_arm(members, variant, env, program)
+    }
     loop (index, member) in members {
         if sema_pattern_unwrap_tags(member) == .Case(name, _) {
             if name == variant -> return SemaUnionArm{indexes: [Int]{index}, outside: None}
@@ -195,7 +202,7 @@ sema_pattern_union_arm: fn(members: [Type], variant: String, env: SemaScopeEnvir
                 }
             }
             if matches.len() > 0 -> return SemaUnionArm{indexes: matches, outside: None}
-            return SemaUnionArm{indexes: [Int]{}, outside: Val(named)}
+            return SemaUnionArm{indexes: [Int]{}, outside: Val(Type.Named{name: named})}
         }
     }
     leaves := [Int]{}
@@ -211,6 +218,36 @@ sema_pattern_union_arm: fn(members: [Type], variant: String, env: SemaScopeEnvir
         }
     }
     SemaUnionArm{indexes: [Int]{}, outside: None}
+}
+
+// The members an arm with type arguments names (`.Box<Int>`,
+// `.geo.Box<Int>`): the instance its generic's name names in type position
+// with those arguments, or, when the name names no type in scope, the
+// instances with that leaf and those arguments.
+sema_pattern_union_instance_arm: fn(members: [Type], variant: String, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaUnionArm {
+    nothing: SemaUnionArm{indexes: [Int]{}, outside: None}
+    graph: program.registration_graph ?? return nothing
+    written: parse_type_text(variant) ?? return nothing
+    written == .Apply(head, arguments) ?? return nothing
+    caller: sema_scope_caller_row(env, graph)
+    resolved: loop argument in arguments -> sema_type_resolve_declared_recursive(graph, argument, caller, [TGenericParam]{})
+    matches := [Int]{}
+    if sema_pattern_arm_type_name(graph, caller, head) == .Val(named) {
+        instance: Type.Apply{name: named, args: resolved}
+        shown: type_name(instance)
+        loop (index, member) in members {
+            if type_name(sema_pattern_unwrap_tags(member)) == shown -> matches.push(index)
+        }
+        if matches.len() > 0 -> return SemaUnionArm{indexes: matches, outside: None}
+        return SemaUnionArm{indexes: matches, outside: Val(instance)}
+    }
+    leaf: type_name(type_unqualified_nominals(Type.Apply{name: head, args: resolved}))
+    loop (index, member) in members {
+        if type_name(type_unqualified_nominals(sema_pattern_unwrap_tags(member))) == leaf {
+            matches.push(index)
+        }
+    }
+    SemaUnionArm{indexes: matches, outside: None}
 }
 
 // The arm that names member `index` of union `members` from the caller's
@@ -270,8 +307,8 @@ sema_pattern_union_member: fn(subject: Type, members: [Type], variant: String, e
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names more than one member of `{type_name(subject)}`", "the union holds {arm.indexes.len()} members whose type is named `{variant}`, and an arm names one member", fix))
         return None
     }
-    if arm.outside == .Val(name) {
-        leaf: type_unqualified_name(name)
+    if arm.outside == .Val(outside) {
+        leaf: type_unqualified_name(sema_pattern_base_name(outside) ?? "")
         same_leaf := [Int]{}
         loop (index, member) in members {
             if sema_pattern_base_name(sema_pattern_unwrap_tags(member)) == .Val(base) {
@@ -280,7 +317,7 @@ sema_pattern_union_member: fn(subject: Type, members: [Type], variant: String, e
         }
         arms: sema_pattern_member_arms_text(members, same_leaf, env, program)
         fix: if arms == "" -> "use one of the subject union member types" else -> "name the member by its arm: {arms}"
-        diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names `{type_name(Type.Named{name: name})}`, which isn't a member of `{type_name(subject)}`", "an arm names the type its name names in type position", fix))
+        diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names `{type_name(outside)}`, which isn't a member of `{type_name(subject)}`", "an arm names the type its name names in type position", fix))
         return None
     }
     diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{type_name(subject)}`", "union pattern arms name one member type of the subject union", "use one of the subject union member types"))

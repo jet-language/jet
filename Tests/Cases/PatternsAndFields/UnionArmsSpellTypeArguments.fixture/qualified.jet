@@ -1,0 +1,22 @@
+// An imported generic's instances, each named through its module, beside
+// a pair whose arm spells two arguments.
+use boxes
+
+Pair: struct<A, B> {
+    first: A,
+    second: B,
+}
+
+show: fn(item: boxes.Box<Int> | boxes.Box<String> | Pair<Int, String>) {
+    if item == {
+        .boxes.Box<Int>(b) -> print("int box {b.v}")
+        .boxes.Box<String>(s) -> print("string box {s.v}")
+        .Pair<Int, String>(p) -> print("pair {p.first} {p.second}")
+    }
+}
+
+run: fn() {
+    show(boxes.Box<Int>{v: 4})
+    show(boxes.Box<String>{v: "t"})
+    show(Pair<Int, String>{first: 1, second: "one"})
+}

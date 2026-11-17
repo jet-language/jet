@@ -261,6 +261,27 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names]
     assert(arms.len() == 2, "{arms.len()} arms")
 }
 
+// An arm's type arguments name one instance of a generic member: the pattern
+// carries them in its name as type text, and the formatter keeps them. An arm
+// on a later line that spells arguments starts a new arm, not a chain on the
+// arm above.
+#Test("union_arms_spell_type_arguments") {
+    source: "\nrun: fn(item: Box<Int> | geo.Pair<Int, [String]> | geo.Point) {{\n    if item == {{\n        .Box<Int>(b) -> print(b)\n        .geo.Pair<Int, [String]>(p) -> print(p)\n        .geo.Point(q) -> print(q)\n    }}\n}}\n"
+    result: parser_test_result(source)
+    assert(result.diagnostics.is_empty(), "type arguments in arms should parse: {result.diagnostics:Debug}")
+    result.program.items[0] == .Func(function) ?? panic("function")
+    function.body[0] == .Switch(_, arms, _, _) ?? panic("arm table")
+    names := [String]{}
+    loop arm in arms {
+        if arm.cond == .PatternTest(_, pattern, _, _) {
+            if pattern == .Variant(variant, _, _, _) -> names.push("{variant}")
+        }
+    }
+    assert(names == ["Box<Int>", "geo.Pair<Int, [String]>", "geo.Point"], "{names:Debug}")
+    formatted: parser_test_format(source)
+    assert(formatted.contains("\n        .geo.Pair<Int, [String]>(p) -> "), formatted)
+}
+
 // #6281: the retired result-only `value ? ok -> … ! err -> …` spelling is
 // an ordinary parse error, with no teaching of its own.
 #Test("retired_result_handler_spelling_does_not_parse") {

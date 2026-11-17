@@ -663,7 +663,11 @@ arm name the union's one member with that leaf (`.Point` over
 `Int | geo.Point`). An arm whose name names two members (`.Point` over
 `geo.Point | map.Point` with no `Point` in scope) or a type that is no member
 is E0305, and its fix names each member's arm. An `else` over such a union is
-E0641 like any other, and E0307's fix names each missing member's arm.
+E0641 like any other, and E0307's fix names each missing member's arm. An arm
+spells a generic member's type arguments as type position does: over
+`Box<Int> | Box<String>` the arms are `.Box<Int>(b)` and `.Box<String>(s)`
+(`.geo.Box<Int>(b)` through a module), a table of both needs no `else`, and
+the bare `.Box(b)`, which names both, is E0305.
 
 A union member may be a named case, written exactly as inside an enum:
 `temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union, `Name(T)` is a

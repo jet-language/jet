@@ -1,0 +1,19 @@
+Named: trait {
+    size: fn(self) -> Int,
+}
+
+Window: struct {
+    values: View<Int>,
+
+    impl Named {
+        size: fn(self) -> Int { self.values.len() }
+    }
+}
+
+leak: fn() -> Named {
+    owner: [1, 2, 3]
+    window: Window{values: owner[0..2]}
+    window
+}
+
+run: fn() { print(leak().size()) }
