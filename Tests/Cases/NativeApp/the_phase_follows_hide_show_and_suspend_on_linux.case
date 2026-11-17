@@ -1,0 +1,35 @@
+# A Linux app's phase follows its window and the machine. Before launch
+# the app has no phase. A fake compositor on $WAYLAND_DISPLAY, with
+# xdg-shell at version 6, shows the window, suspends it and shows it
+# again; a fake logind on the system bus at $DBUS_SYSTEM_BUS_ADDRESS puts
+# the machine to sleep and wakes it; and the compositor closes the window.
+# The app's lifecycle listener hears each change in order, one at a time,
+# with the phase already published, and writes it to phases.txt.
+fixture: ThePhaseFollowsHideShowAndSuspendOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+spawn bus: jet run bus/fake_logind.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake system bus listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+env: DBUS_SYSTEM_BUS_ADDRESS=unix:path={work}/system.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+wait: bus timeout 60s
+exit: 0
+file: compositor.stdout = "the window showed its first frame\nsuspended the window\nshowed the window again\nwrote sleep.go\nclosed the window\n"
+file: phases.txt = "before launch: no phase\n1 VisibilityChanged: Unknown Running -> Visible Running, run 1, phase 1\n2 VisibilityChanged: Visible Running -> Hidden Running, run 1, phase 2\n3 VisibilityChanged: Hidden Running -> Visible Running, run 1, phase 3\n4 SleepPreparing: Visible Running -> Visible Suspending, run 1, phase 4\n5 Woke: Visible Suspending -> Visible Running, run 1, phase 5\n6 Closing: Visible Running -> Hidden Running, run 1, phase 6\n"

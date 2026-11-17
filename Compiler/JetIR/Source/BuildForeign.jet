@@ -88,7 +88,11 @@ ir_foreign_handle_type: fn(p: IRProgram, ty: Type) -> Bool Never! {
 // The row of the C handle type `ty`: the C pointer, which only moves. With a
 // close its drop is a generated jet_ir_ffi_close_<target> that closes a
 // non-null handle through the raw C close or the Jet close adapter. Every
-// spelling of the handle (qualified or bare) shares the one row.
+// spelling of the handle (qualified or bare) shares the one row. The glue is
+// named by its close (the C symbol, or the stable hash of the adapter's
+// function key), never by the adapter's row in this module: every build part
+// that lays the handle out gives its row the same drop, as ir_merge_type
+// requires.
 ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeignHandle) -> Int Never! {
     bare: Type.Named{name: ir_short_name(ir_nominal_name(ir_untag(ty)) ?? "")}
     identity: type_carrier_identity(bare)
@@ -104,7 +108,7 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
     if c_symbol == "" && callee < 0 {
         return ir_intern_type(m, identity, ir_layout(IRTypeKind.Pointer, bare, 8, 8, IRClass.Pointer, false, 64, ""))
     }
-    symbol: if c_symbol != "" -> "jet_ir_ffi_close_{c_symbol}" else -> "jet_ir_ffi_close_fn{callee}"
+    symbol: if c_symbol != "" -> "jet_ir_ffi_close_{c_symbol}" else -> ir_hashed_function("ffi.handle.close", handle.close_function ?? "", "jet_ir_ffi_close_fn_", "", 0).symbol
     if name_rows_value(m.function_rows, symbol) == None {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function (as ir_scope_guard_row).

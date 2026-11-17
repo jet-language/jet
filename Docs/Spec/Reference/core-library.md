@@ -5456,7 +5456,7 @@ frames are the whole window.
 | `Window.maximized() -> Bool` / `.fullscreen() -> Bool` / `.set_maximized(maximized: Bool)` / `.set_fullscreen(fullscreen: Bool)` / `.minimize()` | states | The window's states as the display server last configured them, and requests to change them (`xdg_toplevel`'s set/unset maximized and fullscreen, on the output the display server picks, and set_minimized). The display server decides; a new size arrives as `.Resize`, and a minimized window comes back only when the user brings it back. A headless window takes each state at once and keeps its size. Each window has its own connection to the display server, so a program shows several windows by driving each window's `frames()` in its own task. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
 | `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
-| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Drop(x:, y:, items: [UIDropItem])`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. `Drop` is what a drag dropped on the window, at the place in pixels where it fell. A drag that offers a list of URIs (`text/uri-list`; a file manager's files are `file://` URIs) is taken as that, one `UIDropItem.URI` per line that is neither empty nor a `#` comment. A drag that offers only text is taken as one `UIDropItem.Text`. A drag with neither can't drop on the window. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Visible(Bool?)`, `Drop(x:, y:, items: [UIDropItem])`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. `Visible` says the compositor started or stopped showing the window, from its first frame on: `Val(true)` when shown, `Val(false)` when suspended (xdg-shell 6: minimized, on another workspace or wholly covered) or minimized, and `None` once minimized on a compositor older than xdg-shell 6, which never says when the window comes back. The focus says nothing of it. `Drop` is what a drag dropped on the window, at the place in pixels where it fell. A drag that offers a list of URIs (`text/uri-list`; a file manager's files are `file://` URIs) is taken as that, one `UIDropItem.URI` per line that is neither empty nor a `#` comment. A drag that offers only text is taken as one `UIDropItem.Text`. A drag with neither can't drop on the window. |
 | `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
 | `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
@@ -5771,7 +5771,9 @@ tasks never read or change the process registry. The module source is
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
-| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; give back the graph. See below. |
+| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep, as `LIFECYCLE` hears them; give back the graph. See below. |
+| `phase() -> Phase?` | phase | The app's phase: its run (`instance`), the observation's `sequence`, its `visibility` (`Visibility`: `Visible`, `Hidden`, `Unknown`) and `execution` (`Execution`: `Running`, `Suspending`, `Unknown`); `None` before `graph.launch()` and once the app's window closed. See below. |
+| `LIFECYCLE: Event<LifecycleEvent>` | event | Each change of the app's phase, in order, one at a time: a `LifecycleEvent` with its `instance`, `sequence`, `reason` (`LifecycleReason`: `VisibilityChanged`, `SleepPreparing`, `Woke`, `FocusRegained`, `Closing`) and the phases `before` and `after`. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
 | `graph.sessions(access: Duration = 15min, refresh: Duration = 30d) -[DB, Rand]> App` | graph | Let a native app sign in to the graph's servers (`sign_in`): an access token lasts `access`, a refresh token `refresh` and works once; give back the graph. The graph keeps `auth.tokens_login` and `auth.tokens_refresh` for its servers, so the app that calls it reaches `DB` and `Rand`. Panics when a lifetime is under a millisecond. |
 | `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and grayed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
@@ -6425,14 +6427,39 @@ A desktop with no session bus or no global menu shows no menu, and the
 key equivalents still work. A key that names no key, or a modifier that
 isn't one of these, panics.
 
+`app.phase()` is the app's phase from `graph.launch()` on: its run
+(`instance`, counted from 1, each launch a new one), the number of the
+observation it is (`sequence`, 0 at the launch, one more each change),
+whether the app's window shows (`visibility`) and whether the app runs
+(`execution`). A launch with a window starts `Unknown` until the
+window's first frame, one without `Hidden`; both start `Running`. On
+Linux the window is `Visible` while the compositor shows it and `Hidden`
+while it is suspended (xdg-shell 6: minimized, on another workspace or
+wholly covered) or minimized; a compositor older than xdg-shell 6 makes a
+minimized window `Unknown`, as it never says when the window comes back.
+The window's focus never changes the visibility. The app is `Suspending`
+from logind's `PrepareForSleep(true)` on the system bus until its
+`PrepareForSleep(false)`. Before the launch, and once the window closed,
+there is no phase (`None`).
+
+`app.LIFECYCLE` is the event each change of the phase goes to, as a
+`LifecycleEvent`: the run, the new sequence number, the `reason`, and the
+phase `before` and `after` it. The window being shown or hidden is
+`VisibilityChanged`, the machine preparing to sleep `SleepPreparing`, its
+wake `Woke`, the window taking the focus again after it lost it
+`FocusRegained`, and its closing `Closing`, whose phase after is `Hidden`
+and the last. A show, hide or sleep that leaves the phase as it was is not
+heard; a wake or a focus regained always is. Listeners hear one change at
+a time, in the order the runtime observed them: `app.phase()` already
+says the change a listener hears, and a change made while listeners run
+waits for them. `LIFECYCLE.on(scope, handler)` subscribes as any event
+does (core.event).
+
 `graph.lifecycle(on_resume:)` runs `on_resume` each time the app comes
-back, from `graph.launch()` on. The runtime follows the app's moments
-itself: on Linux the app goes to the background when its window loses
-the focus and to the foreground when the window takes it again, and the
-machine goes to sleep and wakes when logind says `PrepareForSleep` on the
-system bus. Coming to the foreground or waking after the app was in the
-background or asleep is a resume. A resume runs in a task of its own, so
-the window never waits on it. The app does not see the other moments.
+back, as a `LIFECYCLE` listener for the graph's life. Losing the focus or
+the machine preparing to sleep takes the app away; the focus regained or
+the wake after that brings it back. The window being shown again does
+not. A resume runs in a task of its own, so the window never waits on it.
 
 Each resume, with or without `on_resume`, first sends the writes the
 device queued (`graph.offline(.Queue)`), then re-runs every live binding
@@ -6440,9 +6467,9 @@ at its next read, so the screen shows what changed while the app was
 away; the app writes no code for this. Only then does `on_resume` run. When
 `on_resume` fails, its `Notice` shows on a red bar over the top of the
 window that came back, until a click on the bar dismisses it; with no
-window open it joins `app.notices()`. An app with a window, a queue or an
-`on_resume` follows the machine's sleep. A desktop with no system bus or
-no logind resumes on the focus alone.
+window open it joins `app.notices()`. A launched app follows the
+machine's sleep. A desktop with no system bus or no logind resumes on the
+focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the

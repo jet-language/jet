@@ -1,0 +1,325 @@
+// The Wayland compositor for the app in ../main.jet. It is its own package,
+// so the app's package does not hold it. It listens at wl.sock in the
+// directory it runs in and writes compositor.ready once it listens. It
+// offers a compositor, shared memory, xdg-shell at version 6, which says
+// when the window is suspended, and a seat; and configures the window at
+// 200x100, activated. Once the window shows its first frame it suspends
+// it, as when the person minimizes it or covers it; once the app heard
+// that (phases.txt, which the app writes) it shows it again; once the app
+// heard that it writes sleep.go, for logind to put the machine to sleep
+// and wake it; and once the app heard the wake it closes the window. Once
+// the app has hung up it prints what it did, a line each.
+use {
+    files: core.files
+    net: core.net
+    sys: core.sys
+}
+
+// The checks of phases.txt a step may take, 50 ms apart, before what it
+// waits for shows.
+CHECKS_PER_STEP: 400
+
+// xdg_toplevel's states: activated, and suspended (xdg_wm_base v6).
+ACTIVATED: 4
+
+SUSPENDED: 9
+
+Fake: struct {
+    stream: net.UnixStream,
+    inbox: [U8],
+    out: [U8],
+    registry: Int,
+    compositor: Int,
+    wm_base: Int,
+    surface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
+    // The buffer the window attached.
+    attached: Int,
+    callbacks: [Int],
+    serial: Int,
+    commits: Int,
+    configured: Bool,
+    // 0 until the first frame; 1 until the app heard the window hidden; 2
+    // until it heard it shown; 3 until it heard the wake; 4 after the
+    // close.
+    phase: Int,
+    // The checks of phases.txt since the phase began.
+    checked: Int,
+    records: [String],
+    failures: [String],
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat"}
+
+fake_put: fn(out: &[U8], value: Int) {
+    v: value & 4294967295
+    out.push(U8{v & 255})
+    out.push(U8{(v >> 8) & 255})
+    out.push(U8{(v >> 16) & 255})
+    out.push(U8{(v >> 24) & 255})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if f.phase < 4 -> f.failures.push("send failed: {err}")
+        return
+    }
+}
+
+fake_fail: fn(f: &Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
+}
+
+// xdg_toplevel.configure at 200x100 with `states`, then
+// xdg_surface.configure.
+fake_configure: fn(f: &Fake, states: [Int]) {
+    f.serial += 1
+    toplevel: f.toplevel
+    xdg_surface: f.xdg_surface
+    args := fake_words([Int]{200, 100, states.len() * 4})
+    loop state in states -> fake_put(args, state)
+    fake_event(f, toplevel, 0, args)
+    fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+}
+
+fake_close: fn(f: &Fake) {
+    toplevel: f.toplevel
+    fake_event(f, toplevel, 1, [U8]{})
+    f.records.push("closed the window")
+    f.phase = 4
+}
+
+// A commit of the window's surface: its frame callbacks are done, and the
+// first buffer is its first frame.
+fake_commit: fn(f: &Fake) {
+    f.commits += 1
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.attached == 0 {
+        return
+    }
+    attached: f.attached
+    f.attached = 0
+    fake_event(f, attached, 0, [U8]{})
+    if f.phase != 0 {
+        return
+    }
+    f.records.push("the window showed its first frame")
+    fake_configure(f, [Int]{ACTIVATED, SUSPENDED})
+    f.records.push("suspended the window")
+    f.phase = 1
+    f.checked = 0
+}
+
+// The next step, once the app heard the line `heard` of phases.txt, or a
+// failure when it never does; whether the app heard it.
+fake_heard: fn(f: &Fake, heard: String) -[FS.Read]> Bool {
+    phases: files.read("phases.txt") ?? ""
+    if phases.contains(heard) {
+        f.checked = 0
+        return true
+    }
+    f.checked += 1
+    if f.checked < CHECKS_PER_STEP -> return false
+    fake_fail(f, "the app never heard `{heard}`")
+    fake_close(f)
+    false
+}
+
+fake_step: fn(f: &Fake) -[FS]> {
+    if f.phase == 1 && fake_heard(f, "\n2 VisibilityChanged:") {
+        fake_configure(f, [Int]{ACTIVATED})
+        f.records.push("showed the window again")
+        f.phase = 2
+        return
+    }
+    if f.phase == 2 && fake_heard(f, "\n3 VisibilityChanged:") {
+        files.write("sleep.go", "") ?? {
+            fake_fail(f, "writing sleep.go failed: {err}")
+            fake_close(f)
+            return
+        }
+        f.records.push("wrote sleep.go")
+        f.phase = 3
+        return
+    }
+    if f.phase == 3 && fake_heard(f, "\n5 Woke:") -> fake_close(f)
+}
+
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        loop (index, interface) in GLOBALS {
+            args := fake_words([Int]{index + 1})
+            loop b in fake_text(interface) -> args.push(b)
+            version: if interface == "wl_compositor" || interface == "xdg_wm_base" -> 6 else if interface == "wl_seat" -> 5 else -> 1
+            fake_put(args, version)
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
+        if interface == "wl_compositor" -> f.compositor = id
+        // wl_shm.format: ARGB8888 and XRGB8888, as every compositor.
+        if interface == "wl_shm" {
+            fake_event(f, id, 0, fake_words([Int]{0}))
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        // wl_seat.capabilities: none, so the focus never moves.
+        if interface == "wl_seat" -> fake_event(f, id, 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.compositor && opcode == 0 {
+        if f.surface == 0 -> f.surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface && opcode == 1 {
+        f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                // The initial commit: the first configure, activated.
+                f.configured = true
+                fake_configure(f, [Int]{ACTIVATED})
+                return
+            }
+            fake_commit(f)
+        }
+    }
+}
+
+fake_dispatch: fn(f: &Fake) {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word & 65535, body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+// Accepts the one window and serves it until the app hangs up, or for a
+// minute of quiet.
+fake_serve: fn(listener: net.UnixListener) -[FS, Net, Time]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept on wl.sock: {err}")
+    f := Fake{
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        wm_base: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        attached: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        commits: 0,
+        configured: false,
+        phase: 0,
+        checked: 0,
+        records: [String]{},
+        failures: [String]{},
+    }
+    idle := 0
+    loop idle < 1200 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if ready {
+            idle = 0
+            message: net.unix_receive(f.stream, 65536) ?? {
+                if f.phase < 4 -> f.failures.push("receive failed: {err}")
+                return f
+            }
+            if message.bytes.len() == 0 -> return f
+            loop b in message.bytes -> f.inbox.push(b)
+            fake_dispatch(f)
+        } else { idle += 1 }
+        fake_step(f)
+        fake_flush(f)
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+run: fn() -[FS, IO, Net, Time]> {
+    listener: net.unix_listen("wl.sock") ?? panic("listen on wl.sock: {err}")
+    files.write("compositor.ready", "") ?? panic("write compositor.ready: {err}")
+    f: fake_serve(listener)
+    if f.phase != 4 -> print("FAIL the compositor stopped in phase {f.phase}")
+    loop record in f.records -> print(record)
+    loop failure in f.failures -> print("FAIL {failure}")
+}

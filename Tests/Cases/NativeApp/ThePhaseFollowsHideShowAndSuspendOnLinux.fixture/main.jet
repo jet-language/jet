@@ -1,0 +1,49 @@
+// A Linux app that writes its phase (`app.phase`) before launch, and each
+// change of it its lifecycle's listeners hear (`app.LIFECYCLE`), to
+// phases.txt: the reason, the phase before and after, and the phase the
+// listener reads then. The compositor suspends the window and shows it
+// again, the machine sleeps and wakes, and the compositor closes the
+// window, which ends the app.
+use {
+    app
+    event: core.event
+    files: core.files
+    tasks: core.tasks
+    ui: core.ui
+    core.ui.[UINode]
+}
+
+Heard: struct {
+    lines: [String],
+}
+
+HEARD: Shared{Heard{lines: [String]{}}}
+
+// Adds `line` to phases.txt.
+note: fn(line: String) -[FS.Write]> {
+    held := HEARD.guard_edit()
+    held.value.lines.push(line.copy())
+    files.write("phases.txt", "{held.value.lines.join("\n")}\n") ?? panic("write phases.txt: {err}")
+}
+
+said: fn(phase: app.Phase) -> String { "{phase.visibility} {phase.execution}" }
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! { ui.text("Today") }
+
+run: fn() {
+    note(if app.phase() == None -> "before launch: no phase" else -> "before launch: a phase")
+    graph: app.new("Phases").screen("/", board).window(width: 200, height: 100)
+    listening: event.scope()
+    app.LIFECYCLE.on(listening, fn(heard: app.LifecycleEvent) {
+        now: if app.phase() == .Val(phase) -> "{phase.sequence}" else -> "none"
+        note("{heard.sequence} {heard.reason}: {said(heard.before)} -> {said(heard.after)}, run {heard.instance}, phase {now}")
+    })
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    print("the window stayed open")
+}
