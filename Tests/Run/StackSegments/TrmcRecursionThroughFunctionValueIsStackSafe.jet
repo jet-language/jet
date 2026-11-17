@@ -1,0 +1,14 @@
+// Recursion through a function value: each level calls the next through the
+// value `next_level` returns. The call graph counts a call through a function
+// value as a call of every function whose address the program takes, so
+// `depth` is on a cycle and checks the stack: a million levels run on grown
+// stack segments.
+next_level: fn() -> fn(Int) -> Int { depth }
+
+depth: fn(n: Int) -> Int {
+    if n == 0 -> return 0
+    step: next_level()
+    1 + step(n - 1)
+}
+
+run: fn() { print(depth(1000000)) }

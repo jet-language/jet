@@ -1,0 +1,16 @@
+// A recursive list builder a million levels deep: each level builds the
+// rest, then adds its own. The thread's stack grows onto a new segment
+// when the next frame would not fit, so no depth short of the budget fails.
+build: fn(n: Int) -> [Int] {
+    if n == 0 -> return [Int]{}
+    rest := build(n - 1)
+    rest.push(n)
+    rest
+}
+
+run: fn() {
+    items: build(1000000)
+    print(items.len())
+    print(items[0])
+    print(items[999999])
+}
