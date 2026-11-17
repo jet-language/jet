@@ -5483,7 +5483,8 @@ available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. File dialogs and font shaping are absent there.
-The provider also answers the app's device requests (`app.ask`); one whose
+The provider also answers the app's device requests (`app.ask`,
+`app.take_photo`, `app.location`, and a page's photo's bytes); one whose
 answer the browser gives later, a promise, is waited for where the
 program's entry can wait ([web-backend-wasm.md](web-backend-wasm.md)), and
 is no answer elsewhere.
@@ -6500,7 +6501,14 @@ and keeps the last as a JPEG, so the camera has settled its exposure; the
 photo is `None` when that program does not run or gives no photo within 30
 seconds. The location is the first one the portal's location session
 reports (GeoClue finds it) after the person allows it, within five minutes
-of the ask. On the other native targets both are `None`.
+of the ask. In a page the browser asks: the photo comes from the camera
+through `getUserMedia`, as the browser's `ImageCapture` photo or, where it
+has none, a frame of the camera's video as a JPEG, and the camera stops
+once it is taken; the page keeps the photo, and `read()` reads it from
+there. The location is the browser's position (the Geolocation API's
+`getCurrentPosition`), and a request the person leaves unanswered for five
+minutes counts as refused. With no page to ask in, and on the other native
+targets, both are `None`.
 
 `app.location_updates()` is a stream of places: the first as the device is
 located, then one each time it moves. It asks as `app.location()` does, and
@@ -6650,10 +6658,9 @@ with a notice. macOS and Windows keep that notice too: their save dialogs
 are not built yet.
 
 A browser asks for a device permission itself, when a page first uses the
-device, and the page runtime can't hand the device's values to the app
-yet, so `app.take_photo`, `app.location` and the three streams in code
-whose target is the web output are a compile error, E-APP-TARGET-FEATURE,
-never a made-up answer.
+device, and the page runtime can't hand a stream of device values to the
+app yet, so the three streams in code whose target is the web output are a
+compile error, E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

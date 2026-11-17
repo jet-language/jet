@@ -1563,11 +1563,12 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 
 // The App checks of a device call (`app.ask`, the photo, the location, the
 // sensor streams, the open dialogs, a kept folder, a drop target and a
-// notification on this device): the web output has none of them but `ask`
-// and `open_settings`, which a page answers (sema_call_app_device_target),
-// and one that may ask for a permission needs its purpose
-// (sema_call_app_permission_purpose): `ask` those its argument names, the
-// photo the camera's, the location's calls its, a notification its own.
+// notification on this device): the web output has none of them but
+// `ask`, `open_settings`, the photo and the location, which a page answers
+// (sema_call_app_device_target), and one that may ask for a permission
+// needs its purpose (sema_call_app_permission_purpose): `ask` those its
+// argument names, the photo the camera's, the location's calls its, a
+// notification its own.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
@@ -1579,10 +1580,12 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
             }
         }
         "take_photo" -> {
-            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Camera"), span, program, diagnostics)
         }
-        "location" | "location_updates" -> {
+        "location" -> {
+            sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
+        }
+        "location_updates" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
