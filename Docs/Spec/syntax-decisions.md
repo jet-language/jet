@@ -868,8 +868,22 @@ alias is its target, a repeated type is an unreachable arm (E0365), and a
 distinct type, `F32` or `Float?` is not `Float`. Each instance keeps only its
 arm, with no run-time test. A union arm may name a member without binding it
 (`.Int -> …`, the same test as `.Int(_)`); union matches stay exhaustive with
-no `else`. Run-time dispatch over mixed values uses unions; no `Any` type
-(D-ANY-JAI1 stands).
+no `else`. Run-time dispatch over mixed values uses unions, or type arms over
+a trait value (D-PRIM-ANY1=C); no `Any` type (D-ANY-JAI1 stands).
+
+**D-PRIM-ANY1=C — Type arms over a trait value** *(ratified 2026-11-16, card
+#6833)*: Jet adds no `Any` and no dynamically typed `any` value; the no-top-type
+wall, D-ANY-JAI1 and D-DYNAMIC-TYPE1 stand. A list of mixed values holds a
+trait the stored types opt into (`impl Duration.Field {}`), and the type arm
+`.Duration(d)` over a trait value tests the stored type and binds it: `if f ==
+{ .Duration(d) -> … else -> print(f) }`. The arm names a type that implements
+the trait, resolved as type position resolves it (`.geo.Point(p)` for another
+module's type); a type that never opted in is a compile error. A trait value is
+an open set, so a table over one needs `else`. The binding is a read view of
+the boxed value, with no copy or allocation. A union subject spells its arms
+the same way. A wrong type question is caught when compiling, not when the
+program runs, which is why `Any` was refused. `reflect.of(x)` still reads a
+value's type name and fields.
 
 **D-ENUM-EVOLUTION1=A — Caller-selected enum fallback** *(superseded by the owner ruling on #6281, 2026-11: closed-set matches name every case)*: named enums remain closed. Adding a case can make downstream exhaustive matches fail until they handle it. Callers could add an explicit `else` when they chose future-case tolerance; publishers cannot require it with a marker. The same completeness rule applies inside and outside the defining module. This policy adds no enum constructor, integer conversion, or unknown-case fallback; foreign and wire ingress remain separate contracts (D-ENUM-UNKNOWN1).
 
@@ -1276,7 +1290,8 @@ names the list, and naming another owner is E2305. Moving the payload out
 takes the list (`&&[Shape]` or a consuming loop). A checked downcast of a
 foreign value is not Jet syntax: foreign values arrive through typed binders
 (`#Import module`, `extern rust`) whose declarations give them Jet types, and
-a value whose shape varies is declared as an enum and selected as above.
+a value whose shape varies is declared as an enum and selected as above, or
+held as a trait value and selected with a type arm (D-PRIM-ANY1=C).
 Executable example: `Examples/Types/Patterns/TypedSelection.jet`.
 
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified

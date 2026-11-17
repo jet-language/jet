@@ -7437,8 +7437,16 @@ under `.jetos/proof/`.
 
 These are intentional boundaries, not implied promises:
 
-- Jet does not provide a general `Any` top type. Use a precise type, a generic,
-  a trait, or a closed data carrier.
+- Jet does not provide a general `Any` top type or a dynamically typed `any`
+  value: no type exists that every value fits. Asking such a value for its type
+  is answered only when the program runs, and anything could be stored in it.
+  Values of different types share a list through a union
+  (`[Int | String | Duration]`) or a trait the stored types opt into
+  (`impl Duration.Field {}`). A type arm takes one type back and is checked
+  when compiling: `if f == { .Duration(d) -> … else -> print(f) }` may name
+  only a member of the union or a type that implements the trait.
+  `reflect.of(x)` reads a value's type name and fields. A precise type, a
+  generic, or a closed data carrier covers the rest.
 - Stored-borrow reference fields and their `refs` expansion lens are absent.
   Borrowed views may still be used where their checked callable contract allows.
 - Nested `#CLI` structs and implicit grouped flag prefixes are not part of the
