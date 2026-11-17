@@ -1391,6 +1391,34 @@ scheduler_carrier_excess: fn(root: I64) -> Bool {
     sync_load(wrapping(root + I64{152})) > wrapping(pool + sync_load(wrapping(root + I64{208})))
 }
 
+// Whether a join on this thread would wait on a queued child no carrier is
+// left to start: the joiner runs on a carrier's own stack (its TCB is the
+// carrier's, not a fiber's, whose park would free the carrier), so its wait
+// blocks that carrier; no idle carrier is left to wake; and no carrier may
+// start (scheduler_carrier_room). A join on the process's main thread or on
+// a fiber never starves: the carriers it leaves free start the child.
+scheduler_join_starves: fn() -> Bool {
+    root: scheduler_root_required()
+    base: thread_base()
+    sync_thread_lock(root)
+    starves := false
+    list: sync_load(wrapping(root + I64{128}))
+    if (list != I64{0} && sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160})) && !scheduler_carrier_room(root)) {
+        length: sync_load(list)
+        data: sync_load(wrapping(list + I64{16}))
+        at := I64{0}
+        loop at < length {
+            if (sync_load(wrapping(sync_load(wrapping(data + at * I64{8})) + I64{24})) == base) {
+                starves = true
+                break
+            }
+            at += I64{1}
+        }
+    }
+    sync_thread_unlock(root)
+    starves
+}
+
 // Arms the monitor for a submit or a wake that found neither an idle carrier
 // nor room for one: 0 when it already watches or cannot start, 1 to wake it,
 // 2 to start it (scheduler_monitor_kick, after the unlock). The root lock is

@@ -953,14 +953,14 @@ class Host {
     // With JSPI the program's threads and fibers, and each entry, are
     // coroutines on the page's event loop that take turns (step): the one
     // whose registers the globals hold now (`running`), the ones due to run
-    // next (`ready`), the entries under way (`entries`), the futex waits by
+    // next (`ready`), the entries under way (`underWay`), the futex waits by
     // address (`waiters`), the contexts fiber switches left by token
     // (`switched`), the waits' timers, and the registers of the thread that
     // runs the page's plain calls (`home`).
     this.running = null;
     this.ready = [];
     this.stepping = false;
-    this.entries = new Set();
+    this.underWay = new Set();
     this.waiters = new Map();
     this.switched = new Map();
     this.timers = new Set();
@@ -1018,7 +1018,7 @@ class Host {
         switch: JSPI
           ? new WebAssembly.Suspending((save, target) => this.fiberSwitch(save, target))
           : () => {
-              throw new Error("a fiber switch needs JavaScript Promise Integration");
+              throw new JetHostWasmError("a fiber switch needs JavaScript Promise Integration");
             },
       },
       c: this.cLibrary(),
@@ -1177,7 +1177,7 @@ class Host {
     record.started = false;
     record.edx ??= 0;
     record.clearTid ??= 0;
-    if (record.settle) this.entries.add(record);
+    if (record.settle) this.underWay.add(record);
     this.wake(record);
   }
 
@@ -1263,15 +1263,15 @@ class Host {
   finish(record, value, error) {
     this.running = null;
     if (record.settle) {
-      this.entries.delete(record);
+      this.underWay.delete(record);
       this.home = { sp: this.sp.value, tls: this.tls.value };
       if (error === null) record.settle.resolve(value);
       else record.settle.reject(error);
     } else if (error !== null) {
       this.end();
-      if (this.entries.size === 0) this.fail(error);
-      for (const entry of this.entries) entry.settle.reject(error);
-      this.entries.clear();
+      if (this.underWay.size === 0) this.fail(error);
+      for (const entry of this.underWay) entry.settle.reject(error);
+      this.underWay.clear();
     } else if (record.clearTid !== 0) {
       this.view().setInt32(record.clearTid, 0, true);
       this.futexWake(record.clearTid, Infinity);
@@ -1895,7 +1895,12 @@ class Host {
       jet_ui_provider_event_pop: (queue) => stage(provider()?.eventPop(Number(queue))),
       jet_ui_provider_dialog_request: (kind, bytes, length) => BigInt(provider()?.dialogRequest(Number(kind), textAt(bytes, length)) ?? -1),
       jet_ui_provider_dialog_result: (token) => stage(provider()?.dialogResult(Number(token))),
-      jet_ui_provider_device: (kind, bytes, length) => stage(provider()?.device?.(Number(kind), textAt(bytes, length))),
+      // What the program printed shows before what the page does for it.
+      jet_ui_provider_device: (kind, bytes, length) => {
+        host.rt.jet_rt_stdout_flush();
+        host.flushLines();
+        return stage(provider()?.device?.(Number(kind), textAt(bytes, length)));
+      },
       jet_ui_provider_key_claim: (bytes, length) => (provider()?.keyClaim(textAt(bytes, length)) ? 0n : -1n),
       jet_ui_provider_save_file: (name, nameLength, media, mediaLength, bytes, length) =>
         (provider()?.saveFile?.(textAt(name, nameLength), textAt(media, mediaLength), host.u8().slice(Number(bytes), Number(bytes) + Number(length))) ? 0n : -1n),
