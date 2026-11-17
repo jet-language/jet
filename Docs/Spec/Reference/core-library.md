@@ -568,7 +568,13 @@ or `!Time.Wait`, `!Rand`, `!Env`, `!Exec`, `!GPU`, `!FFI` or `!FFI.C`,
 `!Browser`, `!Panic`, `!Mem.Alloc`), and the compiler checks every artifact
 against that row. `facts.scheduler` names the type implementing
 `core.tasks.Scheduler` that spawned tasks queue in; `None` keeps the runtime's
-own first-in, first-out queue and denies nothing. Code reads the built
+own first-in, first-out queue and denies nothing. A package selects its
+machine in `package.jet` as `targets: { machine: { profile: "Board" } }`; when
+the entry file declares the profile `Board`, the scheduler its facts name (a
+type as the entry file spells it, built from its field defaults, `Lifo{}`)
+becomes the program's run queue. The build defines the runtime's queue hooks
+over one instance of it and the link binds the runtime to them, so a spawn
+compiles to the same code under every scheduler. Code reads the built
 target's operating system as `#build.target.os`.
 
 | Machine | Triple | Denied by its facts |

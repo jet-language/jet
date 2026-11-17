@@ -1,0 +1,25 @@
+# A package's target profile selects its scheduler provider. package.jet's
+# `targets: { machine: { profile: "LifoBoard" } }` names the entry's
+# LifoBoard, whose machine facts name `Lifo` as the scheduler, so every task
+# the program spawns waits in Lifo's queue. The selection costs a spawn
+# nothing: the build binds the runtime's queue to the provider when it links
+# the program, so the IR of the function that spawns is the same with the
+# profile selected and without it.
+fixture: TargetSelectsPackageScheduler.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+timeout: 60s
+exit: 0
+stdout: = "sum 12\nthe selected scheduler took every spawn: true\n"
+step: jet emit --ir main.jet --fn spawn_three
+exit: 0
+stdout: ~ "fn spawn_three [" # the slot IR of the function that spawns
+capture: selected = text stdout
+write: package.jet = "name: \"lifo_board_app\"\nversion: \"0.1.0\"\nedition: \"2026\"\n"
+step: jet emit --ir main.jet --fn spawn_three
+exit: 0
+stdout: = "{cap:selected}" # without the profile the spawns lower to the same IR
+step: jet run main.jet
+timeout: 60s
+exit: 0
+stdout: = "sum 12\nthe selected scheduler took every spawn: false\n" # the runtime's own queue took them
