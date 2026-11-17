@@ -658,7 +658,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .SetFrom | .SetToList | .SetSort | .SetEqual | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SortedSetFrom | .SortedSetToList | .SortedSetInsert | .SortedSetRemove | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequeFrom | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeContains | .DequeDelete | .DequeToList | .DequeJoin | .DequeSplit | .DequeReverse -> return ir_builtin_container_route(operation)
         .OptionZip(_) | .Zip(_, _, _, _, _, _) | .Unzip -> panic("checked structural builtin requires its dedicated non-route lowering")
         .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return ir_builtin_iter_route(operation, receiver, carrier)
-        .StringMethod(method) -> return ir_builtin_string_method_route(method, result, carrier)
+        .StringMethod(symbol) -> return ir_builtin_string_method_route(symbol)
         .ByteBufferMethod(method) -> return ir_builtin_byte_buffer_method_route(method)
         .ByteBufferWrite(method) -> return ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", 2, [Bool]{true, method == "write" || method == "write_bytes"}, Val(Effect.Mem))
         .ByteBufferToBytes -> return ir_builtin_plain_route("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, [Bool]{true}, None)
@@ -721,143 +721,22 @@ ir_builtin_iter_route: fn(operation: TBuiltinOp, receiver: Type, carrier: TFailu
     }
 }
 
-ir_builtin_string_method_route: fn(method: String, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
-    if method == "equal" {
-        return ir_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None)
+// A String method's route is the runtime symbol its BUILTIN_METHOD_ROWS row
+// names, taking the receiver and the row's parameters. Every operand is
+// borrowed but expandtabs's tab size, which that runtime function takes by
+// value.
+ir_builtin_string_method_route: fn(symbol: String) -> IRBuiltinRoute Never! {
+    arity := 0
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.lowering == .Builtin(operation) && operation == .StringMethod(row_symbol) && row_symbol == symbol {
+            arity = row.parameters.len() + 1
+            break
+        }
     }
-    if method == "expandtabs" {
-        return ir_builtin_plain_route("expandtabs", "jet_text_expandtabs", 2, [Bool]{true, false}, None)
-    }
-    if method == "find" {
-        return ir_builtin_plain_route("find", "jet_text_parse_find", 2, [Bool]{true, true}, None)
-    }
-    if method == "rfind" {
-        return ir_builtin_plain_route("rfind", "jet_text_parse_rfind", 2, [Bool]{true, true}, None)
-    }
-    if method == "partition" {
-        return ir_builtin_plain_route("partition", "jet_text_parse_partition", 2, [Bool]{true, true}, None)
-    }
-    if method == "rpartition" {
-        return ir_builtin_plain_route("rpartition", "jet_text_parse_rpartition", 2, [Bool]{true, true}, None)
-    }
-    if method == "strip" {
-        return ir_builtin_plain_route("strip", "jet_text_parse_strip", 1, [Bool]{true}, None)
-    }
-    if method == "lstrip" {
-        return ir_builtin_plain_route("lstrip", "jet_text_parse_lstrip", 1, [Bool]{true}, None)
-    }
-    if method == "rstrip" {
-        return ir_builtin_plain_route("rstrip", "jet_text_parse_rstrip", 1, [Bool]{true}, None)
-    }
-    if method == "replace" {
-        return ir_builtin_plain_route("replace", "jet_string_replace", 3, [Bool]{true, true, true}, None)
-    }
-    if method == "count_bytes" {
-        return ir_builtin_plain_route("count_bytes", "jet_string_count_bytes", 1, [Bool]{true}, None)
-    }
-    if method == "capacity" {
-        return ir_builtin_plain_route("capacity", "jet_string_capacity", 1, [Bool]{true}, None)
-    }
-    if method == "hash" {
-        return ir_builtin_plain_route("hash", "jet_string_hash", 1, [Bool]{true}, None)
-    }
-    if method == "last_index_of" {
-        return ir_builtin_plain_route("last_index_of", "jet_unicode_last_index_of", 2, [Bool]{true, true}, None)
-    }
-    if method == "is_lower" {
-        return ir_builtin_plain_route("is_lower", "jet_text_is_lower", 1, [Bool]{true}, None)
-    }
-    if method == "is_upper" {
-        return ir_builtin_plain_route("is_upper", "jet_text_is_upper", 1, [Bool]{true}, None)
-    }
-    if method == "capitalize" {
-        return ir_builtin_plain_route("capitalize", "jet_text_capitalize", 1, [Bool]{true}, None)
-    }
-    if method == "swapcase" {
-        return ir_builtin_plain_route("swapcase", "jet_text_swapcase", 1, [Bool]{true}, None)
-    }
-    if method == "remove_prefix" || method == "removeprefix" {
-        return ir_builtin_plain_route("remove_prefix", "jet_text_remove_prefix", 2, [Bool]{true, true}, None)
-    }
-    if method == "remove_suffix" || method == "removesuffix" {
-        return ir_builtin_plain_route("remove_suffix", "jet_text_remove_suffix", 2, [Bool]{true, true}, None)
-    }
-    if method == "compare" {
-        return ir_builtin_plain_route("compare", "jet_text_compare", 2, [Bool]{true, true}, None)
-    }
-    if method == "reverse" {
-        return ir_builtin_plain_route("reverse", "jet_text_reverse", 1, [Bool]{true}, None)
-    }
-    if method == "normalize" {
-        return ir_builtin_plain_route("normalize", "jet_text_normalize_nfc", 1, [Bool]{true}, None)
-    }
-    if method == "rsplit" {
-        return ir_builtin_plain_route("rsplit", "jet_iter_string_rsplit", 2, [Bool]{true, true}, None)
-    }
-    if method == "words" {
-        return ir_builtin_plain_route("words", "jet_string_words", 1, [Bool]{true}, None)
-    }
-    if method == "isalnum" {
-        return ir_builtin_plain_route("isalnum", "jet_text_isalnum", 1, [Bool]{true}, None)
-    }
-    if method == "isalpha" {
-        return ir_builtin_plain_route("isalpha", "jet_text_is_alphabetic", 1, [Bool]{true}, None)
-    }
-    if method == "isascii" {
-        return ir_builtin_plain_route("isascii", "jet_text_unicode_is_ascii", 1, [Bool]{true}, None)
-    }
-    if method == "isdecimal" {
-        return ir_builtin_plain_route("isdecimal", "jet_text_isdecimal", 1, [Bool]{true}, None)
-    }
-    if method == "isdigit" {
-        return ir_builtin_plain_route("isdigit", "jet_text_isdigit", 1, [Bool]{true}, None)
-    }
-    if method == "isidentifier" {
-        return ir_builtin_plain_route("isidentifier", "jet_text_isidentifier", 1, [Bool]{true}, None)
-    }
-    if method == "isnumeric" {
-        return ir_builtin_plain_route("isnumeric", "jet_text_isnumeric", 1, [Bool]{true}, None)
-    }
-    if method == "isprintable" {
-        return ir_builtin_plain_route("isprintable", "jet_text_isprintable", 1, [Bool]{true}, None)
-    }
-    if method == "isspace" {
-        return ir_builtin_plain_route("isspace", "jet_text_is_whitespace", 1, [Bool]{true}, None)
-    }
-    if method == "istitle" {
-        return ir_builtin_plain_route("istitle", "jet_text_istitle", 1, [Bool]{true}, None)
-    }
-    if method == "islower" {
-        return ir_builtin_plain_route("islower", "jet_text_is_lower", 1, [Bool]{true}, None)
-    }
-    if method == "isupper" {
-        return ir_builtin_plain_route("isupper", "jet_text_is_upper", 1, [Bool]{true}, None)
-    }
-    if method == "lower" {
-        return ir_builtin_plain_route("lower", "jet_unicode_lower", 1, [Bool]{true}, None)
-    }
-    if method == "upper" {
-        return ir_builtin_plain_route("upper", "jet_unicode_upper", 1, [Bool]{true}, None)
-    }
-    if method == "title" {
-        return ir_builtin_plain_route("title", "jet_text_title", 1, [Bool]{true}, None)
-    }
-    if method == "casefold" {
-        return ir_builtin_plain_route("casefold", "jet_text_casefold", 1, [Bool]{true}, None)
-    }
-    if method == "center" {
-        return ir_builtin_plain_route("center", "jet_text_center_ref", 3, [Bool]{true, true, true}, None)
-    }
-    if method == "ljust" {
-        return ir_builtin_plain_route("ljust", "jet_text_pad_end_ref", 3, [Bool]{true, true, true}, None)
-    }
-    if method == "rjust" {
-        return ir_builtin_plain_route("rjust", "jet_text_pad_start_ref", 3, [Bool]{true, true, true}, None)
-    }
-    if method == "zfill" {
-        return ir_builtin_plain_route("zfill", "jet_text_zfill_ref", 2, [Bool]{true, true}, None)
-    }
-    panic("checked StringMethod has no canonical route")
+    if arity == 0 -> panic("checked StringMethod `{symbol}` has no row in BUILTIN_METHOD_ROWS")
+    mask := [Bool]{}
+    loop index in 0..<arity -> mask.push(index == 0 || symbol != "jet_text_expandtabs")
+    ir_builtin_plain_route(symbol, symbol, arity, mask, None)
 }
 
 // A Bytes method's route takes the receiver and the parameters its
