@@ -2645,28 +2645,19 @@ App: struct {
     // Then it opens the link the launch was given (`open_link`), else,
     // when the graph has a window (`window`), the address `/`, opens the
     // window, and is true. That link is the first argument that is one, as
-    // the desktop passes the link the entry's `%u` names.
-    launch: fn(self) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
-        link := ""
-        loop given in process.args() {
-            if app_link_address(given) == None -> next
-            link = given.copy()
-            break
+    // the desktop passes the link the entry's `%u` names. In a page there
+    // is no other copy, desktop entry or window to open: a launch starts
+    // the app's run and follows the page's lifecycle into it
+    // (`app_launch_page`), and is true.
+    launch: fn(self) -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
+        #if #build.target.os == {
+            .Linux -> { return app_launch_desktop(self) }
+            .MacOS -> { return app_launch_desktop(self) }
+            .Windows -> { return app_launch_desktop(self) }
+            .Web -> { return app_launch_page() }
+            .Wasm -> { return app_launch_desktop(self) }
+            .Freestanding -> { return app_launch_desktop(self) }
         }
-        socket: "{app_runtime_dir()}/{app_desktop_id(self.title)}.link"
-        token: sys.get("XDG_ACTIVATION_TOKEN") ?? sys.get("DESKTOP_STARTUP_ID") ?? ""
-        if app_launch_hand(socket, link, token) -> return false
-        if app_graph_schemes().len() > 0 -> app_link_register(self.title)
-        app_launch_listen(App{title: self.title.copy()}, socket)
-        app_background_start(self.title)
-        app_tray_start(self.title)
-        app_lifecycle_start(app_graph_window() != None)
-        app_sleep_start()
-        if link != "" -> _: self.open_link(link) else if app_graph_window() != None {
-            _: self.open_link("/")
-        }
-        app_window_start(self.title)
-        true
     }
 
     // The activation token of each later launch that handed this running
@@ -4166,6 +4157,63 @@ priv app_link_register: fn(title: String) -[Env, FS.Read, FS.Write]> Never! {
 // next text (`App.launch`).
 C_APP_HANDOFF_WAIT_NS: 5000000000
 
+// `App.launch` on a desktop: hands the launch's link to the running copy
+// and is false, or becomes that copy, starts its run and opens its window.
+priv app_launch_desktop: fn(graph: App) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
+    link := ""
+    loop given in process.args() {
+        if app_link_address(given) == None -> next
+        link = given.copy()
+        break
+    }
+    socket: "{app_runtime_dir()}/{app_desktop_id(graph.title)}.link"
+    token: sys.get("XDG_ACTIVATION_TOKEN") ?? sys.get("DESKTOP_STARTUP_ID") ?? ""
+    if app_launch_hand(socket, link, token) -> return false
+    if app_graph_schemes().len() > 0 -> app_link_register(graph.title)
+    app_launch_listen(App{title: graph.title.copy()}, socket)
+    app_background_start(graph.title)
+    app_tray_start(graph.title)
+    app_lifecycle_start(app_graph_window() != None)
+    app_sleep_start()
+    if link != "" -> _: graph.open_link(link) else if app_graph_window() != None {
+        _: graph.open_link("/")
+    }
+    app_window_start(graph.title)
+    true
+}
+
+// `App.launch` in a page: starts the app's run, its visibility unknown
+// until the page says, and has the page tell it each change of its
+// lifecycle (`app_page_moments`).
+priv app_launch_page: fn() -[Browser, Net, Time]> Bool Never! {
+    app_lifecycle_start(true)
+    hook: ui.button("", fn() { app_page_moments() })
+    _: ui_rt.device(WEB_DEVICE_LIFECYCLE, "{hook.__click_slot()}")
+    app_page_moments()
+    true
+}
+
+// Takes the moments of the page's lifecycle the page holds for the app,
+// oldest first, each one observed (`app_moment`): the page shown or
+// hidden, its window taking or losing the focus, the page frozen or
+// resumed, and the page going away.
+priv app_page_moments: fn() -[Net, Time]> Never! {
+    loop {
+        said: ui_rt.device(WEB_DEVICE_MOMENT, "") ?? return
+        moment: if said == {
+            "visible" -> AppMoment.Shown(.Visible)
+            "hidden" -> AppMoment.Shown(.Hidden)
+            "focus" -> AppMoment.Foreground
+            "blur" -> AppMoment.Background
+            "freeze" -> AppMoment.Suspend
+            "resume" -> AppMoment.Wake
+            "gone" -> AppMoment.Closed
+            else -> next
+        }
+        app_moment(moment)
+    }
+}
+
 // The directory of the app's link socket (`App.launch`): `$XDG_RUNTIME_DIR`
 // when it is an absolute path, else the temporary directory.
 priv app_runtime_dir: fn() -[Env]> String Never! {
@@ -4325,7 +4373,12 @@ LifecycleEvent: struct {
 // The app's lifecycle, from `launch` on: on a Linux desktop its window is
 // shown or hidden (the compositor's configure and the window's
 // `minimize`), takes the focus again, or closes, and the machine prepares
-// to sleep or wakes (logind's PrepareForSleep on the system bus). Each
+// to sleep or wakes (logind's PrepareForSleep on the system bus). In a
+// page the document is shown or hidden (`visibilitychange`), the page's
+// window takes the focus again, the browser freezes the page or resumes
+// it (the Page Lifecycle API's `freeze` and `resume`, and a page kept in
+// the back-forward cache), and the page goes away (`pagehide`), which
+// ends the app as a closed window does. Each
 // listener (`.on(scope, handler)`) hears the observations one at a time,
 // in the order they arrived, never two at once; `phase` gives each one's
 // `after` before its listeners hear it, and an observation made while
@@ -4944,6 +4997,10 @@ priv WEB_DEVICE_WRITE: 13
 priv WEB_DEVICE_KEEP: 14
 
 priv WEB_DEVICE_KEPT: 15
+
+priv WEB_DEVICE_LIFECYCLE: 16
+
+priv WEB_DEVICE_MOMENT: 17
 
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {

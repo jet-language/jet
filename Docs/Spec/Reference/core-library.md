@@ -5783,7 +5783,7 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
+| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run and follow the page's lifecycle, and be true. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
@@ -6458,6 +6458,17 @@ The window's focus never changes the visibility. The app is `Suspending`
 from logind's `PrepareForSleep(true)` on the system bus until its
 `PrepareForSleep(false)`. Before the launch, and once the window closed,
 there is no phase (`None`).
+
+In a page (a web build), `graph.launch()` starts the app's run and
+follows the page's lifecycle into it: there is no other copy, desktop
+entry or window, and the launch is true. The run starts `Unknown` and
+hears at once whether the document shows. The document is `Visible`
+while the browser shows it and `Hidden` while it doesn't
+(`visibilitychange`). The page is `Suspending` from the Page Lifecycle
+API's `freeze`, or a `pagehide` that keeps the page in the back-forward
+cache, until its `resume` or the `pageshow` that gives it back, which is
+`Woke`. The page's window taking the focus again after it lost it is
+`FocusRegained`, and a `pagehide` that discards the page is `Closing`.
 
 `app.LIFECYCLE` is the event each change of the phase goes to, as a
 `LifecycleEvent`: the run, the new sequence number, the `reason`, and the

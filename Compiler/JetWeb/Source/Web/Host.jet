@@ -633,10 +633,13 @@ function shareLink(url) {
 // picks in the browser's directory picker (pickFolder), 12 the record of
 // the files in the kept folder number `request` (listFolder), 13 a write of
 // a file to a kept folder (writeToFolder), 14 the keeping of a kept folder
-// for later visits (keepFolder) and 15 the record of the folder kept for
-// them under the key `request` (keptFolder), null for none. An answer may
-// be a promise.
-function deviceRequest(doc, kept, watches, drops, kind, request) {
+// for later visits (keepFolder), 15 the record of the folder kept for
+// them under the key `request` (keptFolder), 16 the app following the
+// page's lifecycle through the hook whose click slot `request` names,
+// its first moment the document's visibility, and 17 the oldest moment
+// of the page's lifecycle the app hasn't taken (Host followLifecycle),
+// null for none. An answer may be a promise.
+function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
   if (kind === 2) {
@@ -672,6 +675,12 @@ function deviceRequest(doc, kept, watches, drops, kind, request) {
   if (kind === 13) return writeToFolder(kept, request);
   if (kind === 14) return keepFolder(kept, request);
   if (kind === 15) return keptFolder(kept, request);
+  if (kind === 16) {
+    lifecycle.hook = Number(request);
+    lifecycle.moments.push(doc.visibilityState === "hidden" ? "hidden" : "visible");
+    return "following";
+  }
+  if (kind === 17) return lifecycle.moments.shift() ?? null;
   return null;
 }
 
@@ -688,10 +697,12 @@ function defaultUiProvider(doc) {
   // file, a picked or kept folder's handle), by number; each lives as long
   // as the page. The files of each drop on a body that takes them, until
   // the app takes them. The sensors its streams follow, by number, until
-  // each stops.
+  // each stops. The click slot of the hook of the app following the page's
+  // lifecycle (0 before one launched) and the moments it hasn't taken.
   const kept = [];
   const drops = [];
   const watches = { count: 0, held: new Map() };
+  const lifecycle = { hook: 0, moments: [] };
   const enqueue = (queue, fields) => {
     const records = queues[queue];
     if (records.length < UI_QUEUE) records.push(providerRecord(fields));
@@ -752,8 +763,15 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
-    device: (kind, request) => deviceRequest(doc, kept, watches, drops, kind, request),
+    device: (kind, request) => deviceRequest(doc, kept, watches, drops, lifecycle, kind, request),
     filesDropped: (files) => drops.push(files),
+    // A moment of the page's lifecycle (Host followLifecycle), held for the
+    // app that launched: its hook's click slot, 0 with no app to tell.
+    moment: (moment) => {
+      if (lifecycle.hook === 0) return 0;
+      lifecycle.moments.push(moment);
+      return lifecycle.hook;
+    },
     keyClaim: (claim) => {
       claims.add(claim);
       return true;
@@ -976,6 +994,7 @@ class Host {
     if (globalThis.document?.createElement && globalThis.document.body) {
       host.dom = true;
       host.enter(() => host.rt.jet_ui_web_attach());
+      host.followLifecycle(globalThis.document);
     }
     const [argc, argv, envp] = host.place(args, hostZoneEnvironment(environment));
     host.enter(() => host.rt.jet_rt_host_arguments(BigInt(argc), BigInt(argv), BigInt(envp)));
@@ -1422,6 +1441,28 @@ class Host {
       this.flushLines();
       this.paintScene();
     });
+  }
+
+  // The page's lifecycle, told to the app that launched (app.launch's hook,
+  // whose click takes the moments the provider holds for it): the document
+  // shown or hidden, the window taking or losing the focus, the page frozen
+  // and resumed (the Page Lifecycle API, and a page the back-forward cache
+  // keeps or gives back), and the page going away.
+  followLifecycle(doc) {
+    if (!doc.addEventListener) return;
+    const tell = (moment) => {
+      const hook = globalThis.jetUiProvider?.moment?.(moment) ?? 0;
+      return hook !== 0 ? this.click(hook) : Promise.resolve();
+    };
+    doc.addEventListener("visibilitychange", () => tell(doc.visibilityState === "hidden" ? "hidden" : "visible"));
+    doc.addEventListener("freeze", () => tell("freeze"));
+    doc.addEventListener("resume", () => tell("resume"));
+    // A page's window is its global object.
+    if (!globalThis.addEventListener) return;
+    globalThis.addEventListener("focus", () => tell("focus"));
+    globalThis.addEventListener("blur", () => tell("blur"));
+    globalThis.addEventListener("pagehide", (event) => tell(event.persisted ? "freeze" : "gone"));
+    globalThis.addEventListener("pageshow", (event) => (event.persisted ? tell("resume") : Promise.resolve()));
   }
 
   // A drop on a scene element with a drop slot, as core.ui.host.drag_drop
