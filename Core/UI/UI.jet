@@ -162,6 +162,9 @@ UINode: struct {
     // The id the app keeps the handler of values dropped on the node under
     // (`__taking_drops`); 0 for none.
     priv zone: Int,
+    // The entries of the context menu a page opens on the node's leaves
+    // (`__with_web_menu`), in order; none for no menu.
+    priv entries: [UINode],
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -211,6 +214,16 @@ UINode: struct {
     __with_menu: fn(self, menu: Int) -> UINode Never! {
         result := self.copy()
         result.menu = menu
+        result
+    }
+
+    // The tree as a body whose context menu a page opens with `entries`
+    // (`app.context_menu` in a web build): a button is an entry the person
+    // chooses, which clicks it; text is one that shows but can't be chosen;
+    // any other node is a separator.
+    __with_web_menu: fn(self, entries: [UINode]) -> UINode Never! {
+        result := self.copy()
+        result.entries = entries
         result
     }
 
@@ -330,6 +343,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         menu: 0,
         drag: 0,
         zone: 0,
+        entries: [UINode]{},
     }
 }
 
@@ -500,12 +514,14 @@ UIBackendState: struct {
 }
 
 // A leaf of a tree, the frame a paint lays it out in
-// (`internal.placed_leaves`), and the innermost dragged body that holds it
-// (`UINode.__dragging`), 0 for none.
+// (`internal.placed_leaves`), the innermost dragged body that holds it
+// (`UINode.__dragging`), 0 for none, and the entries of the innermost body
+// with a web menu that holds it (`UINode.__with_web_menu`), none for none.
 priv UIPlaced: struct {
     node: UINode,
     frame: Rect,
     drag: Int,
+    menu: [UINode],
 }
 
 // What `internal.held_at` looks for under a point: a body that takes
@@ -1913,6 +1929,7 @@ priv internal: module {
             menu: 0,
             drag: 0,
             zone: 0,
+            entries: [UINode]{},
         }
     }
 
@@ -1970,7 +1987,7 @@ priv internal: module {
         loop leaf in leaves -> paint_leaf(state, leaf.node, leaf.frame)
         if core.ui.__web_attached() {
             records := [String]{}
-            loop leaf in leaves -> records.push(scene_record(leaf.node, leaf.frame))
+            loop leaf in leaves -> records.push(scene_record(leaf.node, leaf.frame, leaf.menu))
             core.ui.__web_scene(records.join(""))
         }
         found := [UINode]{}
@@ -1981,27 +1998,36 @@ priv internal: module {
         }
     }
 
-    // The leaves of `node` in paint order, each with its frame and the
-    // innermost dragged body (`UINode.__dragging`) that holds it: a box
-    // stacks its children down its frame, each its own height across the
-    // frame's width; every other node is a leaf painted into its frame.
-    // Every backend lays a tree out this way.
+    // The leaves of `node` in paint order, each with its frame, the
+    // innermost dragged body (`UINode.__dragging`) that holds it and the
+    // entries of the innermost body with a web menu that holds it
+    // (`UINode.__with_web_menu`): a box stacks its children down its frame,
+    // each its own height across the frame's width; every other node is a
+    // leaf painted into its frame. Every backend lays a tree out this way.
     placed_leaves: fn(node: UINode, frame: Rect, leaves: &[UIPlaced]) Never! {
-        placed_under(node, frame, 0, leaves)
+        placed_under(node, frame, 0, [UINode]{}, leaves)
     }
 
-    // `placed_leaves` within the dragged body `drag` (0 for none).
-    placed_under: fn(node: UINode, frame: Rect, drag: Int, leaves: &[UIPlaced]) Never! {
+    // `placed_leaves` within the dragged body `drag` (0 for none) and the
+    // body whose web menu entries are `menu`.
+    placed_under: fn(node: UINode, frame: Rect, drag: Int, menu: [UINode], leaves: &[UIPlaced]) Never! {
         inner: if node.drag != 0 -> node.drag else -> drag
+        if node.entries.len() > 0 -> placed_within(node, frame, inner, node.entries, leaves) else {
+            placed_within(node, frame, inner, menu, leaves)
+        }
+    }
+
+    // `placed_under` once the node's own dragged body and menu are known.
+    placed_within: fn(node: UINode, frame: Rect, drag: Int, menu: [UINode], leaves: &[UIPlaced]) Never! {
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, inner, leaves)
+                placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, drag, menu, leaves)
                 at += child.height
             }
             return
         }
-        leaves.push(UIPlaced{node: node.copy(), frame: frame, drag: inner})
+        leaves.push(UIPlaced{node: node.copy(), frame: frame, drag: drag, menu: menu.copy()})
     }
 
     paint_leaf: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
@@ -2422,22 +2448,34 @@ priv internal: module {
 
     // A leaf's record in a paint's web scene, which has one per leaf in paint
     // order (`placed_leaves`). A record is its fields separated by tabs, kind
-    // (Custom 0, Text 1, Box 2, Button 3, TextInput 4), click slot and drop
-    // slot (0 for none), x, y, width, height, color (its `to_hex` text,
-    // empty for none) and the label's UTF-8 byte length, then the label and
-    // a newline. A web build's host (JetWeb Host.jet) turns it into the
-    // page's elements.
-    scene_record: fn(node: UINode, frame: Rect) -> String Never! {
-        kind: if node.kind == {
+    // (`scene_kind`), click slot and drop slot (0 for none), the number of
+    // entries of the context menu the page opens on it (`menu`, the entries
+    // of the innermost body with a web menu that holds it), x, y, width,
+    // height, color (its `to_hex` text, empty for none) and the label's
+    // UTF-8 byte length, then the label and a newline; then one line for
+    // each menu entry, in order: its kind, click slot and label's byte
+    // length, separated by tabs, then the label and a newline. A web build's
+    // host (JetWeb Host.jet) turns it into the page's elements.
+    scene_record: fn(node: UINode, frame: Rect, menu: [UINode]) -> String Never! {
+        color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
+        place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
+        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{menu.len()}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
+        loop entry in menu {
+            record = "{record}{scene_kind(entry)}\t{entry.click}\t{entry.label.bytes().len()}\t{entry.label}\n"
+        }
+        record
+    }
+
+    // A node's kind in a web scene: Custom 0, Text 1, Box 2, Button 3 and
+    // TextInput 4.
+    scene_kind: fn(node: UINode) -> Int Never! {
+        if node.kind == {
             .Custom -> 0
             .Text -> 1
             .Box -> 2
             .Button -> 3
             .TextInput -> 4
         }
-        color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
-        place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
-        "{kind}\t{node.click}\t{node.drop}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
     }
 }
 

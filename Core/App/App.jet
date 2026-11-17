@@ -4480,16 +4480,16 @@ priv app_drop_once: fn(run: fn([PickedFile]) Notice!, dropped: [PickedFile]) Nev
 // runs (`item`, `edit_menu`, `window_menu`), and an item's run that fails
 // adds its notice to the app's notice list (`notices`), which the window
 // shows. On Linux the app's window (`App.window`) opens it over the
-// screen (`app_window_run`); the other native targets keep a notice that
-// says their context menu is not built yet and give `body` back as it is.
-// The page runtime can't open one yet, so a call in code whose target is
-// the web output is a compile error.
+// screen (`app_window_run`); in a web build the page opens it on the
+// browser's `contextmenu` event in place of the browser's own menu
+// (`app_context_web`). The other native targets keep a notice that says
+// their context menu is not built yet and give `body` back as it is.
 context_menu: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
     #if #build.target.os == {
         .Linux -> { return app_context_target(body, items) }
         .MacOS -> { return app_no_context_menu(body) }
         .Windows -> { return app_no_context_menu(body) }
-        .Web -> { return app_no_context_menu(body) }
+        .Web -> { return app_context_web(body, items) }
         .Wasm -> { return app_no_context_menu(body) }
         .Freestanding -> { return app_no_context_menu(body) }
     }
@@ -4532,6 +4532,29 @@ priv app_context_target: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
 priv app_no_context_menu: fn(body: UINode) -> UINode Never! {
     __keep_notice(Notice{text: "Couldn't add a context menu: this system's context menu is not built yet"})
     body.copy()
+}
+
+// `body` as one whose context menu a page opens with `items`
+// (`UINode.__with_web_menu`): an enabled item is a button whose click runs
+// it, its failed run's notice joining the app's notice list; a separator
+// is a separator; an item not `enabled`, a notice, and Quit and the Edit
+// and Window menus' items, which a page can't act on, show but can't be
+// chosen.
+priv app_context_web: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
+    entries := [UINode]{}
+    loop item in items {
+        if item.kind == .Separator -> entries.push(ui.node("", 0.0, 0.0)) else if item.kind == .Item && item.enabled {
+            run: item.run.copy()
+            entries.push(ui.button(item.label, fn() { app_context_web_run(run) }))
+        } else { entries.push(ui.text(item.label)) }
+    }
+    body.__with_web_menu(entries)
+}
+
+// Runs the item a page's context menu chose, as the menu bar runs one.
+priv app_context_web_run: fn(run: Shared<AppMenuRun>) Never! {
+    held: run.guard_read()
+    app_background_once(held.value.run)
 }
 
 // Starts the window's context menus over, for a tree opened anew.
