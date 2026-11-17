@@ -14,6 +14,12 @@ use jet_foundation.[
 
 sema_event_unit: fn() -> Type Never! { Type.Named{name: "Unit"} }
 
+// The built-in handle types of the Event family: compiler-known, with no
+// source declaration (the lowering's `lower_event_repr` guard).
+sema_event_handle_name: fn(name: String) -> Bool Never! {
+    name == "Event" || name == "Hook" || name == "DecisionHook" || name == "AsyncEvent" || name == "DispatchReport" || name == "EventScope" || name == "Subscription" || name == "EventTrace"
+}
+
 // The handle family a receiver type is named for: `Event<T>`, `Hook<T, R>`,
 // `DecisionHook<T, E>`, `AsyncEvent<T, E>`, `DispatchReport<E>`,
 // `EventScope`, `Subscription`, `EventTrace`; None for any other type (a
@@ -30,23 +36,18 @@ sema_event_handle_family: fn(ty: Type) -> String? {
     }
 }
 
-// The built-in handle family of a receiver. These are compiler-known types
-// with no source declaration (the lowering's `lower_event_repr` guard): a
-// visible nominal of the same name shadows them, as a user
+// The built-in handle family of a receiver: a nominal of the same name that
+// the caller's module declares or imports shadows it, as a user
 // `Sender`/`Receiver` shadows the channel endpoints (StreamHandles.jet
-// `sema_stream_handle_is_canonical`). Visible means the caller's module
-// declares or imports that name. A same-named nominal of another module
+// `sema_stream_handle_is_canonical`). A same-named nominal of another module
 // (a user module's or `core.compiler::Event`) is another type, keyed by its
-// owner path: the bare-name fallback that finds it only because its module
-// is loaded does not make it shadow the handle.
+// owner path: a bare handle name never resolves to it only because its
+// module is loaded (TypeRelations.jet `sema_type_graph_unique_type_owner`).
 sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
     if program.registration_graph == .Val(graph) {
-        caller: sema_type_module_row(graph, environment.module_identity)
-        if sema_type_resolve_nominal_row_at(graph, ty, caller) != None {
-            if caller < 0 || sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, owner) != None {
-                return None
-            }
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
+            return None
         }
     }
     Val(owner)
