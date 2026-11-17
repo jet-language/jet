@@ -139,8 +139,9 @@ Regex: struct {
         replace_first(self, text, replacement)
     }
 
-    /// Replace every match with what `replacer` returns for it.
-    replace_all_with: fn(self, text: String, replacer: fn(Match) -> String Never!) -> String Never! {
+    /// Replace every match with what `replacer` returns for it; a failure of
+    /// `replacer` is this call's, unchanged.
+    replace_all_with: fn<E>(self, text: String, replacer: fn(Match) -> String E!) -> String E! {
         raw: text.bytes()
         out := [U8]{}
         cur := 0

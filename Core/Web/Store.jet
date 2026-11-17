@@ -43,8 +43,8 @@ WebStore: struct<T> {
 
     set: fn(&self, value: T) -> WebStoreTransaction<T> Never! { set<T>(self, value) }
 
-    transact: fn(&self, label: String, apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
-        transaction<T>(self, label, [String]{}, apply)
+    transact: fn<E>(&self, label: String, apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+        transaction<T, E>(self, label, [String]{}, apply)
     }
 
     back: fn(&self) -> WebStore<T>? Never! { back<T>(self) }
@@ -119,8 +119,9 @@ signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { store.state }
 state_signal: fn<T>(store: WebStore<T>) -> Signal<T> Never! { signal<T>(store) }
 
 // `apply` changes a working copy of the current value; the store then holds
-// the changed copy and records one transaction from the value before it.
-transaction: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
+// the changed copy and records one transaction from the value before it. A
+// failure of `apply` is this call's, unchanged, and leaves the store as it was.
+transaction: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
     before: value<T>(store.copy())
     next := value<T>(store.copy())
     apply(next)
@@ -128,12 +129,12 @@ transaction: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: 
     record<T>(store, label, values, before)
 }
 
-update: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
-    transaction<T>(store, label, values, apply)
+update: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+    transaction<T, E>(store, label, values, apply)
 }
 
-batch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStoreTransaction<T> Never! {
-    transaction<T>(store, label, values, apply)
+batch: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStoreTransaction<T> E! {
+    transaction<T, E>(store, label, values, apply)
 }
 
 set: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never! {
@@ -150,14 +151,14 @@ set_state: fn<T>(store: &WebStore<T>, value: T) -> WebStoreTransaction<T> Never!
 
 // The changed value is live at once; the patch keeps the value before it, and
 // until patch_commit, patch_rollback returns the store with that value restored.
-optimistic: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStorePatch<T> Never! {
+optimistic: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStorePatch<T> E! {
     backup := value<T>(store.copy())
-    transaction: transaction<T>(store, label, values, apply)
+    transaction: transaction<T, E>(store, label, values, apply)
     WebStorePatch<T>{store: store.copy(), backup: backup, transaction: transaction, active: true}
 }
 
-patch: fn<T>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) Never!) -> WebStorePatch<T> Never! {
-    optimistic<T>(store, label, values, apply)
+patch: fn<T, E>(store: &WebStore<T>, label: String, values: [String], apply: fn(&T) E!) -> WebStorePatch<T> E! {
+    optimistic<T, E>(store, label, values, apply)
 }
 
 patch_generation: fn<T>(patch: WebStorePatch<T>) -> Int Never! { patch.store.generation }
@@ -254,7 +255,7 @@ cursor: fn<T>(store: WebStore<T>) -> Int Never! { store.cursor }
 
 current_generation: fn<T>(store: WebStore<T>) -> Int Never! { store.generation }
 
-listen: fn<T>(store: &WebStore<T>, callback: fn(T)) -> WebStoreSubscription Never! {
+listen: fn<T, E>(store: &WebStore<T>, callback: fn(T) E!) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS {
         return WebStoreSubscription{id: store.subs, active: false, selector: ""}
     }
@@ -269,7 +270,7 @@ subscription_unsubscribe: fn(subscription: &WebStoreSubscription) Never! {
 
 subscription_active: fn(subscription: WebStoreSubscription) -> Bool Never! { subscription.active }
 
-listen_selector: fn<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U)) -> WebStoreSubscription E! {
+listen_selector: fn<T, U, E>(store: &WebStore<T>, project: fn(T) -> U E!, callback: fn(U) E!) -> WebStoreSubscription E! {
     if store.subs >= C_MAX_STORE_SUBSCRIBERS {
         return WebStoreSubscription{id: store.subs, active: false, selector: "derived"}
     }

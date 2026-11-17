@@ -393,7 +393,7 @@ __validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: String)
 
 // Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
 // for MIN/MAX; COUNT(column) counts every present non-Null value instead.
-sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?, cell: fn(U64, String) -> JetSQLValue?) -> JetSQLValue Never! {
+sql_aggregate_value: fn<E>(group: [U64], function: JetSQLAggregate, field: String?, cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLValue E! {
     if function == .Count && field == None {
         return .Int(count_cast(checked(U64{group.len()}) ?? panic("SQL group length")))
     }
@@ -404,7 +404,8 @@ sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?,
     selected := JetSQLValue?{None}
     loop index in group {
         name: field ?? next
-        value: cell(index, name) ?? next
+        found: cell(index, name)
+        value: found ?? next
         if value == .Null -> next
         if function == .Count {
             count = count_increment(count)
@@ -470,14 +471,15 @@ sql_output_value: fn(row: JetSQLResultRow, field: String) -> JetSQLValue? Never!
 
 // Rust execute_sql_rows:959–1041. String map lookup + one sorted key pass
 // reproduces BTreeMap lexical iteration in O(n log n), not a linear key table.
-execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> JetSQLValue?) -> [JetSQLResultRow] Err! {
+execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> JetSQLValue? E!) -> [JetSQLResultRow] (Err | E)! {
     selected := [U64]{}
     index := U64{0}
     loop index < row_count {
         keep := true
         if query.filter == .Val(filter) {
             keep = false
-            if cell(index, filter.field) == .Val(left) {
+            found: cell(index, filter.field)
+            if found == .Val(left) {
                 keep = sql_compare(left, filter.operator, JetSQLValue.literal(filter.value))
             }
         }
@@ -495,7 +497,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
                 pieces := [String]{}
                 one: selected[at..<at + 1]  // #4500: no singleton allocation.
                 loop group in query.group_by {
-                    pieces.push(sql_group_key(one, query, group, cell) ?? return Err(err))
+                    pieces.push(sql_group_key(one, query, group, cell))
                 }
                 key: pieces.join("|")
                 position := 0
@@ -932,10 +934,13 @@ priv internal: module {
 
     // Rust sql_group_key:777–792. Caller supplies a singleton slice without
     // allocating Rust's temporary one-element Vec for each row.
-    sql_group_key: fn(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue?) -> String Err! {
+    sql_group_key: fn<E>(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue? E!) -> String (Err | E)! {
         field: group_field(query, key) ?? return Err(err)
         value := JetSQLValue.Null
-        if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+        if group.len() != 0 {
+            found: cell(group[0], field)
+            value = found ?? JetSQLValue.Null
+        }
         "{field}={value_key(value)}"
     }
 
@@ -982,20 +987,26 @@ priv internal: module {
 
     // Rust sql_project_group:891–941. Transfer the consumed grouping positions
     // into the result rather than cloning the otherwise dead Rust group Vec.
-    sql_project_group: fn(fields: [String], query: JetSQLQuery, group: &&[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
+    sql_project_group: fn<E>(fields: [String], query: JetSQLQuery, group: &&[U64], cell: fn(U64, String) -> JetSQLValue? E!) -> JetSQLResultRow E! {
         projected := [{field: String, value: JetSQLValue}]{}
         loop item in query.projection {
             if item == {
                 .Wildcard -> {
                     loop field in fields {
                         value := JetSQLValue.Null
-                        if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+                        if group.len() != 0 {
+                            found: cell(group[0], field)
+                            value = found ?? JetSQLValue.Null
+                        }
                         projected.push({field: field.copy(), value: value})
                     }
                 }
                 .Field(field, alias) -> {
                     value := JetSQLValue.Null
-                    if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
+                    if group.len() != 0 {
+                        found: cell(group[0], field)
+                        value = found ?? JetSQLValue.Null
+                    }
                     projected.push({field: alias ?? field.copy(), value: value})
                 }
                 .Aggregate(function, field, _) -> {

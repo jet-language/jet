@@ -1,0 +1,106 @@
+// A Core function that calls a callback fails with the callback's failure,
+// unchanged. A callback that can't fail adds nothing; one that fails with the
+// program's own `KeyError` passes it through as itself; and one that fails
+// with `DataError` or `KeyError` beside the join's own `DataError` reaches the
+// caller as the member it is, the callback's `DataError` included.
+use {
+    data: core.data
+    re: core.regex
+}
+
+#Error
+KeyError: enum {
+    Blank,
+}
+
+Order: struct {
+    owner: String,
+    total: Int,
+}
+
+Owner: struct {
+    key: String,
+    name: String,
+}
+
+checked_owner: fn(order: Order) -> String KeyError! {
+    if order.owner == "" -> return Err(KeyError.Blank)
+    Ok(order.owner)
+}
+
+measured_owner: fn(order: Order) -> String (data.DataError | KeyError)! {
+    if order.owner == "" -> return Err(KeyError.Blank)
+    if order.total < 0 -> _: data.mean([Float]{})
+    Ok(order.owner)
+}
+
+owner_key: fn(owner: Owner) -> String Never! { owner.key }
+
+checked_key: fn(owner: Owner) -> String KeyError! { Ok(owner.key) }
+
+measured_key: fn(owner: Owner) -> String (data.DataError | KeyError)! { Ok(owner.key) }
+
+// A callback that can't fail: the join fails only with its own DataError.
+plain: fn(orders: [Order], owners: [Owner]) -> Int data.DataError! {
+    joined: data.inner_join(orders, owners, fn(order) { order.owner }, owner_key)
+    joined.len()
+}
+
+// A KeyError callback: the join fails with DataError or with that KeyError.
+checked: fn(orders: [Order], owners: [Owner]) -> Int (data.DataError | KeyError)! {
+    joined: data.inner_join(orders, owners, checked_owner, checked_key)
+    joined.len()
+}
+
+// A callback that fails with DataError or KeyError: the join adds no second
+// DataError, and the callback's own reaches the caller as it was raised.
+measured: fn(orders: [Order], owners: [Owner]) -> Int (data.DataError | KeyError)! {
+    joined: data.inner_join(orders, owners, measured_owner, measured_key)
+    joined.len()
+}
+
+failure_name: fn(error: data.DataError | KeyError) -> String {
+    if error == {
+        .DataError(found) -> "data {found.operation}"
+        .KeyError -> "key"
+    }
+}
+
+report_checked: fn(orders: [Order], owners: [Owner]) {
+    line: if checked(orders, owners) == {
+        .Ok(n) -> "joined {n}"
+        .Err(e) -> failure_name(e)
+    }
+    print(line)
+}
+
+report_measured: fn(orders: [Order], owners: [Owner]) {
+    line: if measured(orders, owners) == {
+        .Ok(n) -> "joined {n}"
+        .Err(e) -> failure_name(e)
+    }
+    print(line)
+}
+
+shout: fn(found: re.Match) -> String KeyError! {
+    if found.start == 0 -> return Err(KeyError.Blank)
+    Ok("hit")
+}
+
+run: fn() {
+    owners: [Owner]{Owner{key: "ada", name: "Ada"}, Owner{key: "lin", name: "Lin"}}
+    orders: [Order]{Order{owner: "ada", total: 3}, Order{owner: "lin", total: 4}, Order{owner: "ada", total: 5}}
+    blank: [Order]{Order{owner: "ada", total: 3}, Order{owner: "", total: 4}}
+    empty: [Order]{Order{owner: "ada", total: -1}}
+    print(plain(orders, owners) ?? -1)
+    report_checked(orders, owners)
+    report_checked(blank, owners)
+    report_measured(orders, owners)
+    report_measured(blank, owners)
+    report_measured(empty, owners)
+
+    word: re.compile("\\w+") ?? panic("bad word")
+    print(word.replace_all_with("a b", fn(found) { "{found.start}" }))
+    print(word.replace_all_with(" a", shout) ?? "key")
+    print(word.replace_all_with("a b", shout) ?? "key")
+}

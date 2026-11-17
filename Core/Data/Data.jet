@@ -1246,7 +1246,9 @@ __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) 
     query_make<DataJoin<T, U>>(query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
-        inner_join<T, U>(left_rows, right_rows, left_key, right_key)
+        left_keys: query_join_keys<T>(left_rows, left_key, "left", "inner_join") ?? return Err(err)
+        right_keys: query_join_keys<U>(right_rows, right_key, "right", "inner_join") ?? return Err(err)
+        inner_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
     })
 }
 
@@ -1254,8 +1256,21 @@ __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: &&fn(T) -
     query_make<DataJoin<T, U?>>(query_steps(left.__steps, "left_join"), true, left.__limits.copy(), fn() {
         left_rows: query_rows<T>(left) ?? return Err(err)
         right_rows: query_rows<U>(right) ?? return Err(err)
-        left_join<T, U>(left_rows, right_rows, left_key, right_key)
+        left_keys: query_join_keys<T>(left_rows, left_key, "left", "left_join") ?? return Err(err)
+        right_keys: query_join_keys<U>(right_rows, right_key, "right", "left_join") ?? return Err(err)
+        left_join_keyed<T, U>(left_rows, right_rows, left_keys, right_keys)
     })
+}
+
+// The join key of each of a query's rows; a key that fails is the query's
+// Decode error, since a query fails only with DataError.
+priv query_join_keys: fn<T>(rows: [T], key: fn(T) -> String, side: String, api: String) -> [String] DataError! {
+    keys := [String]{}
+    loop row in rows {
+        found: key(row) ?? return Err(data_error(DataErrorKind.Decode, "{side} join key failed", api))
+        keys.push(found)
+    }
+    Ok(keys)
 }
 
 __query_group_by: fn<T, K>(query: Query<T>, key: &&fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
@@ -1938,18 +1953,20 @@ rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-inner_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
-    limits := DataLimits.safe()
+// The rows of `left` and `right` whose keys are equal, paired. A key that
+// fails fails the join with that failure, unchanged.
+inner_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, right_key: fn(U) -> String E!) -> [DataJoin<T, U>] (DataError | E)! {
     left_keys := [String]{}
+    loop row in left -> left_keys.push(left_key(row))
     right_keys := [String]{}
-    loop row in left {
-        key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "inner_join"))
-        left_keys.push(key)
-    }
-    loop row in right {
-        key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "inner_join"))
-        right_keys.push(key)
-    }
+    loop row in right -> right_keys.push(right_key(row))
+    joined: inner_join_keyed<T, U>(left, right, left_keys, right_keys)
+    Ok(joined)
+}
+
+// inner_join over the keys each row already gave.
+priv inner_join_keyed: fn<T, U>(left: [T], right: [U], left_keys: [String], right_keys: [String]) -> [DataJoin<T, U>] DataError! {
+    limits := DataLimits.safe()
     // The output cardinality is known from per-key counts before any row is
     // built, so a limit breach costs O(left + right) rather than one push per
     // row up to max_join_rows.
@@ -1974,18 +1991,20 @@ inner_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key
     Ok(out)
 }
 
-left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
-    limits := DataLimits.safe()
+// inner_join that keeps each left row without a match, paired with None. A
+// key that fails fails the join with that failure, unchanged.
+left_join: fn<T, U, E>(left: [T], right: [U], left_key: fn(T) -> String E!, right_key: fn(U) -> String E!) -> [DataJoin<T, U?>] (DataError | E)! {
     left_keys := [String]{}
+    loop row in left -> left_keys.push(left_key(row))
     right_keys := [String]{}
-    loop row in left {
-        key: left_key(row) ?? return Err(data_error(DataErrorKind.Decode, "left join key failed", "left_join"))
-        left_keys.push(key)
-    }
-    loop row in right {
-        key: right_key(row) ?? return Err(data_error(DataErrorKind.Decode, "right join key failed", "left_join"))
-        right_keys.push(key)
-    }
+    loop row in right -> right_keys.push(right_key(row))
+    joined: left_join_keyed<T, U>(left, right, left_keys, right_keys)
+    Ok(joined)
+}
+
+// left_join over the keys each row already gave.
+priv left_join_keyed: fn<T, U>(left: [T], right: [U], left_keys: [String], right_keys: [String]) -> [DataJoin<T, U?>] DataError! {
+    limits := DataLimits.safe()
     // Every left row yields at least one output row; see inner_join.
     right_index: join_index(right_keys)
     total := 0
@@ -2041,14 +2060,16 @@ join_match_count: fn(index: DataJoinIndex, key: String) -> Int Never! {
     index.rows[position].len()
 }
 
-pivot_sum: fn<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
+// Sums `value_fn` over the rows of each (row key, column key) cell. A
+// callback that fails fails the pivot with that failure, unchanged.
+pivot_sum: fn<T, E>(rows: [T], row_key: fn(T) -> String E!, column_key: fn(T) -> String E!, value_fn: fn(T) -> Float E!) -> [DataPivotCell] (DataError | E)! {
     limits := DataLimits.safe()
     cells := [DataPivotCell]{}
     loop index in 0..<rows.len() {
         row := rows[index]
-        row_name: row_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot row key failed", "pivot_sum"))
-        column_name: column_key(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot column key failed", "pivot_sum"))
-        amount: value_fn(row) ?? return Err(data_error(DataErrorKind.Decode, "pivot value failed", "pivot_sum"))
+        row_name: row_key(row)
+        column_name: column_key(row)
+        amount: value_fn(row)
         if nonfinite(amount) {
             return Err(data_error_at(DataErrorKind.NonFinite, "pivot values must be finite", "pivot_sum", index))
         }
