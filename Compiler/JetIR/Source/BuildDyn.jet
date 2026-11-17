@@ -912,7 +912,8 @@ ir_dyn_option_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, va
     out
 }
 
-// A union's `encode()`: the encode() of the member its variant holds.
+// A union's `encode()`: the encode() of the member its variant holds, the
+// variants in layout order (ir_union_layout_order).
 ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
     row: ir_type_def(p, ir_union_key(ir_untag(union_ty))) ?? return ir_fail_slot(b, span, "union {ir_type_name(union_ty)} without a definition")
     dyn_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -927,8 +928,10 @@ ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
     }
     out: ir_temp(m, b, dyn_row)
     selector: ir_load_word(m, b, source, 0)
-    loop (index, member) in members {
-        last: index + 1 == members.len()
+    order: ir_union_layout_order(members)
+    loop (index, at) in order {
+        member: members[at]
+        last: index + 1 == order.len()
         if !last {
             expected: ir_word_const(m, b, index)
             held: ir_bool_op(m, b, IROp.Eq, selector, expected)

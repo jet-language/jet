@@ -3,6 +3,7 @@
 // with. Each call reads the union at its binding: a callback that can't fail
 // leaves `ShopError` alone, one that fails with `ShopError` adds nothing,
 // `KeyError` joins it, and `ShopError | KeyError` adds no second `ShopError`.
+// A caller may write the union in its own member order, or name it nowhere.
 #Error
 ShopError: enum {
     Empty,
@@ -44,6 +45,8 @@ keyed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, strict)
 
 mixed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, either) }
 
+reversed: fn(names: [String]) -> Int (KeyError | ShopError)! { total(names, strict) }
+
 failure_name: fn(error: ShopError | KeyError) -> String {
     if error == {
         .ShopError -> "shop"
@@ -78,4 +81,7 @@ run: fn() {
     report_mixed([String]{"x"})
     report_mixed([String]{"", "a"})
     report_mixed([String]{"abc"})
+    print(reversed([String]{"ab"}) ?? -4)
+    print(reversed([String]{""}) ?? -4)
+    print(total([String]{"", "a"}, strict) ?? -5)
 }
