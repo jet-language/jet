@@ -566,8 +566,10 @@ service is `None`. `facts.row()` derives the effects every artifact built for
 the machine is denied, one per missing service (`!Net`, `!FS`, `!IO`, `!Time`
 or `!Time.Wait`, `!Rand`, `!Env`, `!Exec`, `!GPU`, `!FFI` or `!FFI.C`,
 `!Browser`, `!Panic`, `!Mem.Alloc`), and the compiler checks every artifact
-against that row. Code reads the built target's operating system as
-`#build.target.os`.
+against that row. `facts.scheduler` names the type implementing
+`core.tasks.Scheduler` that spawned tasks queue in; `None` keeps the runtime's
+own first-in, first-out queue and denies nothing. Code reads the built
+target's operating system as `#build.target.os`.
 
 | Machine | Triple | Denied by its facts |
 | --- | --- | --- |
@@ -4892,6 +4894,9 @@ sendability rules. The implementation is in
 | `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is cancelled. |
 | `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
 | `semaphore.value() -> Int` | units | The free units at the moment of the read. |
+| `Scheduler: trait { push, pop }`, `QueuedTask` | trait | A scheduler provider: the run queue the runtime's carriers take submitted tasks from. `push(&self, task: QueuedTask)` queues a task; `pop(&self) -> QueuedTask?` answers the next to run, None when nothing waits. |
+| `#Unsafe queued_task(handle: Int) -> QueuedTask` | task | The task the runtime handed its scheduler hook as `handle`; the caller vouches it is a submitted task that goes back to the runtime once. |
+| `queued_handle(task: QueuedTask) -> Int` | handle | The runtime's handle of `task`, which the hook hands back. |
 
 Every function here that waits, or reads the monotonic clock for a timer's
 deadline, declares the waiting leaf `Time.Wait`, and sema infers the same leaf
@@ -4907,6 +4912,13 @@ the time the task ran, on whichever carrier threads ran it, and stands still
 while the task is parked; on a plain thread it is the thread's CPU time. Only
 the difference of two reads by the same task means anything. A deterministic
 world has no CPU clock to control, so it rejects the read.
+
+A `Scheduler` provider decides the order the runtime's carriers run
+submitted tasks in. The runtime calls `push` and `pop` one at a time, so a
+provider needs no lock of its own. Only `queued_task`, under `#Unsafe`, makes
+a `QueuedTask`, so safe code can queue, reorder and hand back the tasks it was
+given but cannot forge one. Each task goes back exactly once: a task the
+provider never hands back never runs, and its join waits for it.
 
 `Once` and `Semaphore` are built from a `Shared<T>` cell and its guards, so a
 copy shares the original's state and either can cross a task boundary.

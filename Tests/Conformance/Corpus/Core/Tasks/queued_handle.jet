@@ -1,0 +1,27 @@
+// core-conformance: core.tasks.queued_handle
+use tasks: core.tasks
+
+// A provider that runs the newest task first.
+Lifo: struct {
+    held: [tasks.QueuedTask],
+
+    impl tasks.Scheduler {
+        push: fn(&self, task: tasks.QueuedTask) Never! { self.held.push(task) }
+
+        pop: fn(&self) -> tasks.QueuedTask? Never! { self.held.pop() }
+    }
+}
+
+run: fn() {
+    queue := Lifo{held: [tasks.QueuedTask]{}}
+    #Unsafe("the handles stay in this program and never reach the runtime's queue") {
+        queue.push(tasks.queued_task(1))
+        queue.push(tasks.queued_task(2))
+    }
+    loop task in [queue.pop(), queue.pop(), queue.pop()] {
+        if task == {
+            .Val(queued) -> { print(tasks.queued_handle(queued)) }
+            .None -> print("empty")
+        }
+    }
+}
