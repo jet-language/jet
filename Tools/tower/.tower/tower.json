@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111350,
+    "rev": 111375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42,7 +42,7 @@
         "radar-cards"
       ]
     },
-    "completionCursor": "2026-11-17T01:37:39.804Z"
+    "completionCursor": "2026-11-17T01:48:48.888Z"
   },
   "epochs": [
     {
@@ -106068,8 +106068,8 @@
       "title": "Mail and MIME parsing in Core: placement ballot, then hostile-input parsing",
       "body": "Destination: Core (or a first-party package, by ballot) parses and formats mail and MIME data: headers, encodings and attachments, separate from sending and authentication, safe on hostile input.\n\nWhy it matters: mail parsing is a frequent attack surface; it must have no network or credential side effects and must bound its work.\n\nRelated: #6826 (outgoing mail), #3280 (the MIME quoted-string scanner).\n\nSource: #5976 c51, c52 (archived #3285, re-homed by the #6563 audit).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -106120,7 +106120,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:09.559Z",
-      "updated": "2026-11-16T13:07:46.800Z",
+      "updated": "2026-11-17T01:48:46.564Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -106130,8 +106130,8 @@
       "title": "core.io.progress: lazy, truthful progress over lists and iterators (D-PROGRESS-COUNTS1)",
       "body": "Destination: one progress adapter wraps a List or an iterator, stays lazy, counts the items actually pulled through every adapter, renders correctly on a TTY and off one, and gives the same output on every tier.\n\nWhy it matters: a progress bar that counts what it was told instead of what was read lies exactly when it matters (early break, filters, errors).\n\nDecisions: D-PROGRESS-COUNTS1=A (truthful progress with automatic completion), D-COREIO1=A.\n\nSource: #5976 c54-c58 (archived #1402), #3549 c13-c14.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -106209,7 +106209,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:10.450Z",
-      "updated": "2026-11-16T13:07:52.821Z",
+      "updated": "2026-11-17T01:48:48.088Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -106219,8 +106219,8 @@
       "title": "core.db crash consistency: every write and sync boundary crashed, whole-or-absent transactions",
       "body": "Destination: a deterministic crash harness crashes the real DB bridge at every reachable write and sync boundary (including dropped and reordered unsynced writes), and every reopen shows each transaction whole or absent; metamorphic SQL tests catch wrong queries.\n\nWhy it matters: a database that can come back with half a transaction loses data silently; only exhaustive crash schedules show it does not.\n\nRelated: #6448 (the SQL engine leaves Core for the `sql` package).\n\nSource: #5976 c99-c105 (archived #3000, #3001).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -106272,7 +106272,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:11.358Z",
-      "updated": "2026-11-16T13:07:56.301Z",
+      "updated": "2026-11-17T01:48:50.320Z",
       "updatedBy": "Main"
     },
     {
@@ -106281,8 +106281,8 @@
       "title": "One DataTree: duplicate keys, exact numbers, strict decode, readers and limits (D-DATATREE-RULES1)",
       "body": "Destination: every text and binary format parses into the one DataTree with the ratified rules: duplicate keys are errors unless asked for, numbers keep their exact text, decoding is strict, binary byte strings are Bytes; readers and limits have one shape; the duplicate encoding carriers are gone.\n\nWhy it matters: a second carrier or a lenient default gives the same input two meanings.\n\nDecisions: D-DATATREE-RULES1=A (owner rulings 2026-10-05), D-ONE-CODECS1=A. The frozen #4602 holds the original per-format duplicate-key item.\n\nSource: #5976 c2, c3, c6, c7, c93.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -106591,7 +106591,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:12.288Z",
-      "updated": "2026-11-16T13:08:24.867Z",
+      "updated": "2026-11-17T01:48:51.862Z",
       "updatedBy": "Main",
       "criteriaLastN": 31
     },
@@ -106601,8 +106601,8 @@
       "title": "Byte streams and the HTTP server: read_into, WebSocket routes and wss upgrade (D-NET-READINTO1, D-WS-ROUTE1)",
       "body": "Destination: every byte stream reads into a caller-owned buffer, the HTTP server, client and TLS reader use it, and the HTTP mux has a WebSocket route kind that authenticates, validates and upgrades over TCP and TLS.\n\nWhy it matters: a fresh limit-sized buffer per read is the main allocation cost of a steady server, and WebSocket handlers returning a fake response after the socket is gone is a design defect.\n\nDecisions: D-NET-READINTO1=A (2026-11-10), D-WS-ROUTE1=A (2026-11-10). Depends on the concurrent serve loop (#4635).\n\nSource: #5976 c42, c43, c110, c112, c113.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -106861,7 +106861,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:13.176Z",
-      "updated": "2026-11-16T13:08:46.574Z",
+      "updated": "2026-11-17T01:48:53.389Z",
       "updatedBy": "Main",
       "criteriaLastN": 26
     },
@@ -106871,8 +106871,8 @@
       "title": "Core API shape: results come back as returns, no API that can never succeed, spec matches Core",
       "body": "Destination: public Core APIs return their results instead of filling out-parameters, none of them is a stub that can never succeed, core-library.md matches the declared signatures, and module identity does not depend on file paths.\n\nWhy it matters: out-parameters and never-succeeding stubs are the API smells the owner ruled out; a spec that drifts from Core teaches the wrong surface.\n\nDecisions: D-OUTPUT-RETURNS1=A (the frozen #4561 holds the original item). Related: #6367 (API design principle), #6848 c5 (maturity as a typed fact).\n\nSource: #5976 c25, c29, c30, c35.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -106932,7 +106932,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:14.050Z",
-      "updated": "2026-11-16T13:08:49.894Z",
+      "updated": "2026-11-17T01:48:54.918Z",
       "updatedBy": "Main"
     },
     {
@@ -106941,8 +106941,8 @@
       "title": "Core names, modules and prelude follow the ratified contracts: one name, one owner, one prelude",
       "body": "Destination: Core spells each operation once, each job has one owning module under the ratified module map, the prelude is one short readable module with the ratified contents, and foreign spellings are taught by fixes, never aliased.\n\nWhy it matters: duplicate names and plural/singular module twins make every port and every doc guess; the decisions are ratified and only the cutovers remain.\n\nDecisions: D-CORE-ONE-NAME1=A, D-CORE-MODULE-MAP1=A, D-CORE-SPELLING1=A, D-LISTREMOVE1=F, D-ONCE-VERB1=A, D-ONCE-PRINT1=A, D-VERDICT-1321-1, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B, D-NAME-ALIAS1=A, D-LANGNS-NAME1=A, D-RULEARG-TYPES1=A. Greenfield: each cutover migrates every caller in one change with no alias or teaching row for the retired name.\n\nSource: #3548 c45, c47-c49, c51; #4022 c2, c4 (ballots ratified) and c21; #5976 c37.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -107232,6 +107232,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:09:07.239Z"
+        },
+        {
+          "n": 32,
+          "text": "No Core constant declaration or reference uses a leading `@` sigil; every constant is a plain snake_case name. A quick grep on 2026-11-16 found 71 `@` plus letter sequences in Core sources (many may be strings or doc text). Proof: a guard in Tests/Guards scans Core declarations and references (not strings or comments) and passes with zero hits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T01:49:08.247Z"
         }
       ],
       "refs": [],
@@ -107245,9 +107254,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:06.513Z",
-      "updated": "2026-11-16T13:09:07.239Z",
+      "updated": "2026-11-17T01:49:08.247Z",
       "updatedBy": "Main",
-      "criteriaLastN": 31
+      "criteriaLastN": 32
     },
     {
       "id": "c0zii3oj",
@@ -107255,8 +107264,8 @@
       "title": "Core I/O failures and producers: one IOError, typed failure paths, line, accept and resolve contracts",
       "body": "Destination: every Core I/O failure is one canonical IOError with complete context, every failure path cleans up in one order and reports a repairable, redacted diagnostic, and the I/O producers (lines, accepts, address resolution) state exactly what each outcome means on every tier.\n\nWhy it matters: an I/O error that loses its kind or context, or a producer that blurs waiting, failure and end, makes servers and tools misbehave under exactly the conditions they must survive.\n\nSpec: F030 (cleanup of iterator items), F031 (channel readiness). Related: #3239 (task outcomes), #6878 (read_into).\n\nSource: #3548 c53, c54, c56-c63 (archived #3248, #3226, #3395, #4910; first carried by #3239).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -107389,7 +107398,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:14:07.479Z",
-      "updated": "2026-11-16T13:09:17.793Z",
+      "updated": "2026-11-17T01:48:57.967Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -107399,8 +107408,8 @@
       "title": "Lazy adapters read only what they need: early stop, bounded state, flatten, intersperse, replay and cycle",
       "body": "Destination: every lazy adapter pulls only up to its semantic stop, keeps only its minimum state, and never builds a hidden whole-source list; replay, fork and cycle say exactly what they buffer and refuse a one-shot source they cannot repeat.\n\nWhy it matters: an adapter that reads past its stop runs effects the program did not ask for and breaks on endless or failing sources; hidden lists cost memory proportional to the input.\n\nDecisions: D-ITER-NESTED1=A (flatten the existing iterable protocol), D-ITER-SEPARATOR1=A (separators only when demanded), D-ITER-KEYRUNS1=A (adjacent groups), D-ITER-REPLAY1=A (repeat a replayable source lazily), D-ITER-RESUME1=A. Related: #3317 (iterator capabilities), #6875 (progress counts follow pulls).\n\nSource: #3317 c18, c36-c39, c41-c44, c46, c47 (archived #3320, #3106, #3358, #3384, #3350, via #4284).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -107695,7 +107704,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:16:57.357Z",
-      "updated": "2026-11-16T13:09:38.609Z",
+      "updated": "2026-11-17T01:48:59.516Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -107705,8 +107714,8 @@
       "title": "Data formats beyond JSON each have one strict profile: TOML, XML, INI, BSON, BEVE, plist, MessagePack and layered config",
       "body": "Destination: each data format Core reads or writes has one strict, bounded profile over DataTree and Codable: typed values, exact limits, explicit Unsupported for what it cannot represent, malformed and hostile input rejected with a location, and a golden per format on O0, O1 and O2.\n\nWhy it matters: a lenient or partial format reader silently loses data or accepts hostile input; one profile per format keeps every caller's meaning the same.\n\nDecisions: D-ENCBIN1=A (canonical binary interchange), D-ENCXML1=A (lossless XML over DataTree), D-ENCSTREAM1=A, D-ENCBASE-STRICT1=A. Fixed-buffer base encodings are on Main's ballot list (2026-11-15).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (core findings).\n\nSource: #3280 c19-c23, c25, c26, c28, c29 (archived #3267, #3269, #3275, #3284, #3312, #3251, #3282, #3283; via #3271 and #3272).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -107872,7 +107881,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:19:44.267Z",
-      "updated": "2026-11-16T13:09:53.017Z",
+      "updated": "2026-11-17T01:49:01.054Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -107882,8 +107891,8 @@
       "title": "Core sockets and DNS: one TCP write, honest EOF and close, UDP truncation, resolv.conf, and explicit call states",
       "body": "Destination: TCP, Unix and TLS streams share one lifecycle law (positive limits, partial writes, EOF, half-close, cancellation, deadline, use after close), TCP writes have one spelling that never drops bytes, UDP keeps each packet's source, length and truncation, host DNS stays distinct from the wire resolver, and a TCP call says exactly when it was sent and what is uncertain.\n\nWhy it matters: servers and Jetpack's fetchers depend on these edges; a dropped byte or a fabricated success is silent corruption.\n\nRelated: #3665 (HTTP client), #6878 (byte streams and HTTP server), #6881 (I/O failures), #4954 (native UDP).\n\nSource: #3665 c7, c14, c18-c22, c24 (archived #3227, #3080, #3444, #3445; via #3595).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -108024,7 +108033,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:22:53.996Z",
-      "updated": "2026-11-16T13:10:02.998Z",
+      "updated": "2026-11-17T01:49:02.632Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -108034,8 +108043,8 @@
       "title": "Text formatting: exact number formatting, data templates, explicit locales and text diffs",
       "body": "Destination: Core formats numbers exactly (shortest round-trip digits, ties-to-even on the exact binary value, no crash on any tier), renders bounded data templates, formats and parses with an explicit Locale and no process-global default, and offers text diffs whose similarity, alignment, output and patch rules are stated.\n\nWhy it matters: number and template output is what users and files see; a rounding or locale surprise is a data bug.\n\nDecisions: D-FLOAT-POSITIONAL1=A, D-CORE-TEMPLATE1=A. A Locale object and new diff operations are on Main's ballot list (2026-11-15).\n\nSource: #3262 c6, c8, c9, c16, c17, c26 (archived #3252, #3307, #3311, #4417, #4331, #4407; via #4426).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -108201,7 +108210,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:54.433Z",
-      "updated": "2026-11-16T13:10:12.528Z",
+      "updated": "2026-11-17T01:49:04.206Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -108211,8 +108220,8 @@
       "title": "Translatable view text and the opt-in i18n package (D-I18N1=A)",
       "body": "Destination: view text parameters take ui.Text, so a literal in a view is a typed, translatable message (with plural forms), ui.verbatim marks runtime data that is never a catalog key, and translation is an opt-in i18n package: `jet i18n --add=pt` writes a catalog for the translator, and catalogs load explicitly with no ambient locale or filesystem access.\n\nWhy it matters: translation bolted on later means rewriting every view; with typed messages from the start, adding a language is a catalog, not a code change.\n\nDecision: D-I18N1=A (ratified 2026-11-06). Nothing of it is built on dev 168e1e9e92 (no ui.verbatim, no i18n package).\n\nSource: D-I18N1=A; #3262 c7 (archived #3289, message catalogs; D-CORE-CATALOG1).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -108273,7 +108282,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:25:55.334Z",
-      "updated": "2026-11-16T13:10:15.411Z",
+      "updated": "2026-11-17T01:49:05.754Z",
       "updatedBy": "Main"
     },
     {
@@ -108282,8 +108291,8 @@
       "title": "core.game: parallel system scheduling, the frame schedule, and editor, overlay and packaging tools",
       "body": "Destination: core.game runs systems in parallel from their declared access (D-SYSSCHED1=A) on one canonical frame schedule, and game developers get the tooling the ratified game designs promise: play and simulate in the editor, pause and frame advance, an in-game overlay debugger on the real window loop, typed launcher profiles, asset watch events, packaging with receipts, consented crash reporting, release devtools policy, and a complete `jet new game` scaffold.\n\nWhy it matters: these are what make Jet usable for real games rather than demos; each was designed and none is proven today.\n\nDecisions: D-SYSSCHED1=A, D-GAME-ECS1=B, D-GAME-ENTITY1=A, D-GAME-BACKEND1=A, D-GAME-BUDGET1=A. Platform (windows, pixels, audio, input) is #5035; assets and hot reload are #238.\n\nSource: #5035 c5-c18, c20, c23 (archived #2484, #2485, #2490, #2491, #2967, #3645).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -108524,7 +108533,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:28:03.889Z",
-      "updated": "2026-11-16T13:10:28.427Z",
+      "updated": "2026-11-17T01:49:07.323Z",
       "updatedBy": "Main",
       "criteriaLastN": 24
     },
@@ -108534,8 +108543,8 @@
       "title": "Core codecs: gzip and zstd live in core.compress and really compress, and image decode is bounded by one shared inflater",
       "body": "Destination: stream codecs (gzip, zstd) have one public home, core.compress, and their encoders actually compress; core.archive keeps only the zip and tar containers; one source-owned inflater checks the caller's output ceiling before every byte, and core.image decodes and encodes PNG, JPEG and GIF with bounded, typed failures on every tier.\n\nWhy it matters: an encoder that writes stored blocks only is a silent 0% compression; an unbounded inflater is a decompression bomb; two homes for gzip is two names for one thing.\n\nState (dev 7259131021): gzip and zstd live in Core/Archive/Gzip.jet and Core/Archive/Zstd.jet (and Archive.jet compress/decompress); there is no Core/Compress; the encoders write stored blocks only (D-COMPTIME-SIZE1 review, 2026-11-12).\n\nDecisions: D-CODECS1=A, D-CORE-COMPRESS1=A (split codecs from containers), D-CORE-ARCHIVE-BOUND1=A (bounded inflater, spelled core.archive.decompress_bounded), D-CORE-IMAGE1=A. The two module homes conflict; the choice is on Main's ballot list (2026-11-15).\n\nSource: #3551 c9-c15, c17 (archived #499, #3561, #3562, #3564).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -108647,7 +108656,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:30:11.324Z",
-      "updated": "2026-11-16T13:10:32.231Z",
+      "updated": "2026-11-17T01:49:09.412Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -108657,8 +108666,8 @@
       "title": "core.db tools: a bounded connection pool, `jet db` migrations with preview and receipts, the SQL console and EXPLAIN facts",
       "body": "Destination: core.db pools connections with a bounded FIFO deadline and health checks; `jet db` creates, previews, applies, steps and rolls back migrations with receipts and no partial schema change; the local SQL console reads typed sources, scripts and stdin within explicit bounds and inspects tables, plans and stats; a loopback-only browser inspector shows the same session; one typed fact stream gives bounded query stats and authority-gated read-only EXPLAIN without leaking credentials, query text or bindings.\n\nWhy it matters: these are the everyday database workflows; each was designed and none is proven.\n\nDecisions: D-DB-AUTH-HOME1=A (core.db stays in Core; the SQL engine goes to the `sql` package, #6448), D-SQL-SAFETY (offline pull, diff and migrate; #4520 c4).\n\nSource: #6448 c2-c12 (archived #2450, #2456, #2460, #2851).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -108818,7 +108827,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:31:05.913Z",
-      "updated": "2026-11-16T18:47:04.195Z",
+      "updated": "2026-11-17T01:49:10.986Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -108828,8 +108837,8 @@
       "title": "Lazy multi-source and combinatoric iterator adapters: sorted merge, join, combinations, interleave, Cartesian product and keyed set operations",
       "body": "Destination: iterators combine several sources lazily, buffering only what the contract needs: sorted merges keep only the frontiers, joins state their cardinality and sides, combinations, permutations and powersets are generated lazily, interleave and Cartesian products state their end and order policies, and keyed set operations state representatives and consumption.\n\nWhy it matters: today Core/Math/Combinatorics.jet builds whole [[T]] lists and Core/Collections/Collections.jet:640 merge_sorted takes only [Int]; eager forms blow up on large or endless input.\n\nDecisions: D-ITER-SORTEDMERGE1=A, D-ITER-COMBINATIONS1=A, D-ITER-PERMUTATIONS1=A, D-ITER-POWERSET1=A, D-ITER-INTERLEAVE1=A, D-ITER-CARTESIAN1=A, D-ITER-SETOPS1=A, D-ITER-ITDEP1=A (no itertools dependency).\n\nSource: #3327 c9-c14 (archived #3351, #3352, #3353, #3377, #3379, #3390); evidence Docs/research/mine-for-jet-2026-09-12.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -108970,7 +108979,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:32:39.427Z",
-      "updated": "2026-11-16T01:16:36.076Z",
+      "updated": "2026-11-17T01:49:12.530Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -108980,8 +108989,8 @@
       "title": "Guided input from #CLI: typed prompts and forms that match the parser, with accessible, non-TTY and pipeline modes",
       "body": "Destination: a `#CLI` declaration also drives interactive input: a guided field sequence and multi-page forms whose values, defaults, environment inputs and final typed result match the ordinary argv parser, with validation that keeps the invalid value, Unicode-safe editing, accessible and non-TTY modes that need no alternate screen, and small prompts that compose in shell pipelines.\n\nWhy it matters: one checked schema serves both flags and prompts, so an interactive run can never accept what the parser would refuse.\n\nDecisions: D-DX-PROMPT1=A (guided input gets its fields from the CLI schema), D-TERM-COMMANDS1=A, D-CORE-TERMSTDIN1=A.\n\nSource: #6315 c9-c13 (archived #2468, source-only acceptance, never run), #3242 c42 (archived #3294). The one CLI model is #3242.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -109060,7 +109069,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:36:10.146Z",
-      "updated": "2026-11-16T13:10:50.662Z",
+      "updated": "2026-11-17T01:49:14.045Z",
       "updatedBy": "Main"
     },
     {
@@ -109069,8 +109078,8 @@
       "title": "core.log across boundaries: traces cross one service boundary, secrets never leak, and every record keeps a verified source",
       "body": "Destination: core.log carries trace identity across one permitted service boundary without inferring a principal from the header; secret-bearing values never reach logs, facts or exports; loss, sampling, retention and exporter failure are visible without blocking requests; and each record's event field locates its true source after composition, translation, redaction and wrappers, verified against source content before navigating.\n\nWhy it matters: observability that leaks secrets or points at the wrong line is worse than none.\n\nDecisions: D-LOGTRACE1=A, D-LOG-SPAN-SCOPE1=A, D-LOG-LADDER1=A. The web app's request tracing is #6830.\n\nSource: #6523 c1-c9 (archived #3088, #3101, #3176).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -109158,7 +109167,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:36:11.188Z",
-      "updated": "2026-11-16T13:10:56.277Z",
+      "updated": "2026-11-17T01:49:15.571Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -109168,8 +109177,8 @@
       "title": "core.plugin loads a sandbox component chosen at run time, checked against a Jet trait, under fuel, memory and time limits",
       "body": "Destination: `plugin.load<BuildStep>(path, policy)` accepts a path computed at run time and checks at load that the component exports every trait method with the same component type (D-CORE-PLUGINPATH1=A); an optional `limits:` label takes a plugin.Limits value whose fuel and timer reset before each call and whose memory and table caps hold for the component's life (D-CORE-PLUGINLIMITS1=A). The literal form and a bare load behave as today.\n\nWhy it matters: Jetpack's compiler-extension and build-plugin hosts load plugins chosen at run time (wasmtime in the Rust engine); without this the port cannot drop wasmtime.\n\nSource: #5089 c4 (frozen #3598 item 4 holds the original).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -109212,7 +109221,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-16T13:10:58.158Z",
+      "updated": "2026-11-17T01:49:17.079Z",
       "updatedBy": "Main"
     },
     {
@@ -109221,8 +109230,8 @@
       "title": "The Jet SQLite engine in the `sql` package is complete: the sqllogictest corpus, WAL and crash recovery interoperate with C SQLite, and every SQLite 3.45 feature is ported",
       "body": "Destination: the in-Jet SQL engine, which leaves Core for the first-party `sql` package (D-DB-AUTH-HOME1=A, move card #6448), is a complete SQLite: the public sqllogictest corpus passes, WAL mode and crash recovery round-trip with C SQLite databases, and every SQL feature of SQLite 3.45 that Core/Db does not use yet is ported.\n\nWhy it matters: owner order 2026-11-09 moved full library completion to G3 (from #6695 c2 and c3); a Jet SQLite that reads and writes real SQLite files lets Jet programs drop the C library.\n\nSource: #3550 c13.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -109292,7 +109301,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:47:59.470Z",
-      "updated": "2026-11-16T13:11:01.936Z",
+      "updated": "2026-11-17T01:49:18.630Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -109302,8 +109311,8 @@
       "title": "Likely bugs are tidy errors: dead constant ranges, unconditional recursion, discarded pure results, N+1 queries and misleading loop and type shapes",
       "body": "Destination: each likely-bug pattern below is a registered tidy error (D-NO-WARNINGS1=A, #6858): `jet check` and `jet build` list it with what/why/fix text and exit non-zero; `jet run` and `jet dev` never stop on it or print it. Each has a UI snapshot for the firing program and for the accepted fix.\n\nWhy it matters: these shapes compile today and do the wrong thing quietly.\n\nDecisions: D-NO-WARNINGS1=A, D-RANGE-BACKWARD1=A, D-DISCARD1=A, D-TUPLE-ORDER1=A, D-SQL-CLASS1=A (Query class). The two-binding pairs loop is on Main's ballot list (2026-11-15).\n\nSource: Map card #6006 (Lints), batch D05 of the 2026-10-28 consolidation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -109423,7 +109432,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-16T13:11:03.810Z",
+      "updated": "2026-11-17T01:49:20.173Z",
       "updatedBy": "Main"
     },
     {
@@ -109432,8 +109441,8 @@
       "title": "No name silently wins: every shadowing and prelude-alias case is a tidy error with a rename fix",
       "body": "Destination: wherever two declarations could answer to one name and one silently wins (a local over a prelude alias, an import over a local, and the rest), `jet check` lists a registered tidy error with what/why/fix text and a `jet fix` rename; Core, Examples and the compiler are clean.\n\nWhy it matters: a silent winner changes meaning without a trace.\n\nDecisions: D-NO-WARNINGS1=A (no warnings; L codes become tidy errors or fmt rewrites, #6858 c3).\n\nSource: Map card #6006 c11-c13.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -109494,7 +109503,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:54.793Z",
-      "updated": "2026-11-16T01:16:38.578Z",
+      "updated": "2026-11-17T01:49:21.710Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -218010,6 +218019,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:49:21.710Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00gioxt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:20.173Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jt78qz",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:18.630Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gxq09x",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:17.079Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:15.571Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c038h2n6",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:14.045Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0b2xt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:12.530Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t3qh8f",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:10.986Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ujz0kr",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:09.412Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqtmrp",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:08.247Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jjbpij",
+      "note": "#32 No Core constant declaration or reference uses a leading `@`"
+    },
+    {
+      "at": "2026-11-17T01:49:07.323Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c087ot9q",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:05.754Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c065br2r",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:04.206Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0r8ohhq",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:02.632Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0v54mn1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:01.055Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pdkpef",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:59.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00zrgpr",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:57.967Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zii3oj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:56.434Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jjbpij",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:54.918Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t02esm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:53.389Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ejfsdq",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:51.862Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zutf08",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:50.320Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kgt885",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:48.888Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-17T01:48:48.888Z"
+    },
+    {
+      "at": "2026-11-17T01:48:48.088Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05ghhdo",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:46.564Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qpy1t3",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:48:44.684Z",
       "by": "Main",
