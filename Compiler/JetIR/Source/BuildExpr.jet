@@ -3193,14 +3193,14 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     // A mutating receiver still crosses as its handle: the route mutates the
     // runtime value behind it (a HandleMut carrier).
     if route.closure_method {
-        return ir_fail_slot(b, span, "handle method {route.member} with a closure")
+        return ir_fail_slot(b, span, "handle method {route.symbol} with a closure")
     }
     if route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" {
         return ir_fail_slot(b, span, "handle method {route.symbol}")
     }
     special: ir_nominal_name(ir_untag(ir_ty(p, b, receiver))) ?? ""
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" {
-        return ir_fail_slot(b, span, "{special} handle method {route.member}")
+        return ir_fail_slot(b, span, "{special} handle method {route.symbol}")
     }
     static_call: if operation == {
         .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) | .GameBackendHeadless -> true
@@ -3240,7 +3240,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         inputs.push(ir_word_const(m, b, stride))
     }
     if inputs.len() != route.borrow_mask.len() {
-        return ir_fail_slot(b, span, "handle method {route.member} with {inputs.len()} of {route.borrow_mask.len()} operands")
+        return ir_fail_slot(b, span, "handle method {route.symbol} with {inputs.len()} of {route.borrow_mask.len()} operands")
     }
     if operation == .DurationScale || operation == .DurationDivide {
         return ir_duration_scale(m, p, b, if operation == .DurationScale -> "jet_duration_scale_at" else -> "jet_duration_divide_at", inputs, ty, span)
