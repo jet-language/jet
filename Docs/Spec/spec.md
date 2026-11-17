@@ -5578,7 +5578,7 @@ stored result stands in for a run. `--docs` selects checked documentation exampl
 `--watch`, `--where=<expr>`, `--filter=<substring>`, `--shuffle[=<seed>]`,
 `--serial`, `--coverage`, `--update-snapshots` (or `-u`), `--release`, and
 `--profile=<name>` select the corresponding test-run behavior. Browser claims
-use `--browser=<engines>`, `--browser-retries=<n>`,
+use `--browser=<engines>`, `--browser-retries=<n>` (0 to 5, 0 for none),
 `--browser-reporter=<text|json|html>`, `--browser-ui`, `--browser-visual`, and
 `--browser-trace`. `jet test --browser-scaffold=<name>` runs no test: it
 creates the project `<name>` as `jet new` does, with an app that `jet dev`

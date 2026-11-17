@@ -9,3 +9,7 @@ attach_photo: fn() -[Env, Net, Time]> Bool { app.ask(app.Permission.Camera) == .
 
 // A permission chosen at run time may be any of them.
 ask_for: fn(permission: app.Permission) -[Env, Net, Time]> app.Grant { app.ask(permission) }
+
+run: fn() -[Env, Net, Time]> {
+    _: tag_task() && attach_photo() && ask_for(.Notifications) == .Granted
+}

@@ -402,8 +402,11 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
             live: sema_call_live(member, alias, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: live.value}
         }
-        if module_is_core(graph.modules[module_index].module_identity) && sema_app_field_error_refused(graph.modules[module_index].module_name, member, args, environment, program, scopes, diagnostics) {
-            return SemaMethodSpecialCheck{handled: true, value: None}
+        if module_is_core(graph.modules[module_index].module_identity) {
+            if sema_app_field_error_refused(graph.modules[module_index].module_name, member, args, environment, program, scopes, diagnostics) {
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+            sema_call_app_device(graph.modules[module_index].module_name, member, alias, span, args, environment, program, context.function_name, diagnostics)
         }
         before: diagnostics.len()
         failed: SemaMethodSpecialCheck{handled: true, value: None}
