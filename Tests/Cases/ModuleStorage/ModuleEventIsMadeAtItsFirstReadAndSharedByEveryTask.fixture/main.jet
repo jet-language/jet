@@ -1,0 +1,27 @@
+// A module event is made at its first read, once for the program, and
+// every read shares it: a task sees the listener `run` subscribed, and an
+// emit from another task reaches that listener.
+use event: core.event
+
+CLICKS: event.new<Int>()
+
+counted: fn() -> Int { CLICKS.listener_count() }
+
+sent: fn(n: Int) -> Int { CLICKS.emit(n).delivered() }
+
+joined: fn(handle: &&Task<Int>) -> Int {
+    if handle.join() == {
+        .Ok(value) -> value
+        .Err(_) -> -1
+    }
+}
+
+run: fn() {
+    app: event.scope()
+    CLICKS.on(app, fn(n: Int) { print("heard {n}") })
+    first: task counted()
+    print("the first task sees {joined(first)} listener")
+    second: task sent(7)
+    print("the second task delivered to {joined(second)} listener")
+    print("run sees {CLICKS.listener_count()} listener")
+}

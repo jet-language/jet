@@ -48,11 +48,14 @@ use jet_foundation.[
     Type,
     body_type_id,
     checked_comptime_integer_key,
+    module_text,
     name_index,
     name_intern,
     name_table,
     symbol_key,
+    symbol_key_text,
     symbol_kind_name,
+    symbol_table_key,
 ]
 
 // The fold over `program`'s run table.
@@ -91,6 +94,32 @@ sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never!
         }
     }
     None
+}
+
+// Whether `expression` makes a module event: the call `event.new<T>()` of
+// `core.event`, whose value is an `Event<T>`. The build lands no value for
+// it (its landed value is Unit); the program makes the event on its first
+// read, once per process, and every read shares it (JetIR
+// ir_event_holder_read).
+sema_comptime_module_event: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, tree: BodyTree, expression: Int) -> Bool Never! {
+    if !sema_comptime_event_type(tree.types.types[body_type_id(tree, expression)]) -> return false
+    if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .Call(callee, _, args) {
+        if args.len() != 0 -> return false
+        if program.registration_graph == .Val(graph) {
+            if callee.row.index() >= graph.decls.rows.len() -> return false
+            owner: sema_call_core_module_identity(environment, program, "core.event") ?? return false
+            wanted: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, owner), "", "new")
+            return symbol_table_key(graph.symbols, graph.decls.rows[callee.row].symbol) == wanted
+        }
+    }
+    false
+}
+
+// Whether `ty` is an `Event<T>`: a landed module value of that type is a
+// module event's (sema_comptime_module_event).
+sema_comptime_event_type: fn(ty: Type) -> Bool Never! {
+    if sema_event_handle_family(ty) == .Val(family) -> return family == "Event"
+    false
 }
 
 sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, expression_ty: Type, values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
@@ -500,10 +529,11 @@ sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
 }
 
 // The value of a constant that already landed in this run. A `Shared`
-// holder's landed value is its payload, not the holder, so it folds no read.
+// holder's landed value is its payload, not the holder, and a module
+// event's is no value, so neither folds a read.
 sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder {
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder && !sema_comptime_event_type(value.ty) {
             return Val(value.value)
         }
     }

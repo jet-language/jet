@@ -8698,10 +8698,12 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // A checked constant read: a borrow of its static object (BuildStatic.jet)
 // when its value freezes, else its compile-time value built in place; a
 // value holding a compiler value, the compiler answers (ir_host_constant).
-// A read of module storage loads its cell, and a read of a module `Shared`
-// holder shares its process cell (ir_shared_holder_read). A constant the
-// same compile-time program computes (TConstantDef.item_function) is read
-// from the cell its first reader computed (ir_computed_constant_read).
+// A read of module storage loads its cell, a read of a module `Shared`
+// holder shares its process cell (ir_shared_holder_read), and a read of a
+// module event shares the event its first reader made
+// (ir_event_holder_read). A constant the same compile-time program computes
+// (TConstantDef.item_function) is read from the cell its first reader
+// computed (ir_computed_constant_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(m, p, b, ty, key, span)
     at: p.constants.get(key) ?? return ir_fail_slot(b, span, "constant {key} without a declaration")
@@ -8711,6 +8713,9 @@ ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String
         return ir_computed_constant_read(m, p, b, definition.item_function, item, span)
     }
     if definition.shared_holder -> return ir_shared_holder_read(m, p, b, definition, span)
+    if ir_event_type(definition.ty) && !definition.is_storage {
+        return ir_event_holder_read(m, p, b, definition, span)
+    }
     if definition.is_storage {
         address: ir_storage_address(m, p, b, definition, span)
         if address < 0 -> return -1

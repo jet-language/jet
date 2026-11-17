@@ -1,0 +1,21 @@
+# A module-level `NAME: event.new<T>()` can't be computed while building,
+# as an event is a runtime handle: the program makes it at its first read,
+# once, and every read shares it. A task reads the listener `run`
+# subscribed, and an emit from another task reaches that listener, on every
+# tier and in a built program.
+fixture: ModuleEventIsMadeAtItsFirstReadAndSharedByEveryTask.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = module_event_is_made_at_its_first_read_and_shared_by_every_task.out
+step: jet run -O1 main.jet
+exit: 0
+stdout: = module_event_is_made_at_its_first_read_and_shared_by_every_task.out
+step: jet run -O2 main.jet
+exit: 0
+stdout: = module_event_is_made_at_its_first_read_and_shared_by_every_task.out
+step: jet build -O2 main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = module_event_is_made_at_its_first_read_and_shared_by_every_task.out
