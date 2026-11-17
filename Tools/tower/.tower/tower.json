@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111425,
+    "rev": 111450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -115340,8 +115340,8 @@
       "title": "C boundary types: counted pointers as lists, sized booleans, pointer-sized integers, exact Int range stops and C strings",
       "body": "Destination: C pointer and integer shapes arrive as safe Jet types: a counted pointer is a list with no copy (D-FFI-CMAP1=A), `ffi.Bool<U32>` (D-PRIM-BOOLSIZE1=A), `ffi.USize`/`ffi.ISize` (D-PRIM-USIZE1=A), an Int out of range stops with E1003 at the boundary, and C strings follow their ballot once one exists (gate row FC1).\n\nSource: #6366 c25, c29, c39, c40 and c41.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -115416,7 +115416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:31.681Z",
-      "updated": "2026-11-16T13:16:23.192Z",
+      "updated": "2026-11-17T01:51:37.314Z",
       "updatedBy": "Main"
     },
     {
@@ -115425,8 +115425,8 @@
       "title": "Jet functions cross to C as callbacks with explicit registration lifetimes, including from foreign threads",
       "body": "Destination: a named pure Jet fn or a lambda passes to C as a function pointer with a stable symbol; captured and asynchronous callbacks get an owning registration plus a borrowed event per invocation, which can request stop without waiting on itself (D-FFI-CALLBACK2=A, D-FFI-CONCUR1=A); a callback that re-enters Jet from a foreign thread completes on a Jet task.\n\nSource: #6366 c10, c13 and c31, plus its known-failing row for foreign_callback_reenters_jet_and_completes_on_a_jet_task.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -115487,7 +115487,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:32.582Z",
-      "updated": "2026-11-16T20:36:59.633Z",
+      "updated": "2026-11-17T01:51:41.062Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -115497,8 +115497,8 @@
       "title": "Foreign calls carry checked facts: derived effects, evidence per fact, out-of-bounds reach probes, and header-driven C++",
       "body": "Destination: each ownership, lifetime, effect and failure fact on a foreign row carries its basis and artifact coverage (D-FFI-CONTRACT1=A, D-FFI-FACTS1=A); foreign effects are derived from the locked artifact, never declared by hand; each extern form has a probe of what Jet memory a stray foreign write can reach; and C++ is adopted through the header-driven binder and ordinary Jet calls (D-CPPINTEROP1=A).\n\nSource: #6366 c30, c32, c36 and c38. Design: Docs/proposals/ffi-perfect-boundary-2026-10-31.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -115564,7 +115564,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:33.507Z",
-      "updated": "2026-11-16T13:16:30.311Z",
+      "updated": "2026-11-17T01:51:44.988Z",
       "updatedBy": "Main"
     },
     {
@@ -115573,8 +115573,8 @@
       "title": "`use x: <lang>.<lib>` resolves the generated binding cache for every active foreign language, and planned ones stay reserved with clear errors",
       "body": "Destination: the resolver reads `.jet/bindings/<lang>/` for every active foreign root (D-FFI-LANG1=A, D-FFI-BINDER1=A) instead of reporting E1002 ReservedRootShadowed; planned roots (swift) stay reserved with E1002; a cache without a descriptor stamp fails closed; COM is honestly Windows-gated; binder errors (E0956, E3208) name the real cause.\n\nSource: #6366 c3, c4, c17, c18 and c27, plus its known-failing rows for the js and com imports. The 2026-11-12 diagnosis on #6366: the rule is jet_driver_check_reserved_import (Loader.jet:2956).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -115679,7 +115679,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:34.653Z",
-      "updated": "2026-11-16T13:16:37.815Z",
+      "updated": "2026-11-17T01:51:50.121Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -115689,8 +115689,8 @@
       "title": "Language binders run real foreign code: Python, JavaScript, Lua, Ruby, Perl, PHP, R, Go, COBOL and Octave",
       "body": "Destination: each ratified language binder (D-FFI-PY1, -JS1, -LUA1, -RUBY1, -PERL1, -PHP1, -R1, -GO1, -COBOL1, -OCTAVE1) is a Jet package implementing trait Language (D-FFI-LANG1=A, #6519), generates its `.jet/bindings/<lang>/` module, and runs real foreign code with its ratified host model. PowerShell is #6942.\n\nSource: the #6366 known-failing rows for the *_bind and sidecar cases. Each needs the binding-cache resolver (#6949).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -115813,7 +115813,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:35.988Z",
-      "updated": "2026-11-16T13:16:48.670Z",
+      "updated": "2026-11-17T01:51:52.760Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -115823,8 +115823,8 @@
       "title": "User Rust crates in native programs: offline cargo, builds inside packages, foreign panics as stops, and undo hooks",
       "body": "Destination: a native Jet program uses a user Rust crate (D-FFI-RUST1=A, D-FFI-RUSTIMPORT1=A): cargo metadata forwards only CARGO_NET_OFFLINE, extern rust builds inside a package, a foreign panic stops as E3014 with one Jet source frame, and #Undo inverses of extern rust calls run with distinct identities across modules.\n\nSource: #6366 c6 and c15, plus its known-failing rows for transact_ffi_with_undo and cross_module_foreign_undo_bindings. E3014 must be registered again with its emitter (2026-11-12 log on #6366).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -115884,7 +115884,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:57:37.375Z",
-      "updated": "2026-11-16T13:16:52.800Z",
+      "updated": "2026-11-17T01:51:54.867Z",
       "updatedBy": "Main"
     },
     {
@@ -115893,8 +115893,8 @@
       "title": "`jet generate` runs a checked #Job generator explicitly, previews and applies writes atomically, and records a reproducible receipt",
       "body": "Destination: D-DX-GENERATE1=A is built. A #Job with `generates:` and `inputs:` metadata is a source generator; `jet generate <Job>` previews and `--apply` writes every declared output atomically after an authority check; build and test never run generation; an unchanged plan gives an identical receipt.\n\nWhy: generated source must be reviewable and reproducible, never a hidden build side effect.\n\nSource: #3693 c14-c18 (carried from #2442). Decision: D-DX-GENERATE1=A (reuse #Job for generators).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -116062,7 +116062,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:02:12.854Z",
-      "updated": "2026-11-16T13:17:09.847Z",
+      "updated": "2026-11-17T01:51:58.095Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -116072,8 +116072,8 @@
       "title": "The gauntlet scores every cell by one peer law: in-group Jet/peer below 1.00 per metric, AOT against systems peers, run and dev against Python and JS, tiers as context only",
       "body": "Destination: the gauntlet harness, its status projection, the integrated gate and the Tower view apply one comparison law. AOT builds are scored against Rust, C, Zig and Go; `jet run` and `jet dev` are scored separately against Python and JavaScript; Node, Bun and Vite stay required web-development comparisons against `jet dev`; the main chart has one JS column and no Node or expert columns; the four peer tiers (scripting, managed, systems, ceiling) are reporting context only.\n\nWhy: a speed claim is only as honest as its comparator. A missing, mismatched or averaged result must never pass, and an out-of-group comparison must never block.\n\nDecisions and rulings: AGENTS.md performance gate (Jet/peer < 1.00 with no Rust band, then Jet/ceiling <= 1.00 against Tools/perf/asm-parity); owner directions 2026-09-14 (group split, one JS column, hide expert columns) and 2026-11-08 (four tiers); D-PERF-RUNCELL2=A (the `jet run` wait is gated against Lua, LuaJIT, Python and Node), which supersedes D-PERF-RUNCELL1=B. Historical receipts are immutable.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; carries the merged #3404 harness-split criteria.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -116436,7 +116436,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:38.317Z",
-      "updated": "2026-11-16T13:17:42.373Z",
+      "updated": "2026-11-17T01:52:00.745Z",
       "updatedBy": "Main",
       "criteriaLastN": 37
     },
@@ -116597,8 +116597,8 @@
       "title": "Every conformance, corpus and witness program gives the same answer on O0, O1 and O2, and routing canaries catch a silent tier change",
       "body": "Destination: the Core conformance census and the gauntlet corpus run byte-identical on O0, O1 and O2; every public Core item maps to a value-consuming conformance row or an owner-ratified exclusion; a clean `jet check` followed by `jet run` and `jet build` never fails in the compiler on the witness corpus; and canaries fail when a command silently changes its tier or falls back.\n\nWhy: I9 (one meaning on every tier) is the precondition for every speed number; a faster wrong answer is not a result.\n\nDecisions: I9 tiers O0, O1, O2 and web (D-EXEC2=A: no interpreter or JIT).\n\nSource: split from #2858 (measurement gate) on 2026-11-15; rows came from #2286, #2334, #2389, #2270 and the merged #2859 (#1027, #1028).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -116667,7 +116667,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:40.307Z",
-      "updated": "2026-11-16T13:17:47.657Z",
+      "updated": "2026-11-17T01:52:03.322Z",
       "updatedBy": "Main"
     },
     {
@@ -116676,8 +116676,8 @@
       "title": "Thirty frozen puzzles, both parts, measured against every peer on every tier",
       "body": "Destination: thirty puzzle IDs, both parts, are frozen with a stated selection rationale before any Jet measurement; each comparison language has a complete, natural solution; an independent oracle and owned fixtures establish both answers; and all sixty part cells are measured against every applicable peer under the peer law.\n\nWhy: a broad set of small, varied programs catches losses that a few showcase workloads hide.\n\nDecisions: the peer law and groups live on #6953. Neither official puzzle prose nor personal inputs are redistributed.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; rows came from #3407 and #3408.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -116755,7 +116755,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:41.268Z",
-      "updated": "2026-11-16T13:17:52.577Z",
+      "updated": "2026-11-17T01:52:06.289Z",
       "updatedBy": "Main"
     },
     {
@@ -116764,8 +116764,8 @@
       "title": "Core library speed claims each have a paired cell that passes the performance gate: iterators, collections, allocators, codecs, dataframes, byte loops, gathers and FFT",
       "body": "Destination: every Core surface that claims to be fast or zero-cost has a paired cell in the canonical performance manifest against the plain spelling or a matched peer, and passes the performance gate before the claim is published.\n\nWhy: a zero-cost or speed claim without a matched measurement is a guess (owner direction: diagnose before discarding, retest when the precondition lands).\n\nDecisions: AGENTS.md performance gate; owner order 2026-11-11 holds small optimizations until the language is mostly stable, so these cells measure and record, and a loss names its root on #6756. D-LANES-GATHER1 stays a draft ballot until its cell wins.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; each criterion names the feature card it measures.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -116897,7 +116897,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:42.185Z",
-      "updated": "2026-11-16T13:18:04.680Z",
+      "updated": "2026-11-17T01:52:10.684Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -116907,8 +116907,8 @@
       "title": "Safety checks and runtime hooks cost nothing measurable: pause checks, diagnostic chains, unused context hooks, drop glue, exit teardown, checked pointer reads and the hardened profile",
       "body": "Destination: each always-on safety mechanism and runtime hook has a measured cost within the gate's rules: loop-turn pause checks, the diagnostic chain, unused context hooks, boxed trait drop glue, the exit flag in inlined refcount release, checked raw-pointer reads, the checking-mode test run and the hardened profile.\n\nWhy: safety that costs measurable speed gets turned off; Jet's promise is that safe code is also fast code.\n\nDecisions: D-TASK-SLICE1 (busy-task loop-turn checks), D-HOOK-RUNTIME1=A (hooks cost nothing when unused); AGENTS.md performance gate.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; each criterion names the feature card it measures. The c140 root analysis (2026-11-12, G11Speed-4) is in the #2858 log.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117022,7 +117022,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:43.094Z",
-      "updated": "2026-11-16T13:18:13.694Z",
+      "updated": "2026-11-17T01:52:16.822Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -117032,8 +117032,8 @@
       "title": "Web features prove their speed: first result beats JS and Rust, and each automatic web form beats the hand-written code it replaces",
       "body": "Destination: Jet web's first result beats JS and Rust; every performance-relevant framework element has a gauntlet cell against the best framework for it; each automatic form (secret fencing, wire-skew checks, reactive plain data, compiler-decided invalidation, optimistic updates, resumable pages) passes a paired cell against the hand-written form it replaces; and the jet dev study timings are rerun with the gauntlet method.\n\nWhy: automatic web features are only worth having if they are at least as fast as the code a careful developer writes by hand.\n\nDecisions: D-SECRETEDGE1, D-WIRESKEW1, D-REACT-REF1, D-INVALIDATE1, D-OPTIMISTIC1, D-RESUME1, D-WEB-IMAGE1=A; AGENTS.md performance gate.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; each criterion names the feature card it measures.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117165,7 +117165,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:44.060Z",
-      "updated": "2026-11-16T13:18:26.181Z",
+      "updated": "2026-11-17T01:52:21.617Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -117175,8 +117175,8 @@
       "title": "Tool latency is measured against the best peer: edit-to-verdict, Core activation, LSP, package lowering, install and memory profiling",
       "body": "Destination: the developer-facing tools have measured latency and cost against their best peers: cancellation and edit-to-verdict under a repeated-edit stream, Core battery activation cost, LSP hover and diagnostics against tsserver, build time with lazy package lowering, install-to-hello against Deno and Bun, and `jet perf` sampling overhead against py-spy.\n\nWhy: developer experience is mostly waiting; each of these waits is a number Jet can lose on.\n\nDecisions: AGENTS.md performance gate; no zero-cost claim from dead-code elimination alone.\n\nSource: split from #2858 (measurement gate) on 2026-11-15; each criterion names the feature card it measures.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117254,7 +117254,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:19:45.070Z",
-      "updated": "2026-11-16T13:18:31.939Z",
+      "updated": "2026-11-17T01:52:25.361Z",
       "updatedBy": "Main"
     },
     {
@@ -117263,8 +117263,8 @@
       "title": "Number-crunching kernels beat Rust: Decimal parse, add and format, fixed-width byte loops, and integer mod and div",
       "body": "Destination: the arithmetic kernels behind csvtransform, embedded-data and embedded-sensor-ring are faster than Rust at O2: Decimal parse, add and format; the fixed-width take_pattern and byte checksum loops; and integer mod and div. Output stays byte-identical and the Decimal, bigint-promotion and checked-arithmetic tests are unchanged.\n\nWhy: these kernels sit under every data and embedded workload; a slow kernel loses every cell built on it.\n\nDecisions: AGENTS.md performance gate. Owner order 2026-11-11 holds small optimizations until the language is mostly stable, so a fix goes in the general mechanism, never a per-entry trim.\n\nSource: split from #2865 (text pipelines) on 2026-11-15; the rows came from #2866, #2871 and #2872.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -117315,7 +117315,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:47.408Z",
-      "updated": "2026-11-16T13:18:34.807Z",
+      "updated": "2026-11-17T01:52:28.195Z",
       "updatedBy": "Main"
     },
     {
@@ -117324,8 +117324,8 @@
       "title": "Values move without hidden copies: no list clone in elementwise loops, a field read clones one field, and moving a large struct is not a bulk copy",
       "body": "Destination: an elementwise `c[i] = a[i] + b[i]` loop over 20M elements runs in under 0.1 s with no list clone; a stored-field read such as `self.width` clones only that field; returning a large struct and moving it into a list does no bulk copy; and each gauntlet cell reports its bulk-copy count.\n\nWhy: hidden copies are the main way a safe language loses to C on memory and time; Jet promises value semantics without paying for them.\n\nDecisions: copying is explicit `.copy()` (the retired `~`); AGENTS.md performance gate. Ownership, alias, order, bounds, cleanup and error-location semantics must not change.\n\nSource: split from #2865 (text pipelines) on 2026-11-15; the rows came from #2890, #3735 and #4178.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -117413,7 +117413,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:48.351Z",
-      "updated": "2026-11-16T13:18:41.527Z",
+      "updated": "2026-11-17T01:52:31.045Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -117423,8 +117423,8 @@
       "title": "A recursive list builder of a million elements is stack-safe on every tier",
       "body": "Destination: a recursive function that builds a list element by element (cons-style) runs for 1,000,000 elements without exhausting the stack on O0, O1 and O2, with stack depth and time measured first; if it is not already stack-safe, one shared JetIR tail-recursion-modulo-cons transform makes it so.\n\nWhy: recursion is the natural way to write many list builders; a stack overflow at scale pushes users to rewrite correct code.\n\nDecisions: I9 (one meaning on every tier); one shared JetIR transform, no per-backend fix.\n\nSource: split from #2865 (text pipelines) on 2026-11-15.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117457,7 +117457,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:49.254Z",
-      "updated": "2026-11-16T13:18:42.450Z",
+      "updated": "2026-11-17T01:52:33.878Z",
       "updatedBy": "Main"
     },
     {
@@ -117466,8 +117466,8 @@
       "title": "Nested joins never hang: a join on a child that has not started runs it, whatever the task count",
       "body": "Destination: with more running tasks than about (cores+8)/2, nested joins finish instead of hanging. A join on a child that has not started yet runs that child on the joining thread, or an equivalent that never deadlocks.\n\nWhy: today every thread waits in futex_wait on a task that never gets a worker, because the scheduler adds at most 8 workers to cover blocked waits (Compiler/JetRuntime/Source/Scheduler.jet). It was found by TestSpeedLead on 2026-11-05: a testkit pool whose entries each join a child and its resident watcher task hangs on the AOT and run tiers, and JET_SCHEDULER_THREADS=256 is the workaround.\n\nDecisions: I9 (one meaning on every tier).\n\nSource: split from #5910 c59 on 2026-11-15.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -117510,7 +117510,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-16T13:18:43.391Z",
+      "updated": "2026-11-17T01:52:37.077Z",
       "updatedBy": "Main"
     },
     {
@@ -117519,8 +117519,8 @@
       "title": "Measurement helpers are proven: `keep(x)` holds benchmarked work on every tier and `compare` records replayable differences",
       "body": "Destination: `keep(x)` (D-BENCH-KEEP1=A, an always-available Prelude identity sink) stops the optimizer from deleting measured work on O0, O1 and O2, and Core Testing's `compare(cases, reference, candidate, relation)` (D-TEST-COMPARE1=A) returns a comparison record whose differences replay. Both exist on dev (Compiler/Prelude/Core.rows keep row; Core/Testing/Testing.jet compare) but no test proves either behavior.\n\nWhy: every performance cell relies on the work it times not being optimized away, and A-against-B claims rely on a comparison that can be replayed.\n\nDecisions: D-BENCH-KEEP1=A, D-TEST-COMPARE1=A, D-CLAIM-BENCH1=A (shipped in #2082; its retired-spelling teaching rows go with #6637 c11).\n\nSource: split from #5910 c40 on 2026-11-15; D-MEGAPROJ1 went to #6311.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -117571,7 +117571,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:08.825Z",
-      "updated": "2026-11-16T13:18:46.176Z",
+      "updated": "2026-11-17T01:52:42.789Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -117581,8 +117581,8 @@
       "title": "Caches are off by default: every run and build compiles live, and the retired cache stores are gone",
       "body": "Destination: `jet file.jet`, `jet run` and `jet build` compile live every time by default; no kept program, result cache, build store or incremental state serves a run unless the user opts in through an existing switch; and the retired cache stores and their environment switches are deleted.\n\nWhy: owner order 2026-11-11, caches off. Cold compile time is what users feel, and a cache hides it from every measurement.\n\nDecisions: owner order 2026-11-11 (caches off; any new public opt-in spelling goes to a ballot and nothing else changes until it is ratified). The kept-program cache removal itself is #6328 c24.\n\nSource: #6527 c9 and c12 and #6639 c6, gathered 2026-11-15.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -117652,7 +117652,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:33:26.136Z",
-      "updated": "2026-11-16T13:18:48.047Z",
+      "updated": "2026-11-17T01:52:46.423Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -117662,8 +117662,8 @@
       "title": "The build graph runs deterministically and shows its work: ordered scheduling, the ratified pools, alias-safe step outputs and the build board",
       "body": "Destination: `jet build` schedules a graph deterministically (longest remaining path, then key; only the ratified pools cpu, memory, linker, console and gpu; a failure cancels only its dependents), refuses a step output reached through an aliased read folder, and shows its work on a TTY board of at most 8 lines with one final receipt line, plus `--json` NDJSON and `--trace` Chrome trace output.\n\nWhy: a build users can trust gives the same order and diagnostics every run and shows progress without flooding the terminal.\n\nDecisions: D-BUILD-UI1=A (what jet build shows while it works). The owner's acceptance of the board look is on Main's ballot list (2026-11-15).\n\nSource: #6682 c8, c9 and c10 (from #2514 c10 and c11, #2526 and #2527), moved 2026-11-15 because they are build-executor behavior, not the project build function.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117783,7 +117783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:35:08.120Z",
-      "updated": "2026-11-16T13:18:55.160Z",
+      "updated": "2026-11-17T01:52:52.377Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -117793,8 +117793,8 @@
       "title": "Compiler and runtime stacks hold: valid programs never overflow the compiler stack, thread stacks are sized by measurement, and the hosted CLI links glibc dynamically",
       "body": "Destination: small valid programs never overflow the compiler stack under `jet run`; native jet compiles deep programs at the default 8 MiB `ulimit -s`; runtime threads reserve a stack sized by measurement instead of a fixed 192 MiB; and the Jet linker produces the dynamically linked glibc image the hosted CLI needs (D-OS-FLOOR1).\n\nWhy: a compiler crash on a valid program, or a thread reservation far above need, costs users more than any speed win; the glibc link is the last piece of the hosted CLI path.\n\nDecisions: D-OS-FLOOR1 (glibc floor for the hosted CLI); I9 (one meaning on every tier).\n\nSource: split from #6328 (binary size) on 2026-11-15 with Main approval; c7, c9 and c10 there came from #4919 (#4689, #4964, #5467) and c8 from #4768. No linker card owns the dynamic glibc link, so it rides here.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117855,7 +117855,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:39:10.355Z",
-      "updated": "2026-11-16T13:18:59.063Z",
+      "updated": "2026-11-17T01:52:55.668Z",
       "updatedBy": "Main"
     },
     {
@@ -117864,8 +117864,8 @@
       "title": "Data costs what it should: packed list strides, non-atomic unshared reference counts, unboxed scalar options and allocation-free aggregate captures",
       "body": "Destination: `[Bool]` and `[U8]` lists store one byte per element and `[I32]` four; reference counts are atomic only for values shared across tasks; an Option of a scalar is never heap-boxed; and capturing an aggregate in a closure allocates a flat count.\n\nWhy: representation overheads multiply through every program; a hand-written version pays none of them.\n\nDecisions: AGENTS.md performance gate; owner hold 2026-11-11 (architecture and regression fixes first, no small tuning during language churn), so each fix goes in the general representation, proven on a second program.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5471, #5475), #5469 and #5919.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -117926,7 +117926,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:50.756Z",
-      "updated": "2026-11-16T13:19:03.098Z",
+      "updated": "2026-11-17T01:53:00.313Z",
       "updatedBy": "Main"
     },
     {
@@ -117935,8 +117935,8 @@
       "title": "Hot loops emit what a hand-writer would: tag compares, no entry uniqueness test, range-only slices, cheap appends, two-instruction stop polls and no frame traffic",
       "body": "Destination: the hot code `jet build` emits for common shapes matches a hand-written version: fieldless enum compare is a tag compare; a borrowed list parameter does no uniqueness test on entry; slicing touches only its range; interpolated append is cheaper than Rust; a loop stop poll costs at most 2 hot instructions; and loops with at most 9 live general values touch no stack frame.\n\nWhy: these shapes sit inside nearly every hot loop; each extra instruction is paid on every iteration.\n\nDecisions: AGENTS.md performance gate; owner hold 2026-11-11 (no small tuning during language churn), so each fix is general and proven on a second program.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5473), #6362, #6363, #6472 and #6478.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -118041,7 +118041,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:51.726Z",
-      "updated": "2026-11-16T13:19:10.914Z",
+      "updated": "2026-11-17T01:53:04.383Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -118051,8 +118051,8 @@
       "title": "One verified optimizer pipeline: O0 is the reference, passes are canonical and deterministic, stale facts fail closed, and adaptive rebuild is opt-in",
       "body": "Destination: one target-neutral, ordered IR optimization pipeline produces deterministic canonical bytes and stores its facts once; every pass is checked against O0 as reference semantics; stale or malformed facts fail closed; and adaptive rebuild from a run record (D-ADAPTIVE-TIER1=B) exists as an opt-in.\n\nWhy: optimization is only worth having if it never changes meaning; a single canonical pipeline is also what makes speed work repeatable.\n\nDecisions: D-ADAPTIVE-TIER1=B (opt-in, owner ruling); I9.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #5925 (#5064), #2886, #2912, #2951, #3038 and #4571 (frozen #4571 holds the same adaptive work).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -118166,7 +118166,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:52.679Z",
-      "updated": "2026-11-16T13:19:20.355Z",
+      "updated": "2026-11-17T01:53:08.065Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -218020,6 +218020,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:53:08.066Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lpm2b4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:04.383Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05y3url",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:00.313Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pwthed",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:55.668Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01642i8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:52.377Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0r1ln6j",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:46.423Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wf4a3e",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:42.791Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oymlrt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:37.078Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ywczn1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:33.878Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vucs0t",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:31.045Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gwtnue",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:28.195Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01b7gdb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:25.361Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0phknv8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:21.617Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08skdgk",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:16.823Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0st48tc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:10.688Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0drsy4b",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:06.289Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ylzrny",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:03.322Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ipkmlg",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:52:00.745Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lt36hf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:58.095Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0brgvda",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:54.867Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ru6u3t",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:52.760Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04wn01h",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:50.121Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0itin1p",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:44.989Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zvan7c",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:41.062Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kkogun",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:51:37.315Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05nyh21",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:51:31.264Z",
       "by": "Main",
