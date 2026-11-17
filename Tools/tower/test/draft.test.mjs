@@ -22,7 +22,7 @@ function board() {
   s.decisions.push({ id: 'D-READY', cardId: card.id, title: 'Ready choice', status: 'open', draft: false });
   return { s, card };
 }
-const draftError = e => e.code === 'E_DRAFT' && /D-DRAFT.*draft ballot.*marked ready/.test(e.message);
+const draftError = e => e.code === 'E_DRAFT' && /D-DRAFT.*draft ballot \(drafted\).*reviewed and posted/.test(e.message);
 
 test('owner projections hide drafts, associated activity/questions and Now links without changing agent data', () => {
   const { s, card } = board();
@@ -141,7 +141,7 @@ test('HTTP board/card and mutation state hide drafts; clearance, batch and verdi
     assert.equal(JSON.parse(show.stdout).draft, true);
     const verdict = cli(['verdict', '#1', '--outcome', 'A', '--supersedes', 'D-DRAFT', '--by', 'owner']);
     assert.notEqual(verdict.status, 0);
-    assert.match(verdict.stderr, /D-DRAFT.*draft ballot.*marked ready/);
+    assert.match(verdict.stderr, /D-DRAFT.*draft ballot \(drafted\).*reviewed and posted/);
     const readyVerdict = await post('verdict', { id: card.id, outcome: 'A', supersedes: 'D-READY', by: 'owner' });
     assert.equal(readyVerdict.status, 200, JSON.stringify(readyVerdict.body));
   } finally {

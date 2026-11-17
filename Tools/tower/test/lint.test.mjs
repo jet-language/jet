@@ -28,7 +28,7 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
   + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
 
 const ballot = (extra = {}) => ({
-  ballotMode: 'full', situation: SITUATION,
+  ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2',
   reviewPasses: {
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
@@ -144,7 +144,7 @@ test('ballot-gaps: flags an open non-draft decision missing ballot fields', () =
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: ballot().reviewPasses }));
   // simulate a gap slipping past the write-time E_BALLOT gate (e.g. hand
-  // migration, or a draft flipped without going through --ready)
+  // migration, or a draft flipped without going through decision post)
   st.mutate((s) => { s.decisions[0].draft = false; });
   const findings = ruleBallotGaps(st.load());
   assert.equal(findings.length, 1);
@@ -192,6 +192,7 @@ test('stale-draft: flags a draft older than 7 days', () => {
   assert.equal(findings.length, 1);
   assert.equal(findings[0].rule, 'stale-draft');
   assert.equal(findings[0].ref, 'D-1');
+  assert.match(findings[0].msg, /^D-1 draft \(drafted\) untouched \d+d — get it reviewed \(decision review\) or drop it$/);
 });
 
 // ---- 6. orphan-blockers -------------------------------------------------------------

@@ -84,8 +84,9 @@ Load the smallest slice. Never hand-edit `Tools/tower/.tower/*.json`.
    design slice that breaks an invariant, duplicates a mechanism, burdens
    beginners without need, or hides expert control.
 5. For each surviving gate, use `tower-ballot`: keep incomplete fields and
-   reader evidence in its scratch file. Submit a valid draft, then explicitly
-   use `--ready` and read back the owner gate when the ballot is complete. Use
+   reader evidence in its scratch file. Submit a valid draft, have a fresh
+   agent run `decision review`, then `decision post` it and read back the
+   owner gate when the ballot is complete. Use
    `short` for one mechanism with at most three options; use `full` for new
    syntax, invariant carve-outs, or owner-tagged full cards. Full ballots use
    one fresh adversarial reader; see the [ballot review mechanics](../../../../.agents/skills/orchestration/references/ballot-review.md).
@@ -119,7 +120,8 @@ skill structure clearer. These style rules do not authorize product work.
   stored `building`/`verify` (`Review`) phase.
 - Every blocked or external card is listed with its actual reason.
 - Done and frozen cards are counted but not touched.
-- Every open decision is ready, or explicitly a draft with a reason.
+- Every open decision is posted, or explicitly a draft (`tower ballots`
+  shows its stage) with a reason.
 - No implementation diff, product proof, or card closure landed under the
   guise of preparation.
 - The owner receives complete phase-and-lane accounting and a suggested

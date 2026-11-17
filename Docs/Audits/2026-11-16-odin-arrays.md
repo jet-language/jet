@@ -27,9 +27,9 @@ quotes what the probe printed, or the first diagnostic code it reported.
   same need. The row names the decision.
 
 **Links.** A row that is not PASS names an open card criterion, a ratified
-ballot that is not built yet, or a ballot that is still needed. Ballots still
-needed are listed in section 9. Under I7, a feature with no ratified spelling
-is not built until the owner rules on it.
+ballot that is not built yet, or an open owner ballot. The open owner ballots
+are listed in section 9. Under I7, a feature with no ratified spelling is not
+built until the owner rules on it.
 
 ## 2. Fixed arrays
 
@@ -51,7 +51,7 @@ Odin headings: Fixed arrays, Array programming, Array casts, Slices.
 | A12 | bit operators `&`, `\|`, `~`, `&~` between arrays | `a.bit_and(b)` on `[Int#3]` | E0311 | MISSING | #6177 c2 |
 | A13 | compound assignment, `a += b` | `a := …; a += b` on `[Int#3]` | E0109 | MISSING | #6177 c2 (follows from A8) |
 | A14 | nested arrays, `[2][2]i32` | `[[Int#2]#2]{…}; m[1][0]` | `3` | PASS | — |
-| A15 | array cast, `cast([4]f32)a`, applied to each element | `[Float#4]{a}` | E0963; `a.map(…)` gives a `[Float]` list, not `[Float#4]` | PARTIAL | ballot needed (section 9, B1) |
+| A15 | array cast, `cast([4]f32)a`, applied to each element | `[Float#4]{a}` | E0963; `a.map(…)` gives a `[Float]` list, not `[Float#4]` | PARTIAL | D-ARRAY-CONVERT1 (section 9, B1) |
 | A16 | slicing a fixed array, `a[1:4]` | `a[1..<4]` | `[1, 1, 2]` | PASS | — |
 | A17 | iterating, `for x in a` | `loop x in a -> print(x)` | `1 2 3` | PASS | — |
 | A18 | a fixed array passed where a slice is taken | `total(a)` with `total: fn(xs: [Int])` | `6`; the array is copied into a list (Examples/Collections/FixedArrays.jet) | PARTIAL | D-ARRAY-WINDOW1=A (ratified, not built: the array should be passed as a read window) |
@@ -73,7 +73,7 @@ length.
 | W5 | `rgba` names | `col.r`, `col.rgb` on `Vec4` | E0302 | MISSING | #6177 c3 |
 | W6 | swizzle write on a fixed array | `a.xy = …` on `[Float#3]` | E0302 (as W1) | MISSING | #6177 c3 |
 | W7 | swizzles on every lane type | `i.x` on `I32x4` | E0302; only `F32x4` and `F64x2` swizzle | PARTIAL | #6177 c3 |
-| W8 | `swizzle(a, 2, 1, 0)`, by index, any length | `a.swizzle(2, 1, 0)` on `[Float#3]` | E0311 | MISSING | ballot needed (section 9, B2) |
+| W8 | `swizzle(a, 2, 1, 0)`, by index, any length | `a.swizzle(2, 1, 0)` on `[Float#3]` | E0311 | MISSING | D-ARRAY-SHUFFLE1 (section 9, B2) |
 | W9 | overlapping write refused | `v.xx = …` (Tests/UI/swizzle_overlap_write.jet) | E3111 | PASS | — |
 
 ## 4. Enumerated arrays
@@ -111,9 +111,9 @@ heap `Matrix<M, N>` of core.compute, whose shape is checked while compiling.
 | M14 | `matrix_flatten(m)`, column-major | `m.to_array()` | the 9 floats in column order | PASS | — |
 | M15 | `determinant`, `adjugate`, `inverse`, `inverse_transpose`, `hermitian_adjoint`, `matrix_trace`, `matrix_minor` | `m.determinant()` on `Mat3`; core.compute `det`, `inv` | E0102 on `Mat3`; core.compute has `det`, `inv`, `eye` and `solve` for its heap matrices | PARTIAL | D-ARRAY-INVERSE1=A (ratified, not built); #6177 c4 |
 | M16 | `conj(m)` for complex elements | `m.conj()` on `Mat3` | E0102; there are no complex matrices | MISSING | #6177 c4 |
-| M17 | cast to a smaller or larger square matrix | `Mat4{m}` with `m: Mat3` | E0303 | MISSING | ballot needed (section 9, B3) |
-| M18 | cast between non-square shapes with the same element count | `reshape` in Core/Compute/Compute.jet | heap tensors only; nothing for `Mat3` or `Mat4` | PARTIAL | ballot needed (section 9, B3) |
-| M19 | `#row_major` storage | `Mat3.from_rows(…)` | E0311; column-major only | MISSING | ballot needed (section 9, B4) |
+| M17 | cast to a smaller or larger square matrix | `Mat4{m}` with `m: Mat3` | E0303 | MISSING | D-ARRAY-MATRESIZE1 (section 9, B3) |
+| M18 | cast between non-square shapes with the same element count | `reshape` in Core/Compute/Compute.jet | heap tensors only; nothing for `Mat3` or `Mat4` | PARTIAL | D-ARRAY-MATRESIZE1 (section 9, B3) |
+| M19 | `#row_major` storage | `Mat3.from_rows(…)` | E0311; column-major only | MISSING | D-ARRAY-ROWMAJOR1 (section 9, B4) |
 
 ## 6. Complex numbers and quaternions
 
@@ -124,9 +124,9 @@ Odin heading: Complex numbers and quaternions.
 | Q1 | complex type and `+ - * /` | `c: Complex(3.0, 4.0); c * c` | `-7 + 24i` | PASS | — |
 | Q2 | `abs(c)` | `c.abs()` | `5.0` | PASS | — |
 | Q3 | `real(c)`, `imag(c)` | `c.real`, `c.imaginary` | `3.0`, `4.0` | PASS | — |
-| Q4 | `conj(c)` | `c.conj()` | E0102 | MISSING | ballot needed (section 9, B5: the method name) |
+| Q4 | `conj(c)` | `c.conj()` | E0102 | MISSING | D-ARRAY-CONJ1 (section 9, B5: the method name) |
 | Q5 | imaginary literal with a float, `3.0 + 4.0i` | `c := 3.0 + 4.0i` | E0133: `+` between Decimal and Complex | MISSING | #4730 c5 |
-| Q6 | complex32, complex64 and complex128 widths | `Complex<F32>(3.0, 4.0)` | E0119: `Complex` is Float only | PARTIAL | ballot needed (section 9, B6) |
+| Q6 | complex32, complex64 and complex128 widths | `Complex<F32>(3.0, 4.0)` | E0119: `Complex` is Float only | PARTIAL | D-ARRAY-COMPLEXT1 (section 9, B6) |
 | Q7 | quaternion type, `1 + 2i + 3j + 4k` | `Quaternion(1.0, 0.0, 0.0, 0.0)` | E0102 | MISSING | D-ARRAY-QUAT1=A; #4730 c1 |
 | Q8 | quaternion arithmetic, and rotating a vector | `q * q` | E0102 (no type) | MISSING | #4730 c1, c2 |
 | Q9 | `q.x`, `q.w`, `q.xyz` read and write | `q.xyz` | E0102 (no type) | MISSING | D-ARRAY-QUAT1=A; #4730 c1 |
@@ -142,14 +142,14 @@ to `U64x4`).
 |---|---|---|---|---|---|
 | S1 | `#simd[4]f32`, lane-wise `+ - * /` | `a * b + a` on `F32x4` | `[11.0, 22.0, 33.0, 44.0]` | PASS | — |
 | S2 | integer lanes, lane-wise arithmetic | `a + a`, `a * a` on `I32x4` | `[2, 4, 6, 8]`, `[1, 4, 9, 16]` | PASS | — |
-| S3 | a scalar broadcast to every lane, `a * 2` | `a * 2.0` on `F32x4`; `F32x4.splat(10.0)` | E2511; `splat` runs | PARTIAL | ballot needed (section 9, B7) |
+| S3 | a scalar broadcast to every lane, `a * 2` | `a * 2.0` on `F32x4`; `F32x4.splat(10.0)` | E2511; `splat` runs | PARTIAL | D-ARRAY-LANEBCAST1 (section 9, B7) |
 | S4 | `simd.extract(c, 2)` | `c[2]` | `33.0` | PASS | — |
 | S5 | `simd.replace` | `a.x = F32{9.0}` on `F32x4` | `[9.0, 2.0, 3.0, 4.0]` | PASS | — |
 | S6 | `simd.reduce_add_ordered` and the other reductions | `c.sum()`, `c.reduce(.Max)` | `110.0`, `4.0` | PASS | — |
 | S7 | `simd.to_array` | `c.to_array()` | `[11.0, 22.0, 33.0, 44.0]` | PASS | — |
 | S8 | `simd.lanes_lt` and the other lane-wise comparisons | `a.lanes_lt(b)` | E0102 | MISSING | D-ARRAY-LANESCMP1=C (ratified, not built) |
 | S9 | `simd.select(mask, a, b)` | `m.select(a, b)` | E0102 (no mask) | MISSING | D-ARRAY-LANESCMP1=C (the `Lanes<Bool, N>` mask) |
-| S10 | lane-wise conversion, `cast(#simd[4]i32)a` | `a.to_i32x4()` | E0102 | MISSING | ballot needed (section 9, B1, with A15) |
+| S10 | lane-wise conversion, `cast(#simd[4]i32)a` | `a.to_i32x4()` | E0102 | MISSING | D-ARRAY-CONVERT1 (section 9, B1, with A15) |
 | S11 | `swizzle` and `simd.shuffle` on lanes | `a.wzyx` on `F32x4` | `[4.0, 3.0, 2.0, 1.0]`; not on integer lanes | PARTIAL | #6177 c3 |
 | S12 | shifts and bit operators on integer lanes | `a << 1` on `I32x4` | E0109 | MISSING | #6177 c6 |
 | S13 | unary minus on lanes and vectors | `-a` on `F32x4`, `-v` on `Vec3` | E0109 | MISSING | #6177 c2 (no new spelling: see section 9) |
@@ -170,24 +170,24 @@ column per field.
 | O2 | `v[0].x` and `v.x[0]` give the same place | `ps[1].x` runs; `ps.x` is E0302 | E0302 | MISSING | D-ARRAY-COLUMNS1=A; #6314 c16 |
 | O3 | SOA slices and dynamic arrays (`append`, `pop`, `len`, `cap`) | `push`, `len`, index and `loop` on a columnar list (Examples/LowLevel/LayoutColumnar.jet) | runs | PASS | — |
 | O4 | SOA pointers, `p := &v[2]; p.x = 123`, and field writes | `ps[1].x = 7` and `bump(&ps[1])` on a columnar list | E1108 (field writes are not supported yet), E0003 | MISSING | #6314 c7 (element references into columns), c16 |
-| O5 | `soa_zip` and `soa_unzip` | `zip_columns(xs, ys)` | E0102 | MISSING | ballot needed (section 9, B8) |
+| O5 | `soa_zip` and `soa_unzip` | `zip_columns(xs, ys)` | E0102 | MISSING | D-ARRAY-ZIPCOLUMNS1 (section 9, B8) |
 | O6 | an SOA of `[3]f32` keeps the `xyzw` fields | `ps[0].pos.x` with `pos: [Float#3]` | E0302 | MISSING | #6177 c3, then #6314 c16 |
 
-## 9. Ballots still needed
+## 9. Owner ballots
 
-These rows need a spelling the owner has not ratified. Each needs a ballot
-before it is built (I7).
+These rows need a spelling the owner has not ratified. Each has an open owner
+ballot and is not built until the owner rules on it (I7).
 
-| Ballot | Rows | Question |
-|---|---|---|
-| B1 | A15, S10 | How is an array or a lane converted element by element: a method (`a.to<F32>()`), a typed literal (`[Float#4]{a}`), or a conversion function? |
-| B2 | W8 | Is there an index swizzle for any length (`a.swizzle(2, 1, 0)`), or do named lanes for length 4 or less stay the only form? |
-| B3 | M17, M18 | How is a square matrix cast to a smaller or larger one, and how is a matrix reshaped to another shape with the same element count? |
-| B4 | M19 | Is row-major storage offered, and how is it chosen? |
-| B5 | Q4 | Is the complex conjugate `c.conj()` or `c.conjugate()`? |
-| B6 | Q6 | Does `Complex` take an element type (`Complex<F32>`), or does it stay Float only? |
-| B7 | S3 | Does a scalar operand broadcast across the lanes of a lane type (`a * 2.0`), as it already does for `Vec3 * Float`? |
-| B8 | O5 | Is there a zip of separate lists into one columnar view, and an unzip back? |
+| Ballot | Decision | Rows | Question |
+|---|---|---|---|
+| B1 | D-ARRAY-CONVERT1 | A15, S10 | How is an array or a lane converted element by element: a method (`a.to<F32>()`), a typed literal (`[Float#4]{a}`), or a conversion function? |
+| B2 | D-ARRAY-SHUFFLE1 | W8 | Is there an index swizzle for any length (`a.swizzle(2, 1, 0)`), or do named lanes for length 4 or less stay the only form? |
+| B3 | D-ARRAY-MATRESIZE1 | M17, M18 | How is a square matrix cast to a smaller or larger one, and how is a matrix reshaped to another shape with the same element count? |
+| B4 | D-ARRAY-ROWMAJOR1 | M19 | Is row-major storage offered, and how is it chosen? |
+| B5 | D-ARRAY-CONJ1 | Q4 | Is the complex conjugate `c.conj()` or `c.conjugate()`? |
+| B6 | D-ARRAY-COMPLEXT1 | Q6 | Does `Complex` take an element type (`Complex<F32>`), or does it stay Float only? |
+| B7 | D-ARRAY-LANEBCAST1 | S3 | Does a scalar operand broadcast across the lanes of a lane type (`a * 2.0`), as it already does for `Vec3 * Float`? |
+| B8 | D-ARRAY-ZIPCOLUMNS1 | O5 | Is there a zip of separate lists into one columnar view, and an unzip back? |
 
 S13 and S14 need no new spelling: they extend `-` and `/` to vectors and
 lanes, which D-VECARITH1 already allows for this family. They belong in a
@@ -201,9 +201,9 @@ run (W3, S5).
 
 ## Finding dispositions
 
-Each row that is not PASS is a finding. A ballot that section 9 still needs
-is tracked by #6177, whose plan sends every new spelling to an owner ballot
-before it is built.
+Each row that is not PASS is a finding. A row that waits on an open owner
+ballot in section 9 is tracked by #6177, whose plan sends every new spelling
+to an owner ballot before it is built.
 
 <!-- audit-dispositions:v1 -->
 | finding | disposition | target or reason |
@@ -215,7 +215,7 @@ before it is built.
 | A10 | card | #6177 |
 | A12 | card | #6177 |
 | A13 | card | #6177 |
-| A15 | card | #6177 (ballot B1) |
+| A15 | card | #6177 (ballot B1, D-ARRAY-CONVERT1) |
 | A18 | decision | D-ARRAY-WINDOW1 |
 | A19 | decision | D-ARRAY-INDEX1 |
 | A20 | decision | D-ARRAY-CAPACITY1 |
@@ -223,7 +223,7 @@ before it is built.
 | W5 | card | #6177 |
 | W6 | card | #6177 |
 | W7 | card | #6177 |
-| W8 | card | #6177 (ballot B2) |
+| W8 | card | #6177 (ballot B2, D-ARRAY-SHUFFLE1) |
 | E1 | decision | D-ARRAY-ENUMTABLE1 |
 | E2 | decision | D-ARRAY-KEYED1 |
 | E3 | decision | D-ARRAY-ENUMTABLE1 |
@@ -237,20 +237,20 @@ before it is built.
 | M13 | card | #6177 |
 | M15 | decision | D-ARRAY-INVERSE1 |
 | M16 | card | #6177 |
-| M17 | card | #6177 (ballot B3) |
-| M18 | card | #6177 (ballot B3) |
-| M19 | card | #6177 (ballot B4) |
-| Q4 | card | #6177 (ballot B5) |
+| M17 | card | #6177 (ballot B3, D-ARRAY-MATRESIZE1) |
+| M18 | card | #6177 (ballot B3, D-ARRAY-MATRESIZE1) |
+| M19 | card | #6177 (ballot B4, D-ARRAY-ROWMAJOR1) |
+| Q4 | card | #6177 (ballot B5, D-ARRAY-CONJ1) |
 | Q5 | card | #4730 |
-| Q6 | card | #6177 (ballot B6) |
+| Q6 | card | #6177 (ballot B6, D-ARRAY-COMPLEXT1) |
 | Q7 | decision | D-ARRAY-QUAT1 |
 | Q8 | card | #4730 |
 | Q9 | decision | D-ARRAY-QUAT1 |
 | Q10 | card | #4730 |
-| S3 | card | #6177 (ballot B7) |
+| S3 | card | #6177 (ballot B7, D-ARRAY-LANEBCAST1) |
 | S8 | decision | D-ARRAY-LANESCMP1 |
 | S9 | decision | D-ARRAY-LANESCMP1 |
-| S10 | card | #6177 (ballot B1) |
+| S10 | card | #6177 (ballot B1, D-ARRAY-CONVERT1) |
 | S11 | card | #6177 |
 | S12 | card | #6177 |
 | S13 | card | #6177 |
@@ -260,6 +260,6 @@ before it is built.
 | O1 | card | #6314 |
 | O2 | decision | D-ARRAY-COLUMNS1 |
 | O4 | card | #6314 |
-| O5 | card | #6177 (ballot B8) |
+| O5 | card | #6177 (ballot B8, D-ARRAY-ZIPCOLUMNS1) |
 | O6 | card | #6177 |
 <!-- /audit-dispositions -->

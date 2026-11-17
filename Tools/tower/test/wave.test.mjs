@@ -124,7 +124,7 @@ test('clearance batch ratifies without agent notifications', async () => {
   const { json: cardR } = await post('/api/card/add', { title: 'ballot host' });
   const cid = cardR.result.id;
   for (const n of [1, 2, 3]) await post('/api/decision/add', { cardId: cid, id: 'D-W' + n, title: 'w' + n,
-    ballotMode: 'full', situation: SITUATION, reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2', reviewPasses: {
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',

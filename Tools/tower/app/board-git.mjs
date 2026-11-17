@@ -36,8 +36,9 @@ export function boardTarget(dataDir, files, config) {
 }
 
 // Commit the tracked board files as they are now. The caller holds the store
-// lock, so the pair is one committed board version.
-export function commitBoard(dataDir, files, config, { rev, by }) {
+// lock, so the pair is one committed board version. `push: false` leaves the
+// push to the caller (`tower publish` pushes and checks the remote itself).
+export function commitBoard(dataDir, files, config, { rev, by, push = true }) {
   const target = boardTarget(dataDir, files, config);
   if (target.skip) return { committed: null, reason: target.skip };
   const { root, branch, paths, added } = target;
@@ -54,7 +55,7 @@ export function commitBoard(dataDir, files, config, { rev, by }) {
   const commit = runGit(root, ['-c', 'core.hooksPath=/dev/null', 'commit', '--only', '-q', '-m', message, '--', ...paths]);
   if (commit.status !== 0) return { committed: null, reason: (commit.stderr || commit.stdout).trim() };
   const sha = runGit(root, ['rev-parse', 'HEAD']).stdout.trim();
-  pushBoard(root, branch);
+  if (push) pushBoard(root, branch);
   return { committed: sha, branch, paths, rev };
 }
 
@@ -67,6 +68,27 @@ function pushBoard(root, branch) {
   const child = spawn('git', ['-C', root, 'push', '-q', 'origin', branch], { detached: true, stdio: 'ignore', env: gitEnv() });
   child.on('error', () => {});
   child.unref();
+}
+
+// `tower publish`: the board is published only when origin holds it. After
+// `committed` (commitBoard's result), push the board branch and wait for the
+// push, then read the remote branch back; ok only when it names local HEAD.
+export function pushBoardVerified(dataDir, files, config, committed) {
+  if (!committed.committed && !/board is current/.test(committed.reason)) return { ok: false, reason: committed.reason };
+  const target = boardTarget(dataDir, files, config);
+  if (target.skip) return { ok: false, reason: target.skip };
+  const { root, branch } = target;
+  const head = runGit(root, ['rev-parse', 'HEAD']).stdout.trim();
+  if (runGit(root, ['remote', 'get-url', 'origin']).status !== 0)
+    return { ok: false, branch, head, remote: null, reason: 'the repository has no origin remote' };
+  const pushed = runGit(root, ['push', '-q', 'origin', branch]);
+  if (pushed.status !== 0)
+    return { ok: false, branch, head, remote: null, reason: `git push origin ${branch} failed: ${(pushed.stderr || pushed.stdout).trim()}` };
+  const listed = runGit(root, ['ls-remote', 'origin', `refs/heads/${branch}`]);
+  const remote = listed.status === 0 ? listed.stdout.trim().split(/\s+/)[0] || null : null;
+  if (remote !== head)
+    return { ok: false, branch, head, remote, reason: `origin/${branch} is ${remote || 'missing'}, not the local board commit ${head}` };
+  return { ok: true, branch, head, remote };
 }
 
 // How far the committed board trails the working copy, in writes.

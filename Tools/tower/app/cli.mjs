@@ -24,6 +24,7 @@ import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
 import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { applyPlan } from './apply.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -99,9 +100,11 @@ const COMMAND_FLAGS = {
     show: [],
     scaffold: ['id', 'out'],
     add: payload('id', 'card', 'title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
-      'group', 'ballotMode', 'shortAuthorizedBy', 'draft'),
+      'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'reviewedBy'),
     update: payload('title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
-      'ballotMode', 'shortAuthorizedBy', 'ready'),
+      'ballotMode', 'shortAuthorizedBy'),
+    review: by('reject', 'reason'),
+    post: by(),
     report: by('path', 'url', 'title', 'note', 'remove'),
     ratify: by('outcome', 'comment', 'quote', 'expectRev'),
     reopen: by(),
@@ -143,6 +146,7 @@ const COMMAND_FLAGS = {
   next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
   chain: { flags: [] },
   closest: { flags: ['epoch', 'limit'] },
+  ballots: { flags: [] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
   lint: { flags: ['proofs', 'tree'] },
   prove: { flags: by('card', 'epoch', 'jet', 'tree', 'commit', 'dryRun', 'yes') },
@@ -168,6 +172,8 @@ const COMMAND_FLAGS = {
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
   board: { verbs: { commit: by(), check: [] } },
+  apply: { flags: payload('dryRun', 'expectRev') },
+  publish: { flags: by('title', 'file') },
   gauntlet: { verbs: { standings: ['table'] } },
 };
 
@@ -206,7 +212,7 @@ const FLAG_VALUE = {
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"', order: 'N', exitCriteria: '"…"',
   status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
-  unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
+  unarchive: null, archived: null, draft: null, drafts: null, reviewedBy: 'X', reject: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, scratch: null, note: '"…"',
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
@@ -722,7 +728,7 @@ function cmdDecision(store, { pos, flags }) {
       if (flags.open) ds = ds.filter(d => d.status !== 'ratified');
       if (flags.card) { const c = db.findCard(s, flags.card); ds = ds.filter(d => c && d.cardId === c.id); }
       if (flags.json) return out(flags, null, ds);
-      for (const d of ds) console.log(`${String(d.id || '(no id)').padEnd(16)} ${(d.draft ? 'draft' : d.status || 'open').padEnd(9)} ${String(d.title || '(untitled)').slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
+      for (const d of ds) console.log(`${String(d.id || '(no id)').padEnd(16)} ${db.decisionStage(d).padEnd(9)} ${String(d.title || '(untitled)').slice(0, 60)}${d.outcome ? ` → ${d.outcome}` : ''}`);
       if (!ds.length) console.log('(no decisions match)');
       return;
     }
@@ -744,16 +750,24 @@ function cmdDecision(store, { pos, flags }) {
         if (flags[f] !== undefined) payload[f] = flags[f];
       if (flags.card !== undefined) payload.cardId = flags.card;
       if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
+      if (flags.reviewedBy !== undefined) payload.reviewedBy = flags.reviewedBy;
       const { result } = store.mutate((s) => db.addDecision(s, payload));
-      return out(flags, `added decision ${result.id} on card #${result.cardNum}${result.draft ? ' (draft)' : ''}`, result);
+      return out(flags, `added decision ${result.id} on card #${result.cardNum} (${db.decisionStage(result)})`, result);
     }
     case 'update': {
       const p = readPayload(flags) || {};
       for (const f of ['title', 'situation', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy'])
         if (flags[f] !== undefined) p[f] = flags[f];
-      if (flags.ready !== undefined) p.ready = flags.ready === true || flags.ready === 'true';
       const { result } = store.mutate((s) => db.updateDecision(s, id, p, by));
-      return out(flags, `updated decision ${result.id}${p.ready ? ' — ballot-ready' : ''}`, result);
+      return out(flags, `updated decision ${result.id} (${db.decisionStage(result)})`, result);
+    }
+    case 'review': {
+      const { result } = store.mutate((s) => db.reviewDecision(s, id, { by, reject: flags.reject === true, reason: flags.reason }));
+      return out(flags, result.status === 'rejected' ? `rejected ${result.id}: ${result.rejectReason}` : `reviewed ${result.id} — post it with decision post ${result.id}`, result);
+    }
+    case 'post': {
+      const { result } = store.mutate((s) => db.postDecision(s, id, by));
+      return out(flags, `posted ${result.id} to the owner (reviewed by ${result.reviewedBy})`, result);
     }
     case 'report': {
       // Link a report (a Tower doc or an https source) to a ballot, or unlink one.
@@ -802,7 +816,7 @@ function cmdDecision(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteDecision(s, id, by));
       return out(flags, `deleted decision ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/scaffold/add/update/report/ratify/reopen/delete`);
+    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/scaffold/add/update/review/post/report/ratify/reopen/delete`);
   }
 }
 
@@ -1070,6 +1084,22 @@ function cmdClosest(store, { flags }) {
   if (!rows.length) return console.log('(no open cards with criteria)');
   for (const r of rows)
     console.log(` #${String(r.num).padEnd(5)} ${epochTag(proj, r.epoch).padEnd(4)} ${(r.open ? `${r.open} open` : 'ready').padEnd(8)} ${(r.blocked ? `${r.blocked} blocked` : '').padEnd(10)} ${r.title}`);
+}
+
+// Every authored ballot by stage, with the cards and criteria waiting on it.
+function cmdBallots(store, { flags }) {
+  const stages = db.ballotsReport(store.load(), store.config);
+  if (flags.json) return out(flags, null, stages);
+  for (const { stage, count, ballots } of stages) {
+    console.log(`${stage} (${count}${stage === 'ratified' && ballots.length < count ? `, ${ballots.length} recent shown` : ''})`);
+    for (const b of ballots) {
+      const who = stage === 'drafted' ? b.draftedBy : stage === 'ratified' ? `→ ${b.outcome}` : b.reviewedBy;
+      const waits = [...b.waiting.cards.map(n => `#${n}`), ...b.waiting.criteria];
+      console.log(`  ${b.id.padEnd(22)} #${String(b.card ?? '—').padEnd(5)} ${b.title.slice(0, 56)}${who ? `  (${who})` : ''}`
+        + (b.rejectReason ? `\n    rejected: ${b.rejectReason}` : '')
+        + (waits.length ? `\n    waiting: ${waits.join(', ')}` : ''));
+    }
+  }
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
@@ -1491,6 +1521,34 @@ function cmdBoard(store, { pos, flags }) {
   }
 }
 
+// `tower apply --file plan.json`: a plan of board edits as one all-or-nothing
+// write (apply.mjs). --dry-run runs it on a copy and writes nothing.
+function cmdApply(store, { flags }) {
+  const plan = readPayload(flags);
+  if (!plan) throw new TowerError('E_USAGE', 'apply needs --file plan.json (or --file - / --stdin)');
+  if (flags.dryRun) {
+    const pair = store.loadPair();
+    const result = applyPlan(structuredClone(pair.state), plan, flags.by, store.config, structuredClone(pair.history));
+    return out(flags, `dry run: ${result.applied} op${result.applied === 1 ? '' : 's'} would apply (${result.summary}); nothing written`, { ...result, dryRun: true });
+  }
+  const { result, state } = store.mutate((s, cfg, history) => applyPlan(s, plan, flags.by, cfg, history), { expectRev: flags.expectRev });
+  return out(flags, `applied ${result.applied} op${result.applied === 1 ? '' : 's'} in one write at rev ${state.meta.rev} (${result.summary})`, { ...result, rev: state.meta.rev });
+}
+
+// `tower publish`: post the briefing, commit the board, push the board branch
+// and confirm origin holds that very commit; anything less exits non-zero.
+function cmdPublish(store, { flags }) {
+  if (typeof flags.title !== 'string' || !flags.title.trim()) throw new TowerError('E_USAGE', 'publish needs --title "…"');
+  if (typeof flags.file !== 'string') throw new TowerError('E_USAGE', 'publish needs --file FILE (markdown)');
+  if (typeof flags.by !== 'string' || !flags.by) throw new TowerError('E_USAGE', 'publish needs --by <agent>');
+  const body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
+  const { result: briefing } = store.mutate(s => db.postBriefing(s, { title: flags.title, body, sections: [], by: flags.by }));
+  const pushed = store.publishBoard(flags.by);
+  if (!pushed.ok) throw new TowerError('E_PUBLISH', `posted briefing ${briefing.id}, but the board is not published: ${pushed.reason}`);
+  return out(flags, `published briefing ${briefing.id} — ${briefing.title}; origin/${pushed.branch} = ${pushed.head.slice(0, 10)}`,
+    { briefing: briefing.id, branch: pushed.branch, commit: pushed.head, remote: pushed.remote });
+}
+
 // #6834: the gauntlet table the Gauntlet page shows, as text: every entry's
 // grid from the entries' manifests with the table's measured rows. --table
 // names another table file than the machine's
@@ -1662,6 +1720,7 @@ export async function run(argv) {
       case 'next':      return cmdNext(store, sub);
       case 'chain':     return cmdChain(store, sub);
       case 'closest':   return cmdClosest(store, sub);
+      case 'ballots':   return cmdBallots(store, sub);
       case 'brief':     return cmdBrief(store, sub);
       case 'lint':      return cmdLint(store, sub);
       case 'prove':     return cmdProve(store, sub);
@@ -1673,6 +1732,8 @@ export async function run(argv) {
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);
+      case 'apply':     return cmdApply(store, sub);
+      case 'publish':   return cmdPublish(store, sub);
       case 'gauntlet':  return await cmdGauntlet(store, sub);
       case 'githook':
         if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);

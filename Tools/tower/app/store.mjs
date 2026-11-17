@@ -27,7 +27,7 @@ import {
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
-import { checkBoard, commitBoard } from './board-git.mjs';
+import { checkBoard, commitBoard, pushBoardVerified } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
 import { checkProof, migrateCriterionProof, proofInput } from './proof.mjs';
 import { chainRank, criteriaCounts, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
@@ -410,6 +410,10 @@ export function openStore(dataDir) {
   const mutateAsync = (fn, options) => withLockAsync(file, () => afterWrite(mutateLocked(fn, options)));
   const commitBoardNow = (by) => withLock(file, () => commitBoardLocked(by));
   const checkBoardNow = () => checkBoard(dataDir, boardFiles(), config, readConsistentLive().meta.rev);
+  // `tower publish`: commit under the lock, then push and read origin back
+  // outside it, so writers never wait on the network.
+  const publishBoardNow = (by) => pushBoardVerified(dataDir, boardFiles(), config,
+    withLock(file, () => commitBoard(dataDir, boardFiles(), config, { rev: readConsistentLive().meta.rev, by, push: false })));
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
   // write from another agent can never be silently reverted. Undo touches
@@ -454,7 +458,7 @@ export function openStore(dataDir) {
 
   return {
     file, dataDir, config, load, loadLive, loadPair, mutate, mutateAsync, restore, restoreArchived, loadHistory,
-    commitBoard: commitBoardNow, checkBoard: checkBoardNow,
+    commitBoard: commitBoardNow, checkBoard: checkBoardNow, publishBoard: publishBoardNow,
     project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }
@@ -470,7 +474,8 @@ export const emptyHistory = () => ({ version: 1, decisions: [], cards: [], event
 const CRITERION_STATUSES = new Set(['open', 'met', 'verified']);
 const MILESTONE_STATUSES = new Set(['open', 'review-ready', 'met']);
 const EPOCH_STATUSES = new Set(['active', 'arrived', 'planned', 'done', 'open']);
-const DECISION_STATUSES = new Set(['open', 'ratified']);
+// A rejected ballot is a draft its reviewer sent back; it never reaches the owner.
+const DECISION_STATUSES = new Set(['open', 'ratified', 'rejected']);
 
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -631,6 +636,10 @@ function validateStoredDecision(decision, index, source) {
   validateStoredString(decision.cardId, `${label}.cardId`, { nullable: true, nonEmpty: true });
   if (decision.status !== undefined && !DECISION_STATUSES.has(decision.status))
     fail('E_INVALID', `${label}.status is not a canonical decision status`);
+  if (decision.status === 'rejected' && !decision.draft)
+    fail('E_INVALID', `${label} is rejected but not a draft; a rejected ballot never reaches the owner`);
+  validateStoredString(decision.draftedBy, `${label}.draftedBy`, { nullable: true, nonEmpty: true });
+  validateStoredString(decision.reviewedBy, `${label}.reviewedBy`, { nullable: true, nonEmpty: true });
   if (decision.visualMedia !== undefined) normalizeVisualMedia(decision.visualMedia, `${label}.visualMedia`);
   validateStoredString(decision.situation, `${label}.situation`);
   if (decision.options !== undefined) {
@@ -941,7 +950,18 @@ export const activeEpoch = (s) => s.epochs.find(e => e.status === 'active')?.id 
 
 // A draft decision (card #458, D-TWRGUARD1=C) is a scratch ballot still being
 // written — it never blocks a card and never shows in the owner's queue.
-const isBlocking = (d) => d.status !== 'ratified' && !d.draft;
+const isBlocking = (d) => d.status === 'open' && !d.draft;
+
+// A ballot's stage, derived from the stored draft flag, reviewer and status:
+// drafted → reviewed (a reviewer other than the author passed it) → posted
+// (the owner's queue) → ratified. A reviewer may instead reject a draft; the
+// author's next edit returns it to drafted.
+export const DECISION_STAGES = ['drafted', 'reviewed', 'posted', 'ratified', 'rejected'];
+export function decisionStage(d) {
+  if (d.status === 'ratified' || d.status === 'rejected') return d.status;
+  if (!d.draft) return 'posted';
+  return d.reviewedBy ? 'reviewed' : 'drafted';
+}
 
 export function clearanceOf(card, decisions) {
   const linked = decisions.filter(d => d.cardId === card.id && !d.draft);
@@ -1804,7 +1824,7 @@ export function updateHardeningCard(s, ref, p, config, history = emptyHistory())
   return addOrUpdateHardeningCard(s, { ...p, ref }, config, history);
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
+export const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified on durable evidence. A
@@ -2056,7 +2076,7 @@ const BLOCKER_REF = /^(?:#(\d+)(?: c(\d+))?|(D-[A-Za-z0-9][\w.-]*))$/;
 
 function blockerResolved(ref, cardsByNum, decisionsById) {
   const [, num, n, decision] = BLOCKER_REF.exec(ref);
-  if (decision) return decisionsById.get(decision)?.status !== 'open';
+  if (decision) return (decisionsById.get(decision)?.status ?? 'ratified') === 'ratified';
   const card = cardsByNum.get(Number(num));
   if (!card || card.phase === 'done') return true;
   if (n === undefined) return false;
@@ -2090,7 +2110,7 @@ function criterionBlockerInput(s, c, n, raw) {
   const [, num, k, decision] = BLOCKER_REF.exec(ref);
   if (decision) {
     const d = s.decisions.find(x => x.id === decision) || fail('E_NOT_FOUND', `no decision ${decision}`);
-    if (d.status !== 'open') fail('E_INVALID', `decision ${decision} is already ${d.status}; nothing to wait on`);
+    if (d.status === 'ratified') fail('E_INVALID', `decision ${decision} is already ratified; nothing to wait on`);
     return ref;
   }
   const target = s.cards.find(x => x.num === Number(num)) || fail('E_NOT_FOUND', `no live card #${num}`);
@@ -2521,18 +2541,25 @@ const reviewPassKeysFor = (version) => {
 };
 const orderedReviewPasses = (passes, version = BALLOT_PROCESS_VERSION) =>
   Object.fromEntries(reviewPassKeysFor(version).map(key => [key, passes?.[key]]));
-const dissentPrefix = /^Author model family: ([^.]+)\. Adversarial model family: ([^.]+)\./;
+// A family name may hold periods (`GPT-6.1 Sol`): the author family runs to
+// `. Adversarial model family: `, and the adversarial family to
+// `. Fresh agent: ` when the pass names its reviewer, else to the first period.
+const dissentPrefix = /^Author model family: (.+?)\. Adversarial model family: /;
 const freshReviewerPrefix = /^Fresh agent: ([^.]+)\./;
 
 function dissentMetadata(pass) {
   if (typeof pass !== 'string') return null;
   const match = dissentPrefix.exec(pass);
   if (!match) return null;
-  const body = pass.slice(match[0].length).trim();
+  const rest = pass.slice(match[0].length);
+  const named = rest.indexOf('. Fresh agent: ');
+  const cut = named > 0 ? named : rest.indexOf('.');
+  if (cut <= 0) return null;
+  const body = rest.slice(cut + 1).trim();
   const reviewer = freshReviewerPrefix.exec(body);
   return {
     author: match[1].trim(),
-    adversarial: match[2].trim(),
+    adversarial: rest.slice(0, cut).trim(),
     agent: reviewer?.[1].trim() || '',
     summary: reviewer ? body.slice(reviewer[0].length).trim() : body,
   };
@@ -2950,7 +2977,10 @@ export function addDecision(s, p) {
   // enter through the store and keep their stored version unchanged.
   const candidate = systemAcceptance ? p : { ...p, status: 'open', ballotProcessVersion: BALLOT_PROCESS_VERSION };
   const draft = !!candidate.draft;
-  if (!systemAcceptance && candidate.group !== 'acceptance') {
+  const authored = !systemAcceptance && candidate.group !== 'acceptance';
+  const draftedBy = authored && typeof candidate.by === 'string' && candidate.by.trim() ? candidate.by.trim() : null;
+  const reviewedBy = authored && candidate.reviewedBy != null ? ballotReviewer({ id: candidate.id || 'this ballot', draftedBy }, candidate.reviewedBy) : null;
+  if (authored) {
     const gaps = ballotGaps(candidate, { requireSurface: true, requireRecFirst: true, card });
     const metadataGaps = (candidate.ballotMode || 'full') === 'full' ? dissentMetadataGaps(candidate) : [];
     if (draft) {
@@ -2958,6 +2988,8 @@ export function addDecision(s, p) {
         fail('E_BALLOT', `ballot draft missing required review metadata: ${metadataGaps.join(', ')}`);
     } else if (gaps.length) {
       fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
+    } else if (!reviewedBy) {
+      fail('E_STAGE', 'a ballot reaches the owner only after review — pass --reviewed-by <reviewer>, or add it with --draft and post it after decision review');
     }
   }
   const supersededBy = verdictSupersededBy(s, candidate);
@@ -2977,6 +3009,7 @@ export function addDecision(s, p) {
     // any mitigation. Own field so it survives ballot edits.
     ...(candidate.designAway ? { designAway: candidate.designAway } : {}),
     ...(candidate.reports != null && normalizeReports(candidate.reports).length ? { reports: normalizeReports(candidate.reports) } : {}),
+    ...(authored ? { draftedBy, reviewedBy } : {}),
     draft, status: 'open', created: now() };
   s.decisions.push(d);
   touchCard(card, candidate.by);
@@ -2996,7 +3029,7 @@ function appendSyntaxChores(s, c, by) {
 }
 
 function assertReadyForVerdict(d) {
-  if (d.draft) fail('E_DRAFT', `${d.id} is a draft ballot — no verdict is allowed until fresh-reader review and validation pass and it is marked ready`);
+  if (d.draft) fail('E_DRAFT', `${d.id} is a draft ballot (${decisionStage(d)}) — no verdict is allowed until it is reviewed and posted`);
 }
 
 export function ratify(s, decisionId, outcome, comment, by, quote) {
@@ -3072,6 +3105,7 @@ export function reopenDecision(s, decisionId, by) {
   if (typeof by !== 'string' || !by.trim()) fail('E_INVALID', 'reopen needs --by <actor>');
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'reopening a ratified decision is owner-only');
+  if (d.status === 'rejected') { d.reviewedBy = null; delete d.rejectReason; }
   d.status = 'open'; delete d.outcome; delete d.ratifiedAt; const card = s.cards.find(c => c.id === d.cardId);
   // A reopened narrative ballot is re-authored under the current process, so
   // its next update is gated by today's adversarial pass, not retired ones.
@@ -3091,11 +3125,18 @@ export function updateDecision(s, id, patch, by) {
   if (patch.situation != null && typeof patch.situation !== 'string') fail('E_INVALID', 'decision situation must be a string');
   const card = s.cards.find(c => c.id === d.cardId);
   const storedVersion = Number(d.ballotProcessVersion || 0);
-  for (const k of ['title', 'situation', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
-    if (k in patch) d[k] = patch[k];
+  const edits = BALLOT_CONTENT_KEYS.filter(k => k in patch);
+  for (const k of edits) d[k] = patch[k];
   if ('reports' in patch) {
     const reports = normalizeReports(patch.reports);
     if (reports.length) d.reports = reports; else delete d.reports;
+  }
+  // A review covers the text it read: editing a reviewed or rejected draft
+  // returns it to drafted.
+  const reviewCleared = d.draft && edits.length > 0 && (d.reviewedBy || d.status === 'rejected');
+  if (reviewCleared) {
+    d.reviewedBy = null; delete d.rejectReason;
+    if (d.status === 'rejected') d.status = 'open';
   }
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
@@ -3104,24 +3145,113 @@ export function updateDecision(s, id, patch, by) {
     if (metadataGaps.length)
       fail('E_BALLOT', `ballot update missing required review metadata: ${metadataGaps.join(', ')}`);
   }
-  // Every edit to an open ready ballot re-runs the gate. --ready does the
-  // same while promoting a draft. Ratified records remain historical law.
-  if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
-    d.ballotMode ||= 'full';
-    const gaps = ballotGaps(d, { requireSurface: storedVersion >= SURFACE_PROCESS_VERSION, card });
-    if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
-    if (d.ballotMode === 'full') {
-      d.reviewPasses = orderedReviewPasses(d.reviewPasses, storedVersion);
-      d.shortAuthorizedBy = null;
-    } else {
-      d.reviewPasses = null;
-    }
-    if (storedVersion >= BALLOT_PROCESS_VERSION) d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
-  }
-  if (patch.ready) d.draft = false;
+  // Every edit to a posted ballot re-runs the gate. Ratified records remain
+  // historical law.
+  if (isBlocking(d)) gateBallot(d, card, storedVersion);
   if (card) touchCard(card, by);
-  logEvent(s, { by, action: 'decision.update', ref: d.id, note: patch.ready ? 'marked ready' : '' });
+  logEvent(s, { by, action: 'decision.update', ref: d.id, note: reviewCleared ? 'review cleared by the edit' : '' });
   return d;
+}
+
+const BALLOT_CONTENT_KEYS = ['title', 'situation', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'];
+
+// The ballot gate a posted ballot passes: every gap closed, review passes in
+// canonical order, and the current process version.
+function gateBallot(d, card, storedVersion) {
+  d.ballotMode ||= 'full';
+  const gaps = ballotGaps(d, { requireSurface: storedVersion >= SURFACE_PROCESS_VERSION, card });
+  if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
+  if (d.ballotMode === 'full') {
+    d.reviewPasses = orderedReviewPasses(d.reviewPasses, storedVersion);
+    d.shortAuthorizedBy = null;
+  } else {
+    d.reviewPasses = null;
+  }
+  if (storedVersion >= BALLOT_PROCESS_VERSION) d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
+}
+
+// The reviewer of a ballot: named, and not the agent that drafted it.
+function ballotReviewer(d, by) {
+  const reviewer = typeof by === 'string' ? by.trim() : '';
+  if (!reviewer) fail('E_INVALID', `reviewing ${d.id} needs --by <reviewer>`);
+  if (d.draftedBy && reviewer === d.draftedBy)
+    fail('E_STAGE', `${d.id} was drafted by ${reviewer}; another agent must review it`);
+  return reviewer;
+}
+
+const mustAuthoredBallot = (s, id) => {
+  const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
+  if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'))
+    fail('E_INVALID', `${d.id} is an owner-verification ballot; it has no review stages`);
+  return d;
+};
+
+// `decision review`: a reviewer passes a draft (stage reviewed) or rejects it
+// with a reason (stage rejected) for its author to revise.
+export function reviewDecision(s, id, { by, reject = false, reason } = {}) {
+  const d = mustAuthoredBallot(s, id);
+  const stage = decisionStage(d);
+  if (stage !== 'drafted' && stage !== 'reviewed')
+    fail('E_STAGE', `${d.id} is ${stage}; only a drafted or reviewed ballot can be reviewed${stage === 'rejected' ? ' (revise it with decision update first)' : ''}`);
+  const reviewer = ballotReviewer(d, by);
+  const why = typeof reason === 'string' ? reason.trim() : '';
+  if (reject) {
+    if (!why) fail('E_INVALID', 'decision review --reject needs --reason "…"');
+    d.status = 'rejected';
+    d.rejectReason = why;
+  }
+  d.reviewedBy = reviewer;
+  const card = s.cards.find(c => c.id === d.cardId);
+  if (card) touchCard(card, reviewer);
+  logEvent(s, { by: reviewer, action: 'decision.review', ref: d.id, note: reject ? `rejected: ${why}` : 'passed' });
+  return d;
+}
+
+// `decision post`: a reviewed ballot passes the ballot gate and enters the
+// owner's queue.
+export function postDecision(s, id, by) {
+  const d = mustAuthoredBallot(s, id);
+  const stage = decisionStage(d);
+  if (stage !== 'reviewed')
+    fail('E_STAGE', `${d.id} is ${stage}; decision post needs a reviewed ballot${stage === 'drafted' ? ` (run decision review ${d.id} --by <reviewer>)` : ''}`);
+  const card = s.cards.find(c => c.id === d.cardId);
+  const metadataGaps = d.ballotMode === 'short' ? [] : dissentMetadataGaps(d);
+  if (metadataGaps.length) fail('E_BALLOT', `ballot missing required review metadata: ${metadataGaps.join(', ')}`);
+  gateBallot(d, card, Number(d.ballotProcessVersion || 0));
+  d.draft = false;
+  if (card) touchCard(card, by);
+  logEvent(s, { by, action: 'decision.post', ref: d.id, note: `reviewed by ${d.reviewedBy}` });
+  return d;
+}
+
+// `tower ballots`: every authored ballot by stage, with its card and the live
+// cards and open criteria waiting on it. Ratified ballots are counted in full
+// but listed only inside the retire window, like the owner's recent strip.
+export function ballotsReport(s, config = null) {
+  const bufferDays = config?.retireAfterDays ?? 3;
+  const cardsById = new Map(s.cards.map(c => [c.id, c]));
+  const waits = new Map();
+  const waitsOn = (id) => waits.get(id) || waits.set(id, { cards: [], criteria: [] }).get(id);
+  for (const c of s.cards) {
+    if (c.phase === 'done') continue;
+    for (const ref of c.blockedBy || []) if (String(ref).startsWith('D-')) waitsOn(ref).cards.push(c.num);
+    for (const item of c.criteria || [])
+      if (item.status === 'open' && String(item.blockedBy || '').startsWith('D-')) waitsOn(item.blockedBy).criteria.push(`#${c.num} c${item.n}`);
+  }
+  const ballots = s.decisions.filter(d => d.group !== 'acceptance' && !d.id.startsWith('D-ACCEPT-'));
+  return DECISION_STAGES.map(stage => {
+    const inStage = ballots.filter(d => decisionStage(d) === stage);
+    const listed = stage === 'ratified'
+      ? inStage.filter(d => !isOlderThanDays(d.ratifiedAt, bufferDays)).sort((a, b) => (b.ratifiedAt || '').localeCompare(a.ratifiedAt || ''))
+      : inStage;
+    return { stage, count: inStage.length, ballots: listed.map(d => ({
+      id: d.id, title: d.title, card: cardsById.get(d.cardId)?.num ?? null,
+      draftedBy: d.draftedBy || null, reviewedBy: d.reviewedBy || null,
+      ...(d.rejectReason ? { rejectReason: d.rejectReason } : {}),
+      ...(d.outcome ? { outcome: d.outcome, ratifiedAt: d.ratifiedAt || null } : {}),
+      waiting: (stage !== 'ratified' && waits.get(d.id)) || { cards: [], criteria: [] },
+    })) };
+  });
 }
 
 // D-TWRGUARD1=C (#458): tower verdict — an owner ruling recorded as an

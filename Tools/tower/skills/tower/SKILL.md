@@ -83,6 +83,8 @@ approved contract is not a ballot.
 - Board text never names this machine's home, user, host, email or mounts
   (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
   write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.
+- Make many board edits as one plan: `tower apply --file plan.json --dry-run
+  --by <agent>`, then without `--dry-run`; it is all-or-nothing and one undo.
 - End each batch of board writes with `tower board commit --by <agent>`;
   `tower board check` must pass before you hand off.
 
@@ -150,10 +152,12 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 Post the epoch chain as a **Current epochs and progress** briefing on **Now**.
 Refresh it at proven checkpoints and drop finished epochs. Derive progress
 from card evidence, not elapsed time; a briefing summarizes Tower state and
-never replaces cards or ballots. A JSON status snapshot can accompany it:
+never replaces cards or ballots. `publish` posts it, commits the board and
+pushes the board branch, and exits non-zero unless `origin` then holds that
+commit. A JSON status snapshot can accompany it:
 
 ```sh
-node Tools/tower/tower.mjs briefing post --file report.md --title "Current epochs and progress" --by Pip
+node Tools/tower/tower.mjs publish --file report.md --title "Current epochs and progress" --by Pip
 node Tools/tower/tower.mjs briefing list
 node Tools/tower/tower.mjs briefing show                 # latest; or supply its id
 node Tools/tower/tower.mjs status post --file status.json --by Pip

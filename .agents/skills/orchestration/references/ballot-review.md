@@ -4,7 +4,7 @@ Use this reference only for a new, draft, or updated **full ballot**. It does
 not replace ordinary criterion proof or the milestone review in
 [`closeout.md`](closeout.md).
 
-A full ballot needs one fresh adversarial pass before it is marked ready.
+A full ballot needs one fresh adversarial pass before it is posted.
 
 ## Adversarial pass
 
@@ -21,8 +21,11 @@ Author model family: author-family. Adversarial model family: adversarial-family
 
 Follow the owner's requested reviewer when one exists; otherwise use the
 full-review role in `AGENTS.md`. Revise the ballot from material findings.
-Once ratified, the decision is immutable history rather than an invitation to
-repeat the review.
+The reviewer records its verdict on the stored draft with `tower decision
+review D-ID --by <reviewer>`, or `--reject --reason "…"` to send it back; the
+author then runs `tower decision post D-ID`. A ballot added without `--draft`
+names its reviewer with `--reviewed-by <reviewer>`. Once ratified, the
+decision is immutable history rather than an invitation to repeat the review.
 
 A ballot must still state the owner-only choice, same-program alternatives,
 exact syntax and behavior, trade-offs, edge cases, and beginner and expert

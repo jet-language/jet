@@ -67,7 +67,7 @@ below.
 ## Choose the profile
 
 Owner direction 2026-10-28: a new full ballot needs one fresh adversarial pass
-before it is marked ready. Stored ballots from earlier processes keep their
+before it is posted. Stored ballots from earlier processes keep their
 historical review records and render unchanged; never rewrite them.
 
 - **`short`** is the default for one mechanism with at most three options. It
@@ -216,21 +216,26 @@ The scaffold may seed `surface.trio.current` from the card probe and
 `surface.trio.wild` from cited evidence. The author still writes and checks
 every word.
 
-After authoring and review, submit the complete draft, then explicitly make it
-ready:
+Submit the complete ballot as a draft. A fresh agent that did not write it
+reviews it; the author posts it once it is reviewed:
 
 ```sh
-tower decision add --file $JET_STATE_ROOT/ballot.json --by <agent>
-tower decision update D-CACHE1 --ready --by <agent>
+tower decision add --file $JET_STATE_ROOT/ballot.json --draft --by <agent>
+tower decision review D-CACHE1 --by <reviewer>
+tower decision post D-CACHE1 --by <agent>
 tower decision show D-CACHE1 --json
 tower card show '#12' --json
 ```
 
-Confirm the decision is non-draft and open, and the card's computed lane and
-actor expose the choice to the owner. A stored draft is not owner-decide.
-Keep incomplete work in the scratch file; use `--ready` only when the owner
-can decide from the ballot alone. Nudge the owner only when urgent.
-New ballots appear through the live SSE board; web push is removed.
+A reviewer who finds a material gap runs `tower decision review D-CACHE1
+--reject --reason "…" --by <reviewer>`; the author revises it with `tower
+decision update`, which returns it to `drafted` for a new review. Any edit to
+a reviewed draft also clears its review. `tower ballots` shows every ballot's
+stage. Confirm the decision is posted and open, and the card's computed lane
+and actor expose the choice to the owner. A stored draft is not owner-decide.
+Post only when the owner can decide from the ballot alone. Nudge the owner
+only when urgent. New ballots appear through the live SSE board; web push is
+removed.
 
 ## Rules
 

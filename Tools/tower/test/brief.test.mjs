@@ -28,7 +28,7 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
   + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
 
 const ballot = (extra = {}) => ({
-  ballotMode: 'full', situation: SITUATION,
+  ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2',
   reviewPasses: {
     adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
   },
