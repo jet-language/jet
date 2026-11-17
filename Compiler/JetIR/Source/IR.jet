@@ -527,6 +527,10 @@ IRModule: struct {
     // The rows `dead_code: keep` builds as roots beside `entry`
     // (ir_build_program): the object keeps them though nothing calls them.
     kept: [Int]{[Int]{}},
+    // The runtime provider hooks the program defines (IRChecks.hooks), each
+    // a kept row too: the object makes each a global symbol (ir_x64_object),
+    // so the link binds the runtime's calls of the hook to it.
+    hooks: [IRLibraryExport]{[IRLibraryExport]{}},
     layouts: NameRows,
     layout_low: Int,
     struct_members: NameRows,

@@ -568,7 +568,13 @@ or `!Time.Wait`, `!Rand`, `!Env`, `!Exec`, `!GPU`, `!FFI` or `!FFI.C`,
 `!Browser`, `!Panic`, `!Mem.Alloc`), and the compiler checks every artifact
 against that row. `facts.scheduler` names the type implementing
 `core.tasks.Scheduler` that spawned tasks queue in; `None` keeps the runtime's
-own first-in, first-out queue and denies nothing. Code reads the built
+own first-in, first-out queue and denies nothing. A package selects its
+machine in `package.jet` as `targets: { machine: { profile: "Board" } }`; when
+the entry file declares the profile `Board`, the scheduler its facts name (a
+type as the entry file spells it, built from its field defaults, `Lifo{}`)
+becomes the program's run queue. The build defines the runtime's queue hooks
+over one instance of it and the link binds the runtime to them, so a spawn
+compiles to the same code under every scheduler. Code reads the built
 target's operating system as `#build.target.os`.
 
 | Machine | Triple | Denied by its facts |
@@ -5351,7 +5357,7 @@ frames are the whole window.
 | `Window.maximized() -> Bool` / `.fullscreen() -> Bool` / `.set_maximized(maximized: Bool)` / `.set_fullscreen(fullscreen: Bool)` / `.minimize()` | states | The window's states as the display server last configured them, and requests to change them (`xdg_toplevel`'s set/unset maximized and fullscreen, on the output the display server picks, and set_minimized). The display server decides; a new size arrives as `.Resize`, and a minimized window comes back only when the user brings it back. A headless window takes each state at once and keeps its size. Each window has its own connection to the display server, so a program shows several windows by driving each window's `frames()` in its own task. |
 | `Window.frame_stats() -> FrameStats` | stats | `presented`, `missed` (vblanks skipped between consecutive frames), `discarded`, `refresh_ns`, present-to-present `median_ns` / `p99_ns`, `spans` (intervals by refreshes spanned: 1, 2, 3, 4+) and input-to-photon `input_samples` / `input_median_ns` / `input_p99_ns`. |
 | `Frame.index` / `.width` / `.height` / `.scale` / `.time` / `.delta` | fields | The frame's number, the size in pixels to draw at and the pixels per logical unit, and its predicted presentation time and the step since the previous frame's, in seconds. |
-| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. |
+| `Frame.events() -> [UIEvent]` | events | Input since the previous frame: `KeyDown(Key)` (core.term's `Key`; Space is `Char(' ')`), `KeyUp(Key)`, `Text(String)`, `Compose(UIIMEComposition)`, `PointerMove(x:, y:)` in pixels, `PointerDown(UIPointerButton)`, `PointerUp`, `Scroll(dx:, dy:)` in pixels, `Resize(width:, height:)` in pixels, `Focus(Bool)`, `Drop(x:, y:, items: [UIDropItem])`, `Close`. Keys go through the compositor's XKB keymap (`core.ui.xkb`; a US layout until one arrives), and a held key other than a modifier repeats as further `KeyDown` and `Text` at the compositor's rate after its delay. `Text` is also what an input method commits. `Compose` is its composition in progress (`core.ui.host.ime`'s type: `text`, the caret as a `selection` and the `marked` span in characters), which replaces the previous one until its text is committed. A composition with empty text ends it, and it ends before its committed `Text` arrives. `Drop` is what a drag dropped on the window, at the place in pixels where it fell. A drag that offers a list of URIs (`text/uri-list`; a file manager's files are `file://` URIs) is taken as that, one `UIDropItem.URI` per line that is neither empty nor a `#` comment. A drag that offers only text is taken as one `UIDropItem.Text`. A drag with neither can't drop on the window. |
 | `Frame.present(pixels: [U8]) -[Env, Net, Time]> UIError!` | — | Show `height` rows of `width` RGBA pixels. |
 | `Frame.present_damage(pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> UIError!` | — | Show `pixels` where only the `damage` rectangles (in pixels) changed since the previous frame. |
 
@@ -5658,12 +5664,20 @@ tasks never read or change the process registry. The module source is
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `take_photo() -[Env, Exec, FS, Net, Time]> PickedFile?` | photo | Take a photo with the device's camera once the person allows it; `None` when they do not, or no photo came. See below. |
+| `open_file(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile?` | file | Ask the person for a file to open and give it; `None` when they cancel or it can't be read. See below. |
 | `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
+| `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
+| `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
 | `heading_updates() -[Env, Net, Time]> Stream<Float>` | headings | Where the device points, in degrees clockwise from north, each time that changes, until the loop reading it ends. See below. |
-| `photo.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `photo`. |
+| `file.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `file`. |
+| `file.text() -[FS.Read]> String IOError!` | text | The text of the `PickedFile` `file`; an error when its bytes are not UTF-8. |
+| `file.stream() -[FS.Read]> PickedStream IOError!` | reader | The bytes of the `PickedFile` `file` a part at a time, as a `Reader`. |
+| `folder.files() -[FS.Read]> [PickedFile] IOError!` | files | The files directly in the `PickedFolder` `folder`, in name order. |
+| `folder.write(name: String, bytes: [U8]) -[FS.Write]> IOError!` | — | Write `bytes` as the file `name` in `folder`, in one step. |
+| `folder.keep(key: String) -[Env]>` | — | Keep access to `folder` under `key`, for `kept_folder` in this run and every later one. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -6296,6 +6310,40 @@ and each sensor stream gives its sensor back to the sensor proxy
 (iio-sensor-proxy, on the system bus), then each closes its bus
 connection. A device with no such sensor, or no bus to ask, gives an empty
 stream, as the other native targets do.
+
+`app.open_file(types:)` asks the person for a file to open and gives it as
+a `PickedFile`: its `name`, its size in `bytes`, its `media` as its first
+bytes show (as a kept `Blob`'s, `None` for none of those media), and
+`read()`, `text()` and `stream()` for its bytes. The dialog offers the kinds
+of file in `types`, each a `FileType`, with the first one chosen. The
+person cancelling is `None` with no notice. A file that can't be read, or
+no dialog to ask with, is `None`, and a notice in the app's notice list says
+why. On Linux the desktop portal's open dialog
+(org.freedesktop.portal.FileChooser) asks, and the file is the path of the
+file:// URI it answers with. The other native targets keep that notice:
+their open dialogs are not built yet. A browser's file chooser answers
+after the page's code has returned, and the page runtime can't wait for it
+yet, so `app.open_file` in code whose target is the web output is a compile
+error, E-APP-TARGET-FEATURE, never a file made up for the person.
+
+`app.open_folder()` asks the person for a folder and gives it as a
+`PickedFolder`: its `name`, `files()` (the files directly in it, each a
+`PickedFile`, in name order) and `write(name, bytes)`, which writes a file
+there in one step. A name with a `/`, or `.` or `..`, is an error rather
+than a file outside the folder. The person cancelling is `None` with no
+notice. No dialog to ask with is `None`, and a notice in the app's notice
+list says why. On Linux the desktop portal's open dialog
+(org.freedesktop.portal.FileChooser), asked for a directory, chooses it.
+The other native targets keep that notice. `folder.keep(key)` keeps access
+to the folder under `key` in the device store, and `app.kept_folder(key)`
+gives it back in that run and every later one. A folder the document
+portal shares into a sandbox, under `$XDG_RUNTIME_DIR/doc/`, is kept by its
+document portal ID, so a later run finds it under its own runtime
+directory. Any other folder is kept by its path. A key with no folder kept,
+or a folder that is gone, is `None`. A browser's directory picker answers
+after the page's code has returned too, so `app.open_folder` and
+`app.kept_folder` in code whose target is the web output are a compile
+error, E-APP-TARGET-FEATURE.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

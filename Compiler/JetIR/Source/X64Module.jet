@@ -886,7 +886,9 @@ ir_x64_take_inputs: fn(inputs: Shared<IRX64Inputs>) -> IRX64Inputs {
 // (no parameters, no result) through the runtime's jet_rt_main, as the old
 // native route's object, or itself when the program owns its main
 // (IRModule.owned_main), attaching its thread first when
-// IRModule.owned_attach. `debug_info` false (the build option) leaves the
+// IRModule.owned_attach, and a global symbol for each runtime provider hook
+// the program defines (IRModule.hooks), which the link binds the runtime's
+// calls of the hook to. `debug_info` false (the build option) leaves the
 // DWARF sections empty.
 ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
@@ -894,9 +896,12 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     debug := [X64FunctionDebug]{}
     errors := ir_x64_main_rows(owned, functions, debug)
     if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors.move()}
+    exports := [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
+    loop hook in compiler_take_rows<IRLibraryExport>(owned.program.hooks) {
+        exports.push(X64RuntimeExport{function: X64FunctionID{value: hook.function}, symbol: hook.symbol})
+    }
     program: ir_x64_object_module(owned)
     threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
-    exports: [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}
     // What is left of the compile (its IR module above all) is read no more.
     // When its instructions admit threads (ir_x64_release_ways) it drops on
     // tasks of their own while the object is written; a smaller compile

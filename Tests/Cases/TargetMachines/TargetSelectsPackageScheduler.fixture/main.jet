@@ -1,0 +1,59 @@
+use {
+    core.target.[Machine, MachineFacts, MachineLayout]
+    core.tasks.[QueuedTask, Scheduler]
+}
+
+// The board package.jet selects as its machine target. Its scheduler is
+// Lifo, so every task the program spawns waits in Lifo's queue.
+LifoBoard: struct {
+    impl Machine {
+        facts: MachineFacts{
+            triple: "x86_64-unknown-linux-gnu",
+            layout: MachineLayout{pointer_bits: 64, word_bits: 64, cache_line: 64, atomic_bits: 64},
+            allocator: "system",
+            panic: "stderr",
+            byte_sink: "stdio",
+            scheduler: "Lifo",
+        },
+    }
+}
+
+// How many tasks Lifo took.
+Count: struct {
+    pushes: Int,
+}
+
+TAKEN: Shared{Count{pushes: 0}}
+
+// A last-in, first-out run queue.
+Lifo: struct {
+    held: [QueuedTask]{[QueuedTask]{}},
+
+    impl Scheduler {
+        push: fn(&self, task: QueuedTask) Never! {
+            self.held.push(task.copy())
+            TAKEN.pushes += 1
+        }
+
+        pop: fn(&self) -> QueuedTask? Never! { self.held.pop() }
+    }
+}
+
+double: fn(value: Int) -> Int { value * 2 }
+
+// The spawns, whose IR is the same under every scheduler.
+spawn_three: fn() -> Int {
+    total := 0
+    task.group work {
+        a: task double(1)
+        b: task double(2)
+        c: task double(3)
+        total = (a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0)
+    }
+    total
+}
+
+run: fn() {
+    print("sum {spawn_three()}")
+    print("the selected scheduler took every spawn: {TAKEN.pushes >= 3}")
+}

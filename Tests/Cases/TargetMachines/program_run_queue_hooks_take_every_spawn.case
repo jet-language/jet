@@ -1,0 +1,22 @@
+# A program that defines the runtime's two run-queue hooks
+# (jet_rt_scheduler_queue_push and jet_rt_scheduler_queue_pop, `#Export(c)`
+# in the entry module) replaces the runtime's FIFO at link time: every task
+# it spawns goes through its own queue, at every level and in the binary
+# `jet build` makes, and the tasks still run and join.
+fixture: ProgramRunQueueHooksTakeEverySpawn.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+timeout: 60s
+exit: 0
+stdout: = "sum 12\nthe program's queue took every spawn: true\n"
+step: jet run -O2 main.jet
+timeout: 60s
+exit: 0
+stdout: = "sum 12\nthe program's queue took every spawn: true\n"
+step: jet build main.jet
+timeout: 120s
+exit: 0
+step: .jet/build/main
+timeout: 60s
+exit: 0
+stdout: = "sum 12\nthe program's queue took every spawn: true\n"

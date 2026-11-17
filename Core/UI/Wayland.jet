@@ -5,6 +5,7 @@ use {
     core.term.[Key]
     core.ui.[FrameStats, UICursor, UIError, UIEvent, UIIcon, UIIconImage, UIPointerButton, UIRect]
     core.ui.host.[UITextRange]
+    core.ui.host.drag_drop.[UIDropItem]
     core.ui.host.ime.[UIIMEComposition]
     dbus: __core_ui_dbus
     frame: __core_ui_frame
@@ -31,7 +32,9 @@ use {
 // server_side) or offers no wl_subcompositor.
 // The clipboard is the seat's wl_data_device: a paste reads the holder's
 // text through a pipe, and a copy is a wl_data_source that writes its text
-// into each paster's pipe.
+// into each paster's pipe. A drag over the window that offers a list of
+// URIs or text is accepted as a copy, and what it drops is read the same
+// way and arrives as `.Drop`.
 // Input methods speak zwp_text_input_v3: while the program has a text
 // field, the compositor's input method composes into it, its preedit
 // arriving as `.Compose` and its committed text as `.Text`.
@@ -106,6 +109,13 @@ CLIPBOARD_MAX: 16777216
 
 CLIPBOARD_WAIT_NS: 2000000000
 
+// What a drag dropped on the window is taken as: a list of URIs, else text
+// (TEXT_TYPES); a copy is the one action it accepts (wl_data_device_manager's
+// dnd_action copy).
+URI_LIST: "text/uri-list"
+
+DND_COPY: 1
+
 // The most rectangles a damage list keeps apart (past that the two that
 // add the least area join); rectangles closer than DAMAGE_GAP pixels join.
 DAMAGE_RECTS: 64
@@ -161,6 +171,15 @@ OutputScale: struct {
 Offer: struct {
     id: Int,
     types: [String],
+}
+
+// An offer dropped on the window, the type it was accepted as, and where it
+// fell in pixels; the next frame reads it.
+DroppedOffer: struct {
+    offer: Int,
+    kind: String,
+    x: Int,
+    y: Int,
 }
 
 Connection: struct {
@@ -341,6 +360,17 @@ Connection: struct {
     priv source_text: String,
     priv old_sources: [Int],
     priv input_serial: Int,
+    // Drag and drop on the same wl_data_device, at the manager's bound
+    // version (set_actions and finish need 3): the offer of the drag over
+    // the program's surface (0 for none), the type it was accepted as and
+    // the pointer's place in pixels, and the offers dropped since the last
+    // frame.
+    priv data_version: Int,
+    priv drag: Int,
+    priv drag_type: String,
+    priv drag_x: Int,
+    priv drag_y: Int,
+    priv drops: [DroppedOffer],
     // Text input: zwp_text_input_manager_v3 and the seat's
     // zwp_text_input_v3 (0 without them); whether the input method has
     // this surface in focus; the caret area the program composes at
@@ -592,6 +622,12 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         source_text: "",
         old_sources: [Int]{},
         input_serial: 0,
+        data_version: 0,
+        drag: 0,
+        drag_type: "",
+        drag_x: 0,
+        drag_y: 0,
+        drops: [DroppedOffer]{},
         text_manager: 0,
         text_input: 0,
         text_entered: false,
@@ -765,6 +801,7 @@ next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
         }
         if c.failure != None -> c.events.push(UIEvent.Close)
     }
+    if c.failure == None && !has_close(c.events) && c.drops.len() > 0 -> take_drops(c)
     c.frame_start = rt.clock_mono_ns()
     events: c.events.copy()
     c.events.clear()
@@ -772,11 +809,11 @@ next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
 }
 
 // Whether input a person waits to see has arrived (a key, text, a
-// composition or a button) and a buffer is free to show it in; uncapped,
-// a free buffer alone is enough.
+// composition, a button or a drop) and a buffer is free to show it in;
+// uncapped, a free buffer alone is enough.
 urgent: fn(c: Connection) -> Bool {
     if !c.mapped || free_buffer(c) < 0 -> return false
-    if c.uncapped -> return true
+    if c.uncapped || c.drops.len() > 0 -> return true
     loop event in c.events {
         if event == {
             .KeyDown(_) -> return true
@@ -784,6 +821,7 @@ urgent: fn(c: Connection) -> Bool {
             .Compose(_) -> return true
             .PointerDown(_) -> return true
             .PointerUp(_) -> return true
+            .Drop(_, _, _) -> return true
             .KeyUp(_) | .PointerMove(_, _) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Close -> {}
         }
     }
@@ -1399,7 +1437,11 @@ required_bytes: fn(c: Connection, object: Int, opcode: Int) -> Int {
         if opcode == 1 -> return 12
         if opcode == 2 -> return 16
     }
-    if object == c.data_device && (opcode == 0 || opcode == 5) -> return 4
+    if object == c.data_device {
+        if opcode == 0 || opcode == 5 -> return 4
+        if opcode == 1 -> return 20
+        if opcode == 3 -> return 12
+    }
     if opcode == 0 && offer_index(c, object) >= 0 -> return 4
     if opcode == 1 && (object == c.source || c.old_sources.contains(object)) -> return 4
     if object == c.text_input {
@@ -1429,7 +1471,8 @@ global: fn(c: &Connection, name: Int, interface: String, version: Int) {
         text_input_device(c)
     }
     if interface == "wl_data_device_manager" && c.data_manager == 0 {
-        c.data_manager = bind(c, name, interface, min_int(version, 3))
+        c.data_version = min_int(version, 3)
+        c.data_manager = bind(c, name, interface, c.data_version)
         data_device(c)
     }
     if interface == "zwp_text_input_manager_v3" && c.text_manager == 0 {
@@ -1837,10 +1880,10 @@ pointer_button: fn(code: Int) -> UIPointerButton {
     UIPointerButton.Other(code)
 }
 
-// ---- clipboard --------------------------------------------------------
+// ---- clipboard, drag and drop -----------------------------------------
 
 // The seat's wl_data_device (get_data_device), once the manager and the
-// seat both exist: it brings the clipboard's offers.
+// seat both exist: it brings the clipboard's offers and the drags.
 data_device: fn(c: &Connection) {
     if c.data_manager == 0 || c.seat == 0 || c.data_device != 0 {
         return
@@ -1857,29 +1900,123 @@ offer_index: fn(c: Connection, object: Int) -> Int {
 }
 
 // wl_data_device: data_offer introduces an offer, whose types follow it;
-// selection names the offer that holds the clipboard (0: empty). A drag's
-// offer is never accepted, so nothing drops on the window; it and every
-// other offer but the clipboard's is destroyed once the compositor moves
-// on (leave, drop, a new selection).
+// selection names the offer that holds the clipboard (0: empty). A drag
+// that enters the program's surface is accepted or refused (`drag_enter`),
+// motion moves it, and drop keeps an accepted one for the next frame to
+// read (`take_drops`). Every other offer but the clipboard's is destroyed
+// once the compositor moves on (leave, drop, a new selection).
 data_device_event: fn(c: &Connection, opcode: Int, body: [U8]) {
     if opcode == 0 -> c.offers.push(Offer{id: u32_at(body, 0), types: [String]{}})
-    if opcode == 2 || opcode == 4 -> drop_offers(c)
+    if opcode == 1 -> drag_enter(c, body)
+    if opcode == 3 && c.drag != 0 {
+        c.drag_x = to_pixels(c, i32_at(body, 4))
+        c.drag_y = to_pixels(c, i32_at(body, 8))
+    }
+    if opcode == 4 && c.drag != 0 {
+        c.drops.push(DroppedOffer{offer: c.drag, kind: c.drag_type.copy(), x: c.drag_x, y: c.drag_y})
+    }
+    if opcode == 2 || opcode == 4 {
+        c.drag = 0
+        drop_offers(c)
+    }
     if opcode == 5 {
         c.selection = u32_at(body, 0)
         drop_offers(c)
     }
 }
 
-// Destroys (wl_data_offer.destroy) every offer but the clipboard's.
+// enter(serial, surface, x, y, offer): a drag over the program's surface
+// whose offer comes as a list of URIs or as text is accepted as a copy in
+// that type; one over the frame, or with neither, is refused (accept with
+// no type), so it can't drop there.
+drag_enter: fn(c: &Connection, body: [U8]) {
+    c.drag = 0
+    offer: u32_at(body, 16)
+    at: offer_index(c, offer)
+    if at < 0 {
+        return
+    }
+    kind: if u32_at(body, 4) == c.surface -> drop_type(c.offers[at].types) else -> ""
+    accepted := words([Int]{u32_at(body, 0)})
+    named: if kind == "" -> words([Int]{0}) else -> text_argument(kind)
+    loop b in named -> accepted.push(b)
+    request(c, offer, 0, accepted)
+    if kind == "" {
+        return
+    }
+    // set_actions(dnd_actions, preferred_action): from version 3 a drag
+    // drops only with an action both sides take.
+    if c.data_version >= 3 -> request(c, offer, 4, words([Int]{DND_COPY, DND_COPY}))
+    c.drag = offer
+    c.drag_type = kind
+    c.drag_x = to_pixels(c, i32_at(body, 8))
+    c.drag_y = to_pixels(c, i32_at(body, 12))
+}
+
+// The type a drop is taken as among `types`: a list of URIs, else the
+// first text type; "" for neither.
+drop_type: fn(types: [String]) -> String {
+    if types.contains(URI_LIST) -> return URI_LIST
+    text_type(types)
+}
+
+// Destroys (wl_data_offer.destroy) every offer but the clipboard's, the
+// drag's over the window and those dropped and not yet read.
 drop_offers: fn(c: &Connection) {
     offers: c.offers.copy()
     kept := [Offer]{}
     loop offer in offers {
-        if offer.id == c.selection -> kept.push(offer.copy()) else {
-            request(c, offer.id, 2, [U8]{})
-        }
+        if offer.id == c.selection || offer.id == c.drag || dropped(c, offer.id) {
+            kept.push(offer.copy())
+        } else { request(c, offer.id, 2, [U8]{}) }
     }
     c.offers = kept
+}
+
+dropped: fn(c: Connection, offer: Int) -> Bool {
+    loop drop in c.drops {
+        if drop.offer == offer -> return true
+    }
+    false
+}
+
+// Reads each offer dropped on the window in the type it was accepted as,
+// tells its source the drop is done (finish, from version 3) and destroys
+// it: a `.Drop` where it fell, with its items. A drop whose source sends
+// nothing readable, or nothing, is left out.
+take_drops: fn(c: &Connection) -[Env, Net, Time]> {
+    drops: c.drops.copy()
+    c.drops.clear()
+    loop drop in drops {
+        // A source that fails to send is a drop with nothing in it.
+        text: offer_text(c, drop.offer, drop.kind) ?? ""
+        if c.data_version >= 3 -> request(c, drop.offer, 3, [U8]{})
+        request(c, drop.offer, 2, [U8]{})
+        kept := [Offer]{}
+        loop offer in c.offers.copy() {
+            if offer.id != drop.offer -> kept.push(offer.copy())
+        }
+        c.offers = kept
+        items: drop_items(drop.kind, text)
+        if items.len() > 0 -> c.events.push(UIEvent.Drop{x: drop.x, y: drop.y, items: items})
+    }
+    flush(c)
+}
+
+// A drop's items, as core.ui.host.drag_drop reads a page's: each line of a
+// list of URIs that is neither empty nor a `#` comment is a URI item, and
+// text that isn't empty is one text item.
+drop_items: fn(kind: String, text: String) -> [UIDropItem] {
+    items := [UIDropItem]{}
+    if kind != URI_LIST {
+        if text.len() > 0 -> items.push(UIDropItem.Text{value: text.copy()})
+        return items
+    }
+    loop line in text.split("\n") {
+        uri: line.trim()
+        if uri.len() > 0 && !uri.starts_with("#") -> items.push(UIDropItem.URI{value: uri.copy()})
+    }
+    items
 }
 
 // The first of the clipboard's text types among `types`, "" for none.
@@ -1937,10 +2074,8 @@ send_text: fn(fd: sys.Fd, bytes: [U8]) -[Env, Time]> {
 }
 
 // The clipboard's text: this window's own copy while it holds the
-// clipboard, else the holder's, in the first text type it offers, read
-// through a pipe whose write end goes to the holder
-// (wl_data_offer.receive); "" when the clipboard is empty or holds no
-// text.
+// clipboard, else the holder's, in the first text type it offers
+// (`offer_text`); "" when the clipboard is empty or holds no text.
 clipboard_text: fn(c: &Connection) -[Env, Net, Time]> String UIError! {
     if c.failure == .Val(failure) -> return Err(failure)
     if c.data_device == 0 {
@@ -1951,12 +2086,18 @@ clipboard_text: fn(c: &Connection) -[Env, Net, Time]> String UIError! {
     if at < 0 -> return Ok("")
     kind: text_type(c.offers[at].types)
     if kind == "" -> return Ok("")
+    offer_text(c, c.selection, kind)
+}
+
+// The data of `offer` as `kind`, read through a pipe whose write end goes
+// to its source (wl_data_offer.receive).
+offer_text: fn(c: &Connection, offer: Int, kind: String) -[Env, Net, Time]> String UIError! {
     ends := sys.open_pipe() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed: {err}"))
     writer: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
     reader: ends.pop() ?? return Err(UIError.Protocol("opening a pipe for the clipboard failed"))
     // receive(mime_type, fd): the write end rides along, and flush closes
-    // this copy of it, so the holder's close ends the text.
-    request(c, c.selection, 1, text_argument(kind))
+    // this copy of it, so the source's close ends the text.
+    request(c, offer, 1, text_argument(kind))
     c.out_fds.push(writer)
     flush(c)
     if c.failure == .Val(failure) -> return Err(failure)

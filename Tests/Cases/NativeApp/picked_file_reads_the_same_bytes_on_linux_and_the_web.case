@@ -1,0 +1,36 @@
+# `app.open_file(types:)` asks the person for a file and gives it as a
+# PickedFile: a name, a size in bytes and a media type, never a path, with
+# `read`, `text` and `stream` for its bytes. On Linux the desktop portal's
+# open dialog (org.freedesktop.portal.FileChooser) asks: it gets the kinds
+# of file to offer, and its answer is a file:// URI. The picked CSV reads
+# the same whole, as text and a part at a time, and Crewboard's desktop
+# import (a copy of Examples/Apps/Crewboard's Desktop and Logic) adds its
+# rows to a project as tasks. With no dialog to ask, no file is picked and
+# a notice says why. A browser's file chooser answers after the page's code
+# returns, and the page runtime can't wait for it yet, so the same app built
+# for the web output is an E-APP-TARGET-FEATURE compile error at each
+# open_file call, Crewboard's import_tasks among them.
+fixture: PickedFileReadsTheSameBytesOnLinuxAndTheWeb.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+spawn bus: jet run bus/fake_portal.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = "picked: crew-tasks.csv, 59 bytes, text\nwhole, text and stream agree: true\nimported 2 tasks\nGate repair: 2 open\nSpring fair: 3 open\n"
+wait: bus timeout 60s
+exit: 0
+file: heard.txt = "Hello AddMatch OpenFile\nOpen File | handle_token | jet3 | filters | a(sa(us)) | CSV | *.csv | text/csv | current_filter | (sa(us)) | CSV | *.csv | text/csv\n"
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+exit: 0
+stdout: ~ "picked: none" # no dialog to ask, so no file
+stdout: ~ "notice: Couldn't open a file:" # the notice says why
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.open_file` needs target `native`, but the resolved target is `Web`." # never a file made up for the person
+stderr: ~ "main.jet:17:" # at the app's open_file call
+stderr: ~ "Desktop/files.jet:40:" # at Crewboard's import_tasks

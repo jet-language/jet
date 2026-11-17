@@ -1,0 +1,42 @@
+# `app.open_folder()` asks the person for a folder and gives it as a
+# PickedFolder: a name, never a path, with `files` and `write`. On Linux
+# the desktop portal's open dialog (org.freedesktop.portal.FileChooser),
+# asked for a directory, chooses it, and its answer is a file:// URI.
+# `folder.keep(key)` keeps access to it in the device store, a file under
+# the platform data directory and the app's package name, so a later run
+# finds it through `app.kept_folder(key)` with no dialog: by its path, or,
+# inside a sandbox, by its document portal ID. A device that kept no folder
+# and has no dialog to ask picks none, and a notice says why. A browser's
+# directory picker answers after the page's code returns, and the page
+# runtime can't wait for it yet, so the same app built for the web output
+# is an E-APP-TARGET-FEATURE compile error at each folder call.
+fixture: FolderAccessSurvivesARestart.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+spawn bus: jet run bus/fake_portal.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+env: XDG_DATA_HOME={work}/data
+exit: 0
+stdout: = "picked: exports\nwrote board.csv\nfiles: board.csv (31 bytes), tasks.csv (38 bytes)\n"
+wait: bus timeout 60s
+exit: 0
+file: heard.txt = "Hello AddMatch OpenFile\nOpen Folder | handle_token | jet3 | directory\n"
+step restart: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+env: XDG_DATA_HOME={work}/data
+exit: 0
+stdout: = "kept: exports\nfiles: board.csv (31 bytes), tasks.csv (38 bytes)\n"
+step other_device: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+env: XDG_DATA_HOME={work}/other
+exit: 0
+stdout: ~ "picked: none" # this device kept no folder and has no dialog to ask
+stdout: ~ "notice: Couldn't open a folder:" # the notice says why
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.kept_folder` needs target `native`, but the resolved target is `Web`." # no folder kept for a page
+stderr: ~ "App feature `.open_folder` needs target `native`, but the resolved target is `Web`." # never a folder made up for the person

@@ -1,0 +1,138 @@
+// A package's machine target selects its scheduler provider. The manifest's
+// `targets: { machine: { profile: "Board" } }` names a profile; when the
+// entry file declares that profile as a struct whose `impl Machine` facts
+// write `scheduler: "Lifo"`, the entry gains the provider's instance and the
+// run-queue hooks over it:
+//
+//     __JET_SCHEDULER: Shared{Lifo{}}
+//     #Export(c) jet_rt_scheduler_queue_push: fn(task: I64) { … push … }
+//     #Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 { … pop … }
+//
+// The hooks are the program's own definitions of the runtime's weak queue
+// hooks, so the static link binds the runtime to them: a spawn compiles to the
+// same code under every scheduler, and no call goes through a table. The
+// provider names a type as the entry file spells it, built with its field
+// defaults (`Lifo{}`), and implements `core.tasks.Scheduler`. A profile the
+// entry file does not declare (a compiler machine, a profile another package
+// gives) binds nothing here.
+use {
+    jet_foundation.[Item, Program, StructDef]
+    jet_parser.[parse_generated_source]
+    jet_pkg_model.[PackageParseError, pkg_parse_target_profiles, pkg_record_body, pkg_retired_record_head_spans]
+}
+
+// The target whose profile is the build's machine.
+JET_DRIVER_MACHINE_TARGET: "machine"
+
+// The Core functions the hooks call, which the load's reach must keep.
+JET_DRIVER_SCHEDULER_SPELLINGS: #run { [String]{"queued_task", "queued_handle"} }
+
+// The `targets:` field's value, read by the canonical Package reader: the
+// profile identity its `machine` target selects, or "" when it has none.
+jet_driver_read_machine_profile: fn(value: String) -> String PackageParseError! {
+    if pkg_retired_record_head_spans(value).len() > 0 {
+        return Err(PackageParseError.RetiredRecordHead)
+    }
+    targets: pkg_parse_target_profiles(pkg_record_body(value, "targets"))
+    profile: targets.profile(JET_DRIVER_MACHINE_TARGET) ?? return Ok("")
+    Ok(profile.as_str())
+}
+
+// The machine profile of the package whose root is `root_index`.
+jet_driver_machine_profile: fn(packages: [JetDriverPackageInfo], root_index: Int) -> String Never! {
+    loop package in packages {
+        if package.root_index == root_index -> return package.machine_profile
+    }
+    ""
+}
+
+// The provider type `profile`'s facts name, when the entry's `items` declare
+// `profile` as a struct with an `impl Machine` whose `facts` literal writes
+// `scheduler: "Type"`.
+jet_driver_scheduler_provider: fn(items: [Item], profile: String) -> String? Never! {
+    if profile == "" -> return None
+    loop item in items {
+        if item == .Struct(definition) {
+            if definition.name == profile -> return jet_driver_profile_scheduler(definition)
+        }
+    }
+    None
+}
+
+jet_driver_profile_scheduler: fn(definition: StructDef) -> String? Never! {
+    loop block in definition.trait_impls {
+        if block.trait_name != "Machine" && !block.trait_name.ends_with(".Machine") -> next
+        loop constant in block.constants {
+            if constant.name != "facts" -> next
+            if constant.value == .StructLit(_, _, _, _, fields, _, _, _) {
+                loop field in fields {
+                    if field.name != "scheduler" -> next
+                    if field.value == .Str(parts, _, _) {
+                        if parts.len() == 1 && parts[0] == .Lit(text) && jet_driver_provider_type_name(text) {
+                            return Val(text)
+                        }
+                    }
+                    return None
+                }
+            }
+        }
+    }
+    None
+}
+
+// A type as the entry spells it: dotted identifier components.
+jet_driver_provider_type_name: fn(text: String) -> Bool Never! {
+    if text == "" || text.starts_with(".") || text.ends_with(".") || text.contains("..") {
+        return false
+    }
+    loop byte in text.bytes() {
+        code: Int{byte}
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 46) {
+            return false
+        }
+    }
+    true
+}
+
+jet_driver_scheduler_hooks_source: fn(provider: String) -> String Never! {
+    lines: [String]{
+        "use {{",
+        "    __jet_scheduler_tasks: core.tasks",
+        "}}",
+        "__JET_SCHEDULER: Shared{{{provider}{{}}}}",
+        "#Export(c) jet_rt_scheduler_queue_push: fn(task: I64) {{",
+        "    __guard := __JET_SCHEDULER.guard_edit()",
+        "    #Unsafe(\"the runtime hands its scheduler each task it submits, once\") {{",
+        "        __guard.value.push(__jet_scheduler_tasks.queued_task(Int{{task}}))",
+        "    }}",
+        "}}",
+        "#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {{",
+        "    __guard := __JET_SCHEDULER.guard_edit()",
+        "    if __guard.value.pop() == .Val(__task) -> I64{{__jet_scheduler_tasks.queued_handle(__task)}} else -> I64{{0}}",
+        "}}",
+    }
+    lines.join("\n")
+}
+
+// Parse-time step for the entry file: binds the scheduler provider its
+// package's machine profile selects. Returns whether it bound one.
+jet_driver_bind_scheduler_provider: fn(program: &Program, profile: String) -> Bool {
+    provider: jet_driver_scheduler_provider(program.items, profile) ?? return false
+    parsed: parse_generated_source(jet_driver_scheduler_hooks_source(provider).bytes())
+    if parsed.diagnostics.len() > 0 -> return false
+    loop declaration in parsed.program.imports -> program.imports.push(declaration)
+    loop item in parsed.program.items -> program.items.push(item)
+    loop name in parsed.program.used_import_names -> program.used_import_names.push(name)
+    true
+}
+
+// The entry's spellings gain the Core functions the hooks call, after a `.`,
+// so the load keeps them.
+jet_driver_scheduler_spell: fn(words: &JetDriverUnitWords) {
+    if words.spells.len() == 0 -> words.spells.push([Int]{})
+    last: words.spells.len() - 1
+    loop word in JET_DRIVER_SCHEDULER_SPELLINGS {
+        words.spells[last].push(words.words.len() * 4 + 1)
+        words.words.push(word)
+    }
+}

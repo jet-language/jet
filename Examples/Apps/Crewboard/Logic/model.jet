@@ -20,7 +20,21 @@ Task: struct {
     id: String,
     project: String,
     title: String,
+    notes: String,
     status: Status,
+}
+
+// A task an import adds: its title and notes. It starts as Todo.
+#Codable
+TaskDraft: struct {
+    title: String,
+    notes: String,
+}
+
+// The tasks one import adds, every one of them or none.
+#Codable
+TaskBatch: struct {
+    tasks: [TaskDraft],
 }
 
 // A project as the projects screen lists it.
@@ -40,6 +54,7 @@ TaskError: enum {
     SignedOut,
     UpdateRequired,
     Unreachable(String),
+    Invalid(String),
 }
 
 // A call through an `app.Remote<Crew>` can fail on the way; each failure

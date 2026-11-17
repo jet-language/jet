@@ -420,37 +420,41 @@ Notice: struct {
 // The app's notice list holds the notices that have no control to sit
 // beside: a failed background run, a queued write refused after its screen
 // closed. The frame shows the list on every screen and keeps each notice
-// until it is dismissed. The list lives in the device store, so it outlasts
-// a restart (`jet.runtime.web` device_load/device_replace: a file under the
-// platform data directory and the app's package name, written through
-// atomically); inside a deterministic world it is the World's own cell, and
-// in a program with no device store (a test build) one process-wide cell.
-// It is kept as length-prefixed fields: each notice's text, then "1" or "0"
-// for its retry.
-NoticeCell: struct {
-    bytes: [U8],
-}
-
-NOTICE_CELL: Shared{NoticeCell{bytes: [U8]{}}}
+// until it is dismissed. The list lives in the device store
+// (`device_cell_load`), so it outlasts a restart. It is kept as
+// length-prefixed fields: each notice's text, then "1" or "0" for its retry.
+NOTICE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 NOTICE_STORE: "app.notices"
 
-notice_cell_load: fn() -> [U8] {
-    if world_rt.world_store_load(NOTICE_STORE) == .Val(bytes) -> return bytes
-    if rt_web.device_load(NOTICE_STORE) == .Val(bytes) -> return bytes
-    NOTICE_CELL.bytes
-}
+notice_cell_load: fn() -> [U8] { device_cell_load(NOTICE_STORE, NOTICE_CELL) }
 
 notice_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
-    if world_rt.world_store_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
+    device_cell_replace(NOTICE_STORE, NOTICE_CELL, expected, replacement)
+}
+
+// The bytes of the store `store`: on the device (`jet.runtime.web`
+// device_load: a file under the platform data directory and the app's
+// package name, written through atomically), so a restart finds them as the
+// run left them; inside a deterministic world, the World's own cell of that
+// name; in a program with no device store (a test build), `cell`, one
+// process-wide cell.
+priv device_cell_load: fn(store: String, cell: Shared<LiveCell>) -> [U8] Never! {
+    if world_rt.world_store_load(store) == .Val(bytes) -> return bytes
+    if rt_web.device_load(store) == .Val(bytes) -> return bytes
+    cell.bytes
+}
+
+// Replaces the bytes of the store `store` (`device_cell_load`) with
+// `replacement` only while they still equal `expected`; gives whether it did.
+priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U8], replacement: &&[U8]) -> Bool Never! {
+    if world_rt.world_store_replace(store, expected, replacement) == .Val(replaced) {
         return replaced
     }
-    if rt_web.device_replace(NOTICE_STORE, expected, replacement) == .Val(replaced) {
-        return replaced
-    }
-    cell := NOTICE_CELL.guard_edit()
-    if cell.value.bytes != expected -> return false
-    cell.value.bytes = replacement.move()
+    if rt_web.device_replace(store, expected, replacement) == .Val(replaced) -> return replaced
+    held := cell.guard_edit()
+    if held.value.bytes != expected -> return false
+    held.value.bytes = replacement.move()
     true
 }
 
@@ -648,32 +652,18 @@ priv QueuedWrite: struct {
     key: String,
 }
 
-// The queue lives where the notice list does (NoticeCell): in the device
-// store, so a restart finds it as the run left it; in the World's own cell
-// `app.queue` inside a deterministic world; else one process-wide cell. It
-// is kept as length-prefixed fields: each write's client, address, "1" or
-// "0" for local, method, body and key.
+// The queue lives where the notice list does: in the device store
+// (`device_cell_load`), so a restart finds it as the run left it. It is kept
+// as length-prefixed fields: each write's client, address, "1" or "0" for
+// local, method, body and key.
 priv QUEUE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 priv QUEUE_STORE: "app.queue"
 
-priv queue_load: fn() -> [U8] Never! {
-    if world_rt.world_store_load(QUEUE_STORE) == .Val(bytes) -> return bytes
-    if rt_web.device_load(QUEUE_STORE) == .Val(bytes) -> return bytes
-    QUEUE_CELL.bytes
-}
+priv queue_load: fn() -> [U8] Never! { device_cell_load(QUEUE_STORE, QUEUE_CELL) }
 
 priv queue_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool Never! {
-    if world_rt.world_store_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
-        return replaced
-    }
-    if rt_web.device_replace(QUEUE_STORE, expected, replacement) == .Val(replaced) {
-        return replaced
-    }
-    cell := QUEUE_CELL.guard_edit()
-    if cell.value.bytes != expected -> return false
-    cell.value.bytes = replacement.move()
-    true
+    device_cell_replace(QUEUE_STORE, QUEUE_CELL, expected, replacement)
 }
 
 // The writes of an encoded queue; malformed bytes are an empty queue.
@@ -3802,6 +3792,30 @@ PickedFile: struct {
 
     // The file's bytes.
     read: fn(self) -[FS.Read]> [U8] IOError! { files.read_bytes(self.path) }
+
+    // The file's text; an error when its bytes are not UTF-8.
+    text: fn(self) -[FS.Read]> String IOError! { files.read(self.path) }
+
+    // The file's bytes a part at a time, for a file too big to hold whole.
+    stream: fn(self) -[FS.Read]> PickedStream IOError! {
+        Ok(PickedStream{file: files.open(self.path)})
+    }
+}
+
+// A picked file's bytes as a `Reader`, from its first byte to its last.
+#[!Equatable, !Comparable]
+PickedStream: struct {
+    priv file: files.FileReader,
+
+    impl Reader {
+        read_bytes: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
+            self.file.read_bytes(limit)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! {
+            self.file.read_into(buffer, limit)
+        }
+    }
 }
 
 // A place on Earth: degrees north and east, and how far off it may be, in
@@ -3812,11 +3826,209 @@ Place: struct {
     accuracy_m: Float,
 }
 
-// A kind of file `save_file` offers to save as.
+// A kind of file `open_file` and `save_file` offer.
 FileType: enum {
     CSV,
     JSON,
     Image,
+}
+
+// Asks the person for a file to open and gives it, or `None` when they
+// cancel. The dialog offers the kinds in `types`, the first one chosen. A
+// file that can't be read, or no dialog to ask with, is `None` with a
+// notice. On Linux the desktop portal's open dialog asks
+// (org.freedesktop.portal.FileChooser); the other native targets keep that
+// notice.
+open_file: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? {
+    #if #build.target.os == {
+        .Linux -> { return app_open_linux(types) }
+        .MacOS -> { return app_unopened(OPEN_UNBUILT) }
+        .Windows -> { return app_unopened(OPEN_UNBUILT) }
+        .Web -> { return app_unopened(OPEN_UNBUILT) }
+        .Wasm -> { return app_unopened(OPEN_UNBUILT) }
+        .Freestanding -> { return app_unopened(OPEN_UNBUILT) }
+    }
+}
+
+priv OPEN_UNBUILT: "this system's open dialog is not built yet"
+
+// `open_file` on Linux: the portal's dialog, then the chosen file's size
+// and what its first bytes show it holds.
+priv app_open_linux: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_unopened("{err}")
+    filters := [dbus.FileFilter]{}
+    loop kind in types -> filters.push(app_file_filter(kind))
+    uri: if dbus.portal_open_file(bus, "Open File", filters, ASK_WAIT_NS) == {
+        .Err(err) -> {
+            return app_unopened("{err}")
+        }
+        .Ok(chosen) -> chosen ?? return None
+    }
+    path: app_chosen_path(uri) ?? return app_unopened("the dialog chose {uri}, which is not a local file")
+    if app_picked(path) == {
+        .Ok(file) -> Val(file)
+        .Err(err) -> app_unopened("{err}")
+    }
+}
+
+// The file at `path` as a PickedFile: its name, its size, and its media
+// as its first bytes show (`blob_type`), as a kept blob's is.
+priv app_picked: fn(path: String) -[FS.Read]> PickedFile IOError! {
+    size: files.stat(path).size
+    head: files.read_at(path, 0, BLOB_HEAD)
+    Ok(PickedFile{name: files.basename(path), bytes: size, media: blob_media(blob_type(head, size)), path: path})
+}
+
+// Keeps the notice that no file was opened, and why; gives `None`.
+priv app_unopened: fn(why: String) -> PickedFile? Never! {
+    __keep_notice(Notice{text: "Couldn't open a file: {why}"})
+    None
+}
+
+// The path of the local file a file dialog chose, given as a `file://`
+// URI; `None` for any other URI.
+priv app_chosen_path: fn(uri: String) -> String? Never! {
+    if !uri.starts_with("file://") -> return None
+    path: url.percent_decode(uri.removeprefix("file://")) ?? return None
+    Val(path)
+}
+
+// A folder the person gave the app (`open_folder`). It has a name, the
+// files in it and a way to write one there; where it is kept never reaches
+// the app. `keep` keeps access to it, so a later run finds it again
+// (`kept_folder`).
+PickedFolder: struct {
+    name: String,
+    priv path: String,
+
+    // The files directly in the folder, each a PickedFile, in name order.
+    files: fn(self) -[FS.Read]> [PickedFile] IOError! {
+        found := [PickedFile]{}
+        loop entry in files.list_dir(self.path) ?? return Err(err) {
+            if entry.is_dir -> next
+            found.push(app_picked(entry.path) ?? return Err(err))
+        }
+        Ok(found)
+    }
+
+    // Writes `bytes` as the file `name` in the folder, all at once, so a
+    // failed write leaves any file that was there whole. A name with a `/`,
+    // or `.` or `..`, is an error: it would leave the folder.
+    write: fn(self, name: String, bytes: [U8]) -[FS.Write]> IOError! {
+        if name == "" || name == "." || name == ".." || name.contains("/") {
+            return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("a file in a folder is named without a `/`, and is not `.` or `..`")}))
+        }
+        files.write_atomic("{self.path}/{name}", bytes)
+    }
+
+    // Keeps access to the folder under `key` in the device store
+    // (`device_cell_load`): `kept_folder(key)` gives it back in this run and
+    // every later one, until another folder is kept under `key`. It keeps
+    // the folder's path or, for one the document portal shares into a
+    // sandbox, its document portal ID (`app_folder_form`).
+    keep: fn(self, key: String) -[Env]> Never! {
+        form: app_folder_form(self.path, sys.get("XDG_RUNTIME_DIR") ?? "")
+        loop {
+            seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
+            listed: live_fields(seen) ?? [String]{}
+            kept := [U8]{}
+            at := 0
+            loop at + 1 < listed.len() {
+                if listed[at] != key {
+                    live_put(kept, listed[at])
+                    live_put(kept, listed[at + 1])
+                }
+                at += 2
+            }
+            live_put(kept, key)
+            live_put(kept, form)
+            if device_cell_replace(FOLDER_STORE, FOLDER_CELL, seen, kept) {
+                return
+            }
+        }
+    }
+}
+
+// The folders `keep` kept, as length-prefixed fields: each key, then its
+// folder's form (`app_folder_form`).
+priv FOLDER_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+priv FOLDER_STORE: "app.folders"
+
+// The folder kept under `key` (`PickedFolder.keep`), in this run or an
+// earlier one; `None` when none is, or it is no longer a folder.
+kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? {
+    listed: live_fields(device_cell_load(FOLDER_STORE, FOLDER_CELL)) ?? return None
+    at := 0
+    loop at + 1 < listed.len() {
+        if listed[at] == key {
+            path: app_folder_path(listed[at + 1], sys.get("XDG_RUNTIME_DIR") ?? "") ?? return None
+            if !files.is_dir(path) -> return None
+            return Val(PickedFolder{name: files.basename(path), path: path})
+        }
+        at += 2
+    }
+    None
+}
+
+// How `keep` writes down the folder at `path`, given the runtime directory
+// `runtime`. A folder the document portal shares into a sandbox lives
+// under `{runtime}/doc/{id}/`; it is `doc:` and the rest of its path from
+// the ID on, which a later run finds under its own runtime directory. Any
+// other folder is `path:` and its path.
+priv app_folder_form: fn(path: String, runtime: String) -> String Never! {
+    shared: "{runtime}/doc/"
+    if runtime != "" && path.starts_with(shared) -> return "doc:{path.removeprefix(shared)}"
+    "path:{path}"
+}
+
+// The path of the folder `keep` wrote down as `form` (`app_folder_form`),
+// given this run's runtime directory `runtime`; `None` for a form it
+// doesn't write.
+priv app_folder_path: fn(form: String, runtime: String) -> String? Never! {
+    if form.starts_with("path:") -> return Val(form.removeprefix("path:"))
+    if form.starts_with("doc:") && runtime != "" {
+        return Val("{runtime}/doc/{form.removeprefix("doc:")}")
+    }
+    None
+}
+
+// Asks the person for a folder and gives it, or `None` when they cancel.
+// No dialog to ask with, or a choice that is not a local folder, is `None`
+// with a notice. On Linux the desktop portal's open dialog asks for a
+// directory (org.freedesktop.portal.FileChooser); the other native targets
+// keep that notice.
+open_folder: fn() -[Env, FS.Read, Net, Time]> PickedFolder? {
+    #if #build.target.os == {
+        .Linux -> { return app_open_folder_linux() }
+        .MacOS -> { return app_no_folder(OPEN_UNBUILT) }
+        .Windows -> { return app_no_folder(OPEN_UNBUILT) }
+        .Web -> { return app_no_folder(OPEN_UNBUILT) }
+        .Wasm -> { return app_no_folder(OPEN_UNBUILT) }
+        .Freestanding -> { return app_no_folder(OPEN_UNBUILT) }
+    }
+}
+
+// `open_folder` on Linux: the portal's dialog, asked for a directory.
+priv app_open_folder_linux: fn() -[Env, FS.Read, Net, Time]> PickedFolder? Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_folder("{err}")
+    uri: if dbus.portal_open_folder(bus, "Open Folder", ASK_WAIT_NS) == {
+        .Err(err) -> {
+            return app_no_folder("{err}")
+        }
+        .Ok(chosen) -> chosen ?? return None
+    }
+    path: app_chosen_path(uri) ?? return app_no_folder("the dialog chose {uri}, which is not a local folder")
+    if !files.is_dir(path) {
+        return app_no_folder("the dialog chose {files.basename(path)}, which is not a folder")
+    }
+    Val(PickedFolder{name: files.basename(path), path: path})
+}
+
+// Keeps the notice that no folder was opened, and why; gives `None`.
+priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
+    __keep_notice(Notice{text: "Couldn't open a folder: {why}"})
+    None
 }
 
 // Asks the person where to save a file and writes `bytes` there, all at
@@ -3852,10 +4064,7 @@ priv app_save_linux: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env
         }
         .Ok(chosen) -> chosen ?? return false
     }
-    if !uri.starts_with("file://") {
-        return app_unsaved(suggested, "the dialog chose {uri}, which is not a local file")
-    }
-    path: url.percent_decode(uri.removeprefix("file://")) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a file path")
+    path: app_chosen_path(uri) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a local file")
     files.write_atomic(path, bytes) ?? return app_unsaved(suggested, "{err}")
     true
 }
@@ -3887,7 +4096,7 @@ priv app_save_media: fn(suggested: String, types: [FileType]) -> String Never! {
     app_file_filter(types[0]).media[0].copy()
 }
 
-// What the save dialog shows and matches for `kind`.
+// What a file dialog shows and matches for `kind`.
 priv app_file_filter: fn(kind: FileType) -> dbus.FileFilter Never! {
     if kind == {
         .CSV -> dbus.FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
@@ -4288,6 +4497,52 @@ priv app_tray_lost: fn(why: String) Never! {
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "The board is offline")
+}
+
+#Test("a picked file has its name, size and media, and reads whole, as text and a part at a time") {
+    folder: "{sys.temp_dir()}/jet-picked-{sys.getpid()}"
+    files.create_dir_all(folder) ?? panic("folder: {err}")
+    path: "{folder}/tasks 1.csv"
+    files.write(path, "title,notes\nGate repair,hinge\n") ?? panic("write: {err}")
+    assert_eq(app_chosen_path("file://{folder}/tasks%201.csv"), Val(path.copy()))
+    assert_eq(app_chosen_path("https://example.com/tasks.csv"), String?{None})
+    file: app_picked(path) ?? panic("picked: {err}")
+    assert_eq(file.name, "tasks 1.csv")
+    assert_eq(file.bytes, 30)
+    assert_eq(file.media, Val(Media.Text))
+    assert_eq(file.text() ?? panic("text: {err}"), "title,notes\nGate repair,hinge\n")
+    assert_eq(file.read() ?? panic("read: {err}"), "title,notes\nGate repair,hinge\n".bytes())
+    parts := file.stream() ?? panic("stream: {err}")
+    assert_eq(parts.read_bytes(12) ?? panic("part: {err}"), "title,notes\n".bytes())
+    assert_eq(parts.read_bytes(100) ?? panic("rest: {err}"), "Gate repair,hinge\n".bytes())
+    assert_eq(parts.read_bytes(100) ?? panic("end: {err}"), [U8]{})
+    files.remove_all(folder) ?? panic("clean: {err}")
+}
+
+#Test("a kept folder is found again by its key, by its path or its document portal ID, until it is gone") {
+    assert_eq(app_folder_form("/srv/crew/Exports", "/run/user/1000"), "path:/srv/crew/Exports")
+    assert_eq(app_folder_form("/run/user/1000/doc/4f2a/Exports", "/run/user/1000"), "doc:4f2a/Exports")
+    assert_eq(app_folder_form("/run/user/1000/doc/4f2a/Exports", ""), "path:/run/user/1000/doc/4f2a/Exports")
+    assert_eq(app_folder_path("doc:4f2a/Exports", "/run/user/1001"), Val("/run/user/1001/doc/4f2a/Exports"))
+    assert_eq(app_folder_path("path:/srv/crew/Exports", ""), Val("/srv/crew/Exports"))
+    assert_eq(app_folder_path("doc:4f2a/Exports", ""), String?{None})
+    assert_eq(app_folder_path("Exports", "/run/user/1000"), String?{None})
+    folder: "{sys.temp_dir()}/jet-folder-{sys.getpid()}"
+    files.create_dir_all("{folder}/Exports") ?? panic("folder: {err}")
+    assert(kept_folder("exports") == PickedFolder?{None}, "nothing is kept under a new key")
+    PickedFolder{name: "Exports", path: "{folder}/Exports"}.keep("exports")
+    kept: kept_folder("exports") ?? panic("the folder kept as `exports` is found")
+    assert_eq(kept.name, "Exports")
+    kept.write("board.csv", "title\nFix the gate\n".bytes()) ?? panic("write: {err}")
+    refused := false
+    if kept.write("../board.csv", [U8]{}) == .Err(_) -> refused = true
+    assert(refused, "a name with a `/` would leave the folder")
+    listed: kept.files() ?? panic("files: {err}")
+    assert_eq(listed.len(), 1)
+    assert_eq(listed[0].name, "board.csv")
+    assert_eq(listed[0].bytes, 19)
+    files.remove_all(folder) ?? panic("clean: {err}")
+    assert(kept_folder("exports") == PickedFolder?{None}, "a folder that is gone is not found")
 }
 
 // A photo from the camera through PipeWire, kept in a directory of this

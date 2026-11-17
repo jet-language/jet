@@ -1403,6 +1403,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     policy_memory_kernel := if inline_carrier == None -> Val([String]{}) else -> [String]?{None}
     boundaries := [ImportBoundary]{}
     purposes := [String]{}
+    machine_profile := ""
     policy_expert := Bool?{None}
     policy_lints_deny := [String]{}
     policy_harden := false
@@ -1419,6 +1420,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     policy_seen := false
     boundaries_seen := false
     purposes_seen := false
+    targets_seen := false
     settings_seen := false
     build_seen := false
     brace_depth := 0
@@ -1586,6 +1588,20 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                         }
                     }
                     index = purposes_value.next_index - 1
+                }
+                "targets" -> {
+                    if targets_seen {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.Composition("`targets` is declared more than once")))
+                    }
+                    targets_seen = true
+                    targets_value: jet_driver_manifest_field_value(source, tokens, value_index)
+                    if jet_driver_read_machine_profile(targets_value.text) == {
+                        .Ok(read) -> { machine_profile = read }
+                        .Err(error) -> {
+                            diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+                        }
+                    }
+                    index = targets_value.next_index - 1
                 }
                 "allocator" -> {
                     if allocator_seen {
@@ -1768,7 +1784,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     identity: jet_driver_package_identity(name, version ?? "")
     manifest_directory: jet_driver_dependency_path(root.canonical_path, "{root.files[manifest].relative_path}/..")
     read_scope: jet_driver_package_read_scope(authority_allow, if manifest_directory.valid -> manifest_directory.path else -> root.canonical_path)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), purposes: purposes.move(), markers: markers.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), purposes: purposes.move(), machine_profile: machine_profile, markers: markers.move()}
 }
 
 // The header markers of `package.jet` as the Jet parser reads them, each
@@ -6150,6 +6166,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         if !is_core && source_unit_index == (entry_index ?? -1) {
             sema_script_entry(program)
             if request.eval_entry -> sema_eval_entry_show(program)
+            if jet_driver_bind_scheduler_provider(program, jet_driver_machine_profile(catalog.packages, unit.root_index)) && words != None {
+                spelled := words.move() ?? jet_driver_unit_no_words()
+                jet_driver_scheduler_spell(spelled)
+                words = Val(spelled.move())
+            }
         }
         // Established bare names use the same declaring-owner table as Rust.
         // The lowercase URL typed head remains supported without adding a
