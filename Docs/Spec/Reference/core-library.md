@@ -6247,10 +6247,18 @@ its result's text as a text node. core.ui lays the tree out as every
 backend does, one unit a logical pixel, and draws it: a white background,
 each leaf but text a box filled with its color (else light gray), and each
 label in black from its box's top left, 16 units to the em. A text's color
-is its ink. The window draws again when another screen opens or it takes
-another size, and shows an empty box for the not-found state. Closing the
-window ends the process with status 0. A desktop with no display, or a
-display that fails, adds a notice. A side below one pixel panics.
+is its ink. The window routes its input to the tree. The primary pointer
+button focuses the button or text input under it and clicks a button,
+running its handler; Tab moves the focus through the buttons and text
+inputs in order; a key pressed with exactly a button's `shortcut:`
+modifiers clicks it (a command shortcut takes Control or Super); Enter or
+space with no modifier clicks the focused button; typed text and Backspace
+edit the focused text input; and a drop on a text input with `on_drop:`
+gives its handler each text and URI item. The window draws again when
+another screen opens, typing changes the tree, or it takes another size,
+and shows an empty box for the not-found state. Closing the window ends
+the process with status 0. A desktop with no display, or a display that
+fails, adds a notice. A side below one pixel panics.
 
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;

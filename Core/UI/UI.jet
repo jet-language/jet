@@ -160,6 +160,22 @@ UINode: struct {
     // filled with its color, else a light gray, and its label in black from
     // the box's top left, 16 units to the em. A text's color is its ink.
     __draw: fn(self, frame: Frame) Never! { internal.draw_tree(frame, self) }
+
+    // Routes one of a native window's events (`frame`'s) to the tree drawn
+    // in it by `__draw`, and gives whether the event changed the tree, which
+    // then needs drawing again.
+    // `focused` is the index in the tree's focus ring (its buttons and text
+    // inputs, in order) of the focused node, -1 for none, which the window
+    // keeps between events. The primary button focuses the node under the
+    // pointer and clicks a button; Tab moves the focus along the ring; a
+    // key with the modifiers of a button's shortcut clicks it, Enter or
+    // space with none clicks the focused button; typed text and Backspace
+    // edit the focused text input; a drop on a text input that takes drops
+    // gives it each text and URI item. A click and a drop run the handler
+    // the runtime keeps for the node's slot.
+    __input: fn(&self, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
+        internal.window_input(self, frame, event, focused)
+    }
 }
 
 // Whether a backend used an input event.
@@ -1805,6 +1821,174 @@ priv internal: module {
     // The whole pixels of `units` at `scale` pixels per unit.
     pixel: fn(units: Float, scale: Float) -> Int Never! { cell_index(units * scale) }
 
+    // `UINode.__input`. The tree's leaves are laid out as `draw_tree` lays
+    // them out, and its focus ring is the leaves that are buttons or text
+    // inputs. Gives whether the event changed the tree: only typing does,
+    // as a click's or a drop's handler changes what the app shows through
+    // the app's own state.
+    window_input: fn(tree: &UINode, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
+        ring := [Int]{}
+        loop index in 0..<leaves.len() {
+            role: leaves[index].node.role
+            if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) {
+                ring.push(index)
+            }
+        }
+        if focused >= ring.len() -> focused = -1
+        if event == {
+            .PointerDown(button) -> {
+                if button != .Left -> return false
+                x: Float{frame.get_mouse_x()} / frame.scale
+                y: Float{frame.get_mouse_y()} / frame.scale
+                at: ring_at(leaves, ring, x, y) ?? return false
+                focused = at
+                click: leaves[ring[at]].node.click
+                if click != 0 -> core.ui.__click(click)
+                false
+            }
+            .KeyDown(key) -> {
+                if key == .Tab {
+                    if ring.len() > 0 {
+                        focused = if focused < 0 -> 0 else -> (focused + 1) % ring.len()
+                    }
+                    return false
+                }
+                held: held_modifiers(frame)
+                loop index in ring {
+                    node: leaves[index].node
+                    shortcut: node.shortcut ?? next
+                    if node.click != 0 && shortcut_pressed(shortcut, key, held) {
+                        core.ui.__click(node.click)
+                        return false
+                    }
+                }
+                if focused < 0 -> return false
+                node: leaves[ring[focused]].node
+                if node.kind == .TextInput {
+                    chars: node.label.chars()
+                    if key != .Backspace || chars.len() == 0 -> return false
+                    bytes: node.label.bytes()
+                    last: "{chars[chars.len() - 1]}".bytes().len()
+                    kept: String.from_bytes(bytes[0..<bytes.len() - last]) ?? return false
+                    seen := 0
+                    tree = retyped(tree, ring[focused], seen, kept)
+                    return true
+                }
+                if node.click != 0 && held == 0 && (key == .Enter || key == .Char(' ')) {
+                    core.ui.__click(node.click)
+                }
+                false
+            }
+            .Text(typed) -> {
+                if focused < 0 -> return false
+                node: leaves[ring[focused]].node
+                if node.kind != .TextInput -> return false
+                seen := 0
+                tree = retyped(tree, ring[focused], seen, "{node.label}{typed}")
+                true
+            }
+            .Drop(x, y, items) -> {
+                at: ring_at(leaves, ring, Float{x} / frame.scale, Float{y} / frame.scale) ?? return false
+                slot: leaves[ring[at]].node.drop
+                if slot == 0 -> return false
+                loop item in items {
+                    if item == {
+                        .Text(value) -> { core.ui.__drop(slot, 0, value) }
+                        .URI(value) -> { core.ui.__drop(slot, 1, value) }
+                        .File(_) -> {}
+                    }
+                }
+                false
+            }
+            .KeyUp(_) | .Compose(_) | .PointerMove(_, _) | .PointerUp(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Close -> false
+        }
+    }
+
+    // The index in `ring` of the leaf whose frame holds the point (x, y), in
+    // units, if any.
+    ring_at: fn(leaves: [UIPlaced], ring: [Int], x: Float, y: Float) -> Int? Never! {
+        loop (at, index) in ring {
+            place: leaves[index].frame
+            if x >= place.x && x < place.x + place.width && y >= place.y && y < place.y + place.height {
+                return Val(at)
+            }
+        }
+        None
+    }
+
+    // `node` with its leaf `target`, counted in paint order
+    // (`placed_leaves`) from `seen` leaves before `node`, showing `label`
+    // at the width `text_input` gives it; a box is as wide as its widest
+    // child, as `box` makes it.
+    retyped: fn(node: UINode, target: Int, seen: &Int, label: String) -> UINode Never! {
+        result := node.copy()
+        if node.kind != .Box {
+            if seen == target {
+                result.label = label.copy()
+                result.width = Float{label.chars().len()}
+            }
+            seen += 1
+            return result
+        }
+        result.width = 0.0
+        loop index in 0..<node.children.len() {
+            child: retyped(node.children[index], target, seen, label)
+            if child.width > result.width -> result.width = child.width
+            result.children[index] = child
+        }
+        result
+    }
+
+    // The modifier keys `frame` holds down, in a shortcut's bits: Control 1,
+    // Alt 2, Shift 4, Meta (the Super key) 8.
+    held_modifiers: fn(frame: Frame) -> Int Never! {
+        bits := 0
+        if frame.is_key_down(.Control) -> bits += 1
+        if frame.is_key_down(.Alt) -> bits += 2
+        if frame.is_key_down(.Shift) -> bits += 4
+        if frame.is_key_down(.Super) -> bits += 8
+        bits
+    }
+
+    // Whether `key` pressed with the modifier bits `held` is `shortcut`: its
+    // key with exactly its modifiers, or for a command shortcut (bit 16) its
+    // other modifiers and exactly one of Control and Meta, as a page's keys
+    // match (core.ui.host.shortcuts.poll).
+    shortcut_pressed: fn(shortcut: UIShortcut, key: Key, held: Int) -> Bool Never! {
+        if key_name(key) != shortcut.key -> return false
+        bits: shortcut.modifiers.bits
+        if bits & 16 == 0 -> return held == bits
+        control: held & 1 != 0
+        meta: held & 8 != 0
+        control != meta && held - (if control -> 1 else -> 8) == bits - 16
+    }
+
+    // A key's name as a shortcut holds it, the browser's key value in lower
+    // case: a character's own, and empty for a key no shortcut names.
+    key_name: fn(key: Key) -> String Never! {
+        if key == {
+            .Char(c) -> "{c}".to_ascii_lower()
+            .Enter -> "enter"
+            .Escape -> "escape"
+            .Backspace -> "backspace"
+            .Tab -> "tab"
+            .Delete -> "delete"
+            .Insert -> "insert"
+            .Up -> "arrowup"
+            .Down -> "arrowdown"
+            .Left -> "arrowleft"
+            .Right -> "arrowright"
+            .Home -> "home"
+            .End -> "end"
+            .PageUp -> "pageup"
+            .PageDown -> "pagedown"
+            .F(n) -> "f{n}"
+            .Shift | .Control | .Alt | .Super | .CapsLock | .Ctrl(_) | .Unknown -> ""
+        }
+    }
+
     // The interactive nodes (buttons and text inputs) of a tree, in pre-order.
     collect_focus: fn(node: UINode, found: &[UINode]) Never! {
         if node.role == Val(UIAriaRole.Button) || node.role == Val(UIAriaRole.TextInput) {
@@ -2029,6 +2213,39 @@ priv html_name: fn(tree: UINode) -> String Never! {
     assert(get_image_color(screen, 2, 5) == Color{r: 221, g: 221, b: 221, a: 255})
     assert(get_image_color(screen, 30, 3) == Color{r: 255, g: 255, b: 255, a: 255})
     assert(get_image_color(screen, 30, 20) == Color{r: 255, g: 255, b: 255, a: 255})
+}
+
+#Test("a native window's input focuses, types into and tabs between a tree's inputs") {
+    // Text at row 0, the input at row 1, a plain button (no click slot) at 2.
+    script: [[UIEvent]]{
+        [UIEvent]{.PointerMove{x: 1, y: 0}, .PointerDown(.Left)},
+        [UIEvent]{.PointerMove{x: 1, y: 1}, .PointerDown(.Left), .Text("c"), .KeyDown(.Backspace), .Text("dé"), .KeyDown(.Backspace)},
+        [UIEvent]{.KeyDown(.Tab), .Text("x"), .KeyDown(.Enter)},
+        [UIEvent]{.KeyDown(.Tab), .Drop{x: 1, y: 1, items: [UIDropItem]{.Text{value: "dropped"}}}},
+    }
+    window: headless(width: 40, height: 24, script: script) ?? panic("headless")
+    tree := box([text("Name"), text_input("ab", .Native), button("Go")])
+    focused := -1
+    seen := [String]{}
+    loop frame in window.frames() {
+        changed := false
+        loop event in frame.events() {
+            if tree.__input(frame, event, focused) -> changed = true
+        }
+        seen.push("{changed} {focused} {tree.children[1].label} {tree.children[1].width} {tree.width}")
+    }
+    assert_eq(seen, [String]{"false -1 ab 2.0 6.0", "true 0 abd 3.0 6.0", "false 1 abd 3.0 6.0", "false 0 abd 3.0 6.0", "false 0 abd 3.0 6.0"})
+}
+
+#Test("a native window's key matches a button's shortcut as a page's does") {
+    save: UIShortcut.cmd("s")
+    // Control 1, Alt 2, Shift 4, Meta 8.
+    assert(internal.shortcut_pressed(save, .Char('S'), 1) && internal.shortcut_pressed(save, .Char('s'), 8))
+    assert(!internal.shortcut_pressed(save, .Char('s'), 9) && !internal.shortcut_pressed(save, .Char('s'), 0))
+    assert(internal.shortcut_pressed(UIShortcut{key: "s", modifiers: UIShortcutModifiers{bits: 20}}, .Char('s'), 5))
+    plain: UIShortcut{key: "enter", modifiers: UIShortcutModifiers{bits: 0}}
+    assert(internal.shortcut_pressed(plain, .Enter, 0) && !internal.shortcut_pressed(plain, .Enter, 4))
+    assert(!internal.shortcut_pressed(plain, .Control, 0))
 }
 
 #Test("UI event constructors preserve named payloads") {

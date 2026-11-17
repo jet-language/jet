@@ -4539,24 +4539,34 @@ priv app_graph_window: fn() -> AppWindow? Never! {
     held.value.window.copy()
 }
 
-// Shows the window until the person closes it, which ends the app: a frame
-// draws the current screen's tree (`app_window_tree`) when nothing is drawn
-// yet, another screen opened since the last drawing, or the window took
-// another size. A display that is missing or fails leaves a notice.
+// Shows the window until the person closes it, which ends the app. The
+// window shows the current screen's tree (`app_window_tree`), opened again
+// when another screen opens, and routes each event to it (`__input`), which
+// keeps its focus until then. A frame draws the tree when nothing is drawn
+// yet, the tree is new or an event changed it, or the window took another
+// size. A display that is missing or fails leaves a notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
+    tree := ui.box([UINode]{})
+    focused := -1
     drawn := false
     shown := AppCurrent?{None}
     loop frame in window.frames() {
-        now: app_graph_current()
-        stale := !drawn || now != shown
+        stale := !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
+            if tree.__input(frame, event, focused) -> stale = true
+        }
+        now: app_graph_current()
+        if now != shown {
+            tree = app_window_tree(now)
+            focused = -1
+            shown = now
+            stale = true
         }
         if !stale -> next
-        app_window_tree(now).__draw(frame)
+        tree.__draw(frame)
         drawn = true
-        shown = now
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
     process.exit(0)
