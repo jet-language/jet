@@ -1,0 +1,29 @@
+# A Linux app's tray: once the app launches, its icon is a
+# StatusNotifierItem on the session bus, and its menu a dbusmenu that lists
+# the person's projects from a live binding, then a separator and Quit.
+# When a project is added and the binding is invalidated, the tray rebuilds
+# its menu and says LayoutUpdated, and the desktop reads the new list.
+# Choosing a project runs its item, and choosing Quit ends the app. A
+# desktop with no session bus leaves a notice, and the app runs on.
+fixture: TrayMenuFollowsTheLiveProjectList.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+mkdir: run
+spawn bus: jet run bus/fake_bus.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = "opened: Launch\n"
+wait: bus timeout 60s
+exit: 0
+file: heard.txt = "Gate repair | Spring fair | - | Quit\nGate repair | Spring fair | Launch | - | Quit\n"
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+exit: 0
+stdout: ~ "notice: Couldn't show the app in the tray" # no bus, so a notice instead

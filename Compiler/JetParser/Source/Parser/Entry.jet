@@ -1119,6 +1119,8 @@ parser_parse_program: fn(state: &JetParserState) -> Program {
                 markers := [Marker]{}
                 loop parser_current_kind(state) == TOKEN_HASH {
                     markers.push(parser_parse_marker(state))
+                    // A marker on its own line still marks the binding below.
+                    parser_skip_semicolons(state)
                 }
                 parser_check_step_limit(state, markers)
                 start: parser_current(state).span
@@ -1249,23 +1251,33 @@ parser_marker_head_end: fn(state: &JetParserState, start: Int) -> Int Never! {
 }
 
 // `#Rule name: value` at file scope: rules before a lowercase module
-// binding. A marked constant (`NAME: …`) and a type (`Name: …`) take the
-// item route. The binding is the rules' Declaration site, which sema checks
-// against each rule's row, and it carries them as its own markers (a
-// `#ContextKey request_id: 0` is a key by its marker).
+// binding, on its line or on lines of their own above it. A marked constant
+// (`NAME: …`) and a type (`Name: …`) take the item route. The binding is the
+// rules' Declaration site, which sema checks against each rule's row, and it
+// carries them as its own markers (a `#ContextKey request_id: 0` is a key by
+// its marker).
 parser_marked_module_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_marker_head_end(state, 0)
     if offset < 0 -> return false
+    head_end := offset
+    loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
     loop parser_kind_at(state, offset) == TOKEN_HASH {
         offset = parser_marker_head_end(state, offset)
         if offset < 0 -> return false
+        head_end = offset
+        loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
     }
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     next: parser_kind_at(state, offset + 1)
     if next != TOKEN_COLON && next != TOKEN_COLON_EQ -> return false
     name: parser_lookahead(state, offset)
     bytes: parser_value(state, name).bytes()
-    bytes.len() > 0 && ((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95)
+    if bytes.len() == 0 || !((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95) -> return false
+    // Markers on lines of their own above a function or another item take
+    // the item route, which attaches them the same way.
+    if offset == head_end -> return true
+    value: parser_kind_at(state, offset + 2)
+    !parser_is_item_keyword(value) && !parser_prep_verb_ahead(state, offset + 2, TOKEN_KW_FN)
 }
 
 // File rules bare

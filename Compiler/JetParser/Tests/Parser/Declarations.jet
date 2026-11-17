@@ -583,6 +583,22 @@ run: fn() {}
     }
 }
 
+#Test("binding_markers_on_lines_of_their_own_mark_the_module_binding_below") {
+    sources: [String]{"#StepLimit(5) table: #run f()", "#StepLimit(5)\ntable: #run f()", "#StepLimit(5)\n\n#Audit\ntable: #run f()"}
+    loop source in sources {
+        program: parser_test_program(source)
+        assert_eq(program.items.len(), 1)
+        program.items[0] == .Const(binding) ?? panic("marked module binding: {source:Debug}")
+        assert_eq(binding.name, "table")
+        assert_eq(binding.markers[0].name, "StepLimit")
+    }
+    // Markers above a function still mark the function.
+    program: parser_test_program("#Memo\nfib: fn() -> Int {{ 1 }}")
+    program.items[0] == .Func(function) ?? panic("marked function")
+    assert_eq(function.name, "fib")
+    assert_eq(function.markers[0].name, "Memo")
+}
+
 #Test("trait_blocks_in_a_type_body_read_dotted_using_and_operator_heads") {
     source: `Meters: struct {
     v: Int,

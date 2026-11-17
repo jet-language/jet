@@ -1,0 +1,310 @@
+// The session bus for the app in ../main.jet, with the desktop's tray host
+// on it. It is its own package, so the app's package does not hold it. It
+// listens at bus.sock in the directory it runs in and writes bus.ready once
+// it listens. It answers the app's calls: Hello, RequestName (the name is
+// the app's) and the rest with an empty answer, RegisterStatusNotifierItem
+// among them. Each time the app says its menu changed (LayoutUpdated), the
+// host reads the menu (GetLayout). After the first read it writes
+// first.read, so the app adds a project. After the second it clicks the new
+// project, and then Quit. Once the app has closed the connection it writes
+// heard.txt: a line for each menu it read, its labels in order and `-` for
+// a separator.
+use {
+    files: core.files
+    net: core.net
+}
+
+APP: ":1.48"
+
+run: fn() -[FS, Net, Time]> {
+    listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
+    files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
+    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    said := [U8]{}
+    authenticated := false
+    sent := 0
+    layouts := 0
+    menus := [String]{}
+    last := [String]{}
+    loop {
+        got: net.unix_receive(stream, 4096) ?? break
+        if got.bytes.len() == 0 -> break
+        loop b in got.bytes -> said.push(b)
+        if !authenticated {
+            // The credentials byte and the AUTH line come first, then
+            // BEGIN and the calls.
+            line_end: crlf_at(said, 0)
+            if line_end < 0 -> next
+            net.unix_write_all_bytes(stream, "OK 0123456789abcdef0123456789abcdef\r\n".bytes()) ?? panic("answer AUTH: {err}")
+            said = said[line_end..<said.len()].copy()
+            authenticated = true
+        }
+        if said.len() >= 7 && String.from_bytes_lossy(said[0..<7].copy()) == "BEGIN\r\n" {
+            said = said[7..<said.len()].copy()
+        }
+        loop said.len() >= 16 && said.len() >= message_length(said) {
+            n: message_length(said)
+            m: said[0..<n].copy()
+            said = said[n..<said.len()].copy()
+            kind: Int{m[1]}
+            out := [U8]{}
+            if kind == 1 {
+                // A call from the app to the bus or to the tray host.
+                sent += 1
+                member: text_field(m, 3)
+                body := [U8]{}
+                signature := ""
+                if member == "Hello" {
+                    put_text(body, APP)
+                    signature = "s"
+                } else if member == "RequestName" {
+                    put_word(body, 1)
+                    signature = "u"
+                }
+                out = reply(sent, word(m, 8), signature, body)
+            } else if kind == 4 && text_field(m, 3) == "LayoutUpdated" {
+                layouts += 1
+                if layouts <= 2 -> out = get_layout(99 + layouts)
+            } else if kind == 2 {
+                asked: word_field(m, 5)
+                if asked == 100 || asked == 101 {
+                    last = labels_of(body_of(m))
+                    menus.push(last.join(" | "))
+                    if asked == 100 {
+                        files.write("first.read", "") ?? panic("write first.read: {err}")
+                    } else { out = click(102, id_of(last, "Launch")) }
+                } else if asked == 102 { out = click(103, id_of(last, "Quit")) }
+            }
+            if out.len() > 0 {
+                net.unix_write_all_bytes(stream, out) ?? panic("write to the app: {err}")
+            }
+        }
+    }
+    files.write("heard.txt", "{menus.join("\n")}\n") ?? panic("write heard.txt: {err}")
+}
+
+// The bus's answer `serial` to the app's call `to`.
+reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
+    out := start(2, serial)
+    field_word(out, 5, to)
+    field_text(out, 6, 115, APP)
+    field_text(out, 7, 115, "org.freedesktop.DBus")
+    if signature != "" -> field_signature(out, 8, signature)
+    finish(out, body)
+    out
+}
+
+// The tray host's call `serial` to the app's menu.
+menu_call: fn(serial: Int, member: String, signature: String, body: [U8]) -> [U8] {
+    out := start(1, serial)
+    field_text(out, 1, 111, "/MenuBar")
+    field_text(out, 2, 115, "com.canonical.dbusmenu")
+    field_text(out, 3, 115, member)
+    field_text(out, 6, 115, APP)
+    field_text(out, 7, 115, ":1.7")
+    field_signature(out, 8, signature)
+    finish(out, body)
+    out
+}
+
+// GetLayout of the whole menu: the root (0), every depth (-1), every
+// property (none named).
+get_layout: fn(serial: Int) -> [U8] {
+    body := [U8]{}
+    put_word(body, 0)
+    put_word(body, -1)
+    put_word(body, 0)
+    menu_call(serial, "GetLayout", "iias", body)
+}
+
+// A click on the menu item `id`: an Event "clicked" with data 0 at time 0.
+click: fn(serial: Int, id: Int) -> [U8] {
+    body := [U8]{}
+    put_word(body, id)
+    put_text(body, "clicked")
+    // A variant holding an int32: its signature "i", then the number.
+    body.push(U8{1})
+    body.push(U8{105})
+    body.push(U8{0})
+    pad(body, 4)
+    put_word(body, 0)
+    put_word(body, 0)
+    menu_call(serial, "Event", "isvu", body)
+}
+
+// The id of the item labelled `label`: its place in the menu, from 1.
+id_of: fn(labels: [String], label: String) -> Int {
+    loop (at, shown) in labels {
+        if shown == label -> return at + 1
+    }
+    panic("the menu has no {label}: {labels.join(" | ")}")
+}
+
+// The labels of the items of a GetLayout answer's `body`, in order, with
+// `-` for a separator.
+labels_of: fn(body: [U8]) -> [String] {
+    texts: texts_of(body)
+    labels := [String]{}
+    loop (at, text) in texts {
+        if text == "label" && at + 1 < texts.len() -> labels.push(texts[at + 1].copy())
+        if text == "separator" -> labels.push("-")
+    }
+    labels
+}
+
+// A message's fixed header: little-endian, `kind`, no flags, version 1;
+// `finish` fills in the lengths.
+start: fn(kind: Int, serial: Int) -> [U8] {
+    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    put_word(out, 0)
+    put_word(out, serial)
+    put_word(out, 0)
+    out
+}
+
+// Ends the header fields of `out` and adds `body`.
+finish: fn(out: &[U8], body: [U8]) {
+    set_word(out, 12, out.len() - 16)
+    pad(out, 8)
+    set_word(out, 4, body.len())
+    loop b in body -> out.push(b)
+}
+
+// A header field `code` holding a string (115) or an object path (111).
+field_text: fn(out: &[U8], code: Int, kind: Int, text: String) {
+    field_head(out, code, kind)
+    put_text(out, text)
+}
+
+// A header field `code` holding a number.
+field_word: fn(out: &[U8], code: Int, n: Int) {
+    field_head(out, code, 117)
+    put_word(out, n)
+}
+
+// A header field `code` holding a signature.
+field_signature: fn(out: &[U8], code: Int, signature: String) {
+    field_head(out, code, 103)
+    out.push(U8{signature.len()})
+    loop b in signature.bytes() -> out.push(b)
+    out.push(U8{0})
+}
+
+// A header field's code and the signature of its value, the one type
+// `kind`, from an 8-byte boundary.
+field_head: fn(out: &[U8], code: Int, kind: Int) {
+    pad(out, 8)
+    out.push(U8{code})
+    out.push(U8{1})
+    out.push(U8{kind})
+    out.push(U8{0})
+}
+
+// A string: its length, its bytes and a NUL, from a 4-byte boundary.
+put_text: fn(out: &[U8], text: String) {
+    pad(out, 4)
+    put_word(out, text.len())
+    loop b in text.bytes() -> out.push(b)
+    out.push(U8{0})
+}
+
+// `n` as a little-endian 32-bit word, two's complement when negative.
+put_word: fn(out: &[U8], n: Int) {
+    loop b in word_bytes(n) -> out.push(b)
+}
+
+set_word: fn(out: &[U8], at: Int, n: Int) {
+    loop (i, b) in word_bytes(n) -> out[at + i] = b
+}
+
+word_bytes: fn(n: Int) -> [U8] {
+    v := if n < 0 -> n + 4294967296 else -> n
+    bytes := [U8]{}
+    loop _ in 0..<4 {
+        bytes.push(U8{v % 256})
+        v = v /% 256
+    }
+    bytes
+}
+
+pad: fn(out: &[U8], to: Int) {
+    loop out.len() % to != 0 -> out.push(U8{0})
+}
+
+// The body of the message `m`.
+body_of: fn(m: [U8]) -> [U8] { m[(16 + aligned(word(m, 12), 8))..<m.len()].copy() }
+
+// The text of the header field `code` of the message `m`, a string or an
+// object path, or "".
+text_field: fn(m: [U8], code: Int) -> String {
+    at: field_at(m, code)
+    if at < 0 -> return ""
+    String.from_bytes_lossy(m[(at + 4)..<(at + 4 + word(m, at))].copy())
+}
+
+// The number in the header field `code` of the message `m`, or -1.
+word_field: fn(m: [U8], code: Int) -> Int {
+    at: field_at(m, code)
+    if at < 0 -> -1 else -> word(m, at)
+}
+
+// Where the value of the header field `code` of the message `m` starts, or
+// -1.
+field_at: fn(m: [U8], code: Int) -> Int {
+    end: 16 + word(m, 12)
+    at := 16
+    loop at < end {
+        found: Int{m[at]}
+        kind: Int{m[at + 2]}
+        at += 4
+        if kind != 103 -> at = aligned(at, 4)
+        if found == code -> return at
+        if kind == 103 {
+            // A signature: a length byte, the text and a NUL.
+            at += Int{m[at]} + 2
+        } else if kind == 117 { at += 4 } else {
+            // A string or an object path: a length word, the text and a NUL.
+            at += 4 + word(m, at) + 1
+        }
+        at = aligned(at, 8)
+    }
+    -1
+}
+
+// The runs of two or more printable ASCII bytes in `body`: the texts of a
+// message body whose numbers are not printable.
+texts_of: fn(body: [U8]) -> [String] {
+    found := [String]{}
+    run := [U8]{}
+    loop b in body {
+        n: Int{b}
+        if n >= 32 && n < 127 {
+            run.push(b)
+            next
+        }
+        if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+        run = [U8]{}
+    }
+    if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+    found
+}
+
+// Where the CR LF that ends the first line of `bytes` after `from` ends, or
+// -1.
+crlf_at: fn(bytes: [U8], from: Int) -> Int {
+    loop i in from..<(bytes.len() - 1) {
+        if (Int{bytes[i]}) == 13 && (Int{bytes[i + 1]}) == 10 -> return i + 2
+    }
+    -1
+}
+
+// The length of the message `m` starts with: its fixed header, its header
+// fields padded to 8 bytes, and its body.
+message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
+
+aligned: fn(at: Int, to: Int) -> Int { (at + to - 1) /% to * to }
+
+// The little-endian 32-bit word at `at` of `bytes`.
+word: fn(bytes: [U8], at: Int) -> Int {
+    Int{bytes[at]} + (Int{bytes[at + 1]}) * 256 + (Int{bytes[at + 2]}) * 65536 + (Int{bytes[at + 3]}) * 16777216
+}

@@ -1,0 +1,88 @@
+// Crewboard's tray on a Linux desktop: its menu lists the person's projects
+// from a live binding, so it follows the list when a project is added, and
+// choosing a project opens it.
+use {
+    app
+    files: core.files
+    tasks: core.tasks
+    core.reactive.loadable.[Loadable]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Board: struct {
+    projects: [String],
+    opened: String,
+}
+
+BOARD: Shared{Board{projects: [String]{"Gate repair", "Spring fair"}, opened: ""}}
+
+my_projects: fn() -[DB.Read]> [String] BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.projects.copy())
+}
+
+// The tray's menu: a project to open for each of the person's projects,
+// then Quit.
+tray_menu: fn(projects: app.Live<[String], BoardError>) -> [app.MenuItem] app.Notice! {
+    names: if app.state(projects) == {
+        .Loaded(names) -> names
+        .Failed(_) -> {
+            return Err(app.Notice{text: "Can't load your projects."})
+        }
+        .Idle | .Loading -> [String]{}
+    }
+    items := [app.MenuItem]{}
+    loop name in names {
+        picked: name.copy()
+        items.push(app.item(name.copy(), fn() app.Notice! { open_project(picked.copy()) }))
+    }
+    items.push(app.separator())
+    items.push(app.quit_item())
+    Ok(items)
+}
+
+open_project: fn(name: String) app.Notice! {
+    held := BOARD.guard_edit()
+    held.value.opened = name.copy()
+    Ok()
+}
+
+add_project: fn(name: String) {
+    held := BOARD.guard_edit()
+    held.value.projects.push(name.copy())
+}
+
+opened: fn() -> String Never! {
+    held: BOARD.guard_read()
+    held.value.opened.copy()
+}
+
+run: fn() {
+    // The desktop says it has read the first menu by writing first.read.
+    _: files.remove("first.read")
+    projects: app.live(my_projects)
+    graph: app.new("Crewboard").tray(icon: "crewboard", menu: fn() -> [app.MenuItem] app.Notice! { tray_menu(projects) })
+    if !graph.launch() {
+        return
+    }
+    loop _ in 0..<6000 {
+        if app.notices().len() > 0 || files.exists("first.read") -> break
+        tasks.sleep(10)
+    }
+    if app.notices().len() == 0 {
+        add_project("Launch")
+        app.invalidate(my_projects)
+        loop _ in 0..<6000 {
+            if opened() != "" -> break
+            tasks.sleep(10)
+        }
+        print("opened: {opened()}")
+        // The desktop chooses Quit next, which ends the app.
+        loop _ in 0..<6000 -> tasks.sleep(10)
+    }
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}
