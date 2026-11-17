@@ -47,7 +47,7 @@ LANG_FFI_TYPE: "FFILanguage"
 
 #Error
 CoreRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> CoreRowsError Never! {
@@ -58,14 +58,14 @@ rows_fail: fn(message: String) -> CoreRowsError Never! {
 // effect of Effects.jet; for a Core service effect it is the `#FX(…)` list
 // above its declaration, the machine effects a row naming it may use.
 EffectRow: struct {
-    name: String
-    irreversible: Bool
-    kernel: [String]{[String]{}}
+    name: String,
+    irreversible: Bool,
+    kernel: [String]{[String]{}},
 }
 
 GeneratedFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // The text of bytes `start..<end` of `text` (indexes from text.bytes()).
@@ -100,19 +100,19 @@ LAW_ROW: Regex{"^(?:CollectionLawFacts)?\{{law: CollectionLaw\.([A-Za-z0-9_]+), 
 OPERATION_ROW: Regex{"^(?:CollectionOperationRow)?\{{receivers: CollectionReceivers\.([A-Za-z0-9_]+), name: \x22([A-Za-z0-9_]+)\x22, minimum_arity: ([0-9]+), maximum_arity: ([0-9]+), access: CollectionAccess\.([A-Za-z0-9_]+), args: \[CollectionArg\]\{{([^}}]*)\}}, result: CollectionResult\.([A-Za-z0-9_]+), op: (.+), law: CollectionLaw\.([A-Za-z0-9_]+), empty: \x22([^\x22]*)\x22, status: CollectionStatus\.([A-Za-z0-9_]+)(?:, stores: true)?\}},?$"}
 
 CollectionLawRow: struct {
-    law: String
-    cells: [String]
+    law: String,
+    cells: [String],
 }
 
 CollectionOperation: struct {
-    receivers: String
-    name: String
-    minimum: Int
-    args: [String]
-    access: String
-    law: String
-    empty: String
-    status: String
+    receivers: String,
+    name: String,
+    minimum: Int,
+    args: [String],
+    access: String,
+    law: String,
+    empty: String,
+    status: String,
 }
 
 receiver_text: fn(name: String) -> String Never! {
@@ -418,10 +418,11 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
         if !family || fields.len() != 1 || impl_seen {
             return Err(rows_fail("{place}: expected an effect family case name, `impl Effect` or `}}`"))
         }
-        if cases.contains(line) {
-            return Err(rows_fail("{place}: duplicate effect {type_name}.{line}"))
+        member: line.removesuffix(",")
+        if cases.contains(member) {
+            return Err(rows_fail("{place}: duplicate effect {type_name}.{member}"))
         }
-        cases.push(line)
+        cases.push(member)
     }
     if type_name != "" -> return Err(rows_fail("{path}: `{type_name}` is not closed"))
     if rows.len() == 0 -> return Err(rows_fail("{path} declares no effects"))
@@ -493,14 +494,14 @@ render_lang_block: fn(roots: [String], languages: [String]) -> String Never! {
         "/// {META_EFFECTS_PATH}.",
         "Effect: enum {{",
     }
-    loop name in roots -> lines.push("    {name}")
+    loop name in roots -> lines.push("    {name},")
     lines.push("}}")
     lines.push("")
     lines.push("/// Foreign language named by `#FFI(<lang>)`: the languages of the `{FFI_ROOT}`")
     lines.push("/// effect in {EFFECTS_PATH}; an inline body needs a language with an")
     lines.push("/// inline binder.")
     lines.push("{LANG_FFI_TYPE}: enum {{")
-    loop name in languages -> lines.push("    {name}")
+    loop name in languages -> lines.push("    {name},")
     lines.push("}}")
     lines.push(LANG_BLOCK_END)
     lines.join("\n")
@@ -567,8 +568,8 @@ read_core_source_views: fn() -[FS]> CoreSourceViews CoreRowsError! {
 }
 
 CoreSourceViews: struct {
-    files: [GeneratedFile]
-    effects: Int
+    files: [GeneratedFile],
+    effects: Int,
 }
 
 // The file's text, or "" when it does not exist.
@@ -615,20 +616,20 @@ effect_rows_error: fn(source: String, machine: [EffectRow]?) -> String Never! {
     loop output in views.files {
         assert_eq(files.read(output.path) ?? panic("{output.path} did not read"), output.text)
     }
-    assert(effect_rows_error("Net: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\nFS: enum {{\n    Read\n    Write\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n", None) == "")
-    rows: effect_rows("FS: enum {{\n    Read\n    Write\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\nIO: struct {{\n    impl Effect {{}}\n}}\n", "Effects.jet", None) ?? panic("the family was refused: {err.message}")
+    assert(effect_rows_error("Net: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\nFS: enum {{\n    Read,\n    Write,\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n", None) == "")
+    rows: effect_rows("FS: enum {{\n    Read,\n    Write,\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\nIO: struct {{\n    impl Effect {{}}\n}}\n", "Effects.jet", None) ?? panic("the family was refused: {err.message}")
     assert_eq(rows.len(), 4)
     assert(rows[0].name == "FS" && rows[0].irreversible)
     assert(rows[1].name == "FS.Read" && !rows[1].irreversible)
     assert(rows[2].name == "FS.Write" && rows[2].irreversible)
     assert(rows[3].name == "IO" && !rows[3].irreversible && rows[3].kernel.len() == 0)
-    assert(effect_rows_error("FS: enum {{\n    Read\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Gone }}\n    }}\n}}\n", None).contains("is not `true`, `false`"))
+    assert(effect_rows_error("FS: enum {{\n    Read,\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Gone }}\n    }}\n}}\n", None).contains("is not `true`, `false`"))
     assert(effect_rows_error("Net: struct {{\n    impl Effect {{}}\n}}\nNet: struct {{\n    impl Effect {{}}\n}}\n", None).contains("duplicate effect Net"))
     assert(effect_rows_error("Net: effect\n", None).contains("expected `Name: struct {{`"))
     assert(effect_rows_error("Net: struct {{\n}}\n", None).contains("has no `impl Effect` block"))
     assert(effect_rows_error("// only a comment\n", None).contains("declares no effects"))
     assert(effect_rows_error("#FX(Net)\nNet: struct {{\n    impl Effect {{}}\n}}\n", None).contains("expected `Name: struct {{`"))
-    service: effect_rows("#FX(IO, FS.Write)\nDB: enum {{\n    Read\n    Write\n    impl Effect {{}}\n}}\n", "Effects.jet", Val(rows)) ?? panic("the service effect was refused: {err.message}")
+    service: effect_rows("#FX(IO, FS.Write)\nDB: enum {{\n    Read,\n    Write,\n    impl Effect {{}}\n}}\n", "Effects.jet", Val(rows)) ?? panic("the service effect was refused: {err.message}")
     assert_eq(service.len(), 3)
     assert(service[0].name == "DB" && service[0].kernel == [String]{"IO", "FS.Write"})
     assert(service[2].name == "DB.Write" && service[2].kernel == [String]{"IO", "FS.Write"})
@@ -638,15 +639,15 @@ effect_rows_error: fn(source: String, machine: [EffectRow]?) -> String Never! {
     assert(effect_rows_error("#FX(IO)\nFS: struct {{\n    impl Effect {{}}\n}}\n", Val(rows)).contains("`FS` is already a machine effect"))
     roots: [String]{"Net", "Rand"}
     block: render_lang_block(roots, [String]{"C"})
-    fresh: "A: enum {{\n    X\n}}\n\n{block}\n\nB: enum {{\n    Y\n}}\n"
+    fresh: "A: enum {{\n    X,\n}}\n\n{block}\n\nB: enum {{\n    Y,\n}}\n"
     assert_eq(generated_block_text(fresh, "Lang.jet", block) ?? panic("the Lang block was refused: {err.message}"), fresh)
     // A hand-edited byte inside the block is rewritten, so `--check` fails on it.
-    edited: fresh.replace("    Rand\n", "    Rend\n")
+    edited: fresh.replace("    Rand,\n", "    Rend,\n")
     assert(edited != fresh)
     assert_eq(generated_block_text(edited, "Lang.jet", block) ?? panic("the edited Lang block was refused: {err.message}"), fresh)
-    assert(generated_block_text("Effect: enum {{\n    Net\n}}\n", "Lang.jet", block) == .Err(_))
+    assert(generated_block_text("Effect: enum {{\n    Net,\n}}\n", "Lang.jet", block) == .Err(_))
     assert(generated_block_text("{LANG_BLOCK_BEGIN}\nEffect: enum {{\n", "Lang.jet", block) == .Err(_))
-    ffi: effect_rows("Net: struct {{\n    impl Effect {{}}\n}}\nFFI: enum {{\n    C\n    Rust\n\n    impl Effect {{}}\n}}\n", "Effects.jet", None) ?? panic("the FFI family was refused: {err.message}")
+    ffi: effect_rows("Net: struct {{\n    impl Effect {{}}\n}}\nFFI: enum {{\n    C,\n    Rust,\n\n    impl Effect {{}}\n}}\n", "Effects.jet", None) ?? panic("the FFI family was refused: {err.message}")
     assert_eq(ffi_languages(ffi), [String]{"C", "Rust"})
 }
 

@@ -7,55 +7,55 @@ use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety,
 // `file` is the row of the file `edit` changes and `files` the row of each of
 // `edits`, -1 being the fixed file.
 JetCLIFix: struct {
-    title: String
-    edit: TextEdit
-    applicability: DiagnosticFixApplicability
-    safety: DiagnosticFixSafety
-    edits: [TextEdit]{[TextEdit]{}}
-    file: Int{-1}
-    files: [Int]{[Int]{}}
+    title: String,
+    edit: TextEdit,
+    applicability: DiagnosticFixApplicability,
+    safety: DiagnosticFixSafety,
+    edits: [TextEdit]{[TextEdit]{}},
+    file: Int{-1},
+    files: [Int]{[Int]{}},
 }
 
 // A row of `jet fix`'s file table, a file other than the fixed one that
 // fixes change: its text before `jet fix`, None when it can't be read, and
 // its text with the fixes so far, None while they leave it unchanged.
 JetCLIFixFile: struct {
-    path: String
-    before: String?
-    source: String?
+    path: String,
+    before: String?,
+    source: String?,
 }
 
 // `texts`: by row of the file table, a file's text with the applied fixes,
 // None where they change nothing. `refused`: the fixes none of whose edits
 // apply, and why.
 JetCLIFixApply: struct {
-    source: String
-    applied: Int
-    deferred: Int
-    texts: [String?]{[String?]{}}
-    refused: [JetCLIFixRefusal]{[JetCLIFixRefusal]{}}
+    source: String,
+    applied: Int,
+    deferred: Int,
+    texts: [String?]{[String?]{}},
+    refused: [JetCLIFixRefusal]{[JetCLIFixRefusal]{}},
 }
 
 // Fix `fix` of the applied fixes, refused whole for `reason`.
 JetCLIFixRefusal: struct {
-    fix: Int
-    reason: String
+    fix: Int,
+    reason: String,
 }
 
 // One edit of fix `fix` in a list of fixes: its `edit` when `at` is -1, else
 // its `edits[at]`.
 JetCLIFixEditRef: struct {
-    fix: Int
-    at: Int
+    fix: Int,
+    at: Int,
 }
 
 // A fix `jet fix` did not apply (FixCommands.jet), and why: one that needs
 // review (`--all` applies it), or one whose edited file no longer checks.
 // The fix log records each (jet_cli_fix_log).
 JetCLIFixSkip: struct {
-    title: String
-    edit: TextEdit
-    reason: String
+    title: String,
+    edit: TextEdit,
+    reason: String,
 }
 
 // `jet fix` applies a diagnostic's primary edit with the edits beside it;

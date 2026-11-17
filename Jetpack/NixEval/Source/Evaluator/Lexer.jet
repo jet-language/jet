@@ -6,33 +6,33 @@ NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES: 256
 NIXEVAL_MAX_STRING_PARTS: 256
 
 NixEvalStringTokenPart: enum {
-    Literal(String)
-    Expression(String)
+    Literal(String),
+    Expression(String),
 }
 
 NixEvalToken: enum {
-    Identifier(String)
-    Str(String)
-    Interpolated([NixEvalStringTokenPart])
-    Path(String)
-    Integer(Int)
-    LeftBrace
-    RightBrace
-    LeftBracket
-    RightBracket
-    LeftParen
-    RightParen
-    Equal
-    EqualEqual
-    NotEqual
-    Merge
-    Colon
-    Semicolon
-    Dot
-    Comma
-    Question
-    Ellipsis
-    End
+    Identifier(String),
+    Str(String),
+    Interpolated([NixEvalStringTokenPart]),
+    Path(String),
+    Integer(Int),
+    LeftBrace,
+    RightBrace,
+    LeftBracket,
+    RightBracket,
+    LeftParen,
+    RightParen,
+    Equal,
+    EqualEqual,
+    NotEqual,
+    Merge,
+    Colon,
+    Semicolon,
+    Dot,
+    Comma,
+    Question,
+    Ellipsis,
+    End,
 
     describe: fn(self) -> String Never! {
         if self == {
@@ -62,9 +62,9 @@ NixEvalToken: enum {
 }
 
 NixEvalLexer: struct {
-    bytes: [U8]
-    position: Int
-    tokens: [NixEvalToken]
+    bytes: [U8],
+    position: Int,
+    tokens: [NixEvalToken],
 
     tokenize: fn(source: String) -> [NixEvalToken] NixEvalError! {
         lexer := NixEvalLexer{bytes: source.bytes(), position: 0, tokens: [NixEvalToken]{}}

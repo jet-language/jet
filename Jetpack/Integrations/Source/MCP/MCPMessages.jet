@@ -40,8 +40,8 @@ impl MCPCodec {
 
 // JSON-RPC request identifier. Fractional and null IDs are rejected.
 MCPRequestID: enum {
-    Number(Int)
-    Text(String)
+    Number(Int),
+    Text(String),
 
     to_json_tree: fn(self) -> Dyn Never! {
         if self == {
@@ -59,9 +59,9 @@ MCPRequestID: enum {
 
 // JSON-RPC request.
 MCPRequest: struct {
-    id: MCPRequestID
-    method: String
-    params: Dyn?
+    id: MCPRequestID,
+    method: String,
+    params: Dyn?,
 
     // A request with an optional object or array params value.
     new: fn(id: MCPRequestID, method: String, params: Dyn?) -> MCPRequest MCPCodecError! {
@@ -78,8 +78,8 @@ MCPRequest: struct {
 
 // JSON-RPC notification.
 MCPNotification: struct {
-    method: String
-    params: Dyn?
+    method: String,
+    params: Dyn?,
 
     // A notification with an optional object or array params value.
     new: fn(method: String, params: Dyn?) -> MCPNotification MCPCodecError! {
@@ -96,9 +96,9 @@ MCPNotification: struct {
 
 // JSON-RPC protocol error payload.
 MCPRPCError: struct {
-    code: Int
-    message: String
-    data: Dyn?
+    code: Int,
+    message: String,
+    data: Dyn?,
 
     new: fn(code: Int, message: String, data: Dyn?) -> MCPRPCError Never! {
         MCPRPCError{code: code, message: message, data: data}
@@ -125,9 +125,9 @@ MCPRPCError: struct {
 // JSON-RPC response, carrying exactly one result or error. A `None` id is
 // the JSON-RPC null response id.
 MCPResponse: struct {
-    id: MCPRequestID?
-    result: Dyn?
-    error: MCPRPCError?
+    id: MCPRequestID?,
+    result: Dyn?,
+    error: MCPRPCError?,
 
     success: fn(id: MCPRequestID, result: Dyn) -> MCPResponse Never! {
         MCPResponse{id: Val(id), result: Val(result), error: None}
@@ -155,9 +155,9 @@ MCPResponse: struct {
 
 // One JSON-RPC message in the MCP protocol core.
 MCPMessage: enum {
-    Request(MCPRequest)
-    Notification(MCPNotification)
-    Response(MCPResponse)
+    Request(MCPRequest),
+    Notification(MCPNotification),
+    Response(MCPResponse),
 
     // Encode this message through a selected revision codec.
     encode_with: fn(self, codec: MCPCodec, limits: MCPLimits) -> String MCPCodecError! {
@@ -259,7 +259,7 @@ MCPMessage: enum {
 // Capabilities exchanged by initialize. Unknown capability objects are
 // retained so peers can extend the protocol without changing this core.
 MCPCapabilities: struct {
-    values: [String:Dyn]
+    values: [String:Dyn],
 
     empty: fn() -> MCPCapabilities Never! { MCPCapabilities{values: [String:Dyn]{}} }
 
@@ -297,9 +297,9 @@ MCPCapabilities: struct {
 
 // Parameters carried by the stable `initialize` request.
 MCPInitializeParams: struct {
-    protocol_version: String
-    capabilities: MCPCapabilities
-    client_info: MCPImplementation?
+    protocol_version: String,
+    capabilities: MCPCapabilities,
+    client_info: MCPImplementation?,
 
     new: fn(protocol_version: MCPRevision, capabilities: MCPCapabilities, client_info: MCPImplementation?) -> MCPInitializeParams Never! {
         MCPInitializeParams{protocol_version: protocol_version.as_str(), capabilities: capabilities, client_info: client_info}
@@ -345,9 +345,9 @@ MCPInitializeParams: struct {
 
 // Result carried by the stable `initialize` response.
 MCPInitializeResult: struct {
-    protocol_version: MCPRevision
-    capabilities: MCPCapabilities
-    server_info: MCPImplementation
+    protocol_version: MCPRevision,
+    capabilities: MCPCapabilities,
+    server_info: MCPImplementation,
 
     new: fn(protocol_version: MCPRevision, capabilities: MCPCapabilities, server_info: MCPImplementation) -> MCPInitializeResult Never! {
         MCPInitializeResult{protocol_version: protocol_version, capabilities: capabilities, server_info: server_info}

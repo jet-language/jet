@@ -940,9 +940,9 @@ sema_type_graph_resolve_trait_bound: fn(graph: SemaRegistrationGraph, name: Stri
 }
 
 SemaTypeAliasCycleRow: struct {
-    module_index: Int
-    row: Int
-    edges: [Int]
+    module_index: Int,
+    row: Int,
+    edges: [Int],
 }
 
 sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
@@ -1870,16 +1870,16 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
 // The one owner of a bare type name among its nominal rows, or that two
 // modules own one.
 SemaTypeOwnerScan: struct {
-    found: SemaRegistrationRowRef?
-    ambiguous: Bool
+    found: SemaRegistrationRowRef?,
+    ambiguous: Bool,
 }
 
 // Which owners a bare type name's scan counts: every one the caller can see,
 // or only those in modules the caller's package reaches
 // (sema_registration_reaches).
 SemaOwnerCount: enum {
-    Every
-    Reached
+    Every,
+    Reached,
 }
 
 // sema_type_graph_unique_type_owner's scan of `rows`, counting `count`'s owners.

@@ -227,7 +227,7 @@ corpus: fn(glob: String) -[FS]> [String] Never! {
 /// the corpus suffix (`basics/hello` for `<root>/basics/hello.jet`), the row
 /// name a test reports; `path` is the file to read.
 CorpusEntry: struct {
-    id: String
+    id: String,
     path: String
 }
 
@@ -269,8 +269,8 @@ fake_data: fn(seed: Int) -> Fake Never! {
 }
 
 Fake: struct {
-    state: U64
-    locale_code: Int
+    state: U64,
+    locale_code: Int,
 
     impl Display {
         display: fn(self) -> String {
@@ -400,12 +400,12 @@ test_suite: fn() -> Test Never! { builtin.suite_snapshot() }
 /// selects the `perf` suite. Each call appends one row line to the file the
 /// profile runner named, so the rows written before a panic survive it.
 TestRows: struct {
-    suite: String
-    path: String
+    suite: String,
+    path: String,
     /// The run's `--filter`, "" for none. `pass` and `skip` drop a row whose
     /// id doesn't contain it. A failing row is always recorded, so a filtered
     /// run never hides a failure.
-    filter: String{""}
+    filter: String{""},
 
     /// Whether this run reports the row `id`: it has no filter, or `id`
     /// contains it. A suite asks before it does a row's work.
@@ -483,7 +483,7 @@ EventID: struct {
 // 0..<2^64; `below(bound)` gives the next draw modulo `bound`, and 0 without
 // drawing when `bound` is not positive.
 HistoryRNG: struct {
-    __state: Shared<HistoryRNGState>
+    __state: Shared<HistoryRNGState>,
 
     next_u64: fn(self) -> Int Never! { history_rng_next(self) }
 
@@ -530,69 +530,69 @@ priv history_rng_below: fn(rng: HistoryRNG, bound: Int) -> Int Never! {
 /// A value carried by one history operation. A secret enters only as
 /// `Redacted`; `Text` is text declared safe for a replay artifact.
 HistoryValue: enum {
-    Integer(Int)
-    Boolean(Bool)
-    Text(String)
-    Handle(HandleID)
+    Integer(Int),
+    Boolean(Bool),
+    Text(String),
+    Handle(HandleID),
     Redacted(String)
 }
 
 // The four retained precondition kinds an operation can wait on: a live
 // handle, a handle in a named state, a completed task, an available event.
 HistoryPrecondition: enum {
-    HandleLive(HandleID)
-    HandleState(handle: HandleID, state: String)
-    TaskCompleted(TaskID)
+    HandleLive(HandleID),
+    HandleState(handle: HandleID, state: String),
+    TaskCompleted(TaskID),
     EventAvailable(EventID)
 }
 
 // One operation of a history case, with the handles it creates and consumes.
 HistoryOperation: struct {
-    index: Int
-    name: String
-    arguments: [HistoryValue]
-    creates: [HandleID]
-    consumes: [HandleID]
-    preconditions: [HistoryPrecondition]
-    depends_on: [Int]
-    task: TaskID?
+    index: Int,
+    name: String,
+    arguments: [HistoryValue],
+    creates: [HandleID],
+    consumes: [HandleID],
+    preconditions: [HistoryPrecondition],
+    depends_on: [Int],
+    task: TaskID?,
     event: EventID?
 }
 
 /// One scheduler choice attached to an operation.
 HistoryScheduleChoice: struct {
-    operation: Int
-    task: TaskID?
-    event: EventID?
+    operation: Int,
+    task: TaskID?,
+    event: EventID?,
     choice: String
 }
 
 // One history case: its id, its seed, its operations and its schedule.
 HistoryCase: struct {
-    case_id: String
-    seed: Int
-    operations: [HistoryOperation]
+    case_id: String,
+    seed: Int,
+    operations: [HistoryOperation],
     schedule: [HistoryScheduleChoice]
 }
 
 // A history case together with the commands it decodes to.
 TypedHistoryCase: struct<Command> {
-    case: HistoryCase
+    case: HistoryCase,
     commands: [Command]
 }
 
 // The campaign bounds a strategy works within. The `cases` argument of
 // `histories` stays the case bound.
 HistoryBounds: struct {
-    max_steps: Int
-    max_resources: Int
-    max_shrink_attempts: Int
+    max_steps: Int,
+    max_resources: Int,
+    max_shrink_attempts: Int,
     max_discarded_cases: Int
 }
 
 // The generation weight of one named operation.
 HistoryDistribution: struct {
-    operation: String
+    operation: String,
     weight: Int
 }
 
@@ -602,10 +602,10 @@ HistoryDistribution: struct {
 // case draws only from the HistoryRNG, so every target that runs the
 // campaign runs them.
 HistoryStrategy: struct<Command> {
-    generate: fn(HistoryRNG, Int, Int) -[]> TypedHistoryCase<Command>?
-    rebuild: fn(HistoryCase) -[]> TypedHistoryCase<Command>?
-    valid: fn(TypedHistoryCase<Command>) -[]> Bool
-    bounds: HistoryBounds
+    generate: fn(HistoryRNG, Int, Int) -[]> TypedHistoryCase<Command>?,
+    rebuild: fn(HistoryCase) -[]> TypedHistoryCase<Command>?,
+    valid: fn(TypedHistoryCase<Command>) -[]> Bool,
+    bounds: HistoryBounds,
     distributions: [HistoryDistribution]
 }
 
@@ -672,21 +672,21 @@ testing_history_terminal: fn(seed: Int, source: String, tool: String, target: St
 // The observation of one case: the raw JSON of the four observed values
 // and the status of their typed-equality comparison.
 TestingHistorySample: struct {
-    case_id: String
-    input_id: String
-    seed: Int
-    reference: String
-    candidate: String
-    reference_replay: String
+    case_id: String,
+    input_id: String,
+    seed: Int,
+    reference: String,
+    candidate: String,
+    reference_replay: String,
     candidate_replay: String
 }
 
 TestingHistoryObservation: struct {
-    status: String
-    reason: String
-    sample: TestingHistorySample?
-    input: Dyn
-    reference: Dyn
+    status: String,
+    reason: String,
+    sample: TestingHistorySample?,
+    input: Dyn,
+    reference: Dyn,
     candidate: Dyn
 }
 
@@ -866,7 +866,7 @@ testing_history_observe: fn<T>(case: HistoryCase, strategy: HistoryStrategy<T>, 
 }
 
 TestingHistoryShrunk: struct {
-    case: HistoryCase
+    case: HistoryCase,
     observation: TestingHistoryObservation
 }
 
@@ -1507,7 +1507,7 @@ testing_owned_text: fn(bytes: &&[U8]) -> String Never! {
 }
 
 TestingDiffLines: struct {
-    lines: [String]
+    lines: [String],
     truncated: Bool
 }
 
@@ -1530,7 +1530,7 @@ testing_diff_lines: fn(text: String) -> TestingDiffLines Never! {
 }
 
 TestingDiffOutput: struct {
-    bytes: [U8]
+    bytes: [U8],
     truncated: Bool
 }
 

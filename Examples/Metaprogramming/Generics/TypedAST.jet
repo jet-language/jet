@@ -9,15 +9,15 @@
 // belongs to, so an ill-typed node cannot be built and both evaluators are
 // total: no arm handles an impossible shape.
 IntExpr: enum {
-    Lit(Int)
-    Add(a: IntExpr, b: IntExpr)
-    If(c: BoolExpr, t: IntExpr, e: IntExpr)
+    Lit(Int),
+    Add(a: IntExpr, b: IntExpr),
+    If(c: BoolExpr, t: IntExpr, e: IntExpr),
 }
 
 BoolExpr: enum {
-    Lit(Bool)
-    Eq(a: IntExpr, b: IntExpr)
-    If(c: BoolExpr, t: BoolExpr, e: BoolExpr)
+    Lit(Bool),
+    Eq(a: IntExpr, b: IntExpr),
+    If(c: BoolExpr, t: BoolExpr, e: BoolExpr),
 }
 
 eval_int: fn(e: IntExpr) -> Int {
@@ -41,22 +41,22 @@ eval_bool: fn(e: BoolExpr) -> Bool {
 // untyped evaluator still carries a `Stuck` arm for shapes the constructors
 // never build, and the typed runners need a fallback for it.
 Node: enum {
-    ILit(Int)
-    BLit(Bool)
-    Add(a: Node, b: Node)
-    Eq(a: Node, b: Node)
-    If(c: Node, t: Node, e: Node)
+    ILit(Int),
+    BLit(Bool),
+    Add(a: Node, b: Node),
+    Eq(a: Node, b: Node),
+    If(c: Node, t: Node, e: Node),
 }
 
 Value: enum {
-    I(Int)
-    B(Bool)
-    Stuck(String)
+    I(Int),
+    B(Bool),
+    Stuck(String),
 }
 
 Expr: struct<T> {
-    node: Node
-    #Codable(.Skip) marker: T?
+    node: Node,
+    #Codable(.Skip) marker: T?,
 }
 
 int_lit: fn(v: Int) -> Expr<Int> { {node: Node.ILit(v), marker: None} }
@@ -117,15 +117,15 @@ run_bool: fn(e: Expr<Bool>) -> Bool {
 // (c) Trait-bounded, open encoding: each node is its own struct, and the trait
 // it implements fixes its evaluator's result type.
 IntTerm: trait {
-    value: fn(self) -[]> Int
+    value: fn(self) -[]> Int,
 }
 
 BoolTerm: trait {
-    holds: fn(self) -[]> Bool
+    holds: fn(self) -[]> Bool,
 }
 
 Num: struct {
-    v: Int
+    v: Int,
 
     impl IntTerm {
         value: fn(self) -[]> Int { self.v }
@@ -133,7 +133,7 @@ Num: struct {
 }
 
 Truth: struct {
-    v: Bool
+    v: Bool,
 
     impl BoolTerm {
         holds: fn(self) -[]> Bool { self.v }
@@ -141,8 +141,8 @@ Truth: struct {
 }
 
 Plus: struct {
-    a: IntTerm
-    b: IntTerm
+    a: IntTerm,
+    b: IntTerm,
 
     impl IntTerm {
         value: fn(self) -[]> Int { self.a.value() + self.b.value() }
@@ -150,8 +150,8 @@ Plus: struct {
 }
 
 Same: struct {
-    a: IntTerm
-    b: IntTerm
+    a: IntTerm,
+    b: IntTerm,
 
     impl BoolTerm {
         holds: fn(self) -[]> Bool { self.a.value() == self.b.value() }
@@ -159,9 +159,9 @@ Same: struct {
 }
 
 IntIf: struct {
-    c: BoolTerm
-    t: IntTerm
-    e: IntTerm
+    c: BoolTerm,
+    t: IntTerm,
+    e: IntTerm,
 
     impl IntTerm {
         value: fn(self) -[]> Int { if self.c.holds() -> self.t.value() else -> self.e.value() }
@@ -169,9 +169,9 @@ IntIf: struct {
 }
 
 BoolIf: struct {
-    c: BoolTerm
-    t: BoolTerm
-    e: BoolTerm
+    c: BoolTerm,
+    t: BoolTerm,
+    e: BoolTerm,
 
     impl BoolTerm {
         holds: fn(self) -[]> Bool { if self.c.holds() -> self.t.holds() else -> self.e.holds() }

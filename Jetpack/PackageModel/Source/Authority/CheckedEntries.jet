@@ -24,8 +24,8 @@ AUTHORITY_HARDLINK_DETAIL: "authority file must have exactly one hard link"
 
 // The kind proven by a checked open.
 AuthorityKind: enum {
-    File
-    Directory
+    File,
+    Directory,
 
     name: fn(self) -> String Never! {
         if self == {
@@ -44,11 +44,11 @@ AuthorityKind: enum {
 // legitimate writer creates or removes an entry below the authority root, and
 // a path swapped between two observations still yields a different inode.
 FileIdentity: struct {
-    kind: AuthorityKind
-    length: Int
-    modified_ns: Int?
-    device: Int
-    inode: Int
+    kind: AuthorityKind,
+    length: Int,
+    modified_ns: Int?,
+    device: Int,
+    inode: Int,
 
     from_stat: fn(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
@@ -60,11 +60,11 @@ FileIdentity: struct {
 
 // One no-follow opened file and the bytes read from that same handle.
 CheckedFile: struct {
-    path: String
-    relative: String
-    identity: FileIdentity
-    handle: FileReader
-    bytes: [U8]
+    path: String,
+    relative: String,
+    identity: FileIdentity,
+    handle: FileReader,
+    bytes: [U8],
 
     // Decode the bytes that were read from the opened object.
     text: fn(self) -> String AuthorityError! {
@@ -75,47 +75,47 @@ CheckedFile: struct {
 
 // One checked directory: only descendants own a new no-follow handle.
 CheckedDirectory: struct {
-    path: String
-    relative: String
-    identity: FileIdentity
-    handle: Directory?
-    priv allow_hardlinks: Bool
+    path: String,
+    relative: String,
+    identity: FileIdentity,
+    handle: Directory?,
+    priv allow_hardlinks: Bool,
 }
 
 // A parsed canonical `package.jet` plus the opened manifest snapshot.
 CheckedManifest: struct {
-    file: CheckedFile
-    facts: PackageFacts
+    file: CheckedFile,
+    facts: PackageFacts,
 }
 
 // A checked member directory and its canonical manifest.
 CheckedMember: struct {
-    directory: CheckedDirectory
-    manifest: CheckedManifest
+    directory: CheckedDirectory,
+    manifest: CheckedManifest,
 }
 
 // A member snapshot after checked Config composition and member validation.
 CheckedPackage: struct {
-    member: CheckedMember
-    facts: PackageFacts
+    member: CheckedMember,
+    facts: PackageFacts,
 }
 
 // Failure from the shared authority resolver.
 #Error
 AuthorityError: enum {
-    Missing(path: String, cause: String)
-    ManifestParse(path: String, error: PackageParseError)
-    IO(path: String, operation: String, detail: String)
-    Symlink(String)
-    WrongKind(path: String, expected: String, actual: String)
-    Escapes(String)
-    WorkspaceAmbiguous([String])
-    WorkspaceNoModule
-    NestedMembers(root: String, member: String)
-    Invalid(path: String, detail: String)
-    NotText(path: String, detail: String)
-    Changed(String)
-    Unsupported(String)
+    Missing(path: String, cause: String),
+    ManifestParse(path: String, error: PackageParseError),
+    IO(path: String, operation: String, detail: String),
+    Symlink(String),
+    WrongKind(path: String, expected: String, actual: String),
+    Escapes(String),
+    WorkspaceAmbiguous([String]),
+    WorkspaceNoModule,
+    NestedMembers(root: String, member: String),
+    Invalid(path: String, detail: String),
+    NotText(path: String, detail: String),
+    Changed(String),
+    Unsupported(String),
 
     // `cause` is the native open/stat failure text, or why a probe found nothing.
     // `package.jet` parsed as text but violates the manifest vocabulary; kept

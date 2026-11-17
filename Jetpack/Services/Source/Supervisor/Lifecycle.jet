@@ -21,15 +21,15 @@ SERVICES_STATE_LOCK_SCOPE: "services-state"
 // One started generation: the live child, its verified identity, and the
 // authority that contains it.
 StartedService: struct {
-    child: ProcessChild
-    state: ServiceProcessState
-    authority: ServiceAuthority
+    child: ProcessChild,
+    state: ServiceProcessState,
+    authority: ServiceAuthority,
 }
 
 // A watched-tree change that has not yet been stable for the debounce window.
 WatchPending: struct {
-    stamps: [String]
-    since_ms: Int
+    stamps: [String],
+    since_ms: Int,
 }
 
 services_state_lock: fn(project_dir: String) -[FS, Env, Time]> RuntimeLock ServicesError! {
@@ -459,9 +459,9 @@ services_restart_generation: fn(host: ServiceHost, project_dir: String, env: &Sh
 
 // The bounded restart budget: max restarts, base backoff, exponential.
 ServiceRestartBudget: struct {
-    max: Int
-    backoff_ms: Int
-    exponential: Bool
+    max: Int,
+    backoff_ms: Int,
+    exponential: Bool,
 }
 
 services_restart_budget: fn(plan: DevServicePlan) -> ServiceRestartBudget Never! {

@@ -54,11 +54,11 @@ use jet_foundation.[BUILTIN_STATIC_ROWS, CORE_CALLS, CompilerThreads, FunctionCa
 // the function's key ("" for a module row), `pass` where it was found,
 // `rule` the IR_LINT_* rule it breaks.
 IRLintFinding: struct {
-    function: String
-    key: String
-    pass: String
-    rule: String
-    message: String
+    function: String,
+    key: String,
+    pass: String,
+    rule: String,
+    message: String,
 }
 
 // What a function's lint reads beyond its own body: per module function its
@@ -75,27 +75,27 @@ IRLintFinding: struct {
 // IR_LINT_OPS's per-opcode field roles in one Int and typing rules: the
 // per-instruction checks read them in place of the rows.
 IRLintContext: struct {
-    param_start: [Int]
-    params: [Int]
-    results: [Int]
-    function_names: [String]
-    names: Int
-    data: Int
-    name_routes: [Int]
-    kind_bits: [Int]
-    drop_functions: [Int]
-    data_texts: [Int]
-    name_decimals: [Int]
-    modes: [Int]
-    typings: [IRLintTyping]
-    route_words: [Int]
-    route_flags: [Int]
-    route_param_start: [Int]
-    route_positions: [Int]
-    route_kinds: [Int]
+    param_start: [Int],
+    params: [Int],
+    results: [Int],
+    function_names: [String],
+    names: Int,
+    data: Int,
+    name_routes: [Int],
+    kind_bits: [Int],
+    drop_functions: [Int],
+    data_texts: [Int],
+    name_decimals: [Int],
+    modes: [Int],
+    typings: [IRLintTyping],
+    route_words: [Int],
+    route_flags: [Int],
+    route_param_start: [Int],
+    route_positions: [Int],
+    route_kinds: [Int],
     // Per module function, whether a Call of it is a marked call left
     // (IR_LINT_CALL_MARKED); empty before the marked calls are inlined.
-    marked: [Bool]{[Bool]{}}
+    marked: [Bool]{[Bool]{}},
 }
 
 // What a ConstText's data row or a ConstBigInt's name row holds
@@ -183,18 +183,18 @@ IR_LINT_MORE: "more"
 
 // The role of one instruction field.
 IRLintRole: enum {
-    Unused
-    Slot
-    SlotOrNone
-    Name
-    Data
-    Function
-    Args
-    Count
-    Index
-    IndexOrNone
-    Depth
-    Immediate
+    Unused,
+    Slot,
+    SlotOrNone,
+    Name,
+    Data,
+    Function,
+    Args,
+    Count,
+    Index,
+    IndexOrNone,
+    Depth,
+    Immediate,
 }
 
 // Not read (any value).
@@ -207,30 +207,30 @@ IRLintRole: enum {
 
 // The typing rule of an opcode, beyond its operand roles and kinds.
 IRLintTyping: enum {
-    Empty
-    Const
-    Arithmetic
-    Shift
-    Compare
-    Unary
-    Convert
-    Move
-    Copy
-    Concat
-    Call
-    Route
-    Control
-    Return
-    Text
-    BigInt
-    Drop
-    Indirect
-    Address
-    Memory
-    Frame
-    Offset
-    CopyBytes
-    IntBig
+    Empty,
+    Const,
+    Arithmetic,
+    Shift,
+    Compare,
+    Unary,
+    Convert,
+    Move,
+    Copy,
+    Concat,
+    Call,
+    Route,
+    Control,
+    Return,
+    Text,
+    BigInt,
+    Drop,
+    Indirect,
+    Address,
+    Memory,
+    Frame,
+    Offset,
+    CopyBytes,
+    IntBig,
 }
 
 // No operands (Nop, Unreachable): nothing to type.
@@ -313,14 +313,14 @@ IR_LINT_TEXT: 136
 // dst and a may hold (IR_LINT_ANY: any), and its typing rule. IR_LINT_OPS
 // has one row per IROp, in ir_op_code order.
 IRLintOp: struct {
-    op: IROp
-    dst: IRLintRole
-    a: IRLintRole
-    b: IRLintRole
-    c: IRLintRole
-    dst_kinds: Int
-    a_kinds: Int
-    typing: IRLintTyping
+    op: IROp,
+    dst: IRLintRole,
+    a: IRLintRole,
+    b: IRLintRole,
+    c: IRLintRole,
+    dst_kinds: Int,
+    a_kinds: Int,
+    typing: IRLintTyping,
 }
 
 IR_LINT_OPS: #run { [IRLintOp]{
@@ -470,16 +470,16 @@ IR_LINT_MIN_INSTRUCTIONS_PER_THREAD: 50000
 
 // One thread's functions, in module order, and their findings.
 IRLintPart: struct {
-    functions: [IRFunction]
-    found: [IRLintFinding]
+    functions: [IRFunction],
+    found: [IRLintFinding],
 }
 
 // What every lint thread reads: the type rows (in a module of their own),
 // the context and the pass.
 IRLintReads: struct {
-    views: [IRModule]
-    context: IRLintContext
-    pass: String
+    views: [IRModule],
+    context: IRLintContext,
+    pass: String,
 }
 
 // Runs a lint thread per slot from `at`; returns the functions checked.

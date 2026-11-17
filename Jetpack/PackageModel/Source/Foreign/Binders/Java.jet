@@ -12,20 +12,20 @@ use {
 
 // A JVM binding also names the directory holding the embeddable `libjvm`.
 JavaBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    jvm_dir: String
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    jvm_dir: String,
+    provenance: String,
 }
 
 PKG_JAVA_TOOL_ACTION: "rejected the JVM binding input"
 
 // The JVM scalar shapes the JNI boundary accepts.
 JavaScalar: enum {
-    Int
-    Float
-    Void
+    Int,
+    Float,
+    Void,
 
     jet: fn(self) -> String Never! {
         if self == {
@@ -71,23 +71,23 @@ JavaScalar: enum {
 }
 
 JavaMethod: struct {
-    name: String
-    params: [JavaScalar]
-    result: JavaScalar
-    is_static: Bool
+    name: String,
+    params: [JavaScalar],
+    result: JavaScalar,
+    is_static: Bool,
 }
 
 // A JVM method descriptor's parameter and result shapes.
 JavaDescriptorTypes: struct {
-    params: [JavaScalar]
-    result: JavaScalar
+    params: [JavaScalar],
+    result: JavaScalar,
 }
 
 // The one public class a binding exposes: its constructor and typed methods.
 JavaSurface: struct {
-    class: String
-    ctor: [JavaScalar]
-    methods: [JavaMethod]
+    class: String,
+    ctor: [JavaScalar],
+    methods: [JavaMethod],
 }
 
 // Compile and bind the public class of the Java source at `source_path`.

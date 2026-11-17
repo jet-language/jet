@@ -3,9 +3,9 @@
 use jet_foundation.[ASTTables, ExprNode, Func, Item, Program, Span, StmtNode, ast_expr, ast_expr_span, ast_stmt, ast_visit_body, ast_visit_expr, ast_visit_statement]
 
 JetCLIComplexityReport: struct {
-    name: String
-    span: Span
-    score: Int
+    name: String,
+    span: Span,
+    score: Int,
 }
 
 jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Never! {
@@ -60,11 +60,11 @@ jet_cli_complexity_items: fn(tables: ASTTables, items: [Item], reports: &[JetCLI
 // reports every expression here, which records its controls, nesting, mixed
 // boolean chains and direct recursion.
 JetCLIComplexityVisitor: struct {
-    function_name: String
-    controls: [Span]
-    nesting: [Span]
-    mixed: Int
-    recursive: Bool
+    function_name: String,
+    controls: [Span],
+    nesting: [Span],
+    mixed: Int,
+    recursive: Bool,
 
     visit: fn(&self, tables: ASTTables, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         if ast_expr(tables, expression) == {

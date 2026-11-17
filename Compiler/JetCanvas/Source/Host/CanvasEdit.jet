@@ -20,43 +20,43 @@ CANVAS_HOST_MAX_RECEIPTS: 128
 // /debug), answered from the dev loop's debug sessions; any other is a
 // source transaction.
 CanvasHostEdit: struct {
-    body: String
-    debug: Bool
-    reply: Sender<CanvasHostReply>
+    body: String,
+    debug: Bool,
+    reply: Sender<CanvasHostReply>,
 }
 
 // The answer to one request: its HTTP status and `canvas.edit` or
 // `canvas.debug` report.
 CanvasHostReply: struct {
-    status: Int
-    body: String
+    status: Int,
+    body: String,
 }
 
 // One history receipt: the operation, "accepted" or "refused", the revision
 // the client edited, the entry's revision after, and the client's id.
 CanvasHostReceipt: struct {
-    kind: String
-    status: String
-    before: String
-    after: String
-    client: String
+    kind: String,
+    status: String,
+    before: String,
+    after: String,
+    client: String,
 }
 
 // A transaction the host's own checks admitted. `before` is the entry's text
 // it was made against; the dev loop formats the candidate text when `format`
 // is set.
 CanvasEdit: struct {
-    op: String
-    revision: String
-    client: String
-    before: String
-    format: Bool
-    reply: Sender<CanvasHostReply>
+    op: String,
+    revision: String,
+    client: String,
+    before: String,
+    format: Bool,
+    reply: Sender<CanvasHostReply>,
 }
 
 CanvasEditStep: enum {
-    Answered
-    Admitted(edit: CanvasEdit, candidate: String)
+    Answered,
+    Admitted(edit: CanvasEdit, candidate: String),
 }
 
 // Refused and answered; the receipt is kept.
@@ -67,9 +67,9 @@ CanvasEditStep: enum {
 // project root, its source revision, and its kind ("package", "workspace",
 // "env", "lock" or "source").
 CanvasProjectFile: struct {
-    path: String
-    revision: String
-    kind: String
+    path: String,
+    revision: String,
+    kind: String,
 }
 
 // The host's own checks of a transaction, in the order the Rust host makes

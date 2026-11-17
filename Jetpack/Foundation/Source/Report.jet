@@ -26,7 +26,7 @@ STATUS_SCHEMA: "jet.status/v1"
 // The report model's one failure carrier; the text is the Rust error string.
 #Error
 ReportError: struct {
-    message: String
+    message: String,
 
     new: fn(message: String) -> ReportError Never! { ReportError{message: message} }
 }
@@ -76,9 +76,9 @@ report_texts: fn(values: [String]) -> Dyn Never! {
 // Why a diagnostic has no machine-applicable edit. The next action is part
 // of the value, never inferred from the kind.
 NoFixReasonKind: enum {
-    Behavior
-    Design
-    Ambiguous
+    Behavior,
+    Design,
+    Ambiguous,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -100,8 +100,8 @@ NoFixReasonKind: enum {
 
 // A reviewed action for a diagnostic that cannot carry an automatic edit.
 NoFixReason: struct {
-    kind: NoFixReasonKind
-    next: String
+    kind: NoFixReasonKind,
+    next: String,
 
     new: fn(kind: NoFixReasonKind, next: String) -> NoFixReason Never! {
         NoFixReason.try_new(kind, next) ?? panic("NoFixReason::new requires a reviewed next action")
@@ -125,13 +125,13 @@ NoFixReason: struct {
 
 // One named status field.
 StatusField: struct {
-    name: String
-    value: Dyn
+    name: String,
+    value: Dyn,
 }
 
 // Ordered, typed action-specific fields for a status object.
 StatusFields: struct {
-    entries: [StatusField]
+    entries: [StatusField],
 
     new: fn() -> StatusFields Never! { StatusFields{entries: [StatusField]{}} }
 
@@ -187,10 +187,10 @@ report_status_object: fn(fields: StatusFields) -> Dyn Never! {
 
 // The one machine status object for every command `--json` result.
 StatusEnvelope: struct {
-    action: String
-    ok: Bool
-    reports: [ReportEnvelope]
-    fields: StatusFields
+    action: String,
+    ok: Bool,
+    reports: [ReportEnvelope],
+    fields: StatusFields,
 
     new: fn(action: String, ok: Bool) -> StatusEnvelope Never! {
         StatusEnvelope{action: action, ok: ok, reports: [ReportEnvelope]{}, fields: StatusFields.new()}
@@ -274,11 +274,11 @@ report_render_status_with_reports: fn(action: String, ok: Bool, reports: [Report
 
 // Closed safety classes for machine edits.
 FixSafety: enum {
-    Formatting
-    BehaviorPreserving
-    APIChanging
-    TargetChanging
-    NeedsReview
+    Formatting,
+    BehaviorPreserving,
+    APIChanging,
+    TargetChanging,
+    NeedsReview,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -300,8 +300,8 @@ FixSafety: enum {
 
 // The promise attached to a machine-applicable edit.
 FixApplicability: enum {
-    Safe
-    Suggested
+    Safe,
+    Suggested,
 
     // Applying every edit with this grade is proved to make report progress.
     // Useful to show, but a person must choose whether to apply it.
@@ -318,7 +318,7 @@ FixApplicability: enum {
 // disk paths become absolute lexically; synthetic labels such as `<cli>`
 // stay labels.
 ReportPath: struct {
-    priv value: String
+    priv value: String,
 
     from_process: fn(value: String) -[FS, Env]> ReportPath Never! {
         if value == "" || value.starts_with("<") -> return ReportPath{value: value}
@@ -358,8 +358,8 @@ report_lexically_normalize: fn(path: String) -> String Never! {
 }
 
 ReportSpan: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 
     new: fn(start: Int, end: Int) -> ReportSpan Never! { ReportSpan{start: start, end: end} }
 
@@ -391,11 +391,11 @@ report_optional_path: fn(path: ReportPath?) -> Dyn Never! {
 // One ordered cause in a `jet.report/v3` diagnostic. Every location field is
 // independent; an unknown one stays unknown instead of inheriting the root's.
 ReportCause: struct {
-    code: String
-    file: ReportPath?
-    line: Int?
-    col: Int?
-    span: ReportSpan?
+    code: String,
+    file: ReportPath?,
+    line: Int?,
+    col: Int?,
+    span: ReportSpan?,
 
     new: fn(code: String) -> ReportCause Never! {
         ReportCause{code: code, file: None, line: None, col: None, span: None}
@@ -416,10 +416,10 @@ ReportCause: struct {
 }
 
 ReportEdit: struct {
-    file: ReportPath
-    span: ReportSpan
-    new_text: String
-    safety: FixSafety
+    file: ReportPath,
+    span: ReportSpan,
+    new_text: String,
+    safety: FixSafety,
 
     new: fn(file: ReportPath, span: ReportSpan, new_text: String, safety: FixSafety) -> ReportEdit Never! {
         ReportEdit{file: file, span: span, new_text: new_text, safety: safety}
@@ -437,44 +437,44 @@ ReportEdit: struct {
 
 // The crypto finding extension of a report.
 ReportCryptoExtension: struct {
-    reason: String
-    operation: String
-    expected: String?
-    actual: Int?
+    reason: String,
+    operation: String,
+    expected: String?,
+    actual: Int?,
 }
 
 ReportExtension: enum {
-    Crypto(ReportCryptoExtension)
-    BuildError(String)
+    Crypto(ReportCryptoExtension),
+    BuildError(String),
 }
 
 // An already rendered build-error JSON document.
 
 // A `jet.report/v3` diagnostic or machine finding.
 ReportEnvelope: struct {
-    schema_name: String
-    schema_version: Int
-    moment: String
-    severity: String
-    code: String
-    what: String
-    why: String
-    fix: String
-    applicability: FixApplicability?
-    detail: String?
-    file: ReportPath?
-    line: Int?
-    col: Int?
-    span: ReportSpan?
-    priv fix_edits: [ReportEdit]
-    cause: [ReportCause]
-    clears: Int
-    extension: ReportExtension?
-    priv no_fix_reason: NoFixReason?
-    denial_kind: String?
-    call_chain: [String]
-    scope_chain: [String]
-    nearest_granting_scope: String?
+    schema_name: String,
+    schema_version: Int,
+    moment: String,
+    severity: String,
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    applicability: FixApplicability?,
+    detail: String?,
+    file: ReportPath?,
+    line: Int?,
+    col: Int?,
+    span: ReportSpan?,
+    priv fix_edits: [ReportEdit],
+    cause: [ReportCause],
+    clears: Int,
+    extension: ReportExtension?,
+    priv no_fix_reason: NoFixReason?,
+    denial_kind: String?,
+    call_chain: [String],
+    scope_chain: [String],
+    nearest_granting_scope: String?,
 
     new: fn(moment: String, severity: String, code: String, what: String, why: String, fix: String) -> ReportEnvelope Never! {
         ReportEnvelope{

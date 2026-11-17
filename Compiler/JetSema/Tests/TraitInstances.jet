@@ -11,11 +11,11 @@ trait_instance_errors: fn(source: String) -> [String] {
 // `Holds<T>` with one implementation at Int and one at String, then `rest`.
 trait_instance_holds: fn(rest: String) -> String {
     holds: `Holds: trait<T> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 Scores: struct {
-    values: [Int]
+    values: [Int],
 
     impl Holds<Int> {
         first: fn(self) -> Int { self.values[0] }
@@ -23,7 +23,7 @@ Scores: struct {
 }
 
 Names: struct {
-    values: [String]
+    values: [String],
 
     impl Holds<String> {
         first: fn(self) -> String { self.values[0] }
@@ -56,11 +56,11 @@ run: fn() {
     )
     assert(trait_instance_errors(wrong_instance).len() > 0, "Names implements Holds<String>, not Holds<Int>")
     wrong_result: `Holds: trait<T> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 Scores: struct {
-    values: [Int]
+    values: [Int],
 
     impl Holds<String> {
         first: fn(self) -> Int { self.values[0] }
@@ -72,7 +72,7 @@ Scores: struct {
 
 #Test("a parameterized trait use names concrete arguments, one per parameter") {
     bare: `Holds: trait<T> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 doubled: fn<S: Holds>(store: S) -> Int { 2 }
@@ -80,7 +80,7 @@ doubled: fn<S: Holds>(store: S) -> Int { 2 }
     bare_rows: trait_instance_errors(bare).join("; ")
     assert(bare_rows.contains("E0104: Trait `Holds` needs its type arguments"), bare_rows)
     counted: `Holds: trait<T> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 doubled: fn<S: Holds<Int, String>>(store: S) -> Int { 2 }
@@ -88,7 +88,7 @@ doubled: fn<S: Holds<Int, String>>(store: S) -> Int { 2 }
     counted_rows: trait_instance_errors(counted).join("; ")
     assert(counted_rows.contains("E0104: Trait `Holds<Int, String>` has the wrong number of type arguments"), counted_rows)
     parameter: `Holds: trait<T> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 first_of: fn<T, S: Holds<T>>(store: S) -> T { store.first() }

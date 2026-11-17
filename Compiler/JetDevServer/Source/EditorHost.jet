@@ -15,7 +15,7 @@ EDITOR_SELECT_METHOD: "jet/devtools/select"
 EDITOR_COMMAND_METHOD: "jet/devtools/command"
 
 EditorHost: enum {
-    VsCode Zed
+    VsCode, Zed,
     wire_name: fn(self) -> String Never! { if self == {
         .VsCode -> "vscode"
         .Zed -> "zed"
@@ -31,7 +31,7 @@ EditorHost: enum {
     impl Display { display: fn(self) -> String { self.wire_name() } }
 }
 EditorCommand: enum {
-    Check Build Test Run Debug
+    Check, Build, Test, Run, Debug,
     wire_name: fn(self) -> String Never! { if self == {
         .Check -> "check"
         .Build -> "build"
@@ -61,13 +61,13 @@ EditorCommand: enum {
 }
 #Error
 EditorHostError: enum {
-    InvalidRequest(String) InvalidEnvelope(String) UnsupportedEditor(String) UnsupportedCommand(String) UnsupportedMethod(String) LoopbackViolation(String) SourcePathRejected(String)
-    SessionMismatch(expected: String, actual: String)
-    SourceMismatch(expected: String, actual: String)
-    RevisionMismatch(expected: String, actual: String)
-    PanelNotFound(String)
-    CursorExpired(requested: U64, oldest: U64)
-    CommandDenied(command: EditorCommand, required_grant: String)
+    InvalidRequest(String), InvalidEnvelope(String), UnsupportedEditor(String), UnsupportedCommand(String), UnsupportedMethod(String), LoopbackViolation(String), SourcePathRejected(String),
+    SessionMismatch(expected: String, actual: String),
+    SourceMismatch(expected: String, actual: String),
+    RevisionMismatch(expected: String, actual: String),
+    PanelNotFound(String),
+    CursorExpired(requested: U64, oldest: U64),
+    CommandDenied(command: EditorCommand, required_grant: String),
     display: fn(self) -> String Never! {
         if self == {
             .InvalidRequest(message) -> "invalid editor host request: {message}"
@@ -88,7 +88,7 @@ EditorHostError: enum {
 }
 
 EditorSessionIdentity: struct {
-    session_id: String, source_id: String, source_path: String, revision: String
+    session_id: String, source_id: String, source_path: String, revision: String,
     new: fn(&&session_id: String, &&source_id: String, &&source_path: String, &&revision: String) -> EditorSessionIdentity EditorHostError! {
         editor_validate_stable_text(session_id, "session_id")
         editor_validate_source_identity(source_id)
@@ -98,7 +98,7 @@ EditorSessionIdentity: struct {
     }
 }
 EditorFactValue: enum {
-    Null Bool(Bool) Integer(I64) Float(F64) Text(String) Array([EditorFactValue]) Object([String:EditorFactValue])
+    Null, Bool(Bool), Integer(I64), Float(F64), Text(String), Array([EditorFactValue]), Object([String:EditorFactValue]),
     text: fn(&&value: String) -> EditorFactValue EditorHostError! {
         editor_validate_stable_text(value, "fact text")
         Ok(.Text(value))
@@ -123,8 +123,8 @@ EditorFactValue: enum {
     }
 }
 EditorStreamEvent: struct {
-    sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String
-    fields: [String:EditorFactValue], payload: [String:EditorFactValue]?
+    sequence: U64, timestamp_ms: U64, source: String, kind: String, entity: String,
+    fields: [String:EditorFactValue], payload: [String:EditorFactValue]?,
     new: fn(sequence: U64, timestamp_ms: U64, &&source: String, &&kind: String, &&entity: String, &&fields: [String:EditorFactValue], &&payload: [String:EditorFactValue]?) -> EditorStreamEvent EditorHostError! {
         event: EditorStreamEvent{sequence, timestamp_ms, source: source, kind: kind, entity: entity, fields: fields, payload: payload.move()}
         event.validate()
@@ -158,7 +158,7 @@ EditorStreamEvent: struct {
     }
 }
 EditorStreamSnapshot: struct {
-    events: [EditorStreamEvent], resumed_from: U64?, next_cursor: U64?
+    events: [EditorStreamEvent], resumed_from: U64?, next_cursor: U64?,
     serialize: fn(self) -> String Never! {
         out := [U8]{}
         editor_append(out, `{"events":`)
@@ -172,11 +172,11 @@ EditorStreamSnapshot: struct {
     }
 }
 EditorWorkbenchSnapshot: struct {
-    host: EditorHost, protocol: String, protocol_version: U32, workbench_url: String
-    identity: EditorSessionIdentity, started_at_ms: U64
-    panels: [JetDevtoolsPanelDescriptor], panel_availability: [JetDevtoolsPanelAvailability]
-    selection: JetDevtoolsSelection, events: [EditorStreamEvent]
-    resumed_from: U64?, cursor: U64?, time_cursor: U64?
+    host: EditorHost, protocol: String, protocol_version: U32, workbench_url: String,
+    identity: EditorSessionIdentity, started_at_ms: U64,
+    panels: [JetDevtoolsPanelDescriptor], panel_availability: [JetDevtoolsPanelAvailability],
+    selection: JetDevtoolsSelection, events: [EditorStreamEvent],
+    resumed_from: U64?, cursor: U64?, time_cursor: U64?,
     serialize: fn(self) -> String Never! {
         out := [U8]{}
         editor_append(out, `{"protocol":`)
@@ -222,7 +222,7 @@ EditorWorkbenchSnapshot: struct {
     }
 }
 EditorSourceNavigation: struct {
-    host: EditorHost, identity: EditorSessionIdentity, line: U32, column: U32, source_url: String
+    host: EditorHost, identity: EditorSessionIdentity, line: U32, column: U32, source_url: String,
     serialize: fn(self) -> String Never! {
         out := [U8]{}
         editor_render_response_context(self.host, self.identity, true, out)
@@ -233,7 +233,7 @@ EditorSourceNavigation: struct {
     }
 }
 EditorCommandReceipt: struct {
-    host: EditorHost, identity: EditorSessionIdentity, command: EditorCommand, required_grant: String
+    host: EditorHost, identity: EditorSessionIdentity, command: EditorCommand, required_grant: String,
     serialize: fn(self) -> String Never! {
         out := [U8]{}
         editor_render_response_context(self.host, self.identity, false, out)
@@ -246,7 +246,7 @@ EditorCommandReceipt: struct {
     }
 }
 EditorHostResponse: enum {
-    Workbench(EditorWorkbenchSnapshot) Stream(EditorStreamSnapshot) Navigation(EditorSourceNavigation) Selection(JetDevtoolsSelection) Command(EditorCommandReceipt)
+    Workbench(EditorWorkbenchSnapshot), Stream(EditorStreamSnapshot), Navigation(EditorSourceNavigation), Selection(JetDevtoolsSelection), Command(EditorCommandReceipt),
     serialize: fn(self) -> String Never! {
         if self == {
             .Workbench(value) -> value.serialize()
@@ -263,8 +263,8 @@ EditorHostResponse: enum {
 }
 
 EditorWorkbenchOpenRequest: struct {
-    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String
-    panel_id: String?, item_key: String?, cursor: U64?
+    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String,
+    panel_id: String?, item_key: String?, cursor: U64?,
     new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String) -> EditorWorkbenchOpenRequest Never! {
         EditorWorkbenchOpenRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, panel_id: None, item_key: None, cursor: None}
     }
@@ -282,22 +282,22 @@ EditorWorkbenchOpenRequest: struct {
     }
 }
 EditorReconnectRequest: struct {
-    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, cursor: U64?
+    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, cursor: U64?,
     new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, cursor: U64?) -> EditorReconnectRequest Never! {
         EditorReconnectRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, cursor}
     }
 }
 EditorSourceNavigationRequest: struct {
-    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, line: U32, column: U32
+    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, line: U32, column: U32,
     new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, line: U32, column: U32) -> EditorSourceNavigationRequest Never! {
         EditorSourceNavigationRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, line, column}
     }
 }
 EditorPanelSelectionRequest: struct {
-    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, panel_id: String, item_key: String?
+    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, panel_id: String, item_key: String?,
 }
 EditorCommandRequest: struct {
-    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, command: EditorCommand, arguments: [String]
+    host: EditorHost, session_id: String, source_id: String, source_path: String, revision: String, command: EditorCommand, arguments: [String],
     new: fn(host: EditorHost, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, command: EditorCommand) -> EditorCommandRequest Never! {
         EditorCommandRequest{host, session_id: session_id, source_id: source_id, source_path: source_path, revision: revision, command, arguments: [String]{}}
     }
@@ -305,8 +305,8 @@ EditorCommandRequest: struct {
 
 // Ring slots move on insertion/eviction, never shift the retained event payloads.
 EditorHostTransport: struct {
-    workbench: String, session_identity: EditorSessionIdentity, grant_set: [String:Bool]
-    events: [EditorStreamEvent?], head: Int, count: Int, next_sequence: U64, started_at_ms: U64, shared_view: JetDevtoolsViewState
+    workbench: String, session_identity: EditorSessionIdentity, grant_set: [String:Bool],
+    events: [EditorStreamEvent?], head: Int, count: Int, next_sequence: U64, started_at_ms: U64, shared_view: JetDevtoolsViewState,
     new: fn(&&workbench_url: String, &&session_id: String, &&source_id: String, &&source_path: String, &&revision: String, grants: [String]) -> EditorHostTransport EditorHostError! {
         editor_validate_loopback_url(workbench_url)
         identity: EditorSessionIdentity.new(session_id, source_id, source_path, revision)

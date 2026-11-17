@@ -154,16 +154,16 @@ IR_X64_INT_MIN: #run { -9223372036854775807 - 1 }
 
 // What a slow path does once the hot path branches to it.
 IRX64ColdKind: enum {
-    Route
-    LocatedRoute
-    Compare
-    Stop
-    ShiftStop
-    Call
-    Unique
-    Release
-    Fma
-    Poll
+    Route,
+    LocatedRoute,
+    Compare,
+    Stop,
+    ShiftStop,
+    Call,
+    Unique,
+    Release,
+    Fma,
+    Poll,
 }
 
 // `symbol`(left, right) into `dst`, then back to `resume`.
@@ -187,134 +187,134 @@ IRX64ColdKind: enum {
 // (`pad`) when it reports a stop, else back to `resume`.
 
 IRX64Cold: struct {
-    kind: IRX64ColdKind
+    kind: IRX64ColdKind,
     // rel32 fields of the hot path's branches here.
-    sites: [Int]
-    resume: Int
-    symbol: String
+    sites: [Int],
+    resume: Int,
+    symbol: String,
     // Operands: a slot when >= 0, else the immediate beside it.
-    left: Int
-    left_imm: Int
-    right: Int
-    right_imm: Int
-    dst: Int
-    cond: X64Cond
+    left: Int,
+    left_imm: Int,
+    right: Int,
+    right_imm: Int,
+    dst: Int,
+    cond: X64Cond,
     // Stop: the message's data row. ShiftStop: direction, unsigned, width.
-    text: Int
-    direction: Int
-    unsigned: Int
-    width: Int
-    line: Int
+    text: Int,
+    direction: Int,
+    unsigned: Int,
+    width: Int,
+    line: Int,
     // Stop, ShiftStop, LocatedRoute: the If of the stop point the slow path
     // leaves by once it published a stop (ir_x64_stop_point), -1 for none.
-    pad: Int
+    pad: Int,
     // The instruction whose hot path branches here (ir_x64_call_out).
-    at: Int
+    at: Int,
     // Route, Compare: the Int operands dropped right after the operation
     // (ir_x64_operand_drops), dropped here before going back.
-    drops: [Int]
+    drops: [Int],
 }
 
 // A stop point's edge: If `at` (its End at `end`), entered from the hot
 // branch at rel32 field `site` (-1 when only slow paths enter), laid out
 // after the epilogue with the open constructs of its If (`open`, `heads`).
 IRX64Pad: struct {
-    at: Int
-    end: Int
-    site: Int
-    open: [Int]
-    heads: [Int]
+    at: Int,
+    end: Int,
+    site: Int,
+    open: [Int],
+    heads: [Int],
 }
 
 IRX64Emitter: struct {
     // The machine code and, for a function JET_X64_EMIT_LOG names, its
     // emission log (X64Code), whose `at` follows `at` below.
-    code: X64Code
-    relocs: [X64Reloc]
+    code: X64Code,
+    relocs: [X64Reloc],
     // Open structured constructs, innermost last: the opener's instruction
     // index, a Loop's head offset (-1 otherwise), and an If's pending
     // false-edge rel32 field (-1 when none is pending).
-    open: [Int]
-    heads: [Int]
-    falses: [Int]
+    open: [Int],
+    heads: [Int],
+    falses: [Int],
     // rel32 fields that jump to the End of opener `end_targets[k]`.
-    end_sites: [Int]
-    end_targets: [Int]
+    end_sites: [Int],
+    end_targets: [Int],
     // rel32 fields of Returns that jump to the epilogue (a stop edge's: to
     // the stop exit).
-    returns: [Int]
+    returns: [Int],
     // The offsets of the tail jumps' `jmp` (ir_x64_tail_jump), whose call
     // frame rule is the `ret`'s.
-    tails: [Int]
+    tails: [Int],
     // The rel32 fields of the branches inside the function, each patched
     // to its target (ir_x64_patch), for ir_x64_relax.
-    branches: [Int]
+    branches: [Int],
     // Each closed Loop's head and End offsets, in the order they close
     // (inner before outer), for the loop alignment of ir_x64_relax.
-    loops: [Int]
-    loop_ends: [Int]
-    colds: [IRX64Cold]
-    errors: [String]
+    loops: [Int],
+    loop_ends: [Int],
+    colds: [IRX64Cold],
+    errors: [String],
     // A comparison whose Bool only the next If / BrIf reads leaves its
     // result in the flags: the slot (-1 none) and the condition that holds
     // when it is true (ir_x64_fusable).
-    fused: Int
-    fused_cond: X64Cond
+    fused: Int,
+    fused_cond: X64Cond,
     // Per instruction: the offset of an opener's End once laid out (-1
     // before), and an If's stop edge label (-1 for none).
-    end_of: [Int]
-    pad_label: [Int]
-    pads: [IRX64Pad]
+    end_of: [Int],
+    pad_label: [Int],
+    pads: [IRX64Pad],
     // The instruction being selected: a call keeps the xmm slots live
     // there (ir_x64_call_out); -1 in the prologue. Whoever sets it sets
     // code.at too (outside every instruction: -1).
-    at: Int
+    at: Int,
     // Per instruction: whether an earlier instruction's selection covers
     // it (ir_x64_operand_drops), or a select If's End (its comparison), so
     // it selects nothing itself.
-    absorbed: [Bool]
+    absorbed: [Bool],
     // Per instruction: of an If whose arms both run, the slot its End picks
     // by cmov (ir_x64_selectable), else -1; and the one whose arms run
     // now (-1 none).
-    picks: [Int]
-    select: Int
+    picks: [Int],
+    select: Int,
     // Per instruction: of a Loop whose head only tests its exits
     // (ir_x64_mark_test), the offset past the head's last exit jcc (else
     // -1), whether a back edge repeated the head (ir_x64_rotate), and that
     // last exit's BrIf. `marked` counts the slow paths, relocations and
     // branches when the innermost Loop opened.
-    tests: [Int]
-    rotated: [Bool]
-    exits: [Int]
-    marked: Int
+    tests: [Int],
+    rotated: [Bool],
+    exits: [Int],
+    marked: Int,
     // Whether the function holds a StreamStore: its non-temporal stores
     // are fenced (sfence) before each call but a stop poll's, an in-place
     // template, a tail jump and the epilogue, so a callee, a caller or
     // another thread they publish to sees them in program order with the
     // plain stores after them.
-    streams: Bool
+    streams: Bool,
     // The most bytes pushed below the frame at once (a call's stack
     // arguments, a slow path's saved result: ir_x64_below), and whether a
     // call goes through a function value (X64FunctionDebug.stack and
     // .dynamic).
-    below: Int
-    dynamic: Bool
+    below: Int,
+    dynamic: Bool,
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
 // emission log text (ir_x64_log_text; empty unless logged).
 IRX64FunctionResult: struct {
-    function: X64CompiledFunction
-    debug: X64FunctionDebug
-    variables: [X64DebugVariable]
-    errors: [String]
-    log: [String]
+    function: X64CompiledFunction,
+    debug: X64FunctionDebug,
+    variables: [X64DebugVariable],
+    errors: [String],
+    log: [String],
     // The selector rows its code names (IRX64FunctionTables.uses), in order.
-    uses: [IRX64Use]
+    uses: [IRX64Use],
     // The data rows its code reads, apart and on its way to a stop
     // (IRX64FunctionTables hot and cold).
-    hot: [Int]{[Int]{}}
-    cold: [Int]{[Int]{}}
+    hot: [Int]{[Int]{}},
+    cold: [Int]{[Int]{}},
 }
 
 // The layout of `slot`'s type (a scalar row: reading it copies no type tree).
@@ -594,9 +594,9 @@ ir_x64_is_poll: fn(m: IRModule, id: Int) -> Bool Never! {
 
 // One argument of a runtime helper call the selector builds itself.
 IRX64Arg: enum {
-    Slot(slot: Int)
-    Imm(value: Int)
-    Data(id: Int)
+    Slot(slot: Int),
+    Imm(value: Int),
+    Data(id: Int),
 }
 
 // Calls `target` with the slots `args[start..<start + count]` and stores the
@@ -1887,9 +1887,9 @@ ir_x64_power_division: fn(e: &IRX64Emitter, op: IROp, signed: Bool, k: Int, reg:
 // is the high word of n * multiplier (plus n when the multiplier needs 65
 // bits, `add`), shifted right by `shift`, plus 1 when n is negative.
 IRX64Magic: struct {
-    multiplier: Int
-    add: Bool
-    shift: Int
+    multiplier: Int,
+    add: Bool,
+    shift: Int,
 }
 
 // The smallest p >= 64 with 2^p > nc * (d - 2^p mod d), where nc is the
@@ -3036,11 +3036,11 @@ ir_x64_address: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloca
 // loaded into or stored, `disp` the access's displacement, and `width` the
 // leaf's access width (0 for a Load or Store: its value's type has it).
 IRX64Access: struct {
-    address: Int
-    value: Int
-    load: Bool
-    disp: Int
-    width: Int
+    address: Int,
+    value: Int,
+    load: Bool,
+    disp: Int,
+    width: Int,
 }
 
 ir_x64_access: fn(m: IRModule, f: IRFunction, at: Int) -> IRX64Access? Never! {
@@ -3064,12 +3064,12 @@ ir_x64_access: fn(m: IRModule, f: IRFunction, at: Int) -> IRX64Access? Never! {
 // `index * scale` (else the scale is 1 and only the sum is folded);
 // `through`: the access reads the sum through a pointer Copy of it.
 IRX64Indexed: struct {
-    base: Int
-    index: Int
-    scale: Int
-    scaled: Bool
-    through: Bool
-    disp: Int
+    base: Int,
+    index: Int,
+    scale: Int,
+    scaled: Bool,
+    through: Bool,
+    disp: Int,
 }
 
 // The folded address of memory access `at` (ir_x64_access). Its address is
@@ -3828,10 +3828,10 @@ ir_x64_in_loop: fn(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
 // scheduler_check_loops).
 IRX64StopQuiet: struct {
     // The three rel32 fields to patch to `quiet`.
-    quiet: [Int]
+    quiet: [Int],
     // The two rel32 fields to patch to the end of the tests, where the
     // routine is entered.
-    enter: [Int]
+    enter: [Int],
 }
 
 ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {

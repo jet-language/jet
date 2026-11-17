@@ -28,37 +28,37 @@ use {
 }
 
 TrustDecision: enum {
-    Allow
-    Prompt
-    Deny
+    Allow,
+    Prompt,
+    Deny,
 }
 
 // One audited per-dependency grant: `grants: { "dep": [DB, Net] }`.
 PackageGrant: struct {
-    package: String
-    rights: [String]
+    package: String,
+    rights: [String],
 }
 
 // One named service trust decision.
 ServiceTrust: struct {
-    service: String
-    decision: TrustDecision
+    service: String,
+    decision: TrustDecision,
 }
 
 TrustPolicy: struct {
-    default: TrustDecision?
-    ci_prompt: TrustDecision?
-    services: [ServiceTrust]
+    default: TrustDecision?,
+    ci_prompt: TrustDecision?,
+    services: [ServiceTrust],
     // Optional provenance floor for dependency resolution.
-    require: ProvenanceRequirement?
+    require: ProvenanceRequirement?,
 }
 
 // Rust `ProvenanceRequirement::None` is spelled `Unrequired`: `None` is
 // reserved in Jet.
 ProvenanceRequirement: enum {
-    Unrequired
-    Logged
-    Attested
+    Unrequired,
+    Logged,
+    Attested,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -70,22 +70,22 @@ ProvenanceRequirement: enum {
 }
 
 ProviderAuthority: struct {
-    provider: String
-    registry: String
-    allow: [String]
-    deny: [String]
+    provider: String,
+    registry: String,
+    allow: [String],
+    deny: [String],
 }
 
 // One parsed authority block. `allow`/`deny` are the package's own bound
 // (`None` = not written); `needs` is a guest declaration, not a second grant
 // store.
 AuthorityBlock: struct {
-    allow: [String]?
-    deny: [String]?
-    needs: [String]
-    grants: [PackageGrant]
-    trust: TrustPolicy?
-    providers: [ProviderAuthority]
+    allow: [String]?,
+    deny: [String]?,
+    needs: [String],
+    grants: [PackageGrant],
+    trust: TrustPolicy?,
+    providers: [ProviderAuthority],
 
     default: fn() -> AuthorityBlock Never! {
         AuthorityBlock{allow: None, deny: None, needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}

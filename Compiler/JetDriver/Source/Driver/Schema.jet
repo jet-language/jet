@@ -9,28 +9,28 @@ use {
 // Only the schema inputs the populated checker actually reads. An absent,
 // unreadable or malformed snapshot is still an input; it is not an empty cache.
 JetDriverSchemaReadOutcome: enum {
-    Missing(error: IOError)
-    IO(error: IOError, bytes: [U8]?)
-    Invalid(raw: String, error: SchemaSnapshotError)
-    Parsed(raw: String, snapshot: SchemaSnapshot)
+    Missing(error: IOError),
+    IO(error: IOError, bytes: [U8]?),
+    Invalid(raw: String, error: SchemaSnapshotError),
+    Parsed(raw: String, snapshot: SchemaSnapshot),
 }
 
 JetDriverSchemaRead: struct {
-    name: String
-    cache_dir: String
-    path: String
-    outcome: JetDriverSchemaReadOutcome
+    name: String,
+    cache_dir: String,
+    path: String,
+    outcome: JetDriverSchemaReadOutcome,
 }
 
 JetDriverSchemaIngress: enum {
-    Supplied(snapshots: [String:SchemaSnapshot])
-    Cache(root: String, reads: [JetDriverSchemaRead])
+    Supplied(snapshots: [String:SchemaSnapshot]),
+    Cache(root: String, reads: [JetDriverSchemaRead]),
 }
 
 JetDriverSchemaCheckResult: struct {
-    registration: SemaRegistrationGraph
-    diagnostics: [Diagnostic]
-    ingress: JetDriverSchemaIngress?
+    registration: SemaRegistrationGraph,
+    diagnostics: [Diagnostic],
+    ingress: JetDriverSchemaIngress?,
 }
 
 schema_cache_dir: fn(root: String) -[Env]> String {

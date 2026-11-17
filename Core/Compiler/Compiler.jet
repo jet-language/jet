@@ -14,14 +14,14 @@ use query_rows.[fact_kind_refusal, program_fact, run_fact]
 lang: module
 
 Token: struct {
-    kind: String
-    text: String
-    line: Int
+    kind: String,
+    text: String,
+    line: Int,
     column: Int
 }
 
 Pair: struct {
-    left: String
+    left: String,
     right: String
 }
 
@@ -29,8 +29,8 @@ Pair: struct {
 /// writes and the row it runs under. The Meta effects are declared beside
 /// this file, in Meta.jet; reading the program needs none.
 ExtensionPoint: struct {
-    name: String
-    entry: String
+    name: String,
+    entry: String,
     row: [String]
 }
 
@@ -47,24 +47,24 @@ EXTENSION_POINTS: [ExtensionPoint]{
 /// The compiler stage that makes a checked fact available. This is not the
 /// language phase `#phase` reads.
 CompilerStage: enum {
-    Parsed
-    Resolved
-    Typed
-    Prepared
+    Parsed,
+    Resolved,
+    Typed,
+    Prepared,
     Emitted
 }
 
 /// A compiler-issued snapshot identity. Source names and casts can't make
 /// one; only the compiler issues it, with the snapshot it names.
 SnapshotID: struct {
-    priv digest: String
+    priv digest: String,
 
     text: fn(self) -> String Never! { self.digest.copy() }
 }
 
 /// A compiler-issued authorization scope, named by a `Denied` failure.
 ScopeID: struct {
-    priv name: String
+    priv name: String,
 
     text: fn(self) -> String Never! { self.name.copy() }
 }
@@ -72,11 +72,11 @@ ScopeID: struct {
 /// Why a metadata query has no complete answer. A missing fact is never an
 /// empty success: an empty list means the checked answer is empty.
 MetadataFailure: enum {
-    Unavailable(required_stage: CompilerStage, reason: String)
-    Unsupported(capability: String)
-    Stale(requested: SnapshotID, current: SnapshotID)
-    Invalid(diagnostics: [CompilerDiagnostic])
-    Denied(scope: ScopeID, reason: String)
+    Unavailable(required_stage: CompilerStage, reason: String),
+    Unsupported(capability: String),
+    Stale(requested: SnapshotID, current: SnapshotID),
+    Invalid(diagnostics: [CompilerDiagnostic]),
+    Denied(scope: ScopeID, reason: String),
     Truncated(limit: Int, observed: Int)
 }
 
@@ -84,9 +84,9 @@ MetadataFailure: enum {
 /// query names a place in source, that place.
 #Error
 MetadataError: struct {
-    kind: MetadataFailure
-    query: String
-    source: SourceSpan?
+    kind: MetadataFailure,
+    query: String,
+    source: SourceSpan?,
 
     impl Display {
         display: fn(self) -> String {
@@ -119,20 +119,20 @@ MetadataError: struct {
 /// consumed and produced. A store asked for a kind it doesn't hold refuses
 /// with `Unsupported`.
 FactKind: enum {
-    Marker
-    MarkerArg
-    Read
-    Claim
-    Section
-    Consumed
+    Marker,
+    MarkerArg,
+    Read,
+    Claim,
+    Section,
+    Consumed,
     Produced
 }
 
 /// One row of the toolchain's executable schema.
 SchemaFact: struct {
-    kind: FactKind
+    kind: FactKind,
     /// The row's canonical name: the marker or the read it declares.
-    name: String
+    name: String,
     /// Where the row applies: a marker rule's sites, a fact read's planes.
     scope: [String]
 }
@@ -140,8 +140,8 @@ SchemaFact: struct {
 /// The running toolchain's executable schema, as `compiler.schema()` issues
 /// it: an immutable snapshot that `query` reads.
 SchemaSnapshot: struct {
-    priv id: SnapshotID
-    priv facts: [SchemaFact]
+    priv id: SnapshotID,
+    priv facts: [SchemaFact],
 
     identity: fn(self) -> SnapshotID Never! { self.id.copy() }
 }
@@ -149,8 +149,8 @@ SchemaSnapshot: struct {
 /// Where a program fact sits: its package, its module, and the type or
 /// function it belongs to.
 FactScope: struct {
-    package: String
-    module: String
+    package: String,
+    module: String,
     item: String
 }
 
@@ -158,16 +158,16 @@ FactScope: struct {
 /// argument of such a marker, or a typed fact the checker recorded on a type
 /// or function.
 ProgramFact: struct {
-    kind: FactKind
+    kind: FactKind,
     /// The marker's name, `Marker.argument` for a marker argument, or the
     /// recorded fact's name.
-    name: String
+    name: String,
     /// The canonical identity of the type or function it belongs to.
-    subject: String
+    subject: String,
     /// The row's stable identity: `subject#kind:name`, then `@n` for the
     /// n-th repeat of the same name on the same subject.
-    identity: String
-    scope: FactScope
+    identity: String,
+    scope: FactScope,
     /// The checked program's revision: the content hash of its sources.
     source: SnapshotID
 }
@@ -177,13 +177,13 @@ ProgramFact: struct {
 /// (the section's name and type name), or a record it consumed or produced
 /// (the record's artifact id and record kind).
 RunFact: struct {
-    kind: FactKind
-    name: String
-    detail: String
+    kind: FactKind,
+    name: String,
+    detail: String,
     /// The row's stable identity: `digest#kind:key`, where `digest` is the
     /// receipt's and `key` is the claim's verb, the section's name, or a
     /// consumed or produced record's `record-kind/artifact-id`.
-    identity: String
+    identity: String,
     /// The receipt's digest.
     source: SnapshotID
 }
@@ -193,17 +193,17 @@ RunFact: struct {
 /// run's; its claim, sections and record links are the facts `query` reads.
 RunReceipt: struct {
     /// The receipt file, as `receipt(path)` named it.
-    path: String
+    path: String,
     /// The run's exit status.
-    status: Int
+    status: Int,
     /// The receipt's digest, which authenticates its body.
-    digest: String
+    digest: String,
     /// The claim: the command's verb (`left`) and the claim key (`right`).
-    priv claim: Pair
+    priv claim: Pair,
     /// Each section's name (`left`) and type name (`right`), in name order.
-    priv sections: [Pair]
+    priv sections: [Pair],
     /// Each consumed record's kind (`left`) and artifact id (`right`).
-    priv consumed: [Pair]
+    priv consumed: [Pair],
     /// Each produced record's kind (`left`) and artifact id (`right`).
     priv produced: [Pair]
 }
@@ -212,15 +212,15 @@ RunReceipt: struct {
 /// program checked through the normal pipeline (`b.program` in a build), or
 /// a recorded run.
 FactSource: enum {
-    Schema(snapshot: SchemaSnapshot)
-    Program(program: ProgramInfo)
+    Schema(snapshot: SchemaSnapshot),
+    Program(program: ProgramInfo),
     Run(receipt: RunReceipt)
 }
 
 /// One fact a query returns, tagged by the store it comes from.
 Fact: enum {
-    Schema(fact: SchemaFact)
-    Program(fact: ProgramFact)
+    Schema(fact: SchemaFact),
+    Program(fact: ProgramFact),
     Run(fact: RunFact)
 }
 

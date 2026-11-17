@@ -16,32 +16,32 @@ COBOL_BIND_SCHEMA: "jet-cobol-bind-v1"
 COBOL_TOOL_ACTION: "rejected the COBOL binding"
 
 CobolBindResult: struct {
-    source: String
-    archive: String
-    runtime_dir: String
-    program: String
-    layout: CobolRecordLayout
-    provenance: String
+    source: String,
+    archive: String,
+    runtime_dir: String,
+    program: String,
+    layout: CobolRecordLayout,
+    provenance: String,
 }
 
 // One level 01 record and its level 05 fields in declaration order.
 CobolRecordLayout: struct {
-    name: String
-    width: Int
-    fields: [CobolFieldLayout]
+    name: String,
+    width: Int,
+    fields: [CobolFieldLayout],
 }
 
 CobolFieldLayout: struct {
-    name: String
-    offset: Int
-    width: Int
-    kind: CobolFieldKind
+    name: String,
+    offset: Int,
+    width: Int,
+    kind: CobolFieldKind,
 }
 
 CobolFieldKind: enum {
-    FixedText(characters: Int)
-    NativeInt(digits: Int, signed: Bool)
-    PackedDecimal(digits: Int, scale: Int, signed: Bool)
+    FixedText(characters: Int),
+    NativeInt(digits: Int, signed: Bool),
+    PackedDecimal(digits: Int, scale: Int, signed: Bool),
 
     jet_type: fn(self) -> String Never! {
         if self == {
@@ -396,11 +396,11 @@ pkg_cobol_render_jet: fn(lib: String, layout: CobolRecordLayout, packed: CobolFi
         out = "{out}// cobol-field {field.name}: offset={field.offset} width={field.width} type={field.kind.jet_type()}{encoding}\n"
     }
     out = "{out}#Codable\n{pkg_cobol_upper_camel(layout.name)}: struct {{\n"
-    loop field in layout.fields -> out = "{out}    {field.name}: {field.kind.jet_type()}\n"
+    loop field in layout.fields -> out = "{out}    {field.name}: {field.kind.jet_type()},\n"
     out = "{out}}}\n\n"
     record_param: if input != None -> "record_id: Int, " else -> ""
     record_arg: if input != None -> "record_id, " else -> ""
-    out = "{out}#Import c.{abi}: module {{\n    apply_minor: fn({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse abi: c.{abi}\n\nCobolError: enum {{ Range ProgramFailed }}\n\n"
+    out = "{out}#Import c.{abi}: module {{\n    apply_minor: fn({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse abi: c.{abi}\n\nCobolError: enum {{ Range, ProgramFailed }}\n\n"
     out = "{out}apply_minor: fn({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n"
     if packed.kind == {
         .PackedDecimal(digits, _, signed) -> {

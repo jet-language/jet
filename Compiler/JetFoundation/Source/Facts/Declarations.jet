@@ -2,290 +2,290 @@
 // constants. They hold no checked-tree nodes.
 
 TEffectSpan: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
     // A state write (TEffectFacts.module_writes) through a cell the body
     // holds, `name` being the parameter or local, rather than a module
     // binding written by name.
-    held: Bool{false}
+    held: Bool{false},
 }
 
 // A `#ContextKey` value a `#Memo` function can read (`context.get(key)`):
 // the key constant (its declaration key), the value's type, and whether
 // that type has equality, which keying the memo store on the value needs.
 TEffectContextKey: struct {
-    key: String
-    ty: Type
-    equatable: Bool
+    key: String,
+    ty: Type,
+    equatable: Bool,
 }
 
 TEffectFacts: struct {
-    direct: [String]
-    solved: [String]
-    call_edges: [String]
-    maximal: Bool
-    direct_spans: [TEffectSpan]
+    direct: [String],
+    solved: [String],
+    call_edges: [String],
+    maximal: Bool,
+    direct_spans: [TEffectSpan],
     // Where this function's own body made its row maximal (a call with no
     // known body), when it did.
-    maximal_span: Span?{None}
+    maximal_span: Span?{None},
     // The functions this body takes as values (a named function read, a
     // trait-object dispatch's implementations), which it may call later through
     // the value. They are not calls, so they never widen this row; the
     // application's effect list follows them as well as `call_edges`.
-    value_edges: [String]{[String]{}}
+    value_edges: [String]{[String]{}},
     // The state this body writes (`name` and the write's span): a module
     // `:=` binding, a module `Shared` holder or `Cell`, or a cell held in a
     // parameter or local (`held`). It is no effect, but a pure function may
     // not reach one.
-    module_writes: [TEffectSpan]{[TEffectSpan]{}}
+    module_writes: [TEffectSpan]{[TEffectSpan]{}},
     // For a `#Memo` function, the task context fields it can read
     // (`context.<field>`) and the context keys (`context.get(key)`),
     // JetSema sema_effect_context_reach, in key order: its memo key holds
     // each one beside the arguments (JetIR BuildMemo.jet). Reading the
     // context is no effect, so `solved` never shows it.
-    context: [String]{[String]{}}
-    context_keys: [TEffectContextKey]{[TEffectContextKey]{}}
+    context: [String]{[String]{}},
+    context_keys: [TEffectContextKey]{[TEffectContextKey]{}},
 }
 
 TVisibility: enum {
-    Private
-    Package
-    Public
+    Private,
+    Package,
+    Public,
 }
 
 TForeignProvenance: struct {
-    language: String
-    abi: String
-    symbol: String
-    span: Span
+    language: String,
+    abi: String,
+    symbol: String,
+    span: Span,
 }
 
 TGenericParam: struct {
-    name: String
-    bounds: [SymbolID]
+    name: String,
+    bounds: [SymbolID],
     // A `<N: Int>` number parameter: an instance binds it to a
     // Type.Measure length, and a body reads `N` as that Int.
-    number: Bool{false}
+    number: Bool{false},
 }
 
 TDeclarationFacts: struct {
-    type_defs: [TTypeDef]
-    traits: [TTraitDef]
-    impls: [TImplDef]
-    constants: [TConstantDef]
-    core_builtin_owners: [TCoreBuiltinOwner]
+    type_defs: [TTypeDef],
+    traits: [TTraitDef],
+    impls: [TImplDef],
+    constants: [TConstantDef],
+    core_builtin_owners: [TCoreBuiltinOwner],
 }
 
 TDeclarationOwnership: enum {
-    Owned
-    ReadBorrow
-    WriteBorrow
-    Move
+    Owned,
+    ReadBorrow,
+    WriteBorrow,
+    Move,
 }
 
 TCoreBuiltinOwner: struct {
-    symbol: SymbolID
-    module_identity: ModuleID
-    name: String
-    ownership: TDeclarationOwnership
+    symbol: SymbolID,
+    module_identity: ModuleID,
+    name: String,
+    ownership: TDeclarationOwnership,
 }
 
 TStructLayout: enum {
-    C
-    CAligned(alignment: Int, target: Bool)
-    Columnar
+    C,
+    CAligned(alignment: Int, target: Bool),
+    Columnar,
 }
 
 TCEnumTag: enum {
-    CInt
-    U8
-    I8
-    U16
-    I16
-    U32
-    I32
-    U64
-    I64
+    CInt,
+    U8,
+    I8,
+    U16,
+    I16,
+    U32,
+    I32,
+    U64,
+    I64,
 }
 
 TLayoutAlignmentFact: struct {
-    requested_alignment: Int
-    effective_alignment: Int
-    target_mode: Bool
-    target_profile: String
-    fact_identity: String
+    requested_alignment: Int,
+    effective_alignment: Int,
+    target_mode: Bool,
+    target_profile: String,
+    fact_identity: String,
 }
 
 TShapeFieldNames: struct {
-    text: String
-    json: String?
-    cbor: String?
-    csv: String?
-    toml: String?
-    yaml: String?
-    xml: String?
-    args: String
-    env: String
-    db: String?
-    layout: String?
+    text: String,
+    json: String?,
+    cbor: String?,
+    csv: String?,
+    toml: String?,
+    yaml: String?,
+    xml: String?,
+    args: String,
+    env: String,
+    db: String?,
+    layout: String?,
 }
 
 TIntegerRange: struct {
-    lo: Int
-    hi: Int
+    lo: Int,
+    hi: Int,
 }
 
 TSerdeAttributeKind: enum {
-    RenameAll
-    Tag
-    Untagged
-    DenyUnknownFields
+    RenameAll,
+    Tag,
+    Untagged,
+    DenyUnknownFields,
 }
 
 TSerdeAttribute: struct {
-    kind: TSerdeAttributeKind
-    value: String?
-    span: Span
+    kind: TSerdeAttributeKind,
+    value: String?,
+    span: Span,
 }
 
 TFunctionRef: struct {
-    key: String
-    module_identity: ModuleID
-    name: String
-    span: Span
-    visibility: TVisibility
+    key: String,
+    module_identity: ModuleID,
+    name: String,
+    span: Span,
+    visibility: TVisibility,
 }
 
 TCLIBinding: struct {
-    name: String
-    span: Span
-    function_key: String
-    markers: [String]
+    name: String,
+    span: Span,
+    function_key: String,
+    markers: [String],
 }
 
 TField: struct {
-    name: String
-    shape_names: TShapeFieldNames
-    skip: Bool
-    ty: Type
-    span: Span
-    public: Bool
-    package_public: Bool
-    computed: Bool
-    has_default: Bool
-    redact: Bool
+    name: String,
+    shape_names: TShapeFieldNames,
+    skip: Bool,
+    ty: Type,
+    span: Span,
+    public: Bool,
+    package_public: Bool,
+    computed: Bool,
+    has_default: Bool,
+    redact: Bool,
 }
 
 // A copy of `CasePayload` in Core/Prelude/Prelude.jet, in its order (the
 // closed-list mirror ledger): edit `CasePayload`, then copy it here.
 TVariantPayload: enum {
-    Unit
-    Single(value: Type)
-    Named(fields: [TField])
+    Unit,
+    Single(value: Type),
+    Named(fields: [TField]),
 }
 
 TVariant: struct {
-    name: String
-    wire_name: String
-    span: Span
-    payload: TVariantPayload
-    discriminant: Int?
+    name: String,
+    wire_name: String,
+    span: Span,
+    payload: TVariantPayload,
+    discriminant: Int?,
 }
 
 TTypeDefKind: enum {
-    Struct(fields: [TField], methods: [String])
-    Enum(variants: [TVariant], methods: [String])
-    Distinct(base: Type, range: TIntegerRange?)
-    Alias(target: Type)
-    UnitFamily(members: [String], base: String?)
+    Struct(fields: [TField], methods: [String]),
+    Enum(variants: [TVariant], methods: [String]),
+    Distinct(base: Type, range: TIntegerRange?),
+    Alias(target: Type),
+    UnitFamily(members: [String], base: String?),
 }
 
 // `base`: the member a dimensioned quantity is shown in.
 TCompilerBuiltin: enum {
-    DefaultErr
+    DefaultErr,
 }
 
 TTypeDef: struct {
-    module_identity: ModuleID
-    key: String
-    name: String
-    span: Span
-    public: Bool
-    package_public: Bool
-    generic_params: [TGenericParam]
-    derives: [String]
-    auto_derive_default: Bool
-    auto_printable: Bool
-    published_schema: Bool
-    single_use: Bool
-    must_use: Bool
-    layout: TStructLayout?
-    c_layout_tag: TCEnumTag?
-    enum_layout: LayoutFacts?
-    layout_alignment: TLayoutAlignmentFact?
-    serde: [TSerdeAttribute]
-    cli_bindings: [TCLIBinding]
-    ownership: TDeclarationOwnership
-    boxed_edges: [String]
-    compiler_builtin: TCompilerBuiltin?
+    module_identity: ModuleID,
+    key: String,
+    name: String,
+    span: Span,
+    public: Bool,
+    package_public: Bool,
+    generic_params: [TGenericParam],
+    derives: [String],
+    auto_derive_default: Bool,
+    auto_printable: Bool,
+    published_schema: Bool,
+    single_use: Bool,
+    must_use: Bool,
+    layout: TStructLayout?,
+    c_layout_tag: TCEnumTag?,
+    enum_layout: LayoutFacts?,
+    layout_alignment: TLayoutAlignmentFact?,
+    serde: [TSerdeAttribute],
+    cli_bindings: [TCLIBinding],
+    ownership: TDeclarationOwnership,
+    boxed_edges: [String],
+    compiler_builtin: TCompilerBuiltin?,
     // A `#Specified` enum: every case states its number, and a Set of it
     // stored as bits crosses with each case as its own value.
-    specified: Bool{false}
+    specified: Bool{false},
     // The name a value of the type prints by when it is not `name`: a type
     // lifted from an inline module or a generic-module instance is declared
     // under a generated name (`M3GeoPoint`) and prints by its source leaf
     // name (`Point`). "" when the type prints by `name`.
-    shown: String{""}
-    kind: TTypeDefKind
+    shown: String{""},
+    kind: TTypeDefKind,
 }
 
 TAssociatedTypeDecl: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 TAssociatedTypeValue: struct {
-    name: String
-    ty: Type
-    span: Span
+    name: String,
+    ty: Type,
+    span: Span,
 }
 
 TDeclarationParam: struct {
-    index: Int
-    name: String
-    span: Span
-    ty: Type
-    access: AccessConvention
-    ownership: TDeclarationOwnership
-    public_label: String
-    variadic: Bool
-    default_present: Bool
+    index: Int,
+    name: String,
+    span: Span,
+    ty: Type,
+    access: AccessConvention,
+    ownership: TDeclarationOwnership,
+    public_label: String,
+    variadic: Bool,
+    default_present: Bool,
 }
 
 TTraitMethod: struct {
-    key: String
-    name: String
-    span: Span
-    self_access: AccessConvention?
-    params: [TDeclarationParam]
-    declared_return: Type?
-    return_type: Type
-    failure: TFailureCarrier
-    is_pure: Bool
-    declared_effects: [TEffectSpan]?
-    return_view_provenance: ViewProvenanceMap?
-    declared_return_view_provenance: ViewProvenanceMap?
-    default_function_key: String?
+    key: String,
+    name: String,
+    span: Span,
+    self_access: AccessConvention?,
+    params: [TDeclarationParam],
+    declared_return: Type?,
+    return_type: Type,
+    failure: TFailureCarrier,
+    is_pure: Bool,
+    declared_effects: [TEffectSpan]?,
+    return_view_provenance: ViewProvenanceMap?,
+    declared_return_view_provenance: ViewProvenanceMap?,
+    default_function_key: String?,
 }
 
 TTraitDef: struct {
-    module_identity: ModuleID
-    key: String
-    name: String
-    span: Span
-    visibility: TVisibility
-    associated_types: [TAssociatedTypeDecl]
-    methods: [TTraitMethod]
+    module_identity: ModuleID,
+    key: String,
+    name: String,
+    span: Span,
+    visibility: TVisibility,
+    associated_types: [TAssociatedTypeDecl],
+    methods: [TTraitMethod],
 }
 
 // The OSes a build runs on: the one list `#Target(OS.*)`, a `#build.target.os`
@@ -293,12 +293,12 @@ TTraitDef: struct {
 // native OSes; a web build runs in the browser, a Wasm build on a WebAssembly
 // host such as WASI, and a freestanding build on bare metal with no OS.
 TTargetOS: enum {
-    Linux
-    MacOS
-    Windows
-    Web
-    Wasm
-    Freestanding
+    Linux,
+    MacOS,
+    Windows,
+    Web,
+    Wasm,
+    Freestanding,
 }
 
 TARGET_OS_ALL: #run { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows, TTargetOS.Web, TTargetOS.Wasm, TTargetOS.Freestanding} }
@@ -352,56 +352,56 @@ target_os_parse: fn(text: String) -> TTargetOS? Never! {
 }
 
 TOperatorMarker: enum {
-    Commutative
+    Commutative,
 }
 
 TImplDef: struct {
-    module_identity: ModuleID
-    key: String
-    span: Span
-    self_type: Type
-    trait_name: String?
-    trait_ref: String?
-    associated_types: [TAssociatedTypeValue]
+    module_identity: ModuleID,
+    key: String,
+    span: Span,
+    self_type: Type,
+    trait_name: String?,
+    trait_ref: String?,
+    associated_types: [TAssociatedTypeValue],
     // Every constant of the implemented trait: the value the implementation
     // writes, else the trait's default.
-    constants: [TTraitConstantValue]
-    methods: [String]
-    delegation_field: String?
-    compiler_generated: Bool
-    serde: TSerdeCodec?
-    operator_rhs: Type?
-    operator_marker: TOperatorMarker?
-    target_os: TTargetOS?
+    constants: [TTraitConstantValue],
+    methods: [String],
+    delegation_field: String?,
+    compiler_generated: Bool,
+    serde: TSerdeCodec?,
+    operator_rhs: Type?,
+    operator_marker: TOperatorMarker?,
+    target_os: TTargetOS?,
 }
 
 TTraitConstantValue: struct {
-    name: String
-    ty: Type
-    value: TComptimeValue
-    span: Span
+    name: String,
+    ty: Type,
+    value: TComptimeValue,
+    span: Span,
 }
 
 TConstantDef: struct {
-    module_identity: ModuleID
-    key: String
-    name: String
+    module_identity: ModuleID,
+    key: String,
+    name: String,
     // The key a `ConstRef` names the row by beside `key`: its constant
     // SymbolID text (`constant:<module>::<name>`), "" for a row no
     // constant symbol names (a trait constant).
-    symbol_key: String{""}
-    span: Span
-    visibility: TVisibility
-    ty: Type
-    is_comptime: Bool
-    is_storage: Bool
-    value: TComptimeValue
+    symbol_key: String{""},
+    span: Span,
+    visibility: TVisibility,
+    ty: Type,
+    is_comptime: Bool,
+    is_storage: Bool,
+    value: TComptimeValue,
     // A module `Shared{X}` holder: `value` is the payload the build folded
     // and `ty` the holder's Shared type; the program allocates the cell on
     // its first read and every read shares it.
-    shared_holder: Bool{false}
+    shared_holder: Bool{false},
     // A compile-time constant computed in the same program that reads it:
     // the key of the item function that returns its value, which each read
     // calls (`value` is then no value); "" for any other row.
-    item_function: String{""}
+    item_function: String{""},
 }

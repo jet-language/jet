@@ -23,34 +23,34 @@ IR_BUILD_NS_PER_FUNCTION: 160000
 // lambda job `lambda` of part `part`; `part` and `local` (its id there)
 // are known once it is built (a lambda's when it is queued).
 IRWaveJob: struct {
-    key: String
-    row: Int
-    args: [Type]
-    lambda: Int
-    part: Int
-    local: Int
+    key: String,
+    row: Int,
+    args: [Type],
+    lambda: Int,
+    part: Int,
+    local: Int,
 }
 
 // One job built: its queue index, its id in the part, the jobs it queued
 // (in order) and its failures.
 IRWaveBuilt: struct {
-    index: Int
-    local: Int
-    found: [IRWaveJob]
-    failures: [IRBuildFailure]
+    index: Int,
+    local: Int,
+    found: [IRWaveJob],
+    failures: [IRBuildFailure],
 }
 
 // The building threads' read-only input: the checked program.
 IRWaveInputs: struct {
-    programs: [IRProgram]
+    programs: [IRProgram],
 }
 
 // A part's module, kept across the build, its builds in claim order, and
 // its merge input once it is built (ir_merge_prepare).
 IRWaveWorker: struct {
-    modules: [IRModule]
-    built: [IRWaveBuilt]
-    preps: [IRMergePrep]
+    modules: [IRModule],
+    built: [IRWaveBuilt],
+    preps: [IRMergePrep],
 }
 
 // The queue the parts share: every job in the order it was queued; the jobs
@@ -60,15 +60,15 @@ IRWaveWorker: struct {
 // type arguments, not a lambda: its key is its checked row's, ir_function_id)
 // by that row, and of any other job by key.
 IRBuildQueue: struct {
-    jobs: [IRWaveJob]
-    claimable: [Int]
-    claimed: Int
-    own: [[Int]]
-    own_claimed: [Int]
-    waiting: Int
-    busy: Int
-    row_jobs: [Int]
-    keyed_jobs: [String:Int]
+    jobs: [IRWaveJob],
+    claimable: [Int],
+    claimed: Int,
+    own: [[Int]],
+    own_claimed: [Int],
+    waiting: Int,
+    busy: Int,
+    row_jobs: [Int],
+    keyed_jobs: [String:Int],
 }
 
 // Rung after jobs are queued, when a part stops building and when a part
@@ -76,33 +76,33 @@ IRBuildQueue: struct {
 // set once a part fails, and every part then ends (ir_build_parts); each
 // part's seat holds the queue index of the job it is building (-1: none).
 IRBuildBell: struct {
-    rings: Atomic<Int>
-    stopped: Atomic<Int>
-    seats: [IRBuildSeat]
+    rings: Atomic<Int>,
+    stopped: Atomic<Int>,
+    seats: [IRBuildSeat],
 }
 
 IRBuildSeat: struct {
-    job: Atomic<Int>
+    job: Atomic<Int>,
 }
 
 // How parts ended: the jobs they built, and the first failed part's panic
 // text (empty when none failed) with the queue index of the job it was
 // building (-1: it failed between jobs).
 IRBuildPartsEnd: struct {
-    built: Int
-    stop: String
-    job: Int
+    built: Int,
+    stop: String,
+    job: Int,
 }
 
 // A part's claim: the job's queue index (-1: none) and the job; whether the
 // part is building now, whether it just stopped, and whether the build is
 // done (nothing unclaimed, no part building).
 IRBuildClaim: struct {
-    index: Int
-    job: IRWaveJob
-    busy: Bool
-    idled: Bool
-    done: Bool
+    index: Int,
+    job: IRWaveJob,
+    busy: Bool,
+    idled: Bool,
+    done: Bool,
 }
 
 // Builds the jobs `roots` (checked functions, in order) and every function

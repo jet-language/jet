@@ -3,18 +3,18 @@
 use core.build.[BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphFile, BuildGraphTarget]
 
 BuildSessionGraphResult: struct {
-    graph: BuildGraph?
-    diagnostic: BuildSessionDiagnostic?
+    graph: BuildGraph?,
+    diagnostic: BuildSessionDiagnostic?,
 }
 
 BuildSessionPlan: struct {
-    storage: Shared<BuildSessionState>
-    default: Int
+    storage: Shared<BuildSessionState>,
+    default: Int,
 }
 
 BuildSessionFinish: struct {
-    plan: BuildSessionPlan?
-    diagnostics: [BuildSessionDiagnostic]
+    plan: BuildSessionPlan?,
+    diagnostics: [BuildSessionDiagnostic],
 }
 
 build_session_contains_int: fn(values: [Int], value: Int) -> Bool Never! {
@@ -303,17 +303,17 @@ build_session_finish: fn(session: &BuildSession, returned: BuildSessionValue) ->
 // source it declares, which `jet build` requires to exist before any action runs. `target`
 // is its handle id.
 BuildPlanExecutable: struct {
-    name: String
-    source: String
-    sources: [String]
-    target: Int
+    name: String,
+    source: String,
+    sources: [String],
+    target: Int,
 }
 
 BuildPlanSelection: struct {
-    executables: [BuildPlanExecutable]
-    libraries: [BuildPlanExecutable]
-    unsupported: [String]
-    options: [BuildSessionOption]
+    executables: [BuildPlanExecutable],
+    libraries: [BuildPlanExecutable],
+    unsupported: [String],
+    options: [BuildSessionOption],
 }
 
 build_plan_selection: fn(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
@@ -368,14 +368,14 @@ build_plan_graph: fn(plan: BuildSessionPlan) -> BuildGraph Never! {
 // every handle id of the session indexes these lists. `default` is the
 // target `b.default(t)` selected, or -1 for every target.
 BuildPlanExecution: struct {
-    toolchains: [BuildSessionToolchain]
-    signing: [BuildSessionSigning]
-    probes: [BuildSessionProbe]
-    plugins: [BuildSessionPlugin]
-    actions: [BuildSessionAction]
-    targets: [BuildSessionTarget]
-    files: [BuildSessionFile]
-    default: Int
+    toolchains: [BuildSessionToolchain],
+    signing: [BuildSessionSigning],
+    probes: [BuildSessionProbe],
+    plugins: [BuildSessionPlugin],
+    actions: [BuildSessionAction],
+    targets: [BuildSessionTarget],
+    files: [BuildSessionFile],
+    default: Int,
 }
 
 build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {

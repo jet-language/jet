@@ -3,10 +3,10 @@ use core.mem
 // An allocator that hands released blocks out again, so a value left
 // pointing into a block it served would read another value's bytes.
 Reuser: struct {
-    region: mem.Region
-    kept: [mem.Block]
-    taken: Int
-    given: Int
+    region: mem.Region,
+    kept: [mem.Block],
+    taken: Int,
+    given: Int,
 
     impl mem.Allocator {
         allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
@@ -34,7 +34,7 @@ Reuser: struct {
 }
 
 Holder: struct {
-    items: [Int]
+    items: [Int],
 }
 
 squares: fn(n: Int) -> [Int] {

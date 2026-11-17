@@ -15,28 +15,28 @@ JET_CLI_BUDGET_REPORT_LIMIT: 16777216
 
 // One requested source: its root-relative path and SHA-256.
 JetCLIBudgetSource: struct {
-    path: String
-    sha256: String
+    path: String,
+    sha256: String,
 }
 
 // One budget's decision exactly as its canonical report recorded it.
 // `evidence` and `outcome` are the engine's `decision.evidence` and
 // `decision.policy_outcome`; consumers never evaluate policy themselves.
 JetCLIBudgetFact: struct {
-    report_id: String
-    evidence_id: String
-    budget_id: String
-    evidence: String
-    outcome: String
-    enforcement: String
-    statistical: Bool
+    report_id: String,
+    evidence_id: String,
+    budget_id: String,
+    evidence: String,
+    outcome: String,
+    enforcement: String,
+    statistical: Bool,
 }
 
 // The compatible facts, sorted by budget id, and each rejected report's
 // reason in name order.
 JetCLIBudgetProjection: struct {
-    facts: [JetCLIBudgetFact]
-    rejected: [String]
+    facts: [JetCLIBudgetFact],
+    rejected: [String],
 }
 
 jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) -[FS, Time.Wait]> JetCLIBudgetProjection Never! {

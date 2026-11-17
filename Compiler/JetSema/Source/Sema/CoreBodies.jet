@@ -107,13 +107,13 @@ SEMA_CORE_BODIES_BUILTIN_MODULE: "<builtins>"
 // name by position, and its place among the captures
 // (sema_core_bodies_bytes).
 SemaCoreBody: struct {
-    key: String
-    bytes: [U8]
-    symbols: [String]
-    decls: [String]
-    modules: [String]
-    strings: [String]
-    ordinal: Int{0}
+    key: String,
+    bytes: [U8],
+    symbols: [String],
+    decls: [String],
+    modules: [String],
+    strings: [String],
+    ordinal: Int{0},
 }
 
 // The captures of a Core library's check (SemaGraphResult.core_bodies), in
@@ -121,16 +121,16 @@ SemaCoreBody: struct {
 // (sema_core_bodies_context): the bodies file once written
 // (sema_core_bodies_bytes).
 SemaCoreCaptures: struct {
-    bodies: [SemaCoreBody]
-    context: String
+    bodies: [SemaCoreBody],
+    context: String,
 }
 
 // A bodies file's header (sema_core_bodies_head): the context its checks
 // were captured in, how many records it holds, and where its table starts.
 SemaCoreBodiesHead: struct {
-    context: String
-    count: Int
-    table: Int
+    context: String,
+    count: Int,
+    table: Int,
 }
 
 // A bodies file as a compile reads it (sema_core_bodies_read): its bytes,
@@ -138,8 +138,8 @@ SemaCoreBodiesHead: struct {
 // header, table and keys from these bytes; a host that can read the file
 // at an offset hands the records apart (SemaCoreBodiesRecords).
 SemaCoreBodies: struct {
-    bytes: [U8]
-    head: SemaCoreBodiesHead
+    bytes: [U8],
+    head: SemaCoreBodiesHead,
 }
 
 // The host's read of a bodies file's records
@@ -149,7 +149,7 @@ SemaCoreBodies: struct {
 // the read fails. A mapped file's pages stay mapped once touched, and the
 // records one compile loads lie all through the file.
 SemaCoreBodiesRecords: trait {
-    read: fn(self, at: Int, size: Int) -[FS, FFI.Asm]> [U8]?
+    read: fn(self, at: Int, size: Int) -[FS, FFI.Asm]> [U8]?,
 }
 
 // The Prelude: the canonical effect package and the Core modules
@@ -646,20 +646,20 @@ SEMA_CORE_BODIES_AHEAD_HELD_BYTES: 8388608
 // function, its position in the bodies file, its byte offset and size there,
 // and once read its bytes, which the thread drops once it decoded them.
 SemaCoreBodyRecord: struct {
-    owner: SymbolID
-    position: Int
-    at: Int
-    size: Int
-    bytes: [U8]{[U8]{}}
+    owner: SymbolID,
+    position: Int,
+    at: Int,
+    size: Int,
+    bytes: [U8]{[U8]{}},
 }
 
 // A packet sema_core_bodies_ahead decoded, waiting for the module pass to
 // take it (sema_core_body_ahead_take): its record's position in the bodies
 // file and how many of the file's bytes the record holds.
 SemaCoreBodyAhead: struct {
-    packet: SemaParallelBody
-    position: Int
-    size: Int
+    packet: SemaParallelBody,
+    position: Int,
+    size: Int,
 }
 
 // The records sema_core_bodies_ahead's thread reads for the compiler
@@ -669,12 +669,12 @@ SemaCoreBodyAhead: struct {
 // with their packets in the same order: None where a key does not resolve
 // in this compile.
 SemaCoreBodiesAheadFeed: struct {
-    records: [SemaCoreBodyRecord]
-    held: Int
-    read: Bool
-    failed: Bool
-    decoded: [SemaCoreBodyRecord]
-    packets: [SemaParallelBody?]
+    records: [SemaCoreBodyRecord],
+    held: Int,
+    read: Bool,
+    failed: Bool,
+    decoded: [SemaCoreBodyRecord],
+    packets: [SemaParallelBody?],
 }
 
 // Reads ahead the packets a module pass loads: those of the functions

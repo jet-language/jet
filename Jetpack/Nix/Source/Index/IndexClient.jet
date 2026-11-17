@@ -36,12 +36,12 @@ NIX_INDEX_TEMP_SEQUENCE: Shared{ProcessSequence{next: 1}}
 // whose destination rule pins every host's checked addresses for the
 // client's lifetime; tests supply fixed responses.
 NixIndexTransport: struct {
-    get_bounded: fn(String, Int) -[Net, Time.Wait]> [U8] NixIndexError!
+    get_bounded: fn(String, Int) -[Net, Time.Wait]> [U8] NixIndexError!,
 }
 
 NixIndexClock: enum {
-    System
-    Fixed(Int)
+    System,
+    Fixed(Int),
 
     now_unix: fn(self) -[Time]> Int Never! {
         if self == {
@@ -52,14 +52,14 @@ NixIndexClock: enum {
 }
 
 NixIndexClient: struct {
-    priv endpoint: String
-    priv root: String
-    priv key_id: String
-    priv public_key: crypto.VerifyKey?
-    priv local_catalog: Bool
-    priv offline: Bool
-    priv clock: NixIndexClock
-    priv transport: NixIndexTransport
+    priv endpoint: String,
+    priv root: String,
+    priv key_id: String,
+    priv public_key: crypto.VerifyKey?,
+    priv local_catalog: Bool,
+    priv offline: Bool,
+    priv clock: NixIndexClock,
+    priv transport: NixIndexTransport,
 
     from_roots: fn(roots: HangarRoots) -[FS, Env, Net]> NixIndexClient NixIndexError! {
         NixIndexClient.from_roots_with_mode(roots, false)
@@ -500,9 +500,9 @@ NixIndexClient: struct {
 
 // A manifest with the exact bytes and signature sidecar it was verified from.
 NixIndexCachedManifest: struct {
-    manifest: NixIndexChannelManifest
-    bytes: [U8]
-    signature_bytes: [U8]
+    manifest: NixIndexChannelManifest,
+    bytes: [U8],
+    signature_bytes: [U8],
 }
 
 // The native transport: never following redirects and never changing the

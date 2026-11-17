@@ -128,13 +128,13 @@ use {
 MAX_EXPRESSION_DEPTH: 256
 
 ParsedExpr: struct {
-    expr: Expr
-    span: Span
+    expr: Expr,
+    span: Span,
 }
 
 ParsedExprFields: struct {
-    fields: [ExprField]
-    span: Span
+    fields: [ExprField],
+    span: Span,
 }
 
 parser_expression_precedence: fn(kind: Int) -> Int Never! {
@@ -2408,6 +2408,7 @@ parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> Parsed
     fields := [ExprField]{}
     if parser_current_kind(state) != TOKEN_RBRACE {
         loop {
+            entry_start: state.position
             if parser_state_section_ahead(state) {
                 section_start: parser_current(state).span
                 section := parser_parse_state_section(state, "", section_start)
@@ -2428,19 +2429,8 @@ parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> Parsed
                 value = parsed_value.expr.move()
             }
             fields.push(ExprField{name: parser_value(state, name_token), name_span: name_token.span, value: value.move()})
-            if parser_current_kind(state) == TOKEN_RBRACE -> break
-            separator_kind := parser_current_kind(state)
-            if {
-                separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> {
-                    parser_bump(state)
-                    if parser_current_kind(state) == TOKEN_RBRACE -> break
-                }
-                else -> {
-                    token: parser_current(state)
-                    parser_add_error(state, token.span, "expected a separator between record fields", "record fields are separated by commas or statement terminators", "add a comma or close the record")
-                    break
-                }
-            }
+            parser_finish_data_member(state, "record entry")
+            if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF || parser_aborting(state) || state.position == entry_start -> break
         }
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after record fields")

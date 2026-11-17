@@ -6,7 +6,7 @@
 // `blocker` ends and the group joins. The value closes exactly once, before
 // the join returns.
 Res: struct {
-    name: String
+    name: String,
 
     impl Close {
         close: fn(&&self) { print("close {self.name}") }
@@ -14,7 +14,7 @@ Res: struct {
 }
 
 Gate: struct {
-    wake: Sender<Int>
+    wake: Sender<Int>,
 
     impl Close {
         close: fn(&&self) { self.wake.close() }

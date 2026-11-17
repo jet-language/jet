@@ -60,10 +60,10 @@ provider_fetch_remote_repo_indexed: fn(remote: RemoteSource, want_package: Strin
 
 // The result of one index-first sparse member fetch.
 SparseOutcome: enum {
-    Materialized(String)
-    NotMonorepo
-    DepOutside(ProviderError)
-    SparseFailed
+    Materialized(String),
+    NotMonorepo,
+    DepOutside(ProviderError),
+    SparseFailed,
 }
 
 // The member subtree and its in-repo dependencies are checked out here.
@@ -284,8 +284,8 @@ provider_open_held_directory: fn(path: String, create: Bool) -[FS]> Directory IO
 
 // The held parent of a cache path and the cache's final name.
 HeldCacheParent: struct {
-    directory: Directory
-    name: String
+    directory: Directory,
+    name: String,
 
     open: fn(cache: String) -[FS]> HeldCacheParent IOError! {
         HeldCacheParent.open_with(cache, false)
@@ -354,9 +354,9 @@ provider_open_or_create_child: fn(parent: Directory, name: String) -[FS]> Direct
 
 // A held directory together with the held parent and name it was opened by.
 HeldDirectoryEntry: struct {
-    parent: Directory
-    name: String
-    directory: Directory
+    parent: Directory,
+    name: String,
+    directory: Directory,
 
     open: fn(path: String) -[FS]> HeldDirectoryEntry IOError! {
         name: files.basename(path)

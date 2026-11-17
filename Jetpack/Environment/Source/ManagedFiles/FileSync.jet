@@ -24,10 +24,10 @@ ENV_FILES_STATE_HEADER: "jet-env-files-v1"
 ENV_FILES_READ_CHUNK: 65536
 
 FileActionKind: enum {
-    Create
-    ReplaceOwned
-    Preserve
-    Unchanged
+    Create,
+    ReplaceOwned,
+    Preserve,
+    Unchanged,
 
     // The two kinds that write a destination.
     mutates: fn(self) -> Bool Never! {
@@ -39,25 +39,25 @@ FileActionKind: enum {
 }
 
 FileAction: struct {
-    destination: String
-    digest: String
-    mode: FileMode
-    permissions: Int?
-    sensitive: Bool
-    kind: FileActionKind
+    destination: String,
+    digest: String,
+    mode: FileMode,
+    permissions: Int?,
+    sensitive: Bool,
+    kind: FileActionKind,
 }
 
 // One recorded owned destination. Contents never enter the state file.
 ManagedStateEntry: struct {
-    digest: String
-    mode: FileMode
-    permissions: Int?
-    sensitive: Bool
-    generation: String?
+    digest: String,
+    mode: FileMode,
+    permissions: Int?,
+    sensitive: Bool,
+    generation: String?,
 }
 
 ManagedFileState: struct {
-    entries: [String:ManagedStateEntry]
+    entries: [String:ManagedStateEntry],
 
     empty: fn() -> ManagedFileState Never! {
         ManagedFileState{entries: [String:ManagedStateEntry]{}}
@@ -66,11 +66,11 @@ ManagedFileState: struct {
 
 // One resolved declaration with the exact bytes captured at plan time.
 PlannedFile: struct {
-    declaration: ManagedFile
-    bytes: [U8]
-    digest: String
-    destination: String
-    action: FileActionKind
+    declaration: ManagedFile,
+    bytes: [U8],
+    digest: String,
+    destination: String,
+    action: FileActionKind,
 
     // Sensitive bytes never reach debug output.
     impl Debug {
@@ -82,18 +82,18 @@ PlannedFile: struct {
 }
 
 FileSyncReport: struct {
-    applied: Int
-    preserved: Int
-    unchanged: Int
+    applied: Int,
+    preserved: Int,
+    unchanged: Int,
 }
 
 FilePlan: struct {
-    actions: [FileAction]
-    priv planned: [PlannedFile]
-    priv state_before: ManagedFileState
-    priv state_after: ManagedFileState
-    priv state_path: String
-    priv objects_dir: String
+    actions: [FileAction],
+    priv planned: [PlannedFile],
+    priv state_before: ManagedFileState,
+    priv state_after: ManagedFileState,
+    priv state_path: String,
+    priv objects_dir: String,
 
     has_changes: fn(self) -> Bool Never! {
         loop action in self.actions {
@@ -332,15 +332,15 @@ env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentE
 
 // A destination moved aside before replacement.
 ManagedBackup: struct {
-    destination: String
-    backup: String
+    destination: String,
+    backup: String,
 }
 
 // Everything one apply changed, in order, for rollback.
 ManagedApplyJournal: struct {
-    backups: [ManagedBackup]
-    created: [String]
-    new_objects: [String]
+    backups: [ManagedBackup],
+    created: [String],
+    new_objects: [String],
 }
 
 env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncReport, journal: &ManagedApplyJournal) -[FS, Env]> EnvironmentError! {

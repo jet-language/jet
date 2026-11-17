@@ -4,7 +4,7 @@
 // reduced numerator/denominator and integer-or-n/d display.
 #Error
 PerfBudgetError: struct {
-    message: String
+    message: String,
 }
 
 perf_error: fn(message: String) -> PerfBudgetError Never! { PerfBudgetError{message: message} }
@@ -89,8 +89,8 @@ perf_integer_gcd: fn(left: Int, right: Int) -> Int Never! {
 }
 
 PerfRational: struct {
-    num: Int
-    den: Int
+    num: Int,
+    den: Int,
 }
 
 // Rust Rational::new/from_bigints.
@@ -173,13 +173,13 @@ perf_rational_to_json: fn(value: PerfRational) -> CanonicalJSON Never! {
 }
 
 PerfStatistics: struct {
-    p50: PerfRational
-    p90: PerfRational
-    p95: PerfRational
-    p99: PerfRational
-    p999: PerfRational
-    mean: PerfRational
-    mad: PerfRational
+    p50: PerfRational,
+    p90: PerfRational,
+    p95: PerfRational,
+    p99: PerfRational,
+    p999: PerfRational,
+    mean: PerfRational,
+    mad: PerfRational,
 }
 
 // Rust nearest_rank. Rust usize overflow remains a wire boundary.
@@ -219,11 +219,11 @@ perf_statistics: fn(samples: [PerfRational]) -> PerfStatistics PerfBudgetError! 
 }
 
 PerfPercentile: enum {
-    P50
-    P90
-    P95
-    P99
-    P999
+    P50,
+    P90,
+    P95,
+    P99,
+    P999,
 }
 
 // Rust estimator.
@@ -243,57 +243,57 @@ perf_estimator: fn(samples: [PerfRational], percentile: PerfPercentile?) -> Perf
 }
 
 PerfDirection: enum {
-    LowerIsBetter
-    HigherIsBetter
+    LowerIsBetter,
+    HigherIsBetter,
 }
 
 PerfLimitDirection: enum {
-    AtMost
-    AtLeast
+    AtMost,
+    AtLeast,
 }
 
 PerfRelativeGoal: enum {
-    RegressionAtMost
-    ImprovementAtLeast
+    RegressionAtMost,
+    ImprovementAtLeast,
 }
 
 PerfEvidence: enum {
-    Pass
-    Regression
-    Inconclusive
-    Unavailable
+    Pass,
+    Regression,
+    Inconclusive,
+    Unavailable,
 }
 
 PerfEnforcement: enum {
-    Warn
-    Fail
+    Warn,
+    Fail,
 }
 
 PerfPolicyOutcome: enum {
-    Pass
-    Warn
-    Fail
+    Pass,
+    Warn,
+    Fail,
 }
 
 PerfComparison: enum {
-    Absolute(limit: PerfRational, direction: PerfLimitDirection)
-    AbsoluteFrom(limit: PerfRational, direction: PerfLimitDirection)
-    RelativeTo(limit_basis_points: Int, goal: PerfRelativeGoal)
+    Absolute(limit: PerfRational, direction: PerfLimitDirection),
+    AbsoluteFrom(limit: PerfRational, direction: PerfLimitDirection),
+    RelativeTo(limit_basis_points: Int, goal: PerfRelativeGoal),
 }
 
 PerfMeasurementPolicy: struct {
-    bootstrap_resamples: Int
-    lower_rank: Int
-    upper_rank: Int
+    bootstrap_resamples: Int,
+    lower_rank: Int,
+    upper_rank: Int,
 }
 
 PerfEvaluation: struct {
-    point: PerfRational
-    lower95: PerfRational?
-    upper95: PerfRational?
-    evidence: PerfEvidence
-    outcome: PerfPolicyOutcome
-    bootstrap: [PerfRational]
+    point: PerfRational,
+    lower95: PerfRational?,
+    upper95: PerfRational?,
+    evidence: PerfEvidence,
+    outcome: PerfPolicyOutcome,
+    bootstrap: [PerfRational],
 }
 
 // Rust finish.
@@ -327,9 +327,9 @@ perf_relative_stat: fn(candidate: PerfRational, baseline: PerfRational, limit_ba
 PERF_BOOTSTRAP_DOMAIN: "jet.performance-budget.bootstrap.v1"
 
 PerfSHAStream: struct {
-    prefix: [U8]
-    block: Int
-    words: [Int]
+    prefix: [U8],
+    block: Int,
+    words: [Int],
 }
 
 // Rust ShaStream::new.
@@ -471,17 +471,17 @@ perf_evaluate: fn(evidence_id: String, context_key: String, baseline_report_ids:
 }
 
 PerfTrendLabel: enum {
-    Improving
-    Stable
-    Regressing
-    Insufficient
+    Improving,
+    Stable,
+    Regressing,
+    Insufficient,
 }
 
 PerfTrend: struct {
-    report_ids: [String]
-    estimators: [PerfRational]
-    score: PerfRational?
-    label: PerfTrendLabel
+    report_ids: [String],
+    estimators: [PerfRational],
+    score: PerfRational?,
+    label: PerfTrendLabel,
 }
 
 // Rust trend.

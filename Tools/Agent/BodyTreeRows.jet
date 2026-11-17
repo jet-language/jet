@@ -31,13 +31,13 @@ TREE_TYPE: Regex{"T[A-Z][A-Za-z0-9]*"}
 // indices, the tree types with a body form (tree name, body name) and the
 // tree types both sides share.
 BodyTreeView: struct {
-    source_open: String
-    output_path: String
-    output_open: String
-    lede: [String]
-    children: [String]
-    forms: [[String]]
-    shared: [String]
+    source_open: String,
+    output_path: String,
+    output_open: String,
+    lede: [String],
+    children: [String],
+    forms: [[String]],
+    shared: [String],
 }
 
 body_tree_views: fn() -> [BodyTreeView] {
@@ -95,7 +95,7 @@ body_tree_views: fn() -> [BodyTreeView] {
 
 #Error
 BodyTreeRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> BodyTreeRowsError Never! {
@@ -195,22 +195,22 @@ body_tree_rows_error: fn(index: Int, text: String) -> String Never! {
 }
 
 #Test("body host call rows write each tree child as its node index") {
-    tree: "X: enum {{\n}}\nTHostCall: enum {{\n    // A call.\n    Method(receiver: TExpr, args: [TExpr], kind: TOptionProbe)\n    Probe(inner: TExpr?)\n}}\n"
+    tree: "X: enum {{\n}}\nTHostCall: enum {{\n    // A call.\n    Method(receiver: TExpr, args: [TExpr], kind: TOptionProbe),\n    Probe(inner: TExpr?),\n}}\n"
     rendered: render_body_tree(body_tree_views()[0], tree) ?? panic("the declaration did not render: {err.message}")
     assert(rendered.starts_with(GENERATED_BY))
-    assert(rendered.contains("\nBodyHostCall: enum {{\n    // A call.\n    Method(receiver: Int, args: [Int], kind: TOptionProbe)\n    Probe(inner: Int?)\n}}\n"))
+    assert(rendered.contains("\nBodyHostCall: enum {{\n    // A call.\n    Method(receiver: Int, args: [Int], kind: TOptionProbe),\n    Probe(inner: Int?),\n}}\n"))
     assert(body_tree_rows_error(0, "Y: enum {{\n}}\n").contains("declares no"))
-    assert(body_tree_rows_error(0, "THostCall: enum {{\n    Spawn(body: TLambda)\n}}\n").contains("no body form"))
-    assert(body_tree_rows_error(0, "THostCall: enum {{\n    Wrap(kind: TExprKind)\n}}\n").contains("no body form"))
+    assert(body_tree_rows_error(0, "THostCall: enum {{\n    Spawn(body: TLambda),\n}}\n").contains("no body form"))
+    assert(body_tree_rows_error(0, "THostCall: enum {{\n    Wrap(kind: TExprKind),\n}}\n").contains("no body form"))
     assert(body_tree_rows_error(0, "THostCall: enum {{\n    Open\n").contains("no closing"))
 }
 
 #Test("statement kind rows write children as node indices, tree types as their body forms, and shared types as written") {
-    tree: "TStmt: enum {{\n    Contract(contract: TContract)\n    Scope(pre: [TContract], body: [TStmt], result: TContractResult, value: TExpr?)\n    Reactive(executable: TLambda, span: Span)\n}}\n"
+    tree: "TStmt: enum {{\n    Contract(contract: TContract),\n    Scope(pre: [TContract], body: [TStmt], result: TContractResult, value: TExpr?),\n    Reactive(executable: TLambda, span: Span),\n}}\n"
     rendered: render_body_tree(body_tree_views()[1], tree) ?? panic("the declaration did not render: {err.message}")
     assert(rendered.starts_with(GENERATED_BY))
-    assert(rendered.contains("\nStmtKind: enum {{\n    Contract(contract: BodyContract)\n    Scope(pre: [BodyContract], body: [Int], result: TContractResult, value: Int?)\n    Reactive(executable: BodyLambda, span: Span)\n}}\n"))
-    assert(body_tree_rows_error(1, "TStmt: enum {{\n    Hold(kind: TExprKind)\n}}\n").contains("`TExprKind`, a tree type with no body form"))
+    assert(rendered.contains("\nStmtKind: enum {{\n    Contract(contract: BodyContract),\n    Scope(pre: [BodyContract], body: [Int], result: TContractResult, value: Int?),\n    Reactive(executable: BodyLambda, span: Span),\n}}\n"))
+    assert(body_tree_rows_error(1, "TStmt: enum {{\n    Hold(kind: TExprKind),\n}}\n").contains("`TExprKind`, a tree type with no body form"))
 }
 
 #Test("the generated body enums match their tree declarations") {

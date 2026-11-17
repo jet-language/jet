@@ -13,12 +13,12 @@ use jet_foundation.[
 ]
 
 Token: struct {
-    kind: Int
-    span: Span
-    text: Name
-    decoded: Name
+    kind: Int,
+    span: Span,
+    text: Name,
+    decoded: Name,
     // Row in `TokenTables.literals`, or -1 when the token has no literal facts.
-    literal: Int
+    literal: Int,
 }
 
 // Number and string facts of one literal token. Quoted text right after
@@ -31,33 +31,33 @@ Token: struct {
 // each of its `escapes`. A byte asset's plain reading has one unknown escape
 // per byte, so it builds its diagnostics only if the parser picks it.
 TokenLiteral: struct {
-    integer: Int?
-    decimal: Float?
-    suffix: Name
-    interpolations: Int
-    string_parts: [StringPart]
+    integer: Int?,
+    decimal: Float?,
+    suffix: Name,
+    interpolations: Int,
+    string_parts: [StringPart],
     // The typed-head reading's row, or -1 when no typed head can take the text.
-    head: Int
-    head_decoded: Name
-    deferred: [Diagnostic]
-    escapes: [TextEscape]
+    head: Int,
+    head_decoded: Name,
+    deferred: [Diagnostic],
+    escapes: [TextEscape],
 }
 
 // An escape a deferred reading doesn't know: `span` covers the `\` and the
 // escaped scalar, whose UTF-8 bytes `bytes` packs, first byte highest. It
 // reports right before `deferred[before]`, where the lexer met it.
 TextEscape: struct {
-    span: Span
-    bytes: Int
-    before: Int
+    span: Span,
+    bytes: Int,
+    before: Int,
 }
 
 StringPart: struct {
-    kind: Int
-    span: Span
-    text: Name
-    byte: Int
-    tokens: [Token]
+    kind: Int,
+    span: Span,
+    text: Name,
+    byte: Int,
+    tokens: [Token],
 }
 
 STRING_PART_TEXT: 1
@@ -69,18 +69,18 @@ STRING_PART_BYTE: 3
 // The spellings and literal facts a lexed source's tokens refer to,
 // interpolated tokens included.
 TokenTables: struct {
-    names: NameTable
-    literals: [TokenLiteral]
+    names: NameTable,
+    literals: [TokenLiteral],
     // Per token kind, the name id of its one spelling once a keyword or
     // punctuation token of that kind interned it (-1 before), so the next
     // such token skips the hash probe (`intern_token_source`).
-    spellings: [Int]
+    spellings: [Int],
 }
 
 Lexed: struct {
-    tokens: [Token]
-    tables: TokenTables
-    diagnostics: [Diagnostic]
+    tokens: [Token],
+    tables: TokenTables,
+    diagnostics: [Diagnostic],
 }
 
 // One `TokenTables.spellings` slot per token kind.

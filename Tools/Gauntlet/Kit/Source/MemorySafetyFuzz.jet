@@ -46,28 +46,28 @@ MEMORY_OUTPUT_LIMIT: 8192
 // `jet` a declared command's `{jet_bin}` names, how much of each stream a
 // report keeps, and the commit a finding names.
 FuzzRun: struct {
-    run_dir: String
-    repo_dir: String
-    jet_bin: String
-    output_limit: Int
-    target_commit: String
+    run_dir: String,
+    repo_dir: String,
+    jet_bin: String,
+    output_limit: Int,
+    target_commit: String,
 }
 
 // How one command ended, as the host saw it.
 CommandOutcome: struct {
-    code: Int?
-    signal: String?
-    timed_out: Bool
-    resource_exceeded: String?
-    stdout: String
-    stderr: String
+    code: Int?,
+    signal: String?,
+    timed_out: Bool,
+    resource_exceeded: String?,
+    stdout: String,
+    stderr: String,
 }
 
 // The command the host ran (a declared one, wrapped in its budget) and how
 // it ended.
 CommandRun: struct {
-    command: [String]
-    process: CommandOutcome
+    command: [String],
+    process: CommandOutcome,
 }
 
 // What the gauntlet run lends the adapter: staging a runner's declared files
@@ -75,102 +75,102 @@ CommandRun: struct {
 // probing the runner's tools, the argv of a declared command, running one in
 // a directory under the axis budget, and the SHA-256 of a file.
 MemoryAxisHost: trait {
-    stage_files: fn(self, dir: String, declared: Dyn) -[FS]> Dyn Err!
-    stage_path: fn(self, dir: String, relative: String) -> String Err!
-    probe_tools: fn(self, dir: String, tools: Dyn, jet_bin: String) -[FS, Exec]> [Dyn] Err!
-    command: fn(self, declared: Dyn, jet_bin: String) -> [String] Err!
-    run_command: fn(self, dir: String, command: [String], budget: Dyn) -[FS, Exec]> CommandRun Err!
-    file_sha256: fn(self, path: String) -[FS]> String Err!
+    stage_files: fn(self, dir: String, declared: Dyn) -[FS]> Dyn Err!,
+    stage_path: fn(self, dir: String, relative: String) -> String Err!,
+    probe_tools: fn(self, dir: String, tools: Dyn, jet_bin: String) -[FS, Exec]> [Dyn] Err!,
+    command: fn(self, declared: Dyn, jet_bin: String) -> [String] Err!,
+    run_command: fn(self, dir: String, command: [String], budget: Dyn) -[FS, Exec]> CommandRun Err!,
+    file_sha256: fn(self, path: String) -[FS]> String Err!,
 }
 
 // The corpus: `case_count` records of `bytes_per_case` bytes, each its kind,
 // declared length, requested index and tag (the `metadata_bytes`), then its
 // payload of xorshift32 bytes.
 Corpus: struct {
-    seed: Int
-    case_count: Int
-    bytes_per_case: Int
-    metadata_bytes: Int
-    payload_bytes: Int
-    data: [U8]
-    sha256: String
+    seed: Int,
+    case_count: Int,
+    bytes_per_case: Int,
+    metadata_bytes: Int,
+    payload_bytes: Int,
+    data: [U8],
+    sha256: String,
 }
 
 // One record's kind and the read it asks for.
 CaseRecord: struct {
-    index: Int
-    kind: Int
-    declared_length: Int
-    requested_index: Int
-    offset: Int
+    index: Int,
+    kind: Int,
+    declared_length: Int,
+    requested_index: Int,
+    offset: Int,
 }
 
 // The records by kind and the two sums the oracle line carries.
 CorpusSummary: struct {
-    counts: [Int]
-    checksum: Int
-    semantic: Int
-    records: [CaseRecord]
+    counts: [Int],
+    checksum: Int,
+    semantic: Int,
+    records: [CaseRecord],
 }
 
 // A command's process as a report keeps it: each stream cut to the output
 // limit and whole as base64.
 Evidence: struct {
-    code: Int?
-    signal: String?
-    timed_out: Bool
-    resource_exceeded: String?
-    stdout: String
-    stderr: String
-    stdout_bytes: String
-    stderr_bytes: String
+    code: Int?,
+    signal: String?,
+    timed_out: Bool,
+    resource_exceeded: String?,
+    stdout: String,
+    stderr: String,
+    stdout_bytes: String,
+    stderr_bytes: String,
 }
 
 Finding: struct {
-    kind: String
-    phase: String
-    detail: String
-    pattern: String
-    excerpts: [String]
+    kind: String,
+    phase: String,
+    detail: String,
+    pattern: String,
+    excerpts: [String],
 }
 
 Hit: struct {
-    pattern: String
-    line: String
+    pattern: String,
+    line: String,
 }
 
 // The findings of one signature, over every rail that hit it.
 FindingReceipt: struct {
-    dedupe_key: String
-    kind: String
-    signature: String
-    rails: [String]
-    occurrences: [Dyn]
-    payload: Dyn
+    dedupe_key: String,
+    kind: String,
+    signature: String,
+    rails: [String],
+    occurrences: [Dyn],
+    payload: Dyn,
 }
 
 // What every runner of one axis run shares.
 AxisPass: struct {
-    axis: Dyn
-    axis_dir: String
-    corpus: Corpus
-    summary: CorpusSummary
-    expected: String
-    run: FuzzRun
+    axis: Dyn,
+    axis_dir: String,
+    corpus: Corpus,
+    summary: CorpusSummary,
+    expected: String,
+    run: FuzzRun,
 }
 
 // Where a runner got to: the stage and command a failure is charged to, its
 // tool probes and its findings so far.
 RunnerProgress: struct {
-    stage: String
-    command: Dyn
-    probes: [Dyn]
-    findings: [Finding]
+    stage: String,
+    command: Dyn,
+    probes: [Dyn],
+    findings: [Finding],
 }
 
 RunnerOutcome: struct {
-    result: Dyn
-    findings: [Finding]
+    result: Dyn,
+    findings: [Finding],
 }
 
 xorshift32: fn(value: Int) -> Int {
@@ -851,7 +851,7 @@ test_memory_axis: fn() -> Dyn {
 // says: "staging", "compile" (every command), "run" (the test runner) or
 // "digest" (every file digest is wrong).
 TestMemoryHost: struct {
-    fails: String
+    fails: String,
 
     impl MemoryAxisHost {
         stage_files: fn(self, _dir: String, declared: Dyn) -> Dyn Err! {

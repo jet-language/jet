@@ -46,26 +46,26 @@ use jet_foundation.[
 
 // A field of a struct effect, which a value of the effect gives a literal.
 SemaLibraryEffectField: struct {
-    name: String
-    ty: Type
+    name: String,
+    ty: Type,
 }
 
 SemaLibraryEffect: struct {
-    package_identity: String
+    package_identity: String,
     // The graph row of the module that declares it.
-    module_index: Int
-    name: String
-    cases: [String]
-    kernel: [String]
+    module_index: Int,
+    name: String,
+    cases: [String],
+    kernel: [String],
     // The written `parent: Name` of a package effect.
-    parent: NamedSpan?{None}
+    parent: NamedSpan?{None},
     // The effects it is a kind of, nearest first: each package effect's
     // token, then the open Prelude effect the chain ends at.
-    ancestors: [String]{[String]{}}
+    ancestors: [String]{[String]{}},
     // A struct effect's fields, in declaration order.
-    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}}
+    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}},
     // E0758 for its parent, reported once by the declaring module.
-    problem: Diagnostic?{None}
+    problem: Diagnostic?{None},
 }
 
 // One name a module may write for a library effect, and the kernel effects
@@ -75,24 +75,24 @@ SemaLibraryEffect: struct {
 // declaration order (`Bucket{name: "photos"}`). `ancestors` are the effects
 // a package effect is a kind of (SemaLibraryEffect.ancestors).
 SemaLibraryEffectName: struct {
-    written: String
-    kernel: [String]
-    token: String
-    ancestors: [String]
-    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}}
+    written: String,
+    kernel: [String],
+    token: String,
+    ancestors: [String],
+    fields: [SemaLibraryEffectField]{[SemaLibraryEffectField]{}},
 }
 
 // A `!` entry of a function row that names a library effect or a case.
 SemaLibraryEffectDenial: struct {
-    name: SemaLibraryEffectName
-    span: Span
+    name: SemaLibraryEffectName,
+    span: Span,
 }
 
 // The library effects each function reaches, and the ancestors of each
 // reached token (empty for an effect that is no kind of another).
 SemaLibraryEffectReach: struct {
-    reached: [[String]]
-    ancestry: [String:[String]]
+    reached: [[String]],
+    ancestry: [String:[String]],
 }
 
 // `name` is a struct or enum in `items` that implements `Effect` (the parser
@@ -189,10 +189,10 @@ sema_library_effect_row: fn(effects: [SemaLibraryEffect], token: String) -> Int?
 // problem it leaves. `blocked` when the parent has a problem of its own, so
 // one wrong parent reports once.
 SemaLibraryEffectParent: struct {
-    limit: [String]
-    ancestors: [String]
-    problem: Diagnostic?
-    blocked: Bool
+    limit: [String],
+    ancestors: [String],
+    problem: Diagnostic?,
+    blocked: Bool,
 }
 
 sema_library_effect_parent_problem: fn(problem: Diagnostic) -> SemaLibraryEffectParent Never! {

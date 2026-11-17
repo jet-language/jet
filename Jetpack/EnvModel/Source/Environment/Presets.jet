@@ -2,29 +2,29 @@
 // that may be selected explicitly or ambiently by hostname and user.
 
 PresetSpec: struct {
-    name: String{""}
-    extends: [String]{[String]{}}
-    packages: [String]{[String]{}}
-    variables: [String:String]{[String:String]{}}
-    hostname: String?{None}
-    user: String?{None}
+    name: String{""},
+    extends: [String]{[String]{}},
+    packages: [String]{[String]{}},
+    variables: [String:String]{[String:String]{}},
+    hostname: String?{None},
+    user: String?{None},
 }
 
 ResolvedPreset: struct {
-    name: String{""}
+    name: String{""},
     // Ambient selection before inheritance expansion. Explicit CLI selection
     // chooses one preset; ambient hostname and user matches may merge.
-    selected_presets: [String]{[String]{}}
-    applied: [String]{[String]{}}
-    packages: [String]{[String]{}}
-    variables: [String:String]{[String:String]{}}
+    selected_presets: [String]{[String]{}},
+    applied: [String]{[String]{}},
+    packages: [String]{[String]{}},
+    variables: [String:String]{[String:String]{}},
 }
 
 #Error
 PresetError: enum {
-    Missing(String)
-    Cycle([String])
-    Conflict(String)
+    Missing(String),
+    Cycle([String]),
+    Conflict(String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -36,7 +36,7 @@ PresetError: enum {
 }
 
 PresetSet: struct {
-    presets: [String:PresetSpec]{[String:PresetSpec]{}}
+    presets: [String:PresetSpec]{[String:PresetSpec]{}},
 
     insert: fn(&self, preset: PresetSpec) PresetError! { self.insert_checked(preset) }
 

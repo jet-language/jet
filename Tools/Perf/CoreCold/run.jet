@@ -62,59 +62,59 @@ TIMEOUT_SECONDS: 300
 // A program: its name, its working directory under <work>/tree, the jet
 // arguments, and its limits (-1: none).
 Program: struct {
-    name: String
-    cwd: String
-    args: [String]
-    shown: String
-    bodies_max_ms: Int
-    wall_max_ms: Int
-    peak_max_mb: Int
+    name: String,
+    cwd: String,
+    args: [String],
+    shown: String,
+    bodies_max_ms: Int,
+    wall_max_ms: Int,
+    peak_max_mb: Int,
 }
 
 // One run: wall (ns), GNU time's peak (KiB), its trace and the trace's
 // comptime.bodies wall (µs).
 Run: struct {
-    wall_ns: Int
-    peak_kib: Int
-    trace: String
-    bodies_us: Int
+    wall_ns: Int,
+    peak_kib: Int,
+    trace: String,
+    bodies_us: Int,
 }
 
 TraceArgs: struct {
-    value: Int?
+    value: Int?,
 }
 
 TraceEvent: struct {
-    name: String
-    ph: String
-    ts: Int?
-    tid: Int?
-    args: TraceArgs?
+    name: String,
+    ph: String,
+    ts: Int?,
+    tid: Int?,
+    args: TraceArgs?,
 }
 
 // An open span: its lane, name, start, whether it is top level on the
 // opening lane, and whether its end has come.
 Open: struct {
-    lane: Int
-    name: String
-    start_us: Int
-    top: Bool
-    closed: Bool
+    lane: Int,
+    name: String,
+    start_us: Int,
+    top: Bool,
+    closed: Bool,
 }
 
 Total: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 // A trace's top-level spans of the opening lane (µs, summed by name in first
 // order), comptime.bodies' wall over every lane (µs), the first span start to
 // the last span end (µs) and the Core counters.
 Summary: struct {
-    top: [Total]
-    bodies_us: Int
-    traced_us: Int
-    counters: [Total]
+    top: [Total],
+    bodies_us: Int,
+    traced_us: Int,
+    counters: [Total],
 }
 
 run: fn() -> Never Err! {

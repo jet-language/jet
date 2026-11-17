@@ -128,23 +128,23 @@ pkg_policy_unknown_key: fn(name: String, raw: String, package_only_fields: Bool)
 
 // One `policy.sources` rule: a package pattern and its allowed sources.
 PolicySourceMap: struct {
-    pattern: String
-    sources: [String]
+    pattern: String,
+    sources: [String],
 }
 
 // The package-policy fields that govern package metadata and team
 // ceilings (Rust returns them as one tuple).
 PackagePolicySurface: struct {
-    licenses: [String]?
-    source_maps: [PolicySourceMap]
-    exceptions: [PackagePolicyException]
-    unsafe_paths: [String]?
+    licenses: [String]?,
+    source_maps: [PolicySourceMap],
+    exceptions: [PackagePolicyException],
+    unsafe_paths: [String]?,
     // `None`: no `memory:` field, so the package has no kernel files;
     // otherwise the `.Kernel([...])` paths.
-    memory_kernel: [String]?
-    expert: Bool?
-    deps: [String]?
-    claims_min: ClaimsGrade?
+    memory_kernel: [String]?,
+    expert: Bool?,
+    deps: [String]?,
+    claims_min: ClaimsGrade?,
 }
 
 pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface PackageParseError! {
@@ -496,8 +496,8 @@ pkg_days_from_civil: fn(input_year: Int, input_month: Int, day: Int) -> Int Neve
 
 // The package-only dependency guarantee dial.
 GuaranteePolicy: struct {
-    contain: [String]
-    harden: Bool
+    contain: [String],
+    harden: Bool,
 }
 
 pkg_parse_guarantee_policy: fn(body: String) -> GuaranteePolicy PackageParseError! {
@@ -538,8 +538,8 @@ pkg_parse_guarantee_policy: fn(body: String) -> GuaranteePolicy PackageParseErro
 // `policy: { … }` audited-gate floor and the effects its
 // `authority: { deny: [...] }` denies every package of the build.
 PackageOrganizationDocument: struct {
-    declarations: [PolicyDeclaration]
-    deny: [String]
+    declarations: [PolicyDeclaration],
+    deny: [String],
 }
 
 // Parse a standalone organization policy file: a `policy: { … }` block, an

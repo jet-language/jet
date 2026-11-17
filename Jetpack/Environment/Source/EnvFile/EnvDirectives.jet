@@ -35,10 +35,10 @@ use {
 // `via` selects the provider (`nix` by default, `core` for first-party Jet
 // packages, R2).
 EnvNamedSource: struct {
-    name: String
-    upstream: String
+    name: String,
+    upstream: String,
     // The provider name (`nix`/`core`); None means the default `nix`.
-    via: String?
+    via: String?,
 }
 
 // The declared environment, parsed from the directive calls. Sources are a
@@ -48,11 +48,11 @@ EnvNamedSource: struct {
 // package index lives in the source repo's `pkg.jet`, never here.
 EnvFile: struct {
     // The default source for bare package entries (a one-argument source).
-    default_source: String?
+    default_source: String?,
     // Named sources, in declaration order.
-    named: [EnvNamedSource]
-    packages: [String]
-    prompt: String?
+    named: [EnvNamedSource],
+    packages: [String],
+    prompt: String?,
 
     empty: fn() -> EnvFile Never! {
         EnvFile{default_source: None, named: [EnvNamedSource]{}, packages: [String]{}, prompt: None}

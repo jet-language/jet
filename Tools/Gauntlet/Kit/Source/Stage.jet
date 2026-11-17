@@ -80,18 +80,18 @@ WEB_ASSET_URL: Regex{"\bnew\s+URL\(\s*[\x22']([^\x22']+)[\x22']\s*,\s*import\.me
 // other row with a program is recorded unmeasured, with its program's tree
 // hash, and so are Jet's tiers when "jet" is not among them.
 StageOptions: struct {
-    jet_bin: String
-    runs: Int?
-    dev: Bool
-    launcher: String
-    measure: [String]?
+    jet_bin: String,
+    runs: Int?,
+    dev: Bool,
+    launcher: String,
+    measure: [String]?,
 }
 
 // The JetEnv shell a command runs in: the plain one, or the full one an
 // entry asks for with `spec.fullShell`.
 Shell: enum {
-    Plain
-    Full
+    Plain,
+    Full,
 }
 
 // The shell `entry` asks its configured commands to run in.
@@ -100,31 +100,31 @@ entry_shell: fn(entry: Dyn) -> Shell { if is_true(entry, "spec/fullShell") -> .F
 // What every staged command runs with, and how far the launcher's clock runs
 // ahead of this program's.
 Stager: struct {
-    env_runner: String
-    timer: String
-    launcher: String
-    clock_offset_ns: Int
-    jet_bin: String
-    timeout_ms: Int
-    tier_timeout_ms: Int
+    env_runner: String,
+    timer: String,
+    launcher: String,
+    clock_offset_ns: Int,
+    jet_bin: String,
+    timeout_ms: Int,
+    tier_timeout_ms: Int,
 }
 
 // One entry as its rows are staged, and the reason an unmeasured row gives
 // ("" when the run measures every row).
 Staging: struct {
-    s: Stager
-    entry: Dyn
-    entry_dir: String
-    entry_stage: String
-    mode: String
-    expected: [U8]
-    expected_path: String
-    fixture_out: String
-    common_fixtures: String
-    generated: String
-    runs: Int
-    measure: [String]?
-    not_measured: String
+    s: Stager,
+    entry: Dyn,
+    entry_dir: String,
+    entry_stage: String,
+    mode: String,
+    expected: [U8],
+    expected_path: String,
+    fixture_out: String,
+    common_fixtures: String,
+    generated: String,
+    runs: Int,
+    measure: [String]?,
+    not_measured: String,
 }
 
 // Whether the run `st` stages measures `language`'s row.
@@ -135,52 +135,52 @@ measures: fn(st: Staging, language: String) -> Bool {
 // What restores a staged directory before a run: its state from its
 // baseline copy, and the generated fixture ("" for neither).
 Reset: struct {
-    state_dir: String
-    fixture_target: String
-    fixture_source: String
-    make_parent: Bool
+    state_dir: String,
+    fixture_target: String,
+    fixture_source: String,
+    make_parent: Bool,
 }
 
 // What runs before each sample: the reset, then the run tier's cache state
 // ("" outside it) on `script` and `cache_home`.
 Before: struct {
-    reset: Reset
-    cache_state: String
-    script: String
-    original: String
-    cache_home: String
-    edits: Int
+    reset: Reset,
+    cache_state: String,
+    script: String,
+    original: String,
+    cache_home: String,
+    edits: Int,
 }
 
 // A build and what it left: the command (None for none), the cold and warm
 // samples (null without a command), the artifact and the failure ("" for
 // none).
 BuildResult: struct {
-    command: [String]?
-    build: Dyn
-    artifact: String
-    failure: String
+    command: [String]?,
+    build: Dyn,
+    artifact: String,
+    failure: String,
 }
 
 // A started service or peer, and its exit once it is reaped.
 Service: struct {
-    child: ProcessChild
-    exit: ServiceExit?
+    child: ProcessChild,
+    exit: ServiceExit?,
 }
 
 // How a service ended: its code (None for a signal or a timed-out wait),
 // the signal's name ("TIMEOUT" for a wait that timed out) and its stderr.
 ServiceExit: struct {
-    code: Int?
-    signal: String
-    stderr: String
+    code: Int?,
+    signal: String,
+    stderr: String,
 }
 
 // One measured web asset.
 WebFile: struct {
-    path: String
-    bytes: Int
-    kind: String
+    path: String,
+    bytes: Int,
+    kind: String,
 }
 
 // The entry `entry`, from `entry_dir`, staged under `run_dir` and measured:
@@ -1554,8 +1554,8 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int)
 // What the verification run of a service found: its failure ("" for none)
 // and its startup in seconds (null before it answered).
 Verified: struct {
-    failure: String
-    startup: Dyn
+    failure: String,
+    startup: Dyn,
 }
 
 verify_service: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, config: Dyn, probes: [Dyn], protocol: String, report: String) -> Verified IOError! {

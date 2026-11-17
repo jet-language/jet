@@ -110,95 +110,95 @@ JFMT_DELIM_BRACE: 2
 JFMT_DELIM_ANGLE: 3
 
 JetFmtComment: struct {
-    text: String
-    span: Span
+    text: String,
+    span: Span,
 }
 
 JetFmt: struct {
-    src: String
-    src_bytes: [U8]
+    src: String,
+    src_bytes: [U8],
     // Byte offsets of every `\n` in `src`, for Rust `line_of`.
-    newlines: [Int]
-    source_toks: [Token]
-    comments: [JetFmtComment]
-    comment_i: Int
-    out: [U8]
-    col: Int
-    at_line_start: Bool
-    indent: Int
-    pending_blank: Bool
+    newlines: [Int],
+    source_toks: [Token],
+    comments: [JetFmtComment],
+    comment_i: Int,
+    out: [U8],
+    col: Int,
+    at_line_start: Bool,
+    indent: Int,
+    pending_blank: Bool,
     // Exclusive source boundary for trailing comments while formatting a
     // nested construct, so an inner statement never claims a comment that
     // trails its enclosing expression on the same line.
-    trailing_comment_limit: Int
-    items: [Item]
-    policy_declarations: [PolicyDeclaration]
+    trailing_comment_limit: Int,
+    items: [Item],
+    policy_declarations: [PolicyDeclaration],
     // This rule authored forms corresponding to expanded AST statements.
-    fenced_statements: [FencedStatement]
-    simplify: Bool
+    fenced_statements: [FencedStatement],
+    simplify: Bool,
     // The return type supplies the expected type for a direct returned
     // literal; `--simplify` may then drop a redundant named `Type.` head.
-    expected_return_type: Type?
+    expected_return_type: Type?,
     // Keep a marked statement's control body scoped.
-    force_control_braces: Bool
+    force_control_braces: Bool,
     // `#Allow(…)` and unregistered markers that prefix one statement, and an
     // unregistered marker written as a value: the parser keeps them only as
     // Statement- and Expression-site rule rows.
-    inline_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}}
+    inline_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}},
     // The names a pipe's first step reads in place (its head's name), which
     // that step writes as `<>` while it prints.
-    pipe_names: [String]{[String]{}}
+    pipe_names: [String]{[String]{}},
     // How many interpolation holes (`"…{value}…"`) the writer is inside; a
     // hole's value never breaks across lines.
-    interp_depth: Int{0}
+    interp_depth: Int{0},
     // Census mode (`jet_format_redundant_grouping`): author grouping parens
     // the printed precedence does not need are left out, their spans kept.
-    drop_grouping: Bool{false}
-    dropped_grouping: [Span]{[Span]{}}
+    drop_grouping: Bool{false},
+    dropped_grouping: [Span]{[Span]{}},
     // The source edits that spell each `place = place op value` the
     // formatter printed as `place op= value` the same way
     // (jfmt_fmt_expanded_compound), for the check that a format keeps
     // meaning.
-    compound_rewrites: [TextEdit]{[TextEdit]{}}
+    compound_rewrites: [TextEdit]{[TextEdit]{}},
     // The index of the `}` token that closes each `{` token of
     // `source_toks`, -1 for any other token (jfmt_brace_closes).
-    brace_closes: [Int]{[Int]{}}
+    brace_closes: [Int]{[Int]{}},
     // How many one-line trials are in progress, and where the outermost
     // began in `out` (jfmt_one_line_trial_begin).
-    one_line_trials: Int{0}
-    one_line_trial_start: Int{0}
+    one_line_trials: Int{0},
+    one_line_trial_start: Int{0},
     // Where the last line of a callable body with a value starts, else -1
     // (jfmt_value_tail_begin).
-    value_tail_at: Int{-1}
+    value_tail_at: Int{-1},
     // True while printing an `if` condition, where a `{` opens the body,
     // so a named payload keeps `.Value(value: x)` (jfmt_fmt_cond).
-    in_condition: Bool{false}
+    in_condition: Bool{false},
     // Where in `out` the expression statement being written starts, else -1
     // (jfmt_expr_stmt_begin). A line that opens with `.Name{` or
     // `.Name(…) {` is a scope member, so a named payload there keeps its
     // parens.
-    stmt_head_at: Int{-1}
+    stmt_head_at: Int{-1},
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
 JetFmtSourceList: struct {
-    span: Span
-    close_start: Int
+    span: Span,
+    close_start: Int,
 }
 
 // Rust `Option<(usize, usize)>` from `single_stmt_braces`/`value_block_braces`.
 JetFmtBraces: struct {
-    open: Int
-    close: Int
+    open: Int,
+    close: Int,
 }
 
 // The saved writer state every Rust rollback restores.
 JetFmtMark: struct {
-    out_len: Int
-    col: Int
-    at_line_start: Bool
-    pending_blank: Bool
-    comment_i: Int
+    out_len: Int,
+    col: Int,
+    at_line_start: Bool,
+    pending_blank: Bool,
+    comment_i: Int,
 }
 
 // Rust `Result<String, Vec<Diagnostic>>` from `format_source_with_options`.
@@ -206,10 +206,10 @@ JetFmtMark: struct {
 // not mean what the source means (Structure.jet); that is a formatter defect,
 // never a problem in the source, so it carries no diagnostic.
 JetFormatResult: struct {
-    ok: Bool
-    text: String
-    diagnostics: [Diagnostic]
-    structure_change: String?{None}
+    ok: Bool,
+    text: String,
+    diagnostics: [Diagnostic],
+    structure_change: String?{None},
 }
 
 // ---- Prec ----
@@ -1200,9 +1200,9 @@ jfmt_statement_gap_start: fn(f: JetFmt, end: Int, next_start: Int) -> Int Never!
 // after, `close` the table's closing `}` (-1: no arms are read), and
 // `previous_end` where the arm before ends (-1: none yet).
 JetFmtTableArms: struct {
-    at: Int
-    close: Int
-    previous_end: Int{-1}
+    at: Int,
+    close: Int,
+    previous_end: Int{-1},
 }
 
 // The arms of the table written at `start`: its `{` is the first one outside
@@ -1300,8 +1300,9 @@ jfmt_saturating_sub: fn(value: Int, amount: Int) -> Int Never! {
     if value > amount -> value - amount else -> 0
 }
 
-// The exact type spelling through its next top-level terminator: the AST
-// canonicalizes union members, so this slice is the only retained order fact.
+// The exact type spelling through its next top-level terminator, without a
+// comment after its last token: the AST canonicalizes union members, so this
+// slice is the only retained order fact.
 jfmt_source_type_spelling: fn(f: JetFmt, start: Int) -> String? Never! {
     parens := 0
     brackets := 0
@@ -1324,7 +1325,7 @@ jfmt_source_type_spelling: fn(f: JetFmt, start: Int) -> String? Never! {
             kind == TOKEN_SHR -> angles = jfmt_saturating_sub(angles, 2)
             else -> {}
         }
-        end = token.span.end
+        if !jfmt_is_comment_kind(kind) -> end = token.span.end
     }
     if end > start -> Val(jfmt_src_text(f, start, end)) else -> None
 }

@@ -72,12 +72,12 @@ CC_PACK_MUSL_EMPTY_LIBS: [String]{"m", "rt", "pthread", "crypt", "util", "xnet",
 // its release asset name, and the exact bytes jet accepts. `platform` is the
 // `<os>-<arch>` spelling of the release archives.
 CcPackAsset: struct {
-    host: String
-    system: String
-    platform: String
-    file: String
-    sha256: String
-    size: Int
+    host: String,
+    system: String,
+    platform: String,
+    file: String,
+    sha256: String,
+    size: Int,
 }
 
 CC_PACK_ASSETS: #run { [CcPackAsset]{
@@ -96,11 +96,11 @@ CC_PACK_ASSETS: #run { [CcPackAsset]{
 // loader a glibc program names (musl programs link statically, so none).
 // The pack's clang is Nix's, which adds no loader of its own.
 CcPackTarget: struct {
-    triple: String
-    short: String
-    arch: String
-    libc: String
-    loader: String
+    triple: String,
+    short: String,
+    arch: String,
+    libc: String,
+    loader: String,
 
     abi: fn(self) -> String Never! {
         if self.libc == "glibc" -> return "gnu"
@@ -117,21 +117,21 @@ CC_PACK_TARGETS: #run { [CcPackTarget]{
 
 // The versions a pack manifest records.
 CcPackManifest: struct {
-    llvm: String
-    musl: String
-    glibc: String
+    llvm: String,
+    musl: String,
+    glibc: String,
 }
 
 // A verified pack in the Hangar: its object digest and root, the asset it
 // came from, and the digests of the tools the target entries mount.
 CcPackTools: struct {
-    digest: String
-    root: String
-    asset: CcPackAsset
-    manifest: CcPackManifest
-    clang_sha256: String
-    lld_sha256: String
-    ar_sha256: String
+    digest: String,
+    root: String,
+    asset: CcPackAsset,
+    manifest: CcPackManifest,
+    clang_sha256: String,
+    lld_sha256: String,
+    ar_sha256: String,
 }
 
 // Where a missing pack may come from: the directory of the running jetpack
@@ -139,9 +139,9 @@ CcPackTools: struct {
 // the release), the pack URL `JET_CC_PACK_URL` names (`https://` or
 // `file://`), and the base URL of release downloads.
 CcPackSources: struct {
-    beside: String?
-    url: String?
-    release_base: String
+    beside: String?,
+    url: String?,
+    release_base: String,
 }
 
 // The covered target spelled `target` (canonical or short), if any.
@@ -262,8 +262,8 @@ provider_cc_pack_short: fn(digest: String) -> String Never! {
 
 // One pack archive to unpack, and where it came from.
 CcPackArchive: struct {
-    path: String
-    origin: String
+    path: String,
+    origin: String,
 }
 
 // The pack archive to unpack: the copy beside jetpack, else the
@@ -415,8 +415,8 @@ provider_cc_pack_install: fn(verification: &StoreVerification, roots: HangarRoot
 
 // The pack tree's canonical digest and every file's content SHA-256.
 CcPackDigests: struct {
-    tree: String
-    files: [String:String]
+    tree: String,
+    files: [String:String],
 }
 
 // Hash the pack tree and each of its files on worker tasks at once.
@@ -538,9 +538,9 @@ provider_cc_pack_read_manifest: fn(root: String, asset: CcPackAsset) -[FS, Env]>
 
 // The decompressed tar stream of a pack, buffered one chunk at a time.
 CcPackTarStream: struct {
-    reader: zstd.ZstdReader
-    buffer: [U8]
-    at: Int
+    reader: zstd.ZstdReader,
+    buffer: [U8],
+    at: Int,
 
     // At least `need` unread bytes buffered; false at the end of the stream.
     fill: fn(&self, need: Int) -[FS.Read]> Bool CcToolchainError! {

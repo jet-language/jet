@@ -16,29 +16,29 @@ X64_COMPTIME_FD_FLOOR: 100
 X64_COMPTIME_BUFFER: 65536
 
 X64ComptimeChild: struct {
-    pid: Int{0}
-    command: Int{-1}
-    reply: Int{-1}
-    output: Int{-1}
-    errors: Int{-1}
+    pid: Int{0},
+    command: Int{-1},
+    reply: Int{-1},
+    output: Int{-1},
+    errors: Int{-1},
     // One mapping: the poll set and clock (first page), then the read buffer.
-    scratch: Int{0}
+    scratch: Int{0},
     // The image's entries, in the compiler's table order.
-    entries: [Int]{[Int]{}}
-    stdout: [U8]{[U8]{}}
-    stderr: [U8]{[U8]{}}
+    entries: [Int]{[Int]{}},
+    stdout: [U8]{[U8]{}},
+    stderr: [U8]{[U8]{}},
     // Milliseconds of child time left (-1: no limit), and whether it ran out.
-    budget: Int{-1}
-    exhausted: Bool{false}
+    budget: Int{-1},
+    exhausted: Bool{false},
     // The wait status once the child ended, else -1.
-    status: Int{-1}
-    failure: String{""}
+    status: Int{-1},
+    failure: String{""},
     // The spawn's random cookie, which the child's refusal handler passes
     // when it reissues a call of an admitted `#Impure` block
     // (x64_comptime_admit_block), and whether the child admits them now
     // (ADMIT).
-    cookie: Int{0}
-    admitted: Bool{false}
+    cookie: Int{0},
+    admitted: Bool{false},
 }
 
 // Starts the linked executable `image` (Image/Loader.jet
@@ -410,10 +410,10 @@ x64_comptime_close: fn(child: &X64ComptimeChild) {
 // executable has none. Those segments lie in the executable's program part
 // (`tail`), so neither its image part nor its file is needed.
 X64ComptimeCode: struct {
-    segments: [X64Segment]
-    bytes: [U8]
-    high: Int
-    failure: String
+    segments: [X64Segment],
+    bytes: [U8],
+    high: Int,
+    failure: String,
 }
 
 x64_comptime_code: fn(exe: X64Executable, from: Int) -> X64ComptimeCode Never! {
@@ -488,8 +488,8 @@ x64_comptime_ask: fn(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> In
 // Symbols by name: each name's address by its id in `names` (-1: no such
 // symbol).
 X64ComptimeSymbols: struct {
-    names: NameTable
-    address: [Int]
+    names: NameTable,
+    address: [Int],
 }
 
 // The address of the symbol `name`, when `symbols` holds one.
@@ -554,9 +554,9 @@ x64_comptime_symbols: fn(header: [U8], file: [U8], file_at: Int, prefix: String,
 // A function's code in a bound batch, [start, end), and the id its symbol
 // has in the table x64_comptime_functions read it by.
 X64ComptimeFunction: struct {
-    start: Int
-    end: Int
-    name: Int
+    start: Int,
+    end: Int,
+    name: Int,
 }
 
 // The function symbols (STT_FUNC) of an executable's `.symtab` that

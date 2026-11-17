@@ -113,24 +113,24 @@ use {
 }
 
 SemaDeriveExpansion: struct {
-    scope: [NamedCtValue]
-    failure: Diagnostic?
+    scope: [NamedCtValue],
+    failure: Diagnostic?,
     // The `Diagnostic` impls a rule body may raise with `reject(value)`.
-    reports: [SemaDeriveReport]{[SemaDeriveReport]{}}
+    reports: [SemaDeriveReport]{[SemaDeriveReport]{}},
     // The rule's use site: a rejection's primary span.
-    site: Span?{None}
+    site: Span?{None},
     // A marker template of another module: its module identity, which each
     // generated function records (Func.definition_module), and the names
     // pastes produced so far ("" and nothing recorded otherwise).
-    definition_module: String{""}
-    pasted: [String]{[String]{}}
+    definition_module: String{""},
+    pasted: [String]{[String]{}},
 }
 
 // One `impl T.Diagnostic` visible to a rule body. The declaring module's
 // name and `T` make the type path that is the report's default code.
 SemaDeriveReport: struct {
-    module_name: String
-    definition: ImplDef
+    module_name: String,
+    definition: ImplDef,
 }
 
 // A template paste `#{name}` names the binding `name`; a `$fact` member is
@@ -2384,10 +2384,10 @@ sema_derive_has_name: fn(derives: [NamedSpan], name: String) -> Bool {
 // ordinary method: the generated codec would be a second member of that name,
 // so the package default never selects it (an explicit marker still asks).
 SemaDeriveItemIndex: struct {
-    trait_impls: [String:Int]
-    nominals: [String:Int]
-    distincts: [String:Bool]
-    codec_methods: [String:Bool]
+    trait_impls: [String:Int],
+    nominals: [String:Int],
+    distincts: [String:Bool],
+    codec_methods: [String:Bool],
 }
 
 sema_derive_item_index: fn(items: [Item]) -> SemaDeriveItemIndex {
@@ -2482,13 +2482,13 @@ sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, tr
 // graph's fixed point runs over every module at once (`global`), each
 // candidate read against its own module's index (`indexes[module]`).
 SemaDeriveReadiness: struct {
-    indexes: [SemaDeriveItemIndex]
-    module: Int
-    trait_name: String
-    candidates: [String:Int]
-    relied_on: [Int]
-    foreign: [String:Bool]
-    global: Bool
+    indexes: [SemaDeriveItemIndex],
+    module: Int,
+    trait_name: String,
+    candidates: [String:Int],
+    relied_on: [Int],
+    foreign: [String:Bool],
+    global: Bool,
 }
 
 sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
@@ -2936,27 +2936,27 @@ SemaDeriveMemo: struct {
     // While the Core library's check records, the expansions made, each
     // the codec's list of items in its indexed form; `keys` and `starts`
     // hold each one's key and where its bytes start.
-    capture: BodyCodecOut?{None}
-    keys: [[U8]]{[[U8]]{}}
-    starts: [Int]{[Int]{}}
+    capture: BodyCodecOut?{None},
+    keys: [[U8]]{[[U8]]{}},
+    starts: [Int]{[Int]{}},
     // A record read: its bytes, the reader of its expansions, which hold
     // the module identities and strings they name, the first key of each
     // hash (sema_derive_memo_hash), and per key the next key of its hash,
     // or -1; `taken` counts the expansions taken from it.
-    bytes: [U8]{[U8]{}}
-    reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}}
-    first: [U64:Int]{[U64:Int]{}}
-    chain: [Int]{[Int]{}}
-    taken: Int{0}
+    bytes: [U8]{[U8]{}},
+    reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}},
+    first: [U64:Int]{[U64:Int]{}},
+    chain: [Int]{[Int]{}},
+    taken: Int{0},
 }
 
 // A record as the codec writes it in indexed form (sema_derive_memo_read
 // reads it): its bytes, and the module identities and strings they name by
 // position.
 SemaDeriveCapture: struct {
-    bytes: [U8]
-    modules: [ModuleID]
-    strings: [String]
+    bytes: [U8],
+    modules: [ModuleID],
+    strings: [String],
 }
 
 // The provider body `body` of `trait_name` expanded over `type_info`, as

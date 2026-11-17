@@ -49,24 +49,24 @@ vault: module
 
 #Error
 CryptoError: enum {
-    OpenFailed
-    VerifyFailed
-    KeyRejected
-    Length
+    OpenFailed,
+    VerifyFailed,
+    KeyRejected,
+    Length,
     Unavailable
 }
 
 #Error
 FileCryptoError: enum {
-    OpenFailed
-    SealFailed
-    SourceIO
-    DestinationExists
+    OpenFailed,
+    SealFailed,
+    SourceIO,
+    DestinationExists,
     DestinationIO
 }
 
 Digest256: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     as_bytes: fn(self) -> [U8] Never! { self.bytes }
 
@@ -78,7 +78,7 @@ Digest256: struct {
 }
 
 Digest512: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     as_bytes: fn(self) -> [U8] Never! { self.bytes }
 
@@ -93,7 +93,7 @@ Digest512: struct {
 /// holding at most one partial 64-byte block, so a large input is never held
 /// whole.
 Hasher: struct {
-    priv ctx: hashes.HashCtx
+    priv ctx: hashes.HashCtx,
 
     new: fn() -> Hasher Never! { {ctx: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)} }
 
@@ -118,7 +118,7 @@ digest: fn(hasher: &&Hasher) -> String Never! { hasher.digest() }
 
 #!Codable
 Secret: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// The UTF-8 bytes of `text` as secret material.
     from_text: fn(text: String) -> Secret Never! { Secret{bytes: text.bytes()} }
@@ -147,7 +147,7 @@ Secret: struct {
 }
 
 SigningKey: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// A fresh Ed25519 seed from the OS CSPRNG. There is no fallback generator.
     new_random: fn() -[Rand]> SigningKey CryptoError! {
@@ -173,7 +173,7 @@ SigningKey: struct {
 }
 
 VerifyKey: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// An encoded Ed25519 public key. It must be exactly 32 bytes.
     from_bytes: fn(bytes: [U8]) -> VerifyKey CryptoError! {
@@ -183,7 +183,7 @@ VerifyKey: struct {
 }
 
 X25519SecretKey: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// A fresh X25519 private key from the OS CSPRNG.
     new_random: fn() -[Rand]> X25519SecretKey CryptoError! {
@@ -212,7 +212,7 @@ X25519SecretKey: struct {
 }
 
 X25519PublicKey: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// A raw X25519 public key. It must be exactly 32 bytes.
     from_bytes: fn(bytes: [U8]) -> X25519PublicKey CryptoError! {
@@ -232,7 +232,7 @@ X25519PublicKey: struct {
 }
 
 SharedSecret: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     impl Close {
         close: fn(&&self) {
@@ -243,7 +243,7 @@ SharedSecret: struct {
 }
 
 Signature: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     /// An Ed25519 signature. It must be exactly 64 bytes.
     from_bytes: fn(bytes: [U8]) -> Signature CryptoError! {
@@ -1257,7 +1257,7 @@ ed25519_verify_raw: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
 
 // Existing public coordinate carrier. Secret arithmetic uses private fixed limbs.
 EdPoint: struct {
-    x: Int
+    x: Int,
     y: Int
 }
 

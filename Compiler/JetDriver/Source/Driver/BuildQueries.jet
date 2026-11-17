@@ -223,8 +223,8 @@ jet_driver_build_install_nodes: fn(plan: BuildSessionPlan, nodes: &&[BuildGraphN
 // One command owns this scope across all of its package queries. IDs are
 // invocation-local authority, not cache keys or a process-global counter.
 JetDriverBuildQueryScope: struct {
-    next_session_id: Int{1}
-    policy: BuildSessionPolicy{BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}}
+    next_session_id: Int{1},
+    policy: BuildSessionPolicy{BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}},
 }
 
 jet_driver_build_next_session_id: fn(scope: &JetDriverBuildQueryScope) -> Int? Never! {
@@ -235,26 +235,26 @@ jet_driver_build_next_session_id: fn(scope: &JetDriverBuildQueryScope) -> Int? N
 }
 
 JetDriverBuildQueryResult: struct {
-    plan: BuildSessionPlan?
-    graph: BuildGraph?
-    generated: [JetDriverGeneratedModule]
-    diagnostics: [Diagnostic]
-    complete: Bool
-    internal_problem: String?
-    nodes: [BuildGraphNode]{[BuildGraphNode]{}}
+    plan: BuildSessionPlan?,
+    graph: BuildGraph?,
+    generated: [JetDriverGeneratedModule],
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    internal_problem: String?,
+    nodes: [BuildGraphNode]{[BuildGraphNode]{}},
     // The entry package's authority, the policy its build actions run under.
-    authority_policy: JetDriverAuthorityPolicy?{None}
+    authority_policy: JetDriverAuthorityPolicy?{None},
     // The virtual sources (jet_driver_generated_module_path) a failed final
     // checked compile's reports name, so they render against generated text.
-    generated_source_files: [SourceFile]{[SourceFile]{}}
+    generated_source_files: [SourceFile]{[SourceFile]{}},
     // The `.Tidy` findings `meta.report` raised (jet_driver_build_findings):
     // `jet build` fails on them, a run or a test doesn't.
-    tidy: [Diagnostic]{[Diagnostic]{}}
+    tidy: [Diagnostic]{[Diagnostic]{}},
 }
 
 JetDriverBuildQueryResponse: struct {
-    request: JetDriverCompileRequest
-    query: JetDriverBuildQueryResult
+    request: JetDriverCompileRequest,
+    query: JetDriverBuildQueryResult,
 }
 
 jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics: &&[Diagnostic], complete: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {

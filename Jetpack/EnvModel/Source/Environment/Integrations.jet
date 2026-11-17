@@ -50,14 +50,14 @@ envmodel_expression_path: fn(expr: Expr) -> String? Never! {
 // second package resolver, lock, effect system, or activation engine.
 #Comparable
 IntegrationKind: enum {
-    Android
-    Apple
-    Certificates
-    Hosts
-    CodexAgent
-    Editor
-    CloudCredentials
-    Vault
+    Android,
+    Apple,
+    Certificates,
+    Hosts,
+    CodexAgent,
+    Editor,
+    CloudCredentials,
+    Vault,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -107,31 +107,31 @@ IntegrationKind: enum {
 }
 
 IntegrationTaskContract: struct {
-    job: String
-    provider: String
-    grant: String
+    job: String,
+    provider: String,
+    grant: String,
 }
 
 // One lowered integration import. Secret-bearing inputs are represented by
 // names only; values never enter this record, fingerprints, dossiers, image
 // layers, or logs.
 EnvironmentIntegration: struct {
-    kind: IntegrationKind{IntegrationKind.Android}
-    name: String{""}
-    preset: String{""}
-    options: [String:String]{[String:String]{}}
-    packages: [String]{[String]{}}
-    files: [ManagedFile]{[ManagedFile]{}}
+    kind: IntegrationKind{IntegrationKind.Android},
+    name: String{""},
+    preset: String{""},
+    options: [String:String]{[String:String]{}},
+    packages: [String]{[String]{}},
+    files: [ManagedFile]{[ManagedFile]{}},
     // Existing lifecycle/job facts selected by the preset. These are names
     // only; activation still belongs to the ordinary environment lifecycle.
-    tasks: [String]{[String]{}}
+    tasks: [String]{[String]{}},
     // Provider authorities used by package and host facts. This is metadata,
     // not a second resolver.
-    providers: [String]{[String]{}}
-    host_checks: [String]{[String]{}}
-    secrets: [String]{[String]{}}
-    grants: [String]{[String]{}}
-    losses: [String]{[String]{}}
+    providers: [String]{[String]{}},
+    host_checks: [String]{[String]{}},
+    secrets: [String]{[String]{}},
+    grants: [String]{[String]{}},
+    losses: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
@@ -165,13 +165,13 @@ EnvironmentIntegration: struct {
 // ordinary environment plan so trust, inspection, and activation all consume
 // one projection instead of treating integrations as report-only annotations.
 IntegrationTaskFact: struct {
-    name: String
-    integration: IntegrationKind
-    packages: [String]{[String]{}}
-    secrets: [String]{[String]{}}
-    providers: [String]{[String]{}}
-    host_checks: [String]{[String]{}}
-    grants: [String]{[String]{}}
+    name: String,
+    integration: IntegrationKind,
+    packages: [String]{[String]{}},
+    secrets: [String]{[String]{}},
+    providers: [String]{[String]{}},
+    host_checks: [String]{[String]{}},
+    grants: [String]{[String]{}},
 
     has_empty_field: fn(self) -> Bool Never! {
         self.name.trim() == "" || envmodel_any_blank(self.providers) || envmodel_any_blank(self.secrets) || envmodel_any_blank(self.host_checks) || envmodel_any_blank(self.grants)
@@ -179,15 +179,15 @@ IntegrationTaskFact: struct {
 }
 
 IntegrationFactProjection: struct {
-    tasks: [String]{[String]{}}
+    tasks: [String]{[String]{}},
     // Typed task contracts. `tasks` is only the stable disclosure projection;
     // realization consumes these records and their ordinary package,
     // provider, host, and grant facts.
-    task_facts: [IntegrationTaskFact]{[IntegrationTaskFact]{}}
-    providers: [String]{[String]{}}
-    host_checks: [String]{[String]{}}
-    grants: [String]{[String]{}}
-    losses: [String]{[String]{}}
+    task_facts: [IntegrationTaskFact]{[IntegrationTaskFact]{}},
+    providers: [String]{[String]{}},
+    host_checks: [String]{[String]{}},
+    grants: [String]{[String]{}},
+    losses: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{}

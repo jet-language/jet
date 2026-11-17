@@ -268,22 +268,22 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
 // (`*_loose`) when it is the storage's address itself, outside every Loop,
 // with `promote`.
 OptScalarCopy: struct {
-    at: Int
-    target: Int
-    target_offset: Int
-    target_loose: Bool
-    source: Int
-    source_offset: Int
-    source_loose: Bool
-    size: Int
+    at: Int,
+    target: Int,
+    target_offset: Int,
+    target_loose: Bool,
+    source: Int,
+    source_offset: Int,
+    source_loose: Bool,
+    size: Int,
 }
 
 // One side of a CopyBytes of `size` bytes through address `slot`: the
 // candidate and offset it copies, -1 for memory, or -2 when it is a
 // candidate's address or view but the bytes leave the storage.
 OptScalarSide: struct {
-    slot: Int
-    offset: Int
+    slot: Int,
+    offset: Int,
 }
 
 ir_opt_copy_side: fn(f: IRFunction, facts: OptFacts, candidate: [Bool], view_slot: [Int], view_offset: [Int], slot: Int, size: Int) -> OptScalarSide Never! {
@@ -306,8 +306,8 @@ ir_opt_copy_side: fn(f: IRFunction, facts: OptFacts, candidate: [Bool], view_slo
 // The fields copies bring each candidate beyond its own accesses, as
 // parallel offset and row lists per slot.
 OptScalarExtras: struct {
-    offsets: [[Int]]
-    rows: [[Int]]
+    offsets: [[Int]],
+    rows: [[Int]],
 }
 
 // Settles which copies are rewritten (see the head comment). A copy that is
@@ -505,12 +505,12 @@ ir_opt_lends: fn(f: IRFunction, at: Int, slot: Int, depth: Int) -> Bool Never! {
 
 // The code a pass writes back (call arguments stay in `args`).
 IROptCode: struct {
-    op: [IROp]
-    dst: [Int]
-    a: [Int]
-    b: [Int]
-    c: [Int]
-    line: [Int]
+    op: [IROp],
+    dst: [Int],
+    a: [Int],
+    b: [Int],
+    c: [Int],
+    line: [Int],
 }
 
 ir_opt_code_put: fn(code: &IROptCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {

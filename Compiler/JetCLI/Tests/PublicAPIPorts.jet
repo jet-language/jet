@@ -16,7 +16,7 @@ use {
 }
 
 PapFixtureRoot: struct {
-    path: String
+    path: String,
 
     impl Close {
         close: fn(&&self) -[FS]> { pap_files.remove_all(self.path).drop("test root cleanup") }
@@ -85,7 +85,7 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     root: pap_root("cli-default")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
-    api: pap_api(root, "config", "config", "#CLI\nConfig: struct {{\n    port: Int{{3000}}\n    required: Int\n}}\n")
+    api: pap_api(root, "config", "config", "#CLI\nConfig: struct {{\n    port: Int{{3000}},\n    required: Int,\n}}\n")
     assert_eq(pap_find(api, "Config").signature, "struct Config")
     port: pap_find(api, "Config.port").signature
     assert_eq(port, "field Config.port: Int = _")
@@ -152,7 +152,7 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 // A package whose `Receipt` is capped `#FX(receipt)`, beside a capped enum,
 // trait and inline module under an `#FX(!Exec)` file head.
 pap_cap_source: fn(receipt: String) -> String {
-    "#FX(!Exec)\nuse fs: core.files\n\n#FX({receipt})\nReceipt: struct {{\n    total: Int\n\n    show: fn(self) {{ print(\"{{self.total}}\") }}\n}}\n\n#FX(!IO)\nCoin: enum {{\n    Heads\n    Tails\n}}\n\n#FX(FS.Read, IO)\nRender: trait {{\n    render: fn(self) -> String\n}}\n\n#FX(!Net)\npricing: module {{\n    price: fn() -> Int {{ 3 }}\n}}\n\nnote: fn() -> String {{ fs.read(\"note.txt\") ?? \"thanks\" }}\n"
+    "#FX(!Exec)\nuse fs: core.files\n\n#FX({receipt})\nReceipt: struct {{\n    total: Int,\n\n    show: fn(self) {{ print(\"{{self.total}}\") }}\n}}\n\n#FX(!IO)\nCoin: enum {{\n    Heads,\n    Tails,\n}}\n\n#FX(FS.Read, IO)\nRender: trait {{\n    render: fn(self) -> String,\n}}\n\n#FX(!Net)\npricing: module {{\n    price: fn() -> Int {{ 3 }}\n}}\n\nnote: fn() -> String {{ fs.read(\"note.txt\") ?? \"thanks\" }}\n"
 }
 
 // A written cap is a `cap` row of its type, trait or module, and the entry
@@ -204,8 +204,8 @@ pap_cap_source: fn(receipt: String) -> String {
     root: pap_root("trait-effect")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
-    old_api: pap_api(root, "old", "render", "Render: trait {{\n    draw: fn(self) -[IO]> Int\n}}\n")
-    new_api: pap_api(root, "new", "render", "Render: trait {{\n    draw: fn(self) -[GPU]> Int\n}}\n")
+    old_api: pap_api(root, "old", "render", "Render: trait {{\n    draw: fn(self) -[IO]> Int,\n}}\n")
+    new_api: pap_api(root, "new", "render", "Render: trait {{\n    draw: fn(self) -[GPU]> Int,\n}}\n")
     old: pap_find(old_api, "Render.draw").signature
     new: pap_find(new_api, "Render.draw").signature
     assert(old.contains("-[IO]>"), old)
@@ -221,12 +221,12 @@ pap_cap_source: fn(receipt: String) -> String {
     root: pap_root("unit-trait")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
-    prelude_api: pap_api(root, "prelude", "physics", "Measure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
+    prelude_api: pap_api(root, "prelude", "physics", "Measure: trait {{\n    scale: fn(value: Meter) -> Meter,\n}}\n")
     method: pap_find(prelude_api, "Measure.scale")
     assert_eq(method.signature, "require Measure.scale(value: Meter[core.units%3A%3ALength:1]) Meter[core.units%3A%3ALength:1]")
     frozen: pap_frozen("physics", prelude_api)
     assert_eq(pap_find(frozen, "Measure.scale").signature, method.signature)
-    local_api: pap_api(root, "local", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n}}\nMeasure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
+    local_api: pap_api(root, "local", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n}}\nMeasure: trait {{\n    scale: fn(value: Meter) -> Meter,\n}}\n")
     changes: pap_changes(prelude_api, local_api)
     names: loop change in changes -> change.item_name.copy()
     assert(names == [String]{"Measure.scale"}, "changes {names.join(", ")}\nprelude API:\n{pap_text(prelude_api)}\nlocal API:\n{pap_text(local_api)}")

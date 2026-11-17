@@ -21,68 +21,68 @@ DASHBOARD_RETRY_MAX_MS: 2000
 DASHBOARD_KEY_POLL_MS: 100
 
 DashboardLockState: enum {
-    Missing
-    Ready
-    Invalid
+    Missing,
+    Ready,
+    Invalid,
 }
 
 DashboardProjectSummary: struct {
-    root: String
-    env_file: String
-    env_present: Bool
-    typed: Bool
-    active_environment: String?
-    declared_packages: Int?
-    locked_packages: Int?
-    lock: DashboardLockState
-    active: Bool
-    active_refs: String
-    update_channels: Int
+    root: String,
+    env_file: String,
+    env_present: Bool,
+    typed: Bool,
+    active_environment: String?,
+    declared_packages: Int?,
+    locked_packages: Int?,
+    lock: DashboardLockState,
+    active: Bool,
+    active_refs: String,
+    update_channels: Int,
 }
 
 DashboardStoreSummary: struct {
-    path: String
-    bytes: Int
-    packages: Int
-    health: DoctorHealth
+    path: String,
+    bytes: Int,
+    packages: Int,
+    health: DoctorHealth,
 }
 
 DashboardActivity: struct {
-    name: String
-    version: String
-    when: String
+    name: String,
+    version: String,
+    when: String,
 }
 
 DashboardSnapshot: struct {
-    project: DashboardProjectSummary
-    store: DashboardStoreSummary
-    doctor: DoctorReport
-    activity: [DashboardActivity]
+    project: DashboardProjectSummary,
+    store: DashboardStoreSummary,
+    doctor: DoctorReport,
+    activity: [DashboardActivity],
 }
 
 // What the dashboard shows: nothing yet, a busy store (with the last
 // snapshot, if any), a refresh over the last snapshot, or a fresh snapshot.
 DashboardFrame: enum {
-    Loading
-    Busy(DashboardSnapshot?)
-    Refreshing(DashboardSnapshot)
-    Ready(DashboardSnapshot)
+    Loading,
+    Busy(DashboardSnapshot?),
+    Refreshing(DashboardSnapshot),
+    Ready(DashboardSnapshot),
 }
 
 DashboardLoadResult: enum {
-    Ready(DashboardSnapshot)
-    Busy
-    Retry
+    Ready(DashboardSnapshot),
+    Busy,
+    Retry,
 }
 
 // The keys the dashboard distinguishes.
 DashboardKey: enum {
-    Char(String)
-    Escape
-    CtrlC
-    EOF
-    Idle
-    Other
+    Char(String),
+    Escape,
+    CtrlC,
+    EOF,
+    Idle,
+    Other,
 }
 
 // No key arrived within the poll interval.
@@ -91,9 +91,9 @@ DashboardKey: enum {
 // no key read with a timeout (#5935), so a background task
 // forwards each terminal key and a read polls what it has forwarded.
 DashboardKeyReader: struct {
-    priv script: [U8]?
-    priv position: Int
-    priv keys: Receiver<DashboardKey>?
+    priv script: [U8]?,
+    priv position: Int,
+    priv keys: Receiver<DashboardKey>?,
 
     terminal: fn() -[IO, Time.Wait]> DashboardKeyReader Never! {
         {sender, receiver}: channel<DashboardKey>(capacity: 16)
@@ -196,9 +196,9 @@ cli_dashboard_interactive_mode: fn(stdin_tty: Bool, stdout_tty: Bool) -> Bool Ne
 // One in-flight snapshot load. A load cannot be cancelled safely: a
 // superseded loader is dropped and its task finishes detached.
 DashboardLoader: struct {
-    priv result: Receiver<DashboardLoadResult>
+    priv result: Receiver<DashboardLoadResult>,
     // Keeps a scripted, never-completing load open (tests).
-    priv held: Sender<DashboardLoadResult>?
+    priv held: Sender<DashboardLoadResult>?,
 
     spawn: fn(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         {sender, receiver}: channel<DashboardLoadResult>(capacity: 1)
@@ -231,8 +231,8 @@ DashboardLoader: struct {
 // Starts loads: real background loads, or scripted results (tests), each
 // start taking the next result and repeating the last.
 DashboardLoaderFactory: struct {
-    priv script: [DashboardLoadResult]?
-    starts: Int
+    priv script: [DashboardLoadResult]?,
+    starts: Int,
 
     background: fn() -> DashboardLoaderFactory Never! {
         DashboardLoaderFactory{script: None, starts: 0}
@@ -253,8 +253,8 @@ DashboardLoaderFactory: struct {
 
 // Milliseconds: the wall clock, or a fixed step per reading (tests).
 DashboardClock: struct {
-    priv step_ms: Int?
-    priv ticks: Int
+    priv step_ms: Int?,
+    priv ticks: Int,
 
     system: fn() -> DashboardClock Never! { DashboardClock{step_ms: None, ticks: 0} }
 
@@ -272,9 +272,9 @@ DashboardClock: struct {
 
 // Where frames go: redrawn on the terminal, or recorded as text (tests).
 DashboardOutput: struct {
-    priv terminal: Bool
-    priv width: Int?
-    frames: [String]
+    priv terminal: Bool,
+    priv width: Int?,
+    frames: [String],
 
     terminal: fn() -> DashboardOutput Never! {
         DashboardOutput{terminal: true, width: None, frames: [String]{}}

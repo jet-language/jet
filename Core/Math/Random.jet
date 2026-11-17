@@ -68,7 +68,7 @@ seeded_unit: fn(state: &U64) -> Float Never! { Float{seeded_next(state) >> 11} /
 /// Deterministic caller-owned capability. Drawing edits this owner's one word;
 /// an explicit clone duplicates its state, never a process-global stream.
 RNG: struct {
-    state: U64
+    state: U64,
 
     int: fn(&self, low: Int, high: Int) -> Int Never! {
         lower: Int{I64{low}}
@@ -547,13 +547,13 @@ binomialvariate: fn(n: Int, p: Float) -[Rand]> Int Never! {
 // 1c1e8f6498d33c3a42392bc38e59cc0c9712522c6c0520233013a23344c48d8c).
 // The high-rejection range and final states detect modulo-only or extra draws.
 RNGAnswer: struct {
-    seed: Int
-    small: Int
-    unit: Float
-    wide: Int
-    rejection: Int
-    full: Int
-    state: U64
+    seed: Int,
+    small: Int,
+    unit: Float,
+    wide: Int,
+    rejection: Int,
+    full: Int,
+    state: U64,
 }
 
 #Test("caller-owned SplitMix64 fixed known answers including rejection and full width") {

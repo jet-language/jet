@@ -33,27 +33,27 @@ use jet_foundation.[
 
 // A checked function outside Core: its symbol and where its body is.
 SemaAppCallerFunction: struct {
-    symbol: U32
-    module_index: Int
-    function_index: Int
+    symbol: U32,
+    module_index: Int,
+    function_index: Int,
 }
 
 // What the walk reads beside the graph and the checked modules: the
 // functions outside Core, each one's row by symbol, the `#App.SignedIn`
 // methods, and the symbols of `app.caller` and `app.as_caller`.
 SemaAppCallerProgram: struct {
-    functions: [SemaAppCallerFunction]
-    rows: [U32:Int]
-    signed_in: [U32:Bool]
-    caller: U32
-    as_caller: U32
+    functions: [SemaAppCallerFunction],
+    rows: [U32:Int],
+    signed_in: [U32:Bool],
+    caller: U32,
+    as_caller: U32,
 }
 
 // Whether the walk is where a caller is certain: inside an `#App.SignedIn`
 // method or `app.as_caller`'s run.
 SemaAppCallerAccount: enum {
-    Uncertain
-    Certain
+    Uncertain,
+    Certain,
 }
 
 // What a walk has seen: the functions it walked (each once over all roots
@@ -62,16 +62,16 @@ SemaAppCallerAccount: enum {
 // where the path it is on starts, the path from there to the function it is
 // in, and the reports.
 SemaAppCallerWalk: struct {
-    visited: [U32:Bool]
-    certain_visited: [U32:Bool]
-    root: String
-    path: [String]
-    reports: [SemaAppCallerReport]
+    visited: [U32:Bool],
+    certain_visited: [U32:Bool],
+    root: String,
+    path: [String],
+    reports: [SemaAppCallerReport],
 }
 
 SemaAppCallerReport: struct {
-    module_index: Int
-    diagnostic: Diagnostic
+    module_index: Int,
+    diagnostic: Diagnostic,
 }
 
 // The E2815 reports of the program. A program outside Core that never
@@ -252,17 +252,17 @@ sema_app_caller_name: fn(function: FnBody) -> String Never! {
 // The functions outside Core the app.caller scan reads: where each one's
 // body is.
 SemaAppCallerPlace: struct {
-    module_index: Int
-    function_index: Int
+    module_index: Int,
+    function_index: Int,
 }
 
 // One part of the scan: whether it reaches `app.caller`, and as
 // SemaAppCallerRead.Walk reads it, its functions that have a run-wide
 // symbol, in order, and every symbol their bodies call or name.
 SemaAppCallerScan: struct {
-    reached: Bool
-    functions: [SemaAppCallerFunction]
-    callees: [U32:Bool]
+    reached: Bool,
+    functions: [SemaAppCallerFunction],
+    callees: [U32:Bool],
 }
 
 // How a scan reads a function. `Nodes`, the gate: every node of its checked
@@ -270,8 +270,8 @@ SemaAppCallerScan: struct {
 // the tree, so a function the gate finds no call in has none the walk
 // finds. `Walk`: its body as the walk reads it, statement by statement.
 SemaAppCallerRead: enum {
-    Nodes
-    Walk
+    Nodes,
+    Walk,
 }
 
 // The app.caller scan's threads (compiler_threads_admit): a thread is

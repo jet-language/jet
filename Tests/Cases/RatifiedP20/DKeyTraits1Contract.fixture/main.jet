@@ -1,9 +1,9 @@
 // An address keyed by its lowercase spelling: both spellings are one entry.
 Email: struct {
-    address: String
+    address: String,
 
     impl KeyBy {
-        Key: String
+        Key: String,
 
         key: fn(self) -> String { self.address.lower() }
     }
@@ -11,11 +11,11 @@ Email: struct {
 
 // A path keyed by its list of components, the way a command line names files.
 OSPath: struct {
-    shown: String
-    parts: [String]
+    shown: String,
+    parts: [String],
 
     impl KeyBy {
-        Key: [String]
+        Key: [String],
 
         key: fn(self) -> [String] { self.parts.copy() }
     }
@@ -23,11 +23,11 @@ OSPath: struct {
 
 // A key that is itself a KeyBy type.
 Account: struct {
-    owner: Email
-    note: String
+    owner: Email,
+    note: String,
 
     impl KeyBy {
-        Key: Email
+        Key: Email,
 
         key: fn(self) -> Email { self.owner.copy() }
     }

@@ -162,46 +162,46 @@ JET_CANONICAL_EFFECT_PACKAGE_IDENTITY: "jet:canonical-prelude"
 JET_CANONICAL_EFFECT_MODULE_PATH: "Prelude/Effects.jet"
 
 SemaRegistrationNominalKind: enum {
-    Struct
-    Enum
-    Distinct
-    TypeAlias
-    Trait
-    Tag
-    UnitFamily
-    ForeignHandle
+    Struct,
+    Enum,
+    Distinct,
+    TypeAlias,
+    Trait,
+    Tag,
+    UnitFamily,
+    ForeignHandle,
 }
 
 SemaRegistrationForeignHandleFacts: struct {
-    library: String
-    typedef_name: String
-    jet_name: String
-    ownership: String
-    close: String
-    close_source: String
-    thread_safety: String
-    send: Bool
-    sync: Bool
-    close_function_key: String?
-    source_span: Span
+    library: String,
+    typedef_name: String,
+    jet_name: String,
+    ownership: String,
+    close: String,
+    close_source: String,
+    thread_safety: String,
+    send: Bool,
+    sync: Bool,
+    close_function_key: String?,
+    source_span: Span,
 }
 
 SemaRegistrationNominalSource: enum {
-    SourceAST(value: Item)
-    ForeignHandle(value: SemaRegistrationForeignHandleFacts)
-    CompilerBuiltinTrait(value: TraitRef)
+    SourceAST(value: Item),
+    ForeignHandle(value: SemaRegistrationForeignHandleFacts),
+    CompilerBuiltinTrait(value: TraitRef),
 }
 
 SemaRegistrationUnitFact: struct {
-    name: String
-    package: String
-    family: String
-    member: String
-    dimension: Dimension?
-    scale: UnitRatio
-    scale_provenance: UnitScaleProvenance
-    offset: UnitRatio
-    kind: QuantityKind
+    name: String,
+    package: String,
+    family: String,
+    member: String,
+    dimension: Dimension?,
+    scale: UnitRatio,
+    scale_provenance: UnitScaleProvenance,
+    offset: UnitRatio,
+    kind: QuantityKind,
 }
 
 sema_registration_compiler_owned_default_err_provenance: fn() -> String Never! {
@@ -442,312 +442,312 @@ sema_registration_unit_type_is_qualified: fn(ty: Type) -> Bool Never! {
 }
 
 SemaRegistrationGenericParam: struct {
-    index: Int
-    name: String
-    bounds: [String]
-    span: Span
-    identity_key: String
+    index: Int,
+    name: String,
+    bounds: [String],
+    span: Span,
+    identity_key: String,
     // The declaring module, where the bounds' trait names resolve.
-    module_identity: ModuleID
+    module_identity: ModuleID,
     // A `<N: Int>` number parameter (TGenericParam.number).
-    number: Bool{false}
+    number: Bool{false},
 }
 
 SemaRegistrationParameter: struct {
-    index: Int
-    symbol: Symbol
-    ty: Type
-    convention: AccessConvention
-    zone: ParamZone
-    public_label: String?
-    variadic: Bool
-    default: Expr?
-    default_ref: FunctionDefaultRef?
+    index: Int,
+    symbol: Symbol,
+    ty: Type,
+    convention: AccessConvention,
+    zone: ParamZone,
+    public_label: String?,
+    variadic: Bool,
+    default: Expr?,
+    default_ref: FunctionDefaultRef?,
 }
 
 SemaRegistrationCallableABI: struct {
-    is_extern: Bool
-    is_c_abi: Bool
-    c_abi_name: String?
-    callback_transport: String?
-    callback_plan_digest: String?
-    callback_identity: String?
-    foreign_effect_root: String?
+    is_extern: Bool,
+    is_c_abi: Bool,
+    c_abi_name: String?,
+    callback_transport: String?,
+    callback_plan_digest: String?,
+    callback_identity: String?,
+    foreign_effect_root: String?,
 }
 
 SemaRegistrationForeignOwner: enum {
-    ExternRust
-    CModule
+    ExternRust,
+    CModule,
 }
 
 SemaRegistrationForeignFunction: struct {
-    symbol: Symbol
-    declaration: ExternFn
-    owner: SemaRegistrationForeignOwner
-    foreign_library: String
-    foreign_library_span: Span
-    generic_params: [SemaRegistrationGenericParam]
-    parameters: [SemaRegistrationParameter]
-    abi: SemaRegistrationCallableABI
+    symbol: Symbol,
+    declaration: ExternFn,
+    owner: SemaRegistrationForeignOwner,
+    foreign_library: String,
+    foreign_library_span: Span,
+    generic_params: [SemaRegistrationGenericParam],
+    parameters: [SemaRegistrationParameter],
+    abi: SemaRegistrationCallableABI,
 }
 
 SemaRegistrationFunction: struct {
-    symbol: Symbol
-    declaration: Func
-    signature: Type
-    generic_params: [SemaRegistrationGenericParam]
-    parameters: [SemaRegistrationParameter]
-    abi: SemaRegistrationCallableABI
+    symbol: Symbol,
+    declaration: Func,
+    signature: Type,
+    generic_params: [SemaRegistrationGenericParam],
+    parameters: [SemaRegistrationParameter],
+    abi: SemaRegistrationCallableABI,
     // The declared return stays raw for a protocol ABI trait-impl method.
-    raw_protocol_return: Bool
+    raw_protocol_return: Bool,
     // A method of a conditional impl (`impl Pair<T: Priced>.Describe`): the
     // owner's parameters with the bounds the impl applies under.
-    impl_conditions: [TypeParam]{[TypeParam]{}}
+    impl_conditions: [TypeParam]{[TypeParam]{}},
 }
 
 SemaRegistrationField: struct {
-    symbol: Symbol
-    ty: Type
-    default: Expr?
-    computed: Bool
+    symbol: Symbol,
+    ty: Type,
+    default: Expr?,
+    computed: Bool,
 }
 
 SemaRegistrationVariant: struct {
-    symbol: Symbol
-    payload: VariantPayload
-    payload_type: Type?
+    symbol: Symbol,
+    payload: VariantPayload,
+    payload_type: Type?,
 }
 
 SemaRegistrationTraitMethod: struct {
-    symbol: Symbol
-    declaration: TraitMethodSig
-    signature: Type
-    parameters: [SemaRegistrationParameter]
+    symbol: Symbol,
+    declaration: TraitMethodSig,
+    signature: Type,
+    parameters: [SemaRegistrationParameter],
 }
 
 SemaRegistrationAssociatedType: struct {
-    symbol: Symbol
-    declaration: NamedType
-    ty: Type
+    symbol: Symbol,
+    declaration: NamedType,
+    ty: Type,
 }
 
 SemaRegistrationImpl: struct {
-    symbol: Symbol
-    declaration: ImplDef
-    source_module_identity: ModuleID
-    source_package_identity: String
-    target_module_identity: ModuleID
-    target_type_name: String
-    target_type: Type
-    target_identity_key: String
-    trait_name: String?
-    trait_symbol: Symbol?
-    trait_span: Span?
-    methods: [SemaRegistrationFunction]
-    associated_type_impls: [NamedType]
-    associated_types: [SemaRegistrationAssociatedType]
-    delegation_field: String?
-    compiler_generated: Bool
-    operator_marker: OperatorMarker?
-    operator_rhs: Type?
-    target_os: String?
+    symbol: Symbol,
+    declaration: ImplDef,
+    source_module_identity: ModuleID,
+    source_package_identity: String,
+    target_module_identity: ModuleID,
+    target_type_name: String,
+    target_type: Type,
+    target_identity_key: String,
+    trait_name: String?,
+    trait_symbol: Symbol?,
+    trait_span: Span?,
+    methods: [SemaRegistrationFunction],
+    associated_type_impls: [NamedType],
+    associated_types: [SemaRegistrationAssociatedType],
+    delegation_field: String?,
+    compiler_generated: Bool,
+    operator_marker: OperatorMarker?,
+    operator_rhs: Type?,
+    target_os: String?,
     // The symbol id of the nominal `target_type` names from the impl's
     // module, resolved once when the trait index is built
     // (sema_registration_index_impl_traits); None while unresolved.
-    target_nominal: SymbolID?{None}
+    target_nominal: SymbolID?{None},
 }
 
 SemaRegistrationNominal: struct {
-    symbol: Symbol
-    kind: SemaRegistrationNominalKind
-    source: SemaRegistrationNominalSource
-    ty: Type
-    identity_key: String
-    generic_params: [SemaRegistrationGenericParam]
-    fields: [SemaRegistrationField]
-    variants: [SemaRegistrationVariant]
-    methods: [SemaRegistrationFunction]
-    trait_methods: [SemaRegistrationTraitMethod]
+    symbol: Symbol,
+    kind: SemaRegistrationNominalKind,
+    source: SemaRegistrationNominalSource,
+    ty: Type,
+    identity_key: String,
+    generic_params: [SemaRegistrationGenericParam],
+    fields: [SemaRegistrationField],
+    variants: [SemaRegistrationVariant],
+    methods: [SemaRegistrationFunction],
+    trait_methods: [SemaRegistrationTraitMethod],
     // Compiler-owned rows are injected from facts rather than source syntax.
     // They remain real registration nominals so field/type identities are
     // available to every downstream consumer without pretending they are
     // foreign handles or user declarations.
-    compiler_owned: Bool
-    generated_provenance: String?
+    compiler_owned: Bool,
+    generated_provenance: String?,
 }
 
 // A module constant's row. `typed` when the binding writes its type: the
 // compile-time run later gives an unwritten one's `ty` and declaration the
 // type of its staged value, so neither tells a written type afterwards.
 SemaRegistrationConstant: struct {
-    symbol: Symbol
-    declaration: ConstDef
-    ty: Type?
-    typed: Bool
+    symbol: Symbol,
+    declaration: ConstDef,
+    ty: Type?,
+    typed: Bool,
 }
 
 SemaRegistrationExport: struct {
-    name: String
-    symbol: Symbol
+    name: String,
+    symbol: Symbol,
     // The position of the declaration in the `declarations` of module
     // `source_module_identity`; None for a module import or a Core leaf with
     // no source declaration. The row holds no copy of the declaration.
-    declaration_position: Int?
-    source_module_identity: ModuleID
-    visibility: Int
+    declaration_position: Int?,
+    source_module_identity: ModuleID,
+    visibility: Int,
 }
 
 SemaRegistrationImportBinding: struct {
-    original: String
-    local: String
-    symbol: Symbol
+    original: String,
+    local: String,
+    symbol: Symbol,
     // As SemaRegistrationExport.declaration_position, in module
     // `target_module_identity`.
-    declaration_position: Int?
-    target_module_identity: ModuleID
+    declaration_position: Int?,
+    target_module_identity: ModuleID,
     // Resolved against this graph's fixed module order during registration;
     // Core namespace bindings may name a module that was not loaded.
-    target_module_index: Int?
-    visibility: Int
+    target_module_index: Int?,
+    visibility: Int,
 }
 
 SemaRegistrationImport: struct {
-    source_module_identity: ModuleID
-    source_package_identity: String
-    target_module_identity: ModuleID
-    target_package_identity: String
-    declaration: ImportDecl
-    visibility: Int
-    bindings: [SemaRegistrationImportBinding]
+    source_module_identity: ModuleID,
+    source_package_identity: String,
+    target_module_identity: ModuleID,
+    target_package_identity: String,
+    declaration: ImportDecl,
+    visibility: Int,
+    bindings: [SemaRegistrationImportBinding],
 }
 
 SemaRegistrationModuleInput: struct {
-    package_identity: String
-    module_identity: ModuleID
-    module_name: String
-    core_source_alias: String
-    module_path: String
-    source_file: String
-    source_segments: [SemaSourceSegment]
-    source_origin: SemaSourceOrigin
-    program: Program
-    foreign_handles: [SemaRegistrationForeignHandleFacts]
+    package_identity: String,
+    module_identity: ModuleID,
+    module_name: String,
+    core_source_alias: String,
+    module_path: String,
+    source_file: String,
+    source_segments: [SemaSourceSegment],
+    source_origin: SemaSourceOrigin,
+    program: Program,
+    foreign_handles: [SemaRegistrationForeignHandleFacts],
     // Filled by the loader: the package namespace of a member
     // file ("" outside one), the names it contributes in declaration order,
     // the names it keeps to itself (a named entry's or a command home's own
     // command function), and the names of other members its source can reach.
-    namespace: String{""}
-    namespace_names: [String]{[String]{}}
-    namespace_private: [String]{[String]{}}
-    namespace_refs: [String]{[String]{}}
+    namespace: String{""},
+    namespace_names: [String]{[String]{}},
+    namespace_private: [String]{[String]{}},
+    namespace_refs: [String]{[String]{}},
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
-    declared_module: String{""}
+    declared_module: String{""},
     // The module's source text (Rust `Module::source`). A declared text block
     // hands the text inside its braces to its rule.
-    source: String{""}
+    source: String{""},
     // The unit mentions of `source` (sema_units_source_mentions) when the
     // driver already holds them, as for a Core module whose rows it read
     // from the Core interface; registration then scans no text for them.
-    units_mentions: SemaUnitSourceMentions?{None}
+    units_mentions: SemaUnitSourceMentions?{None},
     // Filled by the driver: the module's file from its package root and its
     // package, which its Module record names (ModuleMeta.jet).
-    meta: SemaModuleMetaSource{SemaModuleMetaSource{}}
+    meta: SemaModuleMetaSource{SemaModuleMetaSource{}},
     // False for a Core module of a compile that reaches Core on demand: like
     // the Core bodies no program calls, its casing is the Core library's check
     // (`jet check Core`), which leaves this true.
-    check_casing: Bool{true}
+    check_casing: Bool{true},
     // The derive templates' expansions this module's registration takes or
     // keeps (Derives.jet SemaDeriveMemo, CoreBodies.jet
     // sema_core_derives_attach): the Core library's check keeps a Core
     // module's, which SemaRegistrationModule.derive_captures records, and a
     // compile bound to that Core takes them from the record.
-    derive_memo: SemaDeriveMemo{SemaDeriveMemo{}}
+    derive_memo: SemaDeriveMemo{SemaDeriveMemo{}},
     // The values the build computed for the module values its root `#loop`
     // declarations read (`#loop row in ROWS` over `ROWS: #run rows()`):
     // the driver computes them in a first pass and hands them to the
     // registration that expands the loops (UserTemplates.jet
     // sema_derive_template_loop_waits).
-    loop_values: [NamedCtValue]{[NamedCtValue]{}}
+    loop_values: [NamedCtValue]{[NamedCtValue]{}},
     // Set on that first pass: a root `#loop` over a value not computed yet
     // is left out, without a report, until the value is known.
-    loop_values_pending: Bool{false}
+    loop_values_pending: Bool{false},
 }
 
 SemaForeignImportBinding: struct {
-    scope: String?
-    alias: String
+    scope: String?,
+    alias: String,
 }
 
 SemaRegistrationImportEdge: struct {
-    source_module_identity: ModuleID
-    source_scope: String{""}
-    source_scope_exported: Bool{false}
-    target_module_identity: ModuleID
-    target_package_identity: String
-    foreign_binding: SemaForeignImportBinding?
-    declaration: ImportDecl
+    source_module_identity: ModuleID,
+    source_scope: String{""},
+    source_scope_exported: Bool{false},
+    target_module_identity: ModuleID,
+    target_package_identity: String,
+    foreign_binding: SemaForeignImportBinding?,
+    declaration: ImportDecl,
 }
 
 SemaRegistrationModule: struct {
-    package_identity: String
-    module_identity: ModuleID
-    module_name: String
-    core_source_alias: String
-    module_path: String
+    package_identity: String,
+    module_identity: ModuleID,
+    module_name: String,
+    core_source_alias: String,
+    module_path: String,
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
-    declared_module: String{""}
+    declared_module: String{""},
     // The package the loader read for this module (its manifest name and
     // version; the defaults for a source without one): ProgramInfo groups
     // its modules into one PackageInfo by `package_identity`.
-    package: SemaModulePackage{SemaModulePackage{}}
+    package: SemaModulePackage{SemaModulePackage{}},
     // Whether the file is one of its package's memory kernel files
     // (`policy.memory`): its types' `priv` fields are then private to the
     // kernel files, not the whole package (sema_expression_field_visible).
-    memory_kernel: Bool{false}
-    source_file: String
-    source_segments: [SemaSourceSegment]
-    source_origin: SemaSourceOrigin
-    program: Program
-    inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}}
-    source: String{""}
+    memory_kernel: Bool{false},
+    source_file: String,
+    source_segments: [SemaSourceSegment],
+    source_origin: SemaSourceOrigin,
+    program: Program,
+    inline_bindings: SemaInlinePreparedBindings{SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}},
+    source: String{""},
     // The `#FX(…)` cap of each generic-module template erased from
     // `program.items` once expanded: the cap's names are still checked
     // where it is written (E0119, E0750), instantiated or not.
-    template_caps: [ModuleCap]{[ModuleCap]{}}
-    declarations: [Item]
-    symbols: [Symbol]
+    template_caps: [ModuleCap]{[ModuleCap]{}},
+    declarations: [Item],
+    symbols: [Symbol],
     // Row `i` is the `nominals` row that `symbols[i]` registered (-1 for a
     // symbol without one). Names are unique per module, so this row is the
     // first registered row of the symbol's key: the row
     // `nominal_symbol_rows` answers for it. A resolved symbol carries it, so
     // the hot nominal-row lookups never search the long-key map.
-    symbol_nominal_rows: [Int]{[Int]{}}
+    symbol_nominal_rows: [Int]{[Int]{}},
     // Symbol name -> its `symbols` row, over interned names (A1).
-    symbol_positions: NameRows
-    declaration_positions: [String:Int]
-    impls: [SemaRegistrationImpl]
-    functions: [SemaRegistrationFunction]
-    foreign_functions: [SemaRegistrationForeignFunction]
-    nominals: [SemaRegistrationNominal]
-    constants: [SemaRegistrationConstant]
+    symbol_positions: NameRows,
+    declaration_positions: [String:Int],
+    impls: [SemaRegistrationImpl],
+    functions: [SemaRegistrationFunction],
+    foreign_functions: [SemaRegistrationForeignFunction],
+    nominals: [SemaRegistrationNominal],
+    constants: [SemaRegistrationConstant],
     // Symbol ids of the `#Persist`, mutable, and `#Static` constants
     // (sema_ownership_is_static_root), collected once at registration so a
     // function check reads them without walking the constant ASTs.
-    static_roots: [SymbolID]{[SymbolID]{}}
+    static_roots: [SymbolID]{[SymbolID]{}},
     // The `#Persist` subset of `static_roots`: mutable module state whose
     // cell may be lent for writing.
-    persist_roots: [SymbolID]{[SymbolID]{}}
-    imports: [SemaRegistrationImport]
-    exports: [SemaRegistrationExport]
+    persist_roots: [SymbolID]{[SymbolID]{}},
+    imports: [SemaRegistrationImport],
+    exports: [SemaRegistrationExport],
     // Local import name -> its binding (Rust `Checker::imports`). Import
     // names are unique per module, so each name has one row; the row packs
     // the import and binding positions (sema_registration_import_binding_at).
-    import_binding_rows: NameRows
+    import_binding_rows: NameRows,
     // `{type}:{trait}` for every trait impl among `declarations`, so auto-derive
     // metadata asks once per query instead of rescanning the declarations.
-    declared_trait_impls: [String:Bool]
+    declared_trait_impls: [String:Bool],
     // The module's package namespace (loader key, "" outside
     // one) and its `namespace_tables` slot (-1 outside one), what the loader
     // recorded for it, the position in `imports` where the package names
@@ -755,24 +755,24 @@ SemaRegistrationModule: struct {
     // after every import), whether every namespace name binds (items from a
     // template declared elsewhere), and the sibling declarations its scope
     // binds: (owner module, symbol row).
-    namespace: String{""}
-    namespace_slot: Int{-1}
-    namespace_names: [String]{[String]{}}
-    namespace_private: [String]{[String]{}}
-    namespace_refs: [String]{[String]{}}
-    namespace_import_split: Int{-1}
-    namespace_full: Bool{false}
-    namespace_bindings: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
+    namespace: String{""},
+    namespace_slot: Int{-1},
+    namespace_names: [String]{[String]{}},
+    namespace_private: [String]{[String]{}},
+    namespace_refs: [String]{[String]{}},
+    namespace_import_split: Int{-1},
+    namespace_full: Bool{false},
+    namespace_bindings: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}},
     // The record of the derive templates' expansions the Core library's
     // check kept for this Core module (Derives.jet sema_derive_memo_capture),
     // at most one, which its bodies file holds (CoreBodies.jet
     // sema_core_derive_bodies).
-    derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}}
+    derive_captures: [SemaDeriveCapture]{[SemaDeriveCapture]{}},
 }
 
 SemaRegistrationImportBindingRef: struct {
-    import_index: Int
-    binding: Int
+    import_index: Int,
+    binding: Int,
 }
 
 // Host callbacks the checker calls into. Function values never copy and never
@@ -783,11 +783,11 @@ SemaRegistrationImportBindingRef: struct {
 // one its empty row): an unbounded function value is the maximal row which
 // would make every checker path that consults a hook reach every effect.
 SemaRegistrationHostHooks: struct {
-    numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -[]> Float?)?
+    numeric_unit_conversion_exact: (fn(Float, String, String, String, String) -[]> Float?)?,
     // A `jet run` that may bind to the Core image: the host's read of the
     // seal it would carry (CoreSeal.jet), which its Core demand makes once
     // (CoreDemand.jet sema_core_stand_in_bind) and leaves None after.
-    core_seal: SemaCoreSealSource?{None}
+    core_seal: SemaCoreSealSource?{None},
     // A compile whose Core is the Core built into the host: the Core
     // library's bodies file (CoreBodies.jet), whose Core packets a check
     // loads in place of checking from text, the host's read of its records
@@ -799,39 +799,39 @@ SemaRegistrationHostHooks: struct {
     // on compiler threads wait in `core_bodies_ahead`, by function symbol
     // id, for the wave's loads to take them, each leaving None in its place
     // (CoreBodies.jet sema_core_bodies_ahead, sema_core_body_ahead_take).
-    core_bodies: SemaCoreBodies?{None}
-    core_bodies_records: SemaCoreBodiesRecords?{None}
-    core_bodies_loaded: [Bool]{[Bool]{}}
-    core_bodies_read: Int{0}
-    core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}}
-    core_bodies_ahead: [U32:SemaCoreBodyAhead?]{[U32:SemaCoreBodyAhead?]{}}
+    core_bodies: SemaCoreBodies?{None},
+    core_bodies_records: SemaCoreBodiesRecords?{None},
+    core_bodies_loaded: [Bool]{[Bool]{}},
+    core_bodies_read: Int{0},
+    core_bodies_reader: BodyCodecIn{BodyCodecIn{at: 0, end: 0, failed: false, symbols: [SymbolID]{}, decls: [DeclID]{}, modules: [ModuleID]{}}},
+    core_bodies_ahead: [U32:SemaCoreBodyAhead?]{[U32:SemaCoreBodyAhead?]{}},
 }
 
 // The folded build snapshot the driver
 // seeds before checking (Rust `BuildFactSnapshot`). Sema folds `#package.*`
 // and `build.*` reads from these values and never probes the host.
 SemaBuildFacts: struct {
-    package_name: String
-    package_version: String
-    os: String
-    profile: String
-    stamp_git: String?
-    stamp_dirty: Bool
-    stamp_toolchain: String
-    stamp_at: String
+    package_name: String,
+    package_version: String,
+    os: String,
+    profile: String,
+    stamp_git: String?,
+    stamp_dirty: Bool,
+    stamp_toolchain: String,
+    stamp_at: String,
     // This compile produces a shipped artifact (`jet build`).
-    artifact_build: Bool{false}
+    artifact_build: Bool{false},
     // The package's declared settings with this build's values
     // (`#build.settings.*`, sema_fact_build_setting).
-    settings: [SemaBuildSetting]{[SemaBuildSetting]{}}
+    settings: [SemaBuildSetting]{[SemaBuildSetting]{}},
     // The host's compiler identity ("" when the host names none); a history
     // artifact's `tool` names it (#6410).
-    compiler_identity: String{""}
+    compiler_identity: String{""},
     // The markers `package.jet`'s header writes on the package record (the
     // Package site), as written and, after sema_marker_package_check, bound
     // to their declarations; their spans are in `package_manifest`.
-    package_markers: [Marker]{[Marker]{}}
-    package_manifest: String{""}
+    package_markers: [Marker]{[Marker]{}},
+    package_manifest: String{""},
 }
 
 // One declared setting: its type as written (`Bool`, `Int`, `Char`,
@@ -839,11 +839,11 @@ SemaBuildFacts: struct {
 // declared default's text, and each writer of its chain from least to most
 // explicit layer, the one the contribution law selected marked.
 SemaBuildSetting: struct {
-    name: String
-    ty: String
-    value: String
-    default: String
-    contributions: [SemaSettingContribution]
+    name: String,
+    ty: String,
+    value: String,
+    default: String,
+    contributions: [SemaSettingContribution],
 }
 
 // One writer of a setting: its value's text, where it is written (the file
@@ -852,11 +852,11 @@ SemaBuildSetting: struct {
 // `Profile`, `Build` or `CommandLine`) and whether the contribution law
 // selected it.
 SemaSettingContribution: struct {
-    value: String
-    file: String
-    span: Span
-    kind: String
-    selected: Bool
+    value: String,
+    file: String,
+    span: Span,
+    kind: String,
+    selected: Bool,
 }
 
 // `debug(…)` traces are development-only. A shipped artifact or a
@@ -873,191 +873,191 @@ sema_build_facts_reject_debug_traces: fn(facts: SemaBuildFacts) -> Bool Never! {
 // an uncounted lookup costs one flag test. Each count is one atomic add under
 // a shared read permit, so threads that count don't wait for each other.
 SemaLookupCounters: struct {
-    module_lookups: Atomic<Int>
-    name_lookups: Atomic<Int>
-    scope_lookups: Atomic<Int>
-    scope_compares: Atomic<Int>
+    module_lookups: Atomic<Int>,
+    name_lookups: Atomic<Int>,
+    scope_lookups: Atomic<Int>,
+    scope_compares: Atomic<Int>,
 }
 
 // The counts of a SemaLookupCounters at one moment.
 SemaLookupCounts: struct {
-    module_lookups: Int
-    name_lookups: Int
-    scope_lookups: Int
-    scope_compares: Int
+    module_lookups: Int,
+    name_lookups: Int,
+    scope_lookups: Int,
+    scope_compares: Int,
 }
 
 SemaRegistrationGraph: struct {
-    package_identity: String
-    entry_module_identity: ModuleID
-    canonical_effect_module_identity: ModuleID
-    target_machine: TargetMachine
-    build_facts: SemaBuildFacts
-    modules: [SemaRegistrationModule]
+    package_identity: String,
+    entry_module_identity: ModuleID,
+    canonical_effect_module_identity: ModuleID,
+    target_machine: TargetMachine,
+    build_facts: SemaBuildFacts,
+    modules: [SemaRegistrationModule],
     // The loaded modules' identities (the loader's table, and the graph's
     // own original Prelude error module): every ModuleID names a row here.
-    module_table: ModuleTable
+    module_table: ModuleTable,
     // ModuleID index -> position in `modules`, -1 for an id with no row;
     // fixed at graph construction.
-    module_rows: [Int]
+    module_rows: [Int],
     // The run's symbols (Docs/Spec/compiler-data.md): each module's range,
     // reserved before the module is prepared, and the open range the serial
     // passes after preparation intern into.
-    symbols: SymbolTable
-    edges: [SemaRegistrationImportEdge]
-    foreign_providers: [SemaForeignProviderInput]
-    core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]
-    imports: [SemaRegistrationImport]
-    unit_facts: [SemaRegistrationUnitFact]
+    symbols: SymbolTable,
+    edges: [SemaRegistrationImportEdge],
+    foreign_providers: [SemaForeignProviderInput],
+    core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact],
+    imports: [SemaRegistrationImport],
+    unit_facts: [SemaRegistrationUnitFact],
     // Output alias and callable references come from the same checked graph
     // resolution as their facts; finalization publishes them with body refs.
-    output_name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
-    lookup_counters: Shared<SemaLookupCounters>
-    counting: Bool
-    internal_problem: String?
-    diagnostics: [Diagnostic]
-    complete: Bool
+    output_name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}},
+    lookup_counters: Shared<SemaLookupCounters>,
+    counting: Bool,
+    internal_problem: String?,
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // Per module row, its markers that no rule, marker declaration or derive
     // provider names (E0927, sema_marker_module_check); the module's
     // declaration check reports them, so they do not stop registration.
-    unknown_rule_diagnostics: [[Diagnostic]]{[[Diagnostic]]{}}
+    unknown_rule_diagnostics: [[Diagnostic]]{[[Diagnostic]]{}},
     // The run-wide declaration table (Cutover B L2b): one DeclID row per
     // registered callable (functions, foreign functions, nominal methods,
     // impl methods; module order, a key's first row found), and each row's
     // place, indexed by its DeclID.
-    decls: DeclTable{DeclTable{}}
-    callables: [SemaRegistrationCallableRow]{[SemaRegistrationCallableRow]{}}
+    decls: DeclTable{DeclTable{}},
+    callables: [SemaRegistrationCallableRow]{[SemaRegistrationCallableRow]{}},
     // Base type name -> nominal rows (by `sema_expr_type_base_name`) and impl
     // rows (by `target_type_name`), in module/row order, so operator and
     // method dispatch read only the rows of their receiver type. A name maps
     // to its bucket slot; buckets grow in place (Rust `entry().or_default()`).
-    nominal_row_slots: [String:Int]
-    nominal_row_buckets: [[SemaRegistrationRowRef]]
-    impl_row_slots: [String:Int]
-    impl_row_buckets: [[SemaRegistrationRowRef]]
+    nominal_row_slots: [String:Int],
+    nominal_row_buckets: [[SemaRegistrationRowRef]],
+    impl_row_slots: [String:Int],
+    impl_row_buckets: [[SemaRegistrationRowRef]],
     // Nominal SymbolID -> first registered nominal row. Kept current from
     // graph construction on: every nominal row pushed later (compiler
     // builtins, user templates, minted failure unions) is indexed as it lands.
-    nominal_symbol_rows: [U32:SemaRegistrationRowRef]
+    nominal_symbol_rows: [U32:SemaRegistrationRowRef],
     // Source package identity -> its slot in `package_reach`: per module row,
     // whether the package's own modules reach it through their imports
     // (sema_registration_index_package_reach). Empty until every import is
     // bound.
-    package_reach_slots: [String:Int]{[String:Int]{}}
-    package_reach: [[Bool]]{[[Bool]]{}}
+    package_reach_slots: [String:Int]{[String:Int]{}},
+    package_reach: [[Bool]]{[[Bool]]{}},
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
-    compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
+    compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}},
     // Resolved trait symbol id -> the impl rows implementing it, in
     // module/row order (Rust's keyed trait registry), built with the callable
     // index; a bound query before then (`impl_traits_indexed` false) scans
     // every impl.
-    impl_trait_slots: [U32:Int]{[U32:Int]{}}
-    impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
-    impl_traits_indexed: Bool{false}
+    impl_trait_slots: [U32:Int]{[U32:Int]{}},
+    impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}},
+    impl_traits_indexed: Bool{false},
     // Spelled trait name (an impl's `trait_name`, and its registered trait
     // symbol's name) -> the impl rows under that name, in module/row order,
     // built with the trait index above. The copy-facts and close-owner
     // queries match impls by trait name (sema_copy_nominal_has_impl), so
     // they read one name's rows instead of every impl of the graph.
-    impl_trait_name_slots: [String:Int]{[String:Int]{}}
-    impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
+    impl_trait_name_slots: [String:Int]{[String:Int]{}},
+    impl_trait_name_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}},
     // The impl rows that implement core.prelude's CheckedText
     // (sema_type_graph_is_checked_text_impl), in module/row order, built with
     // the trait index above. A typed literal or static call looks its head's
     // checked-text impl up among these rows instead of every impl of the graph
     // (sema_expression_checked_text_target).
-    checked_text_impl_rows: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}}
+    checked_text_impl_rows: [SemaRegistrationRowRef]{[SemaRegistrationRowRef]{}},
     // Opaque impl type name -> the Core source modules that own its impls
     // (`sema_registration_source_owns_impl`), in module order. Built once with
     // the graph, so method lookup reads only the owning modules instead of
     // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
-    source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}}
+    source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}},
     // Whether some registered function marks its first parameter `#Root`
     // (sema_registration_note_root_functions). Set when the graph is built and
     // when a user template registers more functions, never cleared, so a
     // graph without one skips the receiver-first probe's import walk
     // (sema_root_call_imported) on every method call.
-    root_functions: Bool{false}
+    root_functions: Bool{false},
     // The inferred never-return set: the SymbolIDs of the functions that never return to
     // their caller, one fixed point once every declaration is registered
     // (sema_divergence_solve).
-    diverging_functions: [U32:Bool]{[U32:Bool]{}}
+    diverging_functions: [U32:Bool]{[U32:Bool]{}},
     // The symbol keys of the bodies that reach a nominal whose declared
     // member type names nothing (sema_checked_unusable_bodies): the check
     // skips them and records each as skipped, so it reports no follow-on
     // error of theirs while every other body is checked. Set after the
     // declaration pass of a compile with errors; empty otherwise.
-    unusable_bodies: [String:Bool]{[String:Bool]{}}
+    unusable_bodies: [String:Bool]{[String:Bool]{}},
     // #3708: the bundle failure solve has settled every unannotated
     // callable's contract, so a body checked again (the recheck pass) reads
     // a still-defaulted callee as one the solve left fallible.
-    failure_solved: Bool{false}
+    failure_solved: Bool{false},
     // JET_KEEP_GOING, the compiler-internal diagnostic mode the driver sets
     // (its output is never shipped): a function whose body check fails is
     // kept as a typed trap of its declared signature instead of being left
     // out, so its callers and every later phase still run.
-    keep_going: Bool{false}
+    keep_going: Bool{false},
     // Under keep_going, per module row: whether the row's own sources hold no
     // registration-blocking error (sema_registration_settle_modules). One
     // module's error leaves the graph incomplete, yet every other module
     // registered in full, so its facts stay known
     // (sema_registration_module_settled). Empty when not set, or when an
     // error names no source file.
-    settled_modules: [Bool]{[Bool]{}}
+    settled_modules: [Bool]{[Bool]{}},
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
-    test_mode: Bool{false}
+    test_mode: Bool{false},
     // Test mode: each law test the compiler could not make (TraitLaws.jet),
     // by its test key, with why. The test fails and the run ends as an
     // internal compiler error.
-    law_faults: [String:String]{[String:String]{}}
+    law_faults: [String:String]{[String:String]{}},
     // Check mode (`jet check`), set by the driver: named `#Test` bodies are
     // checked for their diagnostics only; nothing is lowered or registered,
     // so no "not built yet" E2104 applies (sema_refuses_unbuilt).
-    check_tests: Bool{false}
+    check_tests: Bool{false},
     // Program mode (`jet build`, `jet run`), set by the driver: the root
     // package's named `#Test` bodies are checked for their diagnostics only,
     // as under `jet check`, so a body `jet test` refuses is refused here too
     // (sema_check_module_tests). E2104 still applies.
-    check_root_tests: Bool{false}
+    check_root_tests: Bool{false},
     // `#run use` (ComptimeUse.jet): "{module}\n{target}" -> the
     // `#run ` prefix of the import that brings `target` into `module`
     // for compile-time code only, so a runtime read of a value of its types
     // is reported with the edit that drops the prefix.
-    comptime_use_targets: [String:Span]{[String:Span]{}}
+    comptime_use_targets: [String:Span]{[String:Span]{}},
     // User modules only compile-time code uses, however they are imported;
     // the driver leaves their functions out of the shipped program.
-    comptime_only_modules: [ModuleID]{[ModuleID]{}}
+    comptime_only_modules: [ModuleID]{[ModuleID]{}},
     // One table per package namespace (Rust
     // `NameLedger::namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
     // module order, then declaration order.
-    namespace_slots: [String:Int]{[String:Int]{}}
-    namespace_tables: [NameRows]{[NameRows]{}}
-    namespace_entries: [[Int]]{[[Int]]{}}
-    namespace_entry_modules: [Int]{[Int]{}}
-    namespace_entry_names: [String]{[String]{}}
+    namespace_slots: [String:Int]{[String:Int]{}},
+    namespace_tables: [NameRows]{[NameRows]{}},
+    namespace_entries: [[Int]]{[[Int]]{}},
+    namespace_entry_modules: [Int]{[Int]{}},
+    namespace_entry_names: [String]{[String]{}},
     // `jet doc` (driver `JetDriverCompileMode.Doc`): finalization keeps each
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
-    retain_programs: Bool{false}
+    retain_programs: Bool{false},
     // A retaining compile whose reader takes only the user modules
     // (`jet fix`): its Core bodies wait for demand all the same
     // (CoreDemand.jet), so a Core module's kept program has only the bodies a
     // checked body named checked.
-    retained_core_demand: Bool{false}
+    retained_core_demand: Bool{false},
     // Every Core body is checked whether a checked body names it or not
     // (JET_KEEP_GOING, `jet check Core`), so none waits for demand.
-    every_core_body: Bool{false}
+    every_core_body: Bool{false},
     // The Core library's check (driver JetDriverCompileRequest.core_seal):
     // finalization summarizes the Core functions for a bound program
     // (CoreSeal.jet) into SemaGraphResult.core_seal.
-    core_seal: Bool{false}
+    core_seal: Bool{false},
     // The Core function checks stay on the module pass's thread, off the
     // compiler threads, so that thread captures them (`core_seal`) or loads
     // them from the host's bodies file (CoreBodies.jet
     // sema_core_bodies_hold), as the body pass sets it.
-    core_bodies_held: Bool{false}
+    core_bodies_held: Bool{false},
     // A `jet run` that may bind to the Core image: `core_seal_pending`, its
     // Core seal is in the host hooks (SemaRegistrationHostHooks.core_seal)
     // and not yet read, which the Core demand does once it first names a
@@ -1066,18 +1066,18 @@ SemaRegistrationGraph: struct {
     // Core demand checks by signature only (sema_core_stand_in_wait); None
     // checks every demanded body. `core_stand_in_wave`: the current demand
     // wave is such a stand-in wave.
-    core_seal_pending: Bool{false}
-    core_stand_ins: SemaCoreSeal?{None}
-    core_stand_in_wave: Bool{false}
+    core_seal_pending: Bool{false},
+    core_stand_ins: SemaCoreSeal?{None},
+    core_stand_in_wave: Bool{false},
     // This rule demand (sema_serde_index_codec_methods): every generated
     // codec impl registers its header only. `codec_method_rows` maps the
     // SymbolID of each generated codec method to its impl row; `codec_demand` collects the
     // Encode/Decode requirements the checks reach (bound checks, codec calls,
     // nested wire fields), and `codec_wave_rows` ("{module}:{row}") names the
     // impls whose bodies the current codec wave checks (sema_codec_waves).
-    codec_method_rows: [U32:SemaRegistrationRowRef]{[U32:SemaRegistrationRowRef]{}}
-    codec_demand: Shared<SemaCodecDemand>
-    codec_wave_rows: [String:Bool]{[String:Bool]{}}
+    codec_method_rows: [U32:SemaRegistrationRowRef]{[U32:SemaRegistrationRowRef]{}},
+    codec_demand: Shared<SemaCodecDemand>,
+    codec_wave_rows: [String:Bool]{[String:Bool]{}},
     // Demand-checked derives (sema_derive_index_methods): the derived
     // `equal`/`compare` methods of compiler-owned modules (the Prelude error
     // module, Core) are checked only when a checked call names one or an
@@ -1087,37 +1087,37 @@ SemaRegistrationGraph: struct {
     // checks reach, `derive_wave_rows` names the methods the current derive
     // wave checks (sema_derive_waves), and `derive_checked` every method a
     // wave of this finalization checked.
-    derive_method_rows: [U32:SemaDeriveMethodRow]{[U32:SemaDeriveMethodRow]{}}
-    derive_type_methods: [String:[String]]{[String:[String]]{}}
-    derive_demand: Shared<SemaDeriveDemand>
-    derive_wave_rows: [String:Bool]{[String:Bool]{}}
-    derive_checked: [String:Bool]{[String:Bool]{}}
+    derive_method_rows: [U32:SemaDeriveMethodRow]{[U32:SemaDeriveMethodRow]{}},
+    derive_type_methods: [String:[String]]{[String:[String]]{}},
+    derive_demand: Shared<SemaDeriveDemand>,
+    derive_wave_rows: [String:Bool]{[String:Bool]{}},
+    derive_checked: [String:Bool]{[String:Bool]{}},
     // Demand-checked Core bodies (sema_core_demand_index): a Core module's
     // top-level functions (and, under `jet check`, its inherent methods) are
     // checked only once a checked body names one. `core_demand_rows` maps
     // each such function key to its module, `core_wave_rows` names the bodies
     // the current wave checks (sema_core_demand_waves), and `core_checked`
     // every body a wave of this finalization checked.
-    core_demand_rows: [String:Int]{[String:Int]{}}
-    core_wave_rows: [String:Bool]{[String:Bool]{}}
-    core_checked: [String:Bool]{[String:Bool]{}}
+    core_demand_rows: [String:Int]{[String:Int]{}},
+    core_wave_rows: [String:Bool]{[String:Bool]{}},
+    core_checked: [String:Bool]{[String:Bool]{}},
     // A compile that lowers, set by the driver: the keys of the top-level
     // Core functions its lowering keeps with no keyed call in a checked body
     // (driver jet_driver_core_lowering_roots), which Core demand checks up
     // front. None for a compile that lowers nothing.
-    core_lowering_roots: [String:Bool]?{None}
+    core_lowering_roots: [String:Bool]?{None},
     // The canonical spellings of the nominals registered by the end of
     // sema_registration_prepare_graph (sema_registration_index_canonical_nominals);
     // None for a graph built another way, whose lookups cut each spelling.
-    canonical_nominals: SemaCanonicalNominals?{None}
+    canonical_nominals: SemaCanonicalNominals?{None},
     // The interfaces of the project's plugins, read from each literal
     // artifact's Component (jet_driver_plugin_facts): what
     // `plugin.load("artifact")` and its export calls check against.
-    plugin_facts: SemaPluginInterfaceFacts{SemaPluginInterfaceFacts{interfaces: [SemaPluginInterface]{}, artifacts: [SemaPluginArtifactAlias]{}, digest: ""}}
+    plugin_facts: SemaPluginInterfaceFacts{SemaPluginInterfaceFacts{interfaces: [SemaPluginInterface]{}, artifacts: [SemaPluginArtifactAlias]{}, digest: ""}},
     // The registry of the prelude's builtin applied rules (MARKER_SOURCE),
     // built once with the marker module check; the marker-signature checks
     // (sema_marker_rules_check_rule_signature) read it at every site.
-    marker_catalog: SemaScopeMembersMarkerRegistry?{None}
+    marker_catalog: SemaScopeMembersMarkerRegistry?{None},
 }
 
 // `{module_name}::{name}` of every nominal row registered by the end of graph
@@ -1125,45 +1125,45 @@ SemaRegistrationGraph: struct {
 // table holds keeps its spelling; a row pushed later is spelled where it is read.
 SemaCanonicalNominals: struct {
     // names[module_index][row]: the nominal row's canonical spelling.
-    names: [[String]]
+    names: [[String]],
     // Canonical spelling -> row of `owners`/`leaves`: the module `module_rows`
     // gives its `module_name` and its leaf name, exactly the module and name a
     // cut at its last `::` finds (sema_type_graph_lookup_symbol_at). Spellings
     // whose leaf holds `::`, or whose module is not registered, are left out.
-    rows: NameRows
-    owners: [Int]
-    leaves: [String]
+    rows: NameRows,
+    owners: [Int],
+    leaves: [String],
 }
 
 SemaRegistrationRowRef: struct {
-    module_index: Int
-    row: Int
+    module_index: Int,
+    row: Int,
 }
 
 // A demand-checked derived method: nominal `nominal` of module
 // `module_index`, method `method` of it.
 SemaDeriveMethodRow: struct {
-    module_index: Int
-    nominal: Int
-    method: Int
+    module_index: Int,
+    nominal: Int,
+    method: Int,
 }
 
 // The derived method keys a check reached (sema_derive_demand_add); while
 // `capturing`, `captured` also gets each key a check records
 // (sema_demand_capture_open).
 SemaDeriveDemand: struct {
-    keys: [String:Bool]
-    capturing: Bool{false}
-    captured: [String]{[String]{}}
+    keys: [String:Bool],
+    capturing: Bool{false},
+    captured: [String]{[String]{}},
 }
 
 // A registered callable addressed by position, so in-place row updates
 // (failure-union return types) are read at lookup time.
 SemaRegistrationCallableRow: enum {
-    Function(module_index: Int, row: Int)
-    Foreign(module_index: Int, row: Int)
-    NominalMethod(module_index: Int, owner: Int, row: Int)
-    ImplMethod(module_index: Int, owner: Int, row: Int)
+    Function(module_index: Int, row: Int),
+    Foreign(module_index: Int, row: Int),
+    NominalMethod(module_index: Int, owner: Int, row: Int),
+    ImplMethod(module_index: Int, owner: Int, row: Int),
 }
 
 // A name resolved to its symbol (Cutover B L2a). The symbol row stays in the
@@ -1171,23 +1171,23 @@ SemaRegistrationCallableRow: enum {
 // (sema_resolved_kind/_name/_key/_ty), so no lookup copies a Symbol. A type
 // symbol's nominal row is `sema_type_graph_resolved_nominal_row`.
 SemaRegistrationResolvedSymbol: struct {
-    place: SemaRegistrationSymbolPlace
-    source_module_identity: ModuleID
-    target_module_identity: ModuleID
-    visibility: Int
+    place: SemaRegistrationSymbolPlace,
+    source_module_identity: ModuleID,
+    target_module_identity: ModuleID,
+    visibility: Int,
     // The symbol's registered nominal row when the lookup found it beside
     // the symbol (`symbol_nominal_rows`, a builtin row, a nominal row);
     // None leaves `sema_type_graph_resolved_nominal_row` to the key map.
-    nominal_row: SemaRegistrationRowRef?{None}
+    nominal_row: SemaRegistrationRowRef?{None},
 }
 
 // Where a resolved symbol's row lives. `Detached` holds a symbol no graph row
 // keeps: a builtin trait bound and an export row resolved through a chain.
 SemaRegistrationSymbolPlace: enum {
-    Declared(module_index: Int, row: Int)
-    Imported(module_index: Int, import_index: Int, binding: Int)
-    Nominal(module_index: Int, row: Int)
-    Detached(symbol: Symbol)
+    Declared(module_index: Int, row: Int),
+    Imported(module_index: Int, import_index: Int, binding: Int),
+    Nominal(module_index: Int, row: Int),
+    Detached(symbol: Symbol),
 }
 
 sema_resolved_kind: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SymbolKind Never! {
@@ -1734,10 +1734,10 @@ sema_registration_impl_rows_named: fn(graph: SemaRegistrationGraph, name: String
 // indexes below are built from rows merge-sorted once by (key, order), so
 // every insert appends and each key's first registered row wins as before.
 SemaRegistrationKeyedRow: struct {
-    key: String
+    key: String,
     // Registration order: module, then row.
-    order: Int
-    reference: SemaRegistrationRowRef
+    order: Int,
+    reference: SemaRegistrationRowRef,
 }
 
 sema_registration_keyed_row_push: fn(rows: &[SemaRegistrationKeyedRow], key: String, module_index: Int, row: Int) Never! {
@@ -1752,8 +1752,8 @@ sema_registration_keyed_rows_sort: fn(rows: &[SemaRegistrationKeyedRow]) Never! 
 }
 
 SemaRegistrationBuckets: struct {
-    slots: [String:Int]
-    buckets: [[SemaRegistrationRowRef]]
+    slots: [String:Int],
+    buckets: [[SemaRegistrationRowRef]],
 }
 
 // Buckets sorted keyed rows by key: one slot per key, in ascending key
@@ -2756,8 +2756,8 @@ sema_registration_impl_nominal_index: fn(module_row: SemaRegistrationModule, typ
 // type name (sema_registration_impl_nominal_index's answer) and `traits`
 // the first Trait-kind nominal row of each name.
 SemaRegistrationImplRows: struct {
-    nominals: [String:Int]
-    traits: [String:Int]
+    nominals: [String:Int],
+    traits: [String:Int],
 }
 
 sema_registration_impl_rows: fn(module_row: SemaRegistrationModule) -> SemaRegistrationImplRows Never! {
@@ -3556,24 +3556,24 @@ SEMA_REGISTRATION_PREPARE_MIN_BYTES_PER_THREAD: 262144
 
 // One module's sema_registration_prepare_module_row inputs.
 SemaRegistrationPrepareJob: struct {
-    input: SemaRegistrationModuleInput
+    input: SemaRegistrationModuleInput,
     // The input's module identity text, which its symbol keys spell.
-    module_text: String
+    module_text: String,
     // The module's reserved symbol range, which its preparation interns
     // into.
-    symbols: SymbolKeys
-    templates: [SemaGenericModuleSource]
-    policies: [UserPolicyDecl]
-    settings: [SemaBuildSetting]
-    codecs: [String:Bool]
+    symbols: SymbolKeys,
+    templates: [SemaGenericModuleSource],
+    policies: [UserPolicyDecl],
+    settings: [SemaBuildSetting],
+    codecs: [String:Bool],
 }
 
 // A prepared module row, its symbol range and the diagnostics its
 // preparation reported.
 SemaRegistrationPreparedRow: struct {
-    module_row: SemaRegistrationModule
-    symbols: SymbolKeys
-    diagnostics: [Diagnostic]
+    module_row: SemaRegistrationModule,
+    symbols: SymbolKeys,
+    diagnostics: [Diagnostic],
 }
 
 sema_registration_prepare_job: fn(job: &&SemaRegistrationPrepareJob) -> SemaRegistrationPreparedRow {
@@ -3645,20 +3645,20 @@ sema_registration_prepare_rows: fn(jobs: &&[SemaRegistrationPrepareJob], threads
 
 // The unclaimed jobs, lightest first, and each one's job order position.
 SemaRegistrationPrepareShared: struct {
-    jobs: [SemaRegistrationPrepareJob]
-    positions: [Int]
+    jobs: [SemaRegistrationPrepareJob],
+    positions: [Int],
 }
 
 // One claimed job and its job order position.
 SemaRegistrationPrepareClaim: struct {
-    position: Int
-    job: SemaRegistrationPrepareJob
+    position: Int,
+    job: SemaRegistrationPrepareJob,
 }
 
 // One job's prepared row, prepared by one thread.
 SemaRegistrationPreparedSlot: struct {
-    position: Int
-    row: SemaRegistrationPreparedRow
+    position: Int,
+    row: SemaRegistrationPreparedRow,
 }
 
 sema_registration_prepare_fill: fn(shared_state: Shared<SemaRegistrationPrepareShared>, jobs: &[SemaRegistrationPrepareJob]) {
@@ -3705,10 +3705,10 @@ sema_registration_prepare_claim: fn(shared_state: Shared<SemaRegistrationPrepare
 
 // The CLI shape of one `#CLI` field (Rust `CLIFieldKind`).
 SemaRegistrationCLIFieldKind: enum {
-    Flag
-    OptionalOption
-    DefaultedOption
-    RequiredOption
+    Flag,
+    OptionalOption,
+    DefaultedOption,
+    RequiredOption,
 }
 
 // Rust `validate_cli_items`: every `#CLI` program struct of the module, in item
@@ -4866,8 +4866,8 @@ sema_registration_foreign_import_declaration: fn(edge: SemaRegistrationImportEdg
 // check per import scanned every registered import of its module, which a
 // package of M files (two compiler-owned imports per sibling) made M³.
 SemaRegistrationImportIndex: struct {
-    spans: [String:Bool]
-    aliases: [String:Bool]
+    spans: [String:Bool],
+    aliases: [String:Bool],
 }
 
 sema_registration_add_import: fn(graph: &SemaRegistrationGraph, registered: &SemaRegistrationImportIndex, source_index: Int, scope: String, declaration: ImportDecl, target_identity: ModuleID, target_package: String) {
@@ -5715,9 +5715,9 @@ sema_source_word_byte: fn(byte: U8) -> Bool Never! {
 // two members declare (E0624). The tables are filled from rows sorted by
 // (slot, name, entry), so each insert appends (SemaRegistrationKeyedRow).
 SemaRegistrationNamespaceName: struct {
-    slot: Int
-    name: String
-    entry: Int
+    slot: Int,
+    name: String,
+    entry: Int,
 }
 
 sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {

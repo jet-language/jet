@@ -111,7 +111,7 @@ CHANNEL_LINES: [String]{"queue/close/owners ok", "select source-order/probe/time
 
 #Error
 Problem: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }
@@ -125,51 +125,51 @@ Problem: struct {
 problem: fn(message: String) -> Problem Never! { Problem{message: message} }
 
 Options: struct {
-    command: String
-    head: String
-    jet: String
-    manifest: String
-    receipt: String
-    out: String
-    runtime: String
-    shard: String
+    command: String,
+    head: String,
+    jet: String,
+    manifest: String,
+    receipt: String,
+    out: String,
+    runtime: String,
+    shard: String,
 }
 
 Setting: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // One inventory row: a file under Compiler/<package>/Tests.
 Census: struct {
-    package: String
-    source: String
-    sha256: String
-    names: [String]
-    entry: Bool
-    role: String
+    package: String,
+    source: String,
+    sha256: String,
+    names: [String],
+    entry: Bool,
+    role: String,
 }
 
 // One registry to account for: a census row and its id and mode.
 Registry: struct {
-    row: Census
-    id: String
-    mode: String
+    row: Census,
+    id: String,
+    mode: String,
 }
 
 Retirement: struct {
-    path: String
-    reason: String
-    sha256: String?
+    path: String,
+    reason: String,
+    sha256: String?,
 }
 
 Kit: struct {
-    sources: [String]
-    tree: Dyn
-    cases: [String]
-    retired_cases: [Dyn]
-    pending: Int
-    rust_tools: Int
+    sources: [String],
+    tree: Dyn,
+    cases: [String],
+    retired_cases: [Dyn],
+    pending: Int,
+    rust_tools: Int,
 }
 
 // How a native registry is driven: the runner under Compiler/*/Tests and the
@@ -179,18 +179,18 @@ Kit: struct {
 // a program host runs after jet_rt_main returned; `calls` the runs of a
 // committed Jet runner.
 Spec: struct {
-    kind: String
-    name: String
-    runner: String
-    call: String?
-    ended: String?
-    expected: String
-    witness: String
-    expected_file: String
-    blocked: String
-    fragments: [String]
-    cflags: [String]
-    calls: [RunnerCall]
+    kind: String,
+    name: String,
+    runner: String,
+    call: String?,
+    ended: String?,
+    expected: String,
+    witness: String,
+    expected_file: String,
+    blocked: String,
+    fragments: [String],
+    cflags: [String],
+    calls: [RunnerCall],
 }
 
 // One run of a committed Jet runner and its exact stdout (stderr stays
@@ -198,37 +198,37 @@ Spec: struct {
 // object and hands over; without one the runner links its own fixture against
 // the link inputs. `mode` is the operand that selects the run, if any.
 RunnerCall: struct {
-    mode: String
-    witness: String
-    expected: String
+    mode: String,
+    witness: String,
+    expected: String,
 }
 
 Runtime: struct {
-    dir: String
-    pack: String
-    object: String
-    pack_sha256: String
-    object_sha256: String
+    dir: String,
+    pack: String,
+    object: String,
+    pack_sha256: String,
+    object_sha256: String,
 }
 
 // One transport run: its staged toolchain and the evidence of every command.
 Lane: struct {
-    id: String
-    out: String
-    repo: String
-    log_dir: String
-    jet: String
-    runtime_dir: String
-    object: String
-    evidence: [Dyn]
+    id: String,
+    out: String,
+    repo: String,
+    log_dir: String,
+    jet: String,
+    runtime_dir: String,
+    object: String,
+    evidence: [Dyn],
 }
 
 Ran: struct {
-    code: Int
-    signal: Int?
-    timed_out: Bool
-    stdout: String
-    stderr: String
+    code: Int,
+    signal: Int?,
+    timed_out: Bool,
+    stdout: String,
+    stderr: String,
 }
 
 run: fn() {
@@ -514,9 +514,9 @@ tests_in: fn(text: String) -> [String] Problem! {
 }
 
 Patterns: struct {
-    entry: Regex
-    abi: Regex
-    nested: Regex
+    entry: Regex,
+    abi: Regex,
+    nested: Regex,
 }
 
 patterns: fn() -[Exec, IO]> Patterns Never! {
@@ -2141,13 +2141,13 @@ sorted_texts: fn(items: [String]) -> [String] Never! {
 }
 
 RunTally: struct {
-    total: Int
-    passed: Int
-    blocked: Int
-    failed: Int
-    entries: [Dyn]
-    runtime: Dyn?
-    reason: String?
+    total: Int,
+    passed: Int,
+    blocked: Int,
+    failed: Int,
+    entries: [Dyn],
+    runtime: Dyn?,
+    reason: String?,
 }
 
 receipt_dyn: fn(status: String, header: [String:Dyn], tally: RunTally, shard: String, full_total: Int) -> Dyn Never! {
@@ -2271,8 +2271,8 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
 }
 
 Loaded: struct {
-    runtime: Runtime?
-    error: String
+    runtime: Runtime?,
+    error: String,
 }
 
 load_runtime: fn(jet: String, dir: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Loaded Never! {

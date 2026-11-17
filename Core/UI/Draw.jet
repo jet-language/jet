@@ -564,8 +564,8 @@ draw_rectangle: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, colo
 // so its text reads and checks the face's tables once and draws each
 // glyph's mask once per size and quarter-pixel position.
 Typeset: struct {
-    face: font.Face
-    cache: font.GlyphCache
+    face: font.Face,
+    cache: font.GlyphCache,
 }
 
 typeset: fn() -> Typeset { Typeset{face: regular_face(), cache: font.cache()} }
@@ -896,10 +896,10 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
 // The pixels gradient_runs shades: those whose centers `rec` holds, clipped
 // to the image.
 GradientBox: struct {
-    left: Int
-    top: Int
-    right: Int
-    bottom: Int
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
 }
 
 gradient_box: fn(extent: Extent, rec: Rect) -> GradientBox {
@@ -939,16 +939,16 @@ axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
 // reads it at the line's `t`.
 TieAxis: struct {
     // The levels of the channels away from the tie, a tied channel's 0.
-    rgba: Int
+    rgba: Int,
     // Each tied channel's shift in a packed color.
-    shifts: [Int]
+    shifts: [Int],
     // Each tied channel's whole level its sums lie next to.
-    near: [Int]
+    near: [Int],
     // The same levels as Floats.
-    edge: [Float]
+    edge: [Float],
     // Each tied channel's first and last levels.
-    first: [Float]
-    last: [Float]
+    first: [Float],
+    last: [Float],
 }
 
 tie_axis: fn(first: Int, last: Int, t: Float) -> TieAxis {
@@ -1106,20 +1106,20 @@ draw_poly_lines: fn(target: &Image, center: Point, sides: Int, radius: Float, ro
 // A texture atlas: named regions of one texture. `texture` is the decoded
 // PNG, width 0 when it could not be read or decoded.
 TextureAtlas: struct {
-    path: String
-    name: String
-    texture_path: String
-    regions: [Region]
-    texture: Image
+    path: String,
+    name: String,
+    texture_path: String,
+    regions: [Region],
+    texture: Image,
 }
 
 // A rectangle of an atlas's texture, in texture pixels.
 Region: struct {
-    name: String
-    x: Int
-    y: Int
-    width: Int
-    height: Int
+    name: String,
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
 }
 
 // Reads the atlas text at `path` (see parse_atlas), then reads and decodes
@@ -1320,17 +1320,17 @@ clamp8: fn(value: Int) -> Int Never! {
 // packed 0xRRGGBBAA color, already clipped to the image they paint. Pixel
 // (x, y) covers [x, x + 1) x [y, y + 1) and is sampled at its center.
 Run: struct {
-    x: Int
-    y: Int
-    width: Int
-    height: Int
-    rgba: Int
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+    rgba: Int,
 }
 
 // The size of the image a primitive scan-converts for.
 Extent: struct {
-    width: Int
-    height: Int
+    width: Int,
+    height: Int,
 }
 
 extent_of: fn(image: Image) -> Extent { Extent{width: image.width, height: image.height} }
@@ -1422,8 +1422,8 @@ div255: fn(value: Int) -> Int { (value + 1 + (value >> 8)) >> 8 }
 
 // The inclusive column range a triangle row keeps; empty when lo > hi.
 Span: struct {
-    lo: Int
-    hi: Int
+    lo: Int,
+    hi: Int,
 }
 
 pack_rgba: fn(color: Color) -> Int {
@@ -1750,8 +1750,8 @@ gradient_rgba: fn(top_left: Int, bottom_left: Int, bottom_right: Int, top_right:
 // A convex polygon in subpixels, wound so its signed area is positive, the
 // winding triangle_runs fills.
 Piece: struct {
-    xs: [Int]
-    ys: [Int]
+    xs: [Int],
+    ys: [Int],
 }
 
 // Snaps a convex polygon given in either winding and keeps it if it has area.
@@ -1810,9 +1810,9 @@ piece_span: fn(piece: Piece, row: Int, lo: Int, hi: Int) -> Span {
 // A cover reaches one pixel past each image edge, so an outline follows the
 // shape and not the image border.
 Cover: struct {
-    top: Int
-    starts: [Int]
-    spans: [Span]
+    top: Int,
+    starts: [Int],
+    spans: [Span],
 }
 
 // The union of the pieces.
@@ -2122,9 +2122,9 @@ poly_pieces: fn(center: Point, sides: Int, radius: Float, rotation: Float) -> [P
 
 // A decoded RGBA8 image, row-major; width 0 is no image.
 Image: struct {
-    width: Int
-    height: Int
-    pixels: [U8]
+    width: Int,
+    height: Int,
+    pixels: [U8],
 }
 
 // The largest texture side.

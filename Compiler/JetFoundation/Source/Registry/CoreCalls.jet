@@ -11,122 +11,122 @@ CORE_CALL_COVERAGE_COMPTIME: 32
 CORE_CALL_COVERAGE_KNOWN: 47
 
 CoreCallFallibility: enum {
-    Sema
+    Sema,
 }
 
 CoreCallResourceAccessMode: enum {
-    Read
-    Write
-    Move
+    Read,
+    Write,
+    Move,
 }
 
 CoreCallCompletionKind: enum {
-    Synchronous
-    Pending
-    Event
+    Synchronous,
+    Pending,
+    Event,
 }
 
 CoreCapabilityKind: enum {
-    Pure
-    NativeRequired
-    PortableFallback
-    ExplicitSimulation
+    Pure,
+    NativeRequired,
+    PortableFallback,
+    ExplicitSimulation,
 }
 
 CoreCallPureRoute: enum {
-    NoPureRoute
-    MIME
-    EncodingXML
-    Math
-    SketchHLL
-    SketchTDigest
-    SketchCMS
-    SketchReservoir
-    UI
-    IO
-    Net
-    Crypto
+    NoPureRoute,
+    MIME,
+    EncodingXML,
+    Math,
+    SketchHLL,
+    SketchTDigest,
+    SketchCMS,
+    SketchReservoir,
+    UI,
+    IO,
+    Net,
+    Crypto,
 }
 
 // Prelude names the Jet runtime route a call lowers to; SourceOwned carries
 // declaration facts only, and execution uses the owning Jet function.
 CoreCallSymbol: enum {
-    Prelude(name: String)
-    SourceOwned
+    Prelude(name: String),
+    SourceOwned,
 }
 
 CoreCallSignature: struct {
-    arity: Int
-    max_arity: Int
-    borrow_mask: [Bool]
+    arity: Int,
+    max_arity: Int,
+    borrow_mask: [Bool],
 }
 
 CoreCallCoverage: struct {
-    bits: Int
+    bits: Int,
 }
 
 CoreCallResourceAccess: struct {
-    argument: Int
-    mode: CoreCallResourceAccessMode
+    argument: Int,
+    mode: CoreCallResourceAccessMode,
 }
 
 CoreCallCompletion: struct {
-    kind: CoreCallCompletionKind
-    token: String?
-    provider: String
+    kind: CoreCallCompletionKind,
+    token: String?,
+    provider: String,
 }
 
 CoreCapabilityContract: struct {
-    kind: CoreCapabilityKind
-    provider: String?
-    fallback: String?
-    failure: String?
+    kind: CoreCapabilityKind,
+    provider: String?,
+    fallback: String?,
+    failure: String?,
 }
 
 CoreMarkerApplication: struct {
-    member: String
-    since: String
-    replacement: String
-    removed_in: String?
+    member: String,
+    since: String,
+    replacement: String,
+    removed_in: String?,
 }
 
 CoreCallRecord: struct {
-    module_name: String
-    member: String
-    receiver_types: [String]
-    signature: CoreCallSignature
-    frame_accesses: [CoreCallResourceAccess]
-    frame_completion: CoreCallCompletion?
-    fallibility: CoreCallFallibility
+    module_name: String,
+    member: String,
+    receiver_types: [String],
+    signature: CoreCallSignature,
+    frame_accesses: [CoreCallResourceAccess],
+    frame_completion: CoreCallCompletion?,
+    fallibility: CoreCallFallibility,
     // An adapter row's effects (`Net`, `Time.Wait`), named as
     // EFFECT_VOCABULARY_ROOTS names them: a root, unless one of its leaves
     // refines it, and each leaf. A source-owned row carries none: its effects
     // are its Core declaration's row.
-    effects: [String]
-    capability: CoreCapabilityContract
-    pure_route: CoreCallPureRoute
-    symbol: CoreCallSymbol
+    effects: [String],
+    capability: CoreCapabilityContract,
+    pure_route: CoreCallPureRoute,
+    symbol: CoreCallSymbol,
     // Optional checked Jet export name after special-call normalization.
-    source_target: String?
-    coverage: CoreCallCoverage
-    aot_direct: Bool
+    source_target: String?,
+    coverage: CoreCallCoverage,
+    aot_direct: Bool,
     // Rust: CoreCallRecord::native_int_result. The kernel returns its `Int`
     // results as raw machine words; engines widen them into the carrier.
-    native_int_result: Bool
-    ui_capabilities: [String]
-    marker: CoreMarkerApplication?
-    authority: AuthorityDecision?
+    native_int_result: Bool,
+    ui_capabilities: [String],
+    marker: CoreMarkerApplication?,
+    authority: AuthorityDecision?,
 }
 
 CoreCallProjectionError: enum {
-    Unknown
-    Uncovered(projection: Int)
-    Arity(expected: Int, actual: Int)
+    Unknown,
+    Uncovered(projection: Int),
+    Arity(expected: Int, actual: Int),
 }
 
 CoreCallProjectionResult: enum {
-    Row(record: CoreCallRecord)
-    Error(error: CoreCallProjectionError)
+    Row(record: CoreCallRecord),
+    Error(error: CoreCallProjectionError),
 }
 
 core_call_one_of: fn(value: String, choices: [String]) -> Bool Never! {

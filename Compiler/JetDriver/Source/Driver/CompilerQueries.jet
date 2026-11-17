@@ -53,34 +53,34 @@ use {
 // projection or opaque value. Ordinary compiler consumers request the value,
 // while the invocation service retains the original checked projection.
 JetDriverCompilerCheckProduct: enum {
-    CheckedCompilerValue(checked: JetCompilerServicesCheckedFacts)
-    RetainedCheckedProjection(projection: JetDriverCheckedProjectionResult)
-    Failed
+    CheckedCompilerValue(checked: JetCompilerServicesCheckedFacts),
+    RetainedCheckedProjection(projection: JetDriverCheckedProjectionResult),
+    Failed,
 }
 
 JetDriverCompilerCheckInput: struct {
-    parsed: JetCompilerServicesParseFacts
-    request: JetDriverCompileRequest
-    retain_projection: Bool
+    parsed: JetCompilerServicesParseFacts,
+    request: JetDriverCompileRequest,
+    retain_projection: Bool,
 }
 
 JetDriverCompilerCheckResult: struct {
-    product: JetDriverCompilerCheckProduct
-    diagnostics: [Diagnostic]
-    failed_stage: JetDriverStage?
-    complete: Bool
-    internal_problem: String?
+    product: JetDriverCompilerCheckProduct,
+    diagnostics: [Diagnostic],
+    failed_stage: JetDriverStage?,
+    complete: Bool,
+    internal_problem: String?,
 }
 
 // Invocation-owned documents use paths already resolved by the CLI's retained
 // authority adapter. This service never reopens or canonicalizes a display path.
 JetDriverCompilerQueryDocument: struct {
-    path: String
-    source: String
+    path: String,
+    source: String,
 }
 
 JetDriverCompilerQueries: struct {
-    documents: [String:String]
+    documents: [String:String],
 }
 
 jet_driver_compiler_queries_new: fn() -> JetDriverCompilerQueries Never! {

@@ -34,15 +34,15 @@ manifest: fn(name: String) -> String {
 // How a draw maps the 32-bit stream onto a range: scaled as the float
 // `next / 2^32` (package.mjs), or by remainder (mixed.mjs).
 Draw: enum {
-    Scaled
-    Remainder
+    Scaled,
+    Remainder,
 }
 
 // mulberry32: the stream depends only on the seed. The state and every step
 // are 32-bit words, as JavaScript's `>>> 0` and `Math.imul` keep them.
 Seeded: struct {
-    state: U32
-    draw: Draw
+    state: U32,
+    draw: Draw,
 
     next: fn(&self) -> Int {
         self.state = wrapping(self.state + U32{1831565813})

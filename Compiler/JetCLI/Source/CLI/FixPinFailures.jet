@@ -17,16 +17,16 @@ use {
 
 // `Pinned` is `None` when nothing is left to pin.
 JetCLIFixPinned: enum {
-    Pinned(applied: JetCLIFixApply?)
-    Refused(output: JetDriverVerbOutput)
+    Pinned(applied: JetCLIFixApply?),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The checked facts the pins read: each function's failure carrier under its
 // local name (`find`, `Shape.area`), and each enum the checker added to the
 // file's module.
 JetCLIPinFacts: struct {
-    carriers: [String:TFailureCarrier]
-    minted: [String:EnumDef]
+    carriers: [String:TFailureCarrier],
+    minted: [String:EnumDef],
 }
 
 jet_cli_fix_pin_failures: fn(file: String, before: String, color: Bool) -> JetCLIFixPinned {
@@ -203,7 +203,7 @@ jet_cli_pin_contract_text: fn(error: Type) -> String {
 jet_cli_pin_enum_text: fn(definition: EnumDef) -> String {
     text := "#Error\n{definition.name}: enum {{\n"
     loop variant in definition.variants {
-        text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)}\n"
+        text = "{text}    {variant.name}{jet_cli_pin_payload_text(variant.payload)},\n"
     }
     "{text}}}"
 }

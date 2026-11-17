@@ -62,31 +62,31 @@ X64_R10: 10
 X64_R11: 11
 
 X64Cond: enum {
-    O
-    NO
-    B
-    AE
-    E
-    NE
-    BE
-    A
-    S
-    NS
-    P
-    NP
-    L
-    GE
-    LE
-    G
+    O,
+    NO,
+    B,
+    AE,
+    E,
+    NE,
+    BE,
+    A,
+    S,
+    NS,
+    P,
+    NP,
+    L,
+    GE,
+    LE,
+    G,
 }
 
 X64Alu: enum {
-    Add
-    Sub
-    Cmp
-    And
-    Or
-    Xor
+    Add,
+    Sub,
+    Cmp,
+    And,
+    Or,
+    Xor,
 }
 
 // What one emission log row records: a conditional jump (its condition), an
@@ -95,14 +95,14 @@ X64Alu: enum {
 // by a register (`base`), a string copy or fill (rdi, and rsi for a copy),
 // or an inline-asm template spliced in whole.
 X64EmitKind: enum {
-    Jcc
-    Jmp
-    Call
-    CallReg
-    Memory
-    Div
-    String
-    Asm
+    Jcc,
+    Jmp,
+    Call,
+    CallReg,
+    Memory,
+    Div,
+    String,
+    Asm,
 }
 
 // One row: IR instruction `at` (-1 outside every instruction: the prologue,
@@ -112,23 +112,23 @@ X64EmitKind: enum {
 // the program (a numeric or shift stop) is a `stop`; `tests` is the one IR
 // slot its condition reads, -1 for the instruction's operands.
 X64EmitRow: struct {
-    at: Int
-    kind: X64EmitKind
-    cond: Int
-    base: Int
-    index: Int
-    offset: Int
-    stop: Bool
-    tests: Int
+    at: Int,
+    kind: X64EmitKind,
+    cond: Int,
+    base: Int,
+    index: Int,
+    offset: Int,
+    stop: Bool,
+    tests: Int,
 }
 
 // A function's machine code as the encoder writes it, and its emission log
 // when `logging`.
 X64Code: struct {
-    bytes: [U8]
-    logging: Bool
-    at: Int
-    log: [X64EmitRow]
+    bytes: [U8],
+    logging: Bool,
+    at: Int,
+    log: [X64EmitRow],
 }
 
 x64_code: fn() -> X64Code Never! {
@@ -692,9 +692,9 @@ x64_cqo: fn(code: &X64Code) Never! {
 }
 
 X64Shift: enum {
-    Shl
-    Shr
-    Sar
+    Shl,
+    Shr,
+    Sar,
 }
 
 x64_shift_extension: fn(shift: X64Shift) -> Int Never! {
@@ -911,11 +911,11 @@ x64_vector_store: fn(code: &X64Code, base: Int, disp: Int, src: Int) Never! {
 }
 
 X64FloatOp: enum {
-    Add
-    Sub
-    Mul
-    Div
-    Sqrt
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Sqrt,
 }
 
 // addsd/subsd/mulsd/divsd/sqrtsd dst, src (F2 0F 58|5C|59|5E|51 /r), or with

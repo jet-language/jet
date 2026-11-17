@@ -15,57 +15,57 @@ JET_DRIVER_RUST_FOREIGN_DESCRIPTOR: "jet-ffi-descriptor-v1;language=Rust;surface
 // Only signature data crosses into helper realization. Retaining ExternFn
 // would also retain default-expression ASTs and unrelated source metadata.
 JetDriverRustForeignParam: struct {
-    convention: AccessConvention
-    name: String
-    ty: Type
+    convention: AccessConvention,
+    name: String,
+    ty: Type,
 }
 
 JetDriverRustForeignFunction: struct {
-    name: String
-    params: [JetDriverRustForeignParam]
-    return_type: Type?
-    rust_path: String
-    generated: Bool
-    close: String?
+    name: String,
+    params: [JetDriverRustForeignParam],
+    return_type: Type?,
+    rust_path: String,
+    generated: Bool,
+    close: String?,
 }
 
 JetDriverRustForeignEntry: struct {
-    module_identity: ModuleID
-    crate_spec: String
-    declaration: JetDriverRustForeignFunction
+    module_identity: ModuleID,
+    crate_spec: String,
+    declaration: JetDriverRustForeignFunction,
 }
 
 JetDriverRustForeignFacts: struct {
-    entries: [JetDriverRustForeignEntry]
-    record_source: String
-    record_names: [String:String]
+    entries: [JetDriverRustForeignEntry],
+    record_source: String,
+    record_names: [String:String],
 }
 
 JetDriverRustForeignDependency: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
 }
 
 JetDriverRustForeignPlan: struct {
-    key: String
-    crate_name: String
-    shared_key: String
-    target: String
-    dependencies: [JetDriverRustForeignDependency]
-    entries: [JetDriverRustForeignEntry]
-    record_source: String
-    record_names: [String:String]
-    manifest: String
-    source: String
+    key: String,
+    crate_name: String,
+    shared_key: String,
+    target: String,
+    dependencies: [JetDriverRustForeignDependency],
+    entries: [JetDriverRustForeignEntry],
+    record_source: String,
+    record_names: [String:String],
+    manifest: String,
+    source: String,
 }
 
 #Error
 JetDriverRustForeignError: struct {
-    code: String
-    what: String
-    why: String
-    fix: String
-    detail: String?{None}
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    detail: String?{None},
 }
 
 jet_driver_rust_foreign_empty: fn() -> JetDriverRustForeignFacts Never! {
@@ -228,15 +228,15 @@ jet_driver_rust_foreign_plan: fn(facts: JetDriverRustForeignFacts, rust_toolchai
 }
 
 JetDriverRustForeignRecord: struct {
-    rust_name: String
-    fields: [Field]
-    alignment: Int?
+    rust_name: String,
+    fields: [Field],
+    alignment: Int?,
 }
 
 JetDriverRustForeignRecordIndex: struct {
-    records: [JetDriverRustForeignRecord]
-    names: [String:String]
-    aliases: [String:Type]
+    records: [JetDriverRustForeignRecord],
+    names: [String:String],
+    aliases: [String:Type],
 }
 
 jet_driver_rust_foreign_function: fn(declaration: ExternFn) -> JetDriverRustForeignFunction Never! {

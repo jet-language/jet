@@ -26,19 +26,19 @@ use {
 /// failure underneath, as MBEDTLS_ERROR_ADD does.
 #Error
 PKCS7Error: enum {
-    InvalidFormat(asn1.ASN1Error?)
-    FeatureUnavailable
-    InvalidVersion
-    InvalidContentInfo(asn1.ASN1Error?)
-    InvalidAlg(asn1.ASN1Error?)
-    InvalidCert(asn1.ASN1Error?)
-    InvalidSignerInfo(asn1.ASN1Error?)
-    BadInput
-    VerifyFail
-    CertDateInvalid
-    Asn1(asn1.ASN1Error)
-    OID(oids.OIDError)
-    PK(pk.PKError)
+    InvalidFormat(asn1.ASN1Error?),
+    FeatureUnavailable,
+    InvalidVersion,
+    InvalidContentInfo(asn1.ASN1Error?),
+    InvalidAlg(asn1.ASN1Error?),
+    InvalidCert(asn1.ASN1Error?),
+    InvalidSignerInfo(asn1.ASN1Error?),
+    BadInput,
+    VerifyFail,
+    CertDateInvalid,
+    Asn1(asn1.ASN1Error),
+    OID(oids.OIDError),
+    PK(pk.PKError),
 }
 
 /// The message is not a SEQUENCE that fills the input, or has trailing
@@ -69,32 +69,32 @@ PKCS7Error: enum {
 /// - `sig_alg_identifier`: the digestEncryptionAlgorithm.
 /// - `sig`: the encryptedDigest.
 PKCS7SignerInfo: struct {
-    version: Int
-    serial: asn1.ASN1Buf
-    issuer: [asn1.NamedData]
-    issuer_raw: asn1.ASN1Buf
-    alg_identifier: asn1.ASN1Buf
-    sig_alg_identifier: asn1.ASN1Buf
-    sig: asn1.ASN1Buf
+    version: Int,
+    serial: asn1.ASN1Buf,
+    issuer: [asn1.NamedData],
+    issuer_raw: asn1.ASN1Buf,
+    alg_identifier: asn1.ASN1Buf,
+    sig_alg_identifier: asn1.ASN1Buf,
+    sig: asn1.ASN1Buf,
 }
 
 /// A SignedData (mbedtls_pkcs7_signed_data): its one digest algorithm,
 /// the certificates it carries (none or one), and its signers. mbedtls
 /// reads no CRLs, so `no_of_crls` is always 0.
 PKCS7SignedData: struct {
-    version: Int
-    digest_alg_identifiers: asn1.ASN1Buf
-    no_of_certs: Int
-    certs: [x509crt.X509Crt]
-    no_of_crls: Int
-    signers: [PKCS7SignerInfo]
+    version: Int,
+    digest_alg_identifiers: asn1.ASN1Buf,
+    no_of_certs: Int,
+    certs: [x509crt.X509Crt],
+    no_of_crls: Int,
+    signers: [PKCS7SignerInfo],
 }
 
 /// A parsed message (mbedtls_pkcs7): its DER, which every buffer indexes,
 /// and the SignedData.
 PKCS7: struct {
-    raw: [U8]
-    signed_data: PKCS7SignedData
+    raw: [U8],
+    signed_data: PKCS7SignedData,
 }
 
 /// The only SignedData and SignerInfo version mbedtls reads

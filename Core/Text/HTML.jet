@@ -91,7 +91,7 @@ text_escape: fn(text: String) -> String Never! { escape_quote(text, false) }
 // `& < >`, and one inside an attribute value escapes its quotes too.
 // `HTML.raw(text)` is the audited escape hatch.
 HTML: struct {
-    markup: String
+    markup: String,
 
     impl Display {
         display: fn(self) -> String { self.markup.copy() }
@@ -113,8 +113,8 @@ HTML: struct {
     // is and any other value as its text-escaped display text. `build` then
     // escapes a hole inside an attribute value for that value (html_value_hole).
     impl CheckedText {
-        Error: Never
-        Hole: String
+        Error: Never,
+        Hole: String,
 
         check: fn(_text: String) -[]> Never! { return Ok() }
 

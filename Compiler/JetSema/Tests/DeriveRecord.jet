@@ -54,9 +54,9 @@ use {
 derive_record_source: fn(point_fields: String, extra: String) -> String {
     lines: [String]{
         "Shape: enum {{",
-        "    Circle(radius: Float)",
-        "    Rect(width: Int, height: Int)",
-        "    Empty",
+        "    Circle(radius: Float),",
+        "    Rect(width: Int, height: Int),",
+        "    Empty,",
         "}}",
         "",
         "Point: struct {{",
@@ -64,8 +64,8 @@ derive_record_source: fn(point_fields: String, extra: String) -> String {
         "}}",
         "",
         "Level: enum {{",
-        "    Low",
-        "    High",
+        "    Low,",
+        "    High,",
         "}}",
         "",
     }
@@ -73,10 +73,10 @@ derive_record_source: fn(point_fields: String, extra: String) -> String {
 }
 
 // The fields of `Point` in derive_record_source.
-DERIVE_RECORD_POINT: "    x: Int\n    y: Int"
+DERIVE_RECORD_POINT: "    x: Int,\n    y: Int,"
 
 // Two more types derive_record_source can add.
-DERIVE_RECORD_EXTRA: "Size: struct {{\n    width: Int\n}}\n\nMode: enum {{\n    On\n    Off\n}}\n"
+DERIVE_RECORD_EXTRA: "Size: struct {{\n    width: Int,\n}}\n\nMode: enum {{\n    On,\n    Off,\n}}\n"
 
 // The items of `source` as parsed.
 derive_record_items: fn(source: String) -> [Item] {
@@ -154,7 +154,7 @@ derive_record_apply: fn(source: String, memo: &SemaDeriveMemo) -> Int {
 
 #Test("a type that differs from the one a derive record was made from expands its own") {
     memo := derive_record_memo(derive_record_source(DERIVE_RECORD_POINT, ""))
-    taken: derive_record_apply(derive_record_source("    x: Int\n    y: Int\n    z: Int", ""), memo)
+    taken: derive_record_apply(derive_record_source("    x: Int,\n    y: Int,\n    z: Int,", ""), memo)
     assert(taken > 0)
     assert(taken < memo.keys.len())
 }

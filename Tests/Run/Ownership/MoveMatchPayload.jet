@@ -4,8 +4,8 @@
 /// payload moved, in a loop, and through a nested pattern. A `subject.move()`
 /// moves into the match, so its payload binding owns the payload outright.
 Secret: struct {
-    id: Int
-    token: String
+    id: Int,
+    token: String,
 
     impl Close {
         close: fn(&&self) { print("close {self.id}") }
@@ -13,13 +13,13 @@ Secret: struct {
 }
 
 Slot: enum {
-    Full(secret: Secret, label: String)
-    Empty
+    Full(secret: Secret, label: String),
+    Empty,
 }
 
 Holder: struct {
-    slot: Slot
-    keep: Secret
+    slot: Slot,
+    keep: Secret,
 }
 
 consume: fn(secret: &&Secret) { print("consume {secret.id}") }

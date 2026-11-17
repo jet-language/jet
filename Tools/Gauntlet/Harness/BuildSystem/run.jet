@@ -42,33 +42,33 @@ USAGE: "usage: jet Tools/Gauntlet/Harness/BuildSystem/run.jet -- --jet JET [--wo
 EXPECTED: "Tools/Perf/BuildTime/Midsize.out"
 
 Options: struct {
-    jet: String
-    work_dir: String?
-    receipt: String?
-    samples: Int?
+    jet: String,
+    work_dir: String?,
+    receipt: String?,
+    samples: Int?,
     warmups: Int?
 }
 
 #Codable
 Machine: struct {
-    cpu_model: String
-    threads: Int
-    memory_bytes: Int
-    kernel: String
+    cpu_model: String,
+    threads: Int,
+    memory_bytes: Int,
+    kernel: String,
     nix: String
 }
 
 #Codable
 JetBinary: struct {
-    path: String
+    path: String,
     version: String
 }
 
 #Codable
 Summary: struct {
-    samples_ns: [Int]
-    median_ns: Int
-    min_ns: Int
+    samples_ns: [Int],
+    median_ns: Int,
+    min_ns: Int,
     max_ns: Int
 }
 
@@ -76,43 +76,43 @@ Summary: struct {
 // and an unmeasured cell no ratio.
 #Codable
 CellReceipt: struct {
-    id: String
-    target: Dyn
-    status: String
-    jet: Summary?
-    nix: Summary?
-    ratio: Float?
+    id: String,
+    target: Dyn,
+    status: String,
+    jet: Summary?,
+    nix: Summary?,
+    ratio: Float?,
     verdict: String
 }
 
 #Codable
 Receipt: struct {
-    schema: String
-    started_at: String
-    machine: Machine
-    jet: JetBinary
-    samples: Int
-    warmups: Int
-    cells: [CellReceipt]
-    failures: [String]
-    passed: Bool
+    schema: String,
+    started_at: String,
+    machine: Machine,
+    jet: JetBinary,
+    samples: Int,
+    warmups: Int,
+    cells: [CellReceipt],
+    failures: [String],
+    passed: Bool,
     finished_at: String
 }
 
 // One finished step: its exit code (None when it could not start, overran
 // the limit or died by a signal), its output and its wall time.
 Step: struct {
-    code: Int?
-    output: String
-    errors: String
+    code: Int?,
+    output: String,
+    errors: String,
     wall_ns: Int
 }
 
 // A cell's samples per peer, the warmups left out.
 Row: struct {
-    id: String
-    target: Dyn
-    jet: [Int]
+    id: String,
+    target: Dyn,
+    jet: [Int],
     nix: [Int]
 }
 
@@ -198,21 +198,21 @@ verdict_of: fn(target: Dyn, ratio: Float) -> String {
 
 // The project, the private stores and caches, and the samples so far.
 Workspace: struct {
-    work_dir: String
-    project: String
-    jet_dir: String
-    nix_dir: String
-    jet_store: String
-    nix_store: String
-    nix_store_root: String
-    nix_cache: String
-    flake: String
-    jet: String
-    repo: String
-    expected: String
-    nix_out: String
-    edits: Int
-    rows: [Row]
+    work_dir: String,
+    project: String,
+    jet_dir: String,
+    nix_dir: String,
+    jet_store: String,
+    nix_store: String,
+    nix_store_root: String,
+    nix_cache: String,
+    flake: String,
+    jet: String,
+    repo: String,
+    expected: String,
+    nix_out: String,
+    edits: Int,
+    rows: [Row],
 
     // Each cell word with the workspace's {jet}, {flake}, {nix_store} and
     // {nix_cache} in place.

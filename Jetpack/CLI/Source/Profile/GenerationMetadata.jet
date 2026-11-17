@@ -30,8 +30,8 @@ CLI_INT_MAX: 9223372036854775807
 // The checked `current` pointer: which generation is live, bound to its
 // witness and a checksum over the preceding lines.
 ToolProfilePointer: struct {
-    generation: Int
-    witness: String
+    generation: Int,
+    witness: String,
 
     format: fn(self) -> String CLIError! {
         if self.generation == 0 -> return Err(CLIError.InvalidData("tool generation is zero"))
@@ -62,15 +62,15 @@ ToolProfilePointer: struct {
 
 // One tool in a generation record.
 ToolGenerationTool: struct {
-    name: String
-    version: String
-    source: String
-    reference: String
-    output_hash: String
-    store_root: String
-    bins: [String]
-    members: [String]
-    projection_hashes: [String]
+    name: String,
+    version: String,
+    source: String,
+    reference: String,
+    output_hash: String,
+    store_root: String,
+    bins: [String],
+    members: [String],
+    projection_hashes: [String],
 
     // The canonical identity order of a generation's tools.
     before: fn(self, other: ToolGenerationTool) -> Bool Never! {
@@ -115,9 +115,9 @@ ToolGenerationTool: struct {
 
 // A generation's immutable `meta.json` record.
 ToolGenerationMetadata: struct {
-    generation: Int
-    created_at: Int
-    tools: [ToolGenerationTool]
+    generation: Int,
+    created_at: Int,
+    tools: [ToolGenerationTool],
 
     format: fn(self) -> String CLIError! {
         self.validate()

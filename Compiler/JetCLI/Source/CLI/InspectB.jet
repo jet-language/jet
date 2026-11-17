@@ -61,8 +61,8 @@ jet_cli_inspect_b: fn(argv: [String], command: String, jet_argv: [String], args:
 // The inspect commands the host carries out because they run another process
 // or evaluate a config surface through the compiler's comptime stage.
 JetCLIInspectBPlan: enum {
-    Engine(engine: String, verb: String, argv: [String])
-    Env(file: String, source: String, base_dir: String, color: Bool, json: Bool)
+    Engine(engine: String, verb: String, argv: [String]),
+    Env(file: String, source: String, base_dir: String, color: Bool, json: Bool),
 }
 
 // `dispatch`: run `engine` with `argv` on inherited stdio.
@@ -81,8 +81,8 @@ jet_cli_inspect_b_host: fn(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
 
 // The shared Why and default Fix of a spanless CLI code.
 JetCLIDiagnosticCopy: struct {
-    why: String
-    fix: String
+    why: String,
+    fix: String,
 }
 
 jet_cli_diagnostic_copy: fn(code: String) -> JetCLIDiagnosticCopy Never! {
@@ -160,9 +160,9 @@ JET_CLI_FIRST_PARTY_RESERVED: [String]{
 
 // One reserved word or sigil.
 JetCLIReservedEntry: struct {
-    spelling: String
-    kind: String
-    note: String
+    spelling: String,
+    kind: String,
+    note: String,
 }
 
 // What to write instead of each retired keyword, in the lexer's table order.
@@ -279,8 +279,8 @@ jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
 
 // One topic: a byte range of the full digest.
 JetCLIDigestSlice: struct {
-    topic: String
-    bytes: String
+    topic: String,
+    bytes: String,
 }
 
 jet_cli_digest_section: fn(title: String, body: String) -> String Never! {
@@ -342,7 +342,7 @@ jet_cli_digest_marker_declaration: fn(rule: TAppliedRule) -> String Never! {
     if rule.companion_site == .Val(companion) {
         settings.push("companion: [{companion.rule}, .{companion.site}]")
     }
-    fields.push("impl Marker {{ {settings.join("; ")} }}")
+    fields.push("impl Marker {{ {settings.join(", ")} }}")
     "{rule.name}: struct {{ {fields.join(", ")} }}"
 }
 
@@ -818,8 +818,8 @@ jet_cli_inspect_absolutize: fn(raw: String) -[FS, Env]> String Never! {
 
 // The project root of the current directory, or the plan that stopped.
 JetCLIInspectRoot: enum {
-    Root(path: String)
-    Refused(plan: JetCLIPlan)
+    Root(path: String),
+    Refused(plan: JetCLIPlan),
 }
 
 // `require_manifest_root`: use the same checked Package resolver as

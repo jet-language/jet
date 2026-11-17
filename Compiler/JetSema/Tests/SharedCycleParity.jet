@@ -86,11 +86,11 @@ shared_cycle_expect: fn(failures: &[String], source: String, places: [String]) {
     }
 }
 
-SHARED_CYCLE_NODE: "Node: struct {{\nvalue: Int\nnext: Shared<Node>?\n}}\n"
+SHARED_CYCLE_NODE: "Node: struct {{\nvalue: Int,\nnext: Shared<Node>?,\n}}\n"
 
-SHARED_CYCLE_PERSON: "Person: struct {{\nname: String\nparent: Shared.Weak<Person>?\nkids: [Shared<Person>]\n}}\n"
+SHARED_CYCLE_PERSON: "Person: struct {{\nname: String,\nparent: Shared.Weak<Person>?,\nkids: [Shared<Person>],\n}}\n"
 
-SHARED_CYCLE_FEED: "Feed: struct {{\nname: String\nlisteners: [fn() -> Int]\npeers: [Shared<Feed>]\n}}\n"
+SHARED_CYCLE_FEED: "Feed: struct {{\nname: String,\nlisteners: [fn() -> Int],\npeers: [Shared<Feed>],\n}}\n"
 
 #Test("shared_cycle_parity") {
     failures := [String]{}
@@ -109,11 +109,11 @@ SHARED_CYCLE_FEED: "Feed: struct {{\nname: String\nlisteners: [fn() -> Int]\npee
     // A strong path through another type closes the loop too. The active-cycle
     // cut through Looping must not be memoized as negative: the later branch
     // from Branch reaches Owner.
-    shared_cycle_expect(failures, "First: struct {{\nsecond: Shared<Second>?\n}}\nSecond: struct {{\nfirst: Shared<First>?\n}}\nrun: fn() {{\nf: Shared{{First{{second: None}}}}\ns: Shared{{Second{{first: Val(f)}}}}\nf.second = Val(s)\n}}", [String]{"f.second"})
-    shared_cycle_expect(failures, "Owner: struct {{\nbranch: Shared<Branch>?\n}}\nBranch: struct {{\nlooping: Shared<Looping>?\nowner: Shared<Owner>?\n}}\nLooping: struct {{\nbranch: Shared<Branch>?\n}}\nrun: fn() {{\no: Shared{{Owner{{branch: None}}}}\nb: Shared{{Branch{{looping: None, owner: Val(o)}}}}\no.branch = Val(b)\n}}", [String]{"o.branch"})
+    shared_cycle_expect(failures, "First: struct {{\nsecond: Shared<Second>?,\n}}\nSecond: struct {{\nfirst: Shared<First>?,\n}}\nrun: fn() {{\nf: Shared{{First{{second: None}}}}\ns: Shared{{Second{{first: Val(f)}}}}\nf.second = Val(s)\n}}", [String]{"f.second"})
+    shared_cycle_expect(failures, "Owner: struct {{\nbranch: Shared<Branch>?,\n}}\nBranch: struct {{\nlooping: Shared<Looping>?,\nowner: Shared<Owner>?,\n}}\nLooping: struct {{\nbranch: Shared<Branch>?,\n}}\nrun: fn() {{\no: Shared{{Owner{{branch: None}}}}\nb: Shared{{Branch{{looping: None, owner: Val(o)}}}}\no.branch = Val(b)\n}}", [String]{"o.branch"})
     // A weak back-edge and an acyclic leaf never close a cycle.
-    shared_cycle_expect(failures, "Leaf: struct {{\nvalue: Int\n}}\nHolder: struct {{\nleaf: Shared<Leaf>?\n}}\nfill: fn(h: Shared<Holder>, l: Shared<Leaf>) {{\nh.leaf = Val(l)\n}}", [String]{})
-    shared_cycle_expect(failures, "Back: struct {{\nnext: Shared.Weak<Back>?\n}}\nlink: fn(a: Shared<Back>, b: Shared<Back>) {{\na.next = Val(b.downgrade())\n}}", [String]{})
+    shared_cycle_expect(failures, "Leaf: struct {{\nvalue: Int,\n}}\nHolder: struct {{\nleaf: Shared<Leaf>?,\n}}\nfill: fn(h: Shared<Holder>, l: Shared<Leaf>) {{\nh.leaf = Val(l)\n}}", [String]{})
+    shared_cycle_expect(failures, "Back: struct {{\nnext: Shared.Weak<Back>?,\n}}\nlink: fn(a: Shared<Back>, b: Shared<Back>) {{\na.next = Val(b.downgrade())\n}}", [String]{})
     // A function value holds what it captures: storing one that may capture a
     // strong handle to the cell closes the loop.
     shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}run: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nhandle: feed.copy()\nfeed.listeners.push(fn() {{ handle.strong_count() }})\n}}", [String]{"feed.listeners"})

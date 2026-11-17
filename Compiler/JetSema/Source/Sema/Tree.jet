@@ -82,89 +82,89 @@ use jet_foundation.[
 ]
 
 TStrPart: enum {
-    Literal(text: String)
-    Interpolation(value: TExpr, format: TStrFormat)
+    Literal(text: String),
+    Interpolation(value: TExpr, format: TStrFormat),
 }
 
 TCallArg: struct {
-    value: TExpr
-    template_items: [SymbolID]
-    borrow: Bool
-    mut_borrow: Bool
-    fn_coerce: TFnCoerce?
-    widen_to_vec: Bool
-    widen_to_union: Type?
-    box_as_trait: Type?
-    label: String?
-    spread: Bool
+    value: TExpr,
+    template_items: [SymbolID],
+    borrow: Bool,
+    mut_borrow: Bool,
+    fn_coerce: TFnCoerce?,
+    widen_to_vec: Bool,
+    widen_to_union: Type?,
+    box_as_trait: Type?,
+    label: String?,
+    spread: Bool,
 }
 
 TEnumArg: struct {
-    value: TExpr
+    value: TExpr,
 }
 
 TEnumPayload: enum {
-    Unit
-    Positional(args: [TEnumArg])
-    Named(fields: [TNamedEnumArg])
+    Unit,
+    Positional(args: [TEnumArg]),
+    Named(fields: [TNamedEnumArg]),
 }
 
 TNamedEnumArg: struct {
-    name: String
-    value: TEnumArg
+    name: String,
+    value: TEnumArg,
 }
 
 TPatternShape: enum {
-    Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
-    Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
-    Absent(span: Span)
-    Ok(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
-    Err(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
-    Range(lo: Int, hi: Int, span: Span)
-    Or(alternatives: [TPatternShape], span: Span)
-    Struct(fields: [TPatternField], span: Span)
-    List(items: [TPatternBinding], rest: TListPatternRest?, span: Span)
-    Map(entries: [TMapPatternEntry], rest: Bool, span: Span)
-    Text(parts: [TTextPatternPart], span: Span)
-    Binary(parts: [TBinaryPatternPart], span: Span)
+    Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span),
+    Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span),
+    Absent(span: Span),
+    Ok(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span),
+    Err(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span),
+    Range(lo: Int, hi: Int, span: Span),
+    Or(alternatives: [TPatternShape], span: Span),
+    Struct(fields: [TPatternField], span: Span),
+    List(items: [TPatternBinding], rest: TListPatternRest?, span: Span),
+    Map(entries: [TMapPatternEntry], rest: Bool, span: Span),
+    Text(parts: [TTextPatternPart], span: Span),
+    Binary(parts: [TBinaryPatternPart], span: Span),
 }
 
 // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
 
 // S31: a checked nested payload pattern with the payload type's owner.
 TNestedPattern: struct {
-    shape: TPatternShape
-    enum_type: SymbolID?
+    shape: TPatternShape,
+    enum_type: SymbolID?,
 }
 
 TPattern: struct {
-    shape: TPatternShape
-    bindings: [TPatternBindingFact]
-    enum_type: SymbolID?
-    position: TPatternPosition
-    mutable: Bool
-    boxed: Bool
+    shape: TPatternShape,
+    bindings: [TPatternBindingFact],
+    enum_type: SymbolID?,
+    position: TPatternPosition,
+    mutable: Bool,
+    boxed: Bool,
 }
 
 TPatternBinding: enum {
-    Wildcard
-    Bind(name: String, span: Span)
-    Range(lo: Int, hi: Int)
-    Nested(pattern: TNestedPattern)
-    Value(value: TExpr)
+    Wildcard,
+    Bind(name: String, span: Span),
+    Range(lo: Int, hi: Int),
+    Nested(pattern: TNestedPattern),
+    Value(value: TExpr),
 }
 
 TPatternField: enum {
-    Bind(field: String, local: String, span: Span)
-    Value(field: String, value: TExpr, span: Span)
-    Nested(field: String, pattern: TNestedPattern, span: Span)
+    Bind(field: String, local: String, span: Span),
+    Value(field: String, value: TExpr, span: Span),
+    Nested(field: String, pattern: TNestedPattern, span: Span),
 }
 
 TMapPatternEntry: struct {
-    key: TExpr
-    optional: Bool
-    slot: TPatternBinding
-    span: Span
+    key: TExpr,
+    optional: Bool,
+    slot: TPatternBinding,
+    span: Span,
 }
 
 // Logical key identity ignores source spelling and resolved constant aliases.
@@ -195,184 +195,184 @@ tree_pattern_key_identity: fn(key: TExpr, context: SemaCheckContext) -> String? 
 }
 
 TMatchArm: struct {
-    pattern: TPattern
-    body: [TStmt]
+    pattern: TPattern,
+    body: [TStmt],
 }
 
 TIfCond: enum {
-    Plain(value: TExpr)
-    And(left: TIfCond, right: TIfCond)
-    IfLet(pattern: TPattern, subj: TExpr)
+    Plain(value: TExpr),
+    And(left: TIfCond, right: TIfCond),
+    IfLet(pattern: TPattern, subj: TExpr),
 }
 
 // A checked `task.group g(limit: n, stack: bytes)`'s arguments.
 TTaskGroupArgs: struct {
-    limit: TExpr?
-    stack: TExpr?
+    limit: TExpr?,
+    stack: TExpr?,
 }
 
 TContract: struct {
-    kind: TContractKind
-    condition: TExpr
-    message: TExpr
-    file: String
-    line: Int
-    span: Span
-    disposition: TContractDisposition
-    site: TContractSite
+    kind: TContractKind,
+    condition: TExpr,
+    message: TExpr,
+    file: String,
+    line: Int,
+    span: Span,
+    disposition: TContractDisposition,
+    site: TContractSite,
 }
 
 TStmt: enum {
-    Contract(contract: TContract)
-    ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
-    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
-    RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span)
-    TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
-    StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
-    ListDestructure(temp: TLocal, init: TExpr, count: Int, line: Int, elements: [TLocal], span: Span)
-    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, line: Int, span: Span)
-    CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
-    ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
-    Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
-    ExprStmt(value: TExpr, span: Span)
-    Return(value: TExpr?, span: Span)
-    TaskGroup(group: TLocal, args: TTaskGroupArgs, body: [TStmt], span: Span)
-    DeferClose(close: TExpr, resource: SymbolID, span: Span)
-    If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
-    Loop(label: String?, body: [TStmt], span: Span)
-    While(label: String?, condition: TExpr, body: [TStmt], span: Span)
-    Break(label: String?, span: Span)
-    BreakValue(label: String?, value: TExpr, span: Span)
-    Continue(label: String?, span: Span)
-    Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span)
-    EnumMatch(scrutinee: TExpr, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
-    RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span)
-    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
-    Inline(body: [TStmt], span: Span)
-    DebugOnly(body: [TStmt], span: Span)
-    DeepCheck(body: [TStmt], span: Span)
-    MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
-    Unsafe(gate: TUnsafeGate, body: [TStmt])
-    UnsafeBlock(gate: TUnsafeGate, body: [TStmt], span: Span)
-    SentryPolicy(enabled: Bool, body: [TStmt], span: Span)
-    Impure(body: [TStmt], span: Span)
-    Reactive(executable: TLambda, span: Span)
-    Region(body: [TStmt], span: Span)
-    Layout(handle: TLocal, label: String, body: [TStmt], span: Span)
-    ContextBlock(guards: [TContextGuard], body: [TStmt], span: Span)
-    Live(body: [TStmt], span: Span)
-    Shield(body: [TStmt], span: Span)
-    Defer(body: [TStmt], span: Span)
-    ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
-    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
-    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
+    Contract(contract: TContract),
+    ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span),
+    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span),
+    RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span),
+    TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span),
+    StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span),
+    ListDestructure(temp: TLocal, init: TExpr, count: Int, line: Int, elements: [TLocal], span: Span),
+    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, line: Int, span: Span),
+    CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span),
+    ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span),
+    Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span),
+    ExprStmt(value: TExpr, span: Span),
+    Return(value: TExpr?, span: Span),
+    TaskGroup(group: TLocal, args: TTaskGroupArgs, body: [TStmt], span: Span),
+    DeferClose(close: TExpr, resource: SymbolID, span: Span),
+    If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span),
+    Loop(label: String?, body: [TStmt], span: Span),
+    While(label: String?, condition: TExpr, body: [TStmt], span: Span),
+    Break(label: String?, span: Span),
+    BreakValue(label: String?, value: TExpr, span: Span),
+    Continue(label: String?, span: Span),
+    Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span),
+    EnumMatch(scrutinee: TExpr, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span),
+    RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span),
+    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span),
+    Inline(body: [TStmt], span: Span),
+    DebugOnly(body: [TStmt], span: Span),
+    DeepCheck(body: [TStmt], span: Span),
+    MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span),
+    Unsafe(gate: TUnsafeGate, body: [TStmt]),
+    UnsafeBlock(gate: TUnsafeGate, body: [TStmt], span: Span),
+    SentryPolicy(enabled: Bool, body: [TStmt], span: Span),
+    Impure(body: [TStmt], span: Span),
+    Reactive(executable: TLambda, span: Span),
+    Region(body: [TStmt], span: Span),
+    Layout(handle: TLocal, label: String, body: [TStmt], span: Span),
+    ContextBlock(guards: [TContextGuard], body: [TStmt], span: Span),
+    Live(body: [TStmt], span: Span),
+    Shield(body: [TStmt], span: Span),
+    Defer(body: [TStmt], span: Span),
+    ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span),
+    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span),
+    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span),
 }
 
 // An `#On(.Deep)` body: emitted only in a function the compile's
 // `--deep-checks` request selects.
 
 TRangeArm: struct {
-    lo: Int
-    hi: Int
-    body: [TStmt]
+    lo: Int,
+    hi: Int,
+    body: [TStmt],
 }
 
 TMixedArm: struct {
-    condition: TExpr
-    body: [TStmt]
+    condition: TExpr,
+    body: [TStmt],
 }
 
 // One `#Context` guard: a context field, or with `key` set the value of the
 // `#ContextKey` constant whose SymbolID key text it is (ContextKeys.jet).
 TContextGuard: struct {
-    field: String
-    value: TExpr
-    key: String{""}
+    field: String,
+    value: TExpr,
+    key: String{""},
 }
 
 TUnitRounding: struct {
-    mode: TUnitRoundingMode
-    digits: TExpr
+    mode: TUnitRoundingMode,
+    digits: TExpr,
 }
 
 TExprKind: enum {
-    IntLit(value: Int, width: TIntegerWidth?)
-    StrLit(parts: [TStrPart])
-    Local(local: TLocal)
-    InlineBlock(body: [TStmt])
-    CtLit(value: TComptimeValue)
-    Call(callee: DeclID, type_args: [Type], args: [TCallArg])
-    IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
-    MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
-    DistinctCtor(argument: TExpr)
-    TraitBox(value: TExpr, target: Type)
-    UnitConvert(argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
-    MathBuiltin(type_name: String, function: String, args: [TExpr])
-    PreciseBuiltin(type_name: String, function: String, args: [TExpr])
-    Print(value: TExpr)
-    Drop(value: TExpr)
-    Close(value: TExpr)
-    Move(value: TExpr)
-    RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool)
-    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
-    CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
-    Unary(op: TUnaryOp, operand: TExpr)
-    StructLit(fields: [TStructFieldValue])
-    Field(receiver: TExpr, field: TFieldRef)
-    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
-    Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
-    Range(start: TExpr, end: TExpr, exclusive: Bool)
-    Tuple(values: [TExpr])
-    List(values: [TExpr], trait_coercion: Type?)
-    Map(entries: [TMapEntry])
-    Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
-    TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
-    Lambda(value: TLambda)
-    Borrow(place: TExpr, access: AccessConvention)
-    RawAddressOf(place: TPlace)
-    Deref(value: TExpr)
-    PtrFromAddr(address: TExpr, element: Type)
-    LayoutLiteral(value: TExpr)
-    LayoutCompare(op: TBinaryOp, lhs: TExpr, rhs: TExpr)
-    SharedGuardValue(guard: TExpr)
-    SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
-    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
-    HostCall(call: THostCall)
-    AllocNew(ctor: TAllocCtor, args: [TCallArg])
-    EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
-    JSONLit(variant: String, arg: TExpr?, clone_arg: Bool)
-    ListLit(values: [TExpr])
-    ListSpread(parts: [TListSpreadPart])
-    MapLit(entries: [TMapEntry])
-    PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
-    Clone(value: TExpr, fact: CopyFact)
-    ExplicitCopy(value: TExpr)
-    MaterializeView(value: TExpr)
-    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
-    BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
-    IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
-    RawOf(value: TExpr)
-    DistinctRaw(value: TExpr)
-    Present(value: TExpr)
-    Ok(value: TExpr)
-    Err(value: TExpr)
-    OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?)
-    OptField(base: TExpr, member: String, flatten: Bool)
-    OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool)
-    PatternMatches(subject: TExpr, pattern: TPattern)
-    ClosureMethod(receiver: TExpr, operation: TClosureOp, args: [TExpr])
-    NumericMethod(receiver: TExpr, operation: TNumericOp)
-    NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr)
-    OverflowOpt(prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr)
-    HandleMethod(receiver: TExpr, operation: THandleOp, args: [TExpr])
-    CoreClosureCall(kind: TCoreClosureKind)
-    TaskGroupAll(tasks: TExpr)
-    TaskGroupRace(tasks: TExpr)
-    TaskGroupAny(tasks: TExpr)
-    SelectRecv(builder: TExpr, channel: TExpr)
-    SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
-    FnValue(kind: TFnValueKind)
-    Flat(index: Int)
+    IntLit(value: Int, width: TIntegerWidth?),
+    StrLit(parts: [TStrPart]),
+    Local(local: TLocal),
+    InlineBlock(body: [TStmt]),
+    CtLit(value: TComptimeValue),
+    Call(callee: DeclID, type_args: [Type], args: [TCallArg]),
+    IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type),
+    MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg]),
+    DistinctCtor(argument: TExpr),
+    TraitBox(value: TExpr, target: Type),
+    UnitConvert(argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int),
+    MathBuiltin(type_name: String, function: String, args: [TExpr]),
+    PreciseBuiltin(type_name: String, function: String, args: [TExpr]),
+    Print(value: TExpr),
+    Drop(value: TExpr),
+    Close(value: TExpr),
+    Move(value: TExpr),
+    RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool),
+    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr),
+    CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool]),
+    Unary(op: TUnaryOp, operand: TExpr),
+    StructLit(fields: [TStructFieldValue]),
+    Field(receiver: TExpr, field: TFieldRef),
+    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc),
+    Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc),
+    Range(start: TExpr, end: TExpr, exclusive: Bool),
+    Tuple(values: [TExpr]),
+    List(values: [TExpr], trait_coercion: Type?),
+    Map(entries: [TMapEntry]),
+    Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier),
+    TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String),
+    Lambda(value: TLambda),
+    Borrow(place: TExpr, access: AccessConvention),
+    RawAddressOf(place: TPlace),
+    Deref(value: TExpr),
+    PtrFromAddr(address: TExpr, element: Type),
+    LayoutLiteral(value: TExpr),
+    LayoutCompare(op: TBinaryOp, lhs: TExpr, rhs: TExpr),
+    SharedGuardValue(guard: TExpr),
+    SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda),
+    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier),
+    HostCall(call: THostCall),
+    AllocNew(ctor: TAllocCtor, args: [TCallArg]),
+    EnumLit(enum_type: String, variant: String, payload: TEnumPayload),
+    JSONLit(variant: String, arg: TExpr?, clone_arg: Bool),
+    ListLit(values: [TExpr]),
+    ListSpread(parts: [TListSpreadPart]),
+    MapLit(entries: [TMapEntry]),
+    PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String),
+    Clone(value: TExpr, fact: CopyFact),
+    ExplicitCopy(value: TExpr),
+    MaterializeView(value: TExpr),
+    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg]),
+    BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr]),
+    IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr),
+    RawOf(value: TExpr),
+    DistinctRaw(value: TExpr),
+    Present(value: TExpr),
+    Ok(value: TExpr),
+    Err(value: TExpr),
+    OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?),
+    OptField(base: TExpr, member: String, flatten: Bool),
+    OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool),
+    PatternMatches(subject: TExpr, pattern: TPattern),
+    ClosureMethod(receiver: TExpr, operation: TClosureOp, args: [TExpr]),
+    NumericMethod(receiver: TExpr, operation: TNumericOp),
+    NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr),
+    OverflowOpt(prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr),
+    HandleMethod(receiver: TExpr, operation: THandleOp, args: [TExpr]),
+    CoreClosureCall(kind: TCoreClosureKind),
+    TaskGroupAll(tasks: TExpr),
+    TaskGroupRace(tasks: TExpr),
+    TaskGroupAny(tasks: TExpr),
+    SelectRecv(builder: TExpr, channel: TExpr),
+    SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?),
+    FnValue(kind: TFnValueKind),
+    Flat(index: Int),
 }
 
 // #4318: `fact` is the sema decision behind the copy; IR keeps it on Copy.
@@ -385,10 +385,10 @@ TExprKind: enum {
 // one in its context (sema_check_record_expr_id). A node built without one is
 // AST_NODE_GENERATED and takes a fresh id when it is flattened.
 TExpr: struct {
-    ty: Type
-    kind: TExprKind
-    span: Span
-    id: Int{-1}
+    ty: Type,
+    kind: TExprKind,
+    span: Span,
+    id: Int{-1},
 }
 
 // Gives `value` a type other than the one its checked source node has (a
@@ -400,52 +400,52 @@ tree_expr_retype: fn(value: &TExpr, ty: Type) Never! {
 }
 
 TStructFieldValue: struct {
-    field: TFieldRef
-    value: TExpr
-    boxed: Bool
+    field: TFieldRef,
+    value: TExpr,
+    boxed: Bool,
 }
 
 TMapEntry: struct {
-    key: TExpr
-    value: TExpr
+    key: TExpr,
+    value: TExpr,
 }
 
 TListSpreadPart: enum {
-    Element(value: TExpr)
-    Spread(value: TExpr)
+    Element(value: TExpr),
+    Spread(value: TExpr),
 }
 
 TScopeMemberKind: enum {
-    Setup
-    ExpectFail(code: String?, message: String?)
-    Timeout(duration: TExpr)
-    Measure
-    Skip
+    Setup,
+    ExpectFail(code: String?, message: String?),
+    Timeout(duration: TExpr),
+    Measure,
+    Skip,
 }
 
 TOrFallback: enum {
-    Value(value: TExpr)
-    Return(value: TExpr?)
-    Panic(message: TExpr, location: TPanicLoc)
-    Break
-    Continue
-    BreakLabel(label: String)
-    ContinueLabel(label: String)
+    Value(value: TExpr),
+    Return(value: TExpr?),
+    Panic(message: TExpr, location: TPanicLoc),
+    Break,
+    Continue,
+    BreakLabel(label: String),
+    ContinueLabel(label: String),
 }
 
 THostCall: enum {
-    Method(receiver: TExpr, method: String, args: [TExpr])
-    CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
-    OptionProbe(inner: TExpr, kind: TOptionProbe)
-    TupleIndex(base: TExpr, index: Int)
-    SwitchSubjectValue
-    YieldSend(value: TExpr)
-    NumericBounds(ty: Type, member: String)
-    ComptimeInput(builtin: String, path: TExpr, pin: String?)
-    MemoStats(function: DeclID, bound: String)
-    ContextRead(field: String)
-    ContextGet(key: String, default: TExpr, equatable: Bool)
-    DebugTrace(write: TExpr)
+    Method(receiver: TExpr, method: String, args: [TExpr]),
+    CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool),
+    OptionProbe(inner: TExpr, kind: TOptionProbe),
+    TupleIndex(base: TExpr, index: Int),
+    SwitchSubjectValue,
+    YieldSend(value: TExpr),
+    NumericBounds(ty: Type, member: String),
+    ComptimeInput(builtin: String, path: TExpr, pin: String?),
+    MemoStats(function: DeclID, bound: String),
+    ContextRead(field: String),
+    ContextGet(key: String, default: TExpr, equatable: Bool),
+    DebugTrace(write: TExpr),
 }
 
 // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): its
@@ -471,276 +471,276 @@ THostCall: enum {
 // compiler, which prints it while compiling.
 
 TCoreClosureKind: enum {
-    Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
-    Guard(executable: TLambda)
-    OnCommit(handle_name: String, executable: TLambda)
-    OnRollback(handle_name: String, executable: TLambda)
-    UIClickSlot(executable: TLambda)
-    UIDropSlot(executable: TLambda)
-    ReactiveDerived(executable: TLambda)
-    ReactiveEffect(executable: TLambda)
-    UIReactiveRender(executable: TLambda)
+    Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda),
+    Guard(executable: TLambda),
+    OnCommit(handle_name: String, executable: TLambda),
+    OnRollback(handle_name: String, executable: TLambda),
+    UIClickSlot(executable: TLambda),
+    UIDropSlot(executable: TLambda),
+    ReactiveDerived(executable: TLambda),
+    ReactiveEffect(executable: TLambda),
+    UIReactiveRender(executable: TLambda),
 }
 
 // A button's click handler, registered as the click slot Int it yields.
 
 TFnValueKind: enum {
-    NamedFn(function: DeclID?, lambda: TLambda?)
-    Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: TExpr)
-    Call(callee: TExpr, args: [TCallArg])
-    Send(value: TExpr)
+    NamedFn(function: DeclID?, lambda: TLambda?),
+    Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: TExpr),
+    Call(callee: TExpr, args: [TCallArg]),
+    Send(value: TExpr),
 }
 
 THandleOp: enum {
-    Hardware(operation: THardwareCall)
-    DurationNew(unit: String, float: Bool)
-    FileReaderReadLine
-    FileReaderRead(into: Bool)
-    FileReaderSeek
-    FileReaderPath
-    MappedFileWindow
-    MappedFileWindowLen
-    MappedFileLines
-    LinesIter
-    MappedFileLen
-    MappedFileIsEmpty
-    FileWriterWriteLine
-    FileWriterFlush
-    FileWriterWriteAll
-    FileWriterFsync
-    FileWriterPath
-    JSONLReaderNext
-    JSONLWriterWrite
-    JSONLWriterFlush
-    JSONLWriterFinish
-    DataStreamNext
-    XMLReaderNext
-    XMLWriterWrite
-    XMLWriterFlush
-    XMLWriterFinish
-    StdinReadLine
-    StdoutWrite
-    StdoutWriteLine
-    StdoutWriteBytes
-    StdoutFlush
-    StdoutIsTTY
-    StderrWrite
-    StderrWriteLine
-    StderrWriteBytes
-    StderrFlush
-    StderrIsTTY
-    WorldNow
-    WorldAdvance
-    WorldWaitIdle
-    WorldHistory
-    RealtimeNextDeadline
-    RealtimeReceipt
-    RealtimeCancel
-    RealtimeIsCancelled
-    GameSceneNew
-    GameReplayRecord
-    GameBackendHeadless
-    GameBackendShouldContinue
-    GameBackendPresent
-    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?)
-    GameSceneComponent
-    GameSceneQuery
-    GameAssetsImage
-    GameAssetsSound
-    GameInputBind
-    GameInputPressed
-    RNGInt
-    RNGFloat
-    RNGFloatRange
-    RNGBool
-    RNGBoolP
-    RNGNormal
-    RNGExponential
-    RNGBytes
-    RNGSplit
-    RNGPick
-    RNGWeightedPick
-    RNGSample
-    RNGShuffle
-    DurationIn
-    DurationIsZero
-    DurationTotalSeconds
-    DurationDifference
-    TestSuiteRun
-    TestSetting
-    DurationAbs
-    DurationNegated
-    DurationSign
-    DurationTotalIn
-    DurationRound
-    DurationNsValue
-    DurationScale
-    DurationDivide
-    AllocAlloc
-    AllocTryAlloc
-    AllocReset
-    PreciseMethod(type_name: String, method: String)
-    TCPListenerAccept
-    TCPListenerAcceptDeadline
-    TCPListenerLocalAddr
-    TCPStreamRead
-    TCPStreamPeerAddr
-    TCPStreamLocalAddr
-    TCPStreamClose
-    TCPStreamReadBytes(into: Bool)
-    TCPStreamReadBytesDeadline(into: Bool)
-    TCPStreamReadText
-    TCPStreamReadTextDeadline
-    TCPStreamWriteBytes
-    TCPStreamWriteBytesDeadline
-    TCPStreamWriteAllBytes
-    TCPStreamWriteAllBytesDeadline
-    TCPStreamWriteText
-    TCPStreamWriteTextDeadline
-    TCPStreamShutdown
-    TCPStreamReady
-    UDPSocketReady
-    UDPSocketClose
-    UDPSocketReceiveDeadline
-    UDPSocketSendToDeadline
-    UnixListenerAcceptDeadline
-    UnixStreamReadDeadline(into: Bool)
-    UnixStreamWriteAllDeadline
-    UnixStreamReady
-    UnixStreamClose
-    UnixStreamSetTimeout
-    HTTPClientNew
-    ArgsSpecFlag
-    ArgsSpecFlagShort
-    ArgsSpecOption
-    ArgsSpecOptionShort
-    ArgsSpecOptionDefault
-    ArgsSpecOptionEnv
-    ArgsSpecOptionInt
-    ArgsSpecOptionFloat
-    ArgsSpecOptionChoice
-    ArgsSpecRepeat
-    ArgsSpecRequiredOption
-    ArgsSpecPositional
-    ArgsSpecDescription
-    ArgsSpecSubcommand
-    ArgsSpecVersion
-    ArgsSpecCompletion
-    ArgsSpecHelp
-    ArgsSpecParse
-    ArgsSpecParseOrExit
-    ParsedArgsFlag
-    ParsedArgsOption
-    ParsedArgsOptionInt
-    ParsedArgsOptionFloat
-    ParsedArgsOptions
-    ParsedArgsSubcommand
-    ParsedArgsPositional
-    ProcessSpecMethod(method: String, args_len: Int)
-    TerminalSessionResize
-    ProcessStdinWrite
-    ProcessStdinWriteText
-    ProcessStdinClose
-    ProcessStdinWriteAll
-    ProcessStdoutRead
-    ProcessStderrRead
-    ReflectValueRead(method: String)
-    ReflectValueFields
-    ReflectFieldName
-    ReflectFieldValue
-    TaskJoin
-    TaskDetach
-    TaskPause
-    TaskResume
-    TaskCancel
-    ChannelReceive
-    ChannelTryReceive
-    ChannelIsTimer
-    ChannelIsInterval
-    ChannelIsCancelled
-    ChannelIsReady
-    ChannelDelayMs
-    ChannelClose
-    SenderSend
-    MathMethod(type_name: String, method: String)
-    ReactiveGet
-    ReactiveSet
-    ReactiveEffectMethod
-    EventMethod(method: String)
-    LayoutMethod(method: String)
-    HTTPClientMethod(kind: String, method: String)
-    HTTPServerMethod(kind: String, method: String)
-    DynField
-    DynAt
-    DynInt
-    DynText
-    DynBool
-    DynFloat
-    DynToText
-    DynEqualUnordered
-    DynDecode(ty: Type, stored: Bool)
-    DynIndexKey(site: String, location: TPanicLoc)
-    DynIndexAt(site: String, location: TPanicLoc)
-    DynGetKey
-    DynGetAt
-    DynHas
-    DynKeys
-    DynLen(site: String, location: TPanicLoc)
-    DynRemove
-    DynBinary(op: String, site: String, location: TPanicLoc)
-    DynCompare(op: String, site: String, location: TPanicLoc)
-    DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
-    SerdeEncode(stored: Bool)
-    JSONField
-    JSONAt
-    JSONInt
-    JSONText
-    JSONBool
-    JSONFloat
-    JSONToText
-    JSONEqualUnordered
-    PathFrom
-    PathHome
-    PathJoin
-    PathParent
-    PathExtension
-    PathStem
-    PathNormalize
-    PathIsWithin
-    PathToString
-    PathWalk
-    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
-    ReaderOver(owned: Bool)
-    ReaderReadU8
-    ReaderReadI8
-    ReaderReadU16Le
-    ReaderReadU16Be
-    ReaderReadI16Le
-    ReaderReadI16Be
-    ReaderReadU32Le
-    ReaderReadU32Be
-    ReaderReadI32Le
-    ReaderReadI32Be
-    ReaderReadU64Le
-    ReaderReadU64Be
-    ReaderReadI64Le
-    ReaderReadI64Be
-    ReaderReadF32Le
-    ReaderReadF32Be
-    ReaderReadF64Le
-    ReaderReadF64Be
-    ReaderPeek
-    ReaderSeek
-    ReaderSkip
-    ReaderTake
-    ReaderRemaining
-    ReaderAtEnd
-    CursorOver
-    CursorTakeUntil
-    CursorSkipWs
-    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField])
-    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField])
-    ProcessLines
+    Hardware(operation: THardwareCall),
+    DurationNew(unit: String, float: Bool),
+    FileReaderReadLine,
+    FileReaderRead(into: Bool),
+    FileReaderSeek,
+    FileReaderPath,
+    MappedFileWindow,
+    MappedFileWindowLen,
+    MappedFileLines,
+    LinesIter,
+    MappedFileLen,
+    MappedFileIsEmpty,
+    FileWriterWriteLine,
+    FileWriterFlush,
+    FileWriterWriteAll,
+    FileWriterFsync,
+    FileWriterPath,
+    JSONLReaderNext,
+    JSONLWriterWrite,
+    JSONLWriterFlush,
+    JSONLWriterFinish,
+    DataStreamNext,
+    XMLReaderNext,
+    XMLWriterWrite,
+    XMLWriterFlush,
+    XMLWriterFinish,
+    StdinReadLine,
+    StdoutWrite,
+    StdoutWriteLine,
+    StdoutWriteBytes,
+    StdoutFlush,
+    StdoutIsTTY,
+    StderrWrite,
+    StderrWriteLine,
+    StderrWriteBytes,
+    StderrFlush,
+    StderrIsTTY,
+    WorldNow,
+    WorldAdvance,
+    WorldWaitIdle,
+    WorldHistory,
+    RealtimeNextDeadline,
+    RealtimeReceipt,
+    RealtimeCancel,
+    RealtimeIsCancelled,
+    GameSceneNew,
+    GameReplayRecord,
+    GameBackendHeadless,
+    GameBackendShouldContinue,
+    GameBackendPresent,
+    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?),
+    GameSceneComponent,
+    GameSceneQuery,
+    GameAssetsImage,
+    GameAssetsSound,
+    GameInputBind,
+    GameInputPressed,
+    RNGInt,
+    RNGFloat,
+    RNGFloatRange,
+    RNGBool,
+    RNGBoolP,
+    RNGNormal,
+    RNGExponential,
+    RNGBytes,
+    RNGSplit,
+    RNGPick,
+    RNGWeightedPick,
+    RNGSample,
+    RNGShuffle,
+    DurationIn,
+    DurationIsZero,
+    DurationTotalSeconds,
+    DurationDifference,
+    TestSuiteRun,
+    TestSetting,
+    DurationAbs,
+    DurationNegated,
+    DurationSign,
+    DurationTotalIn,
+    DurationRound,
+    DurationNsValue,
+    DurationScale,
+    DurationDivide,
+    AllocAlloc,
+    AllocTryAlloc,
+    AllocReset,
+    PreciseMethod(type_name: String, method: String),
+    TCPListenerAccept,
+    TCPListenerAcceptDeadline,
+    TCPListenerLocalAddr,
+    TCPStreamRead,
+    TCPStreamPeerAddr,
+    TCPStreamLocalAddr,
+    TCPStreamClose,
+    TCPStreamReadBytes(into: Bool),
+    TCPStreamReadBytesDeadline(into: Bool),
+    TCPStreamReadText,
+    TCPStreamReadTextDeadline,
+    TCPStreamWriteBytes,
+    TCPStreamWriteBytesDeadline,
+    TCPStreamWriteAllBytes,
+    TCPStreamWriteAllBytesDeadline,
+    TCPStreamWriteText,
+    TCPStreamWriteTextDeadline,
+    TCPStreamShutdown,
+    TCPStreamReady,
+    UDPSocketReady,
+    UDPSocketClose,
+    UDPSocketReceiveDeadline,
+    UDPSocketSendToDeadline,
+    UnixListenerAcceptDeadline,
+    UnixStreamReadDeadline(into: Bool),
+    UnixStreamWriteAllDeadline,
+    UnixStreamReady,
+    UnixStreamClose,
+    UnixStreamSetTimeout,
+    HTTPClientNew,
+    ArgsSpecFlag,
+    ArgsSpecFlagShort,
+    ArgsSpecOption,
+    ArgsSpecOptionShort,
+    ArgsSpecOptionDefault,
+    ArgsSpecOptionEnv,
+    ArgsSpecOptionInt,
+    ArgsSpecOptionFloat,
+    ArgsSpecOptionChoice,
+    ArgsSpecRepeat,
+    ArgsSpecRequiredOption,
+    ArgsSpecPositional,
+    ArgsSpecDescription,
+    ArgsSpecSubcommand,
+    ArgsSpecVersion,
+    ArgsSpecCompletion,
+    ArgsSpecHelp,
+    ArgsSpecParse,
+    ArgsSpecParseOrExit,
+    ParsedArgsFlag,
+    ParsedArgsOption,
+    ParsedArgsOptionInt,
+    ParsedArgsOptionFloat,
+    ParsedArgsOptions,
+    ParsedArgsSubcommand,
+    ParsedArgsPositional,
+    ProcessSpecMethod(method: String, args_len: Int),
+    TerminalSessionResize,
+    ProcessStdinWrite,
+    ProcessStdinWriteText,
+    ProcessStdinClose,
+    ProcessStdinWriteAll,
+    ProcessStdoutRead,
+    ProcessStderrRead,
+    ReflectValueRead(method: String),
+    ReflectValueFields,
+    ReflectFieldName,
+    ReflectFieldValue,
+    TaskJoin,
+    TaskDetach,
+    TaskPause,
+    TaskResume,
+    TaskCancel,
+    ChannelReceive,
+    ChannelTryReceive,
+    ChannelIsTimer,
+    ChannelIsInterval,
+    ChannelIsCancelled,
+    ChannelIsReady,
+    ChannelDelayMs,
+    ChannelClose,
+    SenderSend,
+    MathMethod(type_name: String, method: String),
+    ReactiveGet,
+    ReactiveSet,
+    ReactiveEffectMethod,
+    EventMethod(method: String),
+    LayoutMethod(method: String),
+    HTTPClientMethod(kind: String, method: String),
+    HTTPServerMethod(kind: String, method: String),
+    DynField,
+    DynAt,
+    DynInt,
+    DynText,
+    DynBool,
+    DynFloat,
+    DynToText,
+    DynEqualUnordered,
+    DynDecode(ty: Type, stored: Bool),
+    DynIndexKey(site: String, location: TPanicLoc),
+    DynIndexAt(site: String, location: TPanicLoc),
+    DynGetKey,
+    DynGetAt,
+    DynHas,
+    DynKeys,
+    DynLen(site: String, location: TPanicLoc),
+    DynRemove,
+    DynBinary(op: String, site: String, location: TPanicLoc),
+    DynCompare(op: String, site: String, location: TPanicLoc),
+    DynSetPath(keys: [Bool], site: String, location: TPanicLoc),
+    SerdeEncode(stored: Bool),
+    JSONField,
+    JSONAt,
+    JSONInt,
+    JSONText,
+    JSONBool,
+    JSONFloat,
+    JSONToText,
+    JSONEqualUnordered,
+    PathFrom,
+    PathHome,
+    PathJoin,
+    PathParent,
+    PathExtension,
+    PathStem,
+    PathNormalize,
+    PathIsWithin,
+    PathToString,
+    PathWalk,
+    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor),
+    ReaderOver(owned: Bool),
+    ReaderReadU8,
+    ReaderReadI8,
+    ReaderReadU16Le,
+    ReaderReadU16Be,
+    ReaderReadI16Le,
+    ReaderReadI16Be,
+    ReaderReadU32Le,
+    ReaderReadU32Be,
+    ReaderReadI32Le,
+    ReaderReadI32Be,
+    ReaderReadU64Le,
+    ReaderReadU64Be,
+    ReaderReadI64Le,
+    ReaderReadI64Be,
+    ReaderReadF32Le,
+    ReaderReadF32Be,
+    ReaderReadF64Le,
+    ReaderReadF64Be,
+    ReaderPeek,
+    ReaderSeek,
+    ReaderSkip,
+    ReaderTake,
+    ReaderRemaining,
+    ReaderAtEnd,
+    CursorOver,
+    CursorTakeUntil,
+    CursorSkipWs,
+    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField]),
+    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField]),
+    ProcessLines,
 }
 
 // `into`: read_into, appending to the caller's [U8] (#5976).
@@ -754,117 +754,117 @@ THandleOp: enum {
 // skips.
 
 TRequireKind: enum {
-    Require(cond: TExpr, msg: TExpr?)
-    RequireEq(left: TExpr, right: TExpr, hook: TMethodRef?)
-    Panic(msg: TExpr)
+    Require(cond: TExpr, msg: TExpr?),
+    RequireEq(left: TExpr, right: TExpr, hook: TMethodRef?),
+    Panic(msg: TExpr),
 }
 
 // `hook`: the authored `equal`/`compare` implementation `==` dispatches
 // to for the operands' type; None compares them structurally.
 
 TLambda: struct {
-    executable: TLambdaBody
-    source_span: Span
-    frame_schedule: FrameSchedule?
-    frame_schedule_derivation: DerivationRef?
-    capture_facts: TCaptureFacts
-    failure_carrier: TFailureCarrier
-    effects: TEffectFacts
-    host_param_conventions: [AccessConvention]?
-    source_params: [String]
-    source_param_symbols: [SymbolID]
-    param_types: [Type]
-    ret: Type?
-    is_move: Bool
-    boxed: Bool
-    rc: Bool
-    captures: [TCapture]
-    materialized_captures: [String]
-    frozen_captures: [String]
-    uses_stack_sentry: Bool
+    executable: TLambdaBody,
+    source_span: Span,
+    frame_schedule: FrameSchedule?,
+    frame_schedule_derivation: DerivationRef?,
+    capture_facts: TCaptureFacts,
+    failure_carrier: TFailureCarrier,
+    effects: TEffectFacts,
+    host_param_conventions: [AccessConvention]?,
+    source_params: [String],
+    source_param_symbols: [SymbolID],
+    param_types: [Type],
+    ret: Type?,
+    is_move: Bool,
+    boxed: Bool,
+    rc: Bool,
+    captures: [TCapture],
+    materialized_captures: [String],
+    frozen_captures: [String],
+    uses_stack_sentry: Bool,
     // The lambda's effect-scope descriptor (BodyLambda.effect_scope), or "".
-    effect_scope: String{""}
+    effect_scope: String{""},
 }
 
 TLambdaBody: enum {
-    Expr(value: TExpr)
-    Block(body: [TStmt])
+    Expr(value: TExpr),
+    Block(body: [TStmt]),
 }
 
 TFunc: struct {
-    name: String
-    module_name: String
-    module_identity: ModuleID
-    key: String
-    source_file: String
-    source_span: Span
-    failure_carrier: TFailureCarrier
-    effects: TEffectFacts
-    web_bucket: WebBucket?
-    web_marker: WebPartitionMarker?
+    name: String,
+    module_name: String,
+    module_identity: ModuleID,
+    key: String,
+    source_file: String,
+    source_span: Span,
+    failure_carrier: TFailureCarrier,
+    effects: TEffectFacts,
+    web_bucket: WebBucket?,
+    web_marker: WebPartitionMarker?,
     // The app endpoint marker or route marker that makes the method an
     // endpoint, as written, or "" (FnBody.endpoint).
-    endpoint: String{""}
+    endpoint: String{""},
     // The server-only app marker that runs the method as the system, as
     // written, or "" (FnBody.system_run).
-    system_run: String{""}
+    system_run: String{""},
     // The jet_builtins role a Core function fills, or "" (FnBody.role).
-    role: String{""}
-    visibility: TVisibility
-    foreign: TForeignProvenance?
-    params: [TParameter]
-    web_param_reconstructions: [TWebParamReconstruction]
-    ret: Type?
-    gc_return: Bool
-    gc_scope: Bool
-    return_view_provenance: ViewProvenanceMap?
-    generic_params: [TGenericParam]
-    is_main: Bool
-    line: Int
-    synthetic: Bool
-    is_unsafe: Bool
-    unsafe_gate: TUnsafeGate?
-    is_pure: Bool
-    memo_bound: Int?
-    memo_unbounded: Bool
-    is_reactive: Bool
-    reactive_upgrades: [String]
-    is_inline: Bool
-    is_inline_always: Bool
-    is_scalar: Bool
-    kernel_proof: KernelProof?
-    uses_stack_sentry: Bool
+    role: String{""},
+    visibility: TVisibility,
+    foreign: TForeignProvenance?,
+    params: [TParameter],
+    web_param_reconstructions: [TWebParamReconstruction],
+    ret: Type?,
+    gc_return: Bool,
+    gc_scope: Bool,
+    return_view_provenance: ViewProvenanceMap?,
+    generic_params: [TGenericParam],
+    is_main: Bool,
+    line: Int,
+    synthetic: Bool,
+    is_unsafe: Bool,
+    unsafe_gate: TUnsafeGate?,
+    is_pure: Bool,
+    memo_bound: Int?,
+    memo_unbounded: Bool,
+    is_reactive: Bool,
+    reactive_upgrades: [String],
+    is_inline: Bool,
+    is_inline_always: Bool,
+    is_scalar: Bool,
+    kernel_proof: KernelProof?,
+    uses_stack_sentry: Bool,
     // `#MaxDepth(n)`; 0 when unmarked.
-    max_depth: Int{0}
-    body: [TStmt]
-    kind: TFuncKind
-    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
-    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    max_depth: Int{0},
+    body: [TStmt],
+    kind: TFuncKind,
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}},
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}},
     // The fixed-list indexes sema proved in range, and the checked `#Pre`
     // clauses; only the solver reads them (FnBody).
-    index_proofs: [TIndexProof]{[TIndexProof]{}}
-    pre: [TContract]{[TContract]{}}
+    index_proofs: [TIndexProof]{[TIndexProof]{}},
+    pre: [TContract]{[TContract]{}},
     // The function's effect-scope descriptor (FnBody.effect_scope), or "".
-    effect_scope: String{""}
+    effect_scope: String{""},
     // Its scoped `#FX(…)` blocks' frames (FnBody.effect_scope_regions).
-    effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}}
+    effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}},
 }
 
 TParameter: struct {
-    local: TLocal
-    name: String
-    span: Span
-    ty: Type
-    convention: AccessConvention
-    public_label: String
-    zone: ParamZone
-    default: TExpr?
-    variadic: Bool
+    local: TLocal,
+    name: String,
+    span: Span,
+    ty: Type,
+    convention: AccessConvention,
+    public_label: String,
+    zone: ParamZone,
+    default: TExpr?,
+    variadic: Bool,
 }
 
 TPlace: enum {
-    Local(local: TLocal)
-    Expr(value: TExpr)
+    Local(local: TLocal),
+    Expr(value: TExpr),
 }
 
 tree_each_pattern_child: fn(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {

@@ -14,8 +14,8 @@
 // A package value (`Pkg`, §5) with its source identity preserved, so
 // de-duplication keeps `default.ripgrep` distinct from `unstable.ripgrep`.
 Pkg: struct {
-    source: String
-    name: String
+    source: String,
+    name: String,
 
     new: fn(source: String, name: String) -> Pkg Never! { Pkg{source: source, name: name} }
 
@@ -72,8 +72,8 @@ Pkg: struct {
 // Why a merge could not be reconciled (§6 conflict diagnostics).
 #Error
 MergeError: enum {
-    SourceConflict(name: String, a: String, b: String)
-    FactConflict(error: FactError)
+    SourceConflict(name: String, a: String, b: String),
+    FactConflict(error: FactError),
 }
 
 // Two `sources` declarations share a name but resolve to different refs.
@@ -147,14 +147,14 @@ pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
 // canonical contribution law. Each writer already carries its layer, scope,
 // span, and source.
 EntryContribution: struct {
-    packages: [Pkg]{[Pkg]{}}
-    settings: [String:[FactContribution]]{[String:[FactContribution]]{}}
+    packages: [Pkg]{[Pkg]{}},
+    settings: [String:[FactContribution]]{[String:[FactContribution]]{}},
 }
 
 // A fully merged namespace entry: deduped packages + resolved text facts.
 MergedEntry: struct {
-    packages: [Pkg]{[Pkg]{}}
-    settings: [String:String]{[String:String]{}}
+    packages: [Pkg]{[Pkg]{}},
+    settings: [String:String]{[String:String]{}},
 }
 
 // Merge several contributions to one namespace entry: packages combine and

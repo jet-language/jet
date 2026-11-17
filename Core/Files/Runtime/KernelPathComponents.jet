@@ -4,58 +4,58 @@
 // atomic writes; no OS ingress, lossy conversion, or alternate path policy.
 // Spans retain caller bytes, including Windows verbatim prefixes.
 PathPlatform: enum {
-    Unix
-    Windows
+    Unix,
+    Windows,
 }
 
 OSPath: struct {
-    encoded: [U8]
-    platform: PathPlatform
+    encoded: [U8],
+    platform: PathPlatform,
 }
 
 PathSpan: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 PrefixKind: enum {
-    Absent
-    Disk
-    UNC
-    DeviceNS
-    Verbatim
-    VerbatimUNC
-    VerbatimDisk
+    Absent,
+    Disk,
+    UNC,
+    DeviceNS,
+    Verbatim,
+    VerbatimUNC,
+    VerbatimDisk,
 }
 
 PathPrefix: struct {
-    kind: PrefixKind
-    len: Int
-    drive: U8
-    first: PathSpan
-    second: PathSpan
+    kind: PrefixKind,
+    len: Int,
+    drive: U8,
+    first: PathSpan,
+    second: PathSpan,
 }
 
 ComponentKind: enum {
-    Prefix
-    RootDir
-    CurDir
-    ParentDir
-    Normal
+    Prefix,
+    RootDir,
+    CurDir,
+    ParentDir,
+    Normal,
 }
 
 PathComponent: struct {
-    kind: ComponentKind
-    span: PathSpan
+    kind: ComponentKind,
+    span: PathSpan,
 }
 
 Components: struct {
-    prefix: PathPrefix
-    physical_root: Bool
-    start: Int
-    end: Int
-    front: Int
-    back: Int
+    prefix: PathPrefix,
+    physical_root: Bool,
+    start: Int,
+    end: Int,
+    front: Int,
+    back: Int,
 }
 
 from_text: fn(text: String, platform: PathPlatform) -> OSPath Never! {

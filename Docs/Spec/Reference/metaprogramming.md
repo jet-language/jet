@@ -674,9 +674,9 @@ shows the runtime floor:
 use reflect: core.reflect
 
 Point: struct {
-    x: Int(0..10)
-    y: Int
-    level: Int(0..10)
+    x: Int(0..10),
+    y: Int,
+    level: Int(0..10),
 }
 
 run: fn() {
@@ -921,9 +921,9 @@ read from that file while the compiler builds.
 ```jet
 Taint: struct {
     impl Fact {
-        holds: .Value
-        safe: .Gain
-        gates: [.Marker(Scrub)]
+        holds: .Value,
+        safe: .Gain,
+        gates: [.Marker(Scrub)],
     }
 }
 ```

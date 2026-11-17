@@ -3,91 +3,91 @@
 // What a metadata producer owes: an unavailable producer never becomes a
 // default value.
 MetadataProducerStatus: enum {
-    ContractOnly
-    NotImplemented
-    ExistingCallableProducerNeedsExtension
+    ContractOnly,
+    NotImplemented,
+    ExistingCallableProducerNeedsExtension,
 }
 
 CtFloat: enum {
-    F32(value: Float)
-    F64(value: Float)
+    F32(value: Float),
+    F64(value: Float),
 }
 
 CtValue: enum {
-    Int(value: Int)
-    Float(value: CtFloat)
-    Bool(value: Bool)
-    Char(value: Char)
-    Str(value: String)
-    BigInt(value: String)
-    Bytes(value: [U8])
-    List(values: [CtValue])
-    Map(entries: [CtMapEntry])
-    Struct(type_name: String, fields: [NamedCtValue])
-    Enum(type_name: String, variant: String, args: [CtEnumArg])
-    Present(value: CtValue)
-    Failed(report: CtReport)
-    Unit
-    Closure(value: ClosureData)
+    Int(value: Int),
+    Float(value: CtFloat),
+    Bool(value: Bool),
+    Char(value: Char),
+    Str(value: String),
+    BigInt(value: String),
+    Bytes(value: [U8]),
+    List(values: [CtValue]),
+    Map(entries: [CtMapEntry]),
+    Struct(type_name: String, fields: [NamedCtValue]),
+    Enum(type_name: String, variant: String, args: [CtEnumArg]),
+    Present(value: CtValue),
+    Failed(report: CtReport),
+    Unit,
+    Closure(value: ClosureData),
 }
 
 CtMapEntry: struct {
-    key: CtKey
-    value: CtValue
+    key: CtKey,
+    value: CtValue,
 }
 
 NamedCtValue: struct {
-    name: String
-    value: CtValue
+    name: String,
+    value: CtValue,
 }
 
 CtEnumArg: struct {
-    label: String?
-    value: CtValue
+    label: String?,
+    value: CtValue,
 }
 
 CtReport: enum {
-    Clean(ty: Type)
-    Told(value: CtValue)
+    Clean(ty: Type),
+    Told(value: CtValue),
 }
 
 ClosureData: struct {
-    lambda: Lambda
-    captured: [NamedCtValue]
-    return_type: Type?
-    opaque: CtOpaque?
+    lambda: Lambda,
+    captured: [NamedCtValue],
+    return_type: Type?,
+    opaque: CtOpaque?,
 }
 
 CtOpaque: struct {
-    kind: String
-    identity: String
+    kind: String,
+    identity: String,
 }
 
 CtKey: enum {
-    Int(value: Int)
-    BigInt(decimal: String)
-    Str(value: String)
-    Bool(value: Bool)
-    Char(value: Char)
-    Tuple(fields: [NamedCtKey])
-    Struct(type_name: String, fields: [NamedCtKey])
-    Enum(type_name: String, variant: String)
+    Int(value: Int),
+    BigInt(decimal: String),
+    Str(value: String),
+    Bool(value: Bool),
+    Char(value: Char),
+    Tuple(fields: [NamedCtKey]),
+    Struct(type_name: String, fields: [NamedCtKey]),
+    Enum(type_name: String, variant: String),
 }
 
 NamedCtKey: struct {
-    name: String
-    value: CtKey
+    name: String,
+    value: CtKey,
 }
 
 FailureContract: enum {
-    Default(success: Type, error: Type)
-    Optional(success: Type)
-    DeclaredNever
-    Explicit(success: Type, error: Type)
-    Converted(success: Type, source: Type, target: Type)
-    ProvenUnreachable(success: Type)
-    InferredNever(success: Type)
-    Inferred(success: Type, error: Type)
+    Default(success: Type, error: Type),
+    Optional(success: Type),
+    DeclaredNever,
+    Explicit(success: Type, error: Type),
+    Converted(success: Type, source: Type, target: Type),
+    ProvenUnreachable(success: Type),
+    InferredNever(success: Type),
+    Inferred(success: Type, error: Type),
 }
 
 // #3708: no contract was written and sema proved the failure set empty;
@@ -235,8 +235,8 @@ ast_comptime_value_type: fn(value: CtValue) -> Type Never! {
 // One named site an expression walk visits: a call's name or an identifier
 // read, with its source span.
 ComptimeNameSite: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression

@@ -4,13 +4,13 @@
 use files: core.files
 
 Probe: struct {
-    path: String
+    path: String,
 
     #Inline(Always) exists: fn(self) -> Bool { files.exists(self.path) }
 }
 
 Inner: struct {
-    id: Int
+    id: Int,
 
     impl Close {
         close: fn(&&self) { print("inner {self.id} closed") }
@@ -18,7 +18,7 @@ Inner: struct {
 }
 
 Outer: struct {
-    inner: Inner
+    inner: Inner,
 
     impl Close {
         #Inline(Always) close: fn(&&self) { close(self.inner) }

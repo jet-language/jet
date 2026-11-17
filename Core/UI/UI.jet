@@ -32,81 +32,81 @@ use {
 host: module
 
 UIPreviewDevice: enum {
-    Phone
-    Tablet
+    Phone,
+    Tablet,
     Desktop
 }
 
 UIPreviewKind: enum {
-    Preview
+    Preview,
     Playground
 }
 
 UIIMEMode: enum {
-    Native
+    Native,
     Disabled
 }
 
 UIAriaRole: enum {
-    Button
-    Container
-    Label
+    Button,
+    Container,
+    Label,
     TextInput
 }
 
 UINodeKind: enum {
-    Custom
-    Text
-    Box
-    Button
+    Custom,
+    Text,
+    Box,
+    Button,
     TextInput
 }
 
 Point: struct {
-    x: Float
+    x: Float,
     y: Float
 }
 
 Size: struct {
-    width: Float
+    width: Float,
     height: Float
 }
 
 Rect: struct {
-    x: Float
-    y: Float
-    width: Float
+    x: Float,
+    y: Float,
+    width: Float,
     height: Float
 }
 
 SizeConstraint: struct {
-    min_width: Float
-    min_height: Float
-    max_width: Float
+    min_width: Float,
+    min_height: Float,
+    max_width: Float,
     max_height: Float
 }
 
 // The size a preview or playground renders at and the device class it
 // stands for; `phone`, `tablet` and `desktop` build the presets.
 UIPreviewViewport: struct {
-    device: UIPreviewDevice
-    width: Int
-    height: Int
+    device: UIPreviewDevice,
+    width: Int,
+    height: Int,
     scale: Int
 }
 
 // A named preview or playground. Its registry keeps `body` and calls it each
 // time the preview renders.
 UIPreview: struct {
-    kind: UIPreviewKind
-    name: String
-    viewport: UIPreviewViewport
+    kind: UIPreviewKind,
+    name: String,
+    viewport: UIPreviewViewport,
     body: fn() -> UINode
 }
 
 // One program's previews or playgrounds: at most 64, each with its own name.
 UIPreviewRegistry: struct {
-    entries: [UIPreview]
+    entries: [UIPreview],
 
     // Builds the node tree of the preview named `name`.
     render: fn(self, name: String) -> UINode UIPreviewError! {
@@ -119,14 +119,14 @@ UIPreviewRegistry: struct {
 
 #Error
 UIPreviewError: enum {
-    EmptyName
-    TooManyPreviews
-    DuplicatePreview(String)
+    EmptyName,
+    TooManyPreviews,
+    DuplicatePreview(String),
     UnknownPreview(String)
 }
 
 InputEvent: enum {
-    Key(code: String)
+    Key(code: String),
     Resize(size: Size)
 }
 
@@ -135,20 +135,20 @@ InputEvent: enum {
 // a button built with a handler (`button(display, () -> { … })`) holds its click
 // slot, and a text input built with `on_drop:` its drop slot.
 UINode: struct {
-    label: String
-    width: Float
-    height: Float
-    accessibility: UIAccessibility?
-    ime: UIIMEMode?
-    shortcut: UIShortcut?
-    priv role: UIAriaRole?
-    priv kind: UINodeKind
-    priv children: [UINode]
-    priv color: Color?
+    label: String,
+    width: Float,
+    height: Float,
+    accessibility: UIAccessibility?,
+    ime: UIIMEMode?,
+    shortcut: UIShortcut?,
+    priv role: UIAriaRole?,
+    priv kind: UINodeKind,
+    priv children: [UINode],
+    priv color: Color?,
     // The id the runtime's click registry keeps the handler under; 0 for none.
-    priv click: Int
+    priv click: Int,
     // The id the runtime's drop registry keeps the handler under; 0 for none.
-    priv drop: Int
+    priv drop: Int,
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -157,7 +157,7 @@ UINode: struct {
 
 // Whether a backend used an input event.
 EventResult: enum {
-    Handled
+    Handled,
     Ignored
 }
 
@@ -350,24 +350,24 @@ preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError
 // Copies of a backend share it.
 
 UIBackendState: struct {
-    priv tui: Bool
+    priv tui: Bool,
     // Whether the TUI grid shows Unicode; else labels are projected to ASCII.
-    priv unicode: Bool
+    priv unicode: Bool,
     // Where the next paint goes; a tree's own size at the origin when unset.
-    priv frame: Rect?
-    priv commands: [String]
-    priv focus: [UINode]
+    priv frame: Rect?,
+    priv commands: [String],
+    priv focus: [UINode],
     // The index of the focused node in `focus`, -1 for none.
-    priv focused: Int
+    priv focused: Int,
     // The TUI grid: `rows` rows of `cols` cells, one scalar each, row-major.
-    priv cols: Int
-    priv rows: Int
-    priv cells: [Int]
+    priv cols: Int,
+    priv rows: Int,
+    priv cells: [Int],
     priv renders: Int
 }
 
 NullBackend: struct {
-    priv state: Shared<UIBackendState>
+    priv state: Shared<UIBackendState>,
 
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
@@ -423,7 +423,7 @@ NullBackend: struct {
 }
 
 TUIBackend: struct {
-    priv state: Shared<UIBackendState>
+    priv state: Shared<UIBackendState>,
 
     // The size `tree` takes within `constraint`: a box its widest child by
     // its children's summed heights, any other node its own size.
@@ -510,7 +510,7 @@ TUIBackend: struct {
 // them premultiplied and hands them out straight. An image of width 0
 // holds no pixels.
 Image: struct {
-    priv canvas: draw.Image
+    priv canvas: draw.Image,
 
     width: fn(self) -> Int { self.canvas.width }
 
@@ -524,7 +524,7 @@ Image: struct {
 
 // A texture atlas: named regions of one PNG texture.
 TextureAtlas: struct {
-    priv atlas: draw.TextureAtlas
+    priv atlas: draw.TextureAtlas,
 
     // The atlas's name: its `atlas:` line, or its file's stem.
     name: fn(self) -> String { self.atlas.name.copy() }
@@ -734,11 +734,11 @@ HEADLESS_REFRESH_NS: 16666667
 
 #Error
 UIError: enum {
-    NoDisplay
-    Connect(String)
-    Protocol(String)
-    Unsupported(String)
-    Size(String)
+    NoDisplay,
+    Connect(String),
+    Protocol(String),
+    Unsupported(String),
+    Size(String),
     Invalid(String)
 }
 
@@ -750,49 +750,49 @@ UIError: enum {
 // An app_id or icon name the program passed is malformed.
 
 UIPointerButton: enum {
-    Left
-    Right
-    Middle
+    Left,
+    Right,
+    Middle,
     Other(Int)
 }
 
 // How the pointer looks over a window: CSS's cursor keywords, in the
 // order wp_cursor_shape_v1 numbers them, and `Hidden` (CSS `none`).
 UICursor: enum {
-    Default
-    ContextMenu
-    Help
-    Pointer
-    Progress
-    Wait
-    Cell
-    Crosshair
-    Text
-    VerticalText
-    Alias
-    Copy
-    Move
-    NoDrop
-    NotAllowed
-    Grab
-    Grabbing
-    ResizeE
-    ResizeN
-    ResizeNE
-    ResizeNW
-    ResizeS
-    ResizeSE
-    ResizeSW
-    ResizeW
-    ResizeEW
-    ResizeNS
-    ResizeNESW
-    ResizeNWSE
-    ResizeColumn
-    ResizeRow
-    AllScroll
-    ZoomIn
-    ZoomOut
+    Default,
+    ContextMenu,
+    Help,
+    Pointer,
+    Progress,
+    Wait,
+    Cell,
+    Crosshair,
+    Text,
+    VerticalText,
+    Alias,
+    Copy,
+    Move,
+    NoDrop,
+    NotAllowed,
+    Grab,
+    Grabbing,
+    ResizeE,
+    ResizeN,
+    ResizeNE,
+    ResizeNW,
+    ResizeS,
+    ResizeSE,
+    ResizeSW,
+    ResizeW,
+    ResizeEW,
+    ResizeNS,
+    ResizeNESW,
+    ResizeNWSE,
+    ResizeColumn,
+    ResizeRow,
+    AllScroll,
+    ZoomIn,
+    ZoomOut,
     Hidden
 }
 
@@ -800,14 +800,14 @@ UICursor: enum {
 // when the desktop has one by that name, and images of it, one per size,
 // for when it has not.
 UIIcon: struct {
-    name: String
+    name: String,
     images: [UIIconImage]
 }
 
 // A square icon image `side` pixels across: `side` rows of `side` RGBA
 // pixels, 4 bytes each, alpha straight (not premultiplied), as a frame's.
 UIIconImage: struct {
-    side: Int
+    side: Int,
     pixels: [U8]
 }
 
@@ -819,62 +819,62 @@ UIIconImage: struct {
 // pixels; `Close` asks the program to close the window and ends the
 // frames.
 UIEvent: enum {
-    KeyDown(Key)
-    KeyUp(Key)
-    Text(String)
-    Compose(UIIMEComposition)
-    PointerMove(x: Int, y: Int)
-    PointerDown(UIPointerButton)
-    PointerUp(UIPointerButton)
-    Scroll(dx: Float, dy: Float)
-    Resize(width: Int, height: Int)
-    Focus(Bool)
+    KeyDown(Key),
+    KeyUp(Key),
+    Text(String),
+    Compose(UIIMEComposition),
+    PointerMove(x: Int, y: Int),
+    PointerDown(UIPointerButton),
+    PointerUp(UIPointerButton),
+    Scroll(dx: Float, dy: Float),
+    Resize(width: Int, height: Int),
+    Focus(Bool),
     Close
 }
 
 // A rectangle of window pixels: `x`, `y` from the top-left.
 UIRect: struct {
-    x: Int
-    y: Int
-    width: Int
+    x: Int,
+    y: Int,
+    width: Int,
     height: Int
 }
 
 WindowState: struct {
-    priv width: Int
-    priv height: Int
-    priv scale: Float
-    priv frames: Int
-    priv closed: Bool
-    priv failure: UIError?
-    priv link: Shared<wayland.Connection>?
-    priv script: [[UIEvent]]
-    priv checksums: [Int]
-    priv cursor: UICursor
+    priv width: Int,
+    priv height: Int,
+    priv scale: Float,
+    priv frames: Int,
+    priv closed: Bool,
+    priv failure: UIError?,
+    priv link: Shared<wayland.Connection>?,
+    priv script: [[UIEvent]],
+    priv checksums: [Int],
+    priv cursor: UICursor,
     // What the frames drew, whether the latest frame drew or presented,
     // and the pixels its draws changed (a damage list, grow_damage).
-    priv canvas: draw.Image
+    priv canvas: draw.Image,
     // The glyph masks text draws with.
-    priv typeset: draw.Typeset
-    priv drawn: Bool
-    priv presented: Bool
-    priv damage: [UIRect]
+    priv typeset: draw.Typeset,
+    priv drawn: Bool,
+    priv presented: Bool,
+    priv damage: [UIRect],
     // The keys and pointer buttons held and the pointer's place, as of
     // the latest frame's events.
-    priv keys: [Key]
-    priv buttons: [UIPointerButton]
-    priv mouse_x: Int
-    priv mouse_y: Int
+    priv keys: [Key],
+    priv buttons: [UIPointerButton],
+    priv mouse_x: Int,
+    priv mouse_y: Int,
     // A headless window's clipboard, and its states as last set.
-    priv clipboard: String
-    priv maximized: Bool
+    priv clipboard: String,
+    priv maximized: Bool,
     priv fullscreen: Bool
 }
 
 // A window and its frames. Copies share the one window, which closes when
 // the last copy is dropped.
 Window: struct {
-    priv state: Shared<WindowState>
+    priv state: Shared<WindowState>,
 
     // The window's frames, paced by the display alone: one per refresh
     // while the program presents, none while it is idle until input
@@ -1167,35 +1167,35 @@ headless: fn(*, width: Int, height: Int, script: [[UIEvent]]) -> Window UIError!
 // the screen (ms resolution: input times are whole ms). All times are
 // nanoseconds.
 FrameStats: struct {
-    presented: Int
-    missed: Int
-    discarded: Int
-    refresh_ns: Int
-    median_ns: Int
-    p99_ns: Int
-    input_samples: Int
-    input_median_ns: Int
-    input_p99_ns: Int
+    presented: Int,
+    missed: Int,
+    discarded: Int,
+    refresh_ns: Int,
+    median_ns: Int,
+    p99_ns: Int,
+    input_samples: Int,
+    input_median_ns: Int,
+    input_p99_ns: Int,
     // Present-to-present intervals by refreshes spanned: [0] one
     // refresh (every vblank), [1] two, [2] three, [3] four or more.
     spans: [Int]
 }
 
 Frames: struct {
-    priv state: Shared<WindowState>
+    priv state: Shared<WindowState>,
 
     impl Iterable {
-        Iter: FrameCursor
+        Iter: FrameCursor,
 
         iter: fn(&&self) -> FrameCursor { FrameCursor{state: self.state.copy()} }
     }
 }
 
 FrameCursor: struct {
-    priv state: Shared<WindowState>
+    priv state: Shared<WindowState>,
 
     impl Iterator {
-        Item: Frame
+        Item: Frame,
 
         // The next frame, once it is due; none after the frame that carried
         // `.Close`. A frame that drew and presented nothing shows what it drew
@@ -1304,20 +1304,20 @@ FrameCursor: struct {
 // whole refresh intervals, so motion computed from `time` keeps its
 // speed even when a frame is late.
 Frame: struct {
-    priv state: Shared<WindowState>
-    index: Int
-    width: Int
-    height: Int
-    scale: Float
-    time: Float
-    delta: Float
-    priv pending: [UIEvent]
-    priv was_keys: [Key]
-    priv keys: [Key]
-    priv was_buttons: [UIPointerButton]
-    priv buttons: [UIPointerButton]
-    priv mouse_x: Int
-    priv mouse_y: Int
+    priv state: Shared<WindowState>,
+    index: Int,
+    width: Int,
+    height: Int,
+    scale: Float,
+    time: Float,
+    delta: Float,
+    priv pending: [UIEvent],
+    priv was_keys: [Key],
+    priv keys: [Key],
+    priv was_buttons: [UIPointerButton],
+    priv buttons: [UIPointerButton],
+    priv mouse_x: Int,
+    priv mouse_y: Int,
 
     events: fn(self) -> [UIEvent] { self.pending.copy() }
 

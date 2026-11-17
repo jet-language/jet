@@ -89,211 +89,211 @@ USAGE: [String]{
 
 // A compiler under test: `path` for jet and bootstrap, `template` for command.
 Compiler: struct {
-    label: String
-    kind: String
-    path: String?
-    template: String?
+    label: String,
+    kind: String,
+    path: String?,
+    template: String?,
 }
 
 // The resolution and bound of a metric family.
 Family: struct {
-    min: Float
-    bound: Float
+    min: Float,
+    bound: Float,
 }
 
 Families: struct {
-    time: Family
-    rss: Family
-    counter: Family
+    time: Family,
+    rss: Family,
+    counter: Family,
 }
 
 FAMILIES: Families{time: Family{min: Float{0.25}, bound: Float{1.5}}, rss: Family{min: Float{65536.0}, bound: Float{1.5}}, counter: Family{min: Float{64.0}, bound: Float{1.25}}}
 
 // A lines/s floor from one phase budget: its spans less its `exclude` spans.
 FloorRule: struct {
-    phase: String
-    kinds: [String]
-    exclude: [String]
-    lines_per_second: Float
-    owners: [String]
+    phase: String,
+    kinds: [String],
+    exclude: [String],
+    lines_per_second: Float,
+    owners: [String],
 }
 
 Limits: struct {
-    rows: [FloorRule]
-    total_lines_per_second: Float
+    rows: [FloorRule],
+    total_lines_per_second: Float,
 }
 
 // A budget.json row: ns per source line by column.
 BudgetRow: struct {
-    phase: String
-    spans: [String]?
-    exclude: [String]?
-    budget: [String:Float]
-    owners: [String]
+    phase: String,
+    spans: [String]?,
+    exclude: [String]?,
+    budget: [String:Float],
+    owners: [String],
 }
 
 BudgetTarget: struct {
-    column: String
-    lines_per_second: Int
+    column: String,
+    lines_per_second: Int,
 }
 
 // budget.json.
 Budgets: struct {
-    target: BudgetTarget
-    rows: [BudgetRow]
+    target: BudgetTarget,
+    rows: [BudgetRow],
 }
 
 // One measured compile. `x` is the size the fit uses: N, or the code lines of
 // a domain corpus; `exit` is None when a signal ended the compile.
 Point: struct {
-    n: Int
-    x: Int
-    code_lines: Int
-    source_sha256: String
-    ok: Bool
-    problems: [String]
-    open_phases: [String]
-    timeout_phase: String?
-    metrics: [String:Float]
-    dir: String
-    build_dir: String
-    exit: Int?
+    n: Int,
+    x: Int,
+    code_lines: Int,
+    source_sha256: String,
+    ok: Bool,
+    problems: [String],
+    open_phases: [String],
+    timeout_phase: String?,
+    metrics: [String:Float],
+    dir: String,
+    build_dir: String,
+    exit: Int?,
 }
 
 // A metric's growth: `ratio` is infinite for a series that "appears" (the
 // receipt file writes it as null, as JSON.stringify does) and None for one
 // that is unmeasured.
 Growth: struct {
-    verdict: String
-    reason: String?
-    ratio: Float?
-    #Rename("from") first: Int?
-    #Rename("to") last: Int?
-    exponent: Float?
-    bound: Float
-    values: [Float?]
+    verdict: String,
+    reason: String?,
+    ratio: Float?,
+    #Rename("from") first: Int?,
+    #Rename("to") last: Int?,
+    exponent: Float?,
+    bound: Float,
+    values: [Float?],
 }
 
 Failure: struct {
-    kind: String
-    metric: String?
-    phase: String?
-    counter: String?
-    ratio: Float?
-    exponent: Float?
-    text: String
+    kind: String,
+    metric: String?,
+    phase: String?,
+    counter: String?,
+    ratio: Float?,
+    exponent: Float?,
+    text: String,
 }
 
 // `lines_per_second` is None when it is infinite (no time in the phase).
 FloorRow: struct {
-    phase: String
-    lines_per_second: Float?
-    floor: Float
-    owners: [String]?
+    phase: String,
+    lines_per_second: Float?,
+    floor: Float,
+    owners: [String]?,
 }
 
 Projected: struct {
-    measured_s: Float
-    at_lines: Int
-    exponent: Float
-    projected_s: Float
+    measured_s: Float,
+    at_lines: Int,
+    exponent: Float,
+    projected_s: Float,
 }
 
 Projection: struct {
-    measured_at_lines: Int
-    target_lines: Int
-    target_seconds: Int
-    phases: [String:Projected]
+    measured_at_lines: Int,
+    target_lines: Int,
+    target_seconds: Int,
+    phases: [String:Projected],
 }
 
 // One ranked symbol of a profiled phase (Profile.jet ranks them). Declared
 // here, beside the receipt types that hold it: a struct-typed field only gets
 // a derived codec when its struct is declared in the same file.
 Row: struct {
-    share: Float
-    symbol: String
+    share: Float,
+    symbol: String,
     // None prints as nothing: no source found.
-    source: String?
+    source: String?,
 }
 
 ProfiledPhase: struct {
-    samples: Int
-    #Rename("self") own: [Row]
-    inclusive: [Row]
+    samples: Int,
+    #Rename("self") own: [Row],
+    inclusive: [Row],
 }
 
 ProfileResult: struct {
-    perf_data: String
-    compile_ok: Bool
-    phases: [String:ProfiledPhase]
+    perf_data: String,
+    compile_ok: Bool,
+    phases: [String:ProfiledPhase],
 }
 
 Series: struct {
-    shape: String
-    layout: String
-    compiler: String
-    mode: String
-    kind: String
-    dimension: String
-    ladder: [Int]
-    baseline: Point?
-    points: [Point]
-    truncated: String?
-    metrics: [String:Growth]{[String:Growth]{}}
-    failures: [Failure]{[Failure]{}}
-    floors: [FloorRow]?
-    projection: Projection?
-    profile: ProfileResult?
-    #Rename("profilePoint") profile_point: Point?
-    done: Bool{false}
+    shape: String,
+    layout: String,
+    compiler: String,
+    mode: String,
+    kind: String,
+    dimension: String,
+    ladder: [Int],
+    baseline: Point?,
+    points: [Point],
+    truncated: String?,
+    metrics: [String:Growth]{[String:Growth]{}},
+    failures: [Failure]{[Failure]{}},
+    floors: [FloorRow]?,
+    projection: Projection?,
+    profile: ProfileResult?,
+    #Rename("profilePoint") profile_point: Point?,
+    done: Bool{false},
 }
 
 Target: struct {
-    lines: Int
-    seconds: Int
+    lines: Int,
+    seconds: Int,
 }
 
 // What a receipt checkpoints: a resumed run must repeat it exactly.
 #Rename(.Camel)
 Invocation: struct {
-    compilers: [Compiler]
-    shapes: [String]
-    layouts: [String]
-    ladders: [String:[Int]]
-    seed: Int
-    memory_max: String
-    timeout_s: Int
-    failure_policy: String
-    stop_after_s: Float?
-    profile_top: Bool
-    build_root: String
-    mode: String
-    jobs: Int
-    families: Families
-    floors: Limits
+    compilers: [Compiler],
+    shapes: [String],
+    layouts: [String],
+    ladders: [String:[Int]],
+    seed: Int,
+    memory_max: String,
+    timeout_s: Int,
+    failure_policy: String,
+    stop_after_s: Float?,
+    profile_top: Bool,
+    build_root: String,
+    mode: String,
+    jobs: Int,
+    families: Families,
+    floors: Limits,
 }
 
 #Rename(.Camel)
 Receipt: struct {
-    schema: String
-    invocation: String
-    started_at: String
-    work_dir: String
-    host: String
-    compilers: [Compiler]
-    families: Families
-    floors: Limits
-    target: Target
-    memory_max: String
-    timeout_s: Int
-    stop_after_s: Float?
-    build_root: String
-    mode: String
-    jobs: Int
-    series: [Series]
-    failures: [String]
-    passed: Bool?
-    finished_at: String?
+    schema: String,
+    invocation: String,
+    started_at: String,
+    work_dir: String,
+    host: String,
+    compilers: [Compiler],
+    families: Families,
+    floors: Limits,
+    target: Target,
+    memory_max: String,
+    timeout_s: Int,
+    stop_after_s: Float?,
+    build_root: String,
+    mode: String,
+    jobs: Int,
+    series: [Series],
+    failures: [String],
+    passed: Bool?,
+    finished_at: String?,
 }
 
 // `stop_after_s` None is no limit; `repo` holds budget.json and the
@@ -301,72 +301,72 @@ Receipt: struct {
 // (enqueue's queue-plan.json).
 #Rename(.Camel)
 Config: struct {
-    compilers: [Compiler]
-    shapes: [String]
-    bases: [String:Int]
-    ladders: [String:[Int]]
-    steps: Int
-    domain_ladder: [Int]
-    memory_max: String
-    timeout_s: Int
-    stop_after_s: Float?
-    jet_command: String
-    seed: Int
-    profile_top: Bool
-    layouts: [String]
-    build_root: String
-    mode: String
-    jobs: Int
-    work_dir: String
-    receipt: String
-    repo: String
+    compilers: [Compiler],
+    shapes: [String],
+    bases: [String:Int],
+    ladders: [String:[Int]],
+    steps: Int,
+    domain_ladder: [Int],
+    memory_max: String,
+    timeout_s: Int,
+    stop_after_s: Float?,
+    jet_command: String,
+    seed: Int,
+    profile_top: Bool,
+    layouts: [String],
+    build_root: String,
+    mode: String,
+    jobs: Int,
+    work_dir: String,
+    receipt: String,
+    repo: String,
     // --help: print the usage and run nothing.
-    help: Bool
+    help: Bool,
 }
 
 // One compile's paths and what its corpus expects.
 Rung: struct {
-    n: Int
-    x: Int
-    code_lines: Int
-    source_sha256: String
-    diagnostics: Int
-    dir: String
-    build_dir: String
-    trace: String
-    receipt: String
-    spec: ProcessSpec
+    n: Int,
+    x: Int,
+    code_lines: Int,
+    source_sha256: String,
+    diagnostics: Int,
+    dir: String,
+    build_dir: String,
+    trace: String,
+    receipt: String,
+    spec: ProcessSpec,
 }
 
 Started: struct {
-    rung: Rung
-    child: ProcessChild
-    spawn_unix_ms: Int
-    start_ns: Int
+    rung: Rung,
+    child: ProcessChild,
+    spawn_unix_ms: Int,
+    start_ns: Int,
 }
 
 Span: struct {
-    start: Float
-    end: Float
-    items: Float?
+    start: Float,
+    end: Float,
+    items: Float?,
 }
 
 PhaseRow: struct {
-    wall_ns: Float
-    count: Int
-    items: Float?
+    wall_ns: Float,
+    count: Int,
+    items: Float?,
 }
 
 PhaseTable: struct {
-    phases: [String:PhaseRow]
-    first_begin_ns: Float?
-    unclosed: [String]
-    events: Int
+    phases: [String:PhaseRow],
+    first_begin_ns: Float?,
+    unclosed: [String],
+    events: Int,
 }
 
 Judged: struct {
-    metrics: [String:Growth]
-    failures: [Failure]
+    metrics: [String:Growth],
+    failures: [Failure],
 }
 
 // ------------------------------------------------------------- formatting

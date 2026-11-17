@@ -8,8 +8,8 @@
 // The requested generated surface. `Automatic` is a checked facade; `Native`
 // retains the foreign declaration's arity while keeping boundary checks.
 BindingShape: enum {
-    Automatic
-    Native
+    Automatic,
+    Native,
 
     parse: fn(value: String) -> BindingShape BindingPlanError! {
         if value == {
@@ -29,8 +29,8 @@ BindingShape: enum {
 
 // Project-level binding drift policy.
 BindingPolicy: enum {
-    Automatic
-    Frozen
+    Automatic,
+    Frozen,
 
     parse: fn(value: String) -> BindingPolicy BindingPlanError! {
         if value == {
@@ -50,9 +50,9 @@ BindingPolicy: enum {
 
 // The unit carried by a foreign pointer/count pair.
 CountUnit: enum {
-    Bytes
-    Elements(String)
-    Unknown
+    Bytes,
+    Elements(String),
+    Unknown,
 
     known: fn(self) -> Bool Never! {
         if self == {
@@ -73,9 +73,9 @@ CountUnit: enum {
 
 // Whether a count describes the complete extent or only a prefix.
 CountMeaning: enum {
-    FullExtent
-    Prefix
-    Unknown
+    FullExtent,
+    Prefix,
+    Unknown,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -88,9 +88,9 @@ CountMeaning: enum {
 
 // Retention evidence for a pointer crossing the boundary.
 PointerRetention: enum {
-    BorrowedForCall
-    MayRetain
-    Unknown
+    BorrowedForCall,
+    MayRetain,
+    Unknown,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -104,12 +104,12 @@ PointerRetention: enum {
 // Canonical facts needed before a pointer/count adaptation can remove the
 // native count argument.
 PointerCountFact: struct {
-    pointer_parameter: String
-    count_parameter: String
-    unit: CountUnit
-    meaning: CountMeaning
-    native_width_bits: Int
-    retention: PointerRetention
+    pointer_parameter: String,
+    count_parameter: String,
+    unit: CountUnit,
+    meaning: CountMeaning,
+    native_width_bits: Int,
+    retention: PointerRetention,
 
     new: fn(pointer_parameter: String, count_parameter: String, unit: CountUnit, meaning: CountMeaning, native_width_bits: Int, retention: PointerRetention) -> PointerCountFact Never! {
         PointerCountFact{
@@ -134,22 +134,22 @@ PointerCountFact: struct {
 
 // One parsed foreign operation supplied to the planner by a language binder.
 BindingOperation: struct {
-    name: String
-    native_signature: String
-    result_type: String
-    pointer_count: PointerCountFact?
-    nullable_return: Bool
-    borrowed_view: Bool
-    status_out: Bool
-    partial_success: Bool
-    fallible_close: Bool
-    callback_transport: String
-    effects: String
-    ownership: String
-    failure_mapping: String
-    copies: String
-    placement: String
-    cleanup: String
+    name: String,
+    native_signature: String,
+    result_type: String,
+    pointer_count: PointerCountFact?,
+    nullable_return: Bool,
+    borrowed_view: Bool,
+    status_out: Bool,
+    partial_success: Bool,
+    fallible_close: Bool,
+    callback_transport: String,
+    effects: String,
+    ownership: String,
+    failure_mapping: String,
+    copies: String,
+    placement: String,
+    cleanup: String,
 
     new: fn(name: String, native_signature: String, result_type: String) -> BindingOperation Never! {
         BindingOperation{
@@ -185,11 +185,11 @@ BindingOperation: struct {
 
 // Exact inputs pinned by a generated binding plan.
 BindingInputs: struct {
-    target: String
-    generator: String
-    artifact: String
-    dependencies: [String]
-    compiler_flags: [String]
+    target: String,
+    generator: String,
+    artifact: String,
+    dependencies: [String],
+    compiler_flags: [String],
 
     new: fn(target: String, generator: String, artifact: String) -> BindingInputs Never! {
         BindingInputs{target: target, generator: generator, artifact: artifact, dependencies: [String]{}, compiler_flags: [String]{}}
@@ -233,25 +233,25 @@ BindingInputs: struct {
 
 // A stable, reviewable description of what an adaptation preserves.
 PlanSemantics: struct {
-    ownership: String
-    failure_mapping: String
-    copies: String
-    placement: String
-    effects: String
-    cleanup: String
+    ownership: String,
+    failure_mapping: String,
+    copies: String,
+    placement: String,
+    effects: String,
+    cleanup: String,
 }
 
 // A resolved generated binding plan.
 BindingPlan: struct {
-    operation: BindingOperation
-    library: String
-    shape: BindingShape
-    boundary_digest: String
-    input_digest: String
-    artifact: String
-    checked_obligations: [String]
-    semantics: PlanSemantics
-    digest: String
+    operation: BindingOperation,
+    library: String,
+    shape: BindingShape,
+    boundary_digest: String,
+    input_digest: String,
+    artifact: String,
+    checked_obligations: [String],
+    semantics: PlanSemantics,
+    digest: String,
 
     // Resolve one operation against the canonical boundary contract. Every
     // automatic adaptation requires a complete artifact identity and
@@ -462,9 +462,9 @@ BindingPlan: struct {
 // A single refusal keeps the command actionable and avoids a cascade of
 // secondary diagnostics caused by one missing canonical fact.
 BindingRefusal: struct {
-    operation: String
-    obligation: String
-    message: String
+    operation: String,
+    obligation: String,
+    message: String,
 
     missing: fn(operation: String, obligation: String) -> BindingRefusal Never! {
         BindingRefusal{
@@ -482,10 +482,10 @@ BindingRefusal: struct {
 // Errors from plan resolution, extent checks, and frozen-plan checks.
 #Error
 BindingPlanError: enum {
-    InvalidInput(String)
-    Contract(String)
-    Refused(BindingRefusal)
-    FrozenDrift(recorded: String, candidate: String)
+    InvalidInput(String),
+    Contract(String),
+    Refused(BindingRefusal),
+    FrozenDrift(recorded: String, candidate: String),
 
     message: fn(self) -> String Never! {
         if self == {

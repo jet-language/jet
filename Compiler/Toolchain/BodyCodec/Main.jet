@@ -49,14 +49,14 @@ HAND_PUT: "body_codec_put_"
 // bare, which the output names as that package does even where its own
 // text does not. `header` is the comment the output starts with.
 CodecTarget: struct {
-    output: String
-    header: String
-    roots: [String]
-    shape_dirs: [String]
-    own_dir: String
-    hand_files: [String]
-    package: String
-    named: [String]
+    output: String,
+    header: String,
+    roots: [String],
+    shape_dirs: [String],
+    own_dir: String,
+    hand_files: [String],
+    package: String,
+    named: [String],
 }
 
 // The generated files, in the order they are written: a later one's hand
@@ -75,7 +75,7 @@ codec_targets: fn() -> [CodecTarget] Never! {
 
 #Error
 BodyCodecError: struct {
-    message: String
+    message: String,
 }
 
 codec_fail: fn(message: String) -> BodyCodecError Never! {
@@ -83,53 +83,53 @@ codec_fail: fn(message: String) -> BodyCodecError Never! {
 }
 
 CodecField: struct {
-    name: String
-    ty: Type
+    name: String,
+    ty: Type,
 }
 
 // An enum variant: no payload (`unit`), one positional payload (`single`,
 // its one field named ""), or named fields.
 CodecVariant: struct {
-    name: String
-    unit: Bool
-    single: Bool
-    fields: [CodecField]
+    name: String,
+    unit: Bool,
+    single: Bool,
+    fields: [CodecField],
 }
 
 // A declared struct, enum or type alias. A name declared more than once is
 // `twice`, and a value of it is refused; a generic declaration is refused.
 CodecShape: struct {
-    is_enum: Bool
-    alias: Type?
-    fields: [CodecField]
-    variants: [CodecVariant]
-    twice: Bool
-    generic: Bool
+    is_enum: Bool,
+    alias: Type?,
+    fields: [CodecField],
+    variants: [CodecVariant],
+    twice: Bool,
+    generic: Bool,
     // Whether a read that already failed still ends: every field of a struct
     // ends, and an enum has a variant (`fallback`) whose fields all end.
-    ends: Bool
-    fallback: Int
+    ends: Bool,
+    fallback: Int,
     // Whether a value of it can take no bytes (a struct with no field that
     // takes any).
-    empty: Bool
+    empty: Bool,
     // Whether the target's package declares it (CodecTarget.package).
-    imported: Bool
+    imported: Bool,
 }
 
 CodecOut: struct {
-    shapes: [CodecShape]
+    shapes: [CodecShape],
     // Each declared name's position in `shapes`.
-    index: [String:Int]
+    index: [String:Int],
     // The put functions the hand files declare, by name.
-    hand: [String:Bool]
+    hand: [String:Bool],
     // The top-level names the target's package declares in its hand files.
-    imported: [String:Bool]
+    imported: [String:Bool],
     // The named types the roots reach, in the order they were reached.
-    reached: [String]
-    seen: [String:Bool]
+    reached: [String],
+    seen: [String:Bool],
     // The list, option and map types written so far, by mangled name.
-    written: [String:Bool]
-    blocks: [String]
+    written: [String:Bool],
+    blocks: [String],
 }
 
 // The put functions the hand file at `path` declares: each top-level

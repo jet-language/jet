@@ -96,7 +96,7 @@ ATOM: 11
 
 #Error
 GateError: struct {
-    message: String
+    message: String,
 }
 
 gate_fail: fn(message: String) -> GateError Never! { GateError{message: message.copy()} }
@@ -104,7 +104,7 @@ gate_fail: fn(message: String) -> GateError Never! { GateError{message: message.
 // The model discards a program whose evaluation is not defined behavior.
 #Error
 Reject: struct {
-    reason: String
+    reason: String,
 }
 
 // ---------------------------------------------------------------- generator
@@ -112,102 +112,102 @@ Reject: struct {
 // One binding the generator knows: its type ("Int", "Bool", "Str", "List" or
 // "Struct") and what later statements may still do with it.
 Var: struct {
-    name: String
-    ty: String
-    mutable: Bool
-    mutated: Bool
-    moved: Bool
-    frozen: Int
-    loops: Int
+    name: String,
+    ty: String,
+    mutable: Bool,
+    mutated: Bool,
+    moved: Bool,
+    frozen: Int,
+    loops: Int,
 }
 
 // One expression node. `s` is the name, list, base, function or literal text;
 // `op` the operator or field; `args` the call arguments, list or struct
 // elements and format parts; `conds`/`vals` the arms of an `if` value.
 Expr: struct {
-    k: String
-    v: Int
-    b: Bool
-    s: String
-    op: String
-    l: Int
-    r: Int
-    args: [Int]
-    conds: [Int]
-    vals: [Int]
+    k: String,
+    v: Int,
+    b: Bool,
+    s: String,
+    op: String,
+    l: Int,
+    r: Int,
+    args: [Int],
+    conds: [Int],
+    vals: [Int],
 }
 
 // One statement node; `bodies` holds the `if` arm bodies.
 Stmt: struct {
-    k: String
-    name: String
-    op: String
-    e: Int
-    idx: Int
-    f: String
-    binding: Int
-    conds: [Int]
-    bodies: [[Int]]
-    otherwise: [Int]
-    has_otherwise: Bool
-    body: [Int]
-    lo: Int
-    hi: Int
-    inclusive: Bool
-    limit: Int
-    index: String
-    item: String
-    parts: [Int]
+    k: String,
+    name: String,
+    op: String,
+    e: Int,
+    idx: Int,
+    f: String,
+    binding: Int,
+    conds: [Int],
+    bodies: [[Int]],
+    otherwise: [Int],
+    has_otherwise: Bool,
+    body: [Int],
+    lo: Int,
+    hi: Int,
+    inclusive: Bool,
+    limit: Int,
+    index: String,
+    item: String,
+    parts: [Int],
 }
 
 Fun: struct {
-    name: String
-    params: [Int]
-    guard: Int
-    body: [Int]
+    name: String,
+    params: [Int],
+    guard: Int,
+    body: [Int],
 }
 
 Ctx: struct {
-    loops: Int
-    in_loop: Bool
-    in_fn: Bool
-    prints: Bool
-    nest: Int
+    loops: Int,
+    in_loop: Bool,
+    in_fn: Bool,
+    prints: Bool,
+    nest: Int,
 }
 
 Choice: struct {
-    name: String
-    weight: Float
+    name: String,
+    weight: Float,
 }
 
 // A value an interpolation or a format may name.
 Hole: struct {
-    k: String
-    name: String
-    f: String
+    k: String,
+    name: String,
+    f: String,
 }
 
 // The generator state and the program it builds, as arenas of nodes.
 Gen: struct {
-    state: Int
-    n: Int
-    vars: [Var]
-    scopes: [[Int]]
-    exprs: [Expr]
-    stmts: [Stmt]
-    fns: [Fun]
-    has_struct: Bool
-    sname: String
-    fields: [String]
-    run: [Int]
+    state: Int,
+    n: Int,
+    vars: [Var],
+    scopes: [[Int]],
+    exprs: [Expr],
+    stmts: [Stmt],
+    fns: [Fun],
+    has_struct: Bool,
+    sname: String,
+    fields: [String],
+    run: [Int],
 }
 
 Case: struct {
-    stem: String
-    source: String
-    stdout: String
-    stderr: String
-    status: Int?
+    stem: String,
+    source: String,
+    stdout: String,
+    stderr: String,
+    status: Int?,
 }
 
 new_gen: fn(state: Int) -> Gen Never! {
@@ -1085,8 +1085,8 @@ program: fn(g: &Gen) -> () {
 // ---------------------------------------------------------------- renderer
 
 Rendered: struct {
-    text: String
-    prec: Int
+    text: String,
+    prec: Int,
 }
 
 precedence: fn(op: String) -> Int Never! {
@@ -1302,29 +1302,29 @@ source: fn(g: Gen, header: String) -> String Never! {
 // A model value: "int", "bool", "str", "list" or "struct" (whose field values
 // are `items`, in the program's field order).
 Value: struct {
-    k: String
-    i: Int
-    b: Bool
-    s: String
-    items: [Int]
+    k: String,
+    i: Int,
+    b: Bool,
+    s: String,
+    items: [Int],
 }
 
 // `k` is "", "break", "next" or "return".
 Signal: struct {
-    k: String
-    v: Value
+    k: String,
+    v: Value,
 }
 
 // Bindings as one stack; a call frame cannot see below its `base`, and each
 // scope starts at a `marks` entry.
 Machine: struct {
-    names: [String]
-    values: [Value]
-    marks: [Int]
-    base: Int
-    out: [String]
-    steps: Int
-    depth: Int
+    names: [String],
+    values: [Value],
+    marks: [Int],
+    base: Int,
+    out: [String],
+    steps: Int,
+    depth: Int,
 }
 
 int_value: fn(i: Int) -> Value Never! { Value{k: "int", i: i, b: false, s: "", items: [Int]{}} }
@@ -1773,27 +1773,27 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
 // ---------------------------------------------------------------- gate
 
 Corpus: struct {
-    features: String
-    cases: [Case]
-    case_list: String
-    sha256: String
+    features: String,
+    cases: [Case],
+    case_list: String,
+    sha256: String,
 }
 
 Check: struct {
-    name: String
-    verdict: String
-    detail: String
+    name: String,
+    verdict: String,
+    detail: String,
 }
 
 Verdict: struct {
-    stem: String
-    verdict: String
-    detail: String
+    stem: String,
+    verdict: String,
+    detail: String,
 }
 
 Entry: struct {
-    path: String
-    stem: String
+    path: String,
+    stem: String,
 }
 
 hash: fn(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
@@ -1970,10 +1970,10 @@ coverage_receipt: fn(input: Dyn, head: String, coverage: String) -[FS]> Bool Nev
 }
 
 Gate: struct {
-    out: String
-    repo: String
-    checks: [Check]
-    gaps: [String]
+    out: String,
+    repo: String,
+    checks: [Check],
+    gaps: [String],
 }
 
 add: fn(gate: &Gate, name: String, verdict: String, detail: String) -> () {
@@ -1981,9 +1981,9 @@ add: fn(gate: &Gate, name: String, verdict: String, detail: String) -> () {
 }
 
 Ran: struct {
-    code: Int
-    detail: String
-    output: String
+    code: Int,
+    detail: String,
+    output: String,
 }
 
 // Run `argv` in the checkout, naming it as the toolchain tree so its checks

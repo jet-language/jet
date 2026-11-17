@@ -274,76 +274,76 @@ sema_target_check_socket_surfaces: fn(graph: SemaRegistrationGraph, used_core: [
 }
 
 SemaResult: struct {
-    module_name: String
-    functions: [FnBody]
-    call_facts: [SemaCallSiteFact]
-    hardware_use: TargetHardwareUse
-    name_references: [SemaNameReferenceFact]
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: [SemaComputeFunctionFacts]
-    exact_int_reachable: Bool
-    copy_events: [SemaCopyEvent]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    module_name: String,
+    functions: [FnBody],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 SemaGraphModuleResult: struct {
-    module_identity: ModuleID
-    module_name: String
-    package_identity: String
-    module_path: String
-    source_file: String
-    declarations: TDeclarationFacts
+    module_identity: ModuleID,
+    module_name: String,
+    package_identity: String,
+    module_path: String,
+    source_file: String,
+    declarations: TDeclarationFacts,
     // This module's checked functions as flat bodies: each function check
     // seals and flattens its own tree (sema_function_check_pass), so sema's
     // whole-program passes and every later package read only these.
-    functions: [FnBody]
-    nominals: [SemaRegistrationNominal]
+    functions: [FnBody],
+    nominals: [SemaRegistrationNominal],
     // Position in `nominals` of the first nominal per declared name, so a
     // nominal spelling resolves without scanning every module's nominals.
-    nominal_positions: [String:Int]
-    constants: [SemaRegistrationConstant]
-    impls: [SemaRegistrationImpl]
-    exports: [SemaRegistrationExport]
-    imports: [SemaRegistrationImport]
-    foreign_functions: [SemaCheckedForeignFunction]
-    foreign_providers: [SemaCheckedForeignProvider]
-    call_facts: [SemaCallSiteFact]
-    hardware_use: TargetHardwareUse
-    name_references: [SemaNameReferenceFact]
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: [SemaComputeFunctionFacts]
-    exact_int_reachable: Bool
-    copy_events: [SemaCopyEvent]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    nominal_positions: [String:Int],
+    constants: [SemaRegistrationConstant],
+    impls: [SemaRegistrationImpl],
+    exports: [SemaRegistrationExport],
+    imports: [SemaRegistrationImport],
+    foreign_functions: [SemaCheckedForeignFunction],
+    foreign_providers: [SemaCheckedForeignProvider],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // #3708: the failure rows of this module's checked top-level functions.
-    failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
+    failure_facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}},
     // Why `complete` is false, one line per cause, so a no-diagnostic
     // incomplete module still names what stopped it.
-    incomplete_reasons: [String]{[String]{}}
+    incomplete_reasons: [String]{[String]{}},
     // Keys of the Prelude error conversions sema injected
     // into this module after its bodies. They have no registration row (the
     // Rust reference pushes them as module items), so the driver's identity
     // check admits exactly these keys beside the registered declarations.
-    injected_function_keys: [String]{[String]{}}
+    injected_function_keys: [String]{[String]{}},
     // Test mode (Rust `CompileMode::Test`): one fact per named `#Test` of this
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
-    tests: [TTestFact]{[TTestFact]{}}
+    tests: [TTestFact]{[TTestFact]{}},
     // Under a per-function trace: each Core body a demand wave checked into
     // this module, as its position in `functions`, and the task CPU time
     // (ns) its check took at the same position of `core_check_ns`
     // (sema_core_bound_charge), which sema_core_bound_counters reads.
-    core_check_rows: [Int]{[Int]{}}
-    core_check_ns: [Int]{[Int]{}}
+    core_check_rows: [Int]{[Int]{}},
+    core_check_ns: [Int]{[Int]{}},
     // The Core library's check: this Core module's function checks as
     // packets, in the order they were checked (CoreBodies.jet
     // sema_core_body_capture); a demand wave appends its own after the
     // body pass's.
-    core_bodies: [SemaCoreBody]{[SemaCoreBody]{}}
+    core_bodies: [SemaCoreBody]{[SemaCoreBody]{}},
 }
 
 // The facts of a checked module that only sema's whole-program passes read:
@@ -351,16 +351,16 @@ SemaGraphModuleResult: struct {
 // and registration impl, export and import rows
 // (sema_graph_modules_take_checked_facts).
 SemaCheckedFacts: struct {
-    name_references: [SemaNameReferenceFact]
-    call_facts: [SemaCallSiteFact]
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: [SemaComputeFunctionFacts]
-    copy_events: [SemaCopyEvent]
-    failure_facts: [SemaFunctionFailureFacts]
-    impls: [SemaRegistrationImpl]
-    exports: [SemaRegistrationExport]
-    imports: [SemaRegistrationImport]
+    name_references: [SemaNameReferenceFact],
+    call_facts: [SemaCallSiteFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    copy_events: [SemaCopyEvent],
+    failure_facts: [SemaFunctionFailureFacts],
+    impls: [SemaRegistrationImpl],
+    exports: [SemaRegistrationExport],
+    imports: [SemaRegistrationImport],
 }
 
 // Moves the SemaCheckedFacts out of every module of `modules`, one row per
@@ -413,102 +413,102 @@ sema_graph_modules_take_checked_facts: fn(modules: &[SemaGraphModuleResult]) -> 
 // functions whose failures pass up ("" for a source of its own) and whether a
 // statement or returned value is a direct failure source.
 SemaFunctionFailureFacts: struct {
-    function_key: String
-    direct: Bool
-    edges: [String]
+    function_key: String,
+    direct: Bool,
+    edges: [String],
     // This body's default-route row.
-    union_members: [Type]{[Type]{}}
-    union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
-    union_edges: [String]{[String]{}}
-    union_general: Bool{false}
+    union_members: [Type]{[Type]{}},
+    union_cases: [SemaFailureCase]{[SemaFailureCase]{}},
+    union_edges: [String]{[String]{}},
+    union_general: Bool{false},
 }
 
 SemaComptimeItemKind: enum {
-    Constant
-    MarkerArgument
-    FieldDefault
-    TypeLevel
-    CheckedText
-    BodyExpression
+    Constant,
+    MarkerArgument,
+    FieldDefault,
+    TypeLevel,
+    CheckedText,
+    BodyExpression,
 }
 
 SemaComptimeItemSource: struct {
-    module_identity: ModuleID
-    key: String
-    destination_key: String
-    name: String
-    source_file: String
-    kind: SemaComptimeItemKind
-    expression: Expr
-    expected_type: Type?
-    span: Span
-    dependencies: [String]
-    checked_text: SemaCheckedTextEvaluation?
+    module_identity: ModuleID,
+    key: String,
+    destination_key: String,
+    name: String,
+    source_file: String,
+    kind: SemaComptimeItemKind,
+    expression: Expr,
+    expected_type: Type?,
+    span: Span,
+    dependencies: [String],
+    checked_text: SemaCheckedTextEvaluation?,
     // A FieldDefault of a struct that bakes its defaults (Codable, Decode,
     // Encode, CLI): a default that cannot be evaluated reports E2414.
-    baked_default: Bool{false}
+    baked_default: Bool{false},
     // A module-level `NAME: expr` or `name := expr` whose value is not literal data:
     // computed while building when its evaluation is pure and succeeds, and
     // refused otherwise (E0643, jet_driver_module_value_refused).
-    module_value: Bool{false}
+    module_value: Bool{false},
     // A refused module value's check as ordinary code, outside compile-time
     // execution, which reports its real errors.
-    runtime_check: Bool{false}
+    runtime_check: Bool{false},
     // An immutable local `name: value` that calls code: computed while
     // compiling when that succeeds, and otherwise left to run time without a
     // report; its landed value is then `.Failed` with the reason as text
     // (sema_comptime_local_value_failure).
-    local_value: Bool{false}
+    local_value: Bool{false},
     // An explicit `name: #run value` local in a body: its failures are
     // reported as any `#run` site's, but a pass whose sites are all local
     // values or such locals lands in their owner bodies the same way
     // (Comptime/LocalSplice.jet).
-    local_binding: Bool{false}
+    local_binding: Bool{false},
     // A local value computed ahead of its body's check, under a key of its
     // own (Comptime/LocalValues.jet): a computation whose own check fails,
     // or that waits for good, leaves no value.
-    ahead: Bool{false}
+    ahead: Bool{false},
     // A body site's prepared locals, declared before its expression is checked.
-    prepared: [SemaComptimePreparedLocal]{[SemaComptimePreparedLocal]{}}
+    prepared: [SemaComptimePreparedLocal]{[SemaComptimePreparedLocal]{}},
     // A body site lexically inside an `#Impure` block: its Tier-2 effects
     // need the invocation gate (E3411), not the block (E3410).
-    impure: Bool{false}
+    impure: Bool{false},
     // A body site's run-time locals and parameters, which its staged check
     // names as run-time values (E0640) when the code reads one.
-    runtime_locals: [String]{[String]{}}
+    runtime_locals: [String]{[String]{}},
 }
 
 SemaComptimeItemRequest: struct {
-    module_identity: ModuleID
-    key: String
-    destination_key: String
-    source_file: String
-    kind: SemaComptimeItemKind
+    module_identity: ModuleID,
+    key: String,
+    destination_key: String,
+    source_file: String,
+    kind: SemaComptimeItemKind,
     // The item expression's flat form (sema_publish_expression).
-    expression: BodyExpr
-    expected_type: Type?
-    span: Span
-    dependencies: [String]
-    calls: [SemaComptimeRequest]
-    hardware_use: TargetHardwareUse
-    reachable_function_keys: [String]
+    expression: BodyExpr,
+    expected_type: Type?,
+    span: Span,
+    dependencies: [String],
+    calls: [SemaComptimeRequest],
+    hardware_use: TargetHardwareUse,
+    reachable_function_keys: [String],
     // The item expression's own call sites (a module value's purity reads them).
-    call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}},
     // The item expression's first call with a host effect, as a refused
     // comptime effect names it (sema_effect_comptime_call_name).
-    effect_call: String?{None}
+    effect_call: String?{None},
 }
 
 SemaComptimeItemValue: struct {
-    module_identity: ModuleID
-    key: String
-    destination_key: String
-    kind: SemaComptimeItemKind
-    value: TComptimeValue
-    ty: Type
+    module_identity: ModuleID,
+    key: String,
+    destination_key: String,
+    kind: SemaComptimeItemKind,
+    value: TComptimeValue,
+    ty: Type,
     // A module `Shared{X}` holder (sema_comptime_shared_payload): `value` is
     // the payload the build folded, `ty` the holder's Shared type.
-    shared_holder: Bool{false}
+    shared_holder: Bool{false},
 }
 
 sema_comptime_body_value_from_item: fn(value: SemaComptimeItemValue) -> SemaComptimeBodyValue Never! {
@@ -531,95 +531,95 @@ sema_comptime_body_values_from_items: fn(values: [SemaComptimeItemValue]) -> [Se
 }
 
 SemaRegistrationPackagePolicy: struct {
-    package_identity: String
-    authority_allow: [String]?
-    authority_deny: [String]?
-    authority_needs: [String]
-    runtime_ceiling: RuntimeLayer?
-    edition: String
+    package_identity: String,
+    authority_allow: [String]?,
+    authority_deny: [String]?,
+    authority_needs: [String],
+    runtime_ceiling: RuntimeLayer?,
+    edition: String,
     // The organization policy's `authority: { deny: [...] }`, carried on the
     // root package's row, and the policy file it names.
-    organization_deny: [String]{[String]{}}
-    organization_source: String{""}
+    organization_deny: [String]{[String]{}},
+    organization_source: String{""},
 }
 
 SemaComptimeDeclarationStage: struct {
-    modules: [SemaGraphModuleResult]
-    imports: [SemaRegistrationImport]
-    package_policies: [SemaRegistrationPackagePolicy]
-    names: NameFacts
-    sources: [SemaComptimeItemSource]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    modules: [SemaGraphModuleResult],
+    imports: [SemaRegistrationImport],
+    package_policies: [SemaRegistrationPackagePolicy],
+    names: NameFacts,
+    sources: [SemaComptimeItemSource],
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // The registration graph the declaration pass moved into its program
     // tables, unchanged, handed to the comptime run (jet_driver_run_comptime
     // `staged`) so no one copies it; None once taken.
-    graph: SemaRegistrationGraph?{None}
+    graph: SemaRegistrationGraph?{None},
     // The declaration pass's boxed edges and copy facts of `graph`, handed
     // with it to the comptime run's environment (sema_comptime_environment)
     // so it does not compute them again; None once taken.
-    graph_facts: SemaComptimeGraphFacts?{None}
+    graph_facts: SemaComptimeGraphFacts?{None},
 }
 
 // The facts the program tables derive from a registration graph alone
 // (sema_scope_environment_boxed_edges, sema_copy_facts_table).
 SemaComptimeGraphFacts: struct {
-    boxed_edges: [String:[String]]
-    copy_facts: SemaCopyFactsTable
+    boxed_edges: [String:[String]],
+    copy_facts: SemaCopyFactsTable,
 }
 
 SemaComptimeItemCheck: struct {
-    request: SemaComptimeItemRequest?
-    dependencies: [String]
-    waiting_dependencies: [String]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    request: SemaComptimeItemRequest?,
+    dependencies: [String],
+    waiting_dependencies: [String],
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // A precheck's literal fold of its call-free request with no landed
     // values (sema_comptime_precheck_fold); None when it did not fold.
-    folded: TComptimeValue?{None}
+    folded: TComptimeValue?{None},
 }
 
 SemaComptimeFunctionResult: struct {
-    module_identity: ModuleID
-    function_key: String
+    module_identity: ModuleID,
+    function_key: String,
     // The checked body (sema_function_check_pass flattens it).
-    function: FnBody?
-    waiting_dependencies: [String]
-    calls: [SemaComptimeRequest]
-    reachable_function_keys: [String]
-    call_facts: [SemaCallSiteFact]
-    hardware_use: TargetHardwareUse
-    name_references: [SemaNameReferenceFact]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: SemaComputeFunctionFacts
-    diagnostics: [Diagnostic]
-    exact_int_reachable: Bool
-    copy_events: [SemaCopyEvent]
-    complete: Bool
+    function: FnBody?,
+    waiting_dependencies: [String],
+    calls: [SemaComptimeRequest],
+    reachable_function_keys: [String],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: SemaComputeFunctionFacts,
+    diagnostics: [Diagnostic],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    complete: Bool,
     // Why an incomplete result has no diagnostic, for the driver's report.
-    incomplete_reasons: [String]{[String]{}}
+    incomplete_reasons: [String]{[String]{}},
     // #3708: the body's failure row, which the bundle solve and a comptime
     // closure's solve read (sema_comptime_failure_closure_settle).
-    failure: SemaFunctionFailureFacts?{None}
+    failure: SemaFunctionFailureFacts?{None},
     // Incomplete only because of failure obligations against unannotated
     // callees: a solve over the callees' rows discharges or emits them.
-    obligations_pending: Bool{false}
+    obligations_pending: Bool{false},
     // An inline foreign (`#FFI`) function's checked foreign row: it has no
     // Jet body to check, and a compile-time call of it stops the run.
-    foreign: SemaCheckedForeignFunction?{None}
+    foreign: SemaCheckedForeignFunction?{None},
     // The codecs and derived methods the check demanded (SemaDemandCapture),
     // which a body pass that takes this result records again.
-    codec_demand: [String]{[String]{}}
-    derive_demand: [String]{[String]{}}
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
     // The Prelude error conversion routines the body's propagation sites
     // demand, checked under its module (sema_check_comptime_function); a
     // closure that builds the body builds them too.
-    conversions: [FnBody]{[FnBody]{}}
+    conversions: [FnBody]{[FnBody]{}},
     // The round of the Core demand (sema_core_demand_waves) whose first wave
     // demands what this function names: 0, but for the closures of a body
     // comptime pass the driver lands between two rounds
     // (jet_driver_land_local_values), which get the next one.
-    demand_round: Int{0}
+    demand_round: Int{0},
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
@@ -635,46 +635,46 @@ sema_publish_expression: fn(value: TExpr, arena: BodyTree) -> BodyExpr Never! {
 }
 
 SemaGraphResult: struct {
-    package_identity: String
-    entry_module_identity: ModuleID
-    modules: [SemaGraphModuleResult]
-    imports: [SemaRegistrationImport]
-    package_policies: [SemaRegistrationPackagePolicy]
-    core_usage: SemaCoreUsageResult
-    call_facts: [SemaCallSiteFact]
-    hardware_use: TargetHardwareUse
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: [SemaComputeFunctionFacts]
-    names: NameFacts
-    diagnostics: [Diagnostic]
-    complete: Bool
+    package_identity: String,
+    entry_module_identity: ModuleID,
+    modules: [SemaGraphModuleResult],
+    imports: [SemaRegistrationImport],
+    package_policies: [SemaRegistrationPackagePolicy],
+    core_usage: SemaCoreUsageResult,
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    names: NameFacts,
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // #3708: the unannotated top-level functions the bundle failure solve
     // proved infallible, by symbol key.
-    inferred_infallible: [String]{[String]{}}
+    inferred_infallible: [String]{[String]{}},
     // SemaRegistrationGraph.core_seal: the Core seal's lines
     // (sema_core_seal_lines); empty otherwise.
-    core_seal: [String]{[String]{}}
+    core_seal: [String]{[String]{}},
     // SemaRegistrationGraph.core_seal: the Core function checks as captured,
     // in capture order, which the Core library writes as the bodies file
     // (CoreBodies.jet sema_core_bodies_bytes); empty otherwise.
-    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}}
+    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}},
     // A run bound to the Core image (SemaRegistrationGraph.core_stand_ins):
     // how many Core functions its demand checked as stand-ins, and, when
     // something they assume did not hold, why the finalization must run
     // again without stand-ins (sema_finalize_program), else "".
-    core_stand_ins: Int{0}
-    core_stand_in_rerun: String{""}
+    core_stand_ins: Int{0},
+    core_stand_in_rerun: String{""},
     // The registration graph finalization checked against (values and
     // failure projections applied), handed back by sema_finalize_graph so its
     // caller can undo the edits (sema_graph_trail_undo); None otherwise.
-    registration_graph: SemaRegistrationGraph?{None}
+    registration_graph: SemaRegistrationGraph?{None},
     // `SemaRegistrationGraph.retain_programs`: each module's program as sema
     // settled it, indexed like `modules`; empty otherwise.
-    programs: [Program]{[Program]{}}
-    outputs: [ResolvedOutput]{[ResolvedOutput]{}}
-    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
-    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
+    programs: [Program]{[Program]{}},
+    outputs: [ResolvedOutput]{[ResolvedOutput]{}},
+    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}},
+    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}},
 }
 
 sema_name_facts_empty: fn() -> NameFacts Never! {
@@ -689,22 +689,22 @@ sema_check_body_job_index: fn(job: SemaBodyJob) -> Int Never! {
 }
 
 SemaFunctionResult: struct {
-    value: FnBody?
-    complete: Bool
-    exact_int_reachable: Bool
-    copy_events: [SemaCopyEvent]
-    hardware_use: TargetHardwareUse
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: SemaComputeFunctionFacts
-    failure: SemaFunctionFailureFacts?
+    value: FnBody?,
+    complete: Bool,
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    hardware_use: TargetHardwareUse,
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: SemaComputeFunctionFacts,
+    failure: SemaFunctionFailureFacts?,
     // Why an incomplete result has no diagnostic (SemaCheckContext rows).
-    incomplete_reasons: [String]{[String]{}}
+    incomplete_reasons: [String]{[String]{}},
     // The value's prelude conversion demands (sema_prelude_conversion_demands),
     // when the compiler thread that checked the body walked it there.
-    prelude_demands: [SemaPreludeConversionDemand]?{None}
+    prelude_demands: [SemaPreludeConversionDemand]?{None},
     // The symbols of a check that built no `value`: the local ids its name
     // references carry are rows of these (sema_keep_going_trap_references).
-    failed_locals: SymbolLocalKeys?{None}
+    failed_locals: SymbolLocalKeys?{None},
 }
 
 sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
@@ -1470,10 +1470,10 @@ sema_function_check_unregistered: fn(func: Func, owner_key: String, function_kin
 // The function's own generic parameters (with the reports resolving them
 // raised) and those merged with the environment's.
 SemaFunctionCheckGenerics: struct {
-    own: [TGenericParam]
-    merged: [TGenericParam]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    own: [TGenericParam],
+    merged: [TGenericParam],
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 sema_function_check_generics: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaFunctionCheckGenerics {
@@ -2368,10 +2368,10 @@ sema_comptime_append_checked_function_to_module: fn(result: SemaComptimeFunction
 }
 
 SemaComptimeFunctionSource: struct {
-    declaration: Func
-    symbol: Symbol
-    kind: TFuncKind
-    raw_protocol_return: Bool
+    declaration: Func,
+    symbol: Symbol,
+    kind: TFuncKind,
+    raw_protocol_return: Bool,
 }
 
 sema_comptime_method_kind: fn(function: Func, owner_type: Type, trait_symbol: Symbol?) -> TFuncKind Never! {
@@ -2819,15 +2819,15 @@ sema_keep_going_cause: fn(causes: [String], diagnostics: [Diagnostic], start: In
 // Preparation is identical on the calling thread and a body-job thread.
 // The packet retains existing scalar positions; no declaration borrow escapes.
 SemaMethodInput: struct {
-    job: SemaBodyJob
-    memory_position: Int?
-    diagnostics: [Diagnostic]
-    generic_params: [TGenericParam]
-    normalized_owner_type: Type
-    function_kind: TFuncKind
-    memory_found: Bool
-    memory_complete: Bool
-    owner_generic_complete: Bool
+    job: SemaBodyJob,
+    memory_position: Int?,
+    diagnostics: [Diagnostic],
+    generic_params: [TGenericParam],
+    normalized_owner_type: Type,
+    function_kind: TFuncKind,
+    memory_found: Bool,
+    memory_complete: Bool,
+    owner_generic_complete: Bool,
 }
 
 sema_check_method_input_row: fn(module_identity: ModuleID, job: SemaBodyJob, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, registered: SemaRegistrationFunction, owner_type: Type, trait_symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaMethodInput {
@@ -3780,9 +3780,9 @@ sema_fact_identity: fn(definition: FactDecl) -> String {
 }
 
 SemaFactFirstDeclaration: struct {
-    module_index: Int
-    span: Span
-    name: String
+    module_index: Int,
+    span: Span,
+    name: String,
 }
 
 // The bundle's earlier declaration of fact `identity`, in module order and
@@ -4365,16 +4365,16 @@ SEMA_PASS_FACT_TABLES: 3
 SEMA_PASS_FACT_JOBS: 4
 
 SemaPassFacts: struct {
-    memory_plan: SemaFunctionMemoryPlan
-    fixed_length_write_params: [String]
-    boxed_edges: [String:[String]]
-    copy_facts: SemaCopyFactsTable
+    memory_plan: SemaFunctionMemoryPlan,
+    fixed_length_write_params: [String],
+    boxed_edges: [String:[String]],
+    copy_facts: SemaCopyFactsTable,
 }
 
 // One computed fact: job `job`'s field of `facts` is filled.
 SemaPassFact: struct {
-    job: Int
-    facts: SemaPassFacts
+    job: Int,
+    facts: SemaPassFacts,
 }
 
 sema_pass_facts_new: fn() -> SemaPassFacts Never! {
@@ -4616,41 +4616,41 @@ sema_check_registered_module_item_count: fn(environment: SemaScopeEnvironment, p
 // `checked` is optional only so the body loop can move it out
 // (sema_check_drain_body); every prepared body has one.
 SemaParallelBody: struct {
-    job_index: Int
-    checked: SemaFunctionResult?
-    diagnostics: [Diagnostic]
-    call_facts: [SemaCallSiteFact]
-    comptime_requests: [SemaComptimeRequest]
-    name_references: [SemaNameReferenceFact]
-    method_input: SemaMethodInput?
-    wanted_hooks: Bool
+    job_index: Int,
+    checked: SemaFunctionResult?,
+    diagnostics: [Diagnostic],
+    call_facts: [SemaCallSiteFact],
+    comptime_requests: [SemaComptimeRequest],
+    name_references: [SemaNameReferenceFact],
+    method_input: SemaMethodInput?,
+    wanted_hooks: Bool,
     // A top-level body's memory plan row, as the thread that checked it
     // looked it up (memory_known), so the module pass need not look it up again.
-    memory_position: Int?{None}
-    memory_known: Bool{false}
+    memory_position: Int?{None},
+    memory_known: Bool{false},
     // What the check demanded of the generated codecs and derived methods,
     // when its thread recorded that apart (sema_check_body_demand_apart)
     // or the Core library's check captured it (CoreBodies.jet); the module
     // pass that takes the packet records it again
     // (sema_check_body_demand_replay).
-    codec_demand: [String]{[String]{}}
-    derive_demand: [String]{[String]{}}
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
 }
 
 // A module's parallel body pass: the post-summary module scope (one row, or
 // none when the module checks serially) and the prepared function and method
 // bodies, each list last first, so the body loop pops them in its order.
 SemaPreparedBodies: struct {
-    scopes: [SemaScopeTable]
-    bodies: [SemaParallelBody]
+    scopes: [SemaScopeTable],
+    bodies: [SemaParallelBody],
     // A body stream's checks of the module's parallel method jobs
     // (sema_check_registered_parallel_method_jobs), last first like `bodies`;
     // `methods_prepared` when the stream selected those jobs.
-    methods: [SemaParallelBody]{[SemaParallelBody]{}}
-    methods_prepared: Bool{false}
+    methods: [SemaParallelBody]{[SemaParallelBody]{}},
+    methods_prepared: Bool{false},
     // The module's declaration and program checks when its pass made them
     // ahead (sema_check_declaration_modules), else None.
-    started: SemaDeclarationCheck?{None}
+    started: SemaDeclarationCheck?{None},
 }
 
 sema_check_prepared_none: fn() -> SemaPreparedBodies Never! {
@@ -4757,56 +4757,56 @@ sema_check_module_scope_rows: fn(graph: SemaRegistrationGraph, module_index: Int
 // between modules, so neither is copied. A body stream's module
 // environments are its cells' (SemaStreamCells.environments).
 SemaCheckShared: struct {
-    environments: [SemaScopeEnvironment]
-    programs: [SemaProgramTables]
-    memory_plans: [SemaFunctionMemoryPlan]
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    memory_plans: [SemaFunctionMemoryPlan],
 }
 
 // Addresses only: the AST, owner and trait stay in the frozen graph. Method
 // ordinals are the nominal-then-impl source order used by ordered application.
 SemaBodyJob: enum {
-    TopLevel(item_index: Int)
-    NominalMethod(ordinal: Int, nominal_index: Int, method_index: Int)
-    ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int)
+    TopLevel(item_index: Int),
+    NominalMethod(ordinal: Int, nominal_index: Int, method_index: Int),
+    ImplMethod(ordinal: Int, implementation_index: Int, method_index: Int),
 }
 
 // The body's existing shared lifecycle, absent for declaration-only checks.
 SemaMethodScheduling: struct {
-    shared_state: Shared<SemaCheckShared>
-    threads: CompilerThreads
+    shared_state: Shared<SemaCheckShared>,
+    threads: CompilerThreads,
 }
 
 // The canonical module checker owns these rows while it runs. Returning
 // them transports ownership back to all callers without moving from a borrow.
 SemaOwnedModuleCheck: struct {
-    module_result: SemaGraphModuleResult
-    environment: SemaScopeEnvironment
-    program: SemaProgramTables
-    memory_plan: SemaFunctionMemoryPlan
+    module_result: SemaGraphModuleResult,
+    environment: SemaScopeEnvironment,
+    program: SemaProgramTables,
+    memory_plan: SemaFunctionMemoryPlan,
 }
 
 // One thread of a module's parallel body pass: its own copy of the
 // post-summary module scope, and the bodies it checked with each one's
 // position in the pass's job list, in the order it claimed them.
 SemaBodyPart: struct {
-    scopes: SemaScopeTable
-    bodies: [SemaParallelBody]
-    positions: [Int]
+    scopes: SemaScopeTable,
+    bodies: [SemaParallelBody],
+    positions: [Int],
 }
 
 // What every thread of a module's parallel body pass reads: the jobs in job
 // order and the order they are claimed in (`order[rank]` is a job position,
 // heaviest source first).
 SemaBodyPlan: struct {
-    jobs: [SemaBodyJob]
-    order: [Int]
+    jobs: [SemaBodyJob],
+    order: [Int],
 }
 
 // A body stream module's environment, entered in the module with its
 // post-summary scope moved in: the one row its jobs read until the module
 // check takes the scope back (none for a module without stream jobs).
 SemaStreamEnvironment: struct {
-    environments: [SemaScopeEnvironment]
+    environments: [SemaScopeEnvironment],
 }
 
 // The bodies a body stream module's jobs published, each with its job
@@ -4820,37 +4820,37 @@ SemaStreamEnvironment: struct {
 // the lead records again before it checks the module
 // (sema_check_body_stream_replay).
 SemaStreamOut: struct {
-    bodies: [SemaParallelBody]
-    positions: [Int]
-    left: Int
-    ready: Bool
-    failed: Bool
-    codec_demand: [String]{[String]{}}
-    derive_demand: [String]{[String]{}}
+    bodies: [SemaParallelBody],
+    positions: [Int],
+    left: Int,
+    ready: Bool,
+    failed: Bool,
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
 }
 
 // Every body stream module's environment cell, published bodies and the
 // view summary jobs its declaration check found ahead, in stream module
 // order; every thread of the stream reads them for its whole run.
 SemaStreamCells: struct {
-    environments: [Shared<SemaStreamEnvironment>]
-    outs: [Shared<SemaStreamOut>]
-    view_jobs: [[Int]?]
+    environments: [Shared<SemaStreamEnvironment>],
+    outs: [Shared<SemaStreamOut>],
+    view_jobs: [[Int]?],
 }
 
 // The next unclaimed rank of a parallel body pass, taken with one atomic add.
 SemaBodyQueue: struct {
-    next: Atomic<Int>
+    next: Atomic<Int>,
 }
 
 // One claimed job: its position in its job list, or -1 when every job is
 // claimed, and in a body stream its stream module and that module's graph
 // module (-1 outside a stream).
 SemaBodyClaim: struct {
-    position: Int
-    job: SemaBodyJob
-    stream_module: Int
-    module_index: Int
+    position: Int,
+    job: SemaBodyJob,
+    stream_module: Int,
+    module_index: Int,
 }
 
 // The item indexes of module `module_index`'s top-level functions a compiler
@@ -5458,10 +5458,10 @@ sema_check_body_parts: fn(shared: Shared<SemaCheckShared>, slots: [Shared<SemaBo
 // wave filled (`Codec`, sema_codec_waves) or the derived methods a derive
 // wave demanded (`Derive`, sema_derive_waves).
 SemaWaveKind: enum {
-    Modules
-    Core
-    Codec
-    Derive
+    Modules,
+    Core,
+    Codec,
+    Derive,
 }
 
 // A body stream's threads: `tasks` tasks of sema_check_body_stream_part,
@@ -5704,21 +5704,21 @@ sema_check_registration_module_lent: fn(environment: &SemaScopeEnvironment, prog
 // are the parallel method jobs the head admitted `wave_workers` threads for
 // (none, and one worker, when it admitted no method wave).
 SemaModuleCheckRun: struct {
-    module_result: SemaGraphModuleResult
-    scopes: SemaScopeTable
-    method_ready: SemaPreparedBodies
-    all_method_jobs: [SemaBodyJob]
-    prelude_demands: [Int:[SemaPreludeConversionDemand]]
-    module_identity: ModuleID
-    keep_going: Bool
-    check_bodies: Bool
-    count_work: Bool
-    items_scanned: Int
-    functions_checked: Int
-    impl_rows_scanned: Int
-    wave_jobs: [SemaBodyJob]
-    wave_weights: [Int]
-    wave_workers: Int
+    module_result: SemaGraphModuleResult,
+    scopes: SemaScopeTable,
+    method_ready: SemaPreparedBodies,
+    all_method_jobs: [SemaBodyJob],
+    prelude_demands: [Int:[SemaPreludeConversionDemand]],
+    module_identity: ModuleID,
+    keep_going: Bool,
+    check_bodies: Bool,
+    count_work: Bool,
+    items_scanned: Int,
+    functions_checked: Int,
+    impl_rows_scanned: Int,
+    wave_jobs: [SemaBodyJob],
+    wave_weights: [Int],
+    wave_workers: Int,
 }
 
 // The module check's declarations and top-level bodies, and the method
@@ -5931,10 +5931,10 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
 
 // One consumer's read of a module value, from a body of this module.
 SemaModuleValueRead: struct {
-    key: SymbolID
-    name: String
-    consumer: String
-    span: Span
+    key: SymbolID,
+    name: String,
+    consumer: String,
+    span: Span,
 }
 
 // A module value has one type and one value for every consumer. When one
@@ -6032,8 +6032,8 @@ sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: Symbo
 
 // A function or method of a module's declarations and its text's span.
 SemaModuleValueBody: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 // The functions and methods of `declarations`, in declaration order.
@@ -6258,8 +6258,8 @@ sema_refuses_unbuilt: fn(program: SemaProgramTables) -> Bool Never! {
 SEMA_CHECK_PROGRESS_STRIDE: 64
 
 SemaNameResolvedDeclaration: struct {
-    symbol: Symbol
-    kind: String
+    symbol: Symbol,
+    kind: String,
 }
 
 sema_name_visibility: fn(value: Int) -> NameVisibility Never! {
@@ -6284,9 +6284,9 @@ sema_name_add_declaration: fn(facts: &NameFacts, module_index: Int, name: String
 // it is dropped before its owner and semantic identity are formatted.
 // `called[row]` marks the symbol-index declarations a call fact has added.
 SemaNameReferenceFilter: struct {
-    parts: NameTable
-    seen: SemaNameReferenceKeys
-    called: [Bool]
+    parts: NameTable,
+    seen: SemaNameReferenceKeys,
+    called: [Bool],
 }
 
 sema_name_add_reference: fn(facts: &NameFacts, filter: &SemaNameReferenceFilter, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[Int], span: Span, symbol: SemaNameReferent, kind: String) Never! {
@@ -6343,8 +6343,8 @@ sema_name_owner_index: fn(graph: SemaRegistrationGraph) -> [String:String] Never
 // The declarations a call fact can name: `keys` maps each symbol id to its
 // declaration row.
 SemaNameSymbolIndex: struct {
-    keys: [U32:Int]
-    declarations: [SemaNameResolvedDeclaration]
+    keys: [U32:Int],
+    declarations: [SemaNameResolvedDeclaration],
 }
 
 sema_name_index_symbol: fn(index: &SemaNameSymbolIndex, symbol: Symbol, kind: String) Never! {
@@ -6447,15 +6447,15 @@ sema_name_first_aliases: fn(rows: &&[NameAlias]) -> [NameAlias] Never! {
 // open-addressing hash over parallel columns, so a row is deduplicated
 // without formatting and interning one String per row.
 SemaNameReferenceKeys: struct {
-    path: [Int]
-    kind: [Int]
-    start: [Int]
-    end: [Int]
-    identity: [Int]
-    member: [Int]
+    path: [Int],
+    kind: [Int],
+    start: [Int],
+    end: [Int],
+    identity: [Int],
+    member: [Int],
     // 0 is empty, otherwise the key's row plus one.
-    slots: [Int]
-    mask: Int
+    slots: [Int],
+    mask: Int,
 }
 
 SEMA_NAME_REFERENCE_KEYS_INITIAL_SLOTS: 1024
@@ -6904,22 +6904,22 @@ sema_name_build_facts_threads: fn(graph: &&SemaRegistrationGraph, modules: &[Sem
 // the owner and symbol indexes (each moved in, the graph, the results and the
 // owner index moved back out), and the parts' module bounds.
 SemaNameShared: struct {
-    graphs: [SemaRegistrationGraph]
-    modules: [SemaGraphModuleResult]
-    owner_names: [[String:String]]
-    symbol_indexes: [SemaNameSymbolIndex]
-    bounds: [Int]
+    graphs: [SemaRegistrationGraph],
+    modules: [SemaGraphModuleResult],
+    owner_names: [[String:String]],
+    symbol_indexes: [SemaNameSymbolIndex],
+    bounds: [Int],
 }
 
 // The next unclaimed part of the name collection, taken with one atomic add.
 SemaNameQueue: struct {
-    next: Atomic<Int>
+    next: Atomic<Int>,
 }
 
 // One collected part: its number and its facts.
 SemaNamePart: struct {
-    part: Int
-    facts: NameFacts
+    part: Int,
+    facts: NameFacts,
 }
 
 sema_name_shared_fill: fn(shared_state: Shared<SemaNameShared>, graph: &&SemaRegistrationGraph, modules: &[SemaGraphModuleResult], owner_names: &&[String:String], symbol_index: &&SemaNameSymbolIndex) {
@@ -7055,36 +7055,36 @@ sema_comptime_graph_with_values: fn(graph: &&SemaRegistrationGraph, values: [Sem
 // records what it replaced, and sema_graph_trail_undo replays the records
 // newest first, which gives back the registered graph exactly.
 SemaGraphTrail: struct {
-    entries: [SemaGraphUndo]
+    entries: [SemaGraphUndo],
     // Whether `entries` holds the nominal indexes as they were before the
     // first minted error type (one record restores them for every mint).
-    nominal_indexes_saved: Bool
+    nominal_indexes_saved: Bool,
 }
 
 // One recorded edit. The `*Type` rows were untyped (None) before a staged
 // value typed them; the others hold the replaced row.
 SemaGraphUndo: enum {
-    SymbolType(module_index: Int, position: Int)
-    ConstantType(module_index: Int, position: Int)
-    ConstantSymbolType(module_index: Int, position: Int)
-    ConstantDeclarationType(module_index: Int, position: Int)
-    ModuleImportType(module_index: Int, import_index: Int, binding: Int)
-    ItemType(module_index: Int, position: Int)
-    GraphImportType(import_index: Int, binding: Int)
-    FunctionRow(module_index: Int, row: Int, old: SemaRegistrationFunction)
-    NominalMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction)
-    ImplMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction)
-    SymbolRow(module_index: Int, position: Int, old: Symbol)
-    DeclarationRow(module_index: Int, position: Int, old: Item)
-    ProgramItemRow(module_index: Int, position: Int, old: Item)
-    ExportRow(module_index: Int, position: Int, old: SemaRegistrationExport)
-    ImportBindingRow(module_index: Int, import_index: Int, binding: Int, old: SemaRegistrationImportBinding)
-    ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String)
-    NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]])
-    Counting(old: Bool)
-    CoreBodiesHeld(old: Bool)
-    FailureSolved(old: Bool)
-    CodecBody(module_index: Int, row: Int)
+    SymbolType(module_index: Int, position: Int),
+    ConstantType(module_index: Int, position: Int),
+    ConstantSymbolType(module_index: Int, position: Int),
+    ConstantDeclarationType(module_index: Int, position: Int),
+    ModuleImportType(module_index: Int, import_index: Int, binding: Int),
+    ItemType(module_index: Int, position: Int),
+    GraphImportType(import_index: Int, binding: Int),
+    FunctionRow(module_index: Int, row: Int, old: SemaRegistrationFunction),
+    NominalMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction),
+    ImplMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction),
+    SymbolRow(module_index: Int, position: Int, old: Symbol),
+    DeclarationRow(module_index: Int, position: Int, old: Item),
+    ProgramItemRow(module_index: Int, position: Int, old: Item),
+    ExportRow(module_index: Int, position: Int, old: SemaRegistrationExport),
+    ImportBindingRow(module_index: Int, import_index: Int, binding: Int, old: SemaRegistrationImportBinding),
+    ModuleAppend(module_index: Int, mark: SemaGraphModuleMark, name: String),
+    NominalIndexes(symbol_rows: [U32:SemaRegistrationRowRef], slots: [String:Int], buckets: [[SemaRegistrationRowRef]]),
+    Counting(old: Bool),
+    CoreBodiesHeld(old: Bool),
+    FailureSolved(old: Bool),
+    CodecBody(module_index: Int, row: Int),
 }
 
 // Rows a minted error type appended to one module (and the name it
@@ -7099,15 +7099,15 @@ sema_graph_trail_init: fn() -> SemaGraphTrail Never! {
 // The row counts of one registration module before an append
 // (SemaGraphUndo.ModuleAppend).
 SemaGraphModuleMark: struct {
-    symbols: Int
-    declarations: Int
-    functions: Int
-    nominals: Int
-    constants: Int
-    static_roots: Int
-    persist_roots: Int
-    program_items: Int
-    exports: Int
+    symbols: Int,
+    declarations: Int,
+    functions: Int,
+    nominals: Int,
+    constants: Int,
+    static_roots: Int,
+    persist_roots: Int,
+    program_items: Int,
+    exports: Int,
 }
 
 sema_graph_module_mark: fn(module_row: SemaRegistrationModule) -> SemaGraphModuleMark Never! {
@@ -7270,16 +7270,16 @@ sema_comptime_graph_apply_values: fn(graph: &SemaRegistrationGraph, values: [Sem
 // lists the positions of every constant row by "{module index}|{key}"
 // (sema_comptime_staged_constant_rows).
 SemaComptimeValueSites: struct {
-    sites: [String:[SemaComptimeValueSite]]
-    constants: [String:[Int]]
+    sites: [String:[SemaComptimeValueSite]],
+    constants: [String:[Int]],
 }
 
 SemaComptimeValueSite: enum {
-    Symbol(module_index: Int, position: Int)
-    Constant(module_index: Int, position: Int)
-    ModuleImport(module_index: Int, import_index: Int, binding: Int)
-    Item(module_index: Int, position: Int)
-    GraphImport(import_index: Int, binding: Int)
+    Symbol(module_index: Int, position: Int),
+    Constant(module_index: Int, position: Int),
+    ModuleImport(module_index: Int, import_index: Int, binding: Int),
+    Item(module_index: Int, position: Int),
+    GraphImport(import_index: Int, binding: Int),
 }
 
 sema_comptime_value_site_add: fn(sites: &[String:[SemaComptimeValueSite]], slot: String, site: SemaComptimeValueSite) Never! {
@@ -7824,35 +7824,35 @@ sema_comptime_precheck_scope_rows: fn(program: SemaProgramTables, module_identit
 // module's prepared comptime scope as `module_scope`) and their
 // `comptime_scopes`, one row per entered wave module.
 SemaPrecheckShared: struct {
-    environments: [SemaScopeEnvironment]
-    programs: [SemaProgramTables]
-    available: [SemaComptimeAvailableConstants]
-    sources: [[SemaComptimeItemSource]]
-    module_environments: [SemaScopeEnvironment]
-    comptime_scopes: [SemaComptimeScopes]
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    available: [SemaComptimeAvailableConstants],
+    sources: [[SemaComptimeItemSource]],
+    module_environments: [SemaScopeEnvironment],
+    comptime_scopes: [SemaComptimeScopes],
 }
 
 // A precheck wave's jobs (sema_comptime_precheck_wave) in claim order:
 // `order[rank]` is the job claimed at `rank`, `next` the next unclaimed rank,
 // taken with one atomic add under a read guard each thread holds for its run.
 SemaPrecheckPlan: struct {
-    positions: [Int]
-    modules: [Int]
-    order: [Int]
-    next: Atomic<Int>
+    positions: [Int],
+    modules: [Int],
+    order: [Int],
+    next: Atomic<Int>,
 }
 
 // One claimed precheck job: its source position and entered wave module;
 // position -1 when none is left.
 SemaPrecheckClaim: struct {
-    position: Int
-    wave_module: Int
+    position: Int,
+    wave_module: Int,
 }
 
 // One check a precheck thread made, at its source's position.
 SemaPrecheckDone: struct {
-    position: Int
-    check: SemaComptimeItemCheck?
+    position: Int,
+    check: SemaComptimeItemCheck?,
 }
 
 // Moves the run's environment and program tables out of their slots into the
@@ -8048,8 +8048,8 @@ sema_comptime_precheck_fold: fn(program: SemaProgramTables, check: SemaComptimeI
 // One function check a comptime run makes ahead of a pass's closures
 // (SemaComptimeWalk): function `function_key` of `module_identity`.
 SemaComptimeFunctionJob: struct {
-    module_identity: ModuleID
-    function_key: String
+    module_identity: ModuleID,
+    function_key: String,
 }
 
 // A comptime run's on-demand function checks (sema_check_comptime_function),
@@ -8078,21 +8078,21 @@ SemaComptimeFunctionJob: struct {
 // one has no row, and neither does a function of a module that cannot be
 // entered.
 SemaComptimeWalk: struct {
-    state: Shared<SemaFunctionPrecheckShared>
-    queue: Shared<SemaComptimeWalkQueue>
-    changed: Condition
+    state: Shared<SemaFunctionPrecheckShared>,
+    queue: Shared<SemaComptimeWalkQueue>,
+    changed: Condition,
     // The checking threads (sema_comptime_walk_admit).
-    workers: Int
+    workers: Int,
     // Each module's row in the queue's `slots`, at its ModuleID row
     // (module_index): -1 for a module not entered yet (or whose scope was
     // dropped, sema_comptime_walk_evict), -2 for one that cannot be entered.
     // Each prepared scope's module and scope rows by its row, and the rows
     // of the scopes the queue still holds. Only the driver's
     // sema_comptime_walk_push reads and writes these.
-    module_slots: [Int]
-    slot_modules: [Int]
-    slot_rows: [Int]
-    held_rows: Int
+    module_slots: [Int],
+    slot_modules: [Int],
+    slot_rows: [Int],
+    held_rows: Int,
 }
 
 // The threads a walk of `jobs` may use: as many as their work admits, or,
@@ -8145,11 +8145,11 @@ sema_comptime_function_weight: fn(program: SemaProgramTables, function_key: Stri
 // program tables, available constants, values and memory plan, each the one
 // row of its list. Nothing writes it while the walk lasts.
 SemaFunctionPrecheckShared: struct {
-    environments: [SemaScopeEnvironment]
-    programs: [SemaProgramTables]
-    available: [SemaComptimeAvailableConstants]
-    values: [[SemaComptimeItemValue]]
-    memory_plans: [SemaFunctionMemoryPlan]
+    environments: [SemaScopeEnvironment],
+    programs: [SemaProgramTables],
+    available: [SemaComptimeAvailableConstants],
+    values: [[SemaComptimeItemValue]],
+    memory_plans: [SemaFunctionMemoryPlan],
 }
 
 // A walk's queue: every job queued, each with its module scope's row in
@@ -8161,30 +8161,30 @@ SemaFunctionPrecheckShared: struct {
 // yet at `pending`; whether the driver closed the walk, and whether a
 // thread failed (sema_comptime_walk_watched).
 SemaComptimeWalkQueue: struct {
-    jobs: [SemaComptimeFunctionJob]
-    job_slots: [Int]
-    order: [Int]
-    next: Int
-    busy: Int
-    done: [SemaComptimeWalkDone]
-    slots: [Shared<SemaComptimeModuleScope>?]
-    pending: [Int]
-    closed: Bool
-    failed: Bool
+    jobs: [SemaComptimeFunctionJob],
+    job_slots: [Int],
+    order: [Int],
+    next: Int,
+    busy: Int,
+    done: [SemaComptimeWalkDone],
+    slots: [Shared<SemaComptimeModuleScope>?],
+    pending: [Int],
+    closed: Bool,
+    failed: Bool,
 }
 
 // A check a walk thread made, of the queued job `job`.
 SemaComptimeWalkDone: struct {
-    job: SemaComptimeFunctionJob
-    check: SemaComptimeFunctionResult
+    job: SemaComptimeFunctionJob,
+    check: SemaComptimeFunctionResult,
 }
 
 // A job a walk thread claimed, with its module scope's row in the queue's
 // `slots` and that row's cell.
 SemaComptimeWalkClaim: struct {
-    job: SemaComptimeFunctionJob
-    slot: Int
-    scope: Shared<SemaComptimeModuleScope>
+    job: SemaComptimeFunctionJob,
+    slot: Int,
+    scope: Shared<SemaComptimeModuleScope>,
 }
 
 // Enters the run's environment in `module_identity` and prepares that
@@ -8546,27 +8546,27 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
 // extended as values land, instead of rescanning every value and every
 // module's constants for each waiting check.
 SemaComptimeAvailableConstants: struct {
-    keys: [String:Bool]
+    keys: [String:Bool],
     // How many of the run's append-only values `keys` already covers.
-    counted_values: Int
+    counted_values: Int,
     // How many constants took their type ahead of their value, joining a
     // batch that computes them for the items after them in one program
     // (the driver's jet_driver_comptime_type_land): each types the graph's
     // rows as a landing does, so the item checks' scopes count it too
     // (sema_comptime_available_version).
-    typed: Int{0}
+    typed: Int{0},
     // Canonical first Constant position, with module/key kept separate:
     // `constant_modules` holds each module's slot at its ModuleID row
     // (sema_comptime_index_module_slot). The same append-only frontier
     // indexes these once for staged lowering.
-    constant_modules: [Int]{[Int]{}}
-    constant_rows: [[String:Int]]{[[String:Int]]{}}
-    indexed_constants: Int{0}
+    constant_modules: [Int]{[Int]{}},
+    constant_rows: [[String:Int]]{[[String:Int]]{}},
+    indexed_constants: Int{0},
     // Fixed declaration topology of this run's graph: heads by key and
     // integer next links retain ALL matching declarations in original order.
-    declaration_heads: [[String:Int]]{[[String:Int]]{}}
-    declaration_next: [[Int]]{[[Int]]{}}
-    indexed_declarations: Int{0}
+    declaration_heads: [[String:Int]]{[[String:Int]]{}},
+    declaration_next: [[Int]]{[[Int]]{}},
+    indexed_declarations: Int{0},
 }
 
 sema_comptime_available_constants: fn(graph: SemaRegistrationGraph, values: [SemaComptimeItemValue]) -> SemaComptimeAvailableConstants Never! {
@@ -8864,9 +8864,9 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // nominal types, impls and fields never change while it runs: landed
 // values change constant rows only.
 SemaComptimeRenderMemo: struct {
-    ids: [U32:Int]{[U32:Int]{}}
-    methods: [[{module_identity: ModuleID, key: String}]]{[[{module_identity: ModuleID, key: String}]]{}}
-    children: [[Int]]{[[Int]]{}}
+    ids: [U32:Int]{[U32:Int]{}},
+    methods: [[{module_identity: ModuleID, key: String}]]{[[{module_identity: ModuleID, key: String}]]{}},
+    children: [[Int]]{[[Int]]{}},
 }
 
 // The methods a value of type `ty` renders, keys or orders through, `ty`
@@ -9378,8 +9378,8 @@ sema_comptime_checked_text_source: fn(evaluation: SemaCheckedTextEvaluation) -> 
 // constant dependencies come from the run's item checks
 // (sema_check_comptime_item_in).
 SemaComptimeSourceList: struct {
-    items: [SemaComptimeItemSource]
-    keys: [String:Bool]
+    items: [SemaComptimeItemSource],
+    keys: [String:Bool],
 }
 
 // `key` is the value's text key; the list dedupes by module and key.
@@ -9805,10 +9805,10 @@ SEMA_DECLARATION_MIN_BYTES_PER_THREAD: 65536
 // (sema_check_declaration_module), the program items it scanned and, for a
 // body pass (not `foreign`), the module's view summary jobs.
 SemaDeclarationCheck: struct {
-    position: Int
-    module_result: SemaGraphModuleResult
-    items_scanned: Int
-    view_summary_jobs: [Int]?
+    position: Int,
+    module_result: SemaGraphModuleResult,
+    items_scanned: Int,
+    view_summary_jobs: [Int]?,
 }
 
 // A module's declaration check under `values`: its declarations and program
@@ -9916,17 +9916,17 @@ sema_check_shared_counting: fn(shared_state: Shared<SemaCheckShared>, counting: 
 // What every declaration-check thread reads: the checked modules by
 // position, the comptime values and whether foreign rows are checked.
 SemaDeclarationInputs: struct {
-    modules: [Int]
-    values: [SemaComptimeItemValue]
-    foreign: Bool
+    modules: [Int],
+    values: [SemaComptimeItemValue],
+    foreign: Bool,
 }
 
 // The module positions in claim order: `order[rank]` is the position claimed
 // at `rank`, `next` the next unclaimed rank, taken with one atomic add under
 // a read guard each thread holds for its run.
 SemaDeclarationPlan: struct {
-    order: [Int]
-    next: Atomic<Int>
+    order: [Int],
+    next: Atomic<Int>,
 }
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
@@ -10860,10 +10860,10 @@ sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &[String:Bool])
 // what the bundle solve proves for those callees; the body pass that reuses a
 // body settles its obligations again with the bundle solve.
 SemaComptimeFailureClosure: struct {
-    owners: [Int]{[Int]{}}
-    facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}}
-    address_taken: [String:Bool]{[String:Bool]{}}
-    obligations: [Diagnostic]{[Diagnostic]{}}
+    owners: [Int]{[Int]{}},
+    facts: [SemaFunctionFailureFacts]{[SemaFunctionFailureFacts]{}},
+    address_taken: [String:Bool]{[String:Bool]{}},
+    obligations: [Diagnostic]{[Diagnostic]{}},
 }
 
 sema_comptime_failure_closure_add: fn(graph: SemaRegistrationGraph, closure: &SemaComptimeFailureClosure, result: SemaComptimeFunctionResult) Never! {
@@ -10903,8 +10903,8 @@ sema_comptime_failure_closure_settle: fn(graph: SemaRegistrationGraph, closure: 
 // One finalize body pass: its checked modules, and the pass graph moved back
 // out of the pass's program tables.
 SemaFinalizeChecked: struct {
-    modules: [SemaGraphModuleResult]
-    graph: SemaRegistrationGraph?
+    modules: [SemaGraphModuleResult],
+    graph: SemaRegistrationGraph?,
 }
 
 // A body check of the registered modules `selected` (graph module indices, in
@@ -11112,10 +11112,10 @@ SEMA_BODY_STREAM_SCOPE_ROWS: 32768
 // callbacks the threads hold withheld, so the lead prepares it again, and
 // `Open` once its jobs can be claimed.
 SemaStreamStage: enum {
-    Waiting
-    Preparing
-    Rescan
-    Open
+    Waiting,
+    Preparing,
+    Rescan,
+    Open,
 }
 
 // A body stream's schedule (sema_check_body_stream), edited under its one
@@ -11133,34 +11133,34 @@ SemaStreamStage: enum {
 // opened module's method jobs) are claimed. `finished` once the lead
 // checked every module, `failed` once a stream thread failed.
 SemaBodyStream: struct {
-    module_indexes: [Int]
-    rows: [Int]
-    jobs: [[SemaBodyJob]]
-    tops: [Int]
-    orders: [[Int]]
-    next: [Int]
-    stages: [SemaStreamStage]
-    prepared: [Bool]
-    summaries: [Int]
-    lead: Int
-    admitted: Int
-    held_rows: Int
-    prep_next: Int
-    claim_from: Int
-    claimed: Int
-    job_total: Int
-    finished: Bool
-    failed: Bool
+    module_indexes: [Int],
+    rows: [Int],
+    jobs: [[SemaBodyJob]],
+    tops: [Int],
+    orders: [[Int]],
+    next: [Int],
+    stages: [SemaStreamStage],
+    prepared: [Bool],
+    summaries: [Int],
+    lead: Int,
+    admitted: Int,
+    held_rows: Int,
+    prep_next: Int,
+    claim_from: Int,
+    claimed: Int,
+    job_total: Int,
+    finished: Bool,
+    failed: Bool,
 }
 
 // What a body stream thread does next: check a claimed job (`Body`),
 // prepare a stream module (`Prep`), wait for the threads checking the jobs
 // of the module it checks next (`Await`, the lead alone), or stop.
 SemaStreamAction: enum {
-    Body
-    Prep
-    Await
-    Stop
+    Body,
+    Prep,
+    Await,
+    Stop,
 }
 
 // A body stream thread's next step (`action`): for `Body` the `claim`, the
@@ -11170,15 +11170,15 @@ SemaStreamAction: enum {
 // jobs, `total` jobs, whether it was `prepared` and the view summary
 // functions that checked.
 SemaStreamStep: struct {
-    action: SemaStreamAction
-    claim: SemaBodyClaim
-    rank: Int
-    total: Int
-    stream_module: Int
-    module_index: Int
-    tops: Int
-    prepared: Bool
-    summary_checked: Int
+    action: SemaStreamAction,
+    claim: SemaBodyClaim,
+    rank: Int,
+    total: Int,
+    stream_module: Int,
+    module_index: Int,
+    tops: Int,
+    prepared: Bool,
+    summary_checked: Int,
 }
 
 sema_check_body_stream_step: fn(action: SemaStreamAction) -> SemaStreamStep {
@@ -11526,13 +11526,13 @@ sema_check_body_stream_replay: fn(cells: SemaStreamCells, stream_module: Int, pr
 // `codec_demand` and `derive_demand`: what its summary checks demanded of
 // the generated codecs and derived methods, when they record that apart.
 SemaStreamModulePrep: struct {
-    environments: [SemaScopeEnvironment]
-    method_jobs: [SemaBodyJob]
-    weights: [Int]
-    summary_checked: Int
-    wanted_hooks: Bool
-    codec_demand: [String]{[String]{}}
-    derive_demand: [String]{[String]{}}
+    environments: [SemaScopeEnvironment],
+    method_jobs: [SemaBodyJob],
+    weights: [Int],
+    summary_checked: Int,
+    wanted_hooks: Bool,
+    codec_demand: [String]{[String]{}},
+    derive_demand: [String]{[String]{}},
 }
 
 // Prepares module `module_index`, with `tops` top-level stream jobs, on its
@@ -11857,11 +11857,11 @@ sema_comptime_function_diagnostics: fn(comptime_functions: [SemaComptimeFunction
 // statements, or a `run` entry, which is a `run: fn` or an import that binds
 // `run`.
 SemaProgramEntrySite: struct {
-    row: Int
-    span: Span
+    row: Int,
+    span: Span,
     // How a report names it: "top-level statements", "`run: fn`" or "the
     // `run` import".
-    kind: String
+    kind: String,
 }
 
 // A program has one entry: its entry file's top-level statements, or one
@@ -12145,12 +12145,12 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
 // the whole-program half builds the bundle's name facts
 // (sema_finalize_graph's `build_names`).
 SemaFinalizeBodies: struct {
-    modules: [SemaGraphModuleResult]
-    carried: [SemaPassFacts]
-    core_tally: SemaCoreDemandTally
-    checked_types: [TTypeDef]
-    complete: Bool
-    build_names: Bool
+    modules: [SemaGraphModuleResult],
+    carried: [SemaPassFacts],
+    core_tally: SemaCoreDemandTally,
+    checked_types: [TTypeDef],
+    complete: Bool,
+    build_names: Bool,
 }
 
 // Bodies for sema_finalize_bodies to fill, with no name facts built.
@@ -12772,9 +12772,9 @@ sema_finalize_walk_all: fn(graph: SemaRegistrationGraph, inputs: SemaFinalizeWal
 // Each walked module's reports, masked branches and fixed tags, in module
 // order (sema_finalize_walk_all).
 SemaFinalizeWalked: struct {
-    found: [[Diagnostic]]
-    masked: [[Span]]
-    fixed: [[String]]
+    found: [[Diagnostic]],
+    masked: [[Span]],
+    fixed: [[String]],
 }
 
 // Each masked branch of a module (Taint.jet sema_taint_mask_branch) joins
@@ -12822,9 +12822,9 @@ sema_fixed_type: fn(ty: Type, fixed_tags: [String]) -> Bool Never! {
 
 // One module's consecutive item range, walked for Core usage on one thread.
 SemaFinalizeCoreJob: struct {
-    module_index: Int
-    first: Int
-    last: Int
+    module_index: Int,
+    first: Int,
+    last: Int,
 }
 
 // The jobs of the parts `bounds` cuts over every module's items (flattened
@@ -12858,26 +12858,26 @@ sema_finalize_core_jobs: fn(bounds: [Int], owners: [Int]) -> [SemaFinalizeCoreJo
 // (sema_finalize_walk_inputs): the catalog, the coverage reports, the
 // modules in claim order and how many threads claim them.
 SemaFinalizeWalkInputs: struct {
-    catalog: SemaTaintCatalog
-    coverage: [Diagnostic]
-    taint_order: [Int]
-    workers: Int
+    catalog: SemaTaintCatalog,
+    coverage: [Diagnostic],
+    taint_order: [Int],
+    workers: Int,
 }
 
 // The next unclaimed job, taken with one atomic add; every thread reads the
 // queue in place.
 SemaFinalizeCoreQueue: struct {
-    next: Atomic<Int>
+    next: Atomic<Int>,
 }
 
 // One job's rows, walked by one thread, or the module's assembled usage when
 // the job walked the whole module; a module's first job that does not walk
 // it whole hands back the module's walk context.
 SemaFinalizeCoreCollected: struct {
-    job: Int
-    collected: SemaCoreCollected
-    assembled: SemaCoreModuleUsageResult?
-    context: SemaCoreModuleContext?
+    job: Int,
+    collected: SemaCoreCollected,
+    assembled: SemaCoreModuleUsageResult?,
+    context: SemaCoreModuleContext?,
 }
 
 // Runs taint-walking threads `from..<workers`, one task each, and moves each
@@ -12958,13 +12958,13 @@ SEMA_FINALIZE_SIDE_MIN_MODULES_PER_THREAD: 16
 // found any, an effect part's inputs and graph rows, the liveness verdicts,
 // or the taint catalog (the one row of `taint`).
 SemaFinalizeSide: struct {
-    job: Int
-    found: Bool
-    diagnostics: [Diagnostic]
-    effect_inputs: [SemaEffectModuleInput]
-    effect_prepared: SemaEffectPrepared
-    liveness: SemaLivenessResult
-    taint: [SemaTaintPrepared]
+    job: Int,
+    found: Bool,
+    diagnostics: [Diagnostic],
+    effect_inputs: [SemaEffectModuleInput],
+    effect_prepared: SemaEffectPrepared,
+    liveness: SemaLivenessResult,
+    taint: [SemaTaintPrepared],
 }
 
 sema_finalize_side_new: fn(job: Int) -> SemaFinalizeSide {
@@ -12979,23 +12979,23 @@ sema_finalize_side_liveness_empty: fn() -> SemaLivenessResult {
 // modules: the program's state table, the checked modules in typestate claim
 // order (most functions first), and the Core usage jobs.
 SemaFinalizeSideInputs: struct {
-    table: SemaStateTable
-    typestate_order: [Int]
-    jobs: [SemaFinalizeCoreJob]
+    table: SemaStateTable,
+    typestate_order: [Int],
+    jobs: [SemaFinalizeCoreJob],
 }
 
 // One checked module's typestate findings (sema_typestate_check_module).
 SemaFinalizeTypestate: struct {
-    module_index: Int
-    found: [Diagnostic]
+    module_index: Int,
+    found: [Diagnostic],
 }
 
 // What one side-check thread returns: its side checks, its modules'
 // typestate findings and its Core jobs' rows.
 SemaFinalizeSideClaimed: struct {
-    sides: [SemaFinalizeSide]
-    typestate: [SemaFinalizeTypestate]
-    core: [SemaFinalizeCoreCollected]
+    sides: [SemaFinalizeSide],
+    typestate: [SemaFinalizeTypestate],
+    core: [SemaFinalizeCoreCollected],
 }
 
 // Runs every side check, on threads when the program is large enough, and

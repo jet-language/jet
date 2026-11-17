@@ -49,7 +49,7 @@ PUSH_FCM_SCOPE: "https://www.googleapis.com/auth/firebase.messaging"
 /// or the system entropy source failed.
 #Error
 PushError: struct {
-    reason: String
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { self.reason }
@@ -59,28 +59,28 @@ PushError: struct {
 /// An application server's P-256 key pair: the 32-byte private scalar and
 /// the 65-byte uncompressed public point.
 PushKeyPair: struct {
-    #Redact private: [U8]
-    public: [U8]
+    #Redact private: [U8],
+    public: [U8],
 }
 
 /// A browser's push subscription: the push service's `endpoint` URL, its
 /// P-256 public key (65 bytes) and its authentication secret (16 bytes).
 PushSubscription: struct {
-    endpoint: String
-    public: [U8]
-    auth_secret: [U8]
+    endpoint: String,
+    public: [U8],
+    auth_secret: [U8],
 }
 
 /// One HTTP request of a push: a POST of `body` to `url`.
 PushRequest: struct {
-    url: String
-    headers: [PushHeader]
-    body: [U8]
+    url: String,
+    headers: [PushHeader],
+    body: [U8],
 }
 
 PushHeader: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 /// A random generator seeded from the system entropy source, for the keys
@@ -347,9 +347,9 @@ push_origin: fn(url: String) -> String? Never! {
 /// The push services a server sends through. A service left None sends
 /// nothing: a push to one of its devices is skipped.
 PushSettings: struct {
-    apns: PushAPNs?
-    fcm: PushFCM?
-    web: PushWeb?
+    apns: PushAPNs?,
+    fcm: PushFCM?,
+    web: PushWeb?,
 }
 
 /// APNs's token-based authentication: the APNs `origin`
@@ -358,37 +358,37 @@ PushSettings: struct {
 /// signing key's ID and the path of its `.p8` file, and the app's bundle
 /// ID, which is each push's `apns-topic`.
 PushAPNs: struct {
-    origin: String
-    team_id: String
-    key_id: String
-    key_path: String
-    topic: String
+    origin: String,
+    team_id: String,
+    key_id: String,
+    key_path: String,
+    topic: String,
 }
 
 /// FCM's HTTP v1 API: the FCM `origin` (`https://fcm.googleapis.com` or a
 /// local fake), the Firebase project's ID, and the service account's email,
 /// token URI and the path of its private key (PEM).
 PushFCM: struct {
-    origin: String
-    project: String
-    client_email: String
-    token_uri: String
-    key_path: String
+    origin: String,
+    project: String,
+    client_email: String,
+    token_uri: String,
+    key_path: String,
 }
 
 /// Web Push: the VAPID `contact` (a `mailto:` or `https:` URI) and the path
 /// of the application server's P-256 private key (PEM), whose public key
 /// browsers subscribe with.
 PushWeb: struct {
-    contact: String
-    key_path: String
+    contact: String,
+    key_path: String,
 }
 
 /// What one push to one device came to: `reason` is "" once its service
 /// took the push, and `gone` says the service no longer knows the device.
 PushOutcome: struct {
-    reason: String
-    gone: Bool
+    reason: String,
+    gone: Bool,
 }
 
 /// How long one push's request may take, its connection included.
@@ -405,16 +405,16 @@ PUSH_FCM_RENEW_SECONDS: 300
 // bearer token APNs and FCM were last sent with, renewed from the Unix
 // second `*_until`.
 priv PushSenders: struct {
-    apns: PushAPNs?
-    #Redact apns_key: [U8]
-    #Redact apns_token: String
-    apns_until: Int
-    fcm: PushFCM?
-    #Redact fcm_key: String
-    #Redact fcm_token: String
-    fcm_until: Int
-    web: PushWeb?
-    web_key: PushKeyPair?
+    apns: PushAPNs?,
+    #Redact apns_key: [U8],
+    #Redact apns_token: String,
+    apns_until: Int,
+    fcm: PushFCM?,
+    #Redact fcm_key: String,
+    #Redact fcm_token: String,
+    fcm_until: Int,
+    web: PushWeb?,
+    web_key: PushKeyPair?,
 }
 
 priv PUSH_SENDERS: Shared{PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}}
@@ -422,8 +422,8 @@ priv PUSH_SENDERS: Shared{PushSenders{apns: None, apns_key: [U8]{}, apns_token: 
 // What an FCM token exchange answers.
 #Codable
 priv PushFCMGrant: struct {
-    access_token: String
-    expires_in: Int
+    access_token: String,
+    expires_in: Int,
 }
 
 /// Sets up the services `settings` names, reading each one's key, in place

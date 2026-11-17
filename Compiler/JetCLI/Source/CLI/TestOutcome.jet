@@ -58,10 +58,10 @@ use {
 // The first `Stop [CODE]: message` of a failed test's stderr and the
 // `--> file:line` under it: the canonical runtime stop report.
 JetCLITestStop: struct {
-    code: String
-    message: String
-    file: String
-    line: U32
+    code: String,
+    message: String,
+    file: String,
+    line: U32,
 }
 
 // What the run knows of one test beyond its wire: its evidence kind code (0
@@ -69,35 +69,35 @@ JetCLITestStop: struct {
 // (a unit or property test is recorded against the tested file), the first
 // claimed value a doctest's output contradicted (E2901), and a property's law.
 JetCLITestClaim: struct {
-    kind: Int
-    file: String
-    line: U32
-    mismatch: JetCLITestStop?
-    law: TTestLawFact?{None}
+    kind: Int,
+    file: String,
+    line: U32,
+    mismatch: JetCLITestStop?,
+    law: TTestLawFact?{None},
 }
 
 // A failed property's report head (TestProperty.jet `property_report`): the
 // failing case's 1-based number, the run seed and the minimized inputs.
 JetCLITestPropertyFailure: struct {
-    case_number: Int
-    seed: String
-    minimized: String
+    case_number: Int,
+    seed: String,
+    minimized: String,
 }
 
 JetCLITestTally: struct {
-    passed: Int
-    failed: Int
-    skipped: Int
-    expected_failures: Int
-    unexpected_passes: Int
+    passed: Int,
+    failed: Int,
+    skipped: Int,
+    expected_failures: Int,
+    unexpected_passes: Int,
 }
 
 // One run: its status line, the report it persists, and its E2942 when the
 // run's grade is below its package's claims floor.
 JetCLITestOutcome: struct {
-    status: String
-    report: EvidenceReport
-    below: Diagnostic?
+    status: String,
+    report: EvidenceReport,
+    below: Diagnostic?,
 }
 
 // EvidenceBuild::from_environment with a fallback: an unset or empty

@@ -84,12 +84,12 @@ PREFIX: [Int]{45, 120, 48, 0, 88, 48, 0}
 
 // One fmtinfo[] entry.
 PrintfInfo: struct {
-    fmttype: Int
-    radix: Int
-    flags: Int
-    kind: Int
-    charset: Int
-    prefix: Int
+    fmttype: Int,
+    radix: Int,
+    flags: Int,
+    kind: Int,
+    charset: Int,
+    prefix: Int,
 }
 
 // fmtinfo[], searched in this order.
@@ -127,9 +127,9 @@ FMT_INFO: [PrintfInfo]{
 // argument, which as a C string end at their first 0x00 byte, and returns
 // false for a NULL char*.
 PrintfArgs: trait {
-    int_arg: fn(&self) -> Int Never!
-    double_arg: fn(&self) -> Float Never!
-    next_text: fn(&self, out: &[U8]) -> Bool Never!
+    int_arg: fn(&self) -> Int Never!,
+    double_arg: fn(&self) -> Float Never!,
+    next_text: fn(&self, out: &[U8]) -> Bool Never!,
 }
 
 // The va_list of an engine-internal format: MEM_INT cells are integer
@@ -137,8 +137,8 @@ PrintfArgs: trait {
 // NULL char*. Reads past the end give 0, 0.0 and NULL as getIntArg and
 // friends do.
 MemList: struct {
-    args: [Mem]
-    used: Int
+    args: [Mem],
+    used: Int,
 
     impl PrintfArgs {
         int_arg: fn(&self) -> Int Never! {
@@ -185,12 +185,12 @@ new_mem_list: fn(args: [Mem]) -> MemList Never! { MemList{args: args, used: 0} }
 // has_db; its owner passes an SQLITE_TOOBIG acc_error on to the parser
 // as sqlite3StrAccumSetError does through sqlite3ErrorToParser.
 StrAccum: struct {
-    text: [U8]
-    n_alloc: Int
-    mx_alloc: Int
-    acc_error: Int
-    printf_flags: Int
-    has_db: Bool
+    text: [U8],
+    n_alloc: Int,
+    mx_alloc: Int,
+    acc_error: Int,
+    printf_flags: Int,
+    has_db: Bool,
 }
 
 // sqlite3StrAccumInit with a base buffer of n bytes.

@@ -318,9 +318,9 @@ usage: fn() -[Exec, IO]> Never {
 // --- processes --------------------------------------------------------------
 
 Ran: struct {
-    code: Int
-    output: String
-    errors: String
+    code: Int,
+    output: String,
+    errors: String,
 }
 
 // `argv` run in `dir`, with GIT_INDEX_FILE set to `index` unless it is "".
@@ -453,13 +453,13 @@ compiler_input: fn(path: String) -> Bool Never! {
 // --- land -------------------------------------------------------------------
 
 Pair: struct {
-    patch: String
-    message: String
+    patch: String,
+    message: String,
 }
 
 #Error
 LandError: struct {
-    message: String
+    message: String,
 }
 
 land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
@@ -898,8 +898,8 @@ census_source: fn(path: String) -> Bool Never! {
 // --- heavy passes -----------------------------------------------------------
 
 Setting: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // `argv` as a heavy pass, capped at `memory` on the CPUs `cpus`, killed
@@ -1035,29 +1035,29 @@ show: fn(lines: [String], limit: Int) -[IO]> {
 
 // The passes after the check, the guards and the build (they always run).
 Passes: struct {
-    build: Bool
-    selfcheck: Bool
+    build: Bool,
+    selfcheck: Bool,
 }
 
 // A census pass as it ran: its phases.tsv row (name, exit, wall seconds,
 // peak bytes when it was measured, a note) and the lines it prints. A pass
 // that was not run has the name "".
 PassRun: struct {
-    name: String
-    rc: Int
-    seconds: Int
-    peak: Int
-    note: String
-    lines: [String]
+    name: String,
+    rc: Int,
+    seconds: Int,
+    peak: Int,
+    note: String,
+    lines: [String],
 }
 
 // Jetpack areas that check one after another, beside the other lanes:
 // `width` is the largest cap of its areas, what the lane holds at most, and
 // `load` their summed caps, its expected length.
 AreaLane: struct {
-    width: Int
-    load: Int
-    areas: [String]
+    width: Int,
+    load: Int,
+    areas: [String],
 }
 
 census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
@@ -1276,8 +1276,8 @@ core_bodies_pass: fn(out: String, self_jet: String, identity: String) -[Exec, FS
 // A check's Core function checks: how many it loaded from the Core bodies
 // file and how many it checked from text, -1 for a count it did not print.
 CoreBodiesCounts: struct {
-    loaded: Int
-    from_text: Int
+    loaded: Int,
+    from_text: Int,
 }
 
 // The counts in `--phase-counters` stderr `text`, read from its
@@ -1881,8 +1881,8 @@ line_at: fn(bytes: [U8], offset: Int) -> Int Never! {
 
 Place: struct {
     // Relative to the tree; "" when the span names no file of it.
-    file: String
-    offset: Int
+    file: String,
+    offset: Int,
 }
 
 // A `path:start..end` span's file of `tree` and start offset. An absolute
@@ -2099,28 +2099,28 @@ counted: fn(rows: [String]) -> [String] Never! {
 // A land job: a lane's patch and its commit message, and its queue name (""
 // outside the service).
 Job: struct {
-    lane: String
-    message: String
-    patch: String
-    name: String
+    lane: String,
+    message: String,
+    patch: String,
+    name: String,
 }
 
 // A job that applied, with the paths its patch touches.
 Applied: struct {
-    job: Job
-    paths: [String]
+    job: Job,
+    paths: [String],
 }
 
 // A path and its modification time, for newest-first listings.
 Dated: struct {
-    path: String
-    time: Int
+    path: String,
+    time: Int,
 }
 
 // What a publish step did: its summary line, and whether it succeeded.
 Step: struct {
-    ok: Bool
-    line: String
+    ok: Bool,
+    line: String,
 }
 
 // The jobs of a list, one `LANE<TAB>MSG<TAB>PATCH[<TAB>NAME]` per line
@@ -2667,40 +2667,40 @@ TIME_UNITS: [String]{"ms", "µs", "us", "ns", "s"}
 PATH_MARKS: [String]{"`", "'", "\"", "(", ")", "[", "]", ","}
 
 Stage: struct {
-    name: String
-    seconds: Int
+    name: String,
+    seconds: Int,
 }
 
 // The applied jobs of a composition, every path they change, and the paths
 // the regeneration changed besides; `ok` is false when the regeneration
 // failed (the worktree is then reverted).
 Composed: struct {
-    ok: Bool
-    applied: [Applied]
-    all: [String]
-    regenerated: [String]
+    ok: Bool,
+    applied: [Applied],
+    all: [String],
+    regenerated: [String],
 }
 
 // A precommit's exit code, and whether it ran the census with its row reports
 // and no ratchet failed (so its rows can be attributed).
 Checked: struct {
-    code: Int
-    census: Bool
+    code: Int,
+    census: Bool,
 }
 
 // A distinct test line: the keys of the jobs listing it (none for the train's
 // whole-profile lines), and its exit code once run.
 TestLine: struct {
-    line: String
-    owners: [String]
-    train: Bool
-    code: Int
+    line: String,
+    owners: [String],
+    train: Bool,
+    code: Int,
 }
 
 // The jobs red at the tests, and the red rows no job owns.
 Tested: struct {
-    red: [String]
-    unowned: Int
+    red: [String],
+    unowned: Int,
 }
 
 job_key: fn(job: Job) -> String Never! { "{job.lane} {files.basename(job.patch)}" }
@@ -4167,8 +4167,8 @@ write_receipt: fn(source_identity: String, seed_identity: String, commit: String
 }
 
 Admission: struct {
-    admitted: Bool
-    reason: String
+    admitted: Bool,
+    reason: String,
 }
 
 // Is a launch of the compiler of `source_identity` by the seed of

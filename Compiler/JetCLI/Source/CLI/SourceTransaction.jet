@@ -14,19 +14,19 @@ use {
 JET_CLI_TRANSACTION_MAX_BYTES: 67108864
 
 JetCLISourceChange: struct {
-    path: String
-    before: [U8]
-    after: [U8]
+    path: String,
+    before: [U8],
+    after: [U8],
 }
 
 JetCLITransactionRecord: struct {
-    change: JetCLISourceChange
-    name: String
-    temp: String
-    destination_id: cli_files.FileID
-    temp_id: cli_files.FileID
-    mode: Int
-    parent: JetCLIRootedDirectory?
+    change: JetCLISourceChange,
+    name: String,
+    temp: String,
+    destination_id: cli_files.FileID,
+    temp_id: cli_files.FileID,
+    mode: Int,
+    parent: JetCLIRootedDirectory?,
 
     stat: fn(self, project: JetCLIRootedDirectory, name: String) -[FS]> cli_files.Stat JetCLIReadError! {
         if self.parent == .Val(parent) -> return parent.transaction_stat(name)

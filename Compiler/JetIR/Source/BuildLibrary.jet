@@ -17,33 +17,33 @@ use {
 // One `#Export(c)` row of the entry module: its checked function's key and
 // its C symbol.
 IRLibraryExportRow: struct {
-    key: String
-    symbol: String
+    key: String,
+    symbol: String,
 }
 
 // One global symbol of the library object: IR function `function`, its
 // constructor/destructor priority (-1: not a hook), and the data rows of
 // its hook's guards (none: an unconditional hook; ir_lifecycle_rows).
 IRLibraryExport: struct {
-    function: Int
-    symbol: String
-    init_priority: Int
-    fini_priority: Int
-    guards: [Int]
+    function: Int,
+    symbol: String,
+    init_priority: Int,
+    fini_priority: Int,
+    guards: [Int],
 }
 
 // The C ABI of an export: the layout of each parameter and of its result
 // (None: void), as the runtime ABI receipt records it.
 IRExportLayout: struct {
-    size: Int
-    align: Int
-    class: String
+    size: Int,
+    align: Int,
+    class: String,
 }
 
 IRExportABI: struct {
-    symbol: String
-    parameters: [IRExportLayout]
-    result: IRExportLayout?
+    symbol: String,
+    parameters: [IRExportLayout],
+    result: IRExportLayout?,
 }
 
 // `errors` are the export, lifecycle and intrinsic problems (the module is
@@ -51,42 +51,42 @@ IRExportABI: struct {
 // build. `abis` is sorted by symbol. `data` are the global data symbols of
 // the library object: the runtime storage a program's inline code reads.
 IRLibraryResult: struct {
-    program: IRModule
-    failures: [IRBuildFailure]
-    errors: [String]
-    exports: [IRLibraryExport]
-    data: [X64DataExport]
-    abis: [IRExportABI]
+    program: IRModule,
+    failures: [IRBuildFailure],
+    errors: [String],
+    exports: [IRLibraryExport],
+    data: [X64DataExport],
+    abis: [IRExportABI],
 }
 
 IRRuntimeIntrinsic: enum {
-    FloatBits
-    FloatFromBits
-    FunctionAddress(key: String)
-    StaticText
-    FaultReport
-    TypeSize
-    ListCapacity
-    ListReserveExact
-    ListAppend
-    ListCopy
-    VolatileRead
-    VolatileWrite
-    StreamStore
-    PtrOffset
-    PtrByteOffset
-    ViewFromRaw
-    MemCopy
-    MemFill
-    AllocRaw
-    FreeRaw
-    Mapped
-    Unmapping
-    RegionReserve
-    RegionRelease
-    ContextTake
-    ContextGive
-    ContextRoom
+    FloatBits,
+    FloatFromBits,
+    FunctionAddress(key: String),
+    StaticText,
+    FaultReport,
+    TypeSize,
+    ListCapacity,
+    ListReserveExact,
+    ListAppend,
+    ListCopy,
+    VolatileRead,
+    VolatileWrite,
+    StreamStore,
+    PtrOffset,
+    PtrByteOffset,
+    ViewFromRaw,
+    MemCopy,
+    MemFill,
+    AllocRaw,
+    FreeRaw,
+    Mapped,
+    Unmapping,
+    RegionReserve,
+    RegionRelease,
+    ContextTake,
+    ContextGive,
+    ContextRoom,
 }
 
 // The IEEE bits of a Float as an I64, and back.
@@ -105,22 +105,22 @@ IRRuntimeIntrinsic: enum {
 // take, give and room of a block.
 
 IRIntrinsicShape: enum {
-    FloatBits
-    FloatFromBits
-    FunctionAddress(symbol: String, arity: Int)
-    StaticText
-    FaultReport
+    FloatBits,
+    FloatFromBits,
+    FunctionAddress(symbol: String, arity: Int),
+    StaticText,
+    FaultReport,
 }
 
 IRIntrinsicSpec: struct {
-    name: String
-    shape: IRIntrinsicShape
+    name: String,
+    shape: IRIntrinsicShape,
 }
 
 IRLifecycle: struct {
-    init_priority: Int
-    fini_priority: Int
-    guards: [String]
+    init_priority: Int,
+    fini_priority: Int,
+    guards: [String],
 }
 
 // The one reviewed recognizer table; every address row uses the same

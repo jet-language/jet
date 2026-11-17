@@ -62,94 +62,94 @@ PLUG_VALUE_NONE: -1
 // module (`source`, its `instance`, its `index` in the module's function
 // space), or the stub of lowered import row `import` (`source` -1).
 PlugFunc: struct {
-    source: Int
-    instance: Int
-    index: Int
-    ty: WasmFuncType
-    name: String
-    module_name: String
-    import: Int
+    source: Int,
+    instance: Int,
+    index: Int,
+    ty: WasmFuncType,
+    name: String,
+    module_name: String,
+    import: Int,
 }
 
 // A core instance: an instantiated module's index spaces mapped to the flat
 // ones (and its segments' first flat index), or, when `source` is -1, a bag
 // of exports naming the Component's core items.
 PlugInstance: struct {
-    source: Int
-    funcs: [Int]
-    tables: [Int]
-    memories: [Int]
-    globals: [Int]
-    data_base: Int
-    elem_base: Int
-    names: [String]
-    sorts: [Int]
-    targets: [Int]
+    source: Int,
+    funcs: [Int],
+    tables: [Int],
+    memories: [Int],
+    globals: [Int],
+    data_base: Int,
+    elem_base: Int,
+    names: [String],
+    sorts: [Int],
+    targets: [Int],
 }
 
 // A global's value type and initial bit pattern (f32 and i32 in the low
 // four bytes).
 PlugGlobal: struct {
-    value: Int
-    init: Int
+    value: Int,
+    init: Int,
 }
 
 PlugData: struct {
-    active: Bool
-    memory: Int
-    offset: Int
-    bytes: [U8]
+    active: Bool,
+    memory: Int,
+    offset: Int,
+    bytes: [U8],
 }
 
 // An element segment: WASM_SEGMENT_* `mode`, flat `table`, static offset
 // and its items as references (function + 1; 0 the null reference).
 PlugElem: struct {
-    mode: Int
-    table: Int
-    offset: Int
-    items: [Int]
+    mode: Int,
+    table: Int,
+    offset: Int,
+    items: [Int],
 }
 
 // A lifted export: its core function, the value codes of its params and
 // result (and of a tuple result's fields), and its canonical options as
 // flat indexes (-1 absent).
 PlugExport: struct {
-    name: String
-    fid: Int
-    params: [Int]
-    result: Int
-    fields: [Int]
-    memory: Int
-    realloc: Int
-    post: Int
-    unsupported: Bool
+    name: String,
+    fid: Int,
+    params: [Int],
+    result: Int,
+    fields: [Int],
+    memory: Int,
+    realloc: Int,
+    post: Int,
+    unsupported: Bool,
 }
 
 // A lowered import. Its options are resolved once every core instance is
 // (`memory_item`, `realloc_item`: the Component's core items, -1 absent).
 PlugImport: struct {
-    name: String
-    params: [Int]
-    result: Int
-    memory_item: Int
-    realloc_item: Int
-    memory: Int
-    realloc: Int
+    name: String,
+    params: [Int],
+    result: Int,
+    memory_item: Int,
+    realloc_item: Int,
+    memory: Int,
+    realloc: Int,
 }
 
 PlugFlat: struct {
-    c: WasmComponent
-    funcs: [PlugFunc]
-    instances: [PlugInstance]
-    memories: [WasmLimits]
-    tables: [WasmTableType]
-    globals: [PlugGlobal]
-    datas: [PlugData]
-    elems: [PlugElem]
-    starts: [Int]
-    exports: [PlugExport]
-    imports: [PlugImport]
-    lowered: [Int:Int]
+    c: WasmComponent,
+    funcs: [PlugFunc],
+    instances: [PlugInstance],
+    memories: [WasmLimits],
+    tables: [WasmTableType],
+    globals: [PlugGlobal],
+    datas: [PlugData],
+    elems: [PlugElem],
+    starts: [Int],
+    exports: [PlugExport],
+    imports: [PlugImport],
+    lowered: [Int:Int],
 }
 
 plug_fail: fn(message: String) -> WasmError Never! { WasmError.new(message, -1) }

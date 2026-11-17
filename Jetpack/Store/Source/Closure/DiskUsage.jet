@@ -5,50 +5,50 @@
 use files: core.files
 
 DuEntry: struct {
-    id: String
-    unique_bytes: Int?
-    shared_bytes: Int?
+    id: String,
+    unique_bytes: Int?,
+    shared_bytes: Int?,
     // True when the A4 provenance shows a first-party source build.
-    source_built: Bool
+    source_built: Bool,
 }
 
 DuReport: struct {
-    objects: Int
-    packages: Int
-    built: Int
-    unique_bytes: Int?
-    shared_bytes: Int?
-    closure_physical_bytes: Int?
-    entries: [DuEntry]
+    objects: Int,
+    packages: Int,
+    built: Int,
+    unique_bytes: Int?,
+    shared_bytes: Int?,
+    closure_physical_bytes: Int?,
+    entries: [DuEntry],
 }
 
 MachineDuEntry: struct {
-    root: String
-    hangar: String
-    bytes: Int
+    root: String,
+    hangar: String,
+    bytes: Int,
 }
 
 MachineDuPool: struct {
-    path: String
-    bytes: Int
+    path: String,
+    bytes: Int,
 }
 
 MachineDuReport: struct {
-    shared_cas: MachineDuPool?
-    roots: [MachineDuEntry]
-    total_bytes: Int
+    shared_cas: MachineDuPool?,
+    roots: [MachineDuEntry],
+    total_bytes: Int,
 }
 
 PhysicalMeasurement: struct {
-    unique_bytes: Int
-    shared_bytes: Int
-    per_object: [String:Int]
+    unique_bytes: Int,
+    shared_bytes: Int,
+    per_object: [String:Int],
 }
 
 // One physical node: its allocation and the packages that reach it.
 PhysicalNode: struct {
-    bytes: Int
-    owners: [String]
+    bytes: Int,
+    owners: [String],
 }
 
 store_du: fn(verification: &StoreVerification, roots: HangarRoots) -> DuReport StoreError! {

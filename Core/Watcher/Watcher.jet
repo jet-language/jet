@@ -70,9 +70,9 @@ kind: fn(handle: WatchHandle) -> String Never! { summary_kind(handle.summary()) 
 target: fn(handle: WatchHandle) -> String Never! { summary_target(handle.summary()) }
 
 WatchDomain: enum {
-    File
-    Process
-    Port
+    File,
+    Process,
+    Port,
 
     impl Equatable {
         equal: fn(self, rhs: WatchDomain) -> Bool {
@@ -82,23 +82,23 @@ WatchDomain: enum {
 }
 
 WatchEventKind: enum {
-    Created
-    Modified
-    Removed
-    Error
-    Exited
+    Created,
+    Modified,
+    Removed,
+    Error,
+    Exited,
     Ready
 }
 
 // WatchEvent.kind is a WatchKind. The WatchEventKind above has the same cases
 // but is a distinct enum.
 WatchKind: enum {
-    Created
-    Modified
-    Removed
-    Error
-    Exited
-    Ready
+    Created,
+    Modified,
+    Removed,
+    Error,
+    Exited,
+    Ready,
 
     impl Equatable {
         equal: fn(self, rhs: WatchKind) -> Bool { watch_kind_tag(self) == watch_kind_tag(rhs) }
@@ -144,12 +144,12 @@ watch_kind_name: fn(value: WatchKind) -> String Never! {
 }
 
 WatchEvent: struct {
-    domain: WatchDomain
-    kind: WatchKind
-    path: String
-    detail: String
-    pid: Int
-    port: Int
+    domain: WatchDomain,
+    kind: WatchKind,
+    path: String,
+    detail: String,
+    pid: Int,
+    port: Int,
 
     __show: fn(self) -> String Never! {
         "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"

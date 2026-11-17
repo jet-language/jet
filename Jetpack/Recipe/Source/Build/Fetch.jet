@@ -38,13 +38,13 @@ RECIPE_CREDENTIAL_SUFFIXES: [String]{"_token", "_secret", "_credential", "_signa
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
 RecipeTransport: struct {
-    fetch: fn(String) -[Net]> [U8] RecipeError!
+    fetch: fn(String) -[Net]> [U8] RecipeError!,
 }
 
 // A locked source fetch recorded for `.jet/lock` provenance.
 FetchRecord: struct {
-    url: String
-    sha256: String
+    url: String,
+    sha256: String,
 }
 
 recipe_do_fetch: fn(url: String, sha256: String, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport) -[FS, Env, Net, Rand]> RecipeDiagnostic! {

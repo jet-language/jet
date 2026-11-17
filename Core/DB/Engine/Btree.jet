@@ -243,15 +243,15 @@ SIZE_TABLE_LEAF: 3
 // The connection state the btree reads (parts of struct sqlite3).
 BtDB: struct {
     // sqlite3.flags.
-    flags: Int
+    flags: Int,
     // nSavepoint.
-    n_savepoint: Int
+    n_savepoint: Int,
     // nVdbeRead.
-    n_vdbe_read: Int
+    n_vdbe_read: Int,
     // sqlite3TempInMemory(db).
-    temp_in_memory: Bool
+    temp_in_memory: Bool,
     // u1.isInterrupted.
-    is_interrupted: Bool
+    is_interrupted: Bool,
 }
 
 // This build has no sqlite3_autovacuum_pages and sets no progress
@@ -268,27 +268,27 @@ bt_db_default: fn() -> BtDB Never! {
 // the pager slot's data; aData is offset 0, aDataEnd the page size,
 // aCellIdx cell_offset and aDataOfst child_ptr_size.
 MemPage: struct {
-    is_init: Bool
-    int_key: Bool
-    int_key_leaf: Bool
-    pgno: Int
-    leaf: Bool
-    hdr_offset: Int
-    child_ptr_size: Int
-    max1byte_payload: Int
-    n_overflow: Int
-    max_local: Int
-    min_local: Int
-    cell_offset: Int
-    n_free: Int
-    n_cell: Int
-    mask_page: Int
+    is_init: Bool,
+    int_key: Bool,
+    int_key_leaf: Bool,
+    pgno: Int,
+    leaf: Bool,
+    hdr_offset: Int,
+    child_ptr_size: Int,
+    max1byte_payload: Int,
+    n_overflow: Int,
+    max_local: Int,
+    min_local: Int,
+    cell_offset: Int,
+    n_free: Int,
+    n_cell: Int,
+    mask_page: Int,
     // aiOvfl and apOvfl: the overflow cells' places and bodies.
-    ai_ovfl: [Int]
-    ap_ovfl: [[U8]]
+    ai_ovfl: [Int],
+    ap_ovfl: [[U8]],
     // xParseCell and xCellSize.
-    parse_kind: Int
-    size_kind: Int
+    parse_kind: Int,
+    size_kind: Int,
 }
 
 // A MemPage of zeroed extra space.
@@ -299,11 +299,11 @@ mem_page_zero: fn() -> MemPage Never! {
 // The parse of one cell (CellInfo). payload is the offset of the payload
 // in the buffer that was parsed.
 CellInfo: struct {
-    n_key: Int
-    payload: Int
-    n_payload: Int
-    n_local: Int
-    n_size: Int
+    n_key: Int,
+    payload: Int,
+    n_payload: Int,
+    n_local: Int,
+    n_size: Int,
 }
 
 cell_info_zero: fn() -> CellInfo Never! {
@@ -314,27 +314,27 @@ cell_info_zero: fn() -> CellInfo Never! {
 // reference each, as pPage and apPage hold MemPage pointers.
 BtCursor: struct {
     // The slot is an open cursor.
-    live: Bool
-    state: Int
-    cur_flags: Int
-    cur_pager_flags: Int
-    hints: Int
-    skip_next: Int
+    live: Bool,
+    state: Int,
+    cur_flags: Int,
+    cur_pager_flags: Int,
+    hints: Int,
+    skip_next: Int,
     // aOverflow: the overflow page numbers once cached.
-    overflow: [Int]
+    overflow: [Int],
     // pKey: the saved key of an index cursor.
-    key: [U8]?
-    info: CellInfo
-    n_key: Int
-    pgno_root: Int
-    i_page: Int
-    cur_int_key: Bool
-    ix: Int
-    ai_idx: [Int]
+    key: [U8]?,
+    info: CellInfo,
+    n_key: Int,
+    pgno_root: Int,
+    i_page: Int,
+    cur_int_key: Bool,
+    ix: Int,
+    ai_idx: [Int],
     // pKeyInfo: set for an index cursor.
-    key_info: record.KeyInfo?
-    page: Int
-    ap_page: [Int]
+    key_info: record.KeyInfo?,
+    page: Int,
+    ap_page: [Int],
 }
 
 // A cursor slot that holds nothing.
@@ -344,41 +344,41 @@ cursor_closed: fn() -> BtCursor Never! {
 
 // A database file's btree: btreeInt.h Btree and its BtShared.
 Btree: struct {
-    db: BtDB
+    db: BtDB,
     // Btree.inTrans.
-    in_trans: Int
-    has_incrblob_cur: Bool
-    n_backup: Int
+    in_trans: Int,
+    has_incrblob_cur: Bool,
+    n_backup: Int,
     // iBDataVersion.
-    b_data_version: Int
+    b_data_version: Int,
     // BtShared.
-    pager: pager.Pager
-    cursors: [BtCursor]
-    cursor_list: [Int]
+    pager: pager.Pager,
+    cursors: [BtCursor],
+    cursor_list: [Int],
     // pPage1: the slot of page 1 while it is held, else NO_PAGE.
-    page1: Int
-    open_flags: Int
-    auto_vacuum: Bool
-    incr_vacuum: Bool
-    do_truncate: Bool
-    in_transaction: Int
-    max1byte_payload: Int
-    n_reserve_wanted: Int
-    bts_flags: Int
-    max_local: Int
-    min_local: Int
-    max_leaf: Int
-    min_leaf: Int
-    page_size: Int
-    usable_size: Int
-    n_transaction: Int
-    n_page: Int
-    has_content: cache.Bitvec
+    page1: Int,
+    open_flags: Int,
+    auto_vacuum: Bool,
+    incr_vacuum: Bool,
+    do_truncate: Bool,
+    in_transaction: Int,
+    max1byte_payload: Int,
+    n_reserve_wanted: Int,
+    bts_flags: Int,
+    max_local: Int,
+    min_local: Int,
+    max_leaf: Int,
+    min_leaf: Int,
+    page_size: Int,
+    usable_size: Int,
+    n_transaction: Int,
+    n_page: Int,
+    has_content: cache.Bitvec,
     // pTmpSpace: a page of scratch space once a write cursor needs it.
-    tmp_space: [U8]
-    n_preformat_size: Int
+    tmp_space: [U8],
+    n_preformat_size: Int,
     // The MemPage of each pager slot.
-    mem: [MemPage]
+    mem: [MemPage],
 }
 
 // A Btree before sqlite3BtreeOpen.
@@ -3181,12 +3181,12 @@ clear_cell: fn(bt: &Btree, s: Int, cell: Int, info: &CellInfo) -[DB]> Int Never!
 // n_key for an index (n_key alone, the rowid, for a table), data, n_data
 // and n_zero for a table, and mem, the unpacked index key when non-empty.
 BtreePayload: struct {
-    key: [U8]
-    n_key: Int
-    data: [U8]
-    n_data: Int
-    n_zero: Int
-    mem: [base.Mem]
+    key: [U8],
+    n_key: Int,
+    data: [U8],
+    n_data: Int,
+    n_zero: Int,
+    mem: [base.Mem],
 }
 
 // memcpy(page s + at, src, n); bytes past the end of src read as zero.
@@ -3443,14 +3443,14 @@ EDIT_FAIL: -1
 // read the same bytes. sz is szCell, 0 until computed; ap_end holds slots
 // (-1 for none).
 CellArray: struct {
-    n_cell: Int
-    ref: MemPage
-    cells: [[U8]]
-    src: [Int]
-    off: [Int]
-    sz: [Int]
-    ap_end: [Int]
-    ix_nx: [Int]
+    n_cell: Int,
+    ref: MemPage,
+    cells: [[U8]],
+    src: [Int],
+    off: [Int],
+    sz: [Int],
+    ap_end: [Int],
+    ix_nx: [Int],
 }
 
 cell_array_new: fn(ref: MemPage) -> CellArray Never! {
@@ -4900,17 +4900,17 @@ PFX_RIGHT_CHILD: 4
 // page (aPgRef's bits); heap is the u32 min-heap of a page's cell and
 // freeblock extents; msg is errMsg.
 IntegrityCk: struct {
-    n_ck_page: Int
-    mx_err: Int
-    n_err: Int
-    rc: Int
-    pg_ref: [Bool]
-    heap: [Int]
-    pfx: Int
-    v0: Int
-    v1: Int
-    v2: Int
-    msg: String
+    n_ck_page: Int,
+    mx_err: Int,
+    n_err: Int,
+    rc: Int,
+    pg_ref: [Bool],
+    heap: [Int],
+    pfx: Int,
+    v0: Int,
+    v1: Int,
+    v2: Int,
+    msg: String,
 }
 
 // checkProgress: stop the check once the connection is interrupted. (No

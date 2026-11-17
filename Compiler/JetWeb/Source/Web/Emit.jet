@@ -25,42 +25,42 @@ WEB_SCRATCH: 1024
 // A callee that is not one of the module's IR functions: an import from
 // `space` "rt", "c" or "host", or a helper the module defines (`space` "").
 WebRef: struct {
-    space: String
-    name: String
-    sig: String
+    space: String,
+    name: String,
+    sig: String,
 }
 
 WebState: struct {
     // The program's module: it keeps the stop protocol (WEB_GLOBAL_EDX).
-    app: Bool
-    stop_points: Bool
+    app: Bool,
+    stop_points: Bool,
     // Per IRX64Tables data row: its address.
-    data_at: [Int]
+    data_at: [Int],
     // The table index of this module's first function slot.
-    table_base: Int
+    table_base: Int,
     // Per IR function: its table slot, -1 while its address is never taken.
-    slots: [Int]
-    slot_rows: [Int]
-    types: [String]
-    type_rows: [String:Int]
-    refs: [WebRef]
-    ref_rows: [String:Int]
+    slots: [Int],
+    slot_rows: [Int],
+    types: [String],
+    type_rows: [String:Int],
+    refs: [WebRef],
+    ref_rows: [String:Int],
     // Runtime symbols this module defines -> IR function row.
-    internal: [String:Int]
+    internal: [String:Int],
     // The program module: the runtime's exports -> signature.
-    exports: [String:String]
+    exports: [String:String],
     // C symbols the JavaScript host provides.
-    hosts: [String:Bool]
+    hosts: [String:Bool],
     // Per IR function: its signature.
-    sigs: [String]
-    poll: Int
-    trap: Int
-    turn: Int
+    sigs: [String],
+    poll: Int,
+    trap: Int,
+    turn: Int,
     // The address of the runtime's armed word for loops' stop polls (JetIR
     // X64Select.jet IR_X64_CHECKS_ARMED_SYMBOL, the receipt's `data` row),
     // -1 when the runtime names none.
-    armed: Int
-    errors: [String]
+    armed: Int,
+    errors: [String],
 }
 
 // One function's code (locals, instructions, `end`) and its function-index
@@ -69,52 +69,52 @@ WebState: struct {
 // code from there was selected for (a program's selected bodies only; the
 // source map, Build.jet web_source_map).
 WebBody: struct {
-    code: [U8]
-    fixups: [Int]
-    lines: [Int]{[Int]{}}
+    code: [U8],
+    fixups: [Int],
+    lines: [Int]{[Int]{}},
 }
 
 WebEmitter: struct {
-    code: [U8]
-    fixups: [Int]
+    code: [U8],
+    fixups: [Int],
     // Per slot: its local, -1 for a Unit slot.
-    locals: [Int]
+    locals: [Int],
     // Every local's value type, the parameters first.
-    local_types: [Int]
-    params: Int
+    local_types: [Int],
+    params: Int,
     // The function's result letter ("" for none).
-    result: String
+    result: String,
     // The hidden result pointer's local, -1 without one.
-    sret: Int
-    t0: Int
-    t1: Int
-    t2: Int
-    t3: Int
-    d0: Int
-    s0: Int
-    frame: Int
+    sret: Int,
+    t0: Int,
+    t1: Int,
+    t2: Int,
+    t3: Int,
+    d0: Int,
+    s0: Int,
+    frame: Int,
     // i32: a slow path published a stop for the trap point after it.
-    flag: Int
+    flag: Int,
     // i32 scratch.
-    ok: Int
-    frame_size: Int
+    ok: Int,
+    frame_size: Int,
     // Per instruction: its frame storage's offset from `frame`, -1 for none.
-    areas: [Int]
+    areas: [Int],
     // The End of every open stop edge.
-    pad_ends: [Int]
+    pad_ends: [Int],
     // The instruction being selected is followed by a trap point its stop
     // paths take (WebState.stop_points, outside any stop edge).
-    trap_next: Bool
+    trap_next: Bool,
     // The last instruction selected has a stop path that set `flag`.
-    wired: Bool
+    wired: Bool,
     // Pairs of byte offset in `code` and source line (web_line).
-    lines: [Int]{[Int]{}}
+    lines: [Int]{[Int]{}},
     // The function has a fixed slot: its code is checked (Timing.jet).
-    timed: Bool{false}
+    timed: Bool{false},
     // Of a timed function: triples of the byte offsets [start, end) in `code`
     // of code one slot alone decides (a shift's count check) and that slot.
     // The fixed-timing check admits that code while the slot is public.
-    decided: [Int]{[Int]{}}
+    decided: [Int]{[Int]{}},
 }
 
 web_type_index: fn(st: &WebState, key: String) -> Int Never! {

@@ -116,231 +116,231 @@ DAMAGE_GAP: 8
 // buffer was last drawn, as a damage list (grow_damage); drawing into it
 // again copies only that plus the new damage.
 Buffer: struct {
-    id: Int
-    offset: Int
-    busy: Bool
-    stale: [UIRect]
+    id: Int,
+    offset: Int,
+    busy: Bool,
+    stale: [UIRect],
 }
 
 // A buffer of the chrome's pool. `ring` names the shadow ring it holds
 // (scale120 * 2, plus 1 when active; -1 for none): the title bar is drawn
 // every time, the ring only into a buffer without it.
 ChromeBuffer: struct {
-    id: Int
-    offset: Int
-    busy: Bool
-    ring: Int
+    id: Int,
+    offset: Int,
+    busy: Bool,
+    ring: Int,
 }
 
 // A committed frame awaiting presentation feedback: the time it was
 // meant to be seen (local clock) and its oldest input's time (ms on the
 // compositor's clock, -1 for none).
 Pending: struct {
-    id: Int
-    target_ns: Int
-    input_ms: Int
+    id: Int,
+    target_ns: Int,
+    input_ms: Int,
     // The frame directly follows the previous one, a refresh later.
-    follows: Bool
+    follows: Bool,
 }
 
 // An xdg_surface.configure not yet acked and the toplevel size it
 // carries, in logical units; 0 leaves that side to the window.
 Configure: struct {
-    serial: Int
-    width: Int
-    height: Int
+    serial: Int,
+    width: Int,
+    height: Int,
 }
 
 // A wl_output and its integer scale (wl_output.scale, 1 until said).
 OutputScale: struct {
-    id: Int
-    scale: Int
+    id: Int,
+    scale: Int,
 }
 
 // A wl_data_offer the compositor made, and the types its data comes as.
 Offer: struct {
-    id: Int
-    types: [String]
+    id: Int,
+    types: [String],
 }
 
 Connection: struct {
-    priv stream: net.UnixStream
-    priv out: [U8]
-    priv out_fds: [sys.Fd]
-    priv inbox: [U8]
-    priv inbox_fds: [sys.Fd]
-    priv next_id: Int
-    priv registry: Int
-    priv compositor: Int
-    priv shm: Int
-    priv wm_base: Int
-    priv seat: Int
-    priv decoration_manager: Int
-    priv fractional_manager: Int
-    priv viewporter: Int
-    priv cursor_manager: Int
+    priv stream: net.UnixStream,
+    priv out: [U8],
+    priv out_fds: [sys.Fd],
+    priv inbox: [U8],
+    priv inbox_fds: [sys.Fd],
+    priv next_id: Int,
+    priv registry: Int,
+    priv compositor: Int,
+    priv shm: Int,
+    priv wm_base: Int,
+    priv seat: Int,
+    priv decoration_manager: Int,
+    priv fractional_manager: Int,
+    priv viewporter: Int,
+    priv cursor_manager: Int,
     // wl_compositor's bound version: 3 brings set_buffer_scale, 6
     // preferred_buffer_scale.
-    priv compositor_version: Int
-    priv surface: Int
-    priv xdg_surface: Int
-    priv toplevel: Int
-    priv pointer: Int
+    priv compositor_version: Int,
+    priv surface: Int,
+    priv xdg_surface: Int,
+    priv toplevel: Int,
+    priv pointer: Int,
     // The pointer's wp_cursor_shape_device_v1 (0 without one), the
     // serial of its latest enter (-1 while it is outside the surface)
     // and the shape the program asked for.
-    priv cursor_device: Int
-    priv pointer_serial: Int
-    priv cursor: UICursor
+    priv cursor_device: Int,
+    priv pointer_serial: Int,
+    priv cursor: UICursor,
     // xdg_toplevel_icon_manager_v1 (0 without one), and the pool and
     // buffers of the icon set last, kept while it is in use.
-    priv icon_manager: Int
-    priv icon_pool: Int
-    priv icon_buffers: [Int]
-    priv keyboard: Int
-    priv output: Int
+    priv icon_manager: Int,
+    priv icon_pool: Int,
+    priv icon_buffers: [Int],
+    priv keyboard: Int,
+    priv output: Int,
     // Every output, with its integer scale, and those the surface is on.
-    priv outputs: [OutputScale]
-    priv entered: [Int]
+    priv outputs: [OutputScale],
+    priv entered: [Int],
     // The surface's fractional scale and viewport, 0 without them.
-    priv fractional: Int
-    priv viewport: Int
-    priv presentation: Int
-    priv pending: [Pending]
-    priv frame_callback: Int
-    priv frame_due: Bool
-    priv sync_callback: Int
-    priv synced: Bool
-    priv configured: Bool
-    priv mapped: Bool
-    priv format: sys.PixelFormat
+    priv fractional: Int,
+    priv viewport: Int,
+    priv presentation: Int,
+    priv pending: [Pending],
+    priv frame_callback: Int,
+    priv frame_due: Bool,
+    priv sync_callback: Int,
+    priv synced: Bool,
+    priv configured: Bool,
+    priv mapped: Bool,
+    priv format: sys.PixelFormat,
     // The configures not yet acked, oldest first.
-    priv configures: [Configure]
+    priv configures: [Configure],
     // The logical size of the buffer attached last, 0 x 0 before one.
-    priv shown_width: Int
-    priv shown_height: Int
+    priv shown_width: Int,
+    priv shown_height: Int,
     // Sizes come in two units. Configures, the viewport and pointer
     // positions are logical (surface) units; buffers, frames and every
     // size a program sees are pixels, `scale120` / 120 of them per unit.
-    priv pending_width: Int
-    priv pending_height: Int
-    priv logical_width: Int
-    priv logical_height: Int
-    priv width: Int
-    priv height: Int
-    priv scale120: Int
+    priv pending_width: Int,
+    priv pending_height: Int,
+    priv logical_width: Int,
+    priv logical_height: Int,
+    priv width: Int,
+    priv height: Int,
+    priv scale120: Int,
     // The preferred scale: wp_fractional_scale_v1's in 120ths, and the
     // integer wl_surface.preferred_buffer_scale; 0 until said.
-    priv fractional_scale: Int
-    priv buffer_scale: Int
+    priv fractional_scale: Int,
+    priv buffer_scale: Int,
     // The viewport or buffer scale still has to follow a new size.
-    priv rescaled: Bool
-    priv pool: Int
-    priv memory: sys.SharedMemory
-    priv buffers: [Buffer]
+    priv rescaled: Bool,
+    priv pool: Int,
+    priv memory: sys.SharedMemory,
+    priv buffers: [Buffer],
     // The refresh interval: presentation feedback's, else the output's
     // current mode's; 0 while unknown.
-    priv refresh_ns: Int
-    priv output_refresh_ns: Int
+    priv refresh_ns: Int,
+    priv output_refresh_ns: Int,
     // Local clock minus the presentation clock: the smallest gap seen
     // between a frame reaching the screen and its feedback arriving.
-    priv clock_offset: Int
-    priv offset_known: Bool
+    priv clock_offset: Int,
+    priv offset_known: Bool,
     // The latest vblank a frame reached the screen at, local clock.
-    priv vblank_ns: Int
-    priv vblank_known: Bool
+    priv vblank_ns: Int,
+    priv vblank_known: Bool,
     // Refreshes the compositor holds a frame beyond the vblank it was
     // committed for (its own pipeline depth, learned from feedback), and
     // the run of frames seen later than that.
-    priv lag: Int
-    priv lag_known: Bool
-    priv late_run: Int
-    priv late_least: Int
-    priv callback_at: Int
+    priv lag: Int,
+    priv lag_known: Bool,
+    priv late_run: Int,
+    priv late_least: Int,
+    priv callback_at: Int,
     // When the current frame is meant to be seen, and the first frame's.
-    priv target_ns: Int
-    priv first_target: Int
-    priv follows: Bool
-    priv time_ns: Int
-    priv delta_ns: Int
+    priv target_ns: Int,
+    priv first_target: Int,
+    priv follows: Bool,
+    priv time_ns: Int,
+    priv delta_ns: Int,
     // Draw late: a frame starts the slowest recent draw time plus a
     // safety margin before its vblank. A missed vblank widens the margin.
-    priv frame_start: Int
-    priv costs: [Int]
-    priv cost_at: Int
-    priv safety_ns: Int
+    priv frame_start: Int,
+    priv costs: [Int],
+    priv cost_at: Int,
+    priv safety_ns: Int,
     // The oldest input since the last frame went out, ms on the
     // compositor's clock; -1 for none.
-    priv input_ms: Int
-    priv presented: Int
-    priv missed: Int
-    priv discarded: Int
-    priv presented_abs: Int
-    priv intervals: [Int]
-    priv interval_at: Int
-    priv latencies: [Int]
-    priv latency_at: Int
+    priv input_ms: Int,
+    priv presented: Int,
+    priv missed: Int,
+    priv discarded: Int,
+    priv presented_abs: Int,
+    priv intervals: [Int],
+    priv interval_at: Int,
+    priv latencies: [Int],
+    priv latency_at: Int,
     // Jet's own frame. The chrome surface is a wl_subsurface below the
     // content in sync mode: the title bar above the content and the
     // shadow ring around both, drawn by __core_ui_frame. `framed` says the
     // compositor leaves the frame to Jet; a fullscreen window has none.
-    priv subcompositor: Int
-    priv decoration: Int
-    priv framed: Bool
+    priv subcompositor: Int,
+    priv decoration: Int,
+    priv framed: Bool,
     // JET_UI_UNCAPPED=1: a frame starts whenever a buffer is free, not when
     // the compositor's frame callback fires, so the program renders as fast
     // as it can and the display shows the latest frame at each refresh.
-    priv uncapped: Bool
-    priv chrome: Int
-    priv chrome_subsurface: Int
-    priv chrome_viewport: Int
-    priv chrome_pool: Int
-    priv chrome_memory: sys.SharedMemory
-    priv chrome_buffers: [ChromeBuffer]
+    priv uncapped: Bool,
+    priv chrome: Int,
+    priv chrome_subsurface: Int,
+    priv chrome_viewport: Int,
+    priv chrome_pool: Int,
+    priv chrome_memory: sys.SharedMemory,
+    priv chrome_buffers: [ChromeBuffer],
     // The chrome buffers' size in pixels, and whether one is attached.
-    priv chrome_width: Int
-    priv chrome_height: Int
-    priv chrome_shown: Bool
+    priv chrome_width: Int,
+    priv chrome_height: Int,
+    priv chrome_shown: Bool,
     // The chrome must be drawn again before it is next seen.
-    priv chrome_stale: Bool
-    priv painter: frame.Painter
+    priv chrome_stale: Bool,
+    priv painter: frame.Painter,
     // The title, focus, states, theme and pressed buttons the frame shows.
-    priv look: frame.FrameLook
+    priv look: frame.FrameLook,
     // The session bus, while the desktop's appearance is followed through
     // the settings portal (empty when there is no bus), and the appearance
     // it gave last.
-    priv portal: [dbus.DbusConnection]
-    priv appearance: dbus.PortalAppearance
-    priv fullscreen: Bool
+    priv portal: [dbus.DbusConnection],
+    priv appearance: dbus.PortalAppearance,
+    priv fullscreen: Bool,
     // The window geometry set last (x, y, width, height); empty before.
-    priv geometry: [Int]
+    priv geometry: [Int],
     // The pointer is on the chrome; it or a finger on the frame is at
     // (chrome_fx, chrome_fy), in 1/256ths of a unit from the chrome's
     // top-left corner; the cursor shape shown there, 0 before one.
-    priv on_chrome: Bool
-    priv chrome_fx: Int
-    priv chrome_fy: Int
-    priv chrome_shape: Int
+    priv on_chrome: Bool,
+    priv chrome_fx: Int,
+    priv chrome_fy: Int,
+    priv chrome_shape: Int,
     // The latest press on the title (ms on the compositor's clock, -1 for
     // none lately), for a double press.
-    priv title_press_ms: Int
+    priv title_press_ms: Int,
     // wl_touch, 0 without one, and the touch point on the frame, -1 for none.
-    priv touch: Int
-    priv touch_id: Int
+    priv touch: Int,
+    priv touch_id: Int,
     // The clipboard: wl_data_device_manager and the seat's wl_data_device
     // (0 without them); the offers the compositor made and the one that
     // holds the clipboard (0: empty); the wl_data_source of what this
     // window copied (0 for none) and its text, and the sources it
     // replaced, until the compositor cancels them; the latest input's
     // serial, which a copy names.
-    priv data_manager: Int
-    priv data_device: Int
-    priv offers: [Offer]
-    priv selection: Int
-    priv source: Int
-    priv source_text: String
-    priv old_sources: [Int]
-    priv input_serial: Int
+    priv data_manager: Int,
+    priv data_device: Int,
+    priv offers: [Offer],
+    priv selection: Int,
+    priv source: Int,
+    priv source_text: String,
+    priv old_sources: [Int],
+    priv input_serial: Int,
     // Text input: zwp_text_input_manager_v3 and the seat's
     // zwp_text_input_v3 (0 without them); whether the input method has
     // this surface in focus; the caret area the program composes at
@@ -348,43 +348,43 @@ Connection: struct {
     // field); what the next done applies (the preedit, its caret's byte
     // range, -1 when hidden, and the committed text); and the composition
     // the program was last told of.
-    priv text_manager: Int
-    priv text_input: Int
-    priv text_entered: Bool
-    priv text_area: [Int]
-    priv preedit_next: String
-    priv preedit_begin: Int
-    priv preedit_end: Int
-    priv commit_next: String
-    priv composing: UIIMEComposition
+    priv text_manager: Int,
+    priv text_input: Int,
+    priv text_entered: Bool,
+    priv text_area: [Int],
+    priv preedit_next: String,
+    priv preedit_begin: Int,
+    priv preedit_end: Int,
+    priv commit_next: String,
+    priv composing: UIIMEComposition,
     // The content's bottom-left corner cover at `corner_scale`.
-    priv corner_cover: [U8]
-    priv corner_scale: Int
+    priv corner_cover: [U8],
+    priv corner_scale: Int,
     // wl_shm offers XBGR8888 and ABGR8888.
-    priv xbgr: Bool
-    priv abgr: Bool
+    priv xbgr: Bool,
+    priv abgr: Bool,
     // The compositor's modifiers (depressed | latched | locked), which the
     // US fallback reads while no keymap has arrived.
-    priv modifiers: Int
+    priv modifiers: Int,
     // The compositor's XKB keymap and the keyboard state it tracks: layout,
     // levels and compose. Empty until wl_keyboard.keymap brings one the
     // engine compiles, and never more than one; the US table stands in
     // while it is empty.
-    priv keymap: [xkb.Keymap]
+    priv keymap: [xkb.Keymap],
     // Key repeat from wl_keyboard.repeat_info, and the key that repeats:
     // its evdev code (-1 for none), what each repeat reports, when it went
     // down and how many repeats it has made.
-    priv repeat: xkb.Repeat
-    priv held: Int
-    priv held_key: Key
-    priv held_text: String
-    priv held_at: Int
-    priv held_repeats: Int
+    priv repeat: xkb.Repeat,
+    priv held: Int,
+    priv held_key: Key,
+    priv held_text: String,
+    priv held_at: Int,
+    priv held_repeats: Int,
     // The evdev codes of the keys down whose press the frame took: their
     // releases are the frame's too.
-    priv frame_keys: [Int]
-    priv events: [UIEvent]
-    priv failure: UIError?
+    priv frame_keys: [Int],
+    priv events: [UIEvent],
+    priv failure: UIError?,
 
     width: fn(self) -> Int { self.width }
 

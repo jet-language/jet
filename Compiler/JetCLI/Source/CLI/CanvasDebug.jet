@@ -53,8 +53,8 @@ JET_CLI_CANVAS_DEBUG_MAX_MESSAGE_BYTES: 16384
 // A refused debug request: its jet.canvas.debug error kind and message.
 #Error
 JetCLICanvasDebugError: struct {
-    kind: String
-    message: String
+    kind: String,
+    message: String,
 }
 
 // One live session: the source id and revision it is bound to, the scratch
@@ -63,40 +63,40 @@ JetCLICanvasDebugError: struct {
 // lines it has breakpoints on, how many commands it has run, and the
 // console's report since the last answer.
 JetCLICanvasDebugSession: struct {
-    source_id: String
-    revision: String
-    created: Int
-    dir: String
-    jet_file: String
-    jet_lines: [String]
-    live: NativeSession
-    stop: NativeStop
-    breakpoints: [Int]
-    commands: Int
-    transcript: String
+    source_id: String,
+    revision: String,
+    created: Int,
+    dir: String,
+    jet_file: String,
+    jet_lines: [String],
+    live: NativeSession,
+    stop: NativeStop,
+    breakpoints: [Int],
+    commands: Int,
+    transcript: String,
 }
 
 // What one request's commands did: the session, the console's transcript,
 // the stop's facts (None outside Jet code), and whether the program is
 // still paused in the session.
 JetCLICanvasDebugRun: struct {
-    id: String
-    transcript: String
-    snapshot: DebugSnapshot?
-    running: Bool
+    id: String,
+    transcript: String,
+    snapshot: DebugSnapshot?,
+    running: Bool,
 }
 
 // One bounded list of a debug document, as JSON items.
 JetCLICanvasDebugList: struct {
-    json: String
-    truncated: Bool
+    json: String,
+    truncated: Bool,
 }
 
 // The dev loop's live debug sessions, by id. Only the dev loop touches them,
 // so they are plain state.
 JetCLICanvasDebugSessions: struct {
-    next_id: Int
-    sessions: [String:JetCLICanvasDebugSession]
+    next_id: Int,
+    sessions: [String:JetCLICanvasDebugSession],
 
     // Run `commands` in the session `requested` names (a new one when None),
     // with breakpoints on `breakpoints` first. A program that ends ends its
@@ -437,16 +437,16 @@ jet_cli_canvas_debug_limits: fn(commands: [String], breakpoints: [Int], watches:
 // The members of a debug request this tier reads; a member of the wrong
 // type reads as absent.
 JetCLICanvasDebugRequest: struct {
-    schema_version: Int
-    revision: String?
-    source_id: String?
-    tier: String?
-    session_id: String?
-    stop: Bool
-    commands: [String]
-    breakpoints: [Int]
-    anchors: [String]
-    watches: [String]
+    schema_version: Int,
+    revision: String?,
+    source_id: String?,
+    tier: String?,
+    session_id: String?,
+    stop: Bool,
+    commands: [String],
+    breakpoints: [Int],
+    anchors: [String],
+    watches: [String],
 }
 
 // The request `value` is, taken out of it.

@@ -35,157 +35,157 @@ use {
 // One invocation's output so far: stdout lines, the stderr warning printed
 // before a refusal, and compiler output to emit verbatim instead of a report.
 JetCLICodemodRun: struct {
-    out: [String]
-    warning: String
-    verbatim: JetDriverVerbOutput?
-    failure: String?
+    out: [String],
+    warning: String,
+    verbatim: JetDriverVerbOutput?,
+    failure: String?,
 }
 
 // A JSON object being consumed field by field (Rust `BTreeMap::remove`).
 JetCLICodemodObject: struct {
-    fields: [JetCLIStatusField]
-    taken: [Bool]
+    fields: [JetCLIStatusField],
+    taken: [Bool],
 }
 
 JetCLICodemodV1: struct {
-    name: String
-    entry: String
-    from: String
-    to: String
+    name: String,
+    entry: String,
+    from: String,
+    to: String,
 }
 
 JetCLICodemodRoot: struct {
-    path: String
-    fixture: Bool
+    path: String,
+    fixture: Bool,
 }
 
 JetCLICodemodAtom: enum {
-    Literal(value: String)
-    Capture(name: String, variadic: Bool)
+    Literal(value: String),
+    Capture(name: String, variadic: Bool),
 }
 
 // Rust `Rule::Rename` (kind `symbol_rename`) or `Rule::Ast` (`ast_rewrite`).
 JetCLICodemodRule: struct {
-    id: String
-    kind: String
-    name: String
-    symbol_kind: String
-    defined_in: String?
-    to: String
-    node: String
-    pattern: [JetCLICodemodAtom]
-    replacement: [JetCLICodemodAtom]
-    matches: Int
-    allow_zero: Bool
+    id: String,
+    kind: String,
+    name: String,
+    symbol_kind: String,
+    defined_in: String?,
+    to: String,
+    node: String,
+    pattern: [JetCLICodemodAtom],
+    replacement: [JetCLICodemodAtom],
+    matches: Int,
+    allow_zero: Bool,
 }
 
 JetCLICodemodSnapshot: struct {
-    destination: String
-    input: String
+    destination: String,
+    input: String,
 }
 
 JetCLICodemodBatch: struct {
-    name: String
-    project: String
-    roots: [JetCLICodemodRoot]
-    rules: [JetCLICodemodRule]
-    snapshots: [JetCLICodemodSnapshot]
+    name: String,
+    project: String,
+    roots: [JetCLICodemodRoot],
+    rules: [JetCLICodemodRule],
+    snapshots: [JetCLICodemodSnapshot],
 }
 
 JetCLICodemodUnit: struct {
-    entry: String
-    fixture: Bool
+    entry: String,
+    fixture: Bool,
 }
 
 // The editable files in path order with their read and staged bytes.
 JetCLICodemodFiles: struct {
-    paths: [String]
-    before: [[U8]]
-    staged: [[U8]]
+    paths: [String],
+    before: [[U8]],
+    staged: [[U8]],
 }
 
 JetCLICodemodPlan: struct {
-    files: JetCLICodemodFiles
-    count_ids: [String]
-    counts: [Int]
-    validations: [String]
-    inputs: [String:String]
-    semantic_ops: [JetCLISemOp]
+    files: JetCLICodemodFiles,
+    count_ids: [String],
+    counts: [Int],
+    validations: [String],
+    inputs: [String:String],
+    semantic_ops: [JetCLISemOp],
 }
 
 // One unit's index; `physical` maps each module path to its real file.
 JetCLICodemodIndexed: struct {
-    index: SemIndex
-    physical: [String:String]
+    index: SemIndex,
+    physical: [String:String],
 }
 
 JetCLICodemodEdits: struct {
-    paths: [String]
-    edits: [[TextEdit]]
+    paths: [String],
+    edits: [[TextEdit]],
 }
 
 JetCLICodemodTemplateToken: struct {
-    text: String
+    text: String,
 }
 
 JetCLICodemodTypedSlot: struct {
-    name: String
-    kind: String
-    children: [Int]
+    name: String,
+    kind: String,
+    children: [Int],
 }
 
 // Rust `TypedTree`, as an arena: children are indexes into the forest.
 JetCLICodemodTypedTree: struct {
-    class: String
-    shape: String
-    span: Span
-    signature: [String]
-    slots: [JetCLICodemodTypedSlot]
+    class: String,
+    shape: String,
+    span: Span,
+    signature: [String],
+    slots: [JetCLICodemodTypedSlot],
 }
 
 JetCLICodemodForest: struct {
-    trees: [JetCLICodemodTypedTree]
+    trees: [JetCLICodemodTypedTree],
 }
 
 // Rust `PatternTree`, as an arena: a capture has no slots.
 JetCLICodemodPatternNode: struct {
-    capture: String?
-    variadic: Bool
-    class: String
-    shape: String
-    signature: [String]
-    slots: [JetCLICodemodPatternSlot]
+    capture: String?,
+    variadic: Bool,
+    class: String,
+    shape: String,
+    signature: [String],
+    slots: [JetCLICodemodPatternSlot],
 }
 
 JetCLICodemodPatternSlot: struct {
-    name: String
-    kind: String
-    children: [Int]
+    name: String,
+    kind: String,
+    children: [Int],
 }
 
 JetCLICodemodPattern: struct {
-    nodes: [JetCLICodemodPatternNode]
-    root: Int
+    nodes: [JetCLICodemodPatternNode],
+    root: Int,
 }
 
 JetCLICodemodCaptured: struct {
-    name: String
-    text: String
-    key: String
+    name: String,
+    text: String,
+    key: String,
 }
 
 JetCLICodemodFound: struct {
-    start: Int
-    end: Int
-    captures: [JetCLICodemodCaptured]
+    start: Int,
+    end: Int,
+    captures: [JetCLICodemodCaptured],
 }
 
 JetCLICodemodReplayRow: struct {
-    path: String
-    before_hash: String
-    after_hash: String
-    before_bytes: String?
-    inverse_edits: [JetCLIStatusValue]
+    path: String,
+    before_hash: String,
+    after_hash: String,
+    before_bytes: String?,
+    inverse_edits: [JetCLIStatusValue],
 }
 
 // The `jet inspect codemod` host: `plan` (dry run), `apply`, or `undo`.

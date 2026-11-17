@@ -23,87 +23,87 @@ BUILD_MAX_NODES: 524288
 // the filesystem or consults a cache, so equal graph values always compare
 // equal and output order is canonical.
 BuildGraphTarget: struct {
-    id: Int
-    name: String
-    kind: String
-    deps: [Int]
-    actions: [Int]
-    files: [String]
+    id: Int,
+    name: String,
+    kind: String,
+    deps: [Int],
+    actions: [Int],
+    files: [String],
     plugin: Int?
 }
 
 BuildGraphAction: struct {
-    id: Int
-    name: String
-    kind: String
-    inputs: [String]
-    outputs: [String]
-    target: Int?
-    caps: [String]
-    pools: [String]
-    plugin: Int?
-    compiler_owned: Bool
-    key: String
+    id: Int,
+    name: String,
+    kind: String,
+    inputs: [String],
+    outputs: [String],
+    target: Int?,
+    caps: [String],
+    pools: [String],
+    plugin: Int?,
+    compiler_owned: Bool,
+    key: String,
     cache_hit: Bool?
 }
 
 BuildGraphActionKey: struct {
-    action: String
+    action: String,
     key: String
 }
 
 BuildGraphFile: struct {
-    path: String
-    owner: Int?
-    consumers: [Int]
+    path: String,
+    owner: Int?,
+    consumers: [Int],
     targets: [Int]
 }
 
 BuildGraphNode: struct {
-    kind: String
-    key: String
-    subject: String
-    inputs: [String]
+    kind: String,
+    key: String,
+    subject: String,
+    inputs: [String],
     input_digests: [BuildGraphInputDigest]
 }
 
 BuildGraphInputDigest: struct {
-    name: String
+    name: String,
     digest: String
 }
 
 BuildGraphFileDelta: struct {
-    path: String
-    before: BuildGraphFile?
+    path: String,
+    before: BuildGraphFile?,
     after: BuildGraphFile?
 }
 
 BuildGraphKeyDelta: struct {
-    action: String
-    before: String?
+    action: String,
+    before: String?,
     after: String?
 }
 
 BuildGraphCacheDelta: struct {
-    action: String
-    before: Bool?
+    action: String,
+    before: Bool?,
     after: Bool?
 }
 
 BuildGraphDiff: struct {
-    file_deltas: [BuildGraphFileDelta]
-    affected_files: [String]
-    key_deltas: [BuildGraphKeyDelta]
+    file_deltas: [BuildGraphFileDelta],
+    affected_files: [String],
+    key_deltas: [BuildGraphKeyDelta],
     cache_deltas: [BuildGraphCacheDelta]
 }
 
 BuildGraph: struct {
-    targets: [BuildGraphTarget]
-    actions: [BuildGraphAction]
-    action_keys: [BuildGraphActionKey]
-    cache_hits: [BuildGraphAction]
-    files: [BuildGraphFile]
-    affected_files: [BuildGraphFile]
+    targets: [BuildGraphTarget],
+    actions: [BuildGraphAction],
+    action_keys: [BuildGraphActionKey],
+    cache_hits: [BuildGraphAction],
+    files: [BuildGraphFile],
+    affected_files: [BuildGraphFile],
     nodes: [BuildGraphNode]
 }
 
@@ -113,9 +113,9 @@ BuildGraph: struct {
 /// milliseconds and whether its result was reused from the store instead of
 /// made again. Steps that ran together each carry the time of their round.
 BuildTime: struct {
-    name: String
-    kind: String
-    wall_ms: Int
+    name: String,
+    kind: String,
+    wall_ms: Int,
     reused: Bool
 }
 

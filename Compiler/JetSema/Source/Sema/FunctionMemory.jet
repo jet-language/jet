@@ -38,71 +38,71 @@ use jet_foundation.[
 // once. Gathered in one pass before a walk, so a module reads its package's
 // ladder from these few rows instead of scanning every module of the graph.
 SemaFunctionMemoryPackages: struct {
-    modules: [Int]
-    policies: [[PolicyDeclaration]]
+    modules: [Int],
+    policies: [[PolicyDeclaration]],
 }
 
 SemaFunctionMemoryFunction: struct {
-    module_identity: ModuleID
+    module_identity: ModuleID,
     // The leaf name of the type that owns a method, "" for a free function.
-    owner: String
+    owner: String,
     // The declaration as the plan rewrote it. None when no scoped-GC policy
     // reaches it and no other function shares its key: the plan then leaves
     // it exactly as written, so the checker reads its own declaration.
-    function: Func?
-    diagnostics: [Diagnostic]
-    transfer_root: Bool
-    complete: Bool
+    function: Func?,
+    diagnostics: [Diagnostic],
+    transfer_root: Bool,
+    complete: Bool,
 }
 
 SemaFunctionMemoryPlan: struct {
-    functions: [SemaFunctionMemoryFunction]
+    functions: [SemaFunctionMemoryFunction],
     // Row position of the first function per `sema_function_memory_key`, so
     // every body check finds its row without scanning the whole plan.
-    positions: [String:Int]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    positions: [String:Int],
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 SemaFunctionMemorySource: struct {
-    module_identity: ModuleID
-    owner: String
-    name: String
-    span: Span
+    module_identity: ModuleID,
+    owner: String,
+    name: String,
+    span: Span,
     // The declaration, copied only when a scoped-GC policy may rewrite it
     // (sema_function_memory_scope_may_annotate); `chain` is then its policy
     // ladder, and empty otherwise.
-    function: Func?
-    chain: [PolicyDeclaration]
-    transfer_root: Bool
+    function: Func?,
+    chain: [PolicyDeclaration],
+    transfer_root: Bool,
 }
 
 // One walk over a plan's items in row order. Collecting, it records each
 // function's source row; fetching (a second walk), it copies the declarations
 // of the `wanted` rows into `fetched`.
 SemaFunctionMemoryWalk: struct {
-    sources: [SemaFunctionMemorySource]
-    fetching: Bool
-    next_row: Int
-    wanted: [Int:Bool]
-    fetched: [Int:Func]
+    sources: [SemaFunctionMemorySource],
+    fetching: Bool,
+    next_row: Int,
+    wanted: [Int:Bool],
+    fetched: [Int:Func],
 }
 
 // The declarations a plan rewrote (`functions`, at plan rows `rows`, both in
 // row order) and the transfer-root names they promote.
 SemaFunctionMemoryPlanned: struct {
-    functions: [Func]
-    rows: [Int]
-    promoted: [String]
+    functions: [Func],
+    rows: [Int],
+    promoted: [String],
     // The first row of each key a later row shares: a lookup by that key
     // reads this row's declaration, so the row keeps a copy of it.
-    shared_rows: [Int:Bool]
+    shared_rows: [Int:Bool],
 }
 
 SemaFunctionMemoryPolicy: struct {
-    value: PolicyValue
-    provenance: [PolicyDeclaration]
-    explanation: String
+    value: PolicyValue,
+    provenance: [PolicyDeclaration],
+    explanation: String,
 }
 
 // Exact function identity: module, owning type, name, and declaration span.
@@ -330,8 +330,8 @@ SEMA_FUNCTION_MEMORY_MIN_BYTES_PER_THREAD: 262144
 // One part's collecting walk: its modules' sources in row order and their
 // top-level item count.
 SemaFunctionMemoryWalked: struct {
-    sources: [SemaFunctionMemorySource]
-    limit: Int
+    sources: [SemaFunctionMemorySource],
+    limit: Int,
 }
 
 // The collecting walk of every module of `graph` into `walk`. Each module's

@@ -9,7 +9,7 @@ greet: fn(name: String, loud: Bool{false}) -> String {
 
 // ---: trait with a default method body ---
 Greetable: trait {
-    greeting: fn(self) -> String
+    greeting: fn(self) -> String,
     announce: fn(self) -> String {
         g: self.greeting()
         return "[ {g} ]"
@@ -17,7 +17,7 @@ Greetable: trait {
 }
 
 Person: struct {
-    name: String
+    name: String,
 
     impl Greetable {
         greeting: fn(self) -> String {
@@ -30,8 +30,8 @@ Person: struct {
 // `announce` uses the default from the trait
 // --- S77: field punning ---
 Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 }
 
 make_point: fn(x: Int, y: Int) -> Point {
@@ -40,11 +40,11 @@ make_point: fn(x: Int, y: Int) -> Point {
 
 // --- S62: trait delegation ---
 Logger: trait {
-    log: fn(self, msg: String)
+    log: fn(self, msg: String),
 }
 
 ConsoleLogger: struct {
-    prefix: String
+    prefix: String,
 
     impl Logger {
         log: fn(self, msg: String) {
@@ -55,7 +55,7 @@ ConsoleLogger: struct {
 }
 
 App: struct {
-    logger: ConsoleLogger
+    logger: ConsoleLogger,
 
     // S62: forwards Logger methods to `logger`
     impl Logger using logger

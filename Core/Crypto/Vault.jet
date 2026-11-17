@@ -11,13 +11,13 @@ use {
 }
 
 KeyRef: struct<T> {
-    name: String
-    version: Int
+    name: String,
+    version: Int,
     // The repository identity the vault issued this reference under: store
     // uuid (16 bytes), record opaque id (16), record hash (32). The provider
     // re-verifies all of it, so a same-named generation in a restored or
     // re-imported repository never answers for this reference.
-    priv identity: [U8]
+    priv identity: [U8],
 
     // A reference renders only its public repository name and generation.
     // Its phantom key type never needs Display and never exposes key bytes.
@@ -34,18 +34,18 @@ KeyRef: struct<T> {
 }
 
 KeyStatus: enum {
-    Active
-    Retired
-    Revoked
+    Active,
+    Retired,
+    Revoked,
 }
 
 // Main's owner-approved private-field correction: only a checked, non-escaping
 // loan exposes the credential; the original source clock observer stays live.
 #[!Debug, !Printable]
 ExpiringSecret: struct<T> {
-    value: Shared<T?>
-    deadline_ms: Int
-    observer: time.__ClockObserver
+    value: Shared<T?>,
+    deadline_ms: Int,
+    observer: time.__ClockObserver,
 
     new: fn<T>(value: &&T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
         observer: clock.__observer()
@@ -92,11 +92,11 @@ priv loan_secret: fn<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired!
 }
 
 ExpiryCloseCount: struct {
-    count: Int
+    count: Int,
 }
 
 ExpiryCloseProbe: struct {
-    count: Shared<ExpiryCloseCount>
+    count: Shared<ExpiryCloseCount>,
 
     impl Close {
         close: fn(&&self) {
@@ -109,7 +109,7 @@ ExpiryCloseProbe: struct {
 // Structural twin of ExpiringSecret's Shared<T?> + Close, specialized to a
 // counted probe because the public wrapper's closed crypto family rejects it.
 ExpiryCloseOwner: struct {
-    value: Shared<ExpiryCloseProbe?>
+    value: Shared<ExpiryCloseProbe?>,
 
     impl Close {
         close: fn(&&self) { close_secret_storage<ExpiryCloseProbe>(self.value.move()) }
@@ -150,46 +150,46 @@ ExpiryCloseOwner: struct {
 }
 
 MutationPlan: struct<T> {
-    json: String
+    json: String,
 }
 
 Rotation: struct<T> {
-    previous: KeyRef<T>
-    current: KeyRef<T>
+    previous: KeyRef<T>,
+    current: KeyRef<T>,
 }
 
 VaultWrite: struct<T> {
-    path: String
+    path: String,
 }
 
 WrappedImportPlan: struct<T> {
-    json: String
+    json: String,
 }
 
 #Error
 VaultError: enum {
-    InvalidName
-    NotFound
-    WrongType
-    Revoked
-    Locked
-    AuthorityDenied
-    Conflict
-    UnsupportedProvider
-    InvalidEncoding
-    DurabilityUnknown
-    Crypto(CryptoError)
-    IO(operation: String, redacted_path: String)
-    Internal(incident_id: String)
+    InvalidName,
+    NotFound,
+    WrongType,
+    Revoked,
+    Locked,
+    AuthorityDenied,
+    Conflict,
+    UnsupportedProvider,
+    InvalidEncoding,
+    DurabilityUnknown,
+    Crypto(CryptoError),
+    IO(operation: String, redacted_path: String),
+    Internal(incident_id: String),
 }
 
 WrappedVaultKey: struct {
-    encoded: [U8]
-    mode: Int
-    key_type: Int
-    origin_name: String
-    origin_generation: Int
-    header_len: Int
+    encoded: [U8],
+    mode: Int,
+    key_type: Int,
+    origin_name: String,
+    origin_generation: Int,
+    header_len: Int,
 
     from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(bytes) }
 
@@ -225,8 +225,8 @@ __wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
 __wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
 
 KeyUnlock: struct {
-    kind: Int
-    secret: View<U8>
+    kind: Int,
+    secret: View<U8>,
 }
 
 // These retain a read borrow of the real owner's bytes, never a copied secret.
@@ -242,7 +242,7 @@ __key_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
 
 #Error
 KeyWrapError: struct {
-    reason: String
+    reason: String,
 }
 
 // `get` is the repository secret store, whose intentionally untyped optional
@@ -400,17 +400,17 @@ export_to_recipients: fn<T>(key: KeyRef<T>, recipients: [X25519PublicKey]) -[Sec
 }
 
 VaultRec: struct {
-    name: String
-    version: Int
-    status: String
-    secret_hex: String
+    name: String,
+    version: Int,
+    status: String,
+    secret_hex: String,
 }
 
 PlanBits: struct {
-    op: String
-    name: String
-    version: Int
-    payload: String
+    op: String,
+    name: String,
+    version: Int,
+    payload: String,
 }
 
 same_text: fn(left: String, right: String) -> Bool Never! {
@@ -469,11 +469,11 @@ validate_reason: fn(reason: String) -> Bool? {
 // JVKW/v1 parser policy salvaged from 5933a61b2 vault_02:jvkw_parse.
 // Integer cursors avoid allocating the non-secret header arrays just to validate them.
 WrappedMetadata: struct {
-    mode: Int
-    key_type: Int
-    name: String
-    generation: Int
-    header_len: Int
+    mode: Int,
+    key_type: Int,
+    name: String,
+    generation: Int,
+    header_len: Int,
 }
 
 wrap_error: fn(reason: String) -> KeyWrapError Never! { KeyWrapError{reason: reason} }

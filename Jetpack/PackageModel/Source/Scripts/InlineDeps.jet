@@ -32,9 +32,9 @@ PKG_INLINE_DEPS_FIXTURES_ENV: ENV_JET_INLINE_DEPS_FIXTURES
 
 // One `use pkg#version;` ref collected from a manifest-less script.
 InlineDep: struct {
-    name: String
-    selector: String
-    span: Span
+    name: String,
+    selector: String,
+    span: Span,
 }
 
 // Every inline dependency ref among a parsed program's top-level imports.
@@ -70,20 +70,20 @@ pkg_inline_deps_is_pinned: fn(selector: String) -> Bool Never! {
 // the selected version: changing a loose selector is a semantic change even
 // when it selects the same source today.
 ScriptDependencyIdentity: struct {
-    name: String
-    selector: String
-    resolved_version: String
-    content_hash: String
+    name: String,
+    selector: String,
+    resolved_version: String,
+    content_hash: String,
 }
 
 // The facts that identify a prepared script result. Paths and ambient
 // process state are absent: only recorded source/dependency content plus
 // the selected toolchain and target can authorize reuse.
 ScriptCacheIdentity: struct {
-    source_hash: String
-    dependencies: [ScriptDependencyIdentity]
-    toolchain: String
-    target: String
+    source_hash: String,
+    dependencies: [ScriptDependencyIdentity],
+    toolchain: String,
+    target: String,
 
     // Dependencies are held in (name, selector, resolved_version,
     // content_hash) order so the identity is order independent.
@@ -131,11 +131,11 @@ pkg_inline_deps_cache_identity: fn(source_hash: String, dependencies: [InlineDep
 // A resolved inline dependency: `dir` is the module search root that
 // satisfies it.
 InlineDepResolved: struct {
-    name: String
-    selector: String
-    resolved_version: String
-    dir: String
-    content_hash: String
+    name: String,
+    selector: String,
+    resolved_version: String,
+    dir: String,
+    content_hash: String,
 
     // The portable dependency identity. `dir` is not part of it: the same
     // prepared source identifies the same way after a clone moves.
@@ -147,11 +147,11 @@ InlineDepResolved: struct {
 // Why an inline dependency did not resolve (E1253's reason half).
 #Error
 InlineDepUnresolved: enum {
-    InvalidName
-    InvalidSelector
-    UnknownPackage
-    NoMatch
-    InvalidTree(TreeHashError)
+    InvalidName,
+    InvalidSelector,
+    UnknownPackage,
+    NoMatch,
+    InvalidTree(TreeHashError),
 
     // The import name would escape the local dependency root.
     // The selector is not the supported dotted numeric form.

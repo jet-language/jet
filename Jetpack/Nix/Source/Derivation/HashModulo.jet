@@ -4,9 +4,9 @@
 use jetpack_nix_eval.[nixeval_sorted_unique]
 
 NixDerivationStore: struct {
-    derivations: [String:NixDerivation]
+    derivations: [String:NixDerivation],
     // Modulo digests by mask and derivation path.
-    priv memo: [String:[String:[U8]]]
+    priv memo: [String:[String:[U8]]],
 
     read: fn(self, drv_path: String) -> NixDerivation NixError! {
         derivation: self.derivations.get(drv_path) ?? return Err(NixError.DrvIO("missing drv in map store: {drv_path}"))

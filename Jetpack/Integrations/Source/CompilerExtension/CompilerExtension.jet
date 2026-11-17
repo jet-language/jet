@@ -60,9 +60,9 @@ EXTENSION_HOST_PROCESS_TIMEOUT_MS: 5000
 
 // The closed set of Jet plugin mechanisms, one semantic role each.
 PluginMechanism: enum {
-    PathHelper
-    ApplicationPlugin
-    CompilerExtension
+    PathHelper,
+    ApplicationPlugin,
+    CompilerExtension,
 }
 
 // `jet-<cmd>` executables discovered on PATH.
@@ -72,13 +72,13 @@ PluginMechanism: enum {
 // Authority a v1 component may negotiate. Later stages extend this set
 // rather than inventing a second plugin system.
 ExtensionAbility: enum {
-    ReadTypes
-    ReadSymbols
-    ReadEffects
-    ReadSpans
-    ReadProvenance
-    EmitFinding
-    ProposeEdit
+    ReadTypes,
+    ReadSymbols,
+    ReadEffects,
+    ReadSpans,
+    ReadProvenance,
+    EmitFinding,
+    ProposeEdit,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -135,19 +135,19 @@ ExtensionAbility: enum {
 // Hard resource caps the host applies; a guest cannot raise them.
 ExtensionResourceLimits: struct {
     // Wasmtime fuel granted per `analyze` call.
-    max_fuel: Int
+    max_fuel: Int,
     // Linear memory bytes per instance.
-    max_memory_bytes: Int
+    max_memory_bytes: Int,
     // Table elements per instance.
-    max_table_elements: Int
+    max_table_elements: Int,
     // Findings accepted in one response.
-    max_findings: Int
+    max_findings: Int,
     // Proposed edits accepted in one response.
-    max_edits: Int
+    max_edits: Int,
     // Raw response payload bytes.
-    max_response_bytes: Int
+    max_response_bytes: Int,
     // Wall-clock budget for one `analyze`, in milliseconds.
-    timeout_ms: Int
+    timeout_ms: Int,
 
     v1_defaults: fn() -> ExtensionResourceLimits Never! {
         ExtensionResourceLimits{max_fuel: 10000000, max_memory_bytes: 16777216, max_table_elements: 10000, max_findings: 256, max_edits: 64, max_response_bytes: 262144, timeout_ms: 2000}
@@ -188,7 +188,7 @@ ExtensionResourceLimits: struct {
 // guests: no clock, random, filesystem, network, or process imports and no
 // compiler mutation rights.
 ExtensionTrustPolicy: enum {
-    Untrusted
+    Untrusted,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -208,7 +208,7 @@ ExtensionTrustPolicy: enum {
 // host-language diagnostic.
 #Error
 ExtensionProtocolError: struct {
-    message: String
+    message: String,
 
     new: fn(message: String) -> ExtensionProtocolError Never! {
         ExtensionProtocolError{message: message}
@@ -217,10 +217,10 @@ ExtensionProtocolError: struct {
 
 // A span visible to the guest.
 SpanFact: struct {
-    id: String
-    file: String
-    start: Int
-    end: Int
+    id: String,
+    file: String,
+    start: Int,
+    end: Int,
 
     to_json_tree: fn(self) -> Dyn Never! {
         Dyn.Object(["end": Dyn.Int(self.end), "file": Dyn.Text(self.file.copy()), "id": Dyn.Text(self.id.copy()), "start": Dyn.Int(self.start)])
@@ -231,12 +231,12 @@ SpanFact: struct {
 // for copied boundary payloads whose nested entries refer back to the same
 // `types` identity set.
 TypeFactShape: enum {
-    Opaque
-    Scalar
-    CodableRecord(fields: [TypeFieldFact])
-    List(element_type_id: String)
-    Option(inner_type_id: String)
-    Result(ok_type_id: String, error_type_id: String)
+    Opaque,
+    Scalar,
+    CodableRecord(fields: [TypeFieldFact]),
+    List(element_type_id: String),
+    Option(inner_type_id: String),
+    Result(ok_type_id: String, error_type_id: String),
 
     to_json_tree: fn(self) -> Dyn Never! {
         if self == {
@@ -297,16 +297,16 @@ TypeFactShape: enum {
 }
 
 TypeFieldFact: struct {
-    name: String
-    type_id: String
+    name: String,
+    type_id: String,
 }
 
 // A type fact; `id` is the interface snapshot identity symbols and host
 // imports use.
 TypeFact: struct {
-    id: String
-    repr: String
-    shape: TypeFactShape
+    id: String,
+    repr: String,
+    shape: TypeFactShape,
 
     to_json_tree: fn(self) -> Dyn Never! {
         Dyn.Object(["id": Dyn.Text(self.id.copy()), "repr": Dyn.Text(self.repr.copy()), "shape": self.shape.to_json_tree()])
@@ -315,13 +315,13 @@ TypeFact: struct {
 
 // A symbol fact carrying effects and provenance.
 SymbolFact: struct {
-    id: String
-    name: String
-    kind: String
-    type_id: String
-    span_id: String
-    effects: [String]
-    provenance: String
+    id: String,
+    name: String,
+    kind: String,
+    type_id: String,
+    span_id: String,
+    effects: [String],
+    provenance: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
         Dyn.Object(
@@ -342,15 +342,15 @@ SymbolFact: struct {
 // use this snapshot's type identities for copied payloads; no parallel
 // interface registry is allowed.
 TypedSnapshot: struct {
-    protocol: Int
-    stage: String
-    abilities: [ExtensionAbility]
-    limits: ExtensionResourceLimits
-    trust: ExtensionTrustPolicy
-    types: [TypeFact]
-    symbols: [SymbolFact]
-    spans: [SpanFact]
-    host_imports: [HostImportFact]
+    protocol: Int,
+    stage: String,
+    abilities: [ExtensionAbility],
+    limits: ExtensionResourceLimits,
+    trust: ExtensionTrustPolicy,
+    types: [TypeFact],
+    symbols: [SymbolFact],
+    spans: [SpanFact],
+    host_imports: [HostImportFact],
 
     // A v1 snapshot with no host imports.
     new: fn(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact]) -> TypedSnapshot ExtensionProtocolError! {
@@ -467,10 +467,10 @@ TypedSnapshot: struct {
 
 // One finding the guest proposes.
 ExtensionFinding: struct {
-    rule: String
-    span_id: String
-    message: String
-    severity: String
+    rule: String,
+    span_id: String,
+    message: String,
+    severity: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
         Dyn.Object(["message": Dyn.Text(self.message.copy()), "rule": Dyn.Text(self.rule.copy()), "severity": Dyn.Text(self.severity.copy()), "span_id": Dyn.Text(self.span_id.copy())])
@@ -479,9 +479,9 @@ ExtensionFinding: struct {
 
 // One edit proposal; the host applies it only after accepting it.
 ExtensionProposedEdit: struct {
-    span_id: String
-    replacement: String
-    rationale: String
+    span_id: String,
+    replacement: String,
+    rationale: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
         Dyn.Object(["rationale": Dyn.Text(self.rationale.copy()), "replacement": Dyn.Text(self.replacement.copy()), "span_id": Dyn.Text(self.span_id.copy())])
@@ -490,11 +490,11 @@ ExtensionProposedEdit: struct {
 
 // The guest-to-host `analyze` response as decoded, before validation.
 AnalyzeResponse: struct {
-    protocol: Int
-    findings: [ExtensionFinding]
-    proposed_edits: [ExtensionProposedEdit]
+    protocol: Int,
+    findings: [ExtensionFinding],
+    proposed_edits: [ExtensionProposedEdit],
     // V1 requires this empty; any artifact is a protocol error.
-    artifacts: [String]
+    artifacts: [String],
 
     // Protocol bytes, distinct from the automatically derived Dyn codec.
     encode_bytes: fn(self) -> [U8] ExtensionProtocolError! {
@@ -602,20 +602,20 @@ AnalyzeResponse: struct {
 
 // The host-side lifecycle of one extension instance.
 ExtensionSessionPhase: enum {
-    Idle
-    Loaded
-    Closed
+    Idle,
+    Loaded,
+    Closed,
 }
 
 // One extension session: staging is ephemeral, rollback discards staged
 // output only (the accept latch stays final), and close hands the guest
 // handle to the host's closer so the guest store and memory are dropped.
 ExtensionSession: struct {
-    priv session_phase: ExtensionSessionPhase
-    priv handle: Int?
-    priv staged_response: AnalyzeResponse?
+    priv session_phase: ExtensionSessionPhase,
+    priv handle: Int?,
+    priv staged_response: AnalyzeResponse?,
     // True only after the host explicitly accepts staged output.
-    priv committed: Bool
+    priv committed: Bool,
 
     new: fn() -> ExtensionSession Never! {
         ExtensionSession{session_phase: ExtensionSessionPhase.Idle, handle: None, staged_response: None, committed: false}

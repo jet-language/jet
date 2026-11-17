@@ -54,8 +54,8 @@ NIXEVAL_ORACLE_JSON: #run { `{
 ` }
 
 NixEvalOracleBuildStatus: enum {
-    Blocked
-    Ready
+    Blocked,
+    Ready,
 
     parse: fn(label: String) -> NixEvalOracleBuildStatus? Never! {
         if label == {
@@ -74,8 +74,8 @@ NixEvalOracleBuildStatus: enum {
 }
 
 NixEvalCorpusStatus: enum {
-    BlockedOnOracleBuildHashes
-    BitExact
+    BlockedOnOracleBuildHashes,
+    BitExact,
 
     parse: fn(label: String) -> NixEvalCorpusStatus? Never! {
         if label == {
@@ -87,27 +87,27 @@ NixEvalCorpusStatus: enum {
 }
 
 NixEvalOracleBuild: struct {
-    build_nar_hash: String?
-    executable_nar_hash: String?
-    status: NixEvalOracleBuildStatus
+    build_nar_hash: String?,
+    executable_nar_hash: String?,
+    status: NixEvalOracleBuildStatus,
 }
 
 // One oracle build as read from the manifest, before pin validation.
 NixEvalOracleDraftBuild: struct {
-    build_nar_hash: String?
-    executable_nar_hash: String?
-    status: String
+    build_nar_hash: String?,
+    executable_nar_hash: String?,
+    status: String,
 }
 
 NixEvalOracleDraft: struct {
-    nix_version: String
-    nix_tag_object: String
-    nix_source_commit: String
-    builds: [String:NixEvalOracleDraftBuild]
-    nixpkgs_revision: String
-    nixpkgs_last_modified: Int
-    nixpkgs_nar_hash: String
-    corpus_status: String
+    nix_version: String,
+    nix_tag_object: String,
+    nix_source_commit: String,
+    builds: [String:NixEvalOracleDraftBuild],
+    nixpkgs_revision: String,
+    nixpkgs_last_modified: Int,
+    nixpkgs_nar_hash: String,
+    corpus_status: String,
 
     parse: fn(text: String) -> NixEvalOracleDraft NixEvalError! {
         document: nixeval_oracle_document(text)
@@ -182,14 +182,14 @@ NixEvalOracleDraft: struct {
 }
 
 NixEvalOracleManifest: struct {
-    nix_version: String
-    nix_tag_object: String
-    nix_source_commit: String
-    priv builds: [String:NixEvalOracleBuild]
-    nixpkgs_revision: String
-    nixpkgs_last_modified: Int
-    nixpkgs_nar_hash: String
-    priv corpus_status: NixEvalCorpusStatus
+    nix_version: String,
+    nix_tag_object: String,
+    nix_source_commit: String,
+    priv builds: [String:NixEvalOracleBuild],
+    nixpkgs_revision: String,
+    nixpkgs_last_modified: Int,
+    nixpkgs_nar_hash: String,
+    priv corpus_status: NixEvalCorpusStatus,
 
     embedded: fn() -> NixEvalOracleManifest NixEvalError! {
         NixEvalOracleManifest.parse_and_validate(NIXEVAL_ORACLE_JSON)
@@ -238,9 +238,9 @@ NixEvalOracleManifest: struct {
 
 // An observed oracle build identity; both hashes are canonical SHA-256 SRI.
 NixEvalOracleIdentity: struct {
-    priv system: String
-    priv build_nar_hash: String
-    priv executable_nar_hash: String
+    priv system: String,
+    priv build_nar_hash: String,
+    priv executable_nar_hash: String,
 
     new: fn(system: String, build_nar_hash: String, executable_nar_hash: String) -> NixEvalOracleIdentity NixEvalError! {
         if !nixeval_is_canonical_sha256_sri(build_nar_hash) {
@@ -254,7 +254,7 @@ NixEvalOracleIdentity: struct {
 }
 
 NixEvalVerifiedOracle: struct {
-    system: String
+    system: String,
 }
 
 nixeval_oracle_missing: fn(path: String) -> NixEvalError Never! {

@@ -4,57 +4,57 @@
 // recurses, so deeply nested input fails with a resource limit.
 
 NixEvalBinding: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 NixEvalPatternField: struct {
-    name: String
-    default: Int?
+    name: String,
+    default: Int?,
 }
 
 NixEvalPattern: enum {
-    Name(String)
-    Attrs([NixEvalPatternField])
+    Name(String),
+    Attrs([NixEvalPatternField]),
 }
 
 NixEvalStringPart: enum {
-    Literal(String)
-    Expression(Int)
+    Literal(String),
+    Expression(Int),
 }
 
 NixEvalExpr: enum {
-    Str(String)
-    Interpolated([NixEvalStringPart])
-    Path(String)
-    Integer(Int)
-    Bool(Bool)
-    Null
-    Identifier(String)
-    AttrSet([NixEvalBinding])
-    List([Int])
-    Lambda(pattern: NixEvalPattern, body: Int)
-    Apply(function: Int, argument: Int)
-    Select(value: Int, field: String)
-    Let(bindings: [NixEvalBinding], body: Int)
-    With(scope: Int, body: Int)
-    If(condition: Int, then_branch: Int, else_branch: Int)
-    Merge(left: Int, right: Int)
-    Equal(left: Int, right: Int, positive: Bool)
+    Str(String),
+    Interpolated([NixEvalStringPart]),
+    Path(String),
+    Integer(Int),
+    Bool(Bool),
+    Null,
+    Identifier(String),
+    AttrSet([NixEvalBinding]),
+    List([Int]),
+    Lambda(pattern: NixEvalPattern, body: Int),
+    Apply(function: Int, argument: Int),
+    Select(value: Int, field: String),
+    Let(bindings: [NixEvalBinding], body: Int),
+    With(scope: Int, body: Int),
+    If(condition: Int, then_branch: Int, else_branch: Int),
+    Merge(left: Int, right: Int),
+    Equal(left: Int, right: Int, positive: Bool),
 }
 
 // Parsed nodes numbered from `base`, the node-table length they extend.
 NixEvalSyntax: struct {
-    nodes: [NixEvalExpr]
-    root: Int
+    nodes: [NixEvalExpr],
+    root: Int,
 }
 
 NixEvalParser: struct {
-    tokens: [NixEvalToken]
-    position: Int
-    depth: Int
-    base: Int
-    nodes: [NixEvalExpr]
+    tokens: [NixEvalToken],
+    position: Int,
+    depth: Int,
+    base: Int,
+    nodes: [NixEvalExpr],
 
     parse: fn(tokens: [NixEvalToken], base: Int) -> NixEvalSyntax NixEvalError! {
         parser := NixEvalParser{tokens: tokens, position: 0, depth: 0, base: base, nodes: [NixEvalExpr]{}}

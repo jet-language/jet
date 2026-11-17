@@ -238,8 +238,8 @@ put4: fn(buf: &[U8], at: Int, value: Int) Never! {
 
 // A decoded varint: its signed 64-bit value and its length in bytes.
 Varint: struct {
-    value: Int
-    len: Int
+    value: Int,
+    len: Int,
 }
 
 // sqlite3GetVarint: a 1..9 byte big-endian varint. The first eight bytes
@@ -385,8 +385,8 @@ UTF8_TRANS1: [Int]{
 
 // A decoded character and the offset of the next unread byte.
 UTFChar: struct {
-    c: Int
-    next: Int
+    c: Int,
+    next: Int,
 }
 
 // READ_UTF8 / sqlite3Utf8Read: the character at z[at], reading no further
@@ -559,8 +559,8 @@ utf16_byte_len: fn(z: [U8], n: Int, enc: Int) -> Int Never! {
 // conversions below never reach the x87 exponent limits with a result that
 // differs from C's.
 Ext: struct {
-    mant: Int
-    exp: Int
+    mant: Int,
+    exp: Int,
 }
 
 TWO_63: 9223372036854775808
@@ -711,8 +711,8 @@ ext_dbl_max: fn() -> Ext Never! { Ext{mant: 18446744073709549568, exp: 1023} }
 // integer, 2 or more a number with "." or an exponent, 0 not a number, -1 not
 // a number but with a valid prefix that has "." or an exponent).
 AtoF: struct {
-    value: Float
-    kind: Int
+    value: Float,
+    kind: Int,
 }
 
 // The digit at z[at] as a byte value.
@@ -841,8 +841,8 @@ atof: fn(z: [U8], enc: Int) -> AtoF Never! {
 // The result of sqlite3Atoi64: the value and C's return code (-1 no digits,
 // 0 success, 1 extra text after the integer, 2 too large, 3 exactly 2^63).
 AtoI: struct {
-    value: Int
-    rc: Int
+    value: Int,
+    rc: Int,
 }
 
 // compare2pow63: the 19 digits at z[at] (every `incr` bytes) against
@@ -1013,11 +1013,11 @@ get_uint32: fn(z: [U8]) -> Int? Never! {
 // infinity and 2 for a NaN, and the n significant digits z with the decimal
 // point i_dp digits from the left.
 FpDecode: struct {
-    sign: Int
-    is_special: Int
-    n: Int
-    i_dp: Int
-    z: [U8]
+    sign: Int,
+    is_special: Int,
+    n: Int,
+    i_dp: Int,
+    z: [U8],
 }
 
 // sqlite3FpDecode: the decimal digits of r, rounded to `round` significant

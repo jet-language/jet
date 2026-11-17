@@ -66,18 +66,18 @@ FIELDS: 8
 CATALOG_N: "1000"
 
 Counts: struct {
-    insns: Int
-    pushes: Int
-    pops: Int
-    frame_slots: Int
-    loops: Int
-    loop_insns: Int
+    insns: Int,
+    pushes: Int,
+    pops: Int,
+    frame_slots: Int,
+    loops: Int,
+    loop_insns: Int,
 }
 
 Row: struct {
-    symbol: String
-    golden: Counts
-    ceiling: Int
+    symbol: String,
+    golden: Counts,
+    ceiling: Int,
 }
 
 fail: fn(message: String) -[IO]> Int Never! {
@@ -141,9 +141,9 @@ parse_golden: fn(text: String) -> [Row] Err! {
 // returns is followed by `ud2`, so its path ends there. Any other call
 // returns to the next instruction.
 Flow: struct {
-    falls: [Bool]
-    jumps: [Int]
-    indirect: [Bool]
+    falls: [Bool],
+    jumps: [Int],
+    indirect: [Bool],
 }
 
 // The words of an instruction's text.
@@ -674,8 +674,8 @@ ZERO_COST_HOT: [String]{"main_churn", "main_grow", "main_scan", "main_tally", "m
 
 // One arm built at one level: its binary and its `nm` output.
 ZeroCostBuild: struct {
-    binary: String
-    symbols: String
+    binary: String,
+    symbols: String,
 }
 
 zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expected: String, run_dir: String, scratch: String) -[Exec, Env, FS, IO, Time.Wait]> ZeroCostBuild Err! {
@@ -700,8 +700,8 @@ zero_cost_build: fn(root: String, jet: [String], arm: Int, level: String, expect
 
 // A hot function of one build: its counts and its normalized instructions.
 ZeroCostFunction: struct {
-    counts: Counts
-    text: [String]
+    counts: Counts,
+    text: [String],
 }
 
 // A hot function of one build, as one: the function and every function

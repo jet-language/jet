@@ -13,9 +13,9 @@ use {
 
 // Realization facts for the env-entry banner and the receipt stamp.
 EnvReadyStats: struct {
-    total: Int
-    cache_hits: Int
-    realized: [EnvironmentSelection]
+    total: Int,
+    cache_hits: Int,
+    realized: [EnvironmentSelection],
 
     empty: fn() -> EnvReadyStats Never! {
         EnvReadyStats{total: 0, cache_hits: 0, realized: [EnvironmentSelection]{}}
@@ -122,15 +122,15 @@ cli_take_warm_realization: fn(warm: &[String:[VerifiedRealization]], reference: 
 // A native dev tool: the flake definition name, the command, and the
 // environment variable naming the admitted binary it projects.
 NativeDevTool: struct {
-    definition: String
-    command: String
-    variable: String
+    definition: String,
+    command: String,
+    variable: String,
 }
 
 // The target condition of a native output fact.
 NativeOutputPlatform: enum {
-    Any
-    Linux
+    Any,
+    Linux,
 
     applies: fn(self) -[Env]> Bool Never! {
         if self == {
@@ -143,10 +143,10 @@ NativeOutputPlatform: enum {
 // A realized package output selected by the native shell contract: the
 // package, the relative output, the variable, and its target condition.
 NativeOutputFact: struct {
-    package: String
-    relative: String
-    variable: String
-    platform: NativeOutputPlatform
+    package: String,
+    relative: String,
+    variable: String,
+    platform: NativeOutputPlatform,
 }
 
 CLI_NATIVE_OUTPUT_FACTS: #run { [NativeOutputFact]{
@@ -163,7 +163,7 @@ CLI_NATIVE_DEV_TOOLS: #run { [NativeDevTool]{
 } }
 
 NativeActivation: enum {
-    Disabled
+    Disabled,
 }
 
 // Typed host facts for the Jet-native shell projection. The variable maps
@@ -171,11 +171,11 @@ NativeActivation: enum {
 // then. Paths inside realized outputs are lease text the shell renders for
 // the child its leases are passed to.
 NativeEnvironmentProjection: struct {
-    project_root: String
-    native_bin_dirs: [String]
-    tzdir: LeaseText?
-    loader_paths: [LeaseText]
-    activation: NativeActivation
+    project_root: String,
+    native_bin_dirs: [String],
+    tzdir: LeaseText?,
+    loader_paths: [LeaseText],
+    activation: NativeActivation,
 
     from_realized: fn(project_root: String, realized: [{name: String, output: LeaseText}], dev_tools: [{command: String, binary: String}], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
@@ -565,8 +565,8 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
 
 // One provider metadata file and the variable it feeds.
 ProviderMetadataFile: struct {
-    file: String
-    variable: String
+    file: String,
+    variable: String,
 }
 
 CLI_PROVIDER_METADATA_FILES: #run { [ProviderMetadataFile]{

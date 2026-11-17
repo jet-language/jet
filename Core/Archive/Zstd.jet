@@ -17,11 +17,11 @@ use {
 // `FileReader` through one.
 #Error
 ZstdFileError: enum {
-    Read
-    Write
-    Malformed
-    Unsupported
-    Checksum
+    Read,
+    Write,
+    Malformed,
+    Unsupported,
+    Checksum,
 }
 
 C_MAGIC: 0xFD2FB528
@@ -107,12 +107,12 @@ C_MATCH_MIN: 4
 // states cover every next state exactly once (RFC 8878 4.1.1), so the encoder
 // can choose states backward from the last sequence.
 ZEnc: struct {
-    ll: ZFse
-    of: ZFse
-    ml: ZFse
-    ll_prev: [Int]
-    of_prev: [Int]
-    ml_prev: [Int]
+    ll: ZFse,
+    of: ZFse,
+    ml: ZFse,
+    ll_prev: [Int],
+    of_prev: [Int],
+    ml_prev: [Int],
 }
 
 priv zenc: fn() -> ZEnc ZstdFileError! {
@@ -139,8 +139,8 @@ priv zfse_prev: fn(table: ZFse, symbols: Int) -> [Int] Never! {
 // A forward bit writer whose output a backward stream (`zback`) reads in
 // reverse: the last field written is the first read.
 priv ZBits: struct {
-    acc: Int
-    count: Int
+    acc: Int,
+    count: Int,
 
     put: fn(&self, out: &[U8], value: Int, n: Int) Never! {
         self.acc |= value << self.count
@@ -339,15 +339,15 @@ decompress: fn(data: [U8]) -> [U8] ZstdFileError! {
 /// last chunk (and a `read_bytes` that returned `[]`), `finish` reports a
 /// truncated frame as `ZstdFileError.Malformed`.
 ZstdDecoder: struct {
-    priv input: [U8]
-    priv consumed: Int
+    priv input: [U8],
+    priv consumed: Int,
     // 0 between frames, 1 inside a frame's blocks, 2 before its checksum.
-    priv phase: Int
-    priv frame: ZFrame
-    priv state: ZState
-    priv ready: Int
-    priv produced: Int
-    priv hash: ZHash
+    priv phase: Int,
+    priv frame: ZFrame,
+    priv state: ZState,
+    priv ready: Int,
+    priv produced: Int,
+    priv hash: ZHash,
 
     feed: fn(&self, bytes: [U8]) Never! {
         if self.consumed > 0 {
@@ -443,9 +443,9 @@ decoder: fn() -> ZstdDecoder Never! {
 /// most `limit` decoded bytes, and `[]` at the end of the file once every frame
 /// it held is complete. A failed file read is `ZstdFileError.Read`.
 ZstdReader: struct {
-    priv file: FileReader
-    priv decoder: ZstdDecoder
-    priv ended: Bool
+    priv file: FileReader,
+    priv decoder: ZstdDecoder,
+    priv ended: Bool,
 
     read_bytes: fn(&self, limit: Int) -[FS.Read]> [U8] ZstdFileError! {
         loop {
@@ -469,11 +469,11 @@ reader: fn(file: &&FileReader) -> ZstdReader Never! {
 
 ZFrame: struct {
     // Header bytes after the magic number.
-    size: Int
+    size: Int,
     // Declared content size, or -1.
-    content: Int
-    window: Int
-    checksum: Bool
+    content: Int,
+    window: Int,
+    checksum: Bool,
 }
 
 // The frame header after the magic number at `data[start..]`; `None` while
@@ -524,20 +524,20 @@ zframe_header: fn(data: [U8], start: Int) -> ZFrame? ZstdFileError! {
 
 ZBlock: struct {
     // The input position after the block, or -1 while it is incomplete.
-    after: Int
-    last: Bool
+    after: Int,
+    last: Bool,
 }
 
 // Per-frame decoding state: the decoded output (with the window history the
 // next block may reference), the previous Huffman and sequence tables, and the
 // repeat offsets.
 ZState: struct {
-    out: [U8]
-    huf: ZHuf
-    ll: ZFse
-    of: ZFse
-    ml: ZFse
-    rep: [Int]
+    out: [U8],
+    huf: ZHuf,
+    ll: ZFse,
+    of: ZFse,
+    ml: ZFse,
+    rep: [Int],
 
     // Decode the block at `data[start..]` onto `out`.
     next_block: fn(&self, data: [U8], start: Int, window: Int) -> ZBlock ZstdFileError! {
@@ -758,9 +758,9 @@ zbits: fn(data: [U8], start: Int, end: Int, pos: Int, n: Int) -> Int Never! {
 
 // A backward bit stream (RFC 8878 4.1): read from the end toward the start.
 ZBack: struct {
-    start: Int
-    end: Int
-    offset: Int
+    start: Int,
+    end: Int,
+    offset: Int,
 
     read: fn(&self, data: [U8], n: Int) -> Int Never! {
         self.offset -= n
@@ -803,11 +803,11 @@ zfill: fn(n: Int, value: Int) -> [Int] Never! {
 // A finite-state-entropy decoding table. `log` is -1 for no table and -2 for
 // "repeat the previous table"; `size` is the description's byte length.
 ZFse: struct {
-    log: Int
-    symbols: [Int]
-    bits: [Int]
-    base: [Int]
-    size: Int
+    log: Int,
+    symbols: [Int],
+    bits: [Int],
+    base: [Int],
+    size: Int,
 }
 
 zfse_none: fn() -> ZFse Never! {
@@ -951,10 +951,10 @@ zfse_weights: fn(data: [U8], start: Int, end: Int, table: ZFse) -> [Int] ZstdFil
 // A Huffman decoding table of `1 << max_bits` states (`max_bits` 0 for no
 // table); `size` is the description's byte length.
 ZHuf: struct {
-    max_bits: Int
-    symbols: [Int]
-    bits: [Int]
-    size: Int
+    max_bits: Int,
+    symbols: [Int],
+    bits: [Int],
+    size: Int,
 }
 
 zhuf_none: fn() -> ZHuf Never! { ZHuf{max_bits: 0, symbols: [Int]{}, bits: [Int]{}, size: 0} }
@@ -1045,12 +1045,12 @@ zhuf_stream: fn(data: [U8], start: Int, end: Int, table: ZHuf, count: Int, out: 
 // Streaming XXH64 with seed 0. Every step is explicit 64-bit wrapping
 // arithmetic, so no value leaves the U64 domain.
 ZHash: struct {
-    v1: U64
-    v2: U64
-    v3: U64
-    v4: U64
-    total: Int
-    pending: [U8]
+    v1: U64,
+    v2: U64,
+    v3: U64,
+    v4: U64,
+    total: Int,
+    pending: [U8],
 
     update: fn(&self, data: [U8], start: Int, end: Int) Never! {
         i := start

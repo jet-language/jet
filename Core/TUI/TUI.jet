@@ -25,19 +25,19 @@ use {
 // provider seams; drawing remains owned by the selected UI backend.
 
 TUIEvent: enum {
-    Key(code: String, modifiers: Int)
-    Resize(size: ui.Size)
-    Timer(id: String, elapsed_ms: Int)
-    IO(channel: String, payload: [U8])
-    Focus(focused: Bool)
-    Interrupt
+    Key(code: String, modifiers: Int),
+    Resize(size: ui.Size),
+    Timer(id: String, elapsed_ms: Int),
+    IO(channel: String, payload: [U8]),
+    Focus(focused: Bool),
+    Interrupt,
     Close
 }
 
 TUIColorProfile: enum {
-    ANSI16
-    ANSI256
-    TrueColor
+    ANSI16,
+    ANSI256,
+    TrueColor,
     ASCII
 }
 
@@ -45,45 +45,45 @@ TUIColorProfile: enum {
 // alpha, so its alpha is ignored, and a profile without true color shows the
 // nearest ANSI 256 or ANSI 16 color.
 TUIColor: enum {
-    ANSI16(Int)
-    ANSI256(Int)
+    ANSI16(Int),
+    ANSI256(Int),
     RGB(Color)
 }
 
 TUIDirection: enum {
-    Horizontal
+    Horizontal,
     Vertical
 }
 
 TUIConstraint: enum {
-    Length(Float)
-    Min(Float)
-    Max(Float)
-    Percent(Float)
+    Length(Float),
+    Min(Float),
+    Max(Float),
+    Percent(Float),
     Fill(Float)
 }
 
 TUICapabilities: struct {
-    profile: TUIColorProfile
-    color: Bool
-    unicode: Bool
-    mouse: Bool
-    resize: Bool
-    clipboard: Bool
-    width: Int
+    profile: TUIColorProfile,
+    color: Bool,
+    unicode: Bool,
+    mouse: Bool,
+    resize: Bool,
+    clipboard: Bool,
+    width: Int,
     height: Int
 }
 
 TUIStyle: struct {
-    foreground: TUIColor?
-    background: TUIColor?
-    bold: Bool
-    dim: Bool
+    foreground: TUIColor?,
+    background: TUIColor?,
+    bold: Bool,
+    dim: Bool,
     underline: Bool
 }
 
 TUIListState: struct {
-    selected: Int
+    selected: Int,
     offset: Int
 }
 
@@ -92,14 +92,14 @@ capabilities: fn() -> TUICapabilities Never! { capabilities_from_inputs(capabili
 // The Rust original samples host facts. Runtime leaves do not choose a
 // presentation profile, parse dimensions, or apply the NO_COLOR override.
 TUICapabilityInputs: struct {
-    columns: String?
-    lines: String?
-    term: String?
-    color_term: String?
-    ascii: Bool
-    forced: Bool
-    no_color: Bool
-    terminal: Bool
+    columns: String?,
+    lines: String?,
+    term: String?,
+    color_term: String?,
+    ascii: Bool,
+    forced: Bool,
+    no_color: Bool,
+    terminal: Bool,
     usize_max: U64
 }
 
@@ -423,13 +423,13 @@ interrupt_event: fn() -> TUIEvent Never! { TUIEvent.Interrupt }
 close_event: fn() -> TUIEvent Never! { TUIEvent.Close }
 
 ColorWords: struct {
-    kind: Int
+    kind: Int,
     word: Int
 }
 
 StyleWords: struct {
-    foreground: ColorWords
-    background: ColorWords
+    foreground: ColorWords,
+    background: ColorWords,
     flags: Int
 }
 

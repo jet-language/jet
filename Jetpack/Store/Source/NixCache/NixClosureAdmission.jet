@@ -22,47 +22,47 @@ STORE_NIX_STAGE_PREFIX: "nix-cache-"
 STORE_NIX_U128_MAX: "340282366920938463463374607431768211455"
 
 NixOutputRequest: struct {
-    name: String
-    store_path: String
+    name: String,
+    store_path: String,
 }
 
 AdmittedNixObject: struct {
-    store_path: String
-    hangar_path: String
-    hangar_digest: String
-    direct_reference_digests: [String]
-    upstream_proof_sha256: String
-    nar_hash: String
-    size: Int
-    compression: String
+    store_path: String,
+    hangar_path: String,
+    hangar_digest: String,
+    direct_reference_digests: [String],
+    upstream_proof_sha256: String,
+    nar_hash: String,
+    size: Int,
+    compression: String,
 }
 
 AdmittedNixClosure: struct {
-    outputs: [String:AdmittedNixObject]
-    objects: [String:AdmittedNixObject]
-    closure_receipt_sha256: String
+    outputs: [String:AdmittedNixObject],
+    objects: [String:AdmittedNixObject],
+    closure_receipt_sha256: String,
 }
 
 // One closure member, either freshly staged (`stage`) or already verified in
 // the Hangar (`stage == None`).
 FetchedObject: struct {
-    store_path: String
-    stage: String?
-    hangar_path: String
-    hangar_digest: String
-    references: [String]
-    direct_reference_digests: [String]
-    download_bytes: Int
-    unpacked_bytes: Int
-    proof: String
-    nar_hash: String
-    compression: String
+    store_path: String,
+    stage: String?,
+    hangar_path: String,
+    hangar_digest: String,
+    references: [String],
+    direct_reference_digests: [String],
+    download_bytes: Int,
+    unpacked_bytes: Int,
+    proof: String,
+    nar_hash: String,
+    compression: String,
 }
 
 // The closure receipt digest and the exact bytes it names.
 NixClosureReceipt: struct {
-    digest: String
-    bytes: [U8]
+    digest: String,
+    bytes: [U8],
 }
 
 store_admit_nix_closure: fn(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
@@ -91,13 +91,13 @@ store_nix_run_admission: fn(verification: &StoreVerification, roots: HangarRoots
 }
 
 NixAdmission: struct {
-    priv verification: StoreVerification
-    priv roots: HangarRoots
-    priv expected_closure_receipt: String?
+    priv verification: StoreVerification,
+    priv roots: HangarRoots,
+    priv expected_closure_receipt: String?,
     // The caller holds the Hangar lock for this admission's whole lifetime.
-    priv hangar_locked: Bool
-    stage: String
-    priv committed: Bool
+    priv hangar_locked: Bool,
+    stage: String,
+    priv committed: Bool,
 
     new: fn(verification: &StoreVerification, roots: HangarRoots, expected_closure_receipt: String?, hangar_locked: Bool) -[FS, Env, Time]> NixAdmission NixCacheError! {
         hangar: roots.hangar_dir()

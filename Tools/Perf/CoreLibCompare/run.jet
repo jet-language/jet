@@ -107,65 +107,65 @@ RUST_WORKLOAD: [
 // One build as the report records it, its keys in sorted order.
 #Codable(only: .Encode)
 Build: struct {
-    artifact: String
-    exit: Int
-    stderr: String
-    stdout: String
+    artifact: String,
+    exit: Int,
+    stderr: String,
+    stdout: String,
 }
 
 #Codable(only: .Encode)
 Builds: struct {
-    jet_source_aot: Build
-    rust_core_aot: Build
-    rust_native: Build
+    jet_source_aot: Build,
+    rust_core_aot: Build,
+    rust_native: Build,
 }
 
 // What an arm that does not build prints.
 #Codable(only: .Encode)
 Unbuilt: struct {
-    builds: Builds
-    metric: String
-    #Rename("pass") passed: Bool
+    builds: Builds,
+    metric: String,
+    #Rename("pass") passed: Bool,
 }
 
 #Codable(only: .Encode)
 Arm: struct {
-    median_ns: Int
-    ratio_to_rust_native: Float
-    samples: [Int]
+    median_ns: Int,
+    ratio_to_rust_native: Float,
+    samples: [Int],
 }
 
 #Codable(only: .Encode)
 Arms: struct {
-    jet_source_aot: Arm
-    rust_core_aot: Arm
-    rust_native: Arm
+    jet_source_aot: Arm,
+    rust_core_aot: Arm,
+    rust_native: Arm,
 }
 
 #Codable(only: .Encode)
 JetRatios: struct {
-    jet_source_aot: Float
-    rust_core_aot: Float
+    jet_source_aot: Float,
+    rust_core_aot: Float,
 }
 
 #Codable(only: .Encode)
 Report: struct {
-    arms: Arms
-    builds: Builds
-    jet_ratios_to_rust_native: JetRatios
-    metric: String
-    output: String
-    #Rename("pass") passed: Bool
-    rounds: Int
-    samples: Int
-    workload: String
+    arms: Arms,
+    builds: Builds,
+    jet_ratios_to_rust_native: JetRatios,
+    metric: String,
+    output: String,
+    #Rename("pass") passed: Bool,
+    rounds: Int,
+    samples: Int,
+    workload: String,
 }
 
 // The parsed command line.
 Options: struct {
-    rounds: Int
-    samples: Int
-    require_win: Bool
+    rounds: Int,
+    samples: Int,
+    require_win: Bool,
 }
 
 run: fn() -> Never Err! {

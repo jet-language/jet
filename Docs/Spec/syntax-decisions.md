@@ -211,7 +211,7 @@ a check fails and the lock is older than the running `jet`, it adds one line
 naming the two toolchains. Each rewrite has an old-spelling fixture that
 Tests/Cases/Migrations replays. Built today: the registered rewrites
 (`lambda-shape1`, `codable-options1`, `sig-arrow1`, `bit-sigils1`,
-`paren-tuple1`) run one at a time through `jet run
+`paren-tuple1`, `brace-layout1`) run one at a time through `jet run
 Compiler/Migrations/Migrate.jet -- <plan> --write PATH...`; `jet fix` reading
 the lock is not yet built.
 
@@ -1712,9 +1712,9 @@ whole or not at all, so `saturating` and `wrapping` around it are E1005.
 
 ```jet
 Shape: enum {
-    Circle(Float)               // one payload: positional
-    Rect(w: Float, h: Float)    // two+: named fields
-    Empty
+    Circle(Float),               // one payload: positional
+    Rect(w: Float, h: Float),    // two+: named fields
+    Empty,
 }
 ```
 
@@ -6601,7 +6601,7 @@ declarations before channel resolution; pinned entries never move.
 
 ```jet
 deps: {
-    textkit:  textkit#1.2.0,
+    textkit:  textkit,#1.2.0,
     helpers:  ../helpers,
     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 }

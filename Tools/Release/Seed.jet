@@ -51,9 +51,9 @@ STAGE_FILES: [String]{"jet", "IDENTITY", "jet-runtime"}
 
 // One environment change of a child: set `name` to `value`, or remove it.
 Var: struct {
-    name: String
-    value: String
-    drop: Bool
+    name: String,
+    value: String,
+    drop: Bool,
 }
 
 set_var: fn(name: String, value: String) -> Var Never! {
@@ -65,15 +65,15 @@ drop_var: fn(name: String) -> Var Never! { Var{name: name.copy(), value: "", dro
 // A finished run: its exit status (124 or 137 when the time limit killed
 // it), whether it timed out, and its wall time in seconds.
 Finished: struct {
-    rc: Int
-    timed_out: Bool
-    wall: Int
+    rc: Int,
+    timed_out: Bool,
+    wall: Int,
 }
 
 // Whether the preflight gate admits the launch, and its line.
 Admission: struct {
-    admitted: Bool
-    text: String
+    admitted: Bool,
+    text: String,
 }
 
 // The dev tool roots (Tools/Agent/roots.sh).
@@ -287,11 +287,11 @@ pump_stderr: fn(stream: ProcessStderrStream, log: String) -[Exec, FS, Time.Wait]
 
 // One run of a parallel batch.
 Job: struct {
-    argv: [String]
-    cwd: String
-    vars: [Var]
-    log: String
-    seconds: Int
+    argv: [String],
+    cwd: String,
+    vars: [Var],
+    log: String,
+    seconds: Int,
 }
 
 // Runs every job at once and returns their results in order.

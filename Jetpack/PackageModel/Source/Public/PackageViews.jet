@@ -14,112 +14,112 @@ PACKAGE_MODEL_SCHEMA_VERSION: 1
 
 // One declared dependency (source redacted by `pkg_dep_display_redacted`).
 DependencyView: struct {
-    name: String
-    source: String
+    name: String,
+    source: String,
 }
 
 // One declared package target and its ordered target kinds.
 PackageTargetView: struct {
-    name: String
-    targets: [String]
+    name: String,
+    targets: [String],
 }
 
 // One package target name and its exact selected profile identity.
 TargetProfileView: struct {
-    name: String
-    profile: String
+    name: String,
+    profile: String,
 }
 
 // One declared output.
 OutputView: struct {
-    name: String
-    kind: String
-    entry: String?
+    name: String,
+    kind: String,
+    entry: String?,
 }
 
 // One named build profile from the package's `build: { … }` declarations.
 // `optimize` is the profile's level, or `jet build`'s stock level when the
 // profile leaves `optimize:` to the command.
 BuildProfileView: struct {
-    name: String
-    optimize: String
-    debug_info: Bool
-    small: Bool
-    panic: String?
-    game_development_stripping: Bool?
-    game_cook_mode: String?
+    name: String,
+    optimize: String,
+    debug_info: Bool,
+    small: Bool,
+    panic: String?,
+    game_development_stripping: Bool?,
+    game_cook_mode: String?,
 }
 
 // The uncomposed `package.jet` declaration view.
 ManifestView: struct {
-    schema_version: Int
-    file: String
-    jet: String?
-    edition: String?
-    description: String?
-    license: String?
-    repository: String?
-    layer: String?
-    targets: [TargetProfileView]
-    dependencies: [DependencyView]
-    packages: [PackageTargetView]
-    outputs: [OutputView]
-    build_profiles: [BuildProfileView]
+    schema_version: Int,
+    file: String,
+    jet: String?,
+    edition: String?,
+    description: String?,
+    license: String?,
+    repository: String?,
+    layer: String?,
+    targets: [TargetProfileView],
+    dependencies: [DependencyView],
+    packages: [PackageTargetView],
+    outputs: [OutputView],
+    build_profiles: [BuildProfileView],
 }
 
 // The composed package-facts view.
 PackageView: struct {
-    schema_version: Int
-    file: String
-    jet: String?
-    edition: String?
-    description: String?
-    license: String?
-    repository: String?
-    layer: String?
-    targets: [TargetProfileView]
-    dependencies: [DependencyView]
-    packages: [PackageTargetView]
-    outputs: [OutputView]
-    build_profiles: [BuildProfileView]
+    schema_version: Int,
+    file: String,
+    jet: String?,
+    edition: String?,
+    description: String?,
+    license: String?,
+    repository: String?,
+    layer: String?,
+    targets: [TargetProfileView],
+    dependencies: [DependencyView],
+    packages: [PackageTargetView],
+    outputs: [OutputView],
+    build_profiles: [BuildProfileView],
 }
 
 // One resolved lock entry in the public lock view.
 LockedPackageView: struct {
-    name: String
-    version: String
-    source_kind: String
-    source: String?
-    revision: String?
-    fingerprint: String
-    content_hash: String?
-    dependencies: [String]
-    layer: String?
-    inferred_layer: String?
+    name: String,
+    version: String,
+    source_kind: String,
+    source: String?,
+    revision: String?,
+    fingerprint: String,
+    content_hash: String?,
+    dependencies: [String],
+    layer: String?,
+    inferred_layer: String?,
 }
 
 // The public projection of `.jet/lock`.
 LockView: struct {
-    schema_version: Int
-    file: String
-    version: Int
-    root_dependencies: [String]
-    packages: [LockedPackageView]
+    schema_version: Int,
+    file: String,
+    version: Int,
+    root_dependencies: [String],
+    packages: [LockedPackageView],
 }
 
 // One collision entry in a profile declaration.
 KeyValueView: struct {
-    key: String
-    value: String
+    key: String,
+    value: String,
 }
 
 // One evaluated package profile declaration.
 ProfileView: struct {
-    name: String
-    extends: [String]
-    packages: [String]
-    collisions: [KeyValueView]
-    sources: [String]
+    name: String,
+    extends: [String],
+    packages: [String],
+    collisions: [KeyValueView],
+    sources: [String],
 
     // A canonical profile projection from an environment-model declaration,
     // without coupling the package model to the EnvModel area.
@@ -134,9 +134,9 @@ ProfileView: struct {
 
 // The public projection of the package profile set.
 ProfileSetView: struct {
-    schema_version: Int
-    file: String
-    profiles: [ProfileView]
+    schema_version: Int,
+    file: String,
+    profiles: [ProfileView],
 
     // A schema-versioned profile set that keeps profile order.
     from_profiles: fn(profiles: [ProfileView]) -> ProfileSetView Never! {

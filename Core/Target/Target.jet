@@ -7,51 +7,51 @@
 
 // The byte order of a machine's words.
 MachineEndian: enum {
-    Little
-    Big
+    Little,
+    Big,
 }
 
 // The sizes a machine's code is laid out with, in bits for values and in
 // bytes for the cache line.
 MachineLayout: struct {
-    pointer_bits: Int
-    word_bits: Int
+    pointer_bits: Int,
+    word_bits: Int,
     // The bytes one cache line holds, the unit `#Layout(c, align(…))` pads to.
-    cache_line: Int
-    endian: MachineEndian{.Little}
+    cache_line: Int,
+    endian: MachineEndian{.Little},
     // The widest value one atomic instruction reads or writes.
-    atomic_bits: Int
+    atomic_bits: Int,
 }
 
 // The facts of one machine. Each service is the provider that implements it,
 // or None when the machine lacks it. The operating system is in the triple,
 // and code reads the built target's as `#build.target.os`.
 MachineFacts: struct {
-    triple: String
-    layout: MachineLayout
+    triple: String,
+    layout: MachineLayout,
     // The CPU features every CPU of the machine has, so code built for it
     // uses them without probing.
-    cpu_features: [String]{[String]{}}
+    cpu_features: [String]{[String]{}},
     // The heap. None means code built for the machine cannot allocate.
-    allocator: String?
+    allocator: String?,
     // What reports a panic. None means code built for the machine cannot
     // panic.
-    panic: String?
+    panic: String?,
     // Where `print` and the standard streams write.
-    byte_sink: String?{None}
-    wall_clock: String?{None}
-    monotonic_clock: String?{None}
-    sleep: String?{None}
-    entropy: String?{None}
-    sockets: String?{None}
-    files: String?{None}
-    processes: String?{None}
-    env: String?{None}
+    byte_sink: String?{None},
+    wall_clock: String?{None},
+    monotonic_clock: String?{None},
+    sleep: String?{None},
+    entropy: String?{None},
+    sockets: String?{None},
+    files: String?{None},
+    processes: String?{None},
+    env: String?{None},
     // The page's DOM, storage and JavaScript bridge.
-    browser: String?{None}
-    gpu: String?{None}
+    browser: String?{None},
+    gpu: String?{None},
     // The C calling convention to foreign code.
-    ffi: String?{None}
+    ffi: String?{None},
 
     // The effects every artifact built for the machine is denied, one for
     // each service it lacks, in the order the effect roots are declared.
@@ -82,7 +82,7 @@ MachineFacts: struct {
 // A machine a build can target: a struct with no fields whose `facts` say
 // what the machine is and provides.
 Machine: trait {
-    facts: MachineFacts
+    facts: MachineFacts,
 }
 
 // A 64-bit x86 Linux host. Core's terminal and headless UI backends run
@@ -107,7 +107,7 @@ LinuxX64: struct {
             browser: "core.ui",
             gpu: "vulkan",
             ffi: "c",
-        }
+        },
     }
 }
 
@@ -132,7 +132,7 @@ MacOSArm64: struct {
             browser: "core.ui",
             gpu: "metal",
             ffi: "c",
-        }
+        },
     }
 }
 
@@ -157,7 +157,7 @@ WindowsX64: struct {
             browser: "core.ui",
             gpu: "direct3d",
             ffi: "c",
-        }
+        },
     }
 }
 
@@ -182,7 +182,7 @@ Web: struct {
             env: "web_host",
             browser: "dom",
             gpu: "webgpu",
-        }
+        },
     }
 }
 
@@ -196,6 +196,6 @@ GPU: struct {
             allocator: None,
             panic: None,
             gpu: "device",
-        }
+        },
     }
 }

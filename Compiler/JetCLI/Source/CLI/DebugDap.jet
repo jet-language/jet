@@ -27,42 +27,42 @@ use {
 // One `setBreakpoints` entry: its line, and its condition and log message
 // ("" for none).
 JetCLIDapBreakpoint: struct {
-    line: Int
-    condition: String
-    log: String
+    line: Int,
+    condition: String,
+    log: String,
 }
 
 // A placed breakpoint's condition and log message, parsed.
 JetCLIDapRule: struct {
-    condition: DebugExpression?
-    log: DebugExpression?
+    condition: DebugExpression?,
+    log: DebugExpression?,
 }
 
 // Where a run stopped, and the breakpoint the stop reports (None for the end
 // of a step, a pause or the program).
 JetCLIDapStop: struct {
-    stop: NativeStop
-    hit: Int?
+    stop: NativeStop,
+    hit: Int?,
 }
 
 // One request: its sequence number, its command and its arguments' members.
 JetCLIDapRequest: struct {
-    seq: Int
-    command: String
-    arguments: [{key: String, value: Dyn}]
+    seq: Int,
+    command: String,
+    arguments: [{key: String, value: Dyn}],
 }
 
 // The adapter's state across requests.
 JetCLIDap: struct {
     // The last message's sequence number.
-    seq: Int
-    stop_on_entry: Bool
-    args: [String]
+    seq: Int,
+    stop_on_entry: Bool,
+    args: [String],
     // The breakpoints each source file's `setBreakpoints` placed.
-    placed: [String:[Int]]
+    placed: [String:[Int]],
     // The conditions and log messages of the placed breakpoints, by number.
-    rules: [Int:JetCLIDapRule]
-    launched: Bool
+    rules: [Int:JetCLIDapRule],
+    launched: Bool,
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> Never! {
         request := input.move()

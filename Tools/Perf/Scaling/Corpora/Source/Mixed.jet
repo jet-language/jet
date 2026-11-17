@@ -54,8 +54,8 @@ blend: fn(left: Int, right: Int, weight: Int) -> Int { md(left * weight + right)
 // The physical and code lines of `text`; a final newline ends the last line
 // rather than starting another. The twin of mixed.mjs's countLines.
 LineCount: struct {
-    physical: Int
-    code: Int
+    physical: Int,
+    code: Int,
 }
 
 count_lines: fn(text: String) -> LineCount {
@@ -64,80 +64,80 @@ count_lines: fn(text: String) -> LineCount {
 }
 
 Stats: struct {
-    functions: Int
-    types: Int
-    comptime_items: Int
-    sections: Int
+    functions: Int,
+    types: Int,
+    comptime_items: Int,
+    sections: Int,
 }
 
 // The template parameters of each worker kind, in draw order.
 RecordsModel: struct {
-    count: Int
-    a: Int
-    b: Int
-    c: Int
-    threshold: Int
-    index: Int
-    score_a: Int
-    score_b: Int
+    count: Int,
+    a: Int,
+    b: Int,
+    c: Int,
+    threshold: Int,
+    index: Int,
+    score_a: Int,
+    score_b: Int,
 }
 
 ShapesModel: struct {
-    count: Int
-    a: Int
-    b: Int
-    c: Int
-    d: Int
-    e: Int
+    count: Int,
+    a: Int,
+    b: Int,
+    c: Int,
+    d: Int,
+    e: Int,
 }
 
 WordsModel: struct {
-    words: [String]
-    buckets: Int
-    rounds: Int
-    a: Int
-    limit: Int
-    start_label: String
+    words: [String],
+    buckets: Int,
+    rounds: Int,
+    a: Int,
+    limit: Int,
+    start_label: String,
 }
 
 OptionsModel: struct {
-    keys: [Int]
-    values: [Int]
-    rounds: Int
-    spread: Int
-    fallback: Int
-    factor: Int
-    offset: Int
-    constant_value: Int
+    keys: [Int],
+    values: [Int],
+    rounds: Int,
+    spread: Int,
+    fallback: Int,
+    factor: Int,
+    offset: Int,
+    constant_value: Int,
 }
 
 NumbersModel: struct {
-    limit: Int
-    a: Int
-    b: Int
+    limit: Int,
+    a: Int,
+    b: Int,
 }
 
 // A worker's source text and `value(seed)`, what that source returns.
 Worker: struct {
-    name: String
-    text: [String]
-    value: fn(Int) -> Int
+    name: String,
+    text: [String],
+    value: fn(Int) -> Int,
 }
 
 Generated: struct {
-    lines: [String]
-    value: Int
-    total_name: String
+    lines: [String],
+    value: Int,
+    total_name: String,
 }
 
 MixedPackage: struct {
-    files: [String:String]
-    expected: String
-    physical_lines: Int
-    code_lines: Int
-    bytes: Int
-    stats: Stats
-    source_sha256: String
+    files: [String:String],
+    expected: String,
+    physical_lines: Int,
+    code_lines: Int,
+    bytes: Int,
+    stats: Stats,
+    source_sha256: String,
 }
 
 scored: fn(p: RecordsModel, identifier: Int, weight: Int, label: Int) -> Int {
@@ -413,8 +413,8 @@ mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
     }
     score_a: r.int(3, 19)
     score_b: r.int(2, 11)
-    lines.extend(["{rec}: struct {{", "    identifier: Int", "    weight: Int", "    label: String", "    markers: [Int]", "}}", ""])
-    lines.extend(["{shape}: enum {{", "    Dot(Int)", "    Segment(start: Int, finish: Int)", "    Named(String)", "    Empty", "}}", ""])
+    lines.extend(["{rec}: struct {{", "    identifier: Int,", "    weight: Int,", "    label: String,", "    markers: [Int],", "}}", ""])
+    lines.extend(["{shape}: enum {{", "    Dot(Int),", "    Segment(start: Int, finish: Int),", "    Named(String),", "    Empty,", "}}", ""])
     lines.extend(["impl {rec}.{trait_name} {{", "    score: fn(self) -> Int {{ (self.identifier * {score_a} + self.weight * {score_b} + self.label.len()) % {M} }}", "}}", ""])
     stats.types += 2
     stats.functions += 1

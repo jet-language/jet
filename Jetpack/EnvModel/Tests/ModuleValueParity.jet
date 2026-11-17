@@ -257,7 +257,7 @@ module_value_refusal_matches_the_program: fn(declarations: String, slug: String)
 }
 
 #Test("module_value_typed_struct_with_field_defaults_matches_the_program") {
-    declarations: "Server: struct {{\n    port: Int{{80}}\n    host: String{{\"web\"}}\n}}\n\nSERVER: Server{{}}\n\nTOTAL: #run {{ SERVER.port + 1 }}\nLABEL: \"{{SERVER.host}}-{{TOTAL}}\"\n"
+    declarations: "Server: struct {{\n    port: Int{{80}},\n    host: String{{\"web\"}},\n}}\n\nSERVER: Server{{}}\n\nTOTAL: #run {{ SERVER.port + 1 }}\nLABEL: \"{{SERVER.host}}-{{TOTAL}}\"\n"
     assert_eq(module_values_as_the_program_prints_them("{declarations}\nrun: fn() {{ print(\"{{TOTAL}} {{LABEL}}\") }}\n"), "81 web-81")
     dir: envmodel_test_oci_base_dir("module-value-typed")
     source: "{declarations}\ndev: module {{ env.dev: Env{{ label: LABEL }} }}\n\nimage.server: module {{ from: packages.app, expose: [TOTAL] }}\n"

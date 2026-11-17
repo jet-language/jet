@@ -32,7 +32,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 }
 
 #Test("parses closed output kinds and selects defaults") {
-    facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: .Executable{{ name: \"app\", entry: run }}\n    check: .Check{{ name: \"check\", entry: check }}\n}}\ndefaults: {{ run: app, test: check }}\n", "package.jet") ?? panic("parses")
+    facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: .Executable{{ name: \"app\", entry: run }},\n    check: .Check{{ name: \"check\", entry: check }},\n}}\ndefaults: {{ run: app, test: check }}\n", "package.jet") ?? panic("parses")
     assert(facts.outputs["app"].kind == PackageOutputKind.Executable)
     assert_eq((facts.select_output("run", None, None) ?? panic("run")).name, "app")
     assert_eq((facts.select_output("test", None, None) ?? panic("test")).name, "check")
@@ -79,7 +79,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 #Test("formatting keeps comments with what they sit by") {
     source: "// The demo package.\n\nname:    \"demo\" // the package name\nversion: \"0.1.0\"\noutputs: {{ // every output\n        // the app\n    app: .Executable{{ name: \"app\", entry: run }}, // the app output\n    // nothing after the app\n}}\n"
     formatted: pkg_format_source(source, "package.jet") ?? panic("formats")
-    assert_eq(formatted, "// The demo package.\n\nname: \"demo\" // the package name\nversion: \"0.1.0\"\noutputs: {{ // every output\n    // the app\n    app: .Executable{{\n        name: \"app\",\n        entry: run\n    }}, // the app output\n    // nothing after the app\n}}\n")
+    assert_eq(formatted, "// The demo package.\n\nname: \"demo\" // the package name\nversion: \"0.1.0\"\noutputs: {{ // every output\n    // the app\n    app: .Executable{{\n        name: \"app\",\n        entry: run,\n    }}, // the app output\n    // nothing after the app\n}}\n")
     assert_eq(pkg_format_source(formatted, "package.jet") ?? panic("formats again"), formatted)
     _: PackageFacts.parse(formatted, "package.jet") ?? panic("reparses")
 }
@@ -139,7 +139,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 }
 
 #Test("output payload keeps json shapes") {
-    facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: Environment{{ name: \"dev\", tools: [\"a\", \"b\"], services: {{ db: {{ enable: true, ports: [5432] }} }}, secrets: {{ token: \"x\" }} }}\n}}\n", "package.jet") ?? panic("parses")
+    facts: PackageFacts.parse("\nname: \"demo\"\noutputs: {{\n    app: Environment{{ name: \"dev\", tools: [\"a\", \"b\"], services: {{ db: {{ enable: true, ports: [5432] }} }}, secrets: {{ token: \"x\" }} }},\n}}\n", "package.jet") ?? panic("parses")
     payload: if facts.outputs["app"].payload == {
         .Object(fields) -> fields
         .Null | .Bool(_) | .Number(_) | .String(_) | .Array(_) -> panic("output payload must remain an object")
@@ -163,7 +163,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) -[FS]> Nev
 
 #Test("inline and file configs compose once and keep identity") {
     dir: pkg_facts_test_dir("configs")
-    pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev: Config{{\n    version: \"1\"\n}}\n")
+    pkg_facts_test_write(dir, "package.jet", "\nname: \"demo\"\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\ndev: Config{{\n    version: \"1\",\n}}\n")
     pkg_facts_test_write(dir, "release.jet", "release: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}")
     facts: (if PackageFacts.load(dir) == {
         .Ok(found) -> found

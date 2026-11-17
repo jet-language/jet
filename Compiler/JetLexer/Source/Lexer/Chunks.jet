@@ -34,24 +34,24 @@ LEXER_CHUNK_SCRATCH_PER_SOURCE_BYTE: 96
 // and the delimiters of every run nest within it, so the parser may cut
 // its item runs there.
 LexedThreads: struct {
-    lexed: Lexed
-    line_starts: [Int]
-    runs: [Int]
+    lexed: Lexed,
+    line_starts: [Int],
+    runs: [Int],
 }
 
 // What every chunk thread reads.
 LexerChunkShared: struct {
-    source: [U8]
-    config_surface: Bool
-    allow_reserved_identifiers: Bool
+    source: [U8],
+    config_surface: Bool,
+    allow_reserved_identifiers: Bool,
 }
 
 // One thread's chunk: its byte range and, after the lex, its one output
 // row.
 LexerChunkPart: struct {
-    start: Int
-    end: Int
-    outputs: [LexerChunkOutput]
+    start: Int,
+    end: Int,
+    outputs: [LexerChunkOutput],
 }
 
 // A chunk's lex: its tokens (the seed `}` of a later chunk dropped), its
@@ -62,14 +62,14 @@ LexerChunkPart: struct {
 // `map` and `literal_base` carry the joined table's ids and literal row
 // base for the chunk's second pass.
 LexerChunkOutput: struct {
-    tokens: [Token]
-    tables: TokenTables
-    diagnostics: [Diagnostic]
-    terminator_diagnostics: [Diagnostic]
-    line_starts: [Int]
-    clean: Bool
-    map: [Int]
-    literal_base: Int
+    tokens: [Token],
+    tables: TokenTables,
+    diagnostics: [Diagnostic],
+    terminator_diagnostics: [Diagnostic],
+    line_starts: [Int],
+    clean: Bool,
+    map: [Int],
+    literal_base: Int,
 }
 
 lex_threads: fn(source: [U8], threads: CompilerThreads) -> LexedThreads {

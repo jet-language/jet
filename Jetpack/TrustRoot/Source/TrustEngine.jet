@@ -5,18 +5,18 @@
 use crypto: core.crypto
 
 TrustEngine: struct {
-    root: TUFRootMetadata
-    root_digest: String
-    policy: TrustRootPolicy
+    root: TUFRootMetadata,
+    root_digest: String,
+    policy: TrustRootPolicy,
     // Last accepted monotonic version per role label.
-    versions: [String:Int]
+    versions: [String:Int],
     // Canonical-bytes digest accepted per role label: an equal version may
     // be rechecked, but different signed bytes are a replacement attack.
-    priv metadata_digests: [String:String]
-    keyring: Keyring
+    priv metadata_digests: [String:String],
+    keyring: Keyring,
     // One binding per identity kind label.
-    identities: [String:BoundIdentity]
-    priv roots_dir: String?
+    identities: [String:BoundIdentity],
+    priv roots_dir: String?,
 
     // Pin and accept the first root; its digest must match `expected_pin`
     // when one is given, and an existing on-disk pin when `roots_dir` is.
@@ -344,10 +344,10 @@ trust_check_clock: fn(policy: TrustRootPolicy, clock: TrustedClock) -[Time]> Tru
 
 // The keys and root of a fixture threshold root.
 TrustFixtureRoot: struct {
-    root: TUFRootMetadata
-    keyring: Keyring
+    root: TUFRootMetadata,
+    keyring: Keyring,
     // root-1, root-2, root-3, targets, snapshot, timestamp.
-    keys: [TrustKey]
+    keys: [TrustKey],
 }
 
 // A minimal 2-of-3 offline root for drills and tests.

@@ -8,29 +8,29 @@
 // TrustRoot's one error carrier; `message()` is the Rust `Display` text.
 #Error
 TrustRootError: enum {
-    BootstrapPinMismatch(expected: String, actual: String)
-    BootstrapMissing
-    SignatureStripped(role: MetadataRole)
-    SignatureInvalid(role: MetadataRole, detail: String)
-    ThresholdUnmet(role: MetadataRole, have: Int, need: Int)
-    Rollback(role: MetadataRole, current: Int, incoming: Int)
-    Expired(role: MetadataRole, expires_unix: Int, now_unix: Int)
-    BadClock(skew_secs: Int, max_secs: Int)
-    MetadataTooLarge(role: MetadataRole, size: Int, max: Int)
-    ConsistentSnapshotMismatch(role: String, detail: String)
-    DelegationDenied(path: String, detail: String)
-    UnknownKey(key_id: String)
-    InvalidKey(detail: String)
-    InvalidThreshold(detail: String)
-    InvalidPublisher(detail: String)
-    IdentityKindMismatch(kind: IdentityKind, detail: String)
-    RotationRejected(detail: String)
-    CacheReceiptExpired(expires_unix: Int, now_unix: Int)
-    CacheReceiptInvalid(detail: String)
-    CacheKeyChanged(role: String, expected: String, actual: String)
-    CacheKeyMissing(role: String)
-    CacheBuilderRevoked(builder: String)
-    IO(detail: String)
+    BootstrapPinMismatch(expected: String, actual: String),
+    BootstrapMissing,
+    SignatureStripped(role: MetadataRole),
+    SignatureInvalid(role: MetadataRole, detail: String),
+    ThresholdUnmet(role: MetadataRole, have: Int, need: Int),
+    Rollback(role: MetadataRole, current: Int, incoming: Int),
+    Expired(role: MetadataRole, expires_unix: Int, now_unix: Int),
+    BadClock(skew_secs: Int, max_secs: Int),
+    MetadataTooLarge(role: MetadataRole, size: Int, max: Int),
+    ConsistentSnapshotMismatch(role: String, detail: String),
+    DelegationDenied(path: String, detail: String),
+    UnknownKey(key_id: String),
+    InvalidKey(detail: String),
+    InvalidThreshold(detail: String),
+    InvalidPublisher(detail: String),
+    IdentityKindMismatch(kind: IdentityKind, detail: String),
+    RotationRejected(detail: String),
+    CacheReceiptExpired(expires_unix: Int, now_unix: Int),
+    CacheReceiptInvalid(detail: String),
+    CacheKeyChanged(role: String, expected: String, actual: String),
+    CacheKeyMissing(role: String),
+    CacheBuilderRevoked(builder: String),
+    IO(detail: String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -65,10 +65,10 @@ impl IOError -> TrustRootError { return TrustRootError.IO{detail: "{self}"} }
 
 // Separate trust-domain identities.
 IdentityKind: enum {
-    Publisher
-    Registry
-    CacheBuilder
-    RemoteExecutor
+    Publisher,
+    Registry,
+    CacheBuilder,
+    RemoteExecutor,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -85,9 +85,9 @@ IdentityKind: enum {
 // Ed25519/KMS/HSM publisher signature. Author signatures are a
 // different, opt-in surface.
 PublisherIdentity: enum {
-    Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String)
-    OfflineEd25519(public_key_hex: String, key_id: String)
-    KMSHSM(key_uri: String, public_key_hex: String, key_id: String)
+    Sigstore(identity: String, issuer: String, checkpoint_digest: String, bundle_digest: String),
+    OfflineEd25519(public_key_hex: String, key_id: String),
+    KMSHSM(key_uri: String, public_key_hex: String, key_id: String),
 
     kind_label: fn(self) -> String Never! {
         if self == {
@@ -122,10 +122,10 @@ PublisherIdentity: enum {
 }
 
 BoundIdentity: struct {
-    kind: IdentityKind
-    name: String
+    kind: IdentityKind,
+    name: String,
     // The hybrid publisher proof; non-publisher identities must leave it absent.
-    proof: PublisherIdentity?
+    proof: PublisherIdentity?,
 
     registry: fn(name: String) -> BoundIdentity Never! {
         BoundIdentity{kind: IdentityKind.Registry, name: name, proof: None}

@@ -8,8 +8,8 @@ use {
 }
 
 SemaGateContext: struct {
-    checked_text_types: [String:Bool]
-    unsafe_gates: [UnsafeGateInspection]
+    checked_text_types: [String:Bool],
+    unsafe_gates: [UnsafeGateInspection],
 }
 
 sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates: GateSet, external: [GateEntry], checked_text_types: [String:Bool]) -> GateLedger Never! {
@@ -264,10 +264,10 @@ sema_gate_function: fn(source: String, tables: ASTTables, function: Func, ledger
 }
 
 SemaGateVisitor: struct {
-    source: String
-    tables: ASTTables
-    ledger: GateLedger
-    context: Shared<SemaGateContext>
+    source: String,
+    tables: ASTTables,
+    ledger: GateLedger,
+    context: Shared<SemaGateContext>,
 
     visit: fn(&self, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         permit: self.context.guard_read()

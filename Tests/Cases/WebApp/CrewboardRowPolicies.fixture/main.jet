@@ -9,29 +9,29 @@ use {
 
 #Codable
 Project: struct {
-    id: Int
-    name: String
-    created_by: auth.AccountID
+    id: Int,
+    name: String,
+    created_by: auth.AccountID,
 }
 
 #[Codable, Comparable]
 MemberKey: struct {
-    project: Int
-    account: auth.AccountID
+    project: Int,
+    account: auth.AccountID,
 }
 
 #Codable
 Member: struct {
-    project: Int
-    account: auth.AccountID
-    owner: Bool
+    project: Int,
+    account: auth.AccountID,
+    owner: Bool,
 }
 
 #Codable
 Task: struct {
-    id: Int
-    project: Int
-    title: String
+    id: Int,
+    project: Int,
+    title: String,
 }
 
 mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
@@ -148,16 +148,16 @@ member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Rea
 
 // Crewboard's three tables, each behind its policy.
 Board: struct {
-    store: db.Store
-    projects: db.Table<Int, Project>
-    members: db.Table<MemberKey, Member>
-    tasks: db.Table<Int, Task>
+    store: db.Store,
+    projects: db.Table<Int, Project>,
+    members: db.Table<MemberKey, Member>,
+    tasks: db.Table<Int, Task>,
 }
 
 // The store the board opens its tables from. A lambda owns what it
 // captures, so each call opens the board rather than capturing it.
 Stores: struct {
-    store: db.Store?
+    store: db.Store?,
 }
 
 STORE: Shared{Stores{store: None}}

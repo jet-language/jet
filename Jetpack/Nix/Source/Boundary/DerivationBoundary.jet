@@ -21,14 +21,14 @@ use jetpack_nix_eval.[
 // A derivation materialized to Nix-compatible store paths. `outputs` holds
 // each output's store path with its fixed-output method and hash.
 NixNativeDerivation: struct {
-    name: String
-    drv_path: String
-    outputs: [String:NixDerivationOutput]
-    builder: String
-    args: [String]
-    env: [String:String]
+    name: String,
+    drv_path: String,
+    outputs: [String:NixDerivationOutput],
+    builder: String,
+    args: [String],
+    env: [String:String],
     // Sorted and unique.
-    input_sources: [String]
+    input_sources: [String],
 
     output_path: fn(self, name: String) -> String? Never! {
         output: self.outputs.get(name) ?? return None
@@ -46,7 +46,7 @@ NixNativeDerivation: struct {
 }
 
 NixNativeBoundary: struct {
-    priv manifest: NixEvalOracleManifest
+    priv manifest: NixEvalOracleManifest,
 
     // The committed oracle manifest; evaluation is refused unless it is
     // product-ready.

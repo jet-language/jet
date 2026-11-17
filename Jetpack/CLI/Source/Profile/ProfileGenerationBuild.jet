@@ -36,9 +36,9 @@ PACKAGE_PROFILE_MAX_NODES: 100000
 PACKAGE_PROFILE_LOCK_PREFIX: "package-profile-"
 
 PackageOutputNodeKind: enum {
-    File
-    Directory
-    Symlink
+    File,
+    Directory,
+    Symlink,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -51,51 +51,51 @@ PackageOutputNodeKind: enum {
 
 // One filesystem node of a realized package output, relative to its root.
 PackageOutputNode: struct {
-    package: String
-    path: String
-    kind: PackageOutputNodeKind
+    package: String,
+    path: String,
+    kind: PackageOutputNodeKind,
     // `sha256-…` of a file's bytes or a symlink's target; empty for a directory.
-    digest: String
-    link_target: String?
+    digest: String,
+    link_target: String?,
 }
 
 // A realized package, its checked StoreEntry and lease, and its output nodes.
 RealizedProfilePackage: struct {
-    fact: PackageProfileFact
-    entry: StoreEntry
-    lease: CacheLease
-    nodes: [PackageOutputNode]
+    fact: PackageProfileFact,
+    entry: StoreEntry,
+    lease: CacheLease,
+    nodes: [PackageOutputNode],
 }
 
 // A complete generation: number, plan fingerprint, witness, and lock text.
 PackageGenerationRecord: struct {
-    generation: Int
-    fingerprint: String
-    witness: String
-    metadata: String
+    generation: Int,
+    fingerprint: String,
+    witness: String,
+    metadata: String,
 }
 
 PackageGenerationPointer: struct {
-    generation: Int
-    witness: String
+    generation: Int,
+    witness: String,
 }
 
 // One recorded collision contender, in `(provider, kind, digest)` order.
 PackageCollisionContender: struct {
-    provider: String
-    kind: String
-    digest: String
+    provider: String,
+    kind: String,
+    digest: String,
 }
 
 PackageCollisionRecord: struct {
-    selected: String?
-    contenders: [PackageCollisionContender]
+    selected: String?,
+    contenders: [PackageCollisionContender],
 }
 
 // A staged generation directory; unless published, it is removed at scope
 // exit (a published stage no longer exists at its staged path).
 PackageGenerationStage: struct {
-    path: String
+    path: String,
 
     create: fn(generations: String, generation: Int) -[FS]> PackageGenerationStage CLIError! {
         path: files.join(generations, "{PACKAGE_PROFILE_STAGE_PREFIX}{generation}{PACKAGE_PROFILE_STAGE_SUFFIX}")

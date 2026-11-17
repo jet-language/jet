@@ -10,7 +10,7 @@ use {
 }
 
 CBORReader: struct<R: Reader> {
-    input: codec.CBORPull<R>
+    input: codec.CBORPull<R>,
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
@@ -18,7 +18,7 @@ CBORReader: struct<R: Reader> {
 // A bounded CBOR event writer to any byte sink: a FileWriter, a socket, or a
 // program's own `Writer` type.
 CBORWriter: struct<W: Writer> {
-    output: codec.CBORPush<W>
+    output: codec.CBORPush<W>,
 
     write: fn(&self, event: &&DataEvent) -[IO, Time.Wait]> EncodingError! {
         self.output.write(event)
@@ -43,10 +43,10 @@ writer: fn<W: Writer>(output: &&W, limits: EncodingLimits{EncodingLimits.safe()}
 
 #Equatable
 CBOROptions: struct {
-    max_depth: Int
-    max_items: Int
-    max_bytes: Int
-    require_canonical: Bool
+    max_depth: Int,
+    max_items: Int,
+    max_bytes: Int,
+    require_canonical: Bool,
 
     safe: fn() -> CBOROptions Never! {
         CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
@@ -55,21 +55,21 @@ CBOROptions: struct {
 
 #Equatable
 CBORErrorKind: enum {
-    Syntax
-    Truncated
-    Unsupported
-    Limit
-    TypeMismatch
-    TrailingData
-    NonCanonical
+    Syntax,
+    Truncated,
+    Unsupported,
+    Limit,
+    TypeMismatch,
+    TrailingData,
+    NonCanonical,
 }
 
 #[Error, Equatable]
 CBORError: struct {
-    kind: CBORErrorKind
-    byte_offset: Int
-    path: String
-    reason: String
+    kind: CBORErrorKind,
+    byte_offset: Int,
+    path: String,
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { self.display_text() }

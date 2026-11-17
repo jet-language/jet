@@ -34,57 +34,57 @@ use jet_foundation.[
 ]
 
 SemaCopyIntent: enum {
-    Explicit
-    Clone
-    Materialize
+    Explicit,
+    Clone,
+    Materialize,
 }
 
 SemaCopyLowering: enum {
-    ExplicitCopy
-    Clone
-    MaterializeView
+    ExplicitCopy,
+    Clone,
+    MaterializeView,
 }
 
 SemaCopyMemoryKind: enum {
-    NoEvent
-    Allocation
-    RetainRelease
+    NoEvent,
+    Allocation,
+    RetainRelease,
 }
 
 SemaCopyFacts: struct {
-    source: Type
-    target: Type
-    intent: SemaCopyIntent
-    lowering: SemaCopyLowering
-    materializes_view: Bool
-    observable_clock: Bool
-    memory: SemaCopyMemoryKind
-    resource: Bool
-    holds_resource: Bool
-    dynamic_loan: Bool
-    copyable: Bool
-    cloneable: Bool
-    accepted: Bool
-    complete: Bool
+    source: Type,
+    target: Type,
+    intent: SemaCopyIntent,
+    lowering: SemaCopyLowering,
+    materializes_view: Bool,
+    observable_clock: Bool,
+    memory: SemaCopyMemoryKind,
+    resource: Bool,
+    holds_resource: Bool,
+    dynamic_loan: Bool,
+    copyable: Bool,
+    cloneable: Bool,
+    accepted: Bool,
+    complete: Bool,
 }
 
 SemaCopyEvent: struct {
-    span: Span
-    facts: SemaCopyFacts
+    span: Span,
+    facts: SemaCopyFacts,
 }
 
 SemaCopyTypeFacts: struct {
-    copyable: Bool
-    cloneable: Bool
-    heap: Bool
-    observable_clock: Bool
-    resource: Bool
+    copyable: Bool,
+    cloneable: Bool,
+    heap: Bool,
+    observable_clock: Bool,
+    resource: Bool,
     // The value is a resource or holds one by value at any depth (a field,
     // an element, a payload): duplicating its bits would give one cleanup
     // duty two owners. `resource` is the value's own Close duty only.
-    holds_resource: Bool
-    dynamic_loan: Bool
-    complete: Bool
+    holds_resource: Bool,
+    dynamic_loan: Bool,
+    complete: Bool,
 }
 
 sema_copy_type_facts_known: fn(
@@ -144,39 +144,39 @@ sema_copy_facts_holding: fn(facts: SemaCopyTypeFacts, parts_hold: Bool) -> SemaC
 // gives when it starts at that member. Reaching another instantiation of a
 // generic on the path still taints.
 SemaCopyWalk: struct {
-    active: [String]
+    active: [String],
     // The walk keys (sema_copy_walk_key) of the instantiations reached, each
     // id a row of `finished` and `pending` (-1: not pending).
-    keys: NameTable
-    finished: [SemaCopyWalkRow?]
-    tainted: Bool
-    table: Bool
-    visits: Int
-    low: Int
-    path_ids: [String]
-    path_keys: [Int]
-    path_index: [Int]
-    path_self: [Bool]
-    pending: [Int]
-    scc: [SemaCopySccMember]
+    keys: NameTable,
+    finished: [SemaCopyWalkRow?],
+    tainted: Bool,
+    table: Bool,
+    visits: Int,
+    low: Int,
+    path_ids: [String],
+    path_keys: [Int],
+    path_index: [Int],
+    path_self: [Bool],
+    pending: [Int],
+    scc: [SemaCopySccMember],
 }
 
 SemaCopyWalkRow: struct {
-    facts: SemaCopyTypeFacts
-    tainted: Bool
+    facts: SemaCopyTypeFacts,
+    tainted: Bool,
 }
 
 // One instantiation of an unfinished component: its walk key's id and number,
 // and what sema_copy_nominal_combine needs to combine its facts again.
 SemaCopySccMember: struct {
-    key: Int
-    index: Int
-    actual: Type
-    declared: [Type]
-    distinct: Bool
-    resource: Bool
-    single_use: Bool
-    complete: Bool
+    key: Int,
+    index: Int,
+    actual: Type,
+    declared: [Type],
+    distinct: Bool,
+    resource: Bool,
+    single_use: Bool,
+    complete: Bool,
 }
 
 // NameTable id 0 is the empty key, which no instantiation has, so each column
@@ -218,8 +218,8 @@ sema_copy_walk_key_id: fn(walk: &SemaCopyWalk, key: String) -> Int Never! {
 // answer, which the walk and the ownership Close-owner check read once per
 // visited nominal.
 SemaCopyFactsTable: struct {
-    rows: [[SemaCopyTypeFacts?]]
-    close: [[{known: Bool, value: Bool}]]
+    rows: [[SemaCopyTypeFacts?]],
+    close: [[{known: Bool, value: Bool}]],
 }
 
 sema_copy_facts_table_empty: fn() -> SemaCopyFactsTable Never! {

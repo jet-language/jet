@@ -23,8 +23,8 @@ use jet_foundation.[
 ]
 
 SemaSourceOrigin: enum {
-    Snapshot
-    CompilerGenerated
+    Snapshot,
+    CompilerGenerated,
 }
 
 sema_module_is_core_source: fn(module_identity: String) -> Bool Never! {
@@ -32,11 +32,11 @@ sema_module_is_core_source: fn(module_identity: String) -> Bool Never! {
 }
 
 SemaSourceSegment: struct {
-    generated: Span
-    source_file: String
-    source_start: Int
-    line_starts: [Int]
-    origin: SemaSourceOrigin
+    generated: Span,
+    source_file: String,
+    source_start: Int,
+    line_starts: [Int],
+    origin: SemaSourceOrigin,
 }
 
 sema_source_file_at: fn(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String Never! {
@@ -49,10 +49,10 @@ sema_source_file_at: fn(segments: [SemaSourceSegment], fallback: String, fallbac
 }
 
 SemaSourceLocation: struct {
-    source_path: String
-    aggregate_start: Int
-    source_start: Int
-    origin: SemaSourceOrigin
+    source_path: String,
+    aggregate_start: Int,
+    source_start: Int,
+    origin: SemaSourceOrigin,
 }
 
 sema_source_location_at: fn(segments: [SemaSourceSegment], site: Span) -> SemaSourceLocation? {

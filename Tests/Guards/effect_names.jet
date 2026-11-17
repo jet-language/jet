@@ -22,9 +22,9 @@ EFFECT_NAME_NOT_EFFECTS: [String]{"Compiler/JetDevServer/Tests/Session/Capture.j
 
 // A declared effect list found in a source: where and its members.
 EffectNameList: struct {
-    path: String
-    line: Int
-    members: [String]
+    path: String,
+    line: Int,
+    members: [String],
 }
 
 // The roots and leaves (`Root.Case`) the effect source `text` declares: each
@@ -39,7 +39,7 @@ effect_name_declared: fn(text: String, out: &[String]) {
                 family = ""
                 next
             }
-            if !word.starts_with("//") -> out.push("{family}.{word}")
+            if !word.starts_with("//") -> out.push("{family}.{word.removesuffix(",")}")
             next
         }
         if line.starts_with(" ") || !line.ends_with(" {{") -> next
@@ -196,7 +196,7 @@ effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effect
 
 #Test("the effect name scanner reads declarations and finds a stray in a list") {
     declared := [String]{}
-    effect_name_declared("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read\n    Write\n\n    impl Effect {{}}\n}}\n", declared)
+    effect_name_declared("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read,\n    Write,\n\n    impl Effect {{}}\n}}\n", declared)
     assert_eq(declared, [String]{"Net", "FS", "FS.Read", "FS.Write"})
     lists := [EffectNameList]{}
     effect_name_lists_in("a.jet", "x: [\"Net\", \"FS.Read\", \"Disk\"]\ny: [String]{{\n    \"Net\",\n    \"FS\",\n}}\nz: [\"Net\", \"name\"]\nw: [\"Net\", \"Disk\"]\nv: [\"Net\", \"FS\", \"URL\", \"SQL\"]\n", declared, lists)

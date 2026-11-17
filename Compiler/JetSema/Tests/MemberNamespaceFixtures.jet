@@ -1,7 +1,7 @@
 // Paired checking fixture: no namespace selection depends on call validity.
 Generic: struct<T> {
-    value: T
-    step: fn(Int) -> Int
+    value: T,
+    step: fn(Int) -> Int,
 
     step: fn<U>(self, amount: U) -> Int Never! { 20 }
 }
@@ -13,7 +13,7 @@ Step: trait {
 }
 
 DefaultWorker: struct {
-    step: fn(Int) -> Int
+    step: fn(Int) -> Int,
 
     impl Step {
 
@@ -21,7 +21,7 @@ DefaultWorker: struct {
 }
 
 Hook: struct {
-    mul: fn(Int) -> Int
+    mul: fn(Int) -> Int,
 
     impl Mul(Int) {
         mul: fn(self, rhs: Int) -> Int Never! { rhs + 10 }
@@ -29,8 +29,8 @@ Hook: struct {
 }
 
 MutableWorker: struct {
-    value: Int
-    step: fn(Int) -> Int
+    value: Int,
+    step: fn(Int) -> Int,
 
     step: fn(&self, amount: Int) -> Int Never! {
         self.value += amount
@@ -39,8 +39,8 @@ MutableWorker: struct {
 }
 
 Computed: struct {
-    base: Int
-    value: Int{4}
+    base: Int,
+    value: Int{4},
 
     value: fn(self) -> Int Never! { self.base + self.value }
 }

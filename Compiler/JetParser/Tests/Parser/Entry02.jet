@@ -192,10 +192,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 // are one E0175 whose edit writes the states into the signatures and the
 // moves into the state list; a marker with no owner in the file has no edit.
 #Test("state_marker_is_retired_with_one_edit_per_owner") {
-    src: "Door: struct {{\n    state {{ Open, Closed }}\n    id: Int\n\n    #State(_ -> Open) open: fn(id: Int) -> Door {{ Door{{id: id}} }}\n    #State(Open -> Closed) close: fn(&&self) -> Self {{ self }}\n    #State(Closed) id_of: fn(self) -> Int {{ self.id }}\n}}\n"
+    src: "Door: struct {{\n    state {{ Open, Closed }}\n    id: Int,\n\n    #State(_ -> Open) open: fn(id: Int) -> Door {{ Door{{id: id}} }}\n    #State(Open -> Closed) close: fn(&&self) -> Self {{ self }}\n    #State(Closed) id_of: fn(self) -> Int {{ self.id }}\n}}\n"
     retired: entry02_diag(entry02_errors(src), "E0175")
     edit: retired.edit ?? panic("state marker migration edit")
-    assert(edit.new_text == "state {{\n        Open -> Closed\n        Closed\n    }}\n    id: Int\n\n    open: fn(id: Int) -> Door.Open {{ Door{{id: id}} }}\n    close: fn(self: &&Door.Open) -> Door.Closed {{ self }}\n    id_of: fn(self: Door.Closed")
+    assert(edit.new_text == "state {{\n        Open -> Closed\n        Closed\n    }}\n    id: Int,\n\n    open: fn(id: Int) -> Door.Open {{ Door{{id: id}} }}\n    close: fn(self: &&Door.Open) -> Door.Closed {{ self }}\n    id_of: fn(self: Door.Closed")
     ownerless: entry02_diag(entry02_errors("#State(Open -> Closed)\nwork: fn() {{}}\n"), "E0175")
     assert(ownerless.edit == None)
     assert(entry02_errors("#State(Open -> Closed -> Gone)\nwork: fn() {{}}\n").len() > 0)
@@ -386,7 +386,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("fallible_type_sigil_is_valid_in_all_type_positions") {
-    p: entry02_program("Holder: struct {{\nvalue: Int? IOError!\nnested: [Int (DbError | TimeoutError)!]\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n}}\nBox<T>: T? IOError!\nfetch: fn(value: Int? IOError!) -> Box<Int? IOError!> {{ value }}\nrun: fn() {{}}\n")
+    p: entry02_program("Holder: struct {{\nvalue: Int? IOError!,\nnested: [Int (DbError | TimeoutError)!],\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!,\n}}\nBox<T>: T? IOError!\nfetch: fn(value: Int? IOError!) -> Box<Int? IOError!> {{ value }}\nrun: fn() {{}}\n")
     assert(
         loop item in p.items {
             if item == .Struct(_) {
@@ -457,7 +457,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("suffix_contract_reaches_nested_general_type_positions") {
-    p: entry02_program("Holder: struct {{\nmap: [String: IOError!]\ntuple: {{entry: Entry? StoreError!, failure: Err!}}\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
+    p: entry02_program("Holder: struct {{\nmap: [String: IOError!],\ntuple: {{entry: Entry? StoreError!, failure: Err!}},\ncallback: fn(Int? StoreError!) IOError!,\n}}\nCallback: fn(Int? StoreError!) IOError!\nrun: fn() {{}}\n")
     holder: entry02_struct(p, "Holder")
     assert(
         if holder.fields[0].ty == {
@@ -489,7 +489,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 }
 
 #Test("explicit_error_contract_does_not_consume_the_next_struct_field") {
-    p: entry02_program("Holder: struct {{\nfirst: Int Err!\ncallback: fn() Err!\nvalue: fn(self) -> Int {{ 1 }}\nsecond: String\n}}\nrun: fn() {{}}\n")
+    p: entry02_program("Holder: struct {{\nfirst: Int Err!,\ncallback: fn() Err!,\nvalue: fn(self) -> Int {{ 1 }}\nsecond: String,\n}}\nrun: fn() {{}}\n")
     holder: entry02_struct(p, "Holder")
     assert(holder.fields.len() == 3)
     assert(holder.methods.len() == 1)

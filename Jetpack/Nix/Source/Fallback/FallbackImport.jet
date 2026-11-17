@@ -15,13 +15,13 @@ NIX_FALLBACK_IMPORT_SCHEMA: "jetpack.nix-fallback.v1"
 
 // One required projection of a fallback document.
 NixFallbackProjection: enum {
-    Graph
-    SelectedOutputs
-    Dependencies
-    Sources
-    Hashes
-    Losses
-    Proof
+    Graph,
+    SelectedOutputs,
+    Dependencies,
+    Sources,
+    Hashes,
+    Losses,
+    Proof,
 
     // Accepted field spellings, in lookup order.
     fields: fn(self) -> [String] Never! {
@@ -105,16 +105,16 @@ nix_fallback_detect: fn(root_keys: [String], import_keys: [String]) -> Bool Neve
 // The canonical JSON of a fallback record, of each selected projection, and
 // of the optional `recipe` and `lock` fields of the import object.
 NixFallbackCanonical: struct {
-    document: String
-    graph: String
-    selected_outputs: String
-    dependencies: String
-    sources: String
-    hashes: String
-    losses: String
-    proof: String
-    recipe: String?
-    lock: String?
+    document: String,
+    graph: String,
+    selected_outputs: String,
+    dependencies: String,
+    sources: String,
+    hashes: String,
+    losses: String,
+    proof: String,
+    recipe: String?,
+    lock: String?,
 
     // The facts retained in the producer record, key-ordered.
     imported: fn(self) -> NixImportedState Never! {
@@ -145,7 +145,7 @@ NixFallbackCanonical: struct {
 
 // Jetpack-owned state imported from one fallback record.
 NixImportedState: struct {
-    facts: [String:String]
+    facts: [String:String],
 }
 
 // Import a rich fallback record. None means the record is the old pinned

@@ -28,58 +28,58 @@ JET_CLI_SHAPE_PROJECTIONS: [String]{"json", "cbor", "csv", "toml", "yaml", "xml"
 
 // `Object` names the shape identity's type in the same source.
 JetCLIShapeType: enum {
-    Null
-    Bool
-    Int
-    Float
-    Number
-    Text
-    Bytes
-    Array(inner: JetCLIShapeType)
-    Optional(inner: JetCLIShapeType)
-    Object(source: String, type_name: String)
-    Unknown(name: String)
+    Null,
+    Bool,
+    Int,
+    Float,
+    Number,
+    Text,
+    Bytes,
+    Array(inner: JetCLIShapeType),
+    Optional(inner: JetCLIShapeType),
+    Object(source: String, type_name: String),
+    Unknown(name: String),
 }
 
 JetCLIShapeNames: struct {
-    text: String
-    json: String?
-    cbor: String?
-    csv: String?
-    toml: String?
-    yaml: String?
-    xml: String?
-    args: String
-    env: String
-    db: String?
-    layout: String?
+    text: String,
+    json: String?,
+    cbor: String?,
+    csv: String?,
+    toml: String?,
+    yaml: String?,
+    xml: String?,
+    args: String,
+    env: String,
+    db: String?,
+    layout: String?,
 }
 
 // `default` is the status value of the typed `ShapeDefault`.
 JetCLIShapeField: struct {
-    name: String
-    ty: JetCLIShapeType
-    order: Int
-    names: JetCLIShapeNames
-    encoding: String
-    default: JetCLIStatusValue?
-    skip: Bool
-    short: String?
+    name: String,
+    ty: JetCLIShapeType,
+    order: Int,
+    names: JetCLIShapeNames,
+    encoding: String,
+    default: JetCLIStatusValue?,
+    skip: Bool,
+    short: String?,
 }
 
 // `ShapeFact` of a declared record: rank 1, one column per field, Object
 // encoding, declared provenance naming the struct.
 JetCLIShapeFact: struct {
-    source: String
-    type_name: String
-    fields: [JetCLIShapeField]
-    layout: String
-    alignment: Int?
+    source: String,
+    type_name: String,
+    fields: [JetCLIShapeField],
+    layout: String,
+    alignment: Int?,
 }
 
 JetCLIShapeBuild: enum {
-    Fact(fact: JetCLIShapeFact)
-    Invalid(error: String)
+    Fact(fact: JetCLIShapeFact),
+    Invalid(error: String),
 }
 
 // `ShapeError` display text.

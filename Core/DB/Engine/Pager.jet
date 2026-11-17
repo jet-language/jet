@@ -136,89 +136,89 @@ JOURNAL_MAGIC: [U8]{217, 213, 5, 249, 32, 161, 99, 215}
 // One open savepoint (pager.c PagerSavepoint).
 PagerSavepoint: struct {
     // iOffset and iHdrOffset.
-    offset: Int
-    hdr_offset: Int
+    offset: Int,
+    hdr_offset: Int,
     // pInSavepoint.
-    in_savepoint: cache.Bitvec
+    in_savepoint: cache.Bitvec,
     // nOrig.
-    n_orig: Int
+    n_orig: Int,
     // iSubRec.
-    sub_rec: Int
+    sub_rec: Int,
     // bTruncateOnRelease.
-    truncate_on_release: Bool
+    truncate_on_release: Bool,
     // aWalData: the log's state when the savepoint opened.
-    wal_data: [Int]
+    wal_data: [Int],
 }
 
 // pager.c Pager.
 Pager: struct {
-    exclusive_mode: Bool
-    journal_mode: Int
-    use_journal: Bool
-    no_sync: Bool
-    full_sync: Bool
-    extra_sync: Bool
-    sync_flags: Int
-    wal_sync_flags: Int
-    temp_file: Bool
-    no_lock: Bool
-    read_only: Bool
-    mem_db: Bool
-    mem_vfs: Bool
+    exclusive_mode: Bool,
+    journal_mode: Int,
+    use_journal: Bool,
+    no_sync: Bool,
+    full_sync: Bool,
+    extra_sync: Bool,
+    sync_flags: Int,
+    wal_sync_flags: Int,
+    temp_file: Bool,
+    no_lock: Bool,
+    read_only: Bool,
+    mem_db: Bool,
+    mem_vfs: Bool,
     // eState and eLock.
-    state: Int
-    lock: Int
-    change_count_done: Bool
-    set_super: Bool
-    do_not_spill: Int
-    subj_in_memory: Bool
-    has_held_shared_lock: Bool
-    db_size: Int
-    db_orig_size: Int
-    db_file_size: Int
-    db_hint_size: Int
-    err_code: Int
-    n_rec: Int
-    cksum_init: Int
-    n_sub_rec: Int
+    state: Int,
+    lock: Int,
+    change_count_done: Bool,
+    set_super: Bool,
+    do_not_spill: Int,
+    subj_in_memory: Bool,
+    has_held_shared_lock: Bool,
+    db_size: Int,
+    db_orig_size: Int,
+    db_file_size: Int,
+    db_hint_size: Int,
+    err_code: Int,
+    n_rec: Int,
+    cksum_init: Int,
+    n_sub_rec: Int,
     // pInJournal.
-    in_journal: cache.Bitvec
+    in_journal: cache.Bitvec,
     // fd, jfd and sjfd.
-    fd: file.SQLFile
-    jfd: file.SQLFile
-    sjfd: file.SQLFile
-    journal_off: Int
-    journal_hdr: Int
+    fd: file.SQLFile,
+    jfd: file.SQLFile,
+    sjfd: file.SQLFile,
+    journal_off: Int,
+    journal_hdr: Int,
     // aSavepoint[0..nSavepoint).
-    savepoints: [PagerSavepoint]
+    savepoints: [PagerSavepoint],
     // iDataVersion.
-    data_version: Int
+    data_version: Int,
     // dbFileVers: bytes 24..39 of page 1.
-    db_file_vers: [U8]
-    n_extra: Int
-    n_reserve: Int
-    vfs_flags: Int
-    sector_size: Int
-    mx_pgno: Int
+    db_file_vers: [U8],
+    n_extra: Int,
+    n_reserve: Int,
+    vfs_flags: Int,
+    sector_size: Int,
+    mx_pgno: Int,
     // lckPgno (PAGER_SJ_PGNO).
-    lck_pgno: Int
-    page_size: Int
-    journal_size_limit: Int
+    lck_pgno: Int,
+    page_size: Int,
+    journal_size_limit: Int,
     // zFilename and zJournal.
-    filename: String
-    journal: String?
+    filename: String,
+    journal: String?,
     // zWal.
-    wal_name: String
-    busy: wal.BusyHandler
+    wal_name: String,
+    busy: wal.BusyHandler,
     // aStat.
-    stat: [Int]
+    stat: [Int],
     // pTmpSpace: pageSize + 8 bytes.
-    tmp: [U8]
-    pcache: cache.PCache
+    tmp: [U8],
+    pcache: cache.PCache,
     // Pages xReiniter would have re-parsed while the btree held them.
-    reinit: [Int]
+    reinit: [Int],
     // pWal.
-    wal: wal.Wal
+    wal: wal.Wal,
 }
 
 // n zero bytes.

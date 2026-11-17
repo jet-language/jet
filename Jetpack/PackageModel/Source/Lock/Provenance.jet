@@ -6,9 +6,9 @@
 // are meaningful: an unattested dependency stays resolvable by default, but
 // `authority.trust.require` can require the missing rung.
 DependencyProvenance: struct {
-    transparency: String?{None}
-    publisher: String?{None}
-    build: String?{None}
+    transparency: String?{None},
+    publisher: String?{None},
+    build: String?{None},
 
     empty: fn() -> DependencyProvenance Never! {
         DependencyProvenance{transparency: None, publisher: None, build: None}
@@ -16,9 +16,9 @@ DependencyProvenance: struct {
 }
 
 ProvenanceStatus: enum {
-    Enforced
-    Verified
-    Recorded
+    Enforced,
+    Verified,
+    Recorded,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -30,8 +30,8 @@ ProvenanceStatus: enum {
 }
 
 ProvenanceField: struct {
-    value: String
-    status: ProvenanceStatus
+    value: String,
+    status: ProvenanceStatus,
 
     not_recorded: fn() -> ProvenanceField Never! {
         ProvenanceField{value: "not recorded", status: ProvenanceStatus.Recorded}
@@ -39,16 +39,16 @@ ProvenanceField: struct {
 }
 
 DependencyProvenanceReport: struct {
-    name: String
-    version: String
-    integrity: ProvenanceField
-    transparency: ProvenanceField
-    publisher: ProvenanceField
-    build: ProvenanceField
-    required_effects: [String]
-    granted_effects: [String]
-    denied_effects: [String]
-    authority: String
+    name: String,
+    version: String,
+    integrity: ProvenanceField,
+    transparency: ProvenanceField,
+    publisher: ProvenanceField,
+    build: ProvenanceField,
+    required_effects: [String],
+    granted_effects: [String],
+    denied_effects: [String],
+    authority: String,
 }
 
 // Enforce one manifest-selected provenance floor over every non-root lock
@@ -78,31 +78,31 @@ pkg_lock_enforce_provenance_requirement: fn(lock: LockFile, requirement: Provena
 // A presentation-only package change. The lock schema stays the source of
 // truth; these copies let a renderer outlive its input lock values.
 LockPackageChangeKind: enum {
-    Added
-    Removed
-    Updated
+    Added,
+    Removed,
+    Updated,
 }
 
 LockPackageChange: struct {
-    name: String
-    kind: LockPackageChangeKind
-    before_version: String?
-    after_version: String?
-    before_trust: String?
-    after_trust: String?
-    before_output: String?
-    after_output: String?
+    name: String,
+    kind: LockPackageChangeKind,
+    before_version: String?,
+    after_version: String?,
+    before_trust: String?,
+    after_trust: String?,
+    before_output: String?,
+    after_output: String?,
 }
 
 LockChannelChange: struct {
-    name: String
-    before: String?
-    after: String?
+    name: String,
+    before: String?,
+    after: String?,
 }
 
 LockDiff: struct {
-    packages: [LockPackageChange]
-    channels: [LockChannelChange]
+    packages: [LockPackageChange],
+    channels: [LockChannelChange],
 
     // Compare two lock snapshots without changing or interpreting the lock
     // schema. `None` is a missing snapshot: an empty side of the diff.

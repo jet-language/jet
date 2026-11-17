@@ -11,9 +11,9 @@ use {
 STORE_NIX_BASE32_ALPHABET: "0123456789abcdfghijklmnpqrsvwxyz"
 
 NarSignature: struct {
-    key_id: String
-    algorithm: String
-    sig_hex: String
+    key_id: String,
+    algorithm: String,
+    sig_hex: String,
 
     from_trust: fn(signature: TrustSignature) -> NarSignature Never! {
         NarSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: signature.sig_hex}
@@ -22,18 +22,18 @@ NarSignature: struct {
 
 // Jet's local binary-cache narinfo, signed with a role's HMAC trust key.
 NarInfo: struct {
-    store_path: String
-    url: String
-    compression: String
-    file_size: Int
-    nar_size: Int
-    nar_hash: String
-    references: [String]
-    deriver: String?
+    store_path: String,
+    url: String,
+    compression: String,
+    file_size: Int,
+    nar_size: Int,
+    nar_hash: String,
+    references: [String],
+    deriver: String?,
     // Optional Nix content-addressing descriptor. It is signed with the
     // remaining narinfo fields and retained across endpoint round-trips.
-    ca: String?
-    signatures: [NarSignature]
+    ca: String?,
+    signatures: [NarSignature],
 
     validate: fn(self) StoreError! {
         store_nar_validate_store_path(self.store_path)
@@ -187,10 +187,10 @@ NarInfo: struct {
 
 // Standard Nix binary-cache compression names.
 NixCompression: enum {
-    Plain
-    Zstd
-    Xz
-    Bzip2
+    Plain,
+    Zstd,
+    Xz,
+    Bzip2,
 
     // `Compression: none`.
 
@@ -215,15 +215,15 @@ NixCompression: enum {
 }
 
 NixNarInfoSignature: struct {
-    key_id: String
+    key_id: String,
     // 64 signature bytes.
-    signature: [U8]
+    signature: [U8],
 }
 
 NixPublicKey: struct {
-    key_id: String
+    key_id: String,
     // 32 public-key bytes.
-    public_key: [U8]
+    public_key: [U8],
 
     parse: fn(value: String) -> NixPublicKey StoreError! {
         pair: value.split_once(":") ?? return Err(store_nar_invalid("Nix public key is missing its key name"))
@@ -237,17 +237,17 @@ NixPublicKey: struct {
 // Standard Nix `.narinfo` metadata. Its signature covers only Nix's
 // canonical fingerprint, not the text serialization.
 NixNarInfo: struct {
-    store_path: String
-    url: String
-    compression: NixCompression
-    file_hash: String?
-    file_size: Int?
-    nar_hash: String
-    nar_size: Int
-    references: [String]
-    deriver: String?
-    ca: String?
-    signatures: [NixNarInfoSignature]
+    store_path: String,
+    url: String,
+    compression: NixCompression,
+    file_hash: String?,
+    file_size: Int?,
+    nar_hash: String,
+    nar_size: Int,
+    references: [String],
+    deriver: String?,
+    ca: String?,
+    signatures: [NixNarInfoSignature],
 
     parse: fn(text: String) -> NixNarInfo StoreError! {
         if text.bytes().len() > STORE_NAR_MAX_INFO_BYTES {

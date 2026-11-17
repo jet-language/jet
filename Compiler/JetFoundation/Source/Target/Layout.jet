@@ -39,95 +39,95 @@ JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE: #run { [Int]{
 
 // Size, alignment, and repeated-element stride for one physical value.
 ByteLayout: struct {
-    size: Int
-    alignment: Int
-    stride: Int
+    size: Int,
+    alignment: Int,
+    stride: Int,
 }
 
 // Byte facts for one stored field or enum payload. Unknown physical facts are
 // represented by None in every numeric column; they are never approximated.
 FieldLayoutFacts: struct {
-    name: String
-    offset: Int?
-    size: Int?
-    alignment: Int?
-    stride: Int?
+    name: String,
+    offset: Int?,
+    size: Int?,
+    alignment: Int?,
+    stride: Int?,
 }
 
 // The one physical-layout result consumed by sema, IR lowering and reflection.
 LayoutFacts: struct {
-    bytes: ByteLayout?
-    fields: [FieldLayoutFacts]
+    bytes: ByteLayout?,
+    fields: [FieldLayoutFacts],
 }
 
 CheckedLayoutFacts: struct {
-    physical: LayoutFacts
-    alignment: LayoutAlignmentFact?
+    physical: LayoutFacts,
+    alignment: LayoutAlignmentFact?,
 }
 
 JetTargetLayout: struct {
-    triple: String
-    pointer_size: Int
-    pointer_alignment: Int
-    facts: LayoutCapabilityFacts
+    triple: String,
+    pointer_size: Int,
+    pointer_alignment: Int,
+    facts: LayoutCapabilityFacts,
 }
 
 JetLayoutAlignmentError: enum {
-    Zero
-    NotPowerOfTwo(requested: Int)
-    PortableBaseline(requested: Int, baseline: Int)
-    MissingTypeFacts(profile: String)
-    Unsupported(requested: Int, effective: Int, profile: String)
+    Zero,
+    NotPowerOfTwo(requested: Int),
+    PortableBaseline(requested: Int, baseline: Int),
+    MissingTypeFacts(profile: String),
+    Unsupported(requested: Int, effective: Int, profile: String),
 }
 
 JetLayoutAlignmentResult: enum {
-    Accepted(value: LayoutAlignmentFact)
-    Rejected(error: JetLayoutAlignmentError)
+    Accepted(value: LayoutAlignmentFact),
+    Rejected(error: JetLayoutAlignmentError),
 }
 
 JetLayoutStorageKind: enum {
-    Stack
-    Global
-    Heap
-    ForeignByValue
+    Stack,
+    Global,
+    Heap,
+    ForeignByValue,
 }
 
 JetLayoutStorageError: enum {
-    MissingFacts(kind: JetLayoutStorageKind, profile: String)
-    UnsupportedAlignment(kind: JetLayoutStorageKind, alignment: Int, profile: String)
-    MissingSizeBound(kind: JetLayoutStorageKind)
-    SizeExceeded(kind: JetLayoutStorageKind, size: Int, max_size: Int)
-    MissingAddressBound(kind: JetLayoutStorageKind)
-    AddressOverflow(kind: JetLayoutStorageKind)
-    AddressExceeded(kind: JetLayoutStorageKind, end: Int, max_address: Int)
+    MissingFacts(kind: JetLayoutStorageKind, profile: String),
+    UnsupportedAlignment(kind: JetLayoutStorageKind, alignment: Int, profile: String),
+    MissingSizeBound(kind: JetLayoutStorageKind),
+    SizeExceeded(kind: JetLayoutStorageKind, size: Int, max_size: Int),
+    MissingAddressBound(kind: JetLayoutStorageKind),
+    AddressOverflow(kind: JetLayoutStorageKind),
+    AddressExceeded(kind: JetLayoutStorageKind, end: Int, max_address: Int),
 }
 
 JetLayoutStorageResult: enum {
-    Accepted
-    Rejected(error: JetLayoutStorageError)
+    Accepted,
+    Rejected(error: JetLayoutStorageError),
 }
 
 JetCheckedLayoutResult: enum {
-    Accepted(value: CheckedLayoutFacts)
-    Rejected(error: JetLayoutAlignmentError)
+    Accepted(value: CheckedLayoutFacts),
+    Rejected(error: JetLayoutAlignmentError),
 }
 
 // One source declaration in the canonical module-qualified layout registry.
 // `core` marks a Core source's declaration, which has no native layout of
 // its own.
 TargetLayoutQualifiedItem: struct {
-    qualified_name: String
-    core: Bool
-    item: Item
+    qualified_name: String,
+    core: Bool,
+    item: Item,
 }
 
 // One exact source-name resolution produced by sema. The owner is the
 // declaration's canonical identity, so aliases and imported paths remain
 // distinct even when they occur in the same module.
 TargetLayoutNameResolution: struct {
-    owner_qualified_name: String
-    source_name: String
-    qualified_name: String
+    owner_qualified_name: String,
+    source_name: String,
+    qualified_name: String,
 }
 
 // The engine owns the selected target and the complete source-item registry.
@@ -136,13 +136,13 @@ TargetLayoutNameResolution: struct {
 // name indexes (first row per name) are built once with the engine, not per
 // query (Rust `TargetLayoutEngine::new`).
 TargetLayoutEngine: struct {
-    target: JetTargetLayout
-    items: [Item]
-    qualified_items: [TargetLayoutQualifiedItem]
-    name_resolutions: [TargetLayoutNameResolution]
-    item_positions: [String:Int]
-    qualified_positions: [String:Int]
-    resolution_positions: [String:Int]
+    target: JetTargetLayout,
+    items: [Item],
+    qualified_items: [TargetLayoutQualifiedItem],
+    name_resolutions: [TargetLayoutNameResolution],
+    item_positions: [String:Int],
+    qualified_positions: [String:Int],
+    resolution_positions: [String:Int],
 }
 
 // The target/profile and registry are fixed for this query. Completed byte
@@ -151,10 +151,10 @@ TargetLayoutEngine: struct {
 // Registry lookup indexes belong to TargetLayoutEngine and are reused across
 // queries; each query owns only its recursion tracking and completed layouts.
 JetTargetLayoutQuery: struct {
-    active: [String:Bool]
-    cycle_hits: Int
-    completed_positions: [String:Int]
-    completed: [ByteLayout?]
+    active: [String:Bool],
+    cycle_hits: Int,
+    completed_positions: [String:Int],
+    completed: [ByteLayout?],
 }
 
 // Rust: none (Jet-only pass)

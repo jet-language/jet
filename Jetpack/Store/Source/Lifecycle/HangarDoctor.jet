@@ -10,26 +10,26 @@ use {
 
 // The repair a finding offers.
 DoctorRepair: enum {
-    NoRepair
-    Remove(String)
-    Refresh(path: String, digest: String)
+    NoRepair,
+    Remove(String),
+    Refresh(path: String, digest: String),
 }
 
 // One doctor finding. `kind` is `drift`, `stale stage`, or `orphan CAS`.
 HangarDoctorFinding: struct {
-    kind: String
-    subject: String
-    detail: String
-    fixed: Bool
-    priv repair: DoctorRepair
+    kind: String,
+    subject: String,
+    detail: String,
+    fixed: Bool,
+    priv repair: DoctorRepair,
 }
 
 HangarDoctorReport: struct {
-    objects: Int
-    seal_reused: Int
-    seal_resealed: Int
-    seal_reseal_needed: Int
-    findings: [HangarDoctorFinding]
+    objects: Int,
+    seal_reused: Int,
+    seal_resealed: Int,
+    seal_reseal_needed: Int,
+    findings: [HangarDoctorFinding],
 
     empty: fn() -> HangarDoctorReport Never! {
         HangarDoctorReport{objects: 0, seal_reused: 0, seal_resealed: 0, seal_reseal_needed: 0, findings: [HangarDoctorFinding]{}}
@@ -59,8 +59,8 @@ HangarDoctorReport: struct {
 
 // A scan's report plus the native Nix store path of each repairable digest.
 DoctorScan: struct {
-    report: HangarDoctorReport
-    repair_paths: [String:String]
+    report: HangarDoctorReport,
+    repair_paths: [String:String],
 }
 
 // Rust `hangar_doctor`.

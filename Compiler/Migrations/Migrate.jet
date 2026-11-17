@@ -21,8 +21,8 @@ use {
 // code to. The rows are LANGUAGE_REWRITES of the syntax registry
 // (Compiler/JetFoundation/Data/Syntax/Spellings.jet), in its order.
 MigrationPlan: struct {
-    name: String
-    toolchain: String
+    name: String,
+    toolchain: String,
 }
 
 migration_plans: fn() -> [MigrationPlan] {
@@ -32,6 +32,7 @@ migration_plans: fn() -> [MigrationPlan] {
         MigrationPlan{name: "sig-arrow1", toolchain: "a0.0.45"},
         MigrationPlan{name: "bit-sigils1", toolchain: "a0.0.45"},
         MigrationPlan{name: "paren-tuple1", toolchain: "a0.0.45"},
+        MigrationPlan{name: "brace-layout1", toolchain: "a0.0.45"},
     }
 }
 
@@ -42,6 +43,7 @@ migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) ->
         "sig-arrow1" -> sig_arrow1_file(path, text, source)
         "bit-sigils1" -> bit_sigils1_file(path, text, source)
         "paren-tuple1" -> paren_tuple1_file(path, text, source)
+        "brace-layout1" -> brace_layout1_file(path, text, source)
         else -> panic("no migration plan named {plan}")
     }
 }
@@ -51,6 +53,7 @@ migration_rewrite: fn(plan: String, path: String, text: String, source: Bool) ->
 migration_same_meaning: fn(plan: String, path: String, before: String, after: String, source: Bool) -> String? {
     if plan == {
         "paren-tuple1" -> paren_tuple1_same_meaning(path, before, after, source)
+        "brace-layout1" -> brace_layout1_same_meaning(path, before, after, source)
         else -> panic("the {plan} plan has no meaning check")
     }
 }

@@ -21,41 +21,41 @@ use jet_foundation.[
 
 // A crossing one of the checked function's type parameters reaches.
 SemaGenericCrossing: struct {
-    param: String
-    crossing: SemaSendCrossing
+    param: String,
+    crossing: SemaSendCrossing,
     // The parameter is the crossing value's whole type, not a field or
     // element of it (a part always crosses as a value given away).
-    whole: Bool
+    whole: Bool,
     // The site gives the whole value away (`.move()`, a moved send) ...
-    moved: Bool
+    moved: Bool,
     // ... or captures it, which gives it away exactly when the argument's
     // type can't be cloned.
-    captured: Bool
+    captured: Bool,
 }
 
 // One settled type argument of a generic call, with what it meets crossing:
 // given away, kept by its owner, and at a boundary that refuses every
 // function value. `reaches` are the caller's own type parameters it holds.
 SemaGenericCallArgument: struct {
-    param: String
-    ty: Type
-    given: SemaSendabilityProblem?
-    kept: SemaSendabilityProblem?
-    strict: SemaSendabilityProblem?
-    cloneable: Bool
-    reaches: [SemaCrossingGenericReach]
+    param: String,
+    ty: Type,
+    given: SemaSendabilityProblem?,
+    kept: SemaSendabilityProblem?,
+    strict: SemaSendabilityProblem?,
+    cloneable: Bool,
+    reaches: [SemaCrossingGenericReach],
 }
 
 SemaGenericCall: struct {
-    callee: String
-    name: String
-    span: Span
-    arguments: [SemaGenericCallArgument]
+    callee: String,
+    name: String,
+    span: Span,
+    arguments: [SemaGenericCallArgument],
 }
 
 SemaGenericCrossingReport: struct {
-    module_index: Int
-    diagnostic: Diagnostic
+    module_index: Int,
+    diagnostic: Diagnostic,
 }
 
 sema_generic_crossing_same: fn(left: SemaGenericCrossing, right: SemaGenericCrossing) -> Bool Never! {

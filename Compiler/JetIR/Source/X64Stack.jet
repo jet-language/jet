@@ -13,20 +13,20 @@ use jet_backend.[X64RelocTarget]
 
 IRX64StackBound: struct {
     // The entry's function row.
-    entry: Int
+    entry: Int,
     // Bytes along the deepest chain; -1 when unbounded.
-    bytes: Int
+    bytes: Int,
     // The Jet function names of that chain (IRFunction.name, not the
     // module-qualified object symbol), the entry first; a generated entry
     // function (ir_entry_function) is left out. When unbounded:
     // the chain into the recursion, its repeated function last, or to the
     // function that calls through a function value.
-    path: [String]
+    path: [String],
     // Why unbounded: "recursion" or "dynamic"; "" when bounded.
-    open: String
+    open: String,
     // The runtime symbols the entry reaches, sorted; `bytes` leaves their
     // frames out.
-    runtime: [String]
+    runtime: [String],
 }
 
 // Per function row of one walk: 0 not seen, 1 visited with its part not
@@ -37,16 +37,16 @@ IRX64StackBound: struct {
 // row; -1 before), and the deepest pass from each row of a part with a cycle
 // (-2 not measured, -3 being measured).
 IRX64StackWalk: struct {
-    state: [Int]
-    deep: [Int]
-    next: [Int]
-    open: [String]
-    order: [Int]
-    low: [Int]
-    pending: [Int]
-    visited: Int
-    part: [Int]
-    segment: [Int]
+    state: [Int],
+    deep: [Int],
+    next: [Int],
+    open: [String],
+    order: [Int],
+    low: [Int],
+    pending: [Int],
+    visited: Int,
+    part: [Int],
+    segment: [Int],
 }
 
 // Stack byte counts stop at 2^56, far above any stack a target grants, so a

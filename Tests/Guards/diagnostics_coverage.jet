@@ -114,9 +114,9 @@ dc_emitted_codes: fn() -> [String] {
 }
 
 DcRow: struct {
-    name: String
-    code: String
-    status: String
+    name: String,
+    code: String,
+    status: String,
 }
 
 // The typed rows from their one home: each `X: struct {` in
@@ -133,10 +133,10 @@ dc_registered_rows: fn() -> [DcRow] {
         } else if line == "    impl Diagnostic {{" {
             code = ""
             status = "active"
-        } else if line.starts_with("        code: \"") && line.ends_with("\"") {
-            code = dc_slice(line, 15, line.count_bytes() - 1)
-        } else if line.starts_with("        status: .") {
-            status = dc_slice(line, 17, line.count_bytes()).lower()
+        } else if line.starts_with("        code: \"") && line.ends_with("\",") {
+            code = dc_slice(line, 15, line.count_bytes() - 2)
+        } else if line.starts_with("        status: .") && line.ends_with(",") {
+            status = dc_slice(line, 17, line.count_bytes() - 1).lower()
         } else if line == "    }}" && status != "" {
             assert(code != "", "diagnostic impl without a code before line `{line}`")
             rows.push(DcRow{name: name.copy(), code: code.copy(), status: status.copy()})

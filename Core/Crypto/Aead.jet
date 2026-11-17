@@ -94,8 +94,8 @@ rev64: fn(v: U64) -> U64 Never! {
 /// step 1), as bytes for the host leaf and, in `hw`, as the words h0, h1,
 /// h0 ^ h1 and their bit reversals for the Jet GHASH.
 GHASHKey: struct {
-    h: [U8]
-    hw: [U64]
+    h: [U8],
+    hw: [U64],
 
     impl Close {
         close: fn(&&self) {
@@ -110,8 +110,8 @@ GHASHKey: struct {
 /// A GCM key: the block cipher's encryption key (AES, ARIA or Camellia;
 /// any cipher.ForwardBlock) and its GHASH key.
 GCMKey: struct<K> {
-    c: K
-    g: GHASHKey
+    c: K,
+    g: GHASHKey,
 }
 
 /// The GCM key over the encryption key `c` (mbedtls_gcm_setkey).
@@ -207,13 +207,13 @@ ghash_acc: fn(k: GHASHKey, acc: &[U8]) Never! { ghash(k, acc, ZERO_BLOCK, 0, 1) 
 /// - `stream`: the keystream block of a partial last data block.
 /// - `ad_len`, `len`: the AAD and data bytes so far.
 GCM: struct {
-    decrypt: Bool
-    ctr: [U8]
-    base: [U8]
-    acc: [U8]
-    stream: [U8]
-    ad_len: Int
-    len: Int
+    decrypt: Bool,
+    ctr: [U8],
+    base: [U8],
+    acc: [U8],
+    stream: [U8],
+    ad_len: Int,
+    len: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -408,10 +408,10 @@ CCM_ERROR: 16
 /// which encrypts without authentication (IEEE 802.15.4 security levels
 /// 0 and 4).
 CCMMode: enum {
-    Encrypt
-    Decrypt
-    StarEncrypt
-    StarDecrypt
+    Encrypt,
+    Decrypt,
+    StarEncrypt,
+    StarDecrypt,
 }
 
 /// One CCM operation (mbedtls_ccm_context).
@@ -420,15 +420,15 @@ CCMMode: enum {
 /// - `y`: the CBC-MAC chaining value; `ctr`: the counter block A_i.
 /// - `processed`: AAD bytes, then data bytes, consumed so far.
 CCM: struct {
-    mode: CCMMode
-    state: Int
-    q: Int
-    y: [U8]
-    ctr: [U8]
-    ad_len: Int
-    plain_len: Int
-    tag_len: Int
-    processed: Int
+    mode: CCMMode,
+    state: Int,
+    q: Int,
+    y: [U8],
+    ctr: [U8],
+    ad_len: Int,
+    plain_len: Int,
+    tag_len: Int,
+    processed: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -834,10 +834,10 @@ chacha20_key_state: fn(key: [#Secret U8]) -> [U32] Never! {
 ///   2^32 - counter at the start, so the block at counter 2^32 - 1 is the
 ///   last and the counter never wraps into a reused keystream.
 ChaCha20: struct {
-    state: [U32]
-    stream: [U8]
-    used: Int
-    blocks_left: Int
+    state: [U32],
+    stream: [U8],
+    used: Int,
+    blocks_left: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -957,11 +957,11 @@ hchacha20: fn(key: [#Secret U8], nonce: [U8]) -> [U8]? Never! {
 /// - `h`: the accumulator in five limbs; `pad`: s in four 32-bit words.
 /// - `buf`: `fill` bytes of a partial block.
 Poly1305: struct {
-    r: [U64]
-    h: [U64]
-    pad: [U64]
-    buf: [U8]
-    fill: Int
+    r: [U64],
+    h: [U64],
+    pad: [U64],
+    buf: [U8],
+    fill: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -1177,12 +1177,12 @@ CHACHAPOLY_FINISHED: 3
 
 /// A ChaCha20-Poly1305 context (mbedtls_chachapoly_context).
 ChaChaPoly: struct {
-    chacha: ChaCha20
-    poly: Poly1305
-    ad_len: Int
-    len: Int
-    stage: Int
-    decrypt: Bool
+    chacha: ChaCha20,
+    poly: Poly1305,
+    ad_len: Int,
+    len: Int,
+    stage: Int,
+    decrypt: Bool,
 }
 
 /// A context for a 32-byte key (mbedtls_chachapoly_setkey); None for any

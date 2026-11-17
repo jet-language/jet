@@ -2,25 +2,25 @@ use jet_foundation.[BinOp, Diagnostic, Dimension, Expr, Span, UnitDimensionDecl,
 
 // `DimensionLookup` and resolve_dimension_expression.
 SemaUnitDimensionLookup: enum {
-    Found(value: Dimension)
-    Missing
-    Ambiguous(name: String)
+    Found(value: Dimension),
+    Missing,
+    Ambiguous(name: String),
 }
 
 SemaUnitDimensionDeclaration: struct {
-    module_index: Int
-    item: Int
-    family: String
-    span: Span
-    claim: UnitDimensionDecl
-    preset: Dimension?
+    module_index: Int,
+    item: Int,
+    family: String,
+    span: Span,
+    claim: UnitDimensionDecl,
+    preset: Dimension?,
 }
 
 SemaUnitDimensionVisibility: struct {
-    local: [String:Int]
-    imported: [String:[Int]]
-    qualified: [String:Int]
-    aliases: [String:Int]
+    local: [String:Int],
+    imported: [String:[Int]],
+    qualified: [String:Int],
+    aliases: [String:Int],
 }
 
 sema_units_dimension_target: fn(visible: SemaUnitDimensionVisibility, qualifier: String?, name: String) -> {target: Int?, ambiguous: Bool} Never! {

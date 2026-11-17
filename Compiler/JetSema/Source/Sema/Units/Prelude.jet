@@ -52,10 +52,10 @@ sema_units_local_names: fn(items: [Item], occupied: &[String:Bool], local_famili
 // suffixes a member name prefixes; and `type_names[family][member]` is each
 // catalog member's type name (sema_registration_unit_type_name).
 SemaUnitsCatalogNames: struct {
-    wanted: NameTable
-    members: NameTable
-    member_lengths: [Int]
-    type_names: [[String]]
+    wanted: NameTable,
+    members: NameTable,
+    member_lengths: [Int],
+    type_names: [[String]],
 }
 
 sema_units_catalog_names: fn(catalog: [UnitFamilyDef]) -> SemaUnitsCatalogNames Never! {
@@ -153,20 +153,20 @@ sema_units_held: fn(held: &&SemaUnitSourceMentions?) -> SemaUnitSourceMentions? 
 // source is read in place), the catalog names (the one row of its list) and
 // the input index claimed at each rank.
 SemaUnitsScanShared: struct {
-    inputs: [SemaRegistrationModuleInput]
-    names: [SemaUnitsCatalogNames]
-    order: [Int]
+    inputs: [SemaRegistrationModuleInput],
+    names: [SemaUnitsCatalogNames],
+    order: [Int],
 }
 
 // The next unclaimed rank.
 SemaUnitsScanQueue: struct {
-    next: Int
+    next: Int,
 }
 
 // One input's mentions, scanned by one thread.
 SemaUnitsScanned: struct {
-    module_index: Int
-    mentions: SemaUnitSourceMentions
+    module_index: Int,
+    mentions: SemaUnitSourceMentions,
 }
 
 sema_units_scan_fill: fn(shared_state: Shared<SemaUnitsScanShared>, inputs: &[SemaRegistrationModuleInput]) {

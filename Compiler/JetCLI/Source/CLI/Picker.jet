@@ -37,53 +37,53 @@ JET_CLI_PICKER_MIN_WIDTH: 24
 
 // One palette command, as the picker shows and searches it.
 JetCLIPickerEntry: struct {
-    name: String
-    usage: String
-    summary: String
-    category: String
-    flags: [JetCLIFlagSpec]
-    example: String?
-    see_also: [String]
-    keywords: [String]
+    name: String,
+    usage: String,
+    summary: String,
+    category: String,
+    flags: [JetCLIFlagSpec],
+    example: String?,
+    see_also: [String],
+    keywords: [String],
 }
 
 // One command a query matched: the row in the index, its score, and the
 // text it matched in with the matched character positions.
 JetCLIPickerHit: struct {
-    entry: Int
-    score: Int
-    haystack: String
-    positions: [Int]
+    entry: Int,
+    score: Int,
+    haystack: String,
+    positions: [Int],
 }
 
 // What a query finds: a diagnostic code's page, or the commands it matches,
 // best first.
 JetCLIPickerFound: struct {
-    code: DiagnosticExplanation?
-    commands: [JetCLIPickerHit]
+    code: DiagnosticExplanation?,
+    commands: [JetCLIPickerHit],
 }
 
 JetCLIPickerMode: enum {
-    Categorized
-    Results
-    Detail
-    Reference
+    Categorized,
+    Results,
+    Detail,
+    Reference,
 }
 
 JetCLIPickerKey: enum {
-    Text(text: String)
-    Enter
-    AltEnter
-    Escape
-    Tab
-    Backspace
-    Up
-    Down
-    Left
-    Right
-    F1
-    Quit
-    Other
+    Text(text: String),
+    Enter,
+    AltEnter,
+    Escape,
+    Tab,
+    Backspace,
+    Up,
+    Down,
+    Left,
+    Right,
+    F1,
+    Quit,
+    Other,
 }
 
 // One typed character.
@@ -92,46 +92,46 @@ JetCLIPickerKey: enum {
 // Any other key: ignored.
 
 JetCLIPickerAction: enum {
-    Continue
-    Quit
-    EnterReference
-    LeaveReference
-    Submit(command: String?)
+    Continue,
+    Quit,
+    EnterReference,
+    LeaveReference,
+    Submit(command: String?),
 }
 
 // The picked command line; None picks nothing (a code page).
 
 JetCLIPickerState: struct {
-    index: [JetCLIPickerEntry]
-    categories: [String]
-    width: Int
-    height: Int
-    color: Bool
-    mode: JetCLIPickerMode
-    query: String
-    cat_selected: Int
+    index: [JetCLIPickerEntry],
+    categories: [String],
+    width: Int,
+    height: Int,
+    color: Bool,
+    mode: JetCLIPickerMode,
+    query: String,
+    cat_selected: Int,
     // The selected command, by position within the selected category.
-    cat_entry: Int?
-    found: JetCLIPickerFound
-    res_selected: Int
-    res_scroll: Int
-    ref_category: Int
+    cat_entry: Int?,
+    found: JetCLIPickerFound,
+    res_selected: Int,
+    res_scroll: Int,
+    ref_category: Int,
     // The selected command, by row in the index.
-    ref_entry: Int?
-    ref_query: String
-    ref_scroll: Int
+    ref_entry: Int?,
+    ref_query: String,
+    ref_scroll: Int,
 }
 
 // One row of wrapped text, and whether the source broke the line after it.
 JetCLIPickerWrapped: struct {
-    text: String
-    hard_break: Bool
+    text: String,
+    hard_break: Bool,
 }
 
 // One body row of the categorized list.
 JetCLIPickerLine: struct {
-    text: String
-    selected: Bool
+    text: String,
+    selected: Bool,
 }
 
 // ---- The index ----

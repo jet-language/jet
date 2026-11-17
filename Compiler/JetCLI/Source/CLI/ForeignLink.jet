@@ -15,7 +15,7 @@ use {
 
 #Error
 JetCLIForeignLinkError: struct {
-    message: String
+    message: String,
 }
 
 jet_cli_foreign_link_error: fn(message: String) -> JetCLIForeignLinkError Never! {
@@ -23,12 +23,12 @@ jet_cli_foreign_link_error: fn(message: String) -> JetCLIForeignLinkError Never!
 }
 
 JetCLIForeignInputs: struct {
-    names: [String]
-    bytes: [[U8]]
-    paths: [String]
+    names: [String],
+    bytes: [[U8]],
+    paths: [String],
     // The closure carries the program's musl platform archives, so it links
     // the Jet-only runtime object rather than the pre-resolved runtime pack.
-    platform: Bool{false}
+    platform: Bool{false},
 }
 
 jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) -[FS]> JetCLIForeignLinkError! {
@@ -63,14 +63,14 @@ jet_cli_native_c_command: fn(argv: [String]) -[Env, Exec]> cli_process.ProcessSp
 
 // One C compiler command of a batch: its receipt, or why it never ran.
 JetCLINativeCOutcome: struct {
-    receipt: ProcessReceipt?
-    failure: String
+    receipt: ProcessReceipt?,
+    failure: String,
 }
 
 // One launched child of a batch and the command it runs.
 JetCLINativeCChild: struct {
-    index: Int
-    child: ProcessChild
+    index: Int,
+    child: ProcessChild,
 }
 
 // Runs the C compiler commands `commands` (jet_cli_native_c_command) as
@@ -121,20 +121,20 @@ jet_cli_native_c_run_all: fn(commands: [[String]]) -[Env, Exec, Time.Wait]> [Jet
 // every command; `link_flags` follow them in a link: the inline C proof link
 // and a C or C++ program's (Host.jet jet_cli_native_source).
 JetCLINativeCTools: struct {
-    compiler: String
-    archiver: String
-    target: String
-    flags: [String]
-    link_flags: [String]
+    compiler: String,
+    archiver: String,
+    target: String,
+    flags: [String],
+    link_flags: [String],
 }
 
 // The tools a Jet program's foreign C closure compiles with, the platform
 // archives it links once (musl's libc, the compiler builtins and, for a Rust
 // helper, the unwinder), and the flags of the inline C proof link.
 JetCLIClosureCTools: struct {
-    tools: JetCLINativeCTools
-    platform: [String]
-    proof: [String]
+    tools: JetCLINativeCTools,
+    platform: [String],
+    proof: [String],
 }
 
 // The pack's glibc target: what `jet run` of a C or C++ file builds.
@@ -252,8 +252,8 @@ jet_cli_native_c_host_archive: fn(tools: JetCLINativeCTools, name: String) -[FS,
 // engine puts the pack in the Hangar (verifying a copy already there) and
 // realizes the musl target, building its sysroot once per Hangar.
 JetCLINativeCPack: struct {
-    root: String
-    musl_sysroot: String
+    root: String,
+    musl_sysroot: String,
 }
 
 jet_cli_native_c_pack_fetch: fn(engine: String) -[FS, Env, Exec, Time.Wait]> JetCLINativeCPack JetCLIForeignLinkError! {
@@ -620,11 +620,11 @@ jet_cli_foreign_static_archive: fn(closure: JetCLIClosureCTools, lib: String, di
 }
 
 JetCLIForeignSources: struct {
-    root: String
-    declarations: [JetDriverCDependency]
+    root: String,
+    declarations: [JetDriverCDependency],
     // The `libs` and `link_args` build options (BuildOptions.jet).
-    libs: [String]
-    link_args: [String]
+    libs: [String],
+    link_args: [String],
 }
 
 // Capture only C declarations before a factory transfers its request into

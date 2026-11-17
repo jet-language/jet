@@ -36,7 +36,7 @@ JET_CLI_ELF_DT_STRTAB: 5
 
 #Error
 JetCLIElfError: struct {
-    message: String
+    message: String,
 }
 
 jet_cli_elf_error: fn(message: String) -> JetCLIElfError Never! { JetCLIElfError{message: message} }
@@ -45,20 +45,20 @@ jet_cli_elf_error: fn(message: String) -> JetCLIElfError Never! { JetCLIElfError
 // interpreter (None for a static image), whether it has a PT_DYNAMIC
 // segment, and that segment's DT_NEEDED libraries in table order.
 JetCLIElfLoader: struct {
-    interpreter: String?
-    dynamic: Bool
-    needed: [String]
+    interpreter: String?,
+    dynamic: Bool,
+    needed: [String],
 }
 
 // One foreign-code audit: the program's foreign declarations, the `FFI`
 // effects and the host effects its entry requires (each sorted, unique), the
 // C libraries its link adds (sorted, unique), and the loader needs of its image.
 JetCLIForeignAudit: struct {
-    declarations: [JetDriverForeignDeclaration]
-    ffi_effects: [String]
-    host_effects: [String]
-    c_libraries: [String]
-    loader: JetCLIElfLoader
+    declarations: [JetDriverForeignDeclaration],
+    ffi_effects: [String],
+    host_effects: [String],
+    c_libraries: [String],
+    loader: JetCLIElfLoader,
 }
 
 // The little-endian unsigned field of `width` bytes at `at`, None when it

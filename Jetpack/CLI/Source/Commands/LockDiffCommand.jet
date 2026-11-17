@@ -9,8 +9,8 @@ use {
 
 // Measured or planned byte deltas for one lock change.
 DiffSizes: struct {
-    download: Int?
-    disk: Int?
+    download: Int?,
+    disk: Int?,
 
     empty: fn() -> DiffSizes Never! { DiffSizes{download: None, disk: None} }
 }
@@ -27,13 +27,13 @@ cli_sizes_from_bytes: fn(download: Int?, disk: Int?) -> DiffSizes Never! {
 // renders the diff on every exit path, so a partial lock update is still
 // visible (Rust `LockDiffGuard` Drop).
 CLILockDiffGuard: struct {
-    theme: Theme
-    root: String
-    before: LockFile?
-    sizes: DiffSizes
+    theme: Theme,
+    root: String,
+    before: LockFile?,
+    sizes: DiffSizes,
     // An inactive guard stands in where no lock can change (Rust's absent
     // `Option<LockDiffGuard>`); it renders nothing.
-    active: Bool
+    active: Bool,
 
     new: fn(theme: Theme, root: String) -[FS]> CLILockDiffGuard Never! {
         CLILockDiffGuard{theme: theme, root: root, before: pkg_lock_load(root), sizes: DiffSizes.empty(), active: true}

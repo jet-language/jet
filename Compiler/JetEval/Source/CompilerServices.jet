@@ -179,41 +179,41 @@ use {
 JET_COMPILER_SERVICES_SCHEMA_VERSION: 1
 
 JetCompilerServicesSourcePreparation: enum {
-    Masked(source: String)
-    Rejected(diagnostic: Diagnostic)
+    Masked(source: String),
+    Rejected(diagnostic: Diagnostic),
 }
 
 JetCompilerServicesSourceInput: struct {
-    source: String
-    preparation: JetCompilerServicesSourcePreparation?
+    source: String,
+    preparation: JetCompilerServicesSourcePreparation?,
 }
 
 JetCompilerServicesLexFacts: struct {
-    source: String
-    compiler_source: String
-    lexed: Lexed
-    value: TComptimeValue
+    source: String,
+    compiler_source: String,
+    lexed: Lexed,
+    value: TComptimeValue,
 }
 
 JetCompilerServicesParseFacts: struct {
-    source: String
-    compiler_source: String
-    lexed: Lexed
-    parsed: ParseResult
-    value: TComptimeValue
+    source: String,
+    compiler_source: String,
+    lexed: Lexed,
+    parsed: ParseResult,
+    value: TComptimeValue,
 }
 
 JetCompilerServicesCheckedInput: struct {
-    parsed: JetCompilerServicesParseFacts
-    registration: SemaRegistrationGraph
-    graph: SemaGraphResult
-    module_sources: [SemaCompilerModuleSource]
-    diagnostics: [Diagnostic]
+    parsed: JetCompilerServicesParseFacts,
+    registration: SemaRegistrationGraph,
+    graph: SemaGraphResult,
+    module_sources: [SemaCompilerModuleSource],
+    diagnostics: [Diagnostic],
 }
 
 JetCompilerServicesCheckedFacts: struct {
-    value: TComptimeValue
-    semantic_index_complete: Bool
+    value: TComptimeValue,
+    semantic_index_complete: Bool,
 }
 
 jet_eval_compiler_services_int: fn(value: Int) -> TComptimeValue Never! {
@@ -823,8 +823,8 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
 
 // The build context's whole-program view, or the first producer fact it lacks.
 JetCompilerServicesProgramInfo: enum {
-    Ready(value: TComptimeValue)
-    Missing(fact: String)
+    Ready(value: TComptimeValue),
+    Missing(fact: String),
 }
 
 // The build context reads this immutable, fully checked whole-program view.
@@ -1031,8 +1031,8 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
 }
 
 JetCompilerServicesTypeNames: struct {
-    root: [TComptimeValue]
-    scope: [TComptimeValue]
+    root: [TComptimeValue],
+    scope: [TComptimeValue],
 }
 
 // ProgramInfo's `root_types` and `scope_types`. A type's identity is its
@@ -1090,12 +1090,12 @@ jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
 
 // One package of ProgramInfo while its modules are gathered.
 JetCompilerServicesPackageRows: struct {
-    identity: String
-    name: String
-    version: String
-    modules: [TComptimeValue]
-    types: [TComptimeValue]
-    functions: [TComptimeValue]
+    identity: String,
+    name: String,
+    version: String,
+    modules: [TComptimeValue],
+    types: [TComptimeValue],
+    functions: [TComptimeValue],
 }
 
 // The package `module_row` belongs to, with no modules yet. The entry
@@ -1125,15 +1125,15 @@ jet_eval_compiler_services_package_rows: fn(registration: SemaRegistrationGraph,
 // source the nearest `// jet:source-map source=` marker above it opened, and
 // the source line it names.
 JetCompilerServicesGeneratedLine: struct {
-    generated_line: Int
-    source: String?
-    source_line: Int
+    generated_line: Int,
+    source: String?,
+    source_line: Int,
 }
 
 // `SourceMap`: every opened source once, in first-seen order.
 JetCompilerServicesSourceMap: struct {
-    sources: [String]
-    generated_lines: [JetCompilerServicesGeneratedLine]
+    sources: [String],
+    generated_lines: [JetCompilerServicesGeneratedLine],
 }
 
 // Rust `str::trim_start` over ASCII whitespace.

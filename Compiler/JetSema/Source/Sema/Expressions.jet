@@ -601,10 +601,10 @@ sema_expr_operator_method: fn(op: BinOp) -> String? {
 sema_expr_operator_commutative: fn(op: BinOp) -> Bool Never! { op == BinOp.Add || op == BinOp.Mul }
 
 SemaExprOperatorResolution: struct {
-    candidate: SemaCallMethodCandidate
-    receiver_is_left: Bool
+    candidate: SemaCallMethodCandidate,
+    receiver_is_left: Bool,
     // The hook is compiler-generated (a derive), not authored.
-    derived: Bool
+    derived: Bool,
 }
 
 // The `equal` or `compare` hook `==`/`!=` (and `assert_eq`) dispatch to.
@@ -1953,13 +1953,13 @@ sema_expr_check_time_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
 }
 
 SemaExprDistinctFacts: struct {
-    name: String
+    name: String,
     // The declaration's symbol key: one distinct type under any spelling
     // (`Severity`, `module.Severity`).
-    key: String
-    base: Type
-    numeric: Bool
-    range: TIntegerBounds?
+    key: String,
+    base: Type,
+    numeric: Bool,
+    range: TIntegerBounds?,
 }
 
 sema_expr_distinct_same: fn(lhs: Type, rhs: Type, left_facts: SemaExprDistinctFacts?, right_facts: SemaExprDistinctFacts?) -> Bool Never! {
@@ -2629,8 +2629,8 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
 }
 
 SemaIntegerRange: struct {
-    lo: Int
-    hi: Int
+    lo: Int,
+    hi: Int,
 }
 
 sema_expr_integer_range: fn(signed: Bool, bits: Int) -> SemaIntegerRange Never! {
@@ -2963,10 +2963,10 @@ sema_expr_call_callee: fn(program: SemaProgramTables, value: TExpr) -> SymbolID?
 }
 
 SemaExprComptimeTarget: struct {
-    module_identity: ModuleID
-    declaration: Func
-    path: String
-    kind: String
+    module_identity: ModuleID,
+    declaration: Func,
+    path: String,
+    kind: String,
 }
 
 sema_expr_comptime_method_target: fn(methods: [Func], owner_name: String, module_id: ModuleID, module_identity: String, symbol_key: String) -> SemaExprComptimeTarget? {
@@ -4072,9 +4072,9 @@ sema_expr_canonical_type_binding: fn(name: String, environment: SemaScopeEnviron
 }
 
 SemaExprCoreReceiverPath: struct {
-    alias: String
-    alias_span: Span
-    leaves: [String]
+    alias: String,
+    alias_span: Span,
+    leaves: [String],
 }
 
 // A Core call receiver: an import alias, or a field chain over one
@@ -6041,8 +6041,8 @@ sema_expr_check_binary: fn(op: BinOp, left: Expr, right: Expr, span: Span, expec
 // One inner operator of a left-leaning chain (`a + b + c …`): its Binary
 // node and the expectation its value is checked under.
 SemaBinaryLevel: struct {
-    expr: Expr
-    expected: Type?
+    expr: Expr,
+    expected: Type?,
 }
 
 // A left-leaning chain checks in this one frame, not one checking frame per

@@ -82,107 +82,107 @@ use jet_foundation.[
 ]
 
 SemaKnowledgePlane: enum {
-    Range
-    Exactness
-    Unit
-    State
-    Classification
+    Range,
+    Exactness,
+    Unit,
+    State,
+    Classification,
 }
 
 SemaKnowledgeGate: enum {
-    BoundedArithmetic
-    Approximation
-    RoundedConversion
-    RawProjection
-    StateTransition
-    ClassificationScrub
+    BoundedArithmetic,
+    Approximation,
+    RoundedConversion,
+    RawProjection,
+    StateTransition,
+    ClassificationScrub,
 }
 
 SemaScopeFrame: struct {
-    parent: Int
-    owner: String
+    parent: Int,
+    owner: String,
 }
 
 SemaScopeBinding: struct {
-    frame: Int
-    symbol: Symbol
+    frame: Int,
+    symbol: Symbol,
     // The symbol's key text (the run's or the checking body's), by which the
     // ownership facts name the binding.
-    key: String
-    mutable: Bool
-    access: AccessConvention
-    integer_bounds: TIntegerBounds?
-    string_view: Bool
-    compiler_builtin: Bool
+    key: String,
+    mutable: Bool,
+    access: AccessConvention,
+    integer_bounds: TIntegerBounds?,
+    string_view: Bool,
+    compiler_builtin: Bool,
     // A `name: #run { … }` local reads as this value.
-    prepared: TComptimeValue?{None}
+    prepared: TComptimeValue?{None},
     // A `name: #run value` local whose value has not landed yet: compile-time
     // code that reads it waits for it (sema_comptime_reads_pending_local).
-    pending_prepared: Bool{false}
+    pending_prepared: Bool{false},
     // The `#Track` origin row for this binding; `None`
     // is the untracked row.
-    origin: SemaOriginFact?{None}
+    origin: SemaOriginFact?{None},
     // This `:` name reads a field or element of a place
     // through a view, is a loop name over a collection a read or write
     // parameter owns, or is a match payload bound from storage this scope
     // does not own. It owns nothing to give away: an exact `.move()` of it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
-    place_alias: Bool{false}
+    place_alias: Bool{false},
     // A loop name over a collection a read or write parameter owns keeps the
     // places of the element it reads: a payload matched from the name borrows
     // that element (sema_ownership_record_pattern_views), as one matched from
     // `items[i]` does.
-    element_places: [SemaOwnershipPlace]{[SemaOwnershipPlace]{}}
+    element_places: [SemaOwnershipPlace]{[SemaOwnershipPlace]{}},
     // A `:` name bound to a new `Shared` cell or a lambda keeps its
     // initializer, so a write into another cell can see the stored value is
     // built in place (SharedCycles.jet).
-    fresh_cell: Expr?{None}
+    fresh_cell: Expr?{None},
     // A `:` name bound to a cell this body builds (`Shared{…}` or
     // `Cell.new(…)`): writes through it stay the body's own
     // (sema_scope_record_module_write).
-    own_cell: Bool{false}
+    own_cell: Bool{false},
     // L0517: a `:` name bound to `path.normalize().to_string()` holds the
     // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
-    normalized_path_text: Bool{false}
+    normalized_path_text: Bool{false},
     // The text from the end of a `name: value` binding's name through its
     // `:`: the E0111 machine edit replaces it with ` :=`, so `x: 1` becomes
     // `x := 1`.
-    binding_sigil: Span?{None}
+    binding_sigil: Span?{None},
     // A `loop name in source` item name: each pass binds it afresh, so an
     // assignment to it is the E0111 that teaches a copy in the loop body.
-    loop_item: Bool{false}
+    loop_item: Bool{false},
     // A name bound to a number literal, or to arithmetic on such literals and
     // names, keeps that literal (with each name replaced by its own): where a
     // use refuses the name's type, it reads as the literal written there
     // (Expressions/NumberNames.jet).
-    number_literal: Expr?{None}
+    number_literal: Expr?{None},
     // A `:` name bound to a unit value whose magnitude is a literal (`3meter`,
     // `Double.from_float(-2.0)`) keeps that magnitude: an implicit conversion
     // of the name proves its exactness from it (sema_expr_unit_concrete_value).
-    unit_magnitude: Float?{None}
+    unit_magnitude: Float?{None},
     // A `:` name bound to a lambda this body writes keeps that lambda's effect
     // facts: a call through the name from inside another lambda's body adds
     // them to that lambda's row (sema_expression_lambda_add_effect_facts).
-    lambda_effects: TEffectFacts?{None}
+    lambda_effects: TEffectFacts?{None},
     // A `name: (…) -> …` local bound to a lambda keeps the lambda's
     // ClosureInfo record, which `name.reflect()` reads.
-    closure: TComptimeValue?{None}
+    closure: TComptimeValue?{None},
     // A `:` name bound to `&map[key]` is a write window over that one map
     // value: it reads and writes as the value, and where a `ViewMut` of the
     // value's type is expected it is a one-value window, used as `w[0]`
     // (sema_expr_check_ident).
-    map_slot: Bool{false}
+    map_slot: Bool{false},
 }
 
 SemaOriginFact: struct {
-    source: String
-    line: Int?
-    column: Int?
+    source: String,
+    line: Int?,
+    column: Int?,
 }
 
 SemaScopeDeclaration: struct {
-    symbol_id: SymbolID
-    item: Item
+    symbol_id: SymbolID,
+    item: Item,
 }
 
 // One checked call. A row holds what every call carries; the facts only a
@@ -190,70 +190,70 @@ SemaScopeDeclaration: struct {
 // call carries sit behind one optional `detail` word, so the run's many
 // plain calls hold none of them.
 SemaCallSiteFact: struct {
-    span: Span
-    caller_key: String
-    callee: SymbolID?
-    facts: SemaCallFacts
+    span: Span,
+    caller_key: String,
+    callee: SymbolID?,
+    facts: SemaCallFacts,
     // The statement drops this call's result. The solved effect phase reports
     // it when the callee's row is empty (E0433).
-    discarded: Bool
+    discarded: Bool,
     // The statement drops this call's result, but the callee's checked
     // carrier can still fail. The bundle failure solve sets `discarded` when
     // it projects the callee onto `T Never!` (#3708).
-    discarded_if_infallible: Bool{false}
+    discarded_if_infallible: Bool{false},
     // The call runs while compiling (a comptime item, a `#run { }` site or
     // a module value), not in the running program. A function only such calls
     // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).
-    compile_time: Bool{false}
+    compile_time: Bool{false},
     // None for a call that carries no SemaCallSiteDetail fact
     // (sema_call_site_detail_of).
-    detail: SemaCallSiteDetail?{None}
+    detail: SemaCallSiteDetail?{None},
 }
 
 // What few calls carry (SemaCallSiteFact.detail).
 SemaCallSiteDetail: struct {
     // Rust `sig.foreign_effect_root`: the callee is an extern body (an
     // `#FFI(<lang>)` function or a foreign row) whose effect is this one root.
-    foreign_effect_root: String?{None}
+    foreign_effect_root: String?{None},
     // The foreign callee's row is not descriptor-owned (a written
     // `#Import c.<lib>: module` binding): the call is open-world and reaches
     // the maximal set as well as its `FFI` leaf.
-    foreign_opaque: Bool{false}
+    foreign_opaque: Bool{false},
     // The callee is the `#Unsafe` inline foreign function of this name: the
     // call needs an audited region (E3103).
-    unsafe_foreign_name: String?{None}
+    unsafe_foreign_name: String?{None},
     // The call is a `mem.<operation>(…)` of an audited `core.mem` operation:
     // sema reports it outside `#Unsafe` as E3101, so the effect pass's E3103
     // for its `#Unsafe` callee would report the call twice.
-    audited_operation: Bool{false}
+    audited_operation: Bool{false},
     // The callee is a raw `extern rust` function whose parameter takes a
     // capability: the call needs an audited region (E0702).
-    foreign_capability: SemaForeignCapability?{None}
+    foreign_capability: SemaForeignCapability?{None},
     // A resolved Core lifecycle marker, retained with the checked call site.
-    lifecycle: CoreMarkerApplication?{None}
+    lifecycle: CoreMarkerApplication?{None},
     // The declared callee's `#Deprecated(use:)` replacement name resolves at
     // this call to a local, a parameter or nothing, so a `jet fix` rename
     // wouldn't call the replacement.
-    replacement_hidden: Bool{false}
+    replacement_hidden: Bool{false},
     // The call is in a hole table's header, which runs once per arm tried:
     // the effect phase reports it when the callee has an effect (E0442),
     // with this fix, unless the call was already reported for a change.
-    hole_header: SemaHoleHeaderFix?{None}
-    shared_lifetime: SharedLifetime?{None}
-    shared_member: String{""}
-    shared_source: String{""}
+    hole_header: SemaHoleHeaderFix?{None},
+    shared_lifetime: SharedLifetime?{None},
+    shared_member: String{""},
+    shared_source: String{""},
     // An intrinsic operation's own name (`Clock.system`), recorded with its
     // effect row when the site has no declared callee.
-    intrinsic_api: String?{None}
+    intrinsic_api: String?{None},
     // The runtime export that answers this intrinsic, when it is a Core call
     // the runtime answers: it reads the process it runs in, so its row grants
     // authority and doesn't prove the call pure, and a local never computes it
     // while compiling. A run-time-only export (runtime_only_read) is never
     // computed while compiling at all.
-    runtime_export: String?{None}
+    runtime_export: String?{None},
     // The call is an `==` or `!=` the operator resolved to its callee
     // (sema_expr_check_operator), with where its operands were written.
-    operator: SemaOperatorSite?{None}
+    operator: SemaOperatorSite?{None},
 }
 
 // `detail`, or None when it holds no fact, so a plain call keeps no box.
@@ -278,10 +278,10 @@ sema_call_site_detail: fn(fact: SemaCallSiteFact) -> SemaCallSiteDetail Never! {
 // on, `argument` the other; `bare` when the receiver's text can take
 // `.method(...)` with no parentheses around it.
 SemaOperatorSite: struct {
-    negated: Bool
-    receiver: Span
-    argument: Span
-    bare: Bool
+    negated: Bool,
+    receiver: Span,
+    argument: Span,
+    bare: Bool,
 }
 
 // The fix of an E0442 report on a call in a hole table's header
@@ -290,41 +290,41 @@ SemaOperatorSite: struct {
 // fix is only shown. `reported` when the call was refused for a change it
 // makes, so its effect is not refused again.
 SemaHoleHeaderFix: struct {
-    fix: String
-    edits: [TextEdit]
-    reported: Bool
+    fix: String,
+    edits: [TextEdit],
+    reported: Bool,
 }
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `&&`)
 // of its first parameter that takes one.
 SemaForeignCapability: struct {
-    name: String
-    sigil: String
+    name: String,
+    sigil: String,
 }
 
 SemaCallReturnViewFact: struct {
-    slot: [String]
-    access: AccessConvention
-    places: [SemaOwnershipPlace]
-    sources: [ViewSourcePath]
+    slot: [String],
+    access: AccessConvention,
+    places: [SemaOwnershipPlace],
+    sources: [ViewSourcePath],
     // Argument or receiver spans of sources that name no place (a temporary
     // owner the call drops when it returns).
-    temporaries: [Span]{[Span]{}}
+    temporaries: [Span]{[Span]{}},
     // The literal field value that holds this view inside a returned
     // aggregate; a report names it rather than the whole returned value.
-    span: Span?{None}
+    span: Span?{None},
 }
 
 SemaCallReturnView: struct {
-    span: Span
-    facts: [SemaCallReturnViewFact]
+    span: Span,
+    facts: [SemaCallReturnViewFact],
 }
 
 SemaLocalViewProvenance: struct {
-    carrier_key: String
-    output_path: [String]
-    access: AccessConvention
-    sources: [ViewSourcePath]
+    carrier_key: String,
+    output_path: [String],
+    access: AccessConvention,
+    sources: [ViewSourcePath],
 }
 
 // A checked body's read of a declaration's name. A body check records one
@@ -332,29 +332,29 @@ SemaLocalViewProvenance: struct {
 // what its readers key and place a reference by, never the Symbol's
 // checked type.
 SemaNameReferenceFact: struct {
-    span: Span
-    symbol: SemaNameReferent
+    span: Span,
+    symbol: SemaNameReferent,
     // How the reference reads its declaration: as the kind of declaration
     // it names (`.Import` for an import alias), or None for a read resolved
     // by meaning alone; `sema_name_reference_kind_text` spells it for the
     // name ledger and the semantic index.
-    kind: SymbolKind?
+    kind: SymbolKind?,
     // The key of the checked body whose check recorded the reference
     // (sema_function_check_pass): a local `symbol` is a row of that body's
     // own keys. "" for a reference no body check recorded.
-    body: String{""}
+    body: String{""},
 }
 
 // The declaration a name reference resolves to: its Symbol's identity and
 // definition span, without the checked type or visibility.
 SemaNameReferent: struct {
-    id: SymbolID
-    kind: SymbolKind
-    name: String
-    module_identity: ModuleID
+    id: SymbolID,
+    kind: SymbolKind,
+    name: String,
+    module_identity: ModuleID,
     // The owning declaration's key, "" for a declaration nothing owns.
-    owner: String
-    span: Span
+    owner: String,
+    span: Span,
 }
 
 sema_name_reference_kind_text: fn(kind: SymbolKind?) -> String Never! {
@@ -384,9 +384,9 @@ sema_name_referent: fn(symbol: Symbol) -> SemaNameReferent Never! {
 }
 
 SemaLoopValueKind: enum {
-    Effect
-    Collecting
-    Result
+    Effect,
+    Collecting,
+    Result,
 }
 
 // `moved_before` and `scope_depth` are the ownership state where the loop
@@ -395,21 +395,21 @@ SemaLoopValueKind: enum {
 // reaches its back edge, repeats on the next iteration
 // (sema_ownership_check_loop_move_backedge).
 SemaLoopValueFrame: struct {
-    label: String?
-    kind: SemaLoopValueKind
-    ty: Type?
-    moved_before: [SemaOwnershipMovedPlace]
-    scope_depth: Int
+    label: String?,
+    kind: SemaLoopValueKind,
+    ty: Type?,
+    moved_before: [SemaOwnershipMovedPlace],
+    scope_depth: Int,
 }
 
 SemaPendingLoopValue: struct {
-    label: String?
-    kind: SemaLoopValueKind
-    ty: Type?
+    label: String?,
+    kind: SemaLoopValueKind,
+    ty: Type?,
 }
 
 SemaLoopBreakFlows: struct {
-    paths: [SemaOwnershipState]
+    paths: [SemaOwnershipState],
 }
 
 sema_loop_value_set_pending_type: fn(context: &SemaCheckContext, kind: SemaLoopValueKind, label: String?, ty: Type?) Never! {
@@ -496,24 +496,24 @@ sema_loop_value_set_collecting_type: fn(context: &SemaCheckContext, ty: Type) Ne
 }
 
 SemaScopeLoopLabel: struct {
-    name: String
+    name: String,
 }
 
 // `last_reads` maps each queried name to the index of the last statement that
 // reads it (-1: none), filled on the first query so later live-after queries
 // are O(1) instead of rewalking the remaining statements.
 SemaStatementTailBody: struct {
-    statements: [Stmt]
-    last_reads: [String:Int]
+    statements: [Stmt],
+    last_reads: [String:Int],
 }
 
 SemaStatementTailStore: struct {
-    bodies: [SemaStatementTailBody]
+    bodies: [SemaStatementTailBody],
 }
 
 SemaStatementTailFrame: struct {
-    body_id: Int
-    start_index: Int
+    body_id: Int,
+    start_index: Int,
 }
 
 sema_statement_tail_store_init: fn() -> SemaStatementTailStore Never! {
@@ -533,172 +533,172 @@ sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statement
 // check. A Result error refuses the site as `code` with `what` and `fix`;
 // the error's reason is the Why.
 SemaCheckedTextEvaluation: struct {
-    module_identity: ModuleID
-    key: String
-    type_name: String
-    source_file: String
-    source_expression: Expr
+    module_identity: ModuleID,
+    key: String,
+    type_name: String,
+    source_file: String,
+    source_expression: Expr,
     // The checked literal's flat form (sema_publish_expression) and its type.
-    expression: BodyExpr
-    ty: Type
-    hardware_use: TargetHardwareUse
-    reachable_function_keys: [String]
-    dependencies: [String]
-    span: Span
-    code: String
-    what: String
-    fix: String
+    expression: BodyExpr,
+    ty: Type,
+    hardware_use: TargetHardwareUse,
+    reachable_function_keys: [String],
+    dependencies: [String],
+    span: Span,
+    code: String,
+    what: String,
+    fix: String,
 }
 
 SemaComptimeRequest: struct {
-    callee_key: String
-    module_identity: ModuleID
-    args: [TComptimeValue]
-    span: Span
-    checked_text: SemaCheckedTextEvaluation?
+    callee_key: String,
+    module_identity: ModuleID,
+    args: [TComptimeValue],
+    span: Span,
+    checked_text: SemaCheckedTextEvaluation?,
 }
 
 // A prepared local (`name: #run value`) visible at a body comptime
 // site. The staged check declares it again, so the site's code reads its
 // finished value as it does in the owner body.
 SemaComptimePreparedLocal: struct {
-    name: String
-    ty: Type
-    value: TComptimeValue
-    span: Span
+    name: String,
+    ty: Type,
+    value: TComptimeValue,
+    span: Span,
 }
 
 SemaComptimeBodySource: struct {
-    module_identity: ModuleID
-    function_key: String
-    source_file: String
-    key: String
-    destination_key: String
-    name: String
-    expression: Expr
-    expected_type: Type
-    span: Span
-    site_span: Span
-    prepared: [SemaComptimePreparedLocal]
+    module_identity: ModuleID,
+    function_key: String,
+    source_file: String,
+    key: String,
+    destination_key: String,
+    name: String,
+    expression: Expr,
+    expected_type: Type,
+    span: Span,
+    site_span: Span,
+    prepared: [SemaComptimePreparedLocal],
     // The site is lexically inside an `#Impure` block.
-    impure: Bool{false}
+    impure: Bool{false},
     // The run-time locals and parameters visible at the site: the staged
     // check names a read of one as a run-time value (E0640), not an unknown
     // name.
-    runtime_locals: [String]{[String]{}}
+    runtime_locals: [String]{[String]{}},
     // An immutable local computed while compiling when it can be, quietly
     // left to run time otherwise (SemaComptimeItemSource.local_value).
-    local_value: Bool{false}
+    local_value: Bool{false},
     // An explicit `name: #run value` local: it reports what fails, and lands
     // like a local value (SemaComptimeItemSource.local_binding).
-    local_binding: Bool{false}
+    local_binding: Bool{false},
 }
 
 SemaComptimeBodyValue: struct {
-    module_identity: ModuleID
-    key: String
-    destination_key: String
-    value: TComptimeValue
-    ty: Type
+    module_identity: ModuleID,
+    key: String,
+    destination_key: String,
+    value: TComptimeValue,
+    ty: Type,
 }
 
 // Published ordered prefixes are immutable. The staging owner may append
 // future rows under its guard; contexts retain only the owner and captured
 // visible length, never a copied table or a rebuilt index.
 SemaComptimeBodyFacts: struct {
-    values: [SemaComptimeBodyValue]
+    values: [SemaComptimeBodyValue],
     // Each module's slot at its ModuleID row (sema_comptime_index_module_slot).
-    modules: [Int]
-    first_rows: [[String:Int]]
-    second_rows: [[String:Int]]
-    indexed_rows: Int
+    modules: [Int],
+    first_rows: [[String:Int]],
+    second_rows: [[String:Int]],
+    indexed_rows: Int,
 }
 
 SemaComptimeBodyValues: struct {
-    facts: Shared<SemaComptimeBodyFacts>?{None}
-    length: Int{0}
+    facts: Shared<SemaComptimeBodyFacts>?{None},
+    length: Int{0},
     // Only the staging producer advances this authenticated item frontier.
     // Context views retain it as metadata, never use it to publish.
-    item_frontier: Int{0}
+    item_frontier: Int{0},
     // Numeric diagnosis is a separate phase-owned slot, never a fact mutation
     // or a retained CompilerTraceSink. None on every ordinary/cold trace path.
-    work: Shared<SemaComptimeBodyWork>?{None}
+    work: Shared<SemaComptimeBodyWork>?{None},
 }
 
 SemaComptimeBodyWork: struct {
-    publications: Int{0}
-    publication_rows: Int{0}
-    index_builds: Int{0}
-    indexed_rows: Int{0}
-    index_key_utf8_bytes: Int{0}
-    functions_started: Int{0}
-    check_passes_started: Int{0}
-    context_value_carriers_attached: Int{0}
-    context_value_snapshots: Int{0}
-    queries: Int{0}
-    module_probes: Int{0}
-    first_row_probes: Int{0}
-    second_row_probes: Int{0}
-    owned_rows_returned: Int{0}
+    publications: Int{0},
+    publication_rows: Int{0},
+    index_builds: Int{0},
+    indexed_rows: Int{0},
+    index_key_utf8_bytes: Int{0},
+    functions_started: Int{0},
+    check_passes_started: Int{0},
+    context_value_carriers_attached: Int{0},
+    context_value_snapshots: Int{0},
+    queries: Int{0},
+    module_probes: Int{0},
+    first_row_probes: Int{0},
+    second_row_probes: Int{0},
+    owned_rows_returned: Int{0},
 }
 
 SemaComptimeBodyWorkOperation: enum {
-    FunctionsStarted
-    CheckPassStarted
-    ContextAttached
-    ContextSnapshot
-    Query
-    ModuleProbe
-    FirstRowProbe
-    SecondRowProbe
-    OwnedRowReturned
+    FunctionsStarted,
+    CheckPassStarted,
+    ContextAttached,
+    ContextSnapshot,
+    Query,
+    ModuleProbe,
+    FirstRowProbe,
+    SecondRowProbe,
+    OwnedRowReturned,
 }
 
 // Scope-local facts serve the program-table callers; retained-graph checks
 // also keep their owning graph and its checked-type indexes here.
 SemaScopeEnvironment: struct {
-    registration_graph: SemaRegistrationGraph?{None}
-    module_identity: ModuleID
+    registration_graph: SemaRegistrationGraph?{None},
+    module_identity: ModuleID,
     // The registration row of `module_identity` when module entry set it
     // (sema_scope_caller_row checks it still is), -1 otherwise.
-    module_row: Int{-1}
-    package_identity: String
-    module_name: String
+    module_row: Int{-1},
+    package_identity: String,
+    module_name: String,
     // The dotted `name: module` path that declared the module's file ("" at
     // the package root; SemaRegistrationModule.declared_module).
-    declared_module: String{""}
-    source_file: String
-    source_origin: SemaSourceOrigin
-    source_segments: [SemaSourceSegment]
-    checked_types: [TTypeDef]{[TTypeDef]{}}
-    checked_type_names: NameTable{name_table_sized(2)}
-    checked_type_name_rows: [[Int]]{[[Int]]{}}
-    boxed_edges: [String:[String]]{[String:[String]]{}}
-    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[{known: Bool, value: Bool}]]{}}}
-    declarations: [SemaScopeDeclaration]
-    generic_params: [TGenericParam]
+    declared_module: String{""},
+    source_file: String,
+    source_origin: SemaSourceOrigin,
+    source_segments: [SemaSourceSegment],
+    checked_types: [TTypeDef]{[TTypeDef]{}},
+    checked_type_names: NameTable{name_table_sized(2)},
+    checked_type_name_rows: [[Int]]{[[Int]]{}},
+    boxed_edges: [String:[String]]{[String:[String]]{}},
+    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[{known: Bool, value: Bool}]]{}}},
+    declarations: [SemaScopeDeclaration],
+    generic_params: [TGenericParam],
     // One publication survives comptime retargets. The selected view may be empty
     // for an item check; the next function restores the publication, not a
     // reconstructed/copy-indexed list. Both carriers name the same fact cell.
-    comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}}
-    comptime_body_values: SemaComptimeBodyValues
+    comptime_body_publication: SemaComptimeBodyValues{SemaComptimeBodyValues{}},
+    comptime_body_values: SemaComptimeBodyValues,
     // E0641: the module's dispatch-table `else` arms, from the parser.
-    else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    else_arms: [ElseArmSpan]{[ElseArmSpan]{}},
     // The module's proven length-preserving list write
     // parameters, copied into each function's ownership state.
-    fixed_length_write_params: [String]{[String]{}}
+    fixed_length_write_params: [String]{[String]{}},
     // The module's `debug(…)` call texts, from the parser.
-    debug_sites: [DebugTraceSite]{[DebugTraceSite]{}}
+    debug_sites: [DebugTraceSite]{[DebugTraceSite]{}},
     // The module's AST tables, from the parser: its nodes' handles index them.
-    tables: ASTTables{ASTTables{}}
+    tables: ASTTables{ASTTables{}},
     // The enclosing named callable being checked; panic and propagation
     // locations name it (Rust `capture_panic_loc` `fn_name`).
-    function_name: String{""}
+    function_name: String{""},
     // The post-summary module scope of a parallel body pass, moved in for
     // the pass. Each body thread checks against its own light copy of it
     // (sema_scope_light_copy) and reads the function types that copy leaves
     // out from here (sema_scope_binding_type). None outside such a pass.
-    module_scope: SemaScopeTable?{None}
+    module_scope: SemaScopeTable?{None},
 }
 
 // Core's own generic bodies, and the canonical prelude's, are checked
@@ -727,57 +727,57 @@ sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: Sem
 // entered, so a closure walk that moves back and forth between modules builds
 // each one's table once; `slots[current]` is the current module's.
 SemaComptimeScopes: struct {
-    slots: [SemaComptimeModuleScope]
-    current: Int{0}
+    slots: [SemaComptimeModuleScope],
+    current: Int{0},
     // The host callbacks the checks reach (SemaHostHookAccess).
-    host_hooks: SemaHostHookAccess?{None}
+    host_hooks: SemaHostHookAccess?{None},
     // How many times a check entered a slot; a slot's `used` is the count
     // at its last entry, so a new module replaces the least recent.
-    entries: Int{0}
+    entries: Int{0},
 }
 
 // One module's comptime scope.
 SemaComptimeModuleScope: struct {
-    module_identity: ModuleID
-    table: SemaScopeTable
+    module_identity: ModuleID,
+    table: SemaScopeTable,
     // sema_registration_apply_graph_module's result and its diagnostics.
-    applied: Bool
-    diagnostics: [Diagnostic]
-    constants: [SemaComptimeWaitingConstant]
+    applied: Bool,
+    diagnostics: [Diagnostic],
+    constants: [SemaComptimeWaitingConstant],
     // The graph state `constants` were last compared with: the number of
     // staged values applied to the run's graph (-1: none yet).
-    version: Int
-    used: Int{0}
+    version: Int,
+    used: Int{0},
 }
 
 // A module-scope binding whose symbol is a constant still waiting for its
 // known-time type (sema_comptime_symbol_waits), and its graph row.
 SemaComptimeWaitingConstant: struct {
-    binding: Int
-    source: SemaComptimeWaitingSource
+    binding: Int,
+    source: SemaComptimeWaitingSource,
 }
 
 // `Namespace`: a package name bound from its declaring member's symbol row
 // (SemaRegistrationModule.namespace_bindings).
 SemaComptimeWaitingSource: enum {
-    Symbol(position: Int)
-    Import(import_index: Int, binding: Int)
-    Namespace(module_index: Int, position: Int)
+    Symbol(position: Int),
+    Import(import_index: Int, binding: Int),
+    Namespace(module_index: Int, position: Int),
 }
 
 // The caller's written `T E!` return (its span and success type `T`) and the
 // end of its declaration, where E2404 offers a conversion `impl`.
 SemaFailureRepair: struct {
-    return_span: Span
-    success: Type
-    declaration_end: Int
+    return_span: Span,
+    success: Type,
+    declaration_end: Int,
 }
 
 // A `defer` body's frame: the loop depth and loop label count outside it, so
 // a `break` or `next` that steers one of those loops leaves the body.
 SemaDeferFrame: struct {
-    loop_depth: Int
-    labels: Int
+    loop_depth: Int,
+    labels: Int,
 }
 
 // An `#On(.Deep)` body's frame. A deep check reads the state around it but
@@ -786,353 +786,353 @@ SemaDeferFrame: struct {
 // `labels` are the loop depth and loop label count outside the body. A lambda
 // made in the body runs on its own exits, so `exits` is false there.
 SemaDeepFrame: struct {
-    loop_depth: Int
-    labels: Int
-    bindings: Int
-    exits: Bool
+    loop_depth: Int,
+    labels: Int,
+    bindings: Int,
+    exits: Bool,
 }
 
 SemaCheckContext: struct {
-    exact_int_reachable: Bool
-    unsafe_depth: Int
+    exact_int_reachable: Bool,
+    unsafe_depth: Int,
     // The scope depth of the frame a `return` here leaves: 0 for a named
     // function, the lambda's own frame inside a lambda body. A `return` must
     // have done the `#SingleUse` duties bound in that frame or deeper.
-    duty_scope_depth: Int{0}
-    borrow_ctx: Bool
-    allow_string_view_read: Bool
+    duty_scope_depth: Int{0},
+    borrow_ctx: Bool,
+    allow_string_view_read: Bool,
     // Rust `suppress_partial_move_root_read`: the expression being checked
     // is the base of a deeper place (`state` in `state.x`, `&s`, `s.x = v`)
     // whose complete place the caller checks, so a bare name read here
     // answers only for a move of the whole name.
-    suppress_partial_move_root_read: Bool
-    allow_fixed_constructor: Bool
-    generic_params: [TGenericParam]
-    lambda_escapes: Bool?
-    lambda_lending_views: Bool
-    lending_view_parameter_keys: [String]
-    lambda_statement_tails: [SemaStatementTailFrame]
-    call_facts: [SemaCallSiteFact]
+    suppress_partial_move_root_read: Bool,
+    allow_fixed_constructor: Bool,
+    generic_params: [TGenericParam],
+    lambda_escapes: Bool?,
+    lambda_lending_views: Bool,
+    lending_view_parameter_keys: [String],
+    lambda_statement_tails: [SemaStatementTailFrame],
+    call_facts: [SemaCallSiteFact],
     // Each static route a body registers, `binding|method|pattern`, to the
     // span that registered it first.
-    http_routes: [String:Span]{[String:Span]{}}
-    hardware_use: TargetHardwareUse
-    call_return_views: [SemaCallReturnView]
-    local_view_provenance: [SemaLocalViewProvenance]
-    return_view_receiver_key: String
-    return_view_parameter_keys: [String]
-    return_view_provenance: ViewProvenanceMap?
-    name_references: [SemaNameReferenceFact]
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    comptime_body_values: SemaComptimeBodyValues
+    http_routes: [String:Span]{[String:Span]{}},
+    hardware_use: TargetHardwareUse,
+    call_return_views: [SemaCallReturnView],
+    local_view_provenance: [SemaLocalViewProvenance],
+    return_view_receiver_key: String,
+    return_view_parameter_keys: [String],
+    return_view_provenance: ViewProvenanceMap?,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    comptime_body_values: SemaComptimeBodyValues,
     // Derived module/key indexes into the canonical ordered source rows.
-    comptime_body_source_modules: [Int]
-    comptime_body_source_rows: [[String:Int]]
-    compute_calls: [SemaComputeCallFact]
-    autodiff_obligations: [SemaAutodiffObligation]
+    comptime_body_source_modules: [Int],
+    comptime_body_source_rows: [[String:Int]],
+    compute_calls: [SemaComputeCallFact],
+    autodiff_obligations: [SemaAutodiffObligation],
     // Ownership/GenericCrossings.jet: what this body's type parameters cross,
     // and the generic calls whose arguments decide it.
-    generic_crossings: [SemaGenericCrossing]
-    generic_calls: [SemaGenericCall]
+    generic_crossings: [SemaGenericCrossing],
+    generic_calls: [SemaGenericCall],
     // The clean crossing walks of this body's generic calls, one per crossing.
-    crossing_walks: [SemaCrossingBodyWalk]{[SemaCrossingBodyWalk]{}}
-    autodiff_safe_panic: Bool
-    autodiff_unsafe_panic: Bool
-    autodiff_safe_panic_context: Bool
-    copy_events: [SemaCopyEvent]
-    loop_value_frames: [SemaLoopValueFrame]
-    loop_break_flows: [SemaLoopBreakFlows]
-    pending_loop_value: SemaPendingLoopValue?
-    collect_item_types: [Type?]
+    crossing_walks: [SemaCrossingBodyWalk]{[SemaCrossingBodyWalk]{}},
+    autodiff_safe_panic: Bool,
+    autodiff_unsafe_panic: Bool,
+    autodiff_safe_panic_context: Bool,
+    copy_events: [SemaCopyEvent],
+    loop_value_frames: [SemaLoopValueFrame],
+    loop_break_flows: [SemaLoopBreakFlows],
+    pending_loop_value: SemaPendingLoopValue?,
+    collect_item_types: [Type?],
     // The value-if a collecting loop yields as its item, while it is checked:
     // its arms are the loop's item paths, so their mismatch is E0074.
-    collect_item_if: Span?
-    last_loop_result_type: Type?
-    arrow_loop_body: Bool
-    reactive_upgrades: [String]
-    reactive_upgrade_names: [String]
-    reactive_local_ids: [SymbolID]
-    reactive_shared_ids: [SymbolID]
-    taskgroups: SemaTaskGroupState
+    collect_item_if: Span?,
+    last_loop_result_type: Type?,
+    arrow_loop_body: Bool,
+    reactive_upgrades: [String],
+    reactive_upgrade_names: [String],
+    reactive_local_ids: [SymbolID],
+    reactive_shared_ids: [SymbolID],
+    taskgroups: SemaTaskGroupState,
     // `failure_carrier_root` is the one-shot token a
     // carrier consumer (`??`, `?`, an `.Ok`/`.Err` pattern) sets so its call
     // subject keeps the Result carrier; `failure_success_view` tells the call
     // being checked that its expectation describes the success value.
-    failure_carrier_root: Bool
-    failure_success_view: Bool
+    failure_carrier_root: Bool,
+    failure_success_view: Bool,
     // Under `failures: .Explicit` (FailureMarks.jet): the node of the call a
     // written `?` marks, and the node of the call the expression being
     // checked reads a member of, which its mark must wrap in parentheses.
-    failure_mark_written: Int{-1}
-    failure_mark_receiver: Int{-1}
+    failure_mark_written: Int{-1},
+    failure_mark_receiver: Int{-1},
     // An open callback (no written or expected return) adopts the carrier of
     // its first propagated call, as the Rust reference's callback inference.
-    failure_inference: Bool
-    inferred_failure_carrier: TFailureCarrier?
+    failure_inference: Bool,
+    inferred_failure_carrier: TFailureCarrier?,
     // An expected callback with no return row (`fn(T)`, nothing after it):
     // its `return value` has no slot until a propagated fallible call gives it
     // that call's carrier as its row (`callback_return_row`), as the Rust
     // reference's callback `ret`.
-    callback_return_open: Bool{false}
-    callback_return_row: Type?{None}
+    callback_return_open: Bool{false},
+    callback_return_row: Type?{None},
     // An expected callback whose return row is a plain value (`fn(T, T) ->
     // Ordering`): it has no failure route, so a call of an unannotated
     // function in it is a failure obligation the bundle solve settles, as in
     // a named `T Never!` function, rather than the callback's carrier.
-    callback_return_closed: Bool{false}
+    callback_return_closed: Bool{false},
     // A collection slot that projects a fallible callback's failure onto its
     // own result (`filter`'s `[T] E!`): its plain return row (`Bool`) names
     // only the success, so the callback still infers its carrier from its
     // first propagated call. Set by Calls/Collections.jet for one argument;
     // the lambda it is set for reads and clears it on entry.
-    callback_failure_open: Bool{false}
+    callback_failure_open: Bool{false},
     // The `defer` body being checked: an exit or a propagated failure in it
     // would leave a block that is already ending.
-    defer_frame: SemaDeferFrame?{None}
+    defer_frame: SemaDeferFrame?{None},
     // The enclosing callable's written failure contract, for E2404 provenance.
-    failure_contract_source: String
+    failure_contract_source: String,
     // Where E2404's repair edits go: the caller's written `T E!` return and
     // the end of its declaration. None when no fallible return was written.
-    failure_repair: SemaFailureRepair?
+    failure_repair: SemaFailureRepair?,
     // The enclosing named callable, for the return verdicts.
-    function_name: String
+    function_name: String,
     // The module state this body writes (sema_scope_record_module_write),
     // which a pure function may not reach (E3401).
-    module_writes: [TEffectSpan]{[TEffectSpan]{}}
+    module_writes: [TEffectSpan]{[TEffectSpan]{}},
     // E0408/E0409: a fallback with no failure report to name (`??` on an
     // optional, or a pure pattern miss) denies `err` with this code.
-    fallback_err_denial: String?
+    fallback_err_denial: String?,
     // Source starts of else-less value dispatch chains already proved (E0307);
     // every level of one chain shares its span, and the outermost level wins.
-    noelse_chain_starts: [Int]
+    noelse_chain_starts: [Int],
     // Source starts of the function's fallback-free arm tables followed by a
     // default return (L0513): their miss falls through to that return, so
     // they need no `else` arm (E0003).
-    fallback_tables: [Int]
+    fallback_tables: [Int],
     // The last statement of a named function with no written
     // return type; a non-Unit value there is thrown away (E0433).
-    lost_tail_span: Span?
+    lost_tail_span: Span?,
     // #3886: the last statement of a named function with a
     // written value return; it is checked as the value the function hands back.
-    value_tail_span: Span?
+    value_tail_span: Span?,
     // #3708: the function keys whose failures this body propagates; "" marks a
     // failure source of its own (`Err`, a propagated non-call, a propagating
     // callback). Callback bodies add their rows too, as the Rust body walk does.
-    failure_edges: [String]
+    failure_edges: [String],
     // #3708: a direct failure source outside callbacks (a fallible value
     // returned as-is, or a statement that owns its own failure route).
-    failure_direct_source: Bool
+    failure_direct_source: Bool,
     // What reaches this body's default
     // `Err` route outside callbacks: typed failures (made here or passed up
     // from a callee with a written contract), function-owned cases
     // (`Err(.NotFound(n))`), the unannotated callees whose failures pass up,
     // and whether the general `Err` reaches it. The bundle failure-union
     // solve joins these rows (FailureUnion.jet).
-    failure_union_members: [Type]{[Type]{}}
-    failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}}
-    failure_union_edges: [String]{[String]{}}
-    failure_union_general: Bool{false}
+    failure_union_members: [Type]{[Type]{}},
+    failure_union_cases: [SemaFailureCase]{[SemaFailureCase]{}},
+    failure_union_edges: [String]{[String]{}},
+    failure_union_general: Bool{false},
     // #6281 c176: a top-level body whose default `Err` route the union solve
     // infers (sema_failure_inference_candidate, not the entry `run`). A typed
     // failure it records projects it onto a typed contract and checks it
     // again, so this pass's reports are replaced (sema_failure_recheck_modules).
-    failure_union_inferable: Bool{false}
+    failure_union_inferable: Bool{false},
     // (Rust `task_body_propagates`): a failure in this lambda
     // body leaves through the enclosing callable's carrier. Every lambda body
     // starts it false (a checking snapshot does not copy it) and harvests it.
-    task_body_propagates: Bool{false}
+    task_body_propagates: Bool{false},
     // Rust `iter_borrowed` (E0507): the collections an active `loop x in xs`
     // reads across its body, so a change to one of them there is rejected.
-    iter_borrowed: [String]{[String]{}}
+    iter_borrowed: [String]{[String]{}},
     // E0136: a binding's initializer is being checked, so a
     // propagating runtime range conversion inside it is reported there.
-    binding_initializer: Bool{false}
+    binding_initializer: Bool{false},
     // E1403: source forms being checked right now, one per
     // statement and per expression level, against the limit the parser
     // also enforces.
-    source_nesting: Int{0}
+    source_nesting: Int{0},
     // Active bindingless collecting-loop subjects, where a
     // bare `.member` chain reads the implicit `it`.
-    implicit_loop_subject_depth: Int{0}
+    implicit_loop_subject_depth: Int{0},
     // Active subject-shorthand lambda scopes (L0512).
-    subject_shorthand_depth: Int{0}
+    subject_shorthand_depth: Int{0},
     // Why this body stopped without a diagnostic: a construct the checker
     // does not handle yet or a lost compiler invariant. These reach the
     // driver's internal-problem report (I2), never the user's diagnostics.
-    incomplete_reasons: [String]{[String]{}}
-    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    incomplete_reasons: [String]{[String]{}},
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}},
     // The body's `todo` goals, with the card naming each one's expected type.
-    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}},
     // The fixed-list indexes the body proved in range (TIndexProof).
-    index_proofs: [TIndexProof]{[TIndexProof]{}}
+    index_proofs: [TIndexProof]{[TIndexProof]{}},
     // The source node ids this check gave its nodes (sema_check_record_expr_id),
     // in filing order and as a set, and the next function-local id for a node
     // whose source id is generated or already filed (a desugared copy). A
     // snapshot starts with no ids and continues the id count; its merge hands
     // both back.
-    filed_expr_ids: [Int]{[Int]{}}
-    filed_expr_id_set: [Int:Bool]{[Int:Bool]{}}
-    next_expr_id: Int{TEXPR_FIRST_LOCAL_ID}
+    filed_expr_ids: [Int]{[Int]{}},
+    filed_expr_id_set: [Int:Bool]{[Int:Bool]{}},
+    next_expr_id: Int{TEXPR_FIRST_LOCAL_ID},
     // True while this check reads a copy of another declaration's source (a
     // callee's `#Pre` clause at one of its call sites): that source's ids are
     // filed by every copy, so each copy's nodes take fresh function-local ids.
-    fresh_expr_ids: Bool{false}
+    fresh_expr_ids: Bool{false},
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
-    host_hooks: SemaHostHookAccess?{None}
+    host_hooks: SemaHostHookAccess?{None},
     // (Rust `arithmetic_policy_stack`): the active lexical
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Overflow(mode)` marker. Closures checked inside the body keep it.
-    arithmetic_policy: ArithmeticPolicyFact?{None}
+    arithmetic_policy: ArithmeticPolicyFact?{None},
     // The active run-time policy (`#Runtime(.NoEager)` or `#Runtime(.Only)`)
     // of the function and block being checked: `PolicyValue.NoEager` or
     // `PolicyValue.Only`. Closures checked inside the body keep it.
-    runtime_policy: PolicyValue?{None}
+    runtime_policy: PolicyValue?{None},
     // The overflow word (`wrapping`, `saturating` or `checked`) written
     // directly around the typed-literal conversion being checked. The
     // conversion takes it on entry, so it never reaches a nested expression.
-    overflow_word: String?{None}
+    overflow_word: String?{None},
     // The body being checked is compiler-generated scaffolding (a derived
     // codec or protocol method, a field policy wrapper) that spells every
     // carrier out: a call root keeps its Result and an unmarked writing
     // receiver is not reported. A `#Test` body is user code and is not.
-    compiler_generated: Bool{false}
+    compiler_generated: Bool{false},
     // The types whose semantic copy is being rebuilt from its parts' copies
     // (sema_expr_copy_fork), outermost first: a type that reaches itself
     // without a generated fork function is refused, the rebuild reads and
     // writes the private fields the copied value already owns, and a part's
     // copy inside it records no second `Clock copy` effect.
-    fork_copy_rebuilding: [String]{[String]{}}
+    fork_copy_rebuilding: [String]{[String]{}},
     // The function being checked declares its result's owners (`-> T from
     // self | param`): a returned place read is a view of them, not a copy.
-    return_view_declared: Bool{false}
+    return_view_declared: Bool{false},
     // The rows of the nodes this check built flat (sema_node): a node's
     // children are row indices of this arena (the flattener's into-arena
     // mode). A mark never truncates it, so a kept speculative result never
     // names a row past its end; the rows no published node reaches are
     // dropped when the function is flattened.
-    arena: BodyFlat{BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true}}
+    arena: BodyFlat{BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true}},
     // The field facts of the non-generic structs this check built literals
     // of (sema_expression_struct_field_facts): owner symbol id -> index of
     // its first field's fact.
-    struct_field_fact_rows: [U32:Int]{[U32:Int]{}}
-    struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}}
+    struct_field_fact_rows: [U32:Int]{[U32:Int]{}},
+    struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}},
     // Spans of the named-literal field values whose declared field type holds
     // a view (`View<T>`, `View<str>` or a struct that stores one): only these
     // keep a view into their source inside the literal; any other field owns
     // its value (sema_stmt_local_view_facts_fields).
-    view_field_values: [Span]{[Span]{}}
+    view_field_values: [Span]{[Span]{}},
     // The `:=` number names whose type a use decided on an earlier check pass
     // of this function, and the refusals this pass found. A probe's rollback
     // keeps the refusals it found: each is a use the source writes, and the
     // earliest one decides (Expressions/NumberNames.jet).
-    number_retypes_known: [SemaNumberRetype]{[SemaNumberRetype]{}}
-    number_retypes_found: [SemaNumberRetype]{[SemaNumberRetype]{}}
+    number_retypes_known: [SemaNumberRetype]{[SemaNumberRetype]{}},
+    number_retypes_found: [SemaNumberRetype]{[SemaNumberRetype]{}},
 }
 
 // A `:=` number name (`binding`, its name's span) takes `ty`, the type its use
 // at `use_span` needs where its default type is refused.
 SemaNumberRetype: struct {
-    binding: Span
-    ty: Type
-    use_span: Span
+    binding: Span,
+    ty: Type,
+    use_span: Span,
 }
 
 SemaScopeModulePolicy: struct {
-    unit_explicit_units: Bool
-    copies_explicit: Bool
-    writes_explicit: Bool
-    failures_explicit: Bool
+    unit_explicit_units: Bool,
+    copies_explicit: Bool,
+    writes_explicit: Bool,
+    failures_explicit: Bool,
     // Split the exact span key into scalar indexes, without formatting it.
-    function_unit_starts: [Int:Int]
-    function_unit_ends: [[Int:Bool]]
+    function_unit_starts: [Int:Int],
+    function_unit_ends: [[Int:Bool]],
 }
 
 SemaScopeTable: struct {
     // The module whose scope the table is (none for a detached table); its
     // root frame has no owner.
-    module_identity: ModuleID
-    frames: [SemaScopeFrame]
-    bindings: [SemaScopeBinding]
+    module_identity: ModuleID,
+    frames: [SemaScopeFrame],
+    bindings: [SemaScopeBinding],
     // Binding positions per name, ascending: `name_slots` maps a name to its
     // row in `name_positions` (interned spellings, A1). Every push goes through
     // sema_scope_push_binding, so name resolution never rescans `bindings`.
-    name_slots: NameRows
-    name_positions: [[Int]]
-    loop_labels: [SemaScopeLoopLabel]
-    hardware_transfers: [SemaHardwareDMATransferFact]
-    hardware_definite_transfers: [SemaHardwareDMATransferFact]
-    hardware_pending_transfers: [SemaHardwareDMATransferFact]
-    current: Int
-    return_type: Type?
-    failure_carrier: TFailureCarrier?
-    knowledge_gate: SemaKnowledgeGate?
-    loop_depth: Int
-    ownership_call_depth: Int
-    comptime_execution_depth: Int
-    transaction_depth: Int
-    transaction_wall_depth: Int
-    unit_explicit_units: Bool
+    name_slots: NameRows,
+    name_positions: [[Int]],
+    loop_labels: [SemaScopeLoopLabel],
+    hardware_transfers: [SemaHardwareDMATransferFact],
+    hardware_definite_transfers: [SemaHardwareDMATransferFact],
+    hardware_pending_transfers: [SemaHardwareDMATransferFact],
+    current: Int,
+    return_type: Type?,
+    failure_carrier: TFailureCarrier?,
+    knowledge_gate: SemaKnowledgeGate?,
+    loop_depth: Int,
+    ownership_call_depth: Int,
+    comptime_execution_depth: Int,
+    transaction_depth: Int,
+    transaction_wall_depth: Int,
+    unit_explicit_units: Bool,
     // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
-    copies_explicit: Bool{false}
+    copies_explicit: Bool{false},
     // `writes: .Explicit` is active: every call writes the `&`/`&&` mark its
     // signature implies (Ownership/CallMarks.jet).
-    writes_explicit: Bool{false}
+    writes_explicit: Bool{false},
     // `failures: .Explicit` is active: every call that can fail is written
     // with `?` (FailureMarks.jet).
-    failures_explicit: Bool{false}
+    failures_explicit: Bool{false},
     // The innermost `#Context` block: 0 outside one, 1 inside one without an
     // `allocator:` field, 2 when an enclosing block names an allocator.
-    context_allocation: Int{0}
+    context_allocation: Int{0},
     // The written header of the hole table being checked: the parser
     // checks it once per arm, so a call there that has an effect runs once
     // per arm (E0442).
-    hole_header: Span?{None}
+    hole_header: Span?{None},
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.
-    policy_modules: [U32:Int]{[U32:Int]{}}
-    policy_rows: [SemaScopeModulePolicy]{[SemaScopeModulePolicy]{}}
+    policy_modules: [U32:Int]{[U32:Int]{}},
+    policy_rows: [SemaScopeModulePolicy]{[SemaScopeModulePolicy]{}},
     // Rollback support (sema_scope_mark / sema_scope_rollback): while a mark
     // is open, an in-place edit of an existing binding first records the old
     // row here, so a rollback restores the table without a whole-table copy.
-    binding_undo: [SemaScopeBindingUndo]{[SemaScopeBindingUndo]{}}
-    open_marks: Int{0}
+    binding_undo: [SemaScopeBindingUndo]{[SemaScopeBindingUndo]{}},
+    open_marks: Int{0},
     // The function a compiler thread is checking (sema_function_check_shared),
     // which names its panic locations; None names the environment's
     // `function_name`.
-    location_function: String?{None}
+    location_function: String?{None},
     // `light_types[index]`: row `index` is a body thread's copy whose
     // function type stayed in the environment's `module_scope`
     // (sema_scope_light_copy). Empty for every other table.
-    light_types: [Bool]{[Bool]{}}
+    light_types: [Bool]{[Bool]{}},
     // A contract condition is written above the parameters it reads and is
     // checked again at each call site, whose spans name another place, so
     // its names resolve without the declared-before-use position rule.
-    position_free: Bool{false}
+    position_free: Bool{false},
     // The registration graph's counters (SemaLookupCounters) while it
     // counts: each resolution adds one lookup and the binding rows it
     // examined. None for an uncounted table.
-    lookup_counters: SemaScopeLookupCounters?{None}
+    lookup_counters: SemaScopeLookupCounters?{None},
     // The inferred return-view provenance of this module's view-returning
     // methods (sema_check_view_summaries), by registered method symbol id.
     // A method call candidate carries the registered signature, which holds
     // only a declared `from` contract.
-    method_return_views: [U32:ViewProvenanceMap]{[U32:ViewProvenanceMap]{}}
+    method_return_views: [U32:ViewProvenanceMap]{[U32:ViewProvenanceMap]{}},
     // A body comptime site's staged check: the run-time locals and
     // parameters of the function around the site, which its compile-time
     // code can't read (SemaComptimeBodySource.runtime_locals).
-    comptime_runtime_locals: [String]{[String]{}}
+    comptime_runtime_locals: [String]{[String]{}},
     // The innermost `#On(.Deep)` body being checked (SemaDeepFrame).
-    deep_check: SemaDeepFrame?{None}
+    deep_check: SemaDeepFrame?{None},
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:
 // the counts are not part of the table's facts.
 SemaScopeLookupCounters: struct {
-    counters: Shared<SemaLookupCounters>
+    counters: Shared<SemaLookupCounters>,
 
     impl Debug {
         debug: fn(self) -> String { "SemaScopeLookupCounters" }
@@ -1140,24 +1140,24 @@ SemaScopeLookupCounters: struct {
 }
 
 SemaScopeBindingUndo: struct {
-    index: Int
-    binding: SemaScopeBinding
+    index: Int,
+    binding: SemaScopeBinding,
 }
 
 // A rollback point: the table's row counts plus a copy of its small fields.
 // `saved` holds no frames, bindings or name rows.
 SemaScopeMark: struct {
-    frames: Int
-    bindings: Int
-    undo: Int
-    saved: SemaScopeTable
+    frames: Int,
+    bindings: Int,
+    undo: Int,
+    saved: SemaScopeTable,
 }
 
 // The hardware transfer facts of one path, joined at a control-flow merge.
 SemaScopeHardwareFacts: struct {
-    transfers: [SemaHardwareDMATransferFact]
-    definite: [SemaHardwareDMATransferFact]
-    pending: [SemaHardwareDMATransferFact]
+    transfers: [SemaHardwareDMATransferFact],
+    definite: [SemaHardwareDMATransferFact],
+    pending: [SemaHardwareDMATransferFact],
 }
 
 // The program half of a check's environment (FRONTEND-300X §3.1 J): the
@@ -1166,26 +1166,26 @@ SemaScopeHardwareFacts: struct {
 // landing writes it. The tables own the graph they are given: callers hand
 // over one graph rather than a read value the constructor would copy again.
 SemaProgramTables: struct {
-    registration_graph: SemaRegistrationGraph?
-    checked_types: [TTypeDef]
+    registration_graph: SemaRegistrationGraph?,
+    checked_types: [TTypeDef],
     // Rust `Checker::types` (keyed registry): every `checked_types` row of a
     // bare name in order, by the name's id in `checked_type_names`. The
     // first row of a module among them is that module's declaration.
-    checked_type_names: NameTable
-    checked_type_name_rows: [[Int]]
+    checked_type_names: NameTable,
+    checked_type_name_rows: [[Int]],
     // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
     // key -> its boxed recursive-layout keys, computed once per tables. Staged
     // comptime values type only waiting constants, never a nominal's fields,
     // so landing values leaves these edges unchanged.
-    boxed_edges: [String:[String]]
+    boxed_edges: [String:[String]],
     // `sema_copy_facts_table(registration_graph)`: each non-generic nominal's
     // copy facts, walked once per tables. Landing comptime values never
     // changes a nominal's members, so these stay true.
-    copy_facts: SemaCopyFactsTable
+    copy_facts: SemaCopyFactsTable,
     // The run's symbols of a check with no registration graph (one program,
     // check_program); a graph's own table (SemaRegistrationGraph.symbols)
     // is the run's otherwise.
-    symbols: SymbolTable{symbol_table()}
+    symbols: SymbolTable{symbol_table()},
 }
 
 // The run-wide id of `key`, if a registration holds it.
@@ -1652,30 +1652,30 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
 // `iter_borrowed` rows and no binding initializer open. A new
 // SemaCheckContext field must be added here and in the rollback.
 SemaCheckContextMark: struct {
-    call_facts: Int
-    module_writes: Int
-    call_return_views: Int
-    local_view_provenance: Int
-    name_references: Int
-    comptime_requests: Int
-    comptime_body_sources: Int
-    compute_calls: Int
-    autodiff_obligations: Int
-    generic_crossings: Int
-    generic_calls: Int
-    copy_events: Int
-    noelse_chain_starts: Int
-    failure_edges: Int
-    failure_union_members: Int
-    failure_union_cases: Int
-    failure_union_edges: Int
-    incomplete_reasons: Int
-    origin_facts: Int
-    typed_goals: Int
-    index_proofs: Int
-    filed_expr_ids: Int
-    next_expr_id: Int
-    saved: SemaCheckContext
+    call_facts: Int,
+    module_writes: Int,
+    call_return_views: Int,
+    local_view_provenance: Int,
+    name_references: Int,
+    comptime_requests: Int,
+    comptime_body_sources: Int,
+    compute_calls: Int,
+    autodiff_obligations: Int,
+    generic_crossings: Int,
+    generic_calls: Int,
+    copy_events: Int,
+    noelse_chain_starts: Int,
+    failure_edges: Int,
+    failure_union_members: Int,
+    failure_union_cases: Int,
+    failure_union_edges: Int,
+    incomplete_reasons: Int,
+    origin_facts: Int,
+    typed_goals: Int,
+    index_proofs: Int,
+    filed_expr_ids: Int,
+    next_expr_id: Int,
+    saved: SemaCheckContext,
 }
 
 sema_check_context_mark: fn(context: &SemaCheckContext) -> SemaCheckContextMark Never! {
@@ -2959,9 +2959,9 @@ sema_scope_refine_local: fn(table: &SemaScopeTable, symbol: Symbol, key: String)
 // the readers below: copying the item copies a nominal's method bodies and
 // trait implementations on every expression that names it.
 SemaScopeDeclarationSite: enum {
-    Function(module_index: Int, row: Int)
-    Nominal(module_index: Int, row: Int)
-    Local(index: Int)
+    Function(module_index: Int, row: Int),
+    Nominal(module_index: Int, row: Int),
+    Local(index: Int),
 }
 
 sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> SemaScopeDeclarationSite? {
@@ -3009,11 +3009,11 @@ sema_scope_resolve_declaration: fn(environment: SemaScopeEnvironment, program: S
 
 // The item variant of sema_scope_resolve_declaration(environment, program, id).
 SemaScopeDeclarationKind: enum {
-    Func
-    Struct
-    Enum
-    Distinct
-    Other
+    Func,
+    Struct,
+    Enum,
+    Distinct,
+    Other,
 }
 
 sema_scope_item_kind: fn(item: Item) -> SemaScopeDeclarationKind Never! {
@@ -3057,9 +3057,9 @@ sema_scope_declaration_is: fn(environment: SemaScopeEnvironment, program: SemaPr
 // A struct declaration's type parameters and fields, without its methods, and
 // the inline module that declared it (StructDef.inline_module).
 SemaScopeStructShape: struct {
-    type_params: [TypeParam]
-    fields: [Field]
-    inline_module: Span?
+    type_params: [TypeParam],
+    fields: [Field],
+    inline_module: Span?,
 }
 
 sema_scope_item_struct: fn(item: Item) -> SemaScopeStructShape? {
@@ -3121,9 +3121,9 @@ sema_scope_item_struct_states: fn(item: Item) -> [String]? {
 // An enum declaration's type parameters, variants and variant groups, without
 // its methods.
 SemaScopeEnumShape: struct {
-    type_params: [TypeParam]
-    variants: [Variant]
-    groups: [EnumGroup]
+    type_params: [TypeParam],
+    variants: [Variant],
+    groups: [EnumGroup],
 }
 
 sema_scope_item_enum: fn(item: Item) -> SemaScopeEnumShape? {

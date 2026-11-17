@@ -36,65 +36,65 @@ CANVAS_HOST_TEXT: "text/plain; charset=utf-8"
 
 #Error
 CanvasHostError: struct {
-    message: String
+    message: String,
 }
 
 CanvasHostClient: struct {
-    id: String
-    seen: Int
+    id: String,
+    seen: Int,
 }
 
 // One resident Canvas session. Revisions are `sha256-<hex>` source
 // revisions; "" is none yet.
 CanvasHostState: struct {
-    id: String
-    secret: String
+    id: String,
+    secret: String,
     // The entry file as `jet dev` was given it, and its project-relative id.
-    entry: String
-    source_id: String
-    host: String
-    port: Int
+    entry: String,
+    source_id: String,
+    host: String,
+    port: Int,
     // "starting", "ready" or "error".
-    state: String
-    source_revision: String
-    accepted_revision: String
-    diagnostic_code: String
-    diagnostic: String
-    diagnostic_revision: String
+    state: String,
+    source_revision: String,
+    accepted_revision: String,
+    diagnostic_code: String,
+    diagnostic: String,
+    diagnostic_revision: String,
     // The `canvas.graph` answer of the last good projection, and of the
     // failed check after it, when the latest check failed.
-    graph: String
-    failure: String?
+    graph: String,
+    failure: String?,
     // The revision of the good graph last served: the session's kept view.
-    graph_view_revision: String
+    graph_view_revision: String,
     // Good projections so far; the dev status's revision number.
-    version: Int
-    last_build_ms: Int
-    clients: [CanvasHostClient]
-    tick: Int
+    version: Int,
+    last_build_ms: Int,
+    clients: [CanvasHostClient],
+    tick: Int,
     // The `canvas.project` answer the dev loop last published; "" none yet.
-    project: String
+    project: String,
     // Transaction receipts, oldest first (at most CANVAS_HOST_MAX_RECEIPTS).
-    receipts: [CanvasHostReceipt]
+    receipts: [CanvasHostReceipt],
 }
 
 // What a Canvas listener path names. Every path a Canvas listener serves
 // under its session is a route (the Rust host's canvas_api_path); Unknown
 // paths are refused like a bad secret.
 CanvasHostRoute: enum {
-    Page(base: String)
-    PanelPage
-    App
-    Session
-    Project
-    Graph
-    Source
-    Transaction
-    Debug
-    Status
-    Version
-    Unbuilt
-    Unknown
+    Page(base: String),
+    PanelPage,
+    App,
+    Session,
+    Project,
+    Graph,
+    Source,
+    Transaction,
+    Debug,
+    Status,
+    Version,
+    Unbuilt,
+    Unknown,
 }
 
 // A Canvas path whose handler this host does not have yet.
@@ -502,8 +502,8 @@ canvas_host_graph: fn(state: Shared<CanvasHostState>, source_id: String?) -> HTT
 }
 
 CanvasHostGraph: struct {
-    ok: Bool
-    body: String
+    ok: Bool,
+    body: String,
 }
 
 // The graph answer to serve; a good one becomes the session's kept view.

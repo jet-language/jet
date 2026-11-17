@@ -20,7 +20,7 @@ env: JET_STORE_DIR={work}/cache
 step: jet build -O0 typed/main.jet --write-generated=on
 exit: 0
 file: typed/.jet/generated/main/shape.jet ~ "Shape: struct {" # the declared struct is the generated module
-file: typed/.jet/generated/main/shape.jet ~ "    total: I32\n" # the renamed field keeps its reflected type
+file: typed/.jet/generated/main/shape.jet ~ "    total: I32,\n" # the renamed field keeps its reflected type
 step: {work}/typed/.jet/build/app
 exit: 0
 stdout: = a_struct_made_from_reflected_fields_needs_no_meta_raw.out
@@ -49,13 +49,13 @@ exit: 0
 stdout: = "42\n"
 step: jet build returned/main.jet --write-generated=on
 exit: 0
-file: returned/.jet/generated/main/pin.jet ~ "    at: Point\n" # the returned TypeId is written as the checker prints it
+file: returned/.jet/generated/main/pin.jet ~ "    at: Point,\n" # the returned TypeId is written as the checker prints it
 step: {work}/returned/.jet/build/app
 exit: 0
 stdout: = "point.Point\n9\n"
 step: jet build indexed/main.jet --write-generated=on
 exit: 0
-file: indexed/.jet/generated/main/twin.jet ~ "    id: I64\n    tags: [String]\n" # each index row's TypeId, as the generated module names it
+file: indexed/.jet/generated/main/twin.jet ~ "    id: I64,\n    tags: [String],\n" # each index row's TypeId, as the generated module names it
 step: {work}/indexed/.jet/build/app
 exit: 0
 stdout: = "7\n2\n"

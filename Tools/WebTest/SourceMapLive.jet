@@ -34,7 +34,7 @@ DRIVE_PATH: Regex{"^[A-Za-z]:[\\/]"}
 
 #Error
 Failure: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message }
@@ -43,51 +43,51 @@ Failure: struct {
 
 #CLI
 LiveArgs: struct {
-    #Doc("the static server's port") port: Int
-    #Doc("the page whose script is paused") prefix: String{"/click"}
+    #Doc("the static server's port") port: Int,
+    #Doc("the page whose script is paused") prefix: String{"/click"},
 }
 
 // The fields of a version 3 source map the checks read.
 #Rename(.Camel)
 SourceMapFile: struct {
-    version: Int
-    sources: [String]
-    sources_content: [String]
-    mappings: String
+    version: Int,
+    sources: [String],
+    sources_content: [String],
+    mappings: String,
 }
 
 // One decoded segment with a source: generated and original positions, all 0-based.
 Mapping: struct {
-    generated_line: Int
-    generated_column: Int
-    source: Int
-    original_line: Int
-    original_column: Int
+    generated_line: Int,
+    generated_column: Int,
+    source: Int,
+    original_line: Int,
+    original_column: Int,
 }
 
 // The paused location as printed, lines 1-based.
 #[Codable(only: .Encode), Rename(.Camel)]
 PauseReport: struct {
-    #Rename("sourceMappingURL") source_mapping_url: String
-    #Rename("scriptParsedMapUrl") script_parsed_map_url: Bool
-    generated_line: Int
-    paused_generated_line: Int
-    paused_generated_column: Int
-    jet_file: String
-    jet_line: Int
-    jet_text: String
+    #Rename("sourceMappingURL") source_mapping_url: String,
+    #Rename("scriptParsedMapUrl") script_parsed_map_url: Bool,
+    generated_line: Int,
+    paused_generated_line: Int,
+    paused_generated_column: Int,
+    jet_file: String,
+    jet_line: Int,
+    jet_text: String,
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
 BreakpointAt: struct {
-    url: String
-    line_number: Int
-    column_number: Int
+    url: String,
+    line_number: Int,
+    column_number: Int,
 }
 
 #Codable(only: .Encode)
 Navigation: struct {
-    url: String
+    url: String,
 }
 
 run: fn(args: LiveArgs) Failure! {

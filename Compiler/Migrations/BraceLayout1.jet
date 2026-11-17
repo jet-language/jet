@@ -1,0 +1,272 @@
+// Toolchain a0.0.45: the data members of a brace body (struct fields and
+// command bindings, enum cases and case groups, record entries and record
+// type members, associated types, trait constants and their values,
+// requirements without a body, `impl Marker`, `impl Fact` and `impl Effect`
+// settings) are separated by commas, on one line or many; a line break alone
+// no longer ends one. The parser reports each missing comma at the end of
+// the member before it, so the plan reads them from a parse and writes `,`
+// there. Then it writes the comma `jet fmt` adds after the last member of
+// each multi-line body, found by aligning the source with its formatted
+// text token by token, so a file the formatter would change in other ways
+// still gets those commas and keeps the rest as written. The Jet programs
+// quoted in a source's strings are read the same way, and so is a Markdown
+// file's ```jet fence.
+use {
+    jet_lexer.[Token, lex_generated, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_COMMA, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_SEMI, TOKEN_STRING]
+    jet_parser.[jet_format_library_source, jet_format_source, parse_generated_source]
+}
+
+// How the parser's report of a missing comma begins.
+BRACE_LAYOUT1_MISSING: "Expected `,` after this "
+
+// How far ahead, in tokens, the alignment of a source with its formatted
+// text looks for the place where the two agree again.
+BRACE_LAYOUT1_RESYNC: 64
+
+// A place in both token lists of an alignment.
+BraceLayoutAt: struct {
+    old: Int,
+    new: Int,
+}
+
+// Adds the commas of one file: a Jet source (`source`, or a `.jet` or
+// `.template` path) or a Markdown file's ```jet fences. Other files stay as
+// written, and so do a `package.jet` manifest and a manifest template (a
+// `.template` named for its package): the Package model reads and formats
+// them, keeping the separators their authors wrote.
+brace_layout1_file: fn(path: String, text: String, source: Bool) -[]> MigrationOutcome {
+    parts: path.split("/").to_list()
+    name: parts[parts.len() - 1]
+    if name == "package.jet" || (name.ends_with(".template") && name.contains("package")) {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return brace_layout1_source(path, text)
+    }
+    if path.ends_with(".md") -> return brace_layout1_markdown(path, text)
+    MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+}
+
+// Adds the missing commas of one Jet source and of the programs quoted in
+// its strings, unless the result parses with more errors than the missing
+// commas account for, then the comma after the last data member of each
+// multi-line body. A leading inline `package: { … }` stays as written: the
+// Package model reads and formats it.
+brace_layout1_source: fn(path: String, text: String) -[]> MigrationOutcome {
+    bytes: text.bytes()
+    carrier: brace_layout1_carrier_end(bytes)
+    edits := [LambdaShapeEdit]{}
+    skipped := [String]{}
+    missing := 0
+    loop diagnostic in parse_generated_source(bytes).diagnostics {
+        if !diagnostic.what.starts_with(BRACE_LAYOUT1_MISSING) -> next
+        span: diagnostic.span ?? next
+        if span.start < carrier || edits.any(fn(edit) { edit.start == span.start }) -> next
+        edits.push(LambdaShapeEdit{start: span.start, end: span.start, text: ","})
+        missing += 1
+    }
+    rewritten := missing
+    loop token in lex_generated(bytes).tokens {
+        if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
+        if brace_layout1_quoted(path, bytes, token, skipped) == .Val(quoted_edit) {
+            rewritten += quoted_edit.rewritten
+            edits.push(LambdaShapeEdit{start: quoted_edit.start, end: quoted_edit.end, text: quoted_edit.text})
+        }
+    }
+    if edits.len() == 0 {
+        if brace_layout1_closed(text) == .Val(closed) {
+            return MigrationOutcome{text: closed.text, rewritten: closed.rewritten, skipped: skipped}
+        }
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    errors: lambda_shape1_errors(result)
+    if errors > lambda_shape1_errors(text) - missing {
+        skipped.push("{path}: the rewrite still parses with {errors} errors, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    if brace_layout1_closed(result) == .Val(closed) {
+        return MigrationOutcome{text: closed.text, rewritten: rewritten + closed.rewritten, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+// `text` with a comma after the last data member of each multi-line body,
+// where `jet fmt` writes one, when it has any such body and still parses
+// with no more errors. A body whose `}` shares the member's line is a
+// one-line body and gains none. The formatter reads a Core or prelude
+// source, which spells the reserved `__name` namespace, in the library lane.
+brace_layout1_closed: fn(text: String) -[]> LambdaShapeQuoted? {
+    formatted := jet_format_source(text, false)
+    if !formatted.ok -> formatted = jet_format_library_source(text, false)
+    if !formatted.ok || formatted.text == text -> return None
+    bytes: text.bytes()
+    carrier: brace_layout1_carrier_end(bytes)
+    edits := [LambdaShapeEdit]{}
+    loop end in brace_layout1_trailing(bytes, formatted.text.bytes()) {
+        if end >= carrier && brace_layout1_breaks(bytes, end) -> edits.push(LambdaShapeEdit{start: end, end: end, text: ","})
+    }
+    if edits.len() == 0 -> return None
+    closed: lambda_shape1_apply(bytes, edits) ?? return None
+    if lambda_shape1_errors(closed) > lambda_shape1_errors(text) -> return None
+    Val(LambdaShapeQuoted{start: 0, end: bytes.len(), text: closed, rewritten: edits.len()})
+}
+
+// Whether a line ends between `at` and the next `}`.
+brace_layout1_breaks: fn(bytes: [U8], at: Int) -[]> Bool {
+    loop index in at..<bytes.len() {
+        if bytes[index] == 10 -> return true
+        if bytes[index] == 125 -> return false
+    }
+    false
+}
+
+// The offset just past a leading inline `package: { … }`, or 0 when the
+// source starts with none.
+brace_layout1_carrier_end: fn(bytes: [U8]) -[]> Int {
+    tokens: brace_layout1_tokens(bytes)
+    if tokens.len() < 3 || tokens[0].kind != TOKEN_IDENT || tokens[1].kind != TOKEN_COLON || tokens[2].kind != TOKEN_LBRACE {
+        return 0
+    }
+    if lambda_shape1_text(bytes, tokens[0].span.start, tokens[0].span.end) != "package" -> return 0
+    depth := 0
+    loop token in tokens {
+        if token.kind == TOKEN_LBRACE -> depth += 1
+        if token.kind == TOKEN_RBRACE {
+            depth -= 1
+            if depth == 0 -> return token.span.end
+        }
+    }
+    0
+}
+
+// The source offsets after which `formatted` adds a comma right before a
+// closing `}`. The two token lists, without comments and line ends, are
+// walked together; where they differ in more than such a comma, the walk
+// resumes at the nearest point where three tokens agree again, and stops
+// when there is none close by.
+brace_layout1_trailing: fn(old_bytes: [U8], new_bytes: [U8]) -[]> [Int] {
+    old: brace_layout1_tokens(old_bytes)
+    new: brace_layout1_tokens(new_bytes)
+    ends := [Int]{}
+    at := BraceLayoutAt{old: 0, new: 0}
+    loop at.old < old.len() && at.new < new.len() {
+        if brace_layout1_same(old_bytes, old[at.old], new_bytes, new[at.new]) {
+            at.old += 1
+            at.new += 1
+            next
+        }
+        added: new[at.new].kind == TOKEN_COMMA && at.new + 1 < new.len() && new[at.new + 1].kind == TOKEN_RBRACE
+        if added && old[at.old].kind == TOKEN_RBRACE && at.old > 0 && old[at.old - 1].kind != TOKEN_COMMA {
+            ends.push(old[at.old - 1].span.end)
+            at.new += 1
+            next
+        }
+        at = brace_layout1_resync(old_bytes, old, new_bytes, new, at) ?? break
+    }
+    ends
+}
+
+// The tokens of `bytes` that the formatter keeps in order: no comments and
+// no line ends.
+brace_layout1_tokens: fn(bytes: [U8]) -[]> [Token] {
+    out := [Token]{}
+    loop token in lex_generated(bytes).tokens {
+        if token.kind == TOKEN_SEMI || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        out.push(token)
+    }
+    out
+}
+
+// Whether two tokens have the same kind and spelling.
+brace_layout1_same: fn(old_bytes: [U8], old: Token, new_bytes: [U8], new: Token) -[]> Bool {
+    length: old.span.end - old.span.start
+    if old.kind != new.kind || new.span.end - new.span.start != length -> return false
+    loop offset in 0..<length {
+        if old_bytes[old.span.start + offset] != new_bytes[new.span.start + offset] -> return false
+    }
+    true
+}
+
+// The nearest place after `at`, fewest tokens skipped on both sides first,
+// where the next three tokens of both lists agree. None within
+// BRACE_LAYOUT1_RESYNC tokens on either side.
+brace_layout1_resync: fn(old_bytes: [U8], old: [Token], new_bytes: [U8], new: [Token], at: BraceLayoutAt) -[]> BraceLayoutAt? {
+    loop skipped in 1..(2 * BRACE_LAYOUT1_RESYNC) {
+        loop old_skip in 0..skipped {
+            new_skip: skipped - old_skip
+            if old_skip > BRACE_LAYOUT1_RESYNC || new_skip > BRACE_LAYOUT1_RESYNC -> next
+            from_old: at.old + old_skip
+            from_new: at.new + new_skip
+            if from_old + 3 > old.len() || from_new + 3 > new.len() -> next
+            agree := true
+            loop offset in 0..<3 {
+                if !brace_layout1_same(old_bytes, old[from_old + offset], new_bytes, new[from_new + offset]) {
+                    agree = false
+                    break
+                }
+            }
+            if agree -> return Val(BraceLayoutAt{old: from_old, new: from_new})
+        }
+    }
+    None
+}
+
+// A Jet program quoted in a string literal without interpolation holes or
+// unread escapes, rewritten in place when the result parses cleanly and
+// declares an item, so prose stays as written.
+brace_layout1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -[]> LambdaShapeQuoted? {
+    quote: paren_tuple1_quote_width(bytes, token)
+    inner: paren_tuple1_quoted_text(bytes, token) ?? return None
+    if !inner.contains("{{") -> return None
+    outcome := brace_layout1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
+    if outcome.rewritten == 0 -> return None
+    parsed: parse_generated_source(outcome.text.bytes())
+    if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) {
+        return None
+    }
+    skipped.extend(outcome.skipped.move())
+    count: outcome.rewritten
+    replaced: if token.kind == TOKEN_RAW_STRING -> outcome.text.move() else -> lambda_shape1_quote(outcome.text)
+    if token.kind == TOKEN_RAW_STRING && replaced.contains(lambda_shape1_text(bytes, token.span.start, token.span.start + quote)) {
+        return None
+    }
+    Val(LambdaShapeQuoted{start: token.span.start + quote, end: token.span.end - quote, text: replaced, rewritten: count})
+}
+
+// A Markdown file: each ```jet fence is rewritten in place. Other fences and
+// the prose stay as written.
+brace_layout1_markdown: fn(path: String, text: String) -[]> MigrationOutcome {
+    bytes: text.bytes()
+    edits := [LambdaShapeEdit]{}
+    skipped := [String]{}
+    rewritten := 0
+    loop fence in paren_tuple1_fences(bytes) {
+        outcome := brace_layout1_source("{path}:{fence.line}", lambda_shape1_text(bytes, fence.start, fence.end))
+        skipped.extend(outcome.skipped.move())
+        if outcome.rewritten > 0 {
+            rewritten += outcome.rewritten
+            edits.push(LambdaShapeEdit{start: fence.start, end: fence.end, text: outcome.text.move()})
+        }
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+// Why `after`, the plan's rewrite of `before`, does not mean what `before`
+// means, or None when it does. The parser refuses a missing comma, so
+// `before` is read in the rewrite's own terms: the plan's rewrite of it.
+brace_layout1_same_meaning: fn(path: String, before: String, after: String, source: Bool) -[]> String? {
+    if before == after -> return None
+    if !source && !path.ends_with(".jet") && !path.ends_with(".template") && !path.ends_with(".md") {
+        return Val("the plan rewrites no such file")
+    }
+    paren_tuple1_same_as_planned(path, brace_layout1_file(path, before, source).text, after, source)
+}

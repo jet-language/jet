@@ -8,9 +8,9 @@ CLI_COVERAGE_SCHEMA: "jetpack-migration-coverage-v1"
 
 // One package identity in the migration inventory.
 CoveragePackage: struct {
-    name: String
-    version: String
-    reference: String
+    name: String,
+    version: String,
+    reference: String,
 
     new: fn(name: String, version: String, reference: String) -> CoveragePackage Never! {
         CoveragePackage{name: name, version: version, reference: reference}
@@ -40,10 +40,10 @@ CoveragePackage: struct {
 // The four package buckets. `NotYetImported` is computed from the explicit
 // inventory; a caller cannot put a package there by assertion alone.
 CoverageBucket: enum {
-    NativeRecipe
-    CentrallyImportedRecipe
-    LocalImport
-    NotYetImported
+    NativeRecipe,
+    CentrallyImportedRecipe,
+    LocalImport,
+    NotYetImported,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -58,10 +58,10 @@ CoverageBucket: enum {
 // Inputs from a catalog producer, a local importer, and the native recipe
 // registry. Every listed package must also occur in `inventory`.
 CoverageInput: struct {
-    inventory: [CoveragePackage]
-    native_recipes: [CoveragePackage]
-    centrally_imported_recipes: [CoveragePackage]
-    local_imports: [CoveragePackage]
+    inventory: [CoveragePackage],
+    native_recipes: [CoveragePackage],
+    centrally_imported_recipes: [CoveragePackage],
+    local_imports: [CoveragePackage],
 
     empty: fn() -> CoverageInput Never! {
         CoverageInput{inventory: [CoveragePackage]{}, native_recipes: [CoveragePackage]{}, centrally_imported_recipes: [CoveragePackage]{}, local_imports: [CoveragePackage]{}}
@@ -70,20 +70,20 @@ CoverageInput: struct {
 
 // Nativeization counts over the complete inventory.
 NativeizationProgress: struct {
-    total: Int
-    nativeized: Int
-    remaining: Int
+    total: Int,
+    nativeized: Int,
+    remaining: Int,
     // Whole percentage, rounded down for deterministic CI output.
-    percent: Int
+    percent: Int,
 }
 
 // A deterministic, disjoint migration coverage report.
 CoverageReport: struct {
-    native_recipes: [CoveragePackage]
-    centrally_imported_recipes: [CoveragePackage]
-    local_imports: [CoveragePackage]
-    not_yet_imported: [CoveragePackage]
-    nativeization: NativeizationProgress
+    native_recipes: [CoveragePackage],
+    centrally_imported_recipes: [CoveragePackage],
+    local_imports: [CoveragePackage],
+    not_yet_imported: [CoveragePackage],
+    nativeization: NativeizationProgress,
 
     // Assign every listed package to exactly one inventory bucket; whatever
     // no bucket claims is not yet imported. Each bucket is in identity order.
@@ -147,11 +147,11 @@ CoverageReport: struct {
 
 #Error
 CoverageError: enum {
-    EmptyField(field: String, package: String)
-    DuplicateInventory(String)
-    DuplicateBucket(bucket: CoverageBucket, package: String)
-    PackageOutsideInventory(bucket: CoverageBucket, package: String)
-    PackageInMultipleBuckets(package: String, first: CoverageBucket, second: CoverageBucket)
+    EmptyField(field: String, package: String),
+    DuplicateInventory(String),
+    DuplicateBucket(bucket: CoverageBucket, package: String),
+    PackageOutsideInventory(bucket: CoverageBucket, package: String),
+    PackageInMultipleBuckets(package: String, first: CoverageBucket, second: CoverageBucket),
 
     message: fn(self) -> String Never! {
         if self == {

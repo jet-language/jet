@@ -58,10 +58,10 @@ SORTFLAG_USE_SORTER: 1
 
 // struct DistinctCtx.
 DistinctCtx: struct {
-    is_tnct: Int
-    e_tnct_type: Int
-    tab_tnct: Int
-    addr_tnct: Int
+    is_tnct: Int,
+    e_tnct_type: Int,
+    tab_tnct: Int,
+    addr_tnct: Int,
 }
 
 // A NULL pDistinct.
@@ -71,18 +71,18 @@ no_distinct: fn() -> DistinctCtx Never! {
 
 // struct SortCtx (see the file header).
 SortCtx: struct {
-    order_by: Int
-    n_ob_sat: Int
-    i_ecursor: Int
-    reg_return: Int
-    label_bk_out: Int
-    addr_sort_index: Int
-    label_done: Int
-    label_ob_lopt: Int
-    sort_flags: Int
-    deferred: Bool
-    deferred_reg: Int
-    deferred_flags: Int
+    order_by: Int,
+    n_ob_sat: Int,
+    i_ecursor: Int,
+    reg_return: Int,
+    label_bk_out: Int,
+    addr_sort_index: Int,
+    label_done: Int,
+    label_ob_lopt: Int,
+    sort_flags: Int,
+    deferred: Bool,
+    deferred_reg: Int,
+    deferred_flags: Int,
 }
 
 // A NULL pSort, and the zeroed SortCtx sqlite3Select starts from.
@@ -673,10 +673,10 @@ generate_sort_tail: fn(p: &cg.Parse, a: &ast.AST, s: Int, sort: &SortCtx, n_colu
 // columnTypeImpl's results: the declared type and, with
 // SQLITE_ENABLE_COLUMN_METADATA, the origin database, table and column.
 ColumnOrigin: struct {
-    typ: [U8]?
-    db: [U8]?
-    tab: [U8]?
-    col: [U8]?
+    typ: [U8]?,
+    db: [U8]?,
+    tab: [U8]?,
+    col: [U8]?,
 }
 
 // columnTypeImpl: the declaration type of expression e (a column, or a
@@ -1590,11 +1590,11 @@ multi_select_order_by: fn(p: &cg.Parse, a: &ast.AST, s: Int, dest: &cg.SelectDes
 // terms of elist (collations from clist), under OP_IfNullRow of
 // i_new_table when is_outer_join.
 SubstContext: struct {
-    i_table: Int
-    i_new_table: Int
-    is_outer_join: Bool
-    elist: Int
-    clist: Int
+    i_table: Int,
+    i_new_table: Int,
+    is_outer_join: Bool,
+    elist: Int,
+    clist: Int,
 }
 
 // substExpr: e with the substitution made; the expression to keep.
@@ -1699,8 +1699,8 @@ subst_select: fn(p: &cg.Parse, a: &ast.AST, sc: SubstContext, s0: Int, do_prior:
 // recomputeColumnsUsedExpr: the walk collects the columns of `cursor`
 // (other than the rowid) for the caller to read their colUsed bits.
 ColUsedWalker: struct {
-    cursor: Int
-    hits: [Int]
+    cursor: Int,
+    hits: [Int],
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -1758,7 +1758,7 @@ srclist_renumber_cursors: fn(p: &cg.Parse, a: &ast.AST, csr_map: &[Int], src: In
 
 // renumberCursorsCb: the references to renumbered cursors follow them.
 RenumberWalker: struct {
-    csr_map: [Int]
+    csr_map: [Int],
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -2083,7 +2083,7 @@ propagate_constant_rewrite_one: fn(p: &cg.Parse, a: &ast.AST, t: Int, e: Int, ig
 
 // propagateConstantExprRewrite.
 PropagateConstWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -2326,7 +2326,7 @@ indexed_by_lookup: fn(p: &cg.Parse, a: &ast.AST, si: Int) -> Int Never! {
 // ORDER BY COLLATE term becomes "SELECT * FROM (compound) ORDER BY ..",
 // which multiSelectOrderBy's merge needs.
 ConvertCompoundWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! { ast.WRC_CONTINUE }
@@ -2796,7 +2796,7 @@ select_expander: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Int Never! {
 
 // The sqlite3SelectExpand walker: selectExpander, then sqlite3SelectPopWith.
 ExpanderWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
@@ -2832,7 +2832,7 @@ select_expand: fn(p: &cg.Parse, a: &ast.AST, s: Int) -[DB]> Never! {
 // The sqlite3SelectAddTypeInfo walker: selectAddSubqueryTypeInfo after
 // each SELECT's subtrees.
 TypeInfoWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! { ast.WRC_CONTINUE }
@@ -2933,7 +2933,7 @@ optimize_aggregate_use_of_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, s: Int, ai
 // aggregateIdxEprRefToColCallback: a node of an aggregate's argument that
 // an indexed expression computes reads its AggInfo column.
 IdxEprRefWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -3200,7 +3200,7 @@ explain_simple_count: fn(p: &cg.Parse, a: ast.AST, t: Int, ix: Int) Never! {
 // moves to the WHERE of SELECT u, a "1" taking its place; e_code says one
 // moved.
 HavingToWhereWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {

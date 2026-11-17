@@ -12,23 +12,23 @@ OPAQUE_HANDLE_CLOSE_VERBS: [String]{"close", "destroy", "free", "release", "unre
 // Thread safety is an explicit overlay fact. `Unspecified` is intentional:
 // the binder never infers a concurrency guarantee from C spelling.
 ThreadSafety: enum {
-    Unspecified
-    Safe
-    Unsafe
+    Unspecified,
+    Safe,
+    Unsafe,
 }
 
 // Why a handle's close symbol was selected.
 CloseSource: enum {
-    Conventional
-    Overlay
+    Conventional,
+    Overlay,
 }
 
 // Native libraries that must stay attached to one generated binding.
 // `primary` is the library the C import names; `transitive` holds only
 // libraries the overlay supplied, never ones guessed from includes or symbols.
 LinkClosure: struct {
-    primary: String
-    transitive: [String]
+    primary: String,
+    transitive: [String],
 
     // The overlay's libraries without the primary or repeats, sorted.
     new: fn(primary: String, transitive: [String]) -> LinkClosure Never! {
@@ -54,11 +54,11 @@ HandleOverlay: struct {
     // A C typedef, its generated Jet name, or an opaque struct tag mapped to a
     // close symbol; required when conventional discovery is absent or
     // ambiguous.
-    close_functions: [String:String]
+    close_functions: [String:String],
     // Per-handle concurrency declarations; missing entries stay unspecified.
-    thread_safety: [String:ThreadSafety]
+    thread_safety: [String:ThreadSafety],
     // Explicit transitive libraries this binding needs.
-    links: [String]
+    links: [String],
 
     empty: fn() -> HandleOverlay Never! {
         HandleOverlay{close_functions: [String:String]{}, thread_safety: [String:ThreadSafety]{}, links: [String]{}}
@@ -110,56 +110,56 @@ HandleOverlay: struct {
 // mandatory; handles without one stay in `unresolved`.
 HandleFact: struct {
     // The C typedef spelling that introduced the opaque pointer.
-    typedef_name: String
+    typedef_name: String,
     // The generated nominal Jet type name.
-    jet_name: String
+    jet_name: String,
     // The native close function.
-    close: String
-    close_source: CloseSource
-    thread_safety: ThreadSafety
-    link_closure: LinkClosure
+    close: String,
+    close_source: CloseSource,
+    thread_safety: ThreadSafety,
+    link_closure: LinkClosure,
 }
 
 // An opaque pointer shape: the incomplete struct (or `void`) it names and
 // how many `*` the typedef itself carries.
 OpaqueHandleShape: struct {
-    struct_tag: String
-    pointer_depth: Int
+    struct_tag: String,
+    pointer_depth: Int,
 }
 
 // What a typedef aliases.
 OpaqueAliasBase: enum {
-    Struct(String)
-    Alias(String)
-    Opaque
-    Other
+    Struct(String),
+    Alias(String),
+    Opaque,
+    Other,
 }
 
 OpaqueAliasDecl: struct {
-    base: OpaqueAliasBase
-    pointer_depth: Int
+    base: OpaqueAliasBase,
+    pointer_depth: Int,
 }
 
 OpaqueCPrototype: struct {
-    name: String
-    params: [String]
+    name: String,
+    params: [String],
 }
 
 OpaqueCTypeShape: struct {
-    base: String?
-    struct_tag: String?
-    pointer_depth: Int
+    base: String?,
+    struct_tag: String?,
+    pointer_depth: Int,
 }
 
 // Opaque handle discovery over one C header, consumed by the C binder.
 OpaqueHandleDiscovery: struct {
-    handles: [HandleFact]
+    handles: [HandleFact],
     // Opaque typedefs that cannot safely become owned handles, with the
     // reason, so the binder reports them instead of pretending they are
     // scalars.
-    unresolved: [{reason: String, typedef_name: String}]
-    priv opaque: [String:OpaqueHandleShape]
-    priv handle_indices: [String:Int]
+    unresolved: [{reason: String, typedef_name: String}],
+    priv opaque: [String:OpaqueHandleShape],
+    priv handle_indices: [String:Int],
 
     // Discover opaque struct-pointer typedefs and resolve their ownership
     // facts. `source` is the original header or the binder's cleaned

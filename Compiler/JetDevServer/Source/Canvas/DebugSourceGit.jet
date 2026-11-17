@@ -38,7 +38,7 @@ canvas_debug_error: fn(kind: String, message: String) -> CanvasDebugError Never!
 
 // Canvas debugs on the native tier only.
 DebugTier: enum {
-    NativeLLDB
+    NativeLLDB,
 
     parse: fn(value: String?) -> DebugTier CanvasDebugError! {
         if value == {
@@ -57,49 +57,49 @@ DebugTier: enum {
 }
 
 SessionStatus: enum {
-    Running
-    Finished
-    Failed
+    Running,
+    Finished,
+    Failed,
 }
 
 SessionResult: struct {
-    status: SessionStatus
-    transcript: String
-    snapshot: DebugSnapshot?
+    status: SessionStatus,
+    transcript: String,
+    snapshot: DebugSnapshot?,
 }
 
 // One compiled debug image: the scratch directory it lives in, its digest,
 // and the source it was built from.
 NativeDebugArtifact: struct {
-    dir: String
-    binary: String
-    build_id: String?
-    jet_file: String
-    jet_lines: [String]
+    dir: String,
+    binary: String,
+    build_id: String?,
+    jet_file: String,
+    jet_lines: [String],
 }
 
 DebugSession: struct {
-    path: String
-    source_id: String
-    revision: String
-    tier: DebugTier
-    created: Int
-    breakpoints: [Int]
-    commands: [String]
-    watches: [String]
-    native: NativeDebugArtifact?
-    native_live: NativeSession?
-    native_stop: NativeStop?
-    snapshot: DebugSnapshot?
-    paused_adapter: PausedDebugSessionAdapter?
+    path: String,
+    source_id: String,
+    revision: String,
+    tier: DebugTier,
+    created: Int,
+    breakpoints: [Int],
+    commands: [String],
+    watches: [String],
+    native: NativeDebugArtifact?,
+    native_live: NativeSession?,
+    native_stop: NativeStop?,
+    snapshot: DebugSnapshot?,
+    paused_adapter: PausedDebugSessionAdapter?,
 }
 
 DebugExecution: struct {
-    id: String
-    status: SessionStatus
-    transcript: String
-    snapshot: DebugSnapshot?
-    tier: DebugTier
+    id: String,
+    status: SessionStatus,
+    transcript: String,
+    snapshot: DebugSnapshot?,
+    tier: DebugTier,
 }
 
 // The live Canvas debug sessions. The devserver serves Canvas requests on one
@@ -108,11 +108,11 @@ DebugExecution: struct {
 // `deep_checks` is the deep checks every build keeps, fixed when the store is
 // made, as a `jet debug` session's are.
 DebugSessions: struct {
-    jet: String
-    deep_checks: DeepChecks{DeepChecks{}}
-    next_id: Int
-    sessions: [String: DebugSession]
-    pause_on_input_end: Bool
+    jet: String,
+    deep_checks: DeepChecks{DeepChecks{}},
+    next_id: Int,
+    sessions: [String: DebugSession],
+    pause_on_input_end: Bool,
 
     execute: fn(&self, path: String, source_id: String, revision: String, requested_id: String?, commands: [String], breakpoints: [Int], watches: [String], tier: DebugTier) -> DebugExecution CanvasDebugError! {
         if !debug_identity_text_valid(source_id) -> return Err(canvas_debug_error("bad_request", "Canvas debug source_id must be bounded source identity text"))
@@ -487,17 +487,17 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
 }
 
 DebugOkRequest: struct {
-    src: String
-    graph_json: String
-    transcript: String
-    snapshot: DebugSnapshot?
-    status: SessionStatus
-    session_id: String
-    tier: DebugTier
-    source_id: String
-    breakpoint_lines: [Int]
-    stale_breakpoints: [String]
-    watches: [String]
+    src: String,
+    graph_json: String,
+    transcript: String,
+    snapshot: DebugSnapshot?,
+    status: SessionStatus,
+    session_id: String,
+    tier: DebugTier,
+    source_id: String,
+    breakpoint_lines: [Int],
+    stale_breakpoints: [String],
+    watches: [String],
 }
 
 debug_bool: fn(value: Bool{false}) -> String Never! { if value -> "true" else -> "false" }
@@ -569,8 +569,8 @@ debug_stop_ok: fn(src: String, session_id: String, tier: DebugTier, source_id: S
 }
 
 DebugBoundedText: struct {
-    text: String
-    truncated: Bool
+    text: String,
+    truncated: Bool,
 }
 
 // `text` within `max_bytes`, cut at a UTF-8 boundary and marked when cut.
@@ -692,13 +692,13 @@ anchor_span: fn(src: String, anchor: String) -> Span? Never! {
 }
 
 DebugRecordSpan: struct {
-    id: String
-    span: Span
+    id: String,
+    span: Span,
 }
 
 DebugRecordIds: struct {
-    ids: [String]
-    truncated: Bool
+    ids: [String],
+    truncated: Bool,
 }
 
 // Every object in the graph JSON that carries a string `id_key` and a
@@ -807,8 +807,8 @@ breakpoint_json: fn(src: String, lines: [Int], stale_anchors: [String]) -> Strin
 }
 
 DebugJSONList: struct {
-    json: String
-    truncated: Bool
+    json: String,
+    truncated: Bool,
 }
 
 locals_json: fn(transcript: String) -> DebugJSONList Never! {

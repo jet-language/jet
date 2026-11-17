@@ -49,8 +49,8 @@ ESCAPES: [String:String]{"_u": "_", "_d": ".", "_c": ":", "_s": "/", "_b": "\\",
 
 // A name `pattern` places: a phase, or a module.
 Rule: struct {
-    pattern: Regex
-    name: String
+    pattern: Regex,
+    name: String,
 }
 
 // The phases a frame's function names, the first that matches winning.
@@ -80,89 +80,89 @@ PREFIX_MODULES: [Rule]{
 
 #Codable(only: .Decode)
 MapFile: struct {
-    path: String
-    sha256: String{""}
+    path: String,
+    sha256: String{""},
 }
 
 #Codable(only: .Decode)
 SourceMap: struct {
-    schema: String{""}
-    files: [MapFile]
+    schema: String{""},
+    files: [MapFile],
 }
 
 #Codable(only: .Decode)
 Summary: struct {
-    #Rename("needsDwarf") needs_dwarf: Bool{false}
+    #Rename("needsDwarf") needs_dwarf: Bool{false},
 }
 
 // A declaration in one of the source map's files: where it is, the module its
 // path names (the directory under the top one), and whether the file still
 // holds the bytes the map recorded.
 Decl: struct {
-    location: String
-    module: String?
-    mapped: Bool
+    location: String,
+    module: String?,
+    mapped: Bool,
 }
 
 // The declarations by name: `slots` gives each name's place in `groups`.
 Index: struct {
-    slots: [String:Int]
-    groups: [[Decl]]
+    slots: [String:Int],
+    groups: [[Decl]],
 }
 
 // Counts by key, in first-seen order.
 Counts: struct {
-    entries: [{key: String, count: Int}]
-    slots: [String:Int]
+    entries: [{key: String, count: Int}],
+    slots: [String:Int],
 }
 
 // A frame's samples: every sample it is on and those it is the leaf of.
 // `last` is the latest sample counted, so a recursive frame counts once.
 Row: struct {
-    name: String
-    inclusive: Int
-    own: Int
-    last: Int
+    name: String,
+    inclusive: Int,
+    own: Int,
+    last: Int,
 }
 
 Profile: struct {
-    samples: Int
-    short_stacks: Int
-    unresolved_roots: Int
-    jet_stacks: Int
-    rows: [Row]
-    row_slots: [String:Int]
-    folded: Counts
-    phases: Counts
+    samples: Int,
+    short_stacks: Int,
+    unresolved_roots: Int,
+    jet_stacks: Int,
+    rows: [Row],
+    row_slots: [String:Int],
+    folded: Counts,
+    phases: Counts,
 }
 
 #Codable(only: .Encode)
 TopRow: struct {
-    name: String
-    inclusive: Int
-    #Rename("self") own: Int
+    name: String,
+    inclusive: Int,
+    #Rename("self") own: Int,
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
 Report: struct {
-    samples: Int
-    graph: String
-    short_stacks: Int
-    unresolved_roots: Int
-    jet_stacks: Int
-    needs_dwarf: Bool
-    verdict: String
-    phases: Dyn
-    top: [TopRow]
+    samples: Int,
+    graph: String,
+    short_stacks: Int,
+    unresolved_roots: Int,
+    jet_stacks: Int,
+    needs_dwarf: Bool,
+    verdict: String,
+    phases: Dyn,
+    top: [TopRow],
 }
 
 // A flame graph node: its frame, its samples, and its children by frame in
 // first-seen order, each child's place in the node list in `slots`.
 Node: struct {
-    name: String
-    count: Int
-    children: [String]
-    slots: [String:Int]
+    name: String,
+    count: Int,
+    children: [String],
+    slots: [String:Int],
 }
 
 run: fn() -> Never Err! {

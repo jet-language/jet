@@ -30,8 +30,8 @@ TRUST_BOOTSTRAP_MAX_BYTES: 4096
 // Trusted Unix time: production reads the wall clock (not monotonic
 // `time.instant()`), while tests fix a time.
 TrustedClock: enum {
-    System
-    Fixed(Int)
+    System,
+    Fixed(Int),
 
     now_unix: fn(self) -[Time]> Int Never! {
         if self == {
@@ -51,17 +51,17 @@ trust_os_random_bytes: fn(count: Int) -[Rand]> [U8] TrustRootError! {
 }
 
 TrustSignature: struct {
-    key_id: String
-    algorithm: String
-    sig_hex: String
+    key_id: String,
+    algorithm: String,
+    sig_hex: String,
 }
 
 // An HMAC-SHA256 role signing key. The secret never enters public
 // metadata; only `key_id` appears on the wire.
 TrustKey: struct {
-    key_id: String
-    algorithm: String
-    secret: [U8]
+    key_id: String,
+    algorithm: String,
+    secret: [U8],
 
     // Deterministic drill material: the domain-tagged label, padded or
     // truncated to 32 bytes.
@@ -103,14 +103,14 @@ trust_key_id_for: fn(secret: [U8]) -> String Never! {
 // versioned producer/action digest; the live cache binding folds the
 // canonical realized closure into it before this receipt is signed.
 CacheProvenance: struct {
-    reference: String
-    source: String
-    builder: String
-    action: String
-    output: String
-    platform: String
-    sandbox: String
-    policy: String
+    reference: String,
+    source: String,
+    builder: String,
+    action: String,
+    output: String,
+    platform: String,
+    sandbox: String,
+    policy: String,
 
     validate: fn(self) TrustRootError! {
         fields: [TrustProvenanceField]{
@@ -137,20 +137,20 @@ CacheProvenance: struct {
 }
 
 TrustProvenanceField: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // A signed, time-bounded cache admission receipt. `witness` names the
 // producing process or service and is part of the signed payload.
 CacheReceipt: struct {
-    role: String
-    witness: String
-    provenance: CacheProvenance
-    version: Int
-    issued_unix: Int
-    expires_unix: Int
-    signature: TrustSignature
+    role: String,
+    witness: String,
+    provenance: CacheProvenance,
+    version: Int,
+    issued_unix: Int,
+    expires_unix: Int,
+    signature: TrustSignature,
 
     // Issue for the current producer; CI and local publication share this
     // path and therefore one cache transport and verifier.

@@ -12,12 +12,12 @@ PROVIDER_FACTS_SCHEMA: "jet-provider-facts-v1"
 PROVIDER_EXACT_SELECTOR_LOSS: "external provider references must retain an exact version, revision, or digest"
 
 ProviderFactValue: enum {
-    Null
-    Bool(Bool)
-    Number(String)
-    Text(String)
-    List([ProviderFactValue])
-    Map([String:ProviderFactValue])
+    Null,
+    Bool(Bool),
+    Number(String),
+    Text(String),
+    List([ProviderFactValue]),
+    Map([String:ProviderFactValue]),
 
     // The value as a tree; map keys in byte order.
     to_json_tree: fn(self) -> Dyn Never! {
@@ -73,9 +73,9 @@ ProviderFactValue: enum {
 }
 
 ProviderLoss: struct {
-    key: String
-    reason: String
-    source: String
+    key: String,
+    reason: String,
+    source: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -98,10 +98,10 @@ ProviderLoss: struct {
 }
 
 ProviderConflict: struct {
-    key: String
-    left: String
-    right: String
-    source: String
+    key: String,
+    left: String,
+    right: String,
+    source: String,
 
     to_json_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -129,23 +129,23 @@ ProviderConflict: struct {
 // JSON form.
 #Error
 ProviderFactsError: struct {
-    message: String
+    message: String,
 }
 
 ProviderFacts: struct {
-    provider: String
-    reference: String
-    target: String
-    selector: ProviderSelector
-    resolved_source: String
-    profile: String
-    profile_provenance: String
-    facts: [String:ProviderFactValue]
-    provenance: [String:String]
-    native_format: String
-    native_document: String
-    losses: [ProviderLoss]
-    conflicts: [ProviderConflict]
+    provider: String,
+    reference: String,
+    target: String,
+    selector: ProviderSelector,
+    resolved_source: String,
+    profile: String,
+    profile_provenance: String,
+    facts: [String:ProviderFactValue],
+    provenance: [String:String],
+    native_format: String,
+    native_document: String,
+    losses: [ProviderLoss],
+    conflicts: [ProviderConflict],
 
     // Rust `Default`: the core profile carrier.
     core_profile: fn() -> ProviderFacts Never! {

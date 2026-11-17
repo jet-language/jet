@@ -2,7 +2,7 @@
 // the struct itself is dropped: at its scope end, when a wrapper built in a
 // loop body ends its turn, and when a nested wrapper is dropped.
 Lock: struct {
-    name: String
+    name: String,
 
     impl Close {
         close: fn(&&self) { print("release {self.name}") }
@@ -10,13 +10,13 @@ Lock: struct {
 }
 
 Holder: struct {
-    lock: Lock
-    count: Int
+    lock: Lock,
+    count: Int,
 }
 
 Outer: struct {
-    holder: Holder
-    label: String
+    holder: Holder,
+    label: String,
 }
 
 hold: fn(name: String) -> Holder { Holder{lock: Lock{name: name}, count: 1} }

@@ -9,9 +9,9 @@ use jetpack_foundation.[foundation_generated_snake_name, foundation_generated_ty
 
 // One parsed C function prototype.
 CProto: struct {
-    ret: String
-    name: String
-    params: [String]
+    ret: String,
+    name: String,
+    params: [String],
 }
 
 // A complete C struct that can be represented by a checked `#Layout(c)` Jet
@@ -19,14 +19,14 @@ CProto: struct {
 // record would change its native stride and make array marshalling unsound.
 // C unions stay overlay-only.
 CStructDef: struct {
-    jet_name: String
-    fields: [{name: String, ty: String}]
+    jet_name: String,
+    fields: [{name: String, ty: String}],
 }
 
 CRawRecord: struct {
-    struct_tag: String?
-    alias: String?
-    body: String
+    struct_tag: String?,
+    alias: String?,
+    body: String,
 }
 
 // The callback typedef marker the catalog stores as an alias target:
@@ -35,9 +35,9 @@ CBIND_CALLBACK_MARKER: "__jet_callback__"
 
 // Header type facts shared by prototype rendering and generated C records.
 CTypeCatalog: struct {
-    aliases: [String:String]
-    records: [String:CStructDef]
-    names: [String:String]
+    aliases: [String:String],
+    records: [String:CStructDef],
+    names: [String:String],
 
     parse: fn(source: String, handles: OpaqueHandleDiscovery) -> CTypeCatalog Never! {
         declarations: pkg_opaque_split_declarations(source)

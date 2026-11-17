@@ -7,13 +7,13 @@
 // one included, joins every table.
 Entity: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 // One entity type's storage: its entities in spawn order.
 Rows: struct<T> {
-    items: [T]
+    items: [T],
 
     add: fn(&self, item: &&T) -> Int {
         self.items.push(item)
@@ -46,7 +46,7 @@ add_world: fn(meta: Compiler) {
     loop entry in ENTITIES {
         name: entry.site.name
         rows: "{name.lower()}_rows"
-        fields.push("    {rows}: engine.Rows<{name}>{{engine.Rows<{name}>{{items: [{name}]{{}}}}}}")
+        fields.push("    {rows}: engine.Rows<{name}>{{engine.Rows<{name}>{{items: [{name}]{{}}}}}},")
         spawns.push("    spawn_{name.lower()}: fn(&self) -> Int {{ self.{rows}.add({name}{{}}) }}")
     }
     meta.add("use engine\n\nWorld: struct {{\n{fields.join("\n")}\n\n{spawns.join("\n\n")}\n}}\n", scope: "world")

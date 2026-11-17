@@ -5,10 +5,10 @@
 // `target.marker(T)` reads the marker `T` written there the same way at
 // every site.
 Stamp: struct {
-    label: String
+    label: String,
 
     impl Marker {
-        sites: [.Type, .Variant, .Function, .Method, .Field, .Module]
+        sites: [.Type, .Variant, .Function, .Method, .Field, .Module],
 
         expand: fn(self, target: Target) {
             made: "stamp_{self.label}"
@@ -23,10 +23,10 @@ Stamp: struct {
 }
 
 Note: struct {
-    text: String
+    text: String,
 
     impl Marker {
-        sites: [.Type, .Variant, .Function, .Method, .Field, .Module]
+        sites: [.Type, .Variant, .Function, .Method, .Field, .Module],
     }
 }
 
@@ -34,7 +34,7 @@ Stamps: struct {}
 
 #Stamp("struct")
 Point: struct {
-    #Stamp("field") x: Int
+    #Stamp("field") x: Int,
 
     #[Stamp("method"), Note("m")]
     norm: fn(self) -> Int { self.x }
@@ -42,8 +42,8 @@ Point: struct {
 
 #Stamp("enum")
 Shape: enum {
-    #[Stamp("variant"), Note("v")] Dot
-    Line
+    #[Stamp("variant"), Note("v")] Dot,
+    Line,
 }
 
 #[Stamp("function"), Note("f")]

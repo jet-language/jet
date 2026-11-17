@@ -12,7 +12,7 @@ MAX_BROWSER_VALUE: Int{4096}
 BROWSER_UNLISTED_PANEL_RANK: Int{9223372036854775807}
 
 BrowserPlacement: enum {
-    InApp Workbench
+    InApp, Workbench,
 
     as_str: fn(self) -> String {
         if self == {
@@ -83,10 +83,10 @@ impl BrowserSessionState {
 }
 
 BrowserSourceLocation: struct {
-    source_id: String
-    line: Int
-    column: Int
-    function: String?
+    source_id: String,
+    line: Int,
+    column: Int,
+    function: String?,
 
     validate: fn(self) BrowserHostError! {
         validate_source_id(self.source_id)
@@ -100,12 +100,12 @@ BrowserSourceGrant: struct { session_id: String, revision: Int, panel_id: String
 BrowserActionGrant: struct { session_id: String, revision: Int, panel_id: String, node_id: String, action_id: String }
 
 BrowserNode: struct {
-    id: String
-    kind: DevtoolsNodeKind
-    label: String
-    value: String?
-    status: String?
-    children: [BrowserNode]
+    id: String,
+    kind: DevtoolsNodeKind,
+    label: String,
+    value: String?,
+    status: String?,
+    children: [BrowserNode],
 
     new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> BrowserNode {
         BrowserNode{id: id, kind: kind, label: label, value: None, status: None, children: [BrowserNode]{}}
@@ -127,12 +127,12 @@ BrowserNode: struct {
     }
 }
 BrowserPanelFact: struct {
-    panel_id: String
-    title: String
-    freshness_ms: Int
-    status: String
-    cursor: Int?
-    nodes: [BrowserNode]
+    panel_id: String,
+    title: String,
+    freshness_ms: Int,
+    status: String,
+    cursor: Int?,
+    nodes: [BrowserNode],
 
     new: fn(panel_id: String, title: String, freshness_ms: Int, status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
         BrowserPanelFact{panel_id: panel_id, title: title, freshness_ms: freshness_ms, status: status, cursor: None, nodes: nodes}
@@ -144,12 +144,12 @@ BrowserPanelFact: struct {
     }
 }
 BrowserHostEvent: struct {
-    protocol: String
-    session_id: String
-    revision: Int
-    sequence: Int
-    observed_at_ms: Int
-    panels: [BrowserPanelFact]
+    protocol: String,
+    session_id: String,
+    revision: Int,
+    sequence: Int,
+    observed_at_ms: Int,
+    panels: [BrowserPanelFact],
 
     new: fn(session_id: String, revision: Int, sequence: Int, observed_at_ms: Int, panels: [BrowserPanelFact]) -> BrowserHostEvent {
         BrowserHostEvent{protocol: BROWSER_DEVTOOLS_PROTOCOL, session_id: session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: panels}
@@ -169,75 +169,75 @@ BrowserHostEvent: struct {
 }
 BrowserReconnectCursor: struct { sequence: Int }
 BrowserReconnect: struct {
-    session_id: String
-    from: BrowserReconnectCursor?
-    cursor: BrowserReconnectCursor?
-    events: [BrowserHostEvent]
-    complete: Bool
+    session_id: String,
+    from: BrowserReconnectCursor?,
+    cursor: BrowserReconnectCursor?,
+    events: [BrowserHostEvent],
+    complete: Bool,
 }
 BrowserSelection: struct { panel_id: String, node_id: String? }
 
 BrowserHostAction: enum {
-    OpenPanel(placement: BrowserPlacement, panel_id: String)
-    ClosePanel(placement: BrowserPlacement, panel_id: String)
-    DockPanel(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock)
-    NavigateSource(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant)
-    InvokeAction(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant)
+    OpenPanel(placement: BrowserPlacement, panel_id: String),
+    ClosePanel(placement: BrowserPlacement, panel_id: String),
+    DockPanel(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock),
+    NavigateSource(placement: BrowserPlacement, panel_id: String, node_id: String, grant: BrowserSourceGrant),
+    InvokeAction(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String, grant: BrowserActionGrant),
 }
 BrowserHostEffect: enum {
-    PanelOpened(placement: BrowserPlacement, panel_id: String)
-    PanelClosed(placement: BrowserPlacement, panel_id: String)
-    PanelDocked(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock)
-    SourceNavigated(placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation)
-    ActionInvoked(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String)
+    PanelOpened(placement: BrowserPlacement, panel_id: String),
+    PanelClosed(placement: BrowserPlacement, panel_id: String),
+    PanelDocked(placement: BrowserPlacement, panel_id: String, dock: DevtoolsDock),
+    SourceNavigated(placement: BrowserPlacement, panel_id: String, node_id: String, source: BrowserSourceLocation),
+    ActionInvoked(placement: BrowserPlacement, panel_id: String, node_id: String, action_id: String),
 }
 
 BrowserHTMLElement: struct {
-    id: String
-    kind: String
-    panel_id: String?
-    node_id: String?
-    label: String
-    value: String?
-    status: String?
+    id: String,
+    kind: String,
+    panel_id: String?,
+    node_id: String?,
+    label: String,
+    value: String?,
+    status: String?,
 }
 BrowserHTMLViewModel: struct {
-    placement: BrowserPlacement
-    route: String
-    protocol: String
-    session_id: String
-    revision: Int?
-    sequence: Int?
-    cursor: BrowserReconnectCursor?
-    state: BrowserSessionState
-    selection: BrowserSelection?
-    panels: [BrowserPanelView]
-    elements: [BrowserHTMLElement]
+    placement: BrowserPlacement,
+    route: String,
+    protocol: String,
+    session_id: String,
+    revision: Int?,
+    sequence: Int?,
+    cursor: BrowserReconnectCursor?,
+    state: BrowserSessionState,
+    selection: BrowserSelection?,
+    panels: [BrowserPanelView],
+    elements: [BrowserHTMLElement],
 }
 BrowserPanelView: struct {
-    panel_id: String
-    title: String
-    freshness_ms: Int
-    status: String
-    cursor: Int?
-    open: Bool
-    dock: DevtoolsDock
-    nodes: [BrowserNode]
+    panel_id: String,
+    title: String,
+    freshness_ms: Int,
+    status: String,
+    cursor: Int?,
+    open: Bool,
+    dock: DevtoolsDock,
+    nodes: [BrowserNode],
 }
 
 #Error
 BrowserHostError: enum {
-    InvalidEvent(message: String)
-    WrongSession(expected: String, received: String)
-    StaleRevision(current: Int, received: Int)
-    StaleSequence(current: Int, received: Int)
-    CursorExpired(cursor: Int, earliest: Int)
-    CursorAhead(cursor: Int, current: Int)
-    UnknownPanel(panel_id: String)
-    UnknownNode(panel_id: String, node_id: String)
-    ActionNotGranted(message: String)
-    InvalidSource(message: String)
-    InvalidAction(message: String)
+    InvalidEvent(message: String),
+    WrongSession(expected: String, received: String),
+    StaleRevision(current: Int, received: Int),
+    StaleSequence(current: Int, received: Int),
+    CursorExpired(cursor: Int, earliest: Int),
+    CursorAhead(cursor: Int, current: Int),
+    UnknownPanel(panel_id: String),
+    UnknownNode(panel_id: String, node_id: String),
+    ActionNotGranted(message: String),
+    InvalidSource(message: String),
+    InvalidAction(message: String),
 
     message: fn(self) -> String {
         if self == {
@@ -262,16 +262,16 @@ BrowserPanelLayout: struct { open: Bool, dock: DevtoolsDock }
 BrowserPanelState: struct { fact: BrowserPanelFact, layout: [BrowserPanelLayout] }
 
 BrowserHost: struct {
-    session_id: String
-    revision: Int?
-    sequence: Int?
-    observed_at_ms: Int?
-    state: BrowserSessionState
-    cursor: BrowserReconnectCursor?
-    selection: BrowserSelection?
-    panels: [String: BrowserPanelState]
+    session_id: String,
+    revision: Int?,
+    sequence: Int?,
+    observed_at_ms: Int?,
+    state: BrowserSessionState,
+    cursor: BrowserReconnectCursor?,
+    selection: BrowserSelection?,
+    panels: [String: BrowserPanelState],
     // Oldest first; bounded by MAX_RECONNECT_EVENTS.
-    history: [BrowserHostEvent]
+    history: [BrowserHostEvent],
 
     new: fn(session_id: String) -> BrowserHost {
         BrowserHost{session_id: session_id, revision: None, sequence: None, observed_at_ms: None, state: .Idle, cursor: None, selection: None, panels: [String: BrowserPanelState]{}, history: [BrowserHostEvent]{}}

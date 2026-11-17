@@ -19,7 +19,7 @@ FOREIGN_BOUNDARY_OBLIGATIONS: [String]{"abi", "layout", "width", "alignment", "o
 // was refused. The message is the reference diagnostic text.
 #Error
 ForeignBridgeError: struct {
-    message: String
+    message: String,
 }
 
 pkg_bridge_error: fn(message: String) -> ForeignBridgeError Never! {
@@ -28,7 +28,7 @@ pkg_bridge_error: fn(message: String) -> ForeignBridgeError Never! {
 
 // A deterministic content-addressed identity record.
 ForeignIdentityBuilder: struct {
-    priv bytes: [U8]
+    priv bytes: [U8],
 
     // Start an identity record with its schema as the first field.
     new: fn(schema: String) -> ForeignIdentityBuilder Never! {
@@ -63,12 +63,12 @@ pkg_bridge_flag: fn(value: Bool) -> [U8] Never! { if value -> [U8]{U8{1}} else -
 // separately: a path or version alone cannot keep a cached replacement honest
 // when the bytes behind it change.
 ForeignBoundaryIdentity: struct {
-    source: String
-    overlay: String
-    generator: String
-    implementation: String
-    toolchain: String
-    target: String
+    source: String,
+    overlay: String,
+    generator: String,
+    implementation: String,
+    toolchain: String,
+    target: String,
 
     new: fn(source: String, overlay: String, generator: String, implementation: String, toolchain: String, target: String) -> ForeignBoundaryIdentity Never! {
         ForeignBoundaryIdentity{source: source, overlay: overlay, generator: generator, implementation: implementation, toolchain: toolchain, target: target}
@@ -113,12 +113,12 @@ ForeignBoundaryIdentity: struct {
 // established empty list, so missing callback/dependency analysis cannot be
 // mistaken for "there were none".
 ForeignArtifactCoverage: struct {
-    loaded_artifact: String
-    transitive_dependencies: [String]?
-    reachable_callbacks: [String]?
-    compiler_flags: [String]?
-    target: String
-    generator: String
+    loaded_artifact: String,
+    transitive_dependencies: [String]?,
+    reachable_callbacks: [String]?,
+    compiler_flags: [String]?,
+    target: String,
+    generator: String,
 
     new: fn(loaded_artifact: String, target: String, generator: String) -> ForeignArtifactCoverage Never! {
         ForeignArtifactCoverage{loaded_artifact: loaded_artifact, transitive_dependencies: None, reachable_callbacks: None, compiler_flags: None, target: target, generator: generator}
@@ -160,11 +160,11 @@ ForeignArtifactCoverage: struct {
 
 // One obligation row in the canonical foreign boundary contract.
 ForeignObligationEvidence: struct {
-    obligation: String
-    basis: FFIEvidenceBasis
-    checker: String
-    assumptions: [String]
-    coverage_digest: String
+    obligation: String,
+    basis: FFIEvidenceBasis,
+    checker: String,
+    assumptions: [String],
+    coverage_digest: String,
 
     new: fn(obligation: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String], coverage: ForeignArtifactCoverage) -> ForeignObligationEvidence Never! {
         ForeignObligationEvidence{obligation: obligation, basis: basis, checker: checker, assumptions: pkg_bridge_sorted_strings(assumptions), coverage_digest: coverage.digest()}

@@ -54,7 +54,7 @@ SYNC_MAX_INT: 9223372036854775807
 
 #Error
 AppError: enum {
-    Invalid
+    Invalid,
     Unsupported
 }
 
@@ -68,8 +68,8 @@ AppError: enum {
 // account once sign-in names one, and per network address until then.
 // `limit: 0`, the default, is no limit.
 SignedIn: struct {
-    limit: Int{0}
-    per: Duration{1min}
+    limit: Int{0},
+    per: Duration{1min},
 
     impl Marker {
         sites: [.Method]
@@ -77,8 +77,8 @@ SignedIn: struct {
 }
 
 Public: struct {
-    limit: Int{0}
-    per: Duration{1min}
+    limit: Int{0},
+    per: Duration{1min},
 
     impl Marker {
         sites: [.Method]
@@ -95,9 +95,9 @@ Public: struct {
 // checked in constant time before the body is decoded; any other is answered
 // 401. A webhook is no endpoint: no Remote calls it.
 Webhook: struct {
-    path: String
-    signature: Signature
-    key: String
+    path: String,
+    signature: Signature,
+    key: String,
 
     impl Marker {
         sites: [.Method]
@@ -123,7 +123,7 @@ SigningKey: struct {
 // error ends the request 403 with that error, and the body is never read.
 // An endpoint that takes an `Upload` has to name its check.
 UploadCheck: struct {
-    method: String
+    method: String,
 
     impl Marker {
         sites: [.Method]
@@ -138,7 +138,7 @@ UploadCheck: struct {
 // run that fails runs again after a backoff, up to `retries:` more times. A
 // job is no endpoint: no Remote calls it.
 Job: struct {
-    retries: Int{5}
+    retries: Int{5},
 
     impl Marker {
         sites: [.Method]
@@ -158,7 +158,7 @@ Job: struct {
 // as the system (`as_system`), in a call of its own, and is no endpoint:
 // no Remote calls it.
 Every: struct {
-    cron: String
+    cron: String,
 
     impl Marker {
         sites: [.Method]
@@ -168,7 +168,7 @@ Every: struct {
 // How a webhook's sender signs a delivery: an HMAC-SHA256, hex-encoded,
 // under the webhook's key.
 Signature: enum {
-    GitHub
+    GitHub,
     Stripe
 }
 
@@ -243,11 +243,11 @@ priv webhook_signed: fn(signature: Signature, key: String, sent: String, body: S
 // that posts joins the device's queue when it can't be sent now (`__write`);
 // every call through such a Remote sends its client's queued writes first.
 Remote: struct<S> {
-    priv service: S?
-    priv address: String
-    priv client: String
+    priv service: S?,
+    priv address: String,
+    priv client: String,
     // Whether the app graph mounts `S`, so `address` names `S` in it.
-    priv local: Bool
+    priv local: Bool,
 
     // A call of the endpoint method `method` of `S`, which can fail with
     // `E`. The compiler lowers each such call here: `direct` runs it on the
@@ -348,10 +348,10 @@ priv remote_direct_value: fn<S, R>(service: S, direct: fn(S) -> R Never!) -> R C
 // so the error type of a service method converts from it.
 #Error
 CallError: enum {
-    Unreachable(String)
-    Invalid([FieldError])
-    SignedOut
-    UpdateRequired
+    Unreachable(String),
+    Invalid([FieldError]),
+    SignedOut,
+    UpdateRequired,
 
     // This failure as an error of the call; the compiler's `fail` binds it,
     // so the method's error type takes it through its conversion.
@@ -411,7 +411,7 @@ new_id: fn() -[Rand, Time]> String Never! {
 // it is dismissed. `retry` offers to run the handler again.
 #Error
 Notice: struct {
-    text: String
+    text: String,
     retry: Bool{false}
 }
 
@@ -638,11 +638,11 @@ priv links_unreachable: fn(client: String, method: String) -> CallError Never! {
 // the reply it kept.
 #Equatable
 priv QueuedWrite: struct {
-    client: String
-    address: String
-    local: Bool
-    method: String
-    body: String
+    client: String,
+    address: String,
+    local: Bool,
+    method: String,
+    body: String,
     key: String
 }
 
@@ -969,8 +969,8 @@ priv remote_invalid: fn(text: String) -> [FieldError] Never! {
 // A source may read the database, fetch over the network and wait, nothing
 // more, so `state` runs on every target that has those, the web included.
 Live: struct<T, E> {
-    id: Int
-    run: fn() -[DB.Read, Net, Time]> T E!
+    id: Int,
+    run: fn() -[DB.Read, Net, Time]> T E!,
     priv acting: Acting?
 }
 
@@ -986,24 +986,24 @@ Live: struct<T, E> {
 // `core.db.live:<table>`) its runs read (`live_reads`), so a write to any of
 // them re-runs it too.
 LiveRecord: struct {
-    id: Int
-    source: String
-    key: String
-    value: String
-    dirty: Bool
-    generation: Int
-    overtaken: Int
-    held_ns: Int
-    every_ns: Int
-    ran_ns: Int
-    reads: [String]
+    id: Int,
+    source: String,
+    key: String,
+    value: String,
+    dirty: Bool,
+    generation: Int,
+    overtaken: Int,
+    held_ns: Int,
+    every_ns: Int,
+    ran_ns: Int,
+    reads: [String],
     caller: String
 }
 
 // What `state` reads before it runs a binding: the stored result when it is
 // current, held, or capped (live_current), and the binding's generation then.
 LiveCurrent: struct {
-    value: String?
+    value: String?,
     generation: Int
 }
 
@@ -1011,14 +1011,14 @@ LiveCurrent: struct {
 // `window_ns` starts the current second of re-runs and `window_runs` counts
 // the re-runs in it.
 LiveRegistry: struct {
-    next_id: Int
-    invalidations: Int
-    changes: Int
-    evictions: Int
-    ws_pushes: Int
-    capped: Int
-    window_ns: Int
-    window_runs: Int
+    next_id: Int,
+    invalidations: Int,
+    changes: Int,
+    evictions: Int,
+    ws_pushes: Int,
+    capped: Int,
+    window_ns: Int,
+    window_runs: Int,
     records: [LiveRecord]
 }
 
@@ -1231,8 +1231,8 @@ live_read_record: fn(source: String, entry: String) {
 // screen addresses its run asked `presence` of so far; a source that reads
 // another binding stacks that binding on its own.
 LiveRun: struct {
-    task: TaskID
-    id: Int
+    task: TaskID,
+    id: Int,
     asked: [String]
 }
 
@@ -1282,8 +1282,8 @@ live_presence_ask: fn(task: TaskID, address: String) -> Bool {
 // One account present at a screen address: the latest run of the live
 // binding `binding`, acting for `account`, asked `presence` of `address`.
 AppPresent: struct {
-    binding: Int
-    account: String
+    binding: Int,
+    account: String,
     address: String
 }
 
@@ -1431,15 +1431,15 @@ priv RESUME_OPEN: "<script type=\"application/json\" id=\"jet-resume\">"
 // One read a page carries: its binding's source wire name, encoded
 // argument list and stored result (`ok:` or `err:`, then its JSON).
 priv AppResumed: struct {
-    source: String
-    key: String
+    source: String,
+    key: String,
     value: String
 }
 
 // The bindings a task rendering a page or opening a screen (`App.__go`)
 // read, in first-read order.
 priv AppResumeReads: struct {
-    task: TaskID
+    task: TaskID,
     ids: [Int]
 }
 
@@ -1514,7 +1514,7 @@ priv resume_script: fn(ids: [Int]) -> String Never! {
 // and as no one, never as the system, when there is none. A live binding
 // runs as the caller that made it.
 Acting: enum {
-    Account(auth.AccountID)
+    Account(auth.AccountID),
     System
 }
 
@@ -1522,7 +1522,7 @@ Acting: enum {
 // task and the caller it acts for (None: no one); a task's innermost run
 // names its caller.
 ActingRun: struct {
-    task: TaskID
+    task: TaskID,
     acting: Acting?
 }
 
@@ -1682,7 +1682,7 @@ priv(package) callers: module {
 priv CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
-    end: fn(Bool) -[]> Bool Never!
+    end: fn(Bool) -[]> Bool Never!,
     outbox: CallOutbox
 }
 
@@ -1696,28 +1696,28 @@ priv CallJoin: struct {
 priv CallOutbox: struct {
     // Names the store among the open ones: the database file's path, or
     // one of its own for an in-memory database.
-    store: String
+    store: String,
     // The time it is by the store's clock, the one its engine reads for
     // SQL's `'now'`, in Unix milliseconds.
-    now: fn() -[]> Int Never!
+    now: fn() -[]> Int Never!,
     // Keeps job `name` with its encoded arguments, in the transaction of
     // the call this task runs, taken until `until`; the job's key, a new
     // random one, or "" when the store couldn't keep it.
-    keep: fn(String, String, Int) -[]> String Never!
+    keep: fn(String, String, Int) -[]> String Never!,
     // Deletes the row of key `key`, in the transaction of the call this
     // task runs, as its job runs there: 1; 0 when the row has gone, as
     // another run did the job; -1 when the store couldn't delete it.
-    done: fn(String) -[]> Int Never!
+    done: fn(String) -[]> Int Never!,
     // Records on the row of key `key` that its job ran `runs` times and
     // failed each time, the last with `error`, and takes it until `until`;
     // false when the store couldn't.
-    failed: fn(String, Int, String, Int) -[]> Bool Never!
+    failed: fn(String, Int, String, Int) -[]> Bool Never!,
     // Takes each row of a job named in `names` that is not taken at `now`,
     // until `until`, and gives each; None once the store has closed.
-    take: fn([String], Int, Int) -[]> [CallQueued]? Never!
+    take: fn([String], Int, Int) -[]> [CallQueued]? Never!,
     // Takes the rows of keys `keys` until `until`; false when the store
     // couldn't.
-    hold: fn([String], Int) -[]> Bool Never!
+    hold: fn([String], Int) -[]> Bool Never!,
     // Keeps the reply of request `request`, in the transaction of call
     // `call`, or on its own for call 0 (after the call rolled back); false
     // when the store couldn't.
@@ -1727,9 +1727,9 @@ priv CallOutbox: struct {
 // A row a server took from a store's outbox: its job's key, name and
 // encoded arguments, and the runs the job made so far, each failed.
 priv CallQueued: struct {
-    key: String
-    name: String
-    args: String
+    key: String,
+    name: String,
+    args: String,
     runs: Int
 }
 
@@ -1743,9 +1743,9 @@ priv CallJobCall: struct {
 // arguments as one encoded JSON array, the runs it gets after a first that
 // fails, and the function that runs it.
 priv CallJob: struct {
-    name: String
-    args: String
-    retries: Int
+    name: String,
+    args: String,
+    retries: Int,
     run: Shared<CallJobCall>
 }
 
@@ -1754,7 +1754,7 @@ priv CallJob: struct {
 // server received it.
 #Equatable
 priv CallDelivery: struct {
-    id: String
+    id: String,
     at: Int
 }
 
@@ -1763,7 +1763,7 @@ priv CallDelivery: struct {
 // due.
 #Equatable
 priv CallTick: struct {
-    schedule: String
+    schedule: String,
     due: Int
 }
 
@@ -1773,26 +1773,26 @@ priv CallTick: struct {
 // The account scopes the key, so one account's key never answers another's.
 #Equatable
 priv CallRequest: struct {
-    account: String
-    key: String
+    account: String,
+    key: String,
     at: Int
 }
 
 priv CallRun: struct {
-    task: TaskID
-    id: Int
-    joins: [CallJoin]
-    refused: Bool
-    delivery: CallDelivery?
-    tick: CallTick?
-    request: CallRequest?
-    reply: String?
-    repeated: Bool
+    task: TaskID,
+    id: Int,
+    joins: [CallJoin],
+    refused: Bool,
+    delivery: CallDelivery?,
+    tick: CallTick?,
+    request: CallRequest?,
+    reply: String?,
+    repeated: Bool,
     jobs: [CallJob]
 }
 
 priv CallRuns: struct {
-    runs: [CallRun]
+    runs: [CallRun],
     made: Int
 }
 
@@ -2044,10 +2044,10 @@ priv calls_answered: fn(run: &CallRun, call: Int) -> Bool Never! {
 // subscription's endpoint URL) and, for Web Push only, the subscription's
 // P-256 public key and authentication secret, base64url.
 priv PushDevice: struct {
-    account: String
-    service: String
-    token: String
-    key: String
+    account: String,
+    service: String,
+    token: String,
+    key: String,
     auth: String
 }
 
@@ -2056,13 +2056,13 @@ priv PushDevice: struct {
 // device is found by its service and token.
 priv PushDevices: struct {
     // Names the store among the open ones, as CallOutbox.store does.
-    store: String
+    store: String,
     // Registers a device in place of the one with its service and token;
     // false when the store couldn't.
-    add: fn(PushDevice) -[]> Bool Never!
+    add: fn(PushDevice) -[]> Bool Never!,
     // The devices the account registered; None when the store couldn't
     // read them, as once it has closed.
-    of: fn(String) -[]> [PushDevice]? Never!
+    of: fn(String) -[]> [PushDevice]? Never!,
     // Forgets the device of a service and a token; false when the store
     // couldn't.
     forget: fn(String, String) -[]> Bool Never!
@@ -2140,8 +2140,8 @@ priv(package) push: module {
 // The pushes skipped and failed since the process started, and the last
 // C_PUSH_NOTES_KEPT of them.
 priv PushNotes: struct {
-    skipped: Int
-    failed: Int
+    skipped: Int,
+    failed: Int,
     last: [String]
 }
 
@@ -2162,7 +2162,7 @@ priv C_PUSH_NOTES_KEPT: 32
 // `app.go`, `app.current`, `app.url_of`, `app.presence` and `app.notify` to
 // the graph's `__` members below.
 App: struct {
-    title: String
+    title: String,
 
     // `.api<S>(path, max_upload:)` as the compiler lowers it: `service`
     // names `S`. A client posts each call of an endpoint method of `S` to
@@ -2680,7 +2680,7 @@ new: fn(title: String) -> App Never! {
 // reaches the server again (`.Queue`), or fails them (`.Off`).
 #Equatable
 Offline: enum {
-    Off
+    Off,
     Queue
 }
 
@@ -2688,10 +2688,10 @@ Offline: enum {
 // name, its `#App.Query` fields, whether only a signed-in caller opens it,
 // and how it opens at an address (`App.__screen`).
 AppScreen: struct {
-    path: String
-    state: String
-    query: [String]
-    signed_in: Bool
+    path: String,
+    state: String,
+    query: [String],
+    signed_in: Bool,
     open: Shared<AppOpen>
 }
 
@@ -2709,7 +2709,7 @@ AppOpen: struct {
 // revalidate it with its `ETag`: a GET whose `If-None-Match` names the
 // reply's ETag is answered 304 with no body.
 CachePolicy: enum {
-    Private
+    Private,
     Public(max_age: Duration)
 }
 
@@ -2722,17 +2722,17 @@ priv APP_CACHE: Shared{[String:CachePolicy]{}}
 // its canonical one, and whether search engines may index it. A screen only
 // a signed-in caller opens is never indexed, whatever its head says.
 Head: struct {
-    title: String
-    description: String?{None}
-    image: String?{None}
-    canonical: Bool{true}
+    title: String,
+    description: String?{None},
+    image: String?{None},
+    canonical: Bool{true},
     index: Bool{true}
 }
 
 // A reply a store keeps for a `.Public` policy, as it finds it: the encoded
 // reply and the milliseconds since it was kept, by the store's clock.
 priv KeptReply: struct {
-    reply: String
+    reply: String,
     age_ms: Int
 }
 
@@ -2743,11 +2743,11 @@ priv KeptReply: struct {
 // kept reply may have read what it changed.
 priv KeptReplies: struct {
     // Names the store among the open ones, as CallOutbox.store does.
-    store: String
+    store: String,
     // The reply kept under a key while it is fresh by the store's clock:
     // through the instant its max_age ends, and not after it; None when
     // there is none, or the store couldn't read it.
-    find: fn(String) -[]> KeptReply? Never!
+    find: fn(String) -[]> KeptReply? Never!,
     // Keeps a reply under a key for a max_age in milliseconds, in place of
     // the one kept under it, and drops the stale ones; a reply whose run
     // began, the last milliseconds given ago, no later than a write the file
@@ -2837,7 +2837,7 @@ priv kept_store_name: fn(replies: Shared<KeptReplies>) -> String Never! {
 // A sitemap `.sitemap(list)` gave: the name of the state its list gives,
 // and the address of each state the list gives when asked.
 priv AppSitemap: struct {
-    state: String
+    state: String,
     addresses: fn() -[]> [String] Never!
 }
 
@@ -3125,7 +3125,7 @@ priv resume_test_view: fn() -> String Never! {
 // A service a graph declares (`.api<S>`): where its clients post its calls,
 // and the most bytes one call's body holds.
 priv AppAPI: struct {
-    path: String
+    path: String,
     max_upload: Int
 }
 
@@ -3144,7 +3144,7 @@ priv AppAnswer: struct {
 // field texts, by field name. The not-found state (`App.open_link`) has no
 // state name and keeps the link it shows under C_APP_LOST_LINK.
 priv AppCurrent: struct {
-    state: String
+    state: String,
     fields: [String:String]
 }
 
@@ -3152,8 +3152,8 @@ priv AppCurrent: struct {
 // app shows, the path of its icon (a PNG or JPEG, relative to the working
 // directory like every app path) and its color as 0xRRGGBB.
 AppInstall: struct {
-    name: String
-    icon: String
+    name: String,
+    icon: String,
     color: Int
 }
 
@@ -3166,17 +3166,17 @@ AppInstall: struct {
 // tokens of the later launches that handed it their links (`.launch`) and
 // its background work (`.background`).
 priv AppGraph: struct {
-    title: String
-    apis: [String:AppAPI]
-    endpoints: [String:AppEndpoint]
-    screens: [AppScreen]
-    offline: Offline
-    install: AppInstall?
-    current: AppCurrent?
-    route_data: [Int]
-    schemes: [String]
-    link_domains: [String]
-    activations: [String]
+    title: String,
+    apis: [String:AppAPI],
+    endpoints: [String:AppEndpoint],
+    screens: [AppScreen],
+    offline: Offline,
+    install: AppInstall?,
+    current: AppCurrent?,
+    route_data: [Int],
+    schemes: [String],
+    link_domains: [String],
+    activations: [String],
     backgrounds: [AppBackground]
 }
 
@@ -3185,8 +3185,8 @@ priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
 priv AppBackground: struct {
-    every_ns: Int
-    at_login: Bool
+    every_ns: Int,
+    at_login: Bool,
     run: Shared<AppBackgroundRun>
 }
 
@@ -3642,7 +3642,7 @@ priv graph_answered: fn(replied: String [FieldError]!) -> String CallError! {
 // A board's state, for the graph test: its project is a path segment and its
 // filter the query.
 priv RouteTestBoard: struct {
-    project: String
+    project: String,
     q: String
 }
 
@@ -3884,7 +3884,7 @@ priv push_device_listed: fn(found: [PushDevice], device: PushDevice) -> Bool Nev
 // request that sent it can keep it (`Blobs.keep`).
 #Codable
 Upload: struct {
-    name: String
+    name: String,
     bytes: Int
 }
 
@@ -3892,8 +3892,8 @@ Upload: struct {
 // GIF or WebP), a PDF, or UTF-8 text that is not markup.
 #Codable
 Media: enum {
-    Image
-    PDF
+    Image,
+    PDF,
     Text
 }
 
@@ -3905,8 +3905,8 @@ BlobID: distinct String
 // A blob `Blobs.keep` stored: its id, what its bytes are and how many.
 #Codable
 Blob: struct {
-    id: BlobID
-    media: Media
+    id: BlobID,
+    media: Media,
     bytes: Int
 }
 
@@ -3915,14 +3915,14 @@ Blob: struct {
 // failed.
 #Error
 BlobError: enum {
-    WrongType
+    WrongType,
     Storage(String)
 }
 
 // A store of blobs: the directory `name`, under the working directory, which
 // holds each blob as a file named by its id. `blobs(name)` makes one.
 Blobs: struct {
-    name: String
+    name: String,
 
     // Keeps `file`, the upload the running request staged, as a blob in this
     // store when its bytes are one of the media `allow` lists. Their first
@@ -3961,19 +3961,19 @@ priv BLOB_HEAD: 512
 // its size and first bytes, the blobs `keep` made of it, and whether `keep`
 // refused its media.
 priv StagedUpload: struct {
-    task: TaskID
-    path: String
-    bytes: Int
-    head: [U8]
-    kept: [KeptBlob]
+    task: TaskID,
+    path: String,
+    bytes: Int,
+    head: [U8],
+    kept: [KeptBlob],
     refused: Bool
 }
 
 // A blob a call kept: its file, the call, and whether the call committed.
 // A blob kept outside any call is committed at once.
 priv KeptBlob: struct {
-    path: String
-    call: Int
+    path: String,
+    call: Int,
     committed: Bool
 }
 
@@ -3988,10 +3988,10 @@ priv BlobReader: struct {
 // each table that has been read or written since a store was made
 // (`__blob_reader`), with whether a row policy guards that table.
 priv BlobState: struct {
-    stores: [String]
-    staged: [StagedUpload]
-    cleaned: Bool
-    readers: [String:Shared<BlobReader>]
+    stores: [String],
+    staged: [StagedUpload],
+    cleaned: Bool,
+    readers: [String:Shared<BlobReader>],
     guarded: [String:Bool]
 }
 
@@ -4000,7 +4000,7 @@ priv BLOBS: Shared{BlobState{stores: [String]{}, staged: [StagedUpload]{}, clean
 // One file step of an upload endpoint, as core.web hands it to the lambda the
 // compiler writes where the service is mounted, which calls `run`.
 priv FileJob: struct {
-    step: builtin.FileStep
+    step: builtin.FileStep,
 
     run: fn(self) -[FS, DB.Read]> builtin.FileDone Never! { file_steps(self.step) }
 }
@@ -4357,7 +4357,7 @@ priv blob_readers: fn() -> [Shared<BlobReader>] Never! {
 // The arguments of a mounted method's call or of a job, decoded from their
 // JSON array, and the reply each gives.
 priv RemoteArgs: struct {
-    tree: Dyn
+    tree: Dyn,
 
     // The argument at `index`, decoded as the method's parameter type.
     __take: fn<T: Decode>(self, index: Int) -> T [FieldError]! {
@@ -4430,8 +4430,8 @@ priv JOB_NEVER: 9223372036854775807
 // A job a mounted service declares (`App.__job`), which a serving server
 // takes from a store's outbox by its name and runs.
 priv CallJobRunner: struct {
-    name: String
-    retries: Int
+    name: String,
+    retries: Int,
     run: Shared<CallJobCall>
 }
 
@@ -4441,10 +4441,10 @@ priv CallJobRunner: struct {
 // store as it opened (`jobs.store`). A store it didn't name is forgotten
 // once no job of it runs.
 priv JobStore: struct {
-    store: String
-    outbox: Shared<CallOutbox>
-    running: [String]
-    left: [String]
+    store: String,
+    outbox: Shared<CallOutbox>,
+    running: [String],
+    left: [String],
     named: Bool
 }
 
@@ -4453,9 +4453,9 @@ priv JobStore: struct {
 // jobs, which take the rows no server holds while any serves, and whether
 // the task that tends the stores (`jobs_tend`) runs.
 priv JobRuntime: struct {
-    runners: [CallJobRunner]
-    stores: [JobStore]
-    serving: Int
+    runners: [CallJobRunner],
+    stores: [JobStore],
+    serving: Int,
     tended: Bool
 }
 
@@ -4575,9 +4575,9 @@ priv jobs_tend_start: fn(runtime: &JobRuntime) Never! {
 // and, while a server serves an App that declares jobs, take the rows of
 // jobs named in `names` that no server holds.
 priv JobTick: struct {
-    store: String
-    outbox: Shared<CallOutbox>
-    running: [String]
+    store: String,
+    outbox: Shared<CallOutbox>,
+    running: [String],
     names: [String]
 }
 
@@ -4849,12 +4849,12 @@ priv schedule_tick: fn(name: String, due: Int, run: fn(RemoteArgs) -> String [Fi
 // days of the week (0-6, Sunday 0). `any_day` and `any_weekday` hold when
 // the day field and the weekday field start with `*`.
 priv CronLine: struct {
-    minutes: [Bool]
-    hours: [Bool]
-    days: [Bool]
-    months: [Bool]
-    weekdays: [Bool]
-    any_day: Bool
+    minutes: [Bool],
+    hours: [Bool],
+    days: [Bool],
+    months: [Bool],
+    weekdays: [Bool],
+    any_day: Bool,
     any_weekday: Bool
 }
 
@@ -4944,7 +4944,7 @@ priv cron_day_allowed: fn(line: CronLine, day: Int) -> Bool {
 
 // A day's month (1-12) and day of the month (1-31).
 priv CronDate: struct {
-    month: Int
+    month: Int,
     day: Int
 }
 
@@ -5668,7 +5668,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
 }
 
 SyncSession: struct {
-    generation: Int
+    generation: Int,
     document: String
 }
 
@@ -5737,12 +5737,12 @@ sync_document_merge: fn(left: String, right: String) -> String? {
 }
 
 SyncPair: struct {
-    first: String
+    first: String,
     second: String
 }
 
 SyncCount: struct {
-    positive: Int
+    positive: Int,
     negative: Int
 }
 

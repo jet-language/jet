@@ -34,7 +34,7 @@ ws: module
 ip: module
 
 SocketAddr: struct {
-    host: String
+    host: String,
     port: Int
 }
 
@@ -42,35 +42,35 @@ SocketAddr: struct {
 // contracts; source policy must not replace them with descriptor records.
 
 NetReady: struct {
-    readable: Bool
+    readable: Bool,
     writable: Bool
 }
 
 // Which direction of a stream `shutdown` closes.
 NetShutdown: enum {
-    Read
-    Write
+    Read,
+    Write,
     Both
 }
 
 // The readiness a socket `ready` wait asks for.
 NetReadyInterest: enum {
-    Read
-    Write
+    Read,
+    Write,
     ReadWrite
 }
 
 // JetNetErrorDetail: public construction is already supported.
 NetErrorDetail: struct {
-    operation: String
-    address: String?
-    name: String?
-    message: String
+    operation: String,
+    address: String?,
+    name: String?,
+    message: String,
     os_code: Int?
 }
 
 NetDNSError: enum {
-    NotFound(String)
+    NotFound(String),
     Failure(String)
 }
 
@@ -78,21 +78,21 @@ NetDNSError: enum {
 // declaration order: TLS=11, Protocol=12, Other=13, DNS=14.
 #Error
 NetError: enum {
-    InvalidInput(NetErrorDetail)
-    PermissionDenied(NetErrorDetail)
-    AddressInUse(NetErrorDetail)
-    AddressUnavailable(NetErrorDetail)
-    ConnectionRefused(NetErrorDetail)
-    ConnectionReset(NetErrorDetail)
-    NotConnected(NetErrorDetail)
-    Closed(NetErrorDetail)
-    Timeout(NetErrorDetail)
-    Cancelled(NetErrorDetail)
-    Unsupported(NetErrorDetail)
-    TLS(NetErrorDetail)
-    Protocol(NetErrorDetail)
-    Other(NetErrorDetail)
-    DNS(NetDNSError)
+    InvalidInput(NetErrorDetail),
+    PermissionDenied(NetErrorDetail),
+    AddressInUse(NetErrorDetail),
+    AddressUnavailable(NetErrorDetail),
+    ConnectionRefused(NetErrorDetail),
+    ConnectionReset(NetErrorDetail),
+    NotConnected(NetErrorDetail),
+    Closed(NetErrorDetail),
+    Timeout(NetErrorDetail),
+    Cancelled(NetErrorDetail),
+    Unsupported(NetErrorDetail),
+    TLS(NetErrorDetail),
+    Protocol(NetErrorDetail),
+    Other(NetErrorDetail),
+    DNS(NetDNSError),
 
     impl Display {
         display: fn(self) -> String { net_error_text(self) }
@@ -125,17 +125,17 @@ net_error_text: fn(err: NetError) -> String Never! {
 }
 
 UDPPacket: struct {
-    data: [U8]
-    host: String
-    port: Int
-    original_len: Int
+    data: [U8],
+    host: String,
+    port: Int,
+    original_len: Int,
     truncated: Bool
 }
 
 SRVRecord: struct {
-    target: String
-    port: Int
-    priority: Int
+    target: String,
+    port: Int,
+    priority: Int,
     weight: Int
 }
 
@@ -148,7 +148,7 @@ gethostname: fn() -[Env, FS.Read]> String Never! {
 
 /// One network interface: its name and kernel index.
 NetInterface: struct {
-    name: String
+    name: String,
     index: Int
 }
 
@@ -530,7 +530,7 @@ unix_write_all_bytes: fn(stream: &UnixStream, bytes: [U8]) -[Net, Time.Wait]> Ne
 // with them, each owned by the receiver and closed when dropped. Empty bytes
 // and no descriptors mean the peer closed the stream.
 UnixMessage: struct {
-    bytes: [U8]
+    bytes: [U8],
     fds: [sys.Fd]
 }
 

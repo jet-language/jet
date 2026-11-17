@@ -271,8 +271,8 @@ name: "fleet"
 version: build.git_describe()                 // ordinary prep call, typed String
 targets: [build.target(boards.nucleo)]        // a hardware value from §3.1 feeds the target
 dev: env.module {
-    services: [env.postgres(version: "16", port: 5432)]
-    tools: [env.tool("protoc", "27.1")]
+    services: [env.postgres(version: "16", port: 5432)],
+    tools: [env.tool("protoc", "27.1")],
 }
 // error (from the type, at this line): `prot: 5432` is not a field of Postgres; did you mean `port`?
 ```

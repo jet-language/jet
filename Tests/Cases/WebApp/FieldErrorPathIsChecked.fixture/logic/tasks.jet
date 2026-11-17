@@ -5,19 +5,19 @@ use app
 
 // One step of a task.
 Step: struct {
-    title: String
+    title: String,
 }
 
 // A new task, as a client sends it.
 TaskDraft: struct {
-    title: String
-    assignee: String?
-    steps: [Step]
+    title: String,
+    assignee: String?,
+    steps: [Step],
 }
 
 #Error
 TaskError: enum {
-    Invalid([FieldError])
+    Invalid([FieldError]),
 }
 
 // What a failed add says: each field error's path and reason.
@@ -31,7 +31,7 @@ reason: fn(error: TaskError) -> String {
 }
 
 Crew: struct {
-    members: [String]
+    members: [String],
 
     // A signed-in caller adds a task: its assignee must be in the crew, and
     // each of its steps needs a title.

@@ -35,30 +35,30 @@ store_node_stat: fn(path: String) -[FS]> Stat? StoreError! {
 
 // The project and Hangar locks one clean holds, released at scope exit.
 CleanLocks: struct {
-    project: RuntimeLock?
-    hangar: RuntimeLock
+    project: RuntimeLock?,
+    hangar: RuntimeLock,
 }
 
 // A locked package's name and version (a `(String, String)` set member).
 LockNameVersion: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
 }
 
 // A locked package that names a Hangar receipt.
 LockReceiptPackage: struct {
-    receipt: String
-    package: LockedPackage
+    receipt: String,
+    package: LockedPackage,
 }
 
 // Everything the nearest project lock and the lifecycle journal keep alive.
 // Every list is duplicate-free.
 LiveRoots: struct {
-    priv ids: [String]
-    priv output_hashes: [String]
-    priv name_versions: [LockNameVersion]
-    receipts: [String]
-    priv receipt_packages: [LockReceiptPackage]
+    priv ids: [String],
+    priv output_hashes: [String],
+    priv name_versions: [LockNameVersion],
+    receipts: [String],
+    priv receipt_packages: [LockReceiptPackage],
 
     empty: fn() -> LiveRoots Never! {
         LiveRoots{ids: [String]{}, output_hashes: [String]{}, name_versions: [LockNameVersion]{}, receipts: [String]{}, receipt_packages: [LockReceiptPackage]{}}
@@ -67,8 +67,8 @@ LiveRoots: struct {
 
 // A canonical object no live record or root reaches.
 OrphanedCanonicalObject: struct {
-    path: String
-    priv bytes: Int
+    path: String,
+    priv bytes: Int,
 }
 
 // Rust `with_clean_locks`.

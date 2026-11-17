@@ -95,29 +95,29 @@ JET_DRIVER_CORE_INTERFACE_VERSION: 5
 // units (sema_units_source_mentions over its text), which registration
 // takes in place of scanning the text; a unit a load parses whole has none.
 JetDriverCoreInterfaceUnit: struct {
-    path: String
-    module_name: String
-    text_bytes: Int
-    text_hash: U64
-    lines: Int
-    demand: JetDriverCoreIdentifierDemand
-    words: JetDriverUnitWords
-    bodies: [Span]
-    heads: [U8]
-    holds: Bool
-    regions: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}}
-    held_parses: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}}
-    used_import_names: [String]{[String]{}}
-    fragments: [U8]{[U8]{}}
-    fragments_at: Int{0}
-    mentions: SemaUnitSourceMentions?{None}
+    path: String,
+    module_name: String,
+    text_bytes: Int,
+    text_hash: U64,
+    lines: Int,
+    demand: JetDriverCoreIdentifierDemand,
+    words: JetDriverUnitWords,
+    bodies: [Span],
+    heads: [U8],
+    holds: Bool,
+    regions: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}},
+    held_parses: [JetDriverCoreFragment]{[JetDriverCoreFragment]{}},
+    used_import_names: [String]{[String]{}},
+    fragments: [U8]{[U8]{}},
+    fragments_at: Int{0},
+    mentions: SemaUnitSourceMentions?{None},
 }
 
 // Where one ready parse sits among its unit's: `size` bytes from byte `at`;
 // a size of 0 for a region the unit's parses leave out (it holds no body).
 JetDriverCoreFragment: struct {
-    at: Int
-    size: Int
+    at: Int,
+    size: Int,
 }
 
 // What a load reads one table of its lazy Core unit's ready parses by (the
@@ -125,22 +125,22 @@ JetDriverCoreFragment: struct {
 // unit's ready parses start in the interface file, and where each of the
 // table's sits among them.
 JetDriverCoreReady: struct {
-    at: Int
-    fragments: [JetDriverCoreFragment]
+    at: Int,
+    fragments: [JetDriverCoreFragment],
 }
 
 // One ready parse a load read: its program and its size in bytes.
 JetDriverCoreReadyPart: struct {
-    program: Program
-    size: Int
+    program: Program,
+    size: Int,
 }
 
 // A unit's directory entry: its block starts at byte `at` and is `size`
 // bytes long.
 JetDriverCoreInterfaceEntry: struct {
-    path: String
-    at: Int
-    size: Int
+    path: String,
+    at: Int,
+    size: Int,
 }
 
 // FNV-1a over the bytes of `text`, 64 bits.
@@ -167,11 +167,11 @@ JET_DRIVER_CORE_INTERFACE_BYTES_PER_THREAD: 262144
 // row's names and flags with its text read, all owned, so it can cross to a
 // thread (the row's text reader can't).
 JetDriverCoreInterfaceJob: struct {
-    path: String
-    module_name: String
-    owned_members: [String]
-    runtime: Bool
-    text: String
+    path: String,
+    module_name: String,
+    owned_members: [String],
+    runtime: Bool,
+    text: String,
 }
 
 // The interface rows of each Core unit of `rows`, in their order
@@ -344,10 +344,10 @@ jet_driver_core_whole_parse: fn(parsed: &&ParseResult, dropped: &&[Item], droppe
 // region's and each held declaration's sits in `bytes`, and the import
 // names its whole text spells.
 JetDriverCoreReadyWrite: struct {
-    regions: [JetDriverCoreFragment]
-    held: [JetDriverCoreFragment]
-    bytes: [U8]
-    used_import_names: [String]
+    regions: [JetDriverCoreFragment],
+    held: [JetDriverCoreFragment],
+    bytes: [U8],
+    used_import_names: [String],
 }
 
 // The ready parses of the Core unit `row`, which a load that parses it from
@@ -475,10 +475,10 @@ jet_driver_core_ready_put: fn(bytes: &[U8], part: Program, path: String) -> JetD
 // needs in interface order, so one window serves the many parses of a run
 // with one read.
 JetDriverCoreInterfaceWindow: struct {
-    bytes: [U8]
-    at: Int
-    size: Int
-    reads: Int
+    bytes: [U8],
+    at: Int,
+    size: Int,
+    reads: Int,
 }
 
 // How many bytes a window reads at once; a ready parse longer than that is
@@ -514,8 +514,8 @@ JET_DRIVER_CORE_READY_BYTES_PER_THREAD: 65536
 // Where a ready parse a load reads sits in the interface file: `size`
 // bytes from byte `at`; a size of 0 when there is none to read.
 JetDriverCoreReadyPlace: struct {
-    at: Int
-    size: Int
+    at: Int,
+    size: Int,
 }
 
 // Where the ready parse at `index` of the table `ready` sits in the
@@ -533,8 +533,8 @@ jet_driver_core_ready_place: fn(ready: JetDriverCoreReady?, index: Int) -> JetDr
 // The bytes of one ready parse a load read (jet_driver_core_ready_programs);
 // `found` is false when there was none to read or the read failed.
 JetDriverCoreReadyRecord: struct {
-    bytes: [U8]
-    found: Bool
+    bytes: [U8],
+    found: Bool,
 }
 
 // The ready parses at `places`, in their order: each read on this thread
@@ -661,8 +661,8 @@ jet_driver_core_heads_program: fn(bytes: [U8]) -> Program? Never! {
 // functions, the methods of structs, enums and their trait blocks, `impl`
 // methods, and trait methods' default bodies.
 JetDriverCoreOpenParse: struct {
-    parsed: ParseResult
-    bodies: [Span]
+    parsed: ParseResult,
+    bodies: [Span],
 }
 
 jet_driver_core_open_parse: fn(text: String, threads: CompilerThreads) -> JetDriverCoreOpenParse {
@@ -934,9 +934,9 @@ jet_driver_core_interface_bytes: fn(units: [JetDriverCoreInterfaceUnit]) -> [U8]
 // Where a read of an interface file is, and whether it ran past its end or
 // met a malformed value.
 JetDriverCoreInterfaceCursor: struct {
-    at: Int
-    end: Int
-    failed: Bool
+    at: Int,
+    end: Int,
+    failed: Bool,
 }
 
 jet_driver_core_interface_u32: fn(bytes: [U8], cursor: &JetDriverCoreInterfaceCursor) -> Int Never! {
@@ -1037,9 +1037,9 @@ jet_driver_core_interface_entries: fn(bytes: [U8]) -> [JetDriverCoreInterfaceEnt
 // compiler can't read, leaves `entries` empty, and each Core unit parses
 // whole.
 JetDriverCoreInterfaceIndex: struct {
-    on: Bool
-    read: Bool
-    entries: [JetDriverCoreInterfaceEntry]
+    on: Bool,
+    read: Bool,
+    entries: [JetDriverCoreInterfaceEntry],
 }
 
 jet_driver_core_interface_index: fn(on: Bool) -> JetDriverCoreInterfaceIndex Never! {
@@ -1270,14 +1270,14 @@ jet_driver_core_interface_block_unit: fn(block: [U8], path: String, fragments_at
 // sites its own parse gave it (its held declarations' parse appends more),
 // and where its ready parses sit in the interface.
 JetDriverCoreLazyModule: struct {
-    loaded: Int
-    bodies: [Span]
-    item_ends: [Int]
-    holds: Bool
-    block_spans: Int
-    else_arms: Int
-    debug_sites: Int
-    ready: JetDriverCoreReady?
+    loaded: Int,
+    bodies: [Span],
+    item_ends: [Int],
+    holds: Bool,
+    block_spans: Int,
+    else_arms: Int,
+    debug_sites: Int,
+    ready: JetDriverCoreReady?,
 }
 
 // Where each of a parse's `items` ends, in order. The ends cut the text
@@ -1456,11 +1456,11 @@ jet_driver_core_restore_bodies: fn(request: JetDriverCompileRequest, lazy: [JetD
 // back, the ends of all its kept bodies, and the interior of each body it
 // doesn't keep, in text order.
 JetDriverCoreRestorePlan: struct {
-    row: Int
-    read: [Bool]
-    wanted: [Int]
-    wanted_ends: [Int]
-    stripped: [Span]
+    row: Int,
+    read: [Bool],
+    wanted: [Int],
+    wanted_ends: [Int],
+    stripped: [Span],
 }
 
 // `done`, stopped on the internal problem of a lazy Core module `name`
@@ -1579,11 +1579,11 @@ jet_driver_core_method_name: fn(methods: [Func], blocks: [TraitImplBlock], end: 
 // ready parses it read, their bytes and the reads of the interface it took,
 // and the internal problem of a kept body that didn't come back.
 JetDriverCoreRestore: struct {
-    bodies: Int
-    fragments: Int
-    fragment_bytes: Int
-    fragment_reads: Int
-    problem: String?
+    bodies: Int,
+    fragments: Int,
+    fragment_bytes: Int,
+    fragment_reads: Int,
+    problem: String?,
 }
 
 // A whole restoring parse's side tables (`fresh`) in place of the module's

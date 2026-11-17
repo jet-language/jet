@@ -40,31 +40,31 @@ C_CLIENT_STAGE_HANDSHAKE: 2
 C_CLIENT_STAGE_EXCHANGE: 3
 
 Client: struct {
-    method: String
-    url: String
-    headers: [String]
-    redirects: Int
-    proxy: String
+    method: String,
+    url: String,
+    headers: [String],
+    redirects: Int,
+    proxy: String,
 }
 
 Proxy: struct {
-    url: String
+    url: String,
 }
 
 RedirectPolicy: enum {
-    Disabled
-    Limited
-    All
+    Disabled,
+    Limited,
+    All,
 }
 
 Session: struct {
-    headers: [String]
-    cookies: [String]
-    retries: Int
-    redirects: Int
-    user: String
-    password: String
-    proxy: String
+    headers: [String],
+    cookies: [String],
+    retries: Int,
+    redirects: Int,
+    user: String,
+    password: String,
+    proxy: String,
 }
 
 // The public request names build the Jet message; `send` runs the Jet
@@ -580,7 +580,7 @@ C_BUILD_READ_BYTES: 8192
 
 #Error
 __BuildHTTPFailure: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }
@@ -606,31 +606,31 @@ priv build_fail: fn(message: String) -> __BuildHTTPFailure Never! {
 // the sends left, and `ending` fails the send after them or the read past
 // the tape.
 priv BuildWire: struct {
-    tcp: TCPStream?
-    tls: build_tls.TLSStream?
-    buffer: [U8]
-    at: Int
-    end_ns: Int
-    idle_ns: Int
-    prove: Int
-    taped: [U8]
-    sends: Int
-    ending: String
-    stage: Int
-    addresses: [[U8]]
+    tcp: TCPStream?,
+    tls: build_tls.TLSStream?,
+    buffer: [U8],
+    at: Int,
+    end_ns: Int,
+    idle_ns: Int,
+    prove: Int,
+    taped: [U8],
+    sends: Int,
+    ending: String,
+    stage: Int,
+    addresses: [[U8]],
 }
 
 priv BuildSpan: struct {
-    from: Int
-    to: Int
+    from: Int,
+    to: Int,
 }
 
 // state 0 parsed, 1 empty, 2 invalid digit, 3 above u64::MAX; big marks a
 // value above Int's range (value unused then).
 priv BuildNumber: struct {
-    state: Int
-    value: Int
-    big: Bool
+    state: Int,
+    value: Int,
+    big: Bool,
 }
 
 jet_http_build_get: fn(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
@@ -1127,31 +1127,31 @@ C_CLIENT_INTERIM: 16
 C_CLIENT_BOUNDARY: "jet-http-boundary-"
 
 priv ClientURL: struct {
-    scheme: String
-    host: String
-    port: Int
-    authority: String
-    target: String
+    scheme: String,
+    host: String,
+    port: Int,
+    authority: String,
+    target: String,
 }
 
 // One phase's per-operation timeout and the send's absolute deadline.
 priv ClientPhases: struct {
-    connect_ns: Int
-    tls_ns: Int
-    write_ns: Int
-    first_byte_ns: Int
-    read_ns: Int
-    end_ns: Int
+    connect_ns: Int,
+    tls_ns: Int,
+    write_ns: Int,
+    first_byte_ns: Int,
+    read_ns: Int,
+    end_ns: Int,
 }
 
 // A reply's body is `body`, or `live` when it is still on the connection.
 priv ClientReply: struct {
-    status: Int
-    headers: http.Headers
-    body: [U8]
-    body_error: HTTPError?
-    raw_encoding: String?
-    live: LiveBody?{None}
+    status: Int,
+    headers: http.Headers,
+    body: [U8],
+    body_error: HTTPError?,
+    raw_encoding: String?,
+    live: LiveBody?{None},
 }
 
 __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
@@ -1566,18 +1566,18 @@ C_LIVE_LINE_BYTES: 8192
 // what whole-body reads took, so a later read sees it again; `streamed`
 // marks bytes handed out by chunks and not kept.
 priv LiveBody: struct {
-    tcp: TCPStream?
-    tls: build_tls.TLSStream?
-    buffer: [U8]
-    at: Int
-    read_ns: Int
-    framing: Int
-    left: Int
-    total: Int
-    done: Bool
-    failure: HTTPError?
-    kept: [U8]
-    streamed: Bool
+    tcp: TCPStream?,
+    tls: build_tls.TLSStream?,
+    buffer: [U8],
+    at: Int,
+    read_ns: Int,
+    framing: Int,
+    left: Int,
+    total: Int,
+    done: Bool,
+    failure: HTTPError?,
+    kept: [U8],
+    streamed: Bool,
 }
 
 // The body's bytes, reading on until `want` of them are kept or the body

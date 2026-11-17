@@ -53,8 +53,8 @@ store_recover_certification_staging_unlocked: fn(roots: HangarRoots) -[FS, Env]>
 
 // One fresh private Jetpack root under the Hangar's certification staging.
 RootWorkspace: struct {
-    path: String
-    roots: HangarRoots
+    path: String,
+    roots: HangarRoots,
 
     new: fn(roots: HangarRoots, side: String, attempt: Int) -[FS, Env]> RootWorkspace StoreError! {
         hangar: roots.hangar_dir()
@@ -117,10 +117,10 @@ store_repro_copy_nix_cache_configuration: fn(target: HangarRoots, source: Hangar
 // The workspaces stay alive until the caller has promoted `realized`, then
 // the caller calls `release()` (Rust drops the guards).
 PreparedRealization: struct {
-    realized: Realized
-    action_key: String?
-    attestation: String?
-    priv workspaces: [RootWorkspace]
+    realized: Realized,
+    action_key: String?,
+    attestation: String?,
+    priv workspaces: [RootWorkspace],
 
     release: fn(self) -[FS]> Never! {
         loop workspace in self.workspaces -> workspace.remove()
@@ -228,11 +228,11 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
 // Two independent builds' registration entries, action keys, and their first
 // difference (`None` when they agree).
 IndependentComparison: struct {
-    left_entry: StoreEntry
-    right_entry: StoreEntry
-    left_action: String
-    right_action: String
-    difference: FirstDifference?
+    left_entry: StoreEntry,
+    right_entry: StoreEntry,
+    left_action: String,
+    right_action: String,
+    difference: FirstDifference?,
 }
 
 store_repro_compare_independent: fn(verification: &StoreVerification, left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
@@ -471,8 +471,8 @@ store_repro_debug_list: fn(values: [String]) -> String Never! {
 }
 
 NixActionOutput: struct {
-    digest: String
-    path: String
+    digest: String,
+    path: String,
 }
 
 // `nix.output.<name>` producer facts paired with their recorded digests.

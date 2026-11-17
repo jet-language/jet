@@ -8,144 +8,144 @@ C_MAX_FORM_TEXT: 1048576
 
 #Error
 WebFormError: enum {
-    Invalid
-    Missing
-    Validation
+    Invalid,
+    Missing,
+    Validation,
 }
 
 WebFormValueType: enum {
-    String
-    Int
-    Bool
-    Float
+    String,
+    Int,
+    Bool,
+    Float,
 }
 
 WebFormControl: enum {
-    Text
-    Email
-    URL
-    Password
-    Number
-    Date
-    Checkbox
-    Hidden
+    Text,
+    Email,
+    URL,
+    Password,
+    Number,
+    Date,
+    Checkbox,
+    Hidden,
 }
 
 WebFormStatus: enum {
-    Idle
-    Dirty
-    Validating
-    Invalid
-    Submitting
-    Submitted
-    Error
+    Idle,
+    Dirty,
+    Validating,
+    Invalid,
+    Submitting,
+    Submitted,
+    Error,
 }
 
 // Mirrors the runtime JetWebFormValidationTiming (`Change`, `Blur`, `Submit`).
 WebFormValidationTiming: enum {
-    Change
-    Blur
-    Submit
+    Change,
+    Blur,
+    Submit,
 }
 
 WebFormFieldSpec: struct {
-    name: String
-    value_type: WebFormValueType
-    required: Bool
-    default: String?
-    label: String
-    control: WebFormControl
-    group: String?
-    wire_name: String
+    name: String,
+    value_type: WebFormValueType,
+    required: Bool,
+    default: String?,
+    label: String,
+    control: WebFormControl,
+    group: String?,
+    wire_name: String,
 }
 
 WebFormFieldState: struct {
-    name: String
-    value_type: WebFormValueType
-    required: Bool
-    value: String
-    touched: Bool
-    validating: Bool
-    errors: [String]
+    name: String,
+    value_type: WebFormValueType,
+    required: Bool,
+    value: String,
+    touched: Bool,
+    validating: Bool,
+    errors: [String],
 }
 
 WebForm: struct {
-    action: String
-    method: String
-    fields: [WebFormFieldState]
-    status: WebFormStatus
-    form_error: String
-    focused: String
+    action: String,
+    method: String,
+    fields: [WebFormFieldState],
+    status: WebFormStatus,
+    form_error: String,
+    focused: String,
 }
 
 WebFormState: struct {
-    status: WebFormStatus
-    fields: [String:WebFormFieldState]
-    action: String
-    method: String
-    result: String
-    error: String
-    submission_count: Int
+    status: WebFormStatus,
+    fields: [String:WebFormFieldState],
+    action: String,
+    method: String,
+    result: String,
+    error: String,
+    submission_count: Int,
 }
 
 WebFormInput: struct {
-    type_name: String
-    fields: [WebFormFieldSpec]
+    type_name: String,
+    fields: [WebFormFieldSpec],
 }
 
 WebFormTyped: struct {
-    form: WebForm
-    action: String
-    input: WebFormInput
+    form: WebForm,
+    action: String,
+    input: WebFormInput,
 }
 
 #Error
 WebFormActionError: struct {
-    field_errors: [String:[String]]
-    form_errors: [String]
+    field_errors: [String:[String]],
+    form_errors: [String],
 }
 
 WebFormDecodedInput: struct {
-    type_name: String
-    values: [String:String]
-    wire_values: [String:String]
+    type_name: String,
+    values: [String:String],
+    wire_values: [String:String],
 }
 
 WebFormValidationChain: struct {
-    form: WebFormTyped
-    field: String
-    valid: Bool
+    form: WebFormTyped,
+    field: String,
+    valid: Bool,
 }
 
 WebFormValidation: struct {
-    form: WebFormTyped
-    pending: Bool
+    form: WebFormTyped,
+    pending: Bool,
 }
 
 WebFormTypedSubmission: struct {
-    form: WebFormTyped
-    pending: Bool
+    form: WebFormTyped,
+    pending: Bool,
 }
 
 WebFormErrorState: struct {
-    fields: [String:[String]]
-    form: [String]
+    fields: [String:[String]],
+    form: [String],
 }
 
 WebFormLifecycleStatus: enum {
-    Idle
-    Pending
-    Submitting
-    Success
-    Failure
-    Cancelled
+    Idle,
+    Pending,
+    Submitting,
+    Success,
+    Failure,
+    Cancelled,
 }
 
 WebFormLifecycle: struct {
-    status: WebFormLifecycleStatus
-    result: String
-    error: String
-    generation: Int
+    status: WebFormLifecycleStatus,
+    result: String,
+    error: String,
+    generation: Int,
 }
 
 new: fn(action: String) -> WebForm Never! {

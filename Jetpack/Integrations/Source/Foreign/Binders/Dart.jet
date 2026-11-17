@@ -48,17 +48,17 @@ DART_SDK_SEARCH_DEPTH: 7
 DART_SDK_SEARCH_ENTRIES: 4096
 
 DartBindResult: struct {
-    source: String
-    host_source: String
-    host_rust: String
-    bound: [String]
-    archive: String
-    provenance: String
+    source: String,
+    host_source: String,
+    host_rust: String,
+    bound: [String],
+    archive: String,
+    provenance: String,
 }
 
 DartScalar: enum {
-    Int
-    Float
+    Int,
+    Float,
 
     parse: fn(value: String) -> DartScalar? Never! {
         if value == {
@@ -105,16 +105,16 @@ DartScalar: enum {
 }
 
 DartParam: struct {
-    name: String
-    kind: DartScalar
+    name: String,
+    kind: DartScalar,
 }
 
 // One `@pragma('vm:entry-point')` function: its Dart name and Jet projection.
 DartFunction: struct {
-    name: String
-    jet: String
-    params: [DartParam]
-    result: DartScalar
+    name: String,
+    jet: String,
+    params: [DartParam],
+    result: DartScalar,
 }
 
 // Parse the Dart contract, build the callback bridge and `dart_api_dl`
@@ -476,7 +476,7 @@ pkg_dart_render_jet: fn(lib: String, functions: [DartFunction]) -> String Never!
     loop function in functions {
         out = "{out}    {function.jet}: fn{pkg_dart_jet_params(function.params)} -> {function.result.jet()} = \"{abi}_call_{function.name}\"\n"
     }
-    out = "{out}}}\nuse abi: c.{abi}\n\nDartError: enum {{ NotInitialized CallbackUnavailable }}\n\n"
+    out = "{out}}}\nuse abi: c.{abi}\n\nDartError: enum {{ NotInitialized, CallbackUnavailable }}\n\n"
     loop function in functions {
         out = "{out}{function.jet}: fn{pkg_dart_jet_params(function.params)} -[FFI.Dart]> {function.result.jet()} DartError! {{\n    result: abi.{function.jet}{pkg_dart_call_args(function.params)}\n    code: abi.take_error()\n    if code == 1 {{ return Err(DartError.NotInitialized) }}\n    if code == 2 {{ return Err(DartError.CallbackUnavailable) }}\n    return Ok(result)\n}}\n\n"
     }

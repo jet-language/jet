@@ -209,7 +209,7 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     built: process.cmd([tree_sitter, "build", "-o", library, "Tools/Editors/TreeSitter"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter build: {err}")
     assert(built.code == 0, "tree-sitter build failed: {process.combined_output(built).trim()}")
     sample: files.join(scratch, "sample.jet")
-    files.write(sample, "Point: struct {{\n    x: Int\n}}\nmain: fn() {{\n    print(\"hi\")\n}}\n") ?? panic("write {sample}: {err}")
+    files.write(sample, "Point: struct {{\n    x: Int,\n}}\nmain: fn() {{\n    print(\"hi\")\n}}\n") ?? panic("write {sample}: {err}")
     failures := [String]{}
     loop name in ["highlights", "outline", "brackets", "indents", "overrides"] {
         query: "Tools/Editors/Zed/languages/jet/{name}.scm"

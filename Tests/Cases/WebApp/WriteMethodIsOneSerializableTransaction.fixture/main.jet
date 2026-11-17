@@ -16,17 +16,17 @@ use {
 
 #Codable
 Card: struct {
-    id: Int
-    column: String
-    version: Int
+    id: Int,
+    column: String,
+    version: Int,
 }
 
 #Error
 MoveError: enum {
-    Conflict(Int)
-    Missing
-    Failed(String)
-    Unreachable(String)
+    Conflict(Int),
+    Missing,
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> MoveError {
@@ -52,7 +52,7 @@ card_now: fn(cards: db.Table<Int, Card>, id: Int) -[DB.Read]> Card MoveError! {
 }
 
 Board: struct {
-    store: db.Store
+    store: db.Store,
 
     // Moves card `id`, last seen at `version`, to `column`, and gives its
     // next version; Conflict, with the current version, when it has moved on.

@@ -30,16 +30,16 @@ use jet_foundation.[CompilerTraceSink, compiler_take_rows, compiler_threads_fail
 
 // A function the walk starts from: function `local` of part `part`.
 IRMergeRoot: struct {
-    part: Int
-    local: Int
+    part: Int,
+    local: Int,
 }
 
 // One part's rows under the merged numbering (-1: not reached).
 IRMergeSide: struct {
-    function_new: [Int]
-    type_new: [Int]
-    name_new: [Int]
-    data_new: [Int]
+    function_new: [Int],
+    type_new: [Int],
+    name_new: [Int],
+    data_new: [Int],
 }
 
 // A part's merge input, made on its build thread (ir_merge_prepare): its
@@ -48,13 +48,13 @@ IRMergeSide: struct {
 // (kind, row) pairs `uses[use_starts[local]..<use_starts[local + 1]]`
 // (kinds: IR_MERGE_USE_*).
 IRMergePrep: struct {
-    functions: [{key: String, local: Int}]
-    types: [{key: String, local: Int}]
-    names: [{key: String, local: Int}]
-    texts: [{key: String, local: Int}]
-    constants: [{key: String, local: Int}]
-    use_starts: [Int]
-    uses: [Int]
+    functions: [{key: String, local: Int}],
+    types: [{key: String, local: Int}],
+    names: [{key: String, local: Int}],
+    texts: [{key: String, local: Int}],
+    constants: [{key: String, local: Int}],
+    use_starts: [Int],
+    uses: [Int],
 }
 
 IR_MERGE_USE_TYPE: 0
@@ -81,10 +81,10 @@ ir_merge_row_count: fn(parts: [IRModule]) -> Int Never! {
 
 // Per row kind, the function that last used each row (ir_merge_uses).
 IRMergeSeen: struct {
-    types: [Int]
-    names: [Int]
-    data: [Int]
-    functions: [Int]
+    types: [Int],
+    names: [Int],
+    data: [Int],
+    functions: [Int],
 }
 
 // The merged rows (each one's part and row there); each part row's sharing
@@ -94,32 +94,32 @@ IRMergeSeen: struct {
 // below `data_texts` are text or bytes keys, the rest constants' static
 // objects. Per part, its functions' uses (IRMergePrep), read by the walk.
 IRMerge: struct {
-    sides: [IRMergeSide]
-    roots: [IRMergeRoot]
-    function_part: [Int]
-    function_local: [Int]
-    function_group: [[Int]]
-    function_keys: [String]
-    function_ids: [Int]
-    function_job: [Int]
-    type_part: [Int]
-    type_local: [Int]
-    type_group: [[Int]]
-    type_keys: [String]
-    type_ids: [Int]
-    name_part: [Int]
-    name_local: [Int]
-    name_group: [[Int]]
-    name_keys: [String]
-    name_ids: [Int]
-    data_part: [Int]
-    data_local: [Int]
-    data_group: [[Int]]
-    data_keys: [String]
-    data_texts: Int
-    data_ids: [Int]
-    use_starts: [[Int]]
-    uses: [[Int]]
+    sides: [IRMergeSide],
+    roots: [IRMergeRoot],
+    function_part: [Int],
+    function_local: [Int],
+    function_group: [[Int]],
+    function_keys: [String],
+    function_ids: [Int],
+    function_job: [Int],
+    type_part: [Int],
+    type_local: [Int],
+    type_group: [[Int]],
+    type_keys: [String],
+    type_ids: [Int],
+    name_part: [Int],
+    name_local: [Int],
+    name_group: [[Int]],
+    name_keys: [String],
+    name_ids: [Int],
+    data_part: [Int],
+    data_local: [Int],
+    data_group: [[Int]],
+    data_keys: [String],
+    data_texts: Int,
+    data_ids: [Int],
+    use_starts: [[Int]],
+    uses: [[Int]],
 }
 
 // The module of one part built in queue order (ir_build_tests): its queue,
@@ -496,9 +496,9 @@ ir_merge_use: fn(seen: &[Int], kind: Int, row: Int, local: Int, uses: &[Int]) Ne
 // per group its key, the groups of `runs` before those of `later`;
 // `texts`: how many groups `runs` has. `counts`: per part its rows.
 IRMergeGroups: struct {
-    groups: [[Int]]
-    keys: [String]
-    texts: Int
+    groups: [[Int]],
+    keys: [String],
+    texts: Int,
 }
 
 ir_merge_grouped: fn(runs: &&[[{key: String, local: Int}]], later: &&[[{key: String, local: Int}]], counts: &&[Int]) -> IRMergeGroups Never! {
@@ -710,8 +710,8 @@ ir_merge_rewrite: fn(side: IRMergeSide, f: &IRFunction) Never! {
 
 // A merged function and its merged id, as a part's rewrite hands it back.
 IRMergeTaken: struct {
-    id: Int
-    function: IRFunction
+    id: Int,
+    function: IRFunction,
 }
 
 // Moves the merged functions out of their parts into `functions`, in merged
@@ -768,8 +768,8 @@ ir_merge_function_lists: fn(parts: &[IRModule]) -> [[IRFunction]] Never! {
 // One part's functions and, per row, its merged id (-1: not merged), moved
 // into the thread that rewrites them (ir_merge_rewrite_parts).
 IRMergePart: struct {
-    functions: [IRFunction]
-    ids: [Int]
+    functions: [IRFunction],
+    ids: [Int],
 }
 
 // The rewritten merged functions of every part in `lists`, in part order:

@@ -5,7 +5,7 @@ use {
 
 #CLI
 WorkloadArgs: struct {
-    root: String
+    root: String,
 }
 
 run: fn(args: WorkloadArgs) {
@@ -23,7 +23,7 @@ run_dialogue: fn(root: String) {
         .cwd(root)
         .terminal(TerminalPolicy{
             size: TerminalSize{cols: 100, rows: 30},
-            mode: .Cooked
+            mode: .Cooked,
         })
     if !jet.abilities().has("terminal") -> panic("terminal capability missing")
     child: jet.spawn() ?? panic("terminal spawn failed")
@@ -47,7 +47,7 @@ run_closed: fn(root: String) {
         .cwd(root)
         .terminal(TerminalPolicy{
             size: TerminalSize{cols: 100, rows: 30},
-            mode: .Cooked
+            mode: .Cooked,
         })
         .timeout(duration)
         .run() ?? panic("closed terminal failed to launch")

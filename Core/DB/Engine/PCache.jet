@@ -45,9 +45,9 @@ PCACHE1_MAX_PAGES: 2147418112
 // (bitmap, hash, sub-bitmaps) only bound memory; the set they hold is the
 // same. A Bitvec that is not live is the null Bitvec pointer.
 Bitvec: struct {
-    live: Bool
-    size: Int
-    members: [Int:Bool]
+    live: Bool,
+    size: Int,
+    members: [Int:Bool],
 }
 
 // The null Bitvec.
@@ -92,70 +92,70 @@ bitvec_size: fn(b: Bitvec) -> Int Never! { b.size }
 // A cache page: pcache.c PgHdr with its pcache1.c PgHdr1.
 PgHdr: struct {
     // pData: the page image.
-    data: [U8]
+    data: [U8],
     // pgno.
-    pgno: Int
+    pgno: Int,
     // flags, PGHDR_*.
-    flags: Int
+    flags: Int,
     // nRef.
-    nref: Int
+    nref: Int,
     // pDirtyNext and pDirtyPrev; valid while the page is dirty.
-    dirty_next: Int
-    dirty_prev: Int
+    dirty_next: Int,
+    dirty_prev: Int,
     // PgHdr.pPage != 0: the header was set up by pcacheFetchFinishWithInit.
-    init: Bool
+    init: Bool,
     // PgHdr.pPager != 0: the pager has filled the page (getPageNormal).
-    loaded: Bool
+    loaded: Bool,
     // The first 8 bytes of pExtra were zeroed and the owner of the extra
     // space has not looked since (it clears this when it does).
-    extra_reset: Bool
+    extra_reset: Bool,
     // PgHdr1.iKey.
-    key: Int
+    key: Int,
     // The slot holds a page of the hash (it is not on the free list).
-    live: Bool
+    live: Bool,
     // PAGE_IS_UNPINNED: the page is on the LRU list.
-    unpinned: Bool
+    unpinned: Bool,
     // PgHdr1.pLruNext and pLruPrev.
-    lru_next: Int
-    lru_prev: Int
+    lru_next: Int,
+    lru_prev: Int,
 }
 
 // pcache.c PCache with its pcache1.c PCache1 and PGroup.
 PCache: struct {
-    pages: [PgHdr]
+    pages: [PgHdr],
     // pDirty, pDirtyTail and pSynced.
-    dirty: Int
-    dirty_tail: Int
-    synced: Int
+    dirty: Int,
+    dirty_tail: Int,
+    synced: Int,
     // nRefSum.
-    nref_sum: Int
+    nref_sum: Int,
     // szCache, szSpill, szPage, szExtra, bPurgeable and eCreate.
-    sz_cache: Int
-    sz_spill: Int
-    sz_page: Int
-    sz_extra: Int
-    purgeable: Bool
-    create: Int
+    sz_cache: Int,
+    sz_spill: Int,
+    sz_page: Int,
+    sz_extra: Int,
+    purgeable: Bool,
+    create: Int,
     // pCache != 0: the pcache1 cache exists.
-    open: Bool
+    open: Bool,
     // PCache1: apHash, the free slots, nPage, nRecyclable, iMaxKey, nMax,
     // nMin and n90pct.
-    hash: [Int:Int]
-    free: [Int]
-    npage: Int
-    nrecyclable: Int
-    max_key: Int
-    nmax: Int
-    nmin: Int
-    n90pct: Int
+    hash: [Int:Int],
+    free: [Int],
+    npage: Int,
+    nrecyclable: Int,
+    max_key: Int,
+    nmax: Int,
+    nmin: Int,
+    n90pct: Int,
     // PGroup: nMaxPage, nMinPage, mxPinned, nPurgeable and the LRU list
     // (lru.pLruNext is the most recently unpinned page).
-    group_max_page: Int
-    group_min_page: Int
-    mx_pinned: Int
-    npurgeable: Int
-    lru_head: Int
-    lru_tail: Int
+    group_max_page: Int,
+    group_min_page: Int,
+    mx_pinned: Int,
+    npurgeable: Int,
+    lru_head: Int,
+    lru_tail: Int,
 }
 
 // A cache before sqlite3PcacheOpen (the zeroed PCache inside a new Pager).

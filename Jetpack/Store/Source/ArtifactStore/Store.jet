@@ -12,88 +12,88 @@ use {
 
 // One action record of a batch publication (Rust `(ActionHandle, Vec<u8>)`).
 ArtifactActionPublication: struct {
-    action: ActionHandle
-    bytes: [U8]
+    action: ActionHandle,
+    bytes: [U8],
 }
 
 // One journal line to append (Rust `(&str, &EntryKey, u64)`).
 ArtifactJournalAppend: struct {
-    operation: String
-    key: ArtifactEntryKey
-    length: Int
+    operation: String,
+    key: ArtifactEntryKey,
+    length: Int,
 }
 
 // One encoded action record a batch writes (Rust `(PathBuf, EntryKey, Vec<u8>)`).
 ArtifactPendingWrite: struct {
-    path: String
-    key: ArtifactEntryKey
-    encoded: [U8]
+    path: String,
+    key: ArtifactEntryKey,
+    encoded: [U8],
 }
 
 // A deterministic store listing entry.
 ArtifactEntryStatus: struct {
-    kind: ArtifactEntryKind
-    key: String
-    namespace: String?
-    size_bytes: Int
-    last_use: Int
-    pinned: Bool
-    path: String
+    kind: ArtifactEntryKind,
+    key: String,
+    namespace: String?,
+    size_bytes: Int,
+    last_use: Int,
+    pinned: Bool,
+    path: String,
 }
 
 // Store state suitable for status UIs and deterministic tests.
 ArtifactStoreStatus: struct {
-    root: String
-    footprint_bytes: Int
-    limit_bytes: Int
-    reserve_bytes: Int
-    available_bytes: Int?
-    live_leases: Int
-    host_limit_bytes: Int?
-    entries: [ArtifactEntryStatus]
-    tiers: [String]
+    root: String,
+    footprint_bytes: Int,
+    limit_bytes: Int,
+    reserve_bytes: Int,
+    available_bytes: Int?,
+    live_leases: Int,
+    host_limit_bytes: Int?,
+    entries: [ArtifactEntryStatus],
+    tiers: [String],
 }
 
 // The result of one deterministic prune operation.
 ArtifactPruneReport: struct {
-    target_bytes: Int
-    before_bytes: Int
-    after_bytes: Int
-    removed: [ArtifactEntryStatus]
-    pinned_bytes: Int
-    blocked: Bool
+    target_bytes: Int,
+    before_bytes: Int,
+    after_bytes: Int,
+    removed: [ArtifactEntryStatus],
+    pinned_bytes: Int,
+    blocked: Bool,
 }
 
 // A verified action record that points at one immutable CAS object.
 StoredArtifact: struct {
-    action: ActionHandle
-    object: ObjectHandle
-    path: String
-    executable: Bool
+    action: ActionHandle,
+    object: ObjectHandle,
+    path: String,
+    executable: Bool,
 }
 
 // Result of looking up a named artifact. Corrupt records and objects are
 // quarantined before `Corrupt` is returned.
 ArtifactLookup: enum {
-    Missing
-    Corrupt
-    Hit(StoredArtifact)
+    Missing,
+    Corrupt,
+    Hit(StoredArtifact),
 }
 
 // Result of restoring a named artifact to a display path.
 ArtifactRestore: enum {
-    Missing
-    Corrupt
-    Hit(object: ObjectHandle, executable: Bool)
+    Missing,
+    Corrupt,
+    Hit(object: ObjectHandle, executable: Bool),
 }
 
 // One scanned entry with its journal and lease facts.
 ArtifactStoredEntry: struct {
-    key: ArtifactEntryKey
-    path: String
-    size_bytes: Int
-    last_use: Int
-    pinned: Bool
+    key: ArtifactEntryKey,
+    path: String,
+    size_bytes: Int,
+    last_use: Int,
+    pinned: Bool,
 
     status: fn(self) -> ArtifactEntryStatus Never! {
         namespace: if self.key == {
@@ -148,9 +148,9 @@ STORE_ARTIFACT_FOOTPRINT_FILE: "footprint"
 // What a replay of the tally learned: the entry bytes and the checksum field
 // of the journal's final line, as of `journal_bytes`.
 ArtifactFootprintTally: struct {
-    journal_bytes: Int
-    entry_bytes: Int
-    checksum: String
+    journal_bytes: Int,
+    entry_bytes: Int,
+    checksum: String,
 }
 
 store_artifact_footprint_tally_text: fn(tally: ArtifactFootprintTally) -> String Never! {
@@ -232,8 +232,8 @@ store_artifact_saturating_mul: fn(left: Int, right: Int) -> Int Never! {
 // identity, drawn once when the store opens and written into its lock and
 // lease files.
 ArtifactStore: struct {
-    priv config_value: ArtifactStoreConfig
-    priv owner_value: ArtifactProcessIdentity
+    priv config_value: ArtifactStoreConfig,
+    priv owner_value: ArtifactProcessIdentity,
 
     open: fn(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         if config.root() == "" {

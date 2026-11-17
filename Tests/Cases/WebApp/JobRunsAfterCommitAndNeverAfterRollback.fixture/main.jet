@@ -11,15 +11,15 @@ use {
 
 #Codable
 Note: struct {
-    id: Int
-    text: String
+    id: Int,
+    text: String,
 }
 
 #Error
 BoardError: enum {
-    Refused
-    Failed(String)
-    Unreachable(String)
+    Refused,
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> BoardError {
@@ -36,8 +36,8 @@ notes_in: fn(store: db.Store) -> db.Table<Int, Note> {
 }
 
 Board: struct {
-    store: db.Store
-    runs: Shared<Int>
+    store: db.Store,
+    runs: Shared<Int>,
 
     // Saves note `id` and queues its notice; a note titled "fail" is refused
     // after both, so its call rolls back.

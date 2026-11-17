@@ -38,30 +38,30 @@ sketch: module
 
 #[Comparable, Equatable]
 DataFormat: enum {
-    CSV
-    JSON
-    JSONL
-    Parquet
+    CSV,
+    JSON,
+    JSONL,
+    Parquet,
     Arrow
 }
 
 #Equatable
 DataErrorKind: enum {
-    Decode
-    Limit
-    IO
-    Empty
-    InvalidArgument
-    NonFinite
-    Overflow
-    State
-    Bridge
-    Unsupported
-    DuplicateKey
-    MissingKey
-    WrongOwner
-    StaleRevision
-    InvalidValue
+    Decode,
+    Limit,
+    IO,
+    Empty,
+    InvalidArgument,
+    NonFinite,
+    Overflow,
+    State,
+    Bridge,
+    Unsupported,
+    DuplicateKey,
+    MissingKey,
+    WrongOwner,
+    StaleRevision,
+    InvalidValue,
 
     impl Display {
         display: fn(self) -> String { data_error_kind_text(self) }
@@ -94,13 +94,13 @@ data_error_kind_text: fn(kind: DataErrorKind) -> String Never! {
 
 #[Equatable, Error]
 DataError: struct {
-    kind: DataErrorKind
-    operation: String
-    row: Int?
-    column: Int?
-    index: Int?
-    reason: String
-    cause: EncodingError?
+    kind: DataErrorKind,
+    operation: String,
+    row: Int?,
+    column: Int?,
+    index: Int?,
+    reason: String,
+    cause: EncodingError?,
 
     impl Display {
         display: fn(self) -> String { data_error_text(self) }
@@ -161,56 +161,56 @@ nonfinite: fn(value: Float) -> Bool Never! {
 }
 
 DataLineOptions: struct {
-    title: String
-    x_label: String
-    y_label: String
-    markers: Bool
-    reference: Float?
-    style: String
-    color: String
+    title: String,
+    x_label: String,
+    y_label: String,
+    markers: Bool,
+    reference: Float?,
+    style: String,
+    color: String,
     legend: String
 }
 
 #Comparable
 DataFreshness: enum {
-    Pending
-    Fresh
-    Stale
-    Error
-    Offline
+    Pending,
+    Fresh,
+    Stale,
+    Error,
+    Offline,
     Cancelled
 }
 
 #[Comparable, Equatable]
 DataInvalidationCause: enum {
-    NoCause
-    Loader
-    Input
-    ArchiveMember
-    Parameters
-    Credential
-    Capability
+    NoCause,
+    Loader,
+    Input,
+    ArchiveMember,
+    Parameters,
+    Credential,
+    Capability,
     Manual
 }
 
 #Equatable
 DataStatus: struct {
-    step: String
-    path: String
-    clone_value: String
-    ownership: String
-    trust: String
-    fallback: String
+    step: String,
+    path: String,
+    clone_value: String,
+    ownership: String,
+    trust: String,
+    fallback: String,
     replacement: String
 }
 
 #Equatable
 DataLimits: struct {
-    encoding: EncodingLimits
-    max_groups: Int
-    max_sort_rows: Int
-    max_join_rows: Int
-    max_output_rows: Int
+    encoding: EncodingLimits,
+    max_groups: Int,
+    max_sort_rows: Int,
+    max_join_rows: Int,
+    max_output_rows: Int,
 
     // Typed data declarations and provider-backed boundaries.
     safe: fn() -> DataLimits Never! {
@@ -225,101 +225,101 @@ DataLimits: struct {
 }
 
 DataAuthority: struct {
-    scope: String
+    scope: String,
     revision: String
 }
 
 // Where a loader reads from; the runtime's data provider takes it by
 // position.
 DataLoaderKind: enum {
-    File
-    URL
-    Database
+    File,
+    URL,
+    Database,
     Value
 }
 
 DataSourceIdentity: struct {
-    kind: DataLoaderKind
-    locator: String
-    member: String
+    kind: DataLoaderKind,
+    locator: String,
+    member: String,
     parameters: [String]
 }
 
 DataSnapshotIdentity: struct {
-    id: String
-    source: String
-    content: String
-    schema: String
+    id: String,
+    source: String,
+    content: String,
+    schema: String,
     format: DataFormat
 }
 
 DataProvenance: struct {
-    source: DataSourceIdentity
-    format: DataFormat
+    source: DataSourceIdentity,
+    format: DataFormat,
     authority: DataAuthority
 }
 
 DataColumn: struct {
-    id: String
-    name: String
-    type_name: String
+    id: String,
+    name: String,
+    type_name: String,
     nullable: Bool
 }
 
 DataSchema: struct {
-    identity: String
-    format: DataFormat
-    columns: [DataColumn]
+    identity: String,
+    format: DataFormat,
+    columns: [DataColumn],
     projection: String?
 }
 
 DataSnapshot: struct<T> {
-    value: T
-    identity: DataSnapshotIdentity
-    provenance: DataProvenance
-    schema: DataSchema
-    status: DataLoaderStatus
+    value: T,
+    identity: DataSnapshotIdentity,
+    provenance: DataProvenance,
+    schema: DataSchema,
+    status: DataLoaderStatus,
     content: [U8]
 }
 
 DataLoader: struct<T> {
-    source: DataSourceIdentity
-    format: DataFormat
-    authority: DataAuthority
-    limits: DataLimits
-    payload: [U8]?
-    last_good: [U8]?
-    cancelled: Bool
-    offline: Bool
+    source: DataSourceIdentity,
+    format: DataFormat,
+    authority: DataAuthority,
+    limits: DataLimits,
+    payload: [U8]?,
+    last_good: [U8]?,
+    cancelled: Bool,
+    offline: Bool,
     status: DataLoaderStatus
 }
 
 #Comparable
 DataLoaderStatus: struct {
-    identity: String
-    freshness: DataFreshness
-    invalidated_by: DataInvalidationCause
-    error: String
-    cleanup: String
-    buffered_bytes: Int
-    backpressure: Bool
+    identity: String,
+    freshness: DataFreshness,
+    invalidated_by: DataInvalidationCause,
+    error: String,
+    cleanup: String,
+    buffered_bytes: Int,
+    backpressure: Bool,
     last_good: Bool
 }
 
 #Equatable
 DataWatchStatus: struct {
-    mode: String
-    revision: Int
-    retained_rows: Int
-    recomputations: Int
-    active: Bool
-    generation: Int
-    dirty: Bool
-    error: String
-    freshness_ms: Int
-    invalidation_cause: String
-    refreshing: Bool
-    cancelled: Bool
+    mode: String,
+    revision: Int,
+    retained_rows: Int,
+    recomputations: Int,
+    active: Bool,
+    generation: Int,
+    dirty: Bool,
+    error: String,
+    freshness_ms: Int,
+    invalidation_cause: String,
+    refreshing: Bool,
+    cancelled: Bool,
 
     impl Display {
         display: fn(self) -> String { data_watch_status_text(self) }
@@ -337,9 +337,9 @@ data_watch_status_text: fn(status: DataWatchStatus) -> String Never! {
 // A stream is a one-shot cursor (core-library.md `core.data.stream`): the
 // owned `items` come first, then the rows of the optional pull source.
 DataStream: struct<T> {
-    items: [T]
-    index: Int
-    cancelled: Bool
+    items: [T],
+    index: Int,
+    cancelled: Bool,
     __source: Shared<StreamSource<T>>?
 }
 
@@ -348,46 +348,46 @@ DataStream: struct<T> {
 // stays latched in `terminal`, and `ahead` keeps rows that `len` read early.
 // `limits` are the reader's: they bound `collect` and a query over the stream.
 priv StreamSource: struct<T> {
-    pull: fn() -> T? DataError!
-    limits: DataLimits
-    ahead: [T]
-    ahead_index: Int
-    terminal: DataError?
+    pull: fn() -> T? DataError!,
+    limits: DataLimits,
+    ahead: [T],
+    ahead_index: Int,
+    terminal: DataError?,
     done: Bool
 }
 
 DataPivotCell: struct {
-    row_key: String
-    column_key: String
-    count: Int
-    sum: Float
+    row_key: String,
+    column_key: String,
+    count: Int,
+    sum: Float,
     mean: Float
 }
 
 #Equatable
 DataSummary: struct {
-    count: Int
-    sum: Float
-    mean: Float
-    min: Float
-    max: Float
-    median: Float
-    variance: Float
+    count: Int,
+    sum: Float,
+    mean: Float,
+    min: Float,
+    max: Float,
+    median: Float,
+    variance: Float,
     stddev: Float
 }
 
 DataJoin: struct<L, R> {
-    left: L
+    left: L,
     right: R
 }
 
 JetDataPlot: struct<T> {
-    rows: [T]
+    rows: [T],
     plan: JetDataPlotPlan
 }
 
 Group: struct<K, V> {
-    key: K
+    key: K,
     value: V
 }
 
@@ -418,10 +418,10 @@ priv QueryState: struct {
 // reader's stream keeps that reader's limits, every other source starts at
 // `DataLimits.safe()`, and each derived query inherits its source's.
 Query: struct<T> {
-    __steps: [String]
-    __one_shot: Bool
-    __limits: DataLimits
-    __state: Shared<QueryState>
+    __steps: [String],
+    __one_shot: Bool,
+    __limits: DataLimits,
+    __state: Shared<QueryState>,
     __cell: Shared<QueryCell<T>>
 }
 
@@ -431,7 +431,7 @@ priv QueryKeyCell: struct<T, K> {
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
 DataGroupedQuery: struct<T, K> {
-    __query: Query<T>
+    __query: Query<T>,
     __key: Shared<QueryKeyCell<T, K>>
 }
 
@@ -440,15 +440,15 @@ DataTracked: struct<T, K> {
 }
 
 DataWatch: struct<T> {
-    query: Query<T>
+    query: Query<T>,
     status: DataWatchStatus
 }
 
 #Comparable
 JetDataPlotMark: enum {
-    Line
-    Bar
-    Point
+    Line,
+    Bar,
+    Point,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -461,12 +461,12 @@ JetDataPlotMark: enum {
 
 #Comparable
 JetDataPlotChannel: enum {
-    X
-    Y
-    Color
-    Size
-    Text
-    Detail
+    X,
+    Y,
+    Color,
+    Size,
+    Text,
+    Detail,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -481,21 +481,21 @@ JetDataPlotChannel: enum {
 }
 
 JetDataPlotAggregate: enum {
-    Sum
-    Mean
-    Count
-    Min
+    Sum,
+    Mean,
+    Count,
+    Min,
     Max
 }
 
 #Comparable
 JetDataPlotFilterOp: enum {
-    Equal
-    NotEqual
-    Less
-    LessEqual
-    Greater
-    GreaterEqual
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -510,23 +510,23 @@ JetDataPlotFilterOp: enum {
 }
 
 JetDataPlotValue: enum {
-    Number
-    Text
+    Number,
+    Text,
     Bool
 }
 
 JetDataPlotTransform: enum {
-    Identity
-    Filter
+    Identity,
+    Filter,
     Aggregate
 }
 
 #Comparable
 JetDataPlotScaleKind: enum {
-    Linear
-    Log
-    Band
-    Point
+    Linear,
+    Log,
+    Band,
+    Point,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -541,16 +541,16 @@ JetDataPlotScaleKind: enum {
 }
 
 JetDataPlotDomain: enum {
-    Auto
+    Auto,
     Explicit
 }
 
 #Comparable
 JetDataPlotLegendPosition: enum {
-    Top
-    Right
-    Bottom
-    Left
+    Top,
+    Right,
+    Bottom,
+    Left,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -564,8 +564,8 @@ JetDataPlotLegendPosition: enum {
 
 #Comparable
 JetDataPlotFacetKind: enum {
-    Row
-    Column
+    Row,
+    Column,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -577,11 +577,11 @@ JetDataPlotFacetKind: enum {
 
 #Comparable
 JetDataPlotInteraction: enum {
-    Hover
-    Select
-    Zoom
-    Pan
-    Brush
+    Hover,
+    Select,
+    Zoom,
+    Pan,
+    Brush,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -596,10 +596,10 @@ JetDataPlotInteraction: enum {
 
 #Comparable
 JetDataPlotBackend: enum {
-    Terminal
-    Browser
-    Native
-    Export
+    Terminal,
+    Browser,
+    Native,
+    Export,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -613,9 +613,9 @@ JetDataPlotBackend: enum {
 
 #Comparable
 JetDataPlotSupport: enum {
-    Supported
-    Degraded
-    Unsupported
+    Supported,
+    Degraded,
+    Unsupported,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -627,19 +627,19 @@ JetDataPlotSupport: enum {
 }
 
 JetDataPlotErrorKind: enum {
-    Schema
-    Encoding
+    Schema,
+    Encoding,
     Render
 }
 
 JetDataPlotRenderFormat: enum {
-    SVG
-    Text
+    SVG,
+    Text,
     JSON
 }
 
 JetDataPlotField: struct {
-    name: String
+    name: String,
     kind: JetDataPlotValue
 }
 
@@ -648,23 +648,23 @@ JetDataPlotSchema: struct {
 }
 
 JetDataPlotSourceFacts: struct {
-    rows: Int
+    rows: Int,
     columns: Int
 }
 
 JetDataPlotEncoding: struct {
-    x: String
-    y: String
+    x: String,
+    y: String,
     mark: JetDataPlotMark
 }
 
 JetDataPlotScale: struct {
-    kind: JetDataPlotScaleKind
+    kind: JetDataPlotScaleKind,
     field: String
 }
 
 JetDataPlotAxis: struct {
-    field: String
+    field: String,
     title: String
 }
 
@@ -673,38 +673,38 @@ JetDataPlotLegend: struct {
 }
 
 JetDataPlotFacet: struct {
-    kind: JetDataPlotFacetKind
+    kind: JetDataPlotFacetKind,
     field: String
 }
 
 JetDataPlotLayer: struct {
-    mark: JetDataPlotMark
+    mark: JetDataPlotMark,
     encoding: JetDataPlotEncoding
 }
 
 JetDataPlotAccessibility: struct {
-    title: String
+    title: String,
     summary: String
 }
 
 JetDataPlotLayout: struct {
-    width: Int
+    width: Int,
     height: Int
 }
 
 JetDataPlotCapability: struct {
-    backend: JetDataPlotBackend
+    backend: JetDataPlotBackend,
     support: JetDataPlotSupport
 }
 
 #Error
 JetDataPlotError: struct {
-    kind: JetDataPlotErrorKind
+    kind: JetDataPlotErrorKind,
     message: String
 }
 
 JetDataPlotColumn: struct {
-    name: String
+    name: String,
     values: [String]
 }
 
@@ -717,21 +717,21 @@ JetDataPlotInspection: struct {
 }
 
 JetDataPlotRender: struct {
-    format: JetDataPlotRenderFormat
+    format: JetDataPlotRenderFormat,
     body: String
 }
 
 JetDataPlotProjection: struct {
-    start: Int
+    start: Int,
     end: Int
 }
 
 JetDataPlotPlan: struct {
-    mark: JetDataPlotMark
-    labels: [String]
-    values: [Float]
-    layout: JetDataPlotLayout
-    encoding: JetDataPlotEncoding
+    mark: JetDataPlotMark,
+    labels: [String],
+    values: [Float],
+    layout: JetDataPlotLayout,
+    encoding: JetDataPlotEncoding,
     schema: JetDataPlotSchema
 }
 
@@ -944,7 +944,7 @@ LateEventDisposition: enum {
 }
 
 StreamEvent: struct<T> {
-    value: T
+    value: T,
     event_time: DateTime
 }
 
@@ -957,20 +957,20 @@ KeyedStream: struct<K, T> {
 }
 
 Window: struct<K, T> {
-    key: K
-    start: DateTime
-    end: DateTime
+    key: K,
+    start: DateTime,
+    end: DateTime,
     events: [StreamEvent<T>]
 }
 
 priv KeyedEvent: struct<K, T> {
-    key: K
+    key: K,
     event: StreamEvent<T>
 }
 
 priv PendingWindow: struct<T> {
-    key_index: Int
-    start_ns: Int
+    key_index: Int,
+    start_ns: Int,
     events: [StreamEvent<T>]
 }
 
@@ -1473,7 +1473,7 @@ priv column_identity: fn(name: String, type_name: String) -> String Never! {
 
 #Codable
 priv QueryTestSale: struct {
-    item: String
+    item: String,
     cents: Int
 }
 
@@ -2017,7 +2017,7 @@ left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
 // The right rows of each join key, in row order: rows[positions[key]]. A
 // join then visits only a left row's matches, not every right row.
 priv DataJoinIndex: struct {
-    positions: [String:Int]
+    positions: [String:Int],
     rows: [[Int]]
 }
 
@@ -3568,7 +3568,7 @@ data_format_text: fn(format: DataFormat) -> String Never! {
 
 #Codable(only: .Encode)
 DataLoaderPortRecord: struct {
-    z: Float
+    z: Float,
     a: String
 }
 

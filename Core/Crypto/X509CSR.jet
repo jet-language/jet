@@ -29,21 +29,21 @@ use {
 /// - `sig_md`, `sig_pk`, `sig_opts`: the signature algorithm, with the
 ///   RSASSA-PSS options when it is RSASSA-PSS.
 X509CSR: struct {
-    raw: [U8]
-    cri: asn1.ASN1Buf
-    version: Int
-    subject_raw: asn1.ASN1Buf
-    subject: [asn1.NamedData]
-    pk: pk.PKContext
-    key_usage: Int
-    ns_cert_type: Int
-    subject_alt_names: [asn1.ASN1Buf]
-    ext_types: Int
-    sig_oid: asn1.ASN1Buf
-    sig: asn1.ASN1Buf
-    sig_md: hashes.Md?
-    sig_pk: oids.PKType?
-    sig_opts: pk.PSSOptions?
+    raw: [U8],
+    cri: asn1.ASN1Buf,
+    version: Int,
+    subject_raw: asn1.ASN1Buf,
+    subject: [asn1.NamedData],
+    pk: pk.PKContext,
+    key_usage: Int,
+    ns_cert_type: Int,
+    subject_alt_names: [asn1.ASN1Buf],
+    ext_types: Int,
+    sig_oid: asn1.ASN1Buf,
+    sig: asn1.ASN1Buf,
+    sig_md: hashes.Md?,
+    sig_pk: oids.PKType?,
+    sig_opts: pk.PSSOptions?,
 }
 
 /// A handler for the requested extensions mbedtls does not know
@@ -52,7 +52,7 @@ X509CSR: struct {
 /// data[p..<end]. An error fails the parse when the extension is critical.
 /// The handler is pure, as X509ExtCallback is.
 X509CSRExtCallback: struct {
-    call: fn(X509CSR, [U8], asn1.ASN1Buf, Bool, Int, Int) -[]> x509.X509Error!
+    call: fn(X509CSR, [U8], asn1.ASN1Buf, Bool, Int, Int) -[]> x509.X509Error!,
 }
 
 // The SEQUENCE and SET tags, constructed, and the [0] attributes tag.

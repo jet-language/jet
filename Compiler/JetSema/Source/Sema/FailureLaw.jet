@@ -259,8 +259,8 @@ sema_prelude_conversion_body: fn(source: Type, leaf: String) -> String Never! {
 // an `Err` that shows any other member, as the conversion into `Err` does. A
 // closed union still binds whole.
 SemaCatchAllErr: struct {
-    cond: Expr
-    bind: [Stmt]
+    cond: Expr,
+    bind: [Stmt],
 }
 
 SEMA_CATCH_ALL_ERR_PREFIX: "__caught_"
@@ -342,9 +342,9 @@ sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_
 // without it. A name that is no type stays the pattern's E0305.
 SemaGoneFailure: struct {
     // The failure type the arm names.
-    name: String
+    name: String,
     // The arm's whole pattern.
-    head: Span
+    head: Span,
 }
 
 sema_gone_failure_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaGoneFailure? {
@@ -498,8 +498,8 @@ sema_core_error_type: fn(name: String) -> Bool Never! {
 }
 
 SemaErrorConversionEdge: struct {
-    source: String
-    target: String
+    source: String,
+    target: String,
 }
 
 sema_error_conversion_path_exists: fn(edges: [SemaErrorConversionEdge], from_ty: String, to_ty: String) -> Bool Never! {
@@ -757,10 +757,10 @@ sema_error_conversion_drop_blocks: fn(blocks: &[TraitImplBlock], dropped: [Int])
 // A route a From impl nested in a struct's or enum's body declares: its
 // block's index in the body and its hook's source parameter.
 SemaErrorConversionNestedRoute: struct {
-    index: Int
-    param_name: String
-    convention: AccessConvention
-    route: ErrorConvDef
+    index: Int,
+    param_name: String,
+    convention: AccessConvention,
+    route: ErrorConvDef,
 }
 
 // A From impl that converts failures reads as one conversion route: the
@@ -982,16 +982,16 @@ sema_prelude_error_conversion_key: fn(error: Type, target: Type, environment: Se
 }
 
 SemaPreludeConversionDemand: struct {
-    key: String
-    source: Type
-    site: Span
+    key: String,
+    source: Type,
+    site: Span,
 }
 
 // The demand walk's state (SemaEffectWalk.PreludeDemands): the module and its
 // demands so far, in walk order.
 SemaPreludeDemandWalk: struct {
-    module_identity: String
-    demands: [SemaPreludeConversionDemand]
+    module_identity: String,
+    demands: [SemaPreludeConversionDemand],
 }
 
 // One node of the demand walk: a propagation site whose conversion is
@@ -1687,8 +1687,8 @@ sema_public_failure_visibility_edit: fn(source: String, span: Span) -> TextEdit?
 // receiver is checked without propagation and the reason must be a non-empty
 // plain string literal.
 SemaDropStatement: struct {
-    handled: Bool
-    value: TStmt?
+    handled: Bool,
+    value: TStmt?,
 }
 
 sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDropStatement {
@@ -1712,9 +1712,9 @@ sema_stmt_check_drop: fn(expr: Expr, environment: SemaScopeEnvironment, program:
 }
 
 SemaDropReasonProblem: struct {
-    what: String
-    why: String
-    fix: String
+    what: String,
+    why: String,
+    fix: String,
 }
 
 sema_drop_reason_problem: fn(args: [CallArg]) -> SemaDropReasonProblem? {

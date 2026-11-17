@@ -42,35 +42,35 @@ ENVMODEL_VALUE_WHOLE: "envmodel_value"
 // One run of the generated text and the source bytes it stands for. A copy
 // maps byte for byte; any other text stands for the whole span.
 EnvValueSegment: struct {
-    start: Int
-    end: Int
-    source: Span
-    copied: Bool
+    start: Int,
+    end: Int,
+    source: Span,
+    copied: Bool,
 }
 
 // The generated declarations for one source, and what each one computes.
 EnvValueProgram: struct {
-    source: [U8]
+    source: [U8],
     // The source's tokens, which place the end of a call's arguments.
-    tokens: [Token]
-    environment: [String:CtValue]
-    prefix: String
-    parts: [String]
-    length: Int
-    segments: [EnvValueSegment]
-    count: Int
+    tokens: [Token],
+    environment: [String:CtValue],
+    prefix: String,
+    parts: [String],
+    length: Int,
+    segments: [EnvValueSegment],
+    count: Int,
     // The generated name computing the expression that starts at an offset.
-    leaves: [Int:String]
+    leaves: [Int:String],
     // The source text each generated name stands for.
-    labels: [String:String]
+    labels: [String:String],
     // A value known without the compiler, by its expression's start.
-    known: [Int:CtValue]
+    known: [Int:CtValue],
     // Source text the program spells differently, by its span.
-    respelled: [{span: Span, text: String}]
+    respelled: [{span: Span, text: String}],
     // Whether some generated value needs the compiler.
-    needed: Bool
+    needed: Bool,
     // The span the first generated value stands for.
-    first: Span?
+    first: Span?,
 }
 
 envmodel_value_program: fn(source: String, environment: [String:CtValue]) -> EnvValueProgram Never! {

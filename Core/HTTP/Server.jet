@@ -26,69 +26,69 @@ use {
 // exposes the tagged methods of that value's struct. A route path is text or
 // a `Path`, as at `app.get(path, handler)`.
 Get: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Post: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Put: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Delete: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Patch: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Head: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Options: struct {
-    path: String | Path
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 // `#Server.Custom(token, path)`: a route of the custom method `token`, a
 // static String kept in its exact case (core.http `__method_token_check`).
 Custom: struct {
-    token: String
-    path: String | Path
+    token: String,
+    path: String | Path,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -129,45 +129,45 @@ C_ACCEPT_BACKOFF_MIN_MS: 5
 C_ACCEPT_BACKOFF_MAX_MS: 1000
 
 HTTPCorsOrigins: enum {
-    Any
-    List([String])
+    Any,
+    List([String]),
 }
 
 HTTPCorsPolicy: struct {
-    origins: HTTPCorsOrigins
-    allow_methods: String
-    allow_headers: String
-    credentials: Bool
-    max_age_secs: Int
+    origins: HTTPCorsOrigins,
+    allow_methods: String,
+    allow_headers: String,
+    credentials: Bool,
+    max_age_secs: Int,
 }
 
 // Server TLS credentials, kept verbatim until a listener loads them. The
 // identity check and handshake are reached through `__ops`, which only
 // `tls(cert, key)` fills, so a server without `tls:` links no TLS.
 HTTPServerTLS: struct {
-    cert_pem: String
-    key_pem: String
-    __ops: Shared<HTTPTLSOps>
+    cert_pem: String,
+    key_pem: String,
+    __ops: Shared<HTTPTLSOps>,
 }
 
 priv HTTPTLSOps: struct {
     // The bind-time identity check: "" or the reason the identity is unusable.
-    check: fn(String, String) -[Net]> String Never!
+    check: fn(String, String) -[Net]> String Never!,
     // The server handshake over an accepted stream, within the budget; None
     // drops a failed handshake. A function value's parameters only read, so
     // the stream arrives as the one item of a shared list the handshake pops
     // it from: the TLS stream is then its one owner, and the caller, whose
     // list is empty, does not close it again.
-    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> HTTPSecure? Never!
+    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> HTTPSecure? Never!,
 }
 
 /// What one served lifetime did: connections accepted, refused (over the
 /// connection limits, or while draining), answered, and cancelled at shutdown.
 HTTPShutdownReport: struct {
-    accepted: Int
-    overloaded: Int
-    completed: Int
-    cancelled: Int
+    accepted: Int,
+    overloaded: Int,
+    completed: Int,
+    cancelled: Int,
 }
 
 /// Whether a server should be sent traffic, as `readiness()` and the built-in
@@ -177,10 +177,10 @@ HTTPShutdownReport: struct {
 /// reports. A server shut down before it served is Closed, never Ready. It
 /// displays as the probe's body: `not ready`, `ready`, `draining`, `closed`.
 HTTPReadiness: enum {
-    NotReady
-    Ready
-    Draining
-    Closed
+    NotReady,
+    Ready,
+    Draining,
+    Closed,
 
     impl Display {
         display: fn(self) -> String { readiness_word(self) }
@@ -188,13 +188,13 @@ HTTPReadiness: enum {
 }
 
 priv HTTPHandlerCell: struct {
-    call: fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!
+    call: fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!,
 }
 
 /// A request handler: what a route runs and what middleware wraps. Copies
 /// share the one handler.
 HTTPHandler: struct {
-    __cell: Shared<HTTPHandlerCell>
+    __cell: Shared<HTTPHandlerCell>,
 
     handle: fn(self, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
         guard: self.__cell.guard_read()
@@ -207,62 +207,62 @@ __handler: fn(call: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) 
 }
 
 priv HTTPSegment: enum {
-    Static(String)
-    Param(String)
-    CatchAll(String)
+    Static(String),
+    Param(String),
+    CatchAll(String),
 }
 
 priv HTTPRoute: struct {
-    method: String
-    pattern: String
-    segments: [HTTPSegment]
-    handler: HTTPHandler
+    method: String,
+    pattern: String,
+    segments: [HTTPSegment],
+    handler: HTTPHandler,
     // The compiler-checked endpoint contract an `app.get(…)`-style
     // registration carries ("" for Core's own static and page routes);
     // `web.openapi(app)` renders it.
-    contract: String
+    contract: String,
     // The registering call, which a later duplicate names.
-    at: SourceLocation
+    at: SourceLocation,
 }
 
 priv HTTPParsedRoute: struct {
-    segments: [HTTPSegment]
-    problem: String
+    segments: [HTTPSegment],
+    problem: String,
 }
 
 // A layer builds the handler that wraps `next`; the handler's own row
 // (`HTTPHandler.handle`) is the layer's, as a lambda body's row is its
 // enclosing function's.
 priv HTTPLayerCell: struct {
-    wrap: fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler
+    wrap: fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler,
 }
 
 // What a server runs each time the handler of a request it upgraded
 // returns (`__on_upgraded`).
 priv HTTPUpgradedCell: struct {
-    ended: fn() -[Time]> Never!
+    ended: fn() -[Time]> Never!,
 }
 
 priv HTTPMuxState: struct {
-    routes: [HTTPRoute]
-    layers: [Shared<HTTPLayerCell>]
-    request_seq: Int
+    routes: [HTTPRoute],
+    layers: [Shared<HTTPLayerCell>],
+    request_seq: Int,
     // What the first server that serves this table starts (`__on_serve`),
     // and what that server runs once it stops serving (`__on_stop`).
-    starts: [fn() -[Time]> Never!]
-    stops: [fn(Int) -[Time]> Never!]
-    upgraded: [Shared<HTTPUpgradedCell>]
+    starts: [fn() -[Time]> Never!],
+    stops: [fn(Int) -[Time]> Never!],
+    upgraded: [Shared<HTTPUpgradedCell>],
     // The checks of the routes that admit a request by its head before its
     // body is read (`__route_add_admitted`).
-    admits: [HTTPAdmitRow]
+    admits: [HTTPAdmitRow],
 }
 
 // What an admitted route's check (`__route_add_admitted`) decides from a
 // request's head, before the body is read: the response that refuses the
 // request, or else the most bytes its body may hold.
 HTTPAdmit: struct {
-    refused: HTTPResponse?
-    max_body: Int
+    refused: HTTPResponse?,
+    max_body: Int,
 }
 
 // What an admitted route's spool (`__route_add_admitted`) does with a body
@@ -271,33 +271,33 @@ HTTPAdmit: struct {
 // place named (false when it can't), and `abandon` drops the place of a
 // body the request ended before.
 HTTPSpool: struct {
-    open: fn() -[Net, FS.Read]> String? Never!
-    write: fn(String, [U8]) -[Net, FS.Read]> Bool Never!
-    abandon: fn(String) -[Net, FS.Read]> Never!
+    open: fn() -[Net, FS.Read]> String? Never!,
+    write: fn(String, [U8]) -[Net, FS.Read]> Bool Never!,
+    abandon: fn(String) -[Net, FS.Read]> Never!,
 }
 
 priv HTTPAdmitCell: struct {
-    check: fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!
-    spool: HTTPSpool
+    check: fn(HTTPRequest) -[Net, FS.Read]> HTTPAdmit Never!,
+    spool: HTTPSpool,
 }
 
 priv HTTPAdmitRow: struct {
-    method: String
-    pattern: String
-    cell: Shared<HTTPAdmitCell>
+    method: String,
+    pattern: String,
+    cell: Shared<HTTPAdmitCell>,
 }
 
 // An admitted request (`mux_admit`): what its route's check decided, and
 // the route's cell when it has one.
 priv HTTPAdmitted: struct {
-    admit: HTTPAdmit
-    cell: Shared<HTTPAdmitCell>?
+    admit: HTTPAdmit,
+    cell: Shared<HTTPAdmitCell>?,
 }
 
 /// One route table: routes and middleware layers. A `web.app()` owns one and
 /// so does an `http.router()`; copies share the one table.
 HTTPMux: struct {
-    __state: Shared<HTTPMuxState>
+    __state: Shared<HTTPMuxState>,
 }
 
 // A route whose pattern was checked while building: its contract is the one
@@ -377,30 +377,30 @@ priv route_stop: fn(code: String, message: String, at: SourceLocation) -> Never 
 // that budget run out: a connection whose handler is still running then
 // never sends its response.
 priv HTTPServerState: struct {
-    phase: Int
-    stopping: Bool
-    report: HTTPShutdownReport?
-    live: Int{0}
-    refusing: Int{0}
-    completed: Int{0}
-    peers: [String:Int]{[String:Int]{}}
-    grace_ns: Int{-1}
-    drained: Bool{false}
+    phase: Int,
+    stopping: Bool,
+    report: HTTPShutdownReport?,
+    live: Int{0},
+    refusing: Int{0},
+    completed: Int{0},
+    peers: [String:Int]{[String:Int]{}},
+    grace_ns: Int{-1},
+    drained: Bool{false},
 }
 
 /// A bound listener and its mux. `serve` answers connections until
 /// `shutdown` or a cancelled accept; the report is the same for every caller.
 /// The listener closes when the drain ends, so nothing listens after serving.
 HTTPServer: struct {
-    __state: Shared<HTTPServerState>
+    __state: Shared<HTTPServerState>,
     // The bound listener, the one item until serving closes it
     // (server_close_listener).
-    __listener: Shared<[TCPListener]>
-    __mux: HTTPMux
-    __deadline: Duration?
-    __tls: HTTPServerTLS?
-    __done: Sender<Int>
-    __finished: Receiver<Int>
+    __listener: Shared<[TCPListener]>,
+    __mux: HTTPMux,
+    __deadline: Duration?,
+    __tls: HTTPServerTLS?,
+    __done: Sender<Int>,
+    __finished: Receiver<Int>,
 
     local_addr: fn(self) -[Net]> String HTTPError! {
         listener: server_listener(self) ?? return Err(.IO{operation: "local address: the server has stopped serving, so its listener is closed"})
@@ -1176,10 +1176,10 @@ priv with_request_id: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Neve
 // The route a request selects, or the answer it gets without one: OPTIONS *,
 // 400, 404 or 405. `index` is the selected route's position in `routes`.
 priv HTTPPick: struct {
-    answer: HTTPResponse?
-    index: Int
-    request: HTTPRequest
-    routes: [HTTPRoute]
+    answer: HTTPResponse?,
+    index: Int,
+    request: HTTPRequest,
+    routes: [HTTPRoute],
 }
 
 priv mux_pick: fn(mux: HTTPMux, request: HTTPRequest) -> HTTPPick Never! {
@@ -1641,37 +1641,37 @@ priv route_better: fn(candidate: [HTTPSegment], current: [HTTPSegment]) -> Bool 
 // route's check refused the request with (`mux_admit`).
 #Error
 priv HTTPFault: enum {
-    Reply(Int)
-    Drop
-    Refuse([U8])
+    Reply(Int),
+    Drop,
+    Refuse([U8]),
 }
 
 priv HTTPWire: struct {
-    buffer: [U8]
-    end_ns: Int
+    buffer: [U8],
+    end_ns: Int,
 }
 
 priv HTTPChunked: struct {
-    body: [U8]
-    trailers: Headers
+    body: [U8],
+    trailers: Headers,
 }
 
 // Where a body goes as the server reads it: the spool of its admitted
 // route's cell, under the name the spool opened for it.
 priv HTTPSpoolTo: struct {
-    cell: Shared<HTTPAdmitCell>
-    name: String
+    cell: Shared<HTTPAdmitCell>,
+    name: String,
 }
 
 // One accepted connection: exactly one of tcp/tls. A server bound with
 // `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
 // (Docs/Spec/syntax-decisions.md:5083).
 priv HTTPConn: struct {
-    tcp: TCPStream?
-    tls: HTTPSecure?
+    tcp: TCPStream?,
+    tls: HTTPSecure?,
     // The peer's address without its port, which a request carries as
     // `__peer` for per-network limits ("" when the socket has none).
-    peer: String{""}
+    peer: String{""},
 }
 
 // A TLS connection's stream, held only by these operations; `tls_accept`
@@ -1679,12 +1679,12 @@ priv HTTPConn: struct {
 priv HTTPSecure: struct {
     // Appends up to the limit's plaintext bytes to `staged`: the count, 0 at
     // the end of the stream. `staged` keeps its capacity across reads.
-    read_into: fn(Int, Duration) -[Net, Time.Wait]> Int IOError!
-    staged: Shared<[U8]>
+    read_into: fn(Int, Duration) -[Net, Time.Wait]> Int IOError!,
+    staged: Shared<[U8]>,
     // Whether every byte was sent within the deadline.
-    write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
+    write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool,
     // Sends close_notify and closes the socket the stream owns.
-    close: fn() -[Net, Time.Wait]> ()
+    close: fn() -[Net, Time.Wait]> (),
 }
 
 // The accepted stream, which the connection now owns, after the server
@@ -2206,20 +2206,20 @@ priv response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] H
 // Static files
 
 priv HTTPStaticMount: struct {
-    root: String
-    index: Bool
-    dotfiles: Bool
-    follow_links: Bool
+    root: String,
+    index: Bool,
+    dotfiles: Bool,
+    follow_links: Bool,
 }
 
 priv HTTPStaticFile: struct {
-    path: String
-    modified_seconds: Int
+    path: String,
+    modified_seconds: Int,
 }
 
 priv HTTPRange: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 priv trim_trailing_slashes: fn(prefix: String) -> String Never! {

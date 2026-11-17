@@ -33,8 +33,8 @@ impl TerminalStyleErrorCode {
 
 #Error
 TerminalStyleFactError: struct {
-    code: TerminalStyleErrorCode
-    message: String
+    code: TerminalStyleErrorCode,
+    message: String,
 
     impl Display { display: fn(self) -> String { "{self.code.as_str()}: {self.message}" } }
 }
@@ -61,11 +61,11 @@ terminal_color_choice_text: fn(choice: ColorChoice) -> String {
 }
 
 TerminalCapabilityFacts: struct {
-    profile: TUIColorProfile
-    mode: ColorChoice
-    is_tty: Bool
-    term_is_dumb: Bool
-    no_color: Bool
+    profile: TUIColorProfile,
+    mode: ColorChoice,
+    is_tty: Bool,
+    term_is_dumb: Bool,
+    no_color: Bool,
 
     from_environment: fn(term: String?, colorterm: String?, is_tty: Bool, no_color: Bool, mode: ColorChoice) -> TerminalCapabilityFacts {
         term_name: (term ?? "").trim().to_ascii_lower()
@@ -132,9 +132,9 @@ impl TerminalStyleDependencyKind {
 }
 
 TerminalStyleDependency: struct {
-    kind: TerminalStyleDependencyKind
-    id: String
-    fingerprint: String
+    kind: TerminalStyleDependencyKind,
+    id: String,
+    fingerprint: String,
 
     new: fn(kind: TerminalStyleDependencyKind, id: String, fingerprint: String) -> TerminalStyleDependency TerminalStyleFactError! {
         if terminal_style_identity_problem(id) == .Val(problem) -> return Err(terminal_style_fact_error(.InvalidDependency, problem))
@@ -146,14 +146,14 @@ TerminalStyleDependency: struct {
     }
 }
 TerminalStyleFingerprintFacts: struct {
-    source_id: String
-    source_fingerprint: String
+    source_id: String,
+    source_fingerprint: String,
     // Sorted by kind, id, then fingerprint.
-    dependencies: [TerminalStyleDependency]
-    capabilities: TerminalCapabilityFacts
-    layout_fingerprint: String
-    type_fingerprint: String
-    fingerprint: String
+    dependencies: [TerminalStyleDependency],
+    capabilities: TerminalCapabilityFacts,
+    layout_fingerprint: String,
+    type_fingerprint: String,
+    fingerprint: String,
 
     new: fn(source_id: String, source: String, dependencies: [TerminalStyleDependency], capabilities: TerminalCapabilityFacts, layout_fingerprint: String, type_fingerprint: String) -> TerminalStyleFingerprintFacts TerminalStyleFactError! {
         if terminal_style_identity_problem(source_id) == .Val(problem) -> return Err(terminal_style_fact_error(.InvalidSourceIdentity, problem))
@@ -208,12 +208,12 @@ TerminalStyleFingerprintFacts: struct {
     }
 }
 TerminalStyleEdit: struct {
-    source_id: String
-    source: String
-    dependencies: [TerminalStyleDependency]
-    capabilities: TerminalCapabilityFacts
-    layout_fingerprint: String
-    type_fingerprint: String
+    source_id: String,
+    source: String,
+    dependencies: [TerminalStyleDependency],
+    capabilities: TerminalCapabilityFacts,
+    layout_fingerprint: String,
+    type_fingerprint: String,
 
     new: fn(source_id: String, source: String) -> TerminalStyleEdit {
         TerminalStyleEdit{source_id: source_id, source: source, dependencies: [TerminalStyleDependency]{}, capabilities: TERMINAL_CAPABILITY_DEFAULT, layout_fingerprint: "", type_fingerprint: ""}
@@ -282,7 +282,7 @@ impl TerminalStyleRole {
 }
 
 TerminalStyleValue: enum {
-    Plain Sgr(codes: String)
+    Plain, Sgr(codes: String),
 
     paint: fn(self, text: String) -> String {
         if self == {
@@ -300,7 +300,7 @@ TerminalStyleValue: enum {
 }
 // Roles are keyed by TerminalStyleRole.as_str().
 TerminalStyleDocument: struct {
-    roles: [String: TerminalStyleValue]
+    roles: [String: TerminalStyleValue],
 
     parse: fn(source: String) -> TerminalStyleDocument TerminalStyleParseError! {
         bytes: source.bytes()
@@ -331,9 +331,9 @@ TerminalStyleDocument: struct {
 }
 #Error
 TerminalStyleParseError: struct {
-    line: Int
-    code: TerminalStyleErrorCode
-    message: String
+    line: Int,
+    code: TerminalStyleErrorCode,
+    message: String,
 
     impl Display {
         display: fn(self) -> String {
@@ -383,10 +383,10 @@ terminal_style_parse_value: fn(value: String) -> TerminalStyleValue TerminalStyl
 }
 
 TerminalStyleSnapshot: struct {
-    revision: Int
-    source_id: String
-    roles: [String: TerminalStyleValue]
-    facts: TerminalStyleFingerprintFacts
+    revision: Int,
+    source_id: String,
+    roles: [String: TerminalStyleValue],
+    facts: TerminalStyleFingerprintFacts,
 
     value: fn(self, role: TerminalStyleRole) -> TerminalStyleValue? { self.roles.get(role.as_str()) }
     paint: fn(self, role: TerminalStyleRole, text: String) -> String {
@@ -434,11 +434,11 @@ terminal_style_classify_change: fn(previous: TerminalStyleSnapshot?, next: Termi
 }
 
 TerminalStyleErrorFact: struct {
-    code: TerminalStyleErrorCode
-    source_id: String
-    attempted_fingerprint: String?
-    revision: Int
-    message: String
+    code: TerminalStyleErrorCode,
+    source_id: String,
+    attempted_fingerprint: String?,
+    revision: Int,
+    message: String,
 
     is_bounded: fn(self) -> Bool {
         if self.message.bytes().len() > MAX_TERMINAL_STYLE_ERROR_BYTES || self.source_id.bytes().len() > MAX_TERMINAL_STYLE_ID_BYTES -> return false
@@ -451,10 +451,10 @@ TerminalStyleErrorFact: struct {
     }
 }
 TerminalStyleReloadReceipt: struct {
-    revision: Int
-    change: TerminalStyleChangeKind
-    snapshot: TerminalStyleSnapshot?
-    error: TerminalStyleErrorFact?
+    revision: Int,
+    change: TerminalStyleChangeKind,
+    snapshot: TerminalStyleSnapshot?,
+    error: TerminalStyleErrorFact?,
 
     applied: fn(self) -> Bool {
         if self.change == {
@@ -471,28 +471,28 @@ TerminalStyleReloadReceipt: struct {
     rejected: fn(self) -> Bool { self.change == .Invalid }
 }
 TerminalStyleReloadNotification: struct {
-    revision: Int
-    change: TerminalStyleChangeKind
-    prior_fingerprint: String?
-    candidate_fingerprint: String?
-    error: TerminalStyleErrorFact?
+    revision: Int,
+    change: TerminalStyleChangeKind,
+    prior_fingerprint: String?,
+    candidate_fingerprint: String?,
+    error: TerminalStyleErrorFact?,
 }
 TerminalStyleSubscriberID: struct { value: Int }
 
 #Error
 TerminalStyleSubscribeError: enum {
-    LimitReached
+    LimitReached,
 
     impl Display { display: fn(self) -> String { "terminal style subscriber limit reached" } }
 }
 // The reload transaction state. The host that owns it serializes access.
 TerminalStyleReload: struct {
-    current: TerminalStyleSnapshot?
-    pending: TerminalStyleEdit?
-    last_error: TerminalStyleErrorFact?
-    next_subscriber: Int
+    current: TerminalStyleSnapshot?,
+    pending: TerminalStyleEdit?,
+    last_error: TerminalStyleErrorFact?,
+    next_subscriber: Int,
     // Mailboxes by subscriber id, each oldest first and bounded by MAX_TERMINAL_STYLE_NOTIFICATIONS.
-    subscribers: [Int: [TerminalStyleReloadNotification]]
+    subscribers: [Int: [TerminalStyleReloadNotification]],
 
     new: fn() -> TerminalStyleReload {
         TerminalStyleReload{current: None, pending: None, last_error: None, next_subscriber: 1, subscribers: [Int: [TerminalStyleReloadNotification]]{}}
@@ -596,8 +596,8 @@ TerminalStyleReload: struct {
 }
 #Error
 TerminalStyleBuildError: enum {
-    Parse(error: TerminalStyleParseError)
-    Facts(error: TerminalStyleFactError)
+    Parse(error: TerminalStyleParseError),
+    Facts(error: TerminalStyleFactError),
 
     code: fn(self) -> TerminalStyleErrorCode {
         if self == {
@@ -670,8 +670,8 @@ terminal_style_bounded_text: fn(value: String, max_bytes: Int) -> String {
 }
 
 TerminalStyleHostSource: struct {
-    source_id: String
-    capabilities: TerminalCapabilityFacts
+    source_id: String,
+    capabilities: TerminalCapabilityFacts,
 
     new: fn(source_id: String, capabilities: TerminalCapabilityFacts) -> TerminalStyleHostSource TerminalStyleFactError! {
         if terminal_style_identity_problem(source_id) == .Val(problem) -> return Err(terminal_style_fact_error(.InvalidSourceIdentity, problem))
@@ -690,8 +690,8 @@ impl TerminalStyleHostUnavailableReason {
 }
 
 TerminalStyleHostRejection: enum {
-    Invalid(fact: TerminalStyleErrorFact)
-    RestartRequired(reason: TerminalStyleRestartReason)
+    Invalid(fact: TerminalStyleErrorFact),
+    RestartRequired(reason: TerminalStyleRestartReason),
 
     code: fn(self) -> String {
         if self == {
@@ -704,8 +704,8 @@ TerminalStyleHostRejection: enum {
 TerminalStyleHostResponse: struct { outcome: TerminalStyleHostOutcome, event: String }
 
 TerminalStyleHostAdapter: struct {
-    reload: TerminalStyleReload
-    source: TerminalStyleHostSource?
+    reload: TerminalStyleReload,
+    source: TerminalStyleHostSource?,
 
     new: fn() -> TerminalStyleHostAdapter { TerminalStyleHostAdapter{reload: TerminalStyleReload.new(), source: None} }
     // A different source identity discards the previous style transaction.

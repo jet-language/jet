@@ -101,21 +101,21 @@ MEMORY_KERNEL_FIELD: Regex{"\bmemory\s*:\s*\.\s*Kernel\s*\(\s*\[([^\]]*)\]"}
 QUOTED_PATH: Regex{"\"([^\"]*)\""}
 
 InventoryFile: struct {
-    path: String
-    sha256: String
+    path: String,
+    sha256: String,
 }
 
 Inventory: struct {
-    sha256: String
-    files: [InventoryFile]
+    sha256: String,
+    files: [InventoryFile],
 }
 
 Toolchain: struct {
-    root: String
-    jet: String
+    root: String,
+    jet: String,
     // `jet@<JET_VERSION>` of the built jet, the running compiler's.
-    version: String
-    out: String
+    version: String,
+    out: String,
 }
 
 fail: fn(message: String) -> Never { process.fail(1, "runtime-pack: {message}") }
@@ -244,8 +244,8 @@ rust_symbols: fn(bytes: [U8], what: String) -> String {
 
 // A file's sha256, or the problem the step fails with over it.
 FileDigest: struct {
-    sha256: String
-    problem: String
+    sha256: String,
+    problem: String,
 }
 
 file_digest: fn(path: String) -> FileDigest {
@@ -388,8 +388,8 @@ move_into: fn(from: String, to: String) {
 
 // `--name=value` flags; `--tree` may repeat.
 Flags: struct {
-    values: [String:String]
-    trees: [String]
+    values: [String:String],
+    trees: [String],
 }
 
 parse_flags: fn(args: [String]) -> Flags {
@@ -453,8 +453,8 @@ pack: fn(args: [String]) {
 // `jet`, which is hashed on a task while its version is asked and the
 // inventories are read.
 PackInputs: struct {
-    sources: PackSources
-    compiler: FileDigest
+    sources: PackSources,
+    compiler: FileDigest,
 }
 
 pack_inputs: fn(root: String, flags: Flags, jet: String) -> PackInputs {
@@ -470,10 +470,10 @@ pack_inputs: fn(root: String, flags: Flags, jet: String) -> PackInputs {
 // The release of the jet at `jet` and the inventories of the runtime's
 // sources, the trees `flags` name and the lifecycle hooks.
 PackSources: struct {
-    version: String
-    source: Inventory
-    backend: Inventory
-    lifecycle: Inventory
+    version: String,
+    source: Inventory,
+    backend: Inventory,
+    lifecycle: Inventory,
 }
 
 pack_sources: fn(root: String, flags: Flags, jet: String) -> PackSources {

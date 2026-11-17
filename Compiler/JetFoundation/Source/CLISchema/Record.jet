@@ -33,11 +33,11 @@ CLI_SCHEMA_BYTE_4: U8{4}
 
 #Error
 RecordDecodeError: enum {
-    UnknownFormat
-    Missing
-    Duplicate
-    Malformed(why: String)
-    UnsupportedVersion(version: U16)
+    UnknownFormat,
+    Missing,
+    Duplicate,
+    Malformed(why: String),
+    UnsupportedVersion(version: U16),
 
     display: fn(self) -> String Never! {
         if self == {
@@ -51,8 +51,8 @@ RecordDecodeError: enum {
 }
 
 CLIRecordCursor: struct {
-    bytes: View<U8>
-    at: Int
+    bytes: View<U8>,
+    at: Int,
 
     byte: fn(&self) -> U8 RecordDecodeError! {
         if self.at >= self.bytes.len() {

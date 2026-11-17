@@ -21,22 +21,22 @@ STORE_CACHE_STDERR_LIMIT: 4096
 // What an endpoint can do. `credential_required` endpoints need an explicit
 // typed credential provider; none may execute remote commands.
 CacheEndpointCapabilities: struct {
-    read: Bool
-    write: Bool
-    promote: Bool
-    remote_execute: Bool
-    trust: Bool
-    credential: Bool
-    credential_required: Bool
+    read: Bool,
+    write: Bool,
+    promote: Bool,
+    remote_execute: Bool,
+    trust: Bool,
+    credential: Bool,
+    credential_required: Bool,
 }
 
 // One parsed cache mirror.
 CacheEndpoint: enum {
-    Local(String)
-    HTTP(String)
-    SSH(target: String, root: String)
-    S3(String)
-    Hangar
+    Local(String),
+    HTTP(String),
+    SSH(target: String, root: String),
+    S3(String),
+    Hangar,
 
     capabilities: fn(self) -> CacheEndpointCapabilities Never! {
         if self == {
@@ -259,8 +259,8 @@ store_cache_endpoint_put: fn(endpoint: CacheEndpoint, key: String, bytes: [U8]) 
 
 // One named object of a remote publication.
 CacheRemoteObject: struct {
-    key: String
-    bytes: [U8]
+    key: String,
+    bytes: [U8],
 }
 
 // Stage every object as `<key>.partial`, read it back, and promote it. The
@@ -451,9 +451,9 @@ store_cache_s3_promote: fn(partial: String, final_uri: String) StoreError! {
 // What a bounded host transport produced: its exit, at most `limit` stdout
 // bytes, and a trimmed diagnostic prefix of at most 4096 stderr bytes.
 CacheTransportOutput: struct {
-    success: Bool
-    stdout: [U8]
-    stderr: String
+    success: Bool,
+    stdout: [U8],
+    stderr: String,
 }
 
 // Run a host transport with a hard stdout bound. The child is killed as soon

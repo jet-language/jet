@@ -36,9 +36,9 @@ use core: core
 
 #Error
 ImageError: enum {
-    Malformed
-    Unsupported
-    TooLarge
+    Malformed,
+    Unsupported,
+    TooLarge,
 }
 
 // The bytes are not a well-formed image of their format.
@@ -47,9 +47,9 @@ ImageError: enum {
 
 // The encoded format, read from the first bytes.
 ImageFormat: enum {
-    PNG
-    JPEG
-    GIF
+    PNG,
+    JPEG,
+    GIF,
 }
 
 // How the encoded pixels carry color: gray or red, green and blue, with or
@@ -57,36 +57,36 @@ ImageFormat: enum {
 // color types.
 #[Specified, Layout(U8)]
 ImageColor: enum {
-    Gray = 0
-    GrayAlpha = 4
-    RGB = 2
-    RGBA = 6
-    Indexed = 3
+    Gray = 0,
+    GrayAlpha = 4,
+    RGB = 2,
+    RGBA = 6,
+    Indexed = 3,
 }
 
 // The budgets a read keeps within, each a count that must be at least 1:
 // the encoded bytes, the pixels (`width * height`) and the decoded bytes
 // (`width * height * 4`).
 Limits: struct {
-    max_input_bytes: Int
-    max_pixels: Int
-    max_output_bytes: Int
+    max_input_bytes: Int,
+    max_pixels: Int,
+    max_output_bytes: Int,
 }
 
 // What the header of an encoded image says, read without decoding it.
 ImageInfo: struct {
-    width: Int
-    height: Int
-    format: ImageFormat
-    color: ImageColor
+    width: Int,
+    height: Int,
+    format: ImageFormat,
+    color: ImageColor,
 }
 
 // Decoded pixels: `height` rows of `width` RGBA pixels, 4 bytes each, alpha
 // straight.
 Image: struct {
-    width: Int
-    height: Int
-    pixels: [U8]
+    width: Int,
+    height: Int,
+    pixels: [U8],
 }
 
 // The header of `data`: its size, format and color, checked against
@@ -174,12 +174,12 @@ C_ADAM7_DY: [Int]{8, 8, 8, 4, 4, 2, 2}
 // A PNG's IHDR: its size, its color type and bit depth with the samples per
 // pixel they imply, and its interlace method.
 PNGHeader: struct {
-    width: Int
-    height: Int
-    color_type: Int
-    depth: Int
-    channels: Int
-    interlace: Int
+    width: Int,
+    height: Int,
+    color_type: Int,
+    depth: Int,
+    channels: Int,
+    interlace: Int,
 }
 
 priv byte_at: fn(data: [U8], at: Int) -> Int { Int{data[at]} }
@@ -531,40 +531,40 @@ C_JPEG_NATURAL: [Int]{0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12
 // A JPEG frame header: its size and, per component, its id, sampling
 // factors and quantization table. A one-component frame samples 1 x 1.
 JPEGFrame: struct {
-    width: Int
-    height: Int
-    ids: [Int]
-    hs: [Int]
-    vs: [Int]
-    tables: [Int]
+    width: Int,
+    height: Int,
+    ids: [Int],
+    hs: [Int],
+    vs: [Int],
+    tables: [Int],
 }
 
 // A marker segment: its marker and where its body starts and ends. A
 // marker without a body has `start == end`.
 JPEGSegment: struct {
-    marker: Int
-    start: Int
-    end: Int
+    marker: Int,
+    start: Int,
+    end: Int,
 }
 
 // A Huffman table in the form the JPEG DECODE procedure reads it: per code
 // length 1 through 16, the largest code (-1 for none), the first code and the
 // index of its first value. An undefined table has no lengths.
 JPEGHuffman: struct {
-    maxcode: [Int]
-    mincode: [Int]
-    valptr: [Int]
-    values: [Int]
+    maxcode: [Int],
+    mincode: [Int],
+    valptr: [Int],
+    values: [Int],
 }
 
 // A scan's entropy-coded bits: the next byte, the bits not yet read and
 // their count, and whether a marker ended the data, after which every bit
 // reads as zero.
 JPEGBits: struct {
-    at: Int
-    buffer: Int
-    count: Int
-    marker: Bool
+    at: Int,
+    buffer: Int,
+    count: Int,
+    marker: Bool,
 }
 
 priv be16: fn(data: [U8], at: Int) -> Int { (byte_at(data, at) << 8) + byte_at(data, at + 1) }
@@ -882,23 +882,23 @@ priv jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc
 // 0..3 then AC slots 4..7, 64 zigzag quantization entries per slot with the
 // slots defined so far, and the restart interval in MCUs (0 for none).
 JPEGTables: struct {
-    huffman: [JPEGHuffman]
-    quant: [Int]
-    defined: [Bool]
-    interval: Int
+    huffman: [JPEGHuffman],
+    quant: [Int],
+    defined: [Bool],
+    interval: Int,
 }
 
 // The decoded component planes in one buffer: plane `c` starts at
 // `offsets[c]` (the last offset is the size), is `strides[c]` wide and is
 // padded to whole MCUs of the largest sampling factors.
 JPEGPlanes: struct {
-    samples: [U8]
-    offsets: [Int]
-    strides: [Int]
-    h_max: Int
-    v_max: Int
-    mcus_x: Int
-    mcus_y: Int
+    samples: [U8],
+    offsets: [Int],
+    strides: [Int],
+    h_max: Int,
+    v_max: Int,
+    mcus_x: Int,
+    mcus_y: Int,
 }
 
 priv zeros: fn(count: Int) -> [Int] {
@@ -1413,15 +1413,15 @@ C_JPEG_AC_CHROMA: [Int]{
 // JPEG entropy-coded output: whole bytes with 0xFF stuffed, then the
 // pending bits and their count.
 JPEGWriter: struct {
-    out: [U8]
-    pending: Int
-    count: Int
+    out: [U8],
+    pending: Int,
+    count: Int,
 }
 
 // A Huffman table for writing: each symbol's code and code length.
 JPEGCodes: struct {
-    codes: [Int]
-    sizes: [Int]
+    codes: [Int],
+    sizes: [Int],
 }
 
 priv jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
@@ -1664,8 +1664,8 @@ priv jpeg_encode: fn(image: Image, quality: Int, limits: Limits) -> [U8] ImageEr
 
 // How `resize` picks each destination pixel.
 ResizeFilter: enum {
-    Nearest
-    Area
+    Nearest,
+    Area,
 }
 
 // The source pixel under the destination pixel's center.

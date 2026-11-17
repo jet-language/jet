@@ -1,0 +1,15 @@
+# Struct fields, enum cases and case groups, trait constants and requirements,
+# impl constants and record entries take a comma after each one, on one line
+# or many. `jet fmt` writes the comma after every data member of a
+# multi-line body, the last one too, keeps a one-line body of data on one
+# line without a trailing comma, and the formatted file is a fixed point.
+fixture: FmtBraceLayoutWritesACommaAfterEachDataMember/Input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet fmt run.jet
+file: run.jet = FmtBraceLayoutWritesACommaAfterEachDataMember/formatted.out
+step: jet fmt run.jet
+file: run.jet = FmtBraceLayoutWritesACommaAfterEachDataMember/formatted.out
+step: jet run run.jet
+exit: 0
+stdout: = "1 4 6 18\n"

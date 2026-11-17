@@ -25,100 +25,100 @@ BROWSER_ASSET_WATCH_MAX_EVENTS: Int{256}
 BROWSER_ASSET_WATCH_MAX_PATH_BYTES: Int{1024}
 
 LiveLineage: struct {
-    protocol: String
-    session_id: String
-    source_id: String
-    build_id: String
-    revision: String
-    world_id: String
+    protocol: String,
+    session_id: String,
+    source_id: String,
+    build_id: String,
+    revision: String,
+    world_id: String,
 }
 LiveValueFact: struct {
-    value_id: String
-    type_identity: String
-    disposition: String
-    reason: String
+    value_id: String,
+    type_identity: String,
+    disposition: String,
+    reason: String,
 }
 LiveReceipt: struct {
-    lineage: LiveLineage
-    values: [LiveValueFact]
+    lineage: LiveLineage,
+    values: [LiveValueFact],
 }
 Receipt: struct {
-    kind: String
-    status: String
-    before: String
-    after: String
-    client: String
-    output: String
-    live: LiveReceipt?
+    kind: String,
+    status: String,
+    before: String,
+    after: String,
+    client: String,
+    output: String,
+    live: LiveReceipt?,
 }
 DebuggerSnapshot: struct {
-    state: String
-    session_id: String
-    source_id: String
-    revision: String
-    tier: String
+    state: String,
+    session_id: String,
+    source_id: String,
+    revision: String,
+    tier: String,
 
     idle: fn() -> DebuggerSnapshot Never! { DebuggerSnapshot{state: "idle", session_id: "", source_id: "", revision: "", tier: ""} }
 }
 RetainedView: struct {
-    revision: String
-    source_id: String
-    payload: String
+    revision: String,
+    source_id: String,
+    payload: String,
 }
 DevtoolsSelectionFact: struct {
-    panel_id: String
-    item_key: String
+    panel_id: String,
+    item_key: String,
 }
 DevtoolsStatusFact: struct {
-    state: JetDevtoolsLifecycleState
-    diagnostic_code: String?
-    diagnostic: String?
-    accepted_revision: String?
-    last_good_revision: String?
-    run_target: String?
-    run_output: String?
-    test_state: String?
+    state: JetDevtoolsLifecycleState,
+    diagnostic_code: String?,
+    diagnostic: String?,
+    accepted_revision: String?,
+    last_good_revision: String?,
+    run_target: String?,
+    run_output: String?,
+    test_state: String?,
 }
 DevtoolsCommandCapabilities: struct {
-    project_rebuild: Bool
-    project_rebuild_reason: String?
+    project_rebuild: Bool,
+    project_rebuild_reason: String?,
 }
 // What a host renders after `cursor`: identity, the retained events, the
 // selection, status and command facts.
 DevtoolsProjection: struct {
-    protocol: String
-    session_id: String
-    source_id: String?
-    build_id: String?
-    revision: String
-    world_id: String?
-    sequence: Int
-    observed_at: Int
-    panels: [JetDevtoolsEvent]
-    selection: DevtoolsSelectionFact?
-    status: DevtoolsStatusFact
-    command_capabilities: DevtoolsCommandCapabilities
-    command_receipts: [JetDevtoolsCommandReceipt]
-    reset: Bool
-    truncation: Bool
+    protocol: String,
+    session_id: String,
+    source_id: String?,
+    build_id: String?,
+    revision: String,
+    world_id: String?,
+    sequence: Int,
+    observed_at: Int,
+    panels: [JetDevtoolsEvent],
+    selection: DevtoolsSelectionFact?,
+    status: DevtoolsStatusFact,
+    command_capabilities: DevtoolsCommandCapabilities,
+    command_receipts: [JetDevtoolsCommandReceipt],
+    reset: Bool,
+    truncation: Bool,
 }
 DevtoolsRecordingDivergence: struct {
-    divergent: Bool
-    reason: String?
-    identity: SessionRecordingIdentity
-    expected_sequence: Int?
-    actual_sequence: Int?
-    retained_events: Int
-    dropped_events: Int
-    truncation: TruncationFacts
+    divergent: Bool,
+    reason: String?,
+    identity: SessionRecordingIdentity,
+    expected_sequence: Int?,
+    actual_sequence: Int?,
+    retained_events: Int,
+    dropped_events: Int,
+    truncation: TruncationFacts,
 }
 // The recording, its live cursor, named checkpoints and the first envelope
 // sequence it holds.
 ResidentRecordingState: struct {
-    recording: SessionRecording
-    cursor: ReplayCursor
-    checkpoints: [String:SessionCheckpoint]
-    first_sequence: Int?
+    recording: SessionRecording,
+    cursor: ReplayCursor,
+    checkpoints: [String:SessionCheckpoint],
+    first_sequence: Int?,
 
     new: fn(recording: SessionRecording, first_sequence: Int?) -> ResidentRecordingState Never! {
         cursor: recording.replay()
@@ -128,22 +128,22 @@ ResidentRecordingState: struct {
 
 // One regular file under the game's `assets` directory.
 BrowserAssetStamp: struct {
-    modified_ns: Int
-    size: Int
+    modified_ns: Int,
+    size: Int,
 }
 BrowserAssetChange: struct {
-    path: String
-    kind: String
+    path: String,
+    kind: String,
 }
 BrowserAssetPoll: struct {
-    changes: [BrowserAssetChange]
-    skipped: Int
+    changes: [BrowserAssetChange],
+    skipped: Int,
 }
 // Polls `<entry dir>/assets` and reports created, changed and deleted files
 // as one host_to_runtime frame. Links are skipped, never followed.
 BrowserAssetWatcher: struct {
-    root: String
-    known: [String:BrowserAssetStamp]
+    root: String,
+    known: [String:BrowserAssetStamp],
 
     for_entry: fn(entry: String) -> BrowserAssetWatcher {
         watcher := BrowserAssetWatcher{root: browser_asset_root(entry), known: [String:BrowserAssetStamp]{}}
@@ -248,38 +248,38 @@ browser_asset_collect: fn(path: String, files: &[String:BrowserAssetStamp], skip
 }
 
 ResidentDevSession: struct {
-    session_id: String
-    entry: String
-    canvas_host: String
-    canvas_port_number: Int
-    application_host_name: String
-    application_port_number: Int
-    clock: Stopwatch
-    current_revision_text: String
-    live_lineage: LiveLineage?
-    live_values: [LiveValueFact]
-    accepted_revision: String
-    last_good_revision: String
-    last_good_program: String
-    state: String
-    diagnostic_code: String
-    diagnostic: String
-    diagnostic_revision: String
-    selected_source_id: String
-    selected_output_name: String
-    selected_target_name: String
-    debugger: DebuggerSnapshot
-    test_state: String
-    capture_fact_list: [CaptureSessionFact]
-    last_good_views: [String:RetainedView]
-    clients: [String:Int]
-    receipts: [Receipt]
-    devtools: JetDevtoolsEnvelope
-    commands: JetDevtoolsCommandQueue
-    browser_game_controls: [JetDevtoolsGameControlRequest]
-    browser_asset_watcher: BrowserAssetWatcher
-    recording: ResidentRecordingState?
-    project_rebuild_executor: Bool
+    session_id: String,
+    entry: String,
+    canvas_host: String,
+    canvas_port_number: Int,
+    application_host_name: String,
+    application_port_number: Int,
+    clock: Stopwatch,
+    current_revision_text: String,
+    live_lineage: LiveLineage?,
+    live_values: [LiveValueFact],
+    accepted_revision: String,
+    last_good_revision: String,
+    last_good_program: String,
+    state: String,
+    diagnostic_code: String,
+    diagnostic: String,
+    diagnostic_revision: String,
+    selected_source_id: String,
+    selected_output_name: String,
+    selected_target_name: String,
+    debugger: DebuggerSnapshot,
+    test_state: String,
+    capture_fact_list: [CaptureSessionFact],
+    last_good_views: [String:RetainedView],
+    clients: [String:Int],
+    receipts: [Receipt],
+    devtools: JetDevtoolsEnvelope,
+    commands: JetDevtoolsCommandQueue,
+    browser_game_controls: [JetDevtoolsGameControlRequest],
+    browser_asset_watcher: BrowserAssetWatcher,
+    recording: ResidentRecordingState?,
+    project_rebuild_executor: Bool,
 
     new: fn(entry: String, canvas_port: Int, application_port: Int) -> ResidentDevSession {
         ResidentDevSession.new_with_hosts(entry, "127.0.0.1", canvas_port, "127.0.0.1", application_port)
@@ -305,7 +305,7 @@ ResidentDevSession: struct {
             last_good_views: [String:RetainedView]{}, clients: [String:Int]{}, receipts: [Receipt]{},
             devtools: JetDevtoolsEnvelope.new(envelope_id, session_unix_ms()), commands: JetDevtoolsCommandQueue.new(queue_id),
             browser_game_controls: [JetDevtoolsGameControlRequest]{}, browser_asset_watcher: BrowserAssetWatcher.for_entry(entry),
-            recording: None, project_rebuild_executor: false
+            recording: None, project_rebuild_executor: false,
         }
     }
     note_client: fn(&self, client: String) {
@@ -391,12 +391,12 @@ ResidentDevSession: struct {
         status: DevtoolsStatusFact{
             state: envelope.lifecycle, diagnostic_code: session_optional_fact(self.diagnostic_code), diagnostic: session_optional_fact(self.diagnostic),
             accepted_revision: session_optional_fact(self.accepted_revision), last_good_revision: session_optional_fact(self.last_good_revision),
-            run_target: session_optional_fact(self.selected_target_name), run_output: session_optional_fact(self.selected_output_name), test_state: session_optional_fact(self.test_state)
+            run_target: session_optional_fact(self.selected_target_name), run_output: session_optional_fact(self.selected_output_name), test_state: session_optional_fact(self.test_state),
         }
         DevtoolsProjection{
             protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id,
             sequence: envelope.latest_sequence() ?? 0, observed_at: session_unix_ms(), panels: envelope.events_since(cursor), selection: selection,
-            status: status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.commands.receipts(), reset: reset, truncation: truncation
+            status: status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.commands.receipts(), reset: reset, truncation: truncation,
         }
     }
     observe_source: fn(&self, revision: String) {

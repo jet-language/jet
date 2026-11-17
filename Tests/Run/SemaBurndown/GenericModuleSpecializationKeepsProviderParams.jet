@@ -6,15 +6,15 @@
 // (`impl Provider.gc_m8.Native`, D-IMPLDOT1). A bound inside an instance or an
 // inline module names that module's own trait (`<W: Native>`).
 Native: trait {
-    strong_count: fn(self) -> Int
+    strong_count: fn(self) -> Int,
 }
 
 Labelled: trait {
-    label: fn(self) -> String
+    label: fn(self) -> String,
 }
 
 Provider: struct {
-    count: Int
+    count: Int,
 
     impl Native {
         strong_count: fn(self) -> Int { self.count }
@@ -23,7 +23,7 @@ Provider: struct {
 
 seam: module<N: Native> {
     Handle: struct {
-        native: N
+        native: N,
     }
 
     impl Handle.Native {
@@ -42,8 +42,8 @@ seam_m8: seam<Provider>
 seam_alias: seam_m8
 
 Outer: struct {
-    inner: seam_m8.Handle
-    others: [seam_alias.Handle]
+    inner: seam_m8.Handle,
+    others: [seam_alias.Handle],
 
     impl gc_m8.Native {
         strong_count: fn(self) -> Int { self.inner.strong_count() + self.others.len() }
@@ -56,7 +56,7 @@ impl seam_m8.Handle.Labelled {
 
 gc: module<O>(scale: Int) {
     Native: trait {
-        strong_count: fn(self) -> Int
+        strong_count: fn(self) -> Int,
     }
 
     weighted: fn<W: Native>(value: W) -> Int { value.strong_count() * scale }
@@ -68,11 +68,11 @@ gc_m8: gc<Provider>(3)
 
 plain: module {
     Native: trait {
-        strong_count: fn(self) -> Int
+        strong_count: fn(self) -> Int,
     }
 
     Box: struct {
-        count: Int
+        count: Int,
     }
 
     impl Box.Native {

@@ -5,33 +5,33 @@ use jet_foundation.[jettrace_has_control]
 // The game-window hook surface jet dev installs. These devtools types are
 // devserver-local: the backend calls the hooks; no other package names them.
 JetDevtoolsNativeColor: struct {
-    red: Int
-    green: Int
-    blue: Int
-    alpha: Int
+    red: Int,
+    green: Int,
+    blue: Int,
+    alpha: Int,
 
     new: fn(red: Int, green: Int, blue: Int, alpha: Int) -> JetDevtoolsNativeColor {
         JetDevtoolsNativeColor{red: red, green: green, blue: blue, alpha: alpha}
     }
 }
 JetDevtoolsNativeDrawCommand: enum {
-    Rectangle(x: Int, y: Int, width: Int, height: Int, color: JetDevtoolsNativeColor)
-    Text(text: String, x: Int, y: Int, size: Int, color: JetDevtoolsNativeColor)
+    Rectangle(x: Int, y: Int, width: Int, height: Int, color: JetDevtoolsNativeColor),
+    Text(text: String, x: Int, y: Int, size: Int, color: JetDevtoolsNativeColor),
 }
 JetDevtoolsNativeWindow: struct { session_id: String, width: Int, height: Int }
 JetDevtoolsNativeFrame: struct { session_id: String, width: Int, height: Int }
 JetDevtoolsNativeInput: enum {
-    Key(code: String, pressed: Bool)
-    Gamepad(gamepad: Int, control: String, pressed: Bool)
+    Key(code: String, pressed: Bool),
+    Gamepad(gamepad: Int, control: String, pressed: Bool),
 }
 JetDevtoolsNativeHost: trait {
-    on_event: fn(&self, session_id: String, event: JetDevtoolsEvent)
-    on_window_open: fn(&self, window: JetDevtoolsNativeWindow)
-    on_window_close: fn(&self, session_id: String)
-    on_input: fn(&self, session_id: String, input: JetDevtoolsNativeInput) -> Bool
-    on_frame_begin: fn(&self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand]
-    on_draw: fn(&self, session_id: String, command: JetDevtoolsNativeDrawCommand)
-    on_frame_end: fn(&self, session_id: String)
+    on_event: fn(&self, session_id: String, event: JetDevtoolsEvent),
+    on_window_open: fn(&self, window: JetDevtoolsNativeWindow),
+    on_window_close: fn(&self, session_id: String),
+    on_input: fn(&self, session_id: String, input: JetDevtoolsNativeInput) -> Bool,
+    on_frame_begin: fn(&self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand],
+    on_draw: fn(&self, session_id: String, command: JetDevtoolsNativeDrawCommand),
+    on_frame_end: fn(&self, session_id: String),
 }
 
 MAX_OVERLAY_PANELS: Int{64}
@@ -43,7 +43,7 @@ MAX_OVERLAY_COORDINATE: Int{2147483647}
 
 #Error
 NativeOverlayHostError: struct {
-    message: String
+    message: String,
 
     impl Display { display: fn(self) -> String { self.message } }
 }
@@ -54,13 +54,13 @@ NativeOverlayAction: struct { action_id: String, required_grant: NativeOverlayGr
 
 // Values are optional; no recovery of unpublished observation payloads.
 NativeOverlayNode: struct {
-    id: String
-    kind: DevtoolsNodeKind
-    label: String
-    value: String?
-    status: String?
-    children: [NativeOverlayNode]
-    action: NativeOverlayAction?
+    id: String,
+    kind: DevtoolsNodeKind,
+    label: String,
+    value: String?,
+    status: String?,
+    children: [NativeOverlayNode],
+    action: NativeOverlayAction?,
 
     new: fn(id: String, kind: DevtoolsNodeKind, label: String) -> NativeOverlayNode {
         NativeOverlayNode{id: id, kind: kind, label: label, value: None, status: None, children: [NativeOverlayNode]{}, action: None}
@@ -107,11 +107,11 @@ NativeOverlayNode: struct {
 }
 // Already-typed panel facts; host never infers meaning from panel names.
 NativeOverlayPanelFact: struct {
-    panel_id: String
-    title: String
-    freshness: Int
-    status: String
-    nodes: [NativeOverlayNode]
+    panel_id: String,
+    title: String,
+    freshness: Int,
+    status: String,
+    nodes: [NativeOverlayNode],
 
     new: fn(panel_id: String, title: String, freshness: Int, status: String, nodes: [NativeOverlayNode]) -> NativeOverlayPanelFact {
         NativeOverlayPanelFact{panel_id: panel_id, title: title, freshness: freshness, status: status, nodes: nodes}
@@ -125,12 +125,12 @@ NativeOverlayPanelFact: struct {
     }
 }
 NativeOverlayEvent: struct {
-    protocol: String
-    session_id: String
-    revision: String
-    sequence: Int
-    observed_at_ms: Int
-    panels: [NativeOverlayPanelFact]
+    protocol: String,
+    session_id: String,
+    revision: String,
+    sequence: Int,
+    observed_at_ms: Int,
+    panels: [NativeOverlayPanelFact],
 
     new: fn(protocol: String, session_id: String, revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent {
         NativeOverlayEvent{protocol: protocol, session_id: session_id, revision: revision, sequence: sequence, observed_at_ms: observed_at_ms, panels: panels}
@@ -154,9 +154,9 @@ NativeOverlayEvent: struct {
 }
 // Physical viewport with integer DPI scale for reproducible headless geometry.
 NativeOverlayViewport: struct {
-    width: Int
-    height: Int
-    scale_milli: Int
+    width: Int,
+    height: Int,
+    scale_milli: Int,
 
     new: fn(width: Int, height: Int, scale_milli: Int) -> NativeOverlayViewport NativeOverlayHostError! {
         viewport: NativeOverlayViewport{width: width, height: height, scale_milli: scale_milli}
@@ -189,43 +189,43 @@ NativeOverlayViewport: struct {
 }
 NATIVE_OVERLAY_DEFAULT_VIEWPORT: NativeOverlayViewport{NativeOverlayViewport{width: 1280, height: 720, scale_milli: 1000}}
 NativeOverlayRect: struct {
-    x: Int
-    y: Int
-    width: Int
-    height: Int
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
 
     contains: fn(self, x: Int, y: Int) -> Bool { x >= self.x && y >= self.y && x < self.x + self.width && y < self.y + self.height }
 }
 NativeOverlayState: struct { open: Bool, dock: DevtoolsDock, focused: Bool }
 
 NativeOverlayInput: enum {
-    Toggle
-    Close
-    Dock(dock: DevtoolsDock)
-    Focus(focused: Bool)
-    Key(code: String, pressed: Bool)
-    Gamepad(gamepad: Int, control: String, pressed: Bool)
-    Pointer(x: Int, y: Int, pressed: Bool)
-    Text(text: String)
-    Activate(action_id: String)
+    Toggle,
+    Close,
+    Dock(dock: DevtoolsDock),
+    Focus(focused: Bool),
+    Key(code: String, pressed: Bool),
+    Gamepad(gamepad: Int, control: String, pressed: Bool),
+    Pointer(x: Int, y: Int, pressed: Bool),
+    Text(text: String),
+    Activate(action_id: String),
 }
-NativeOverlayInputRoute: enum { Overlay Game }
+NativeOverlayInputRoute: enum { Overlay, Game }
 
 NativeOverlayFrame: struct {
-    frame_id: Int
-    protocol: String
-    session_id: String
-    revision: String
-    sequence: Int
-    observed_at_ms: Int
-    open: Bool
-    dock: DevtoolsDock
-    focused: Bool
-    viewport: NativeOverlayViewport
-    bounds: NativeOverlayRect
-    cursor: Int?
-    selection: JetDevtoolsSelection?
-    panels: [NativeOverlayPanelFact]
+    frame_id: Int,
+    protocol: String,
+    session_id: String,
+    revision: String,
+    sequence: Int,
+    observed_at_ms: Int,
+    open: Bool,
+    dock: DevtoolsDock,
+    focused: Bool,
+    viewport: NativeOverlayViewport,
+    bounds: NativeOverlayRect,
+    cursor: Int?,
+    selection: JetDevtoolsSelection?,
+    panels: [NativeOverlayPanelFact],
 
     panel_count: fn(self) -> Int { self.panels.len() }
     node_count: fn(self) -> Int {
@@ -246,23 +246,23 @@ overlay_panel_node_count: fn(panel: NativeOverlayPanelFact) -> Int {
 }
 
 NativeOverlayHost: struct {
-    state: NativeOverlayState
-    viewport: NativeOverlayViewport
-    toggle_key: String
-    release_build: Bool
-    session_id: String?
-    revision: String?
-    sequence: Int?
-    cursor: Int?
-    selection: JetDevtoolsSelection?
-    observed_at_ms: Int
-    panels: [String: NativeOverlayPanelFact]
-    next_frame_id: Int
-    max_frames: Int
+    state: NativeOverlayState,
+    viewport: NativeOverlayViewport,
+    toggle_key: String,
+    release_build: Bool,
+    session_id: String?,
+    revision: String?,
+    sequence: Int?,
+    cursor: Int?,
+    selection: JetDevtoolsSelection?,
+    observed_at_ms: Int,
+    panels: [String: NativeOverlayPanelFact],
+    next_frame_id: Int,
+    max_frames: Int,
     // Oldest first; bounded by max_frames.
-    frames: [NativeOverlayFrame]
+    frames: [NativeOverlayFrame],
     // One real game-backend draw callback, bounded independently of frame history.
-    last_native_draw: JetDevtoolsNativeDrawCommand?
+    last_native_draw: JetDevtoolsNativeDrawCommand?,
 
     new: fn() -> NativeOverlayHost { NativeOverlayHost.with_viewport(NATIVE_OVERLAY_DEFAULT_VIEWPORT) }
     with_viewport: fn(viewport: NativeOverlayViewport) -> NativeOverlayHost {
@@ -503,10 +503,10 @@ append_native_node_commands: fn(commands: &[JetDevtoolsNativeDrawCommand], node:
 // window hooks without importing devserver into the generated Prelude. The
 // bridge exclusively owns its adapter, host and toggle-key edge state.
 NativeOverlayHostBridge: struct {
-    session: ResidentDevSession
-    adapter: NativeOverlayAdapter
-    host: NativeOverlayHost
-    toggle_key_state: [String: Bool]
+    session: ResidentDevSession,
+    adapter: NativeOverlayAdapter,
+    host: NativeOverlayHost,
+    toggle_key_state: [String: Bool],
 
     new: fn(session: ResidentDevSession, release_build: Bool) -> NativeOverlayHostBridge {
         adapter := NativeOverlayAdapter.for_session(session)

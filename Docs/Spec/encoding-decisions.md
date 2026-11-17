@@ -738,7 +738,7 @@ use xml: core.encoding.xml
 Catalog: struct { book: [Book] }
 #Codable
 Book: struct {
-    #Rename("@id") id: String
+    #Rename("@id") id: String,
     title: String
 }
 

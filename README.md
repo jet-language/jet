@@ -27,8 +27,8 @@ use fs: core.files
 
 #CLI
 Args: struct {
-    #Doc("text file to read") path: String
-    #Doc("how many words to show") top: Int{3}
+    #Doc("text file to read") path: String,
+    #Doc("how many words to show") top: Int{3},
 }
 
 count_words: fn(text: String) -> [String:Int] {

@@ -123,15 +123,15 @@ IR_REDUCE_KINDS: 10
 // conversion of the stored value (`narrow`, jet_int_checked_fixed's 0..7;
 // -1 for none).
 IRReduceLoop: struct {
-    at: Int
-    kind: Int
-    total: Int
-    index: Int
-    bound: Int
-    base: Int
-    value: Int
-    limit: Int
-    narrow: Int
+    at: Int,
+    kind: Int,
+    total: Int,
+    index: Int,
+    bound: Int,
+    base: Int,
+    value: Int,
+    limit: Int,
+    narrow: Int,
 }
 
 // The leaf's function name; its key is "jet_<name>#asm".
@@ -227,10 +227,10 @@ ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], threads: Compil
 // function `start`, with the Loops its search found in each
 // (ir_opt_reduce_loops) and its notes.
 IROptReducePart: struct {
-    functions: [IRFunction]
-    start: Int
-    taken: [[IRReduceLoop]]
-    report: IROptReport
+    functions: [IRFunction],
+    start: Int,
+    taken: [[IRReduceLoop]],
+    report: IROptReport,
 }
 
 // What every thread of ir_opt_reduce_module reads: the module's lent rows
@@ -238,10 +238,10 @@ IROptReducePart: struct {
 // done the leaves' rows (ir_opt_reduce_leaves) and every body's Loops a
 // leaf takes.
 IROptReduceView: struct {
-    views: [IRModule]
-    word_row: Int
-    leaves: [Int]
-    taken: [[IRReduceLoop]]
+    views: [IRModule],
+    word_row: Int,
+    leaves: [Int],
+    taken: [[IRReduceLoop]],
 }
 
 // Runs a reduction thread per slot from `at`; returns the functions they
@@ -435,8 +435,8 @@ ir_opt_reduce_rewrite: fn(f: &IRFunction, taken: [IRReduceLoop], leaves: [Int], 
 // of a loaded element and stores no one value, else why the leaf
 // (`plan.kind`) does not take it.
 IRReduceFound: struct {
-    plan: IRReduceLoop
-    reason: String
+    plan: IRReduceLoop,
+    reason: String,
 }
 
 ir_reduce_declined: fn(kind: Int, reason: String) -> IRReduceFound Never! {
@@ -453,19 +453,19 @@ ir_reduce_declined: fn(kind: Int, reason: String) -> IRReduceFound Never! {
 // (`convert`, -1 for none) with its constant kind (`narrow`, -1 for none).
 // `reason` as in IRReduceFound.
 IRReduceUpdate: struct {
-    kind: Int
-    add: Int
-    total: Int
-    element: Int
-    carry: Int
-    match: Int
-    value: Int
-    widened: Int
-    store: Int
-    clone: Int
-    convert: Int
-    narrow: Int
-    reason: String
+    kind: Int,
+    add: Int,
+    total: Int,
+    element: Int,
+    carry: Int,
+    match: Int,
+    value: Int,
+    widened: Int,
+    store: Int,
+    clone: Int,
+    convert: Int,
+    narrow: Int,
+    reason: String,
 }
 
 ir_reduce_no_update: fn(kind: Int, reason: String) -> IRReduceUpdate Never! {

@@ -42,13 +42,13 @@ JET_CLI_REMOTE_RUN_TIMEOUT_MS: 30000
 
 #Error
 JetCLIRemoteRunError: struct {
-    message: String
+    message: String,
 }
 
 // What `jet run <word>` reaches when `word` is not a local path.
 JetCLIRemoteRunTarget: enum {
-    URL(url: String)
-    Registry(name: String, selector: String)
+    URL(url: String),
+    Registry(name: String, selector: String),
 }
 
 // An `https://` URL (or a refused `http://` one).
@@ -57,31 +57,31 @@ JetCLIRemoteRunTarget: enum {
 // The pin of one target: the bytes that run and the effects accepted for them.
 JetCLIRemoteRunPin: struct {
     // The target as written: the URL, `name#selector` or `name`.
-    source: String
+    source: String,
     // `sha256-<hex>`: of the file for a URL, of the package tree for a package.
-    content_hash: String
+    content_hash: String,
     // The local entry that runs: the stored file, or the package directory.
-    entry: String
+    entry: String,
     // The registry version the target resolved to; "" for a URL.
-    version: String
+    version: String,
     // The effects the user said yes to for these bytes.
-    accepted: [String]
+    accepted: [String],
 }
 
 // A pinned target, as the first-run question names it.
 JetCLIRemoteRunOrigin: struct {
-    pin: JetCLIRemoteRunPin
+    pin: JetCLIRemoteRunPin,
     // `tool.jet`, or `greet 1.0.0`.
-    name: String
+    name: String,
     // `example.org`, or `the registry`.
-    from: String
+    from: String,
     // A record pinned other bytes for this target, which the user accepted.
-    changed: Bool
+    changed: Bool,
 }
 
 JetCLIRemoteRunResolved: enum {
-    Pinned(origin: JetCLIRemoteRunOrigin)
-    Refused(output: JetDriverVerbOutput)
+    Pinned(origin: JetCLIRemoteRunOrigin),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The remote target `word` names, or None when it names a local path. A word

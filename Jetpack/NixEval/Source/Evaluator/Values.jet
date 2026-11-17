@@ -9,15 +9,15 @@ NIXEVAL_MAX_PACKAGE_NAME_BYTES: 128
 // A package namespace. `overlay` names a shared, mutable override table once
 // the namespace has been merged or overlaid; a plain namespace has none.
 NixEvalPackageSet: struct {
-    prefix: String
-    overlay: Int?
+    prefix: String,
+    overlay: Int?,
 }
 
 NixEvalFetcher: enum {
-    Fetchurl
-    FetchTarball
-    FetchTree
-    FetchGit
+    Fetchurl,
+    FetchTarball,
+    FetchTree,
+    FetchGit,
 
     name: fn(self) -> String Never! {
         if self == {
@@ -30,45 +30,45 @@ NixEvalFetcher: enum {
 }
 
 NixEvalBuiltin: enum {
-    AttrNames
-    AttrValues
-    GetAttr
-    HasAttr
-    IsAttrs
-    IsBool
-    IsFunction
-    IsInt
-    IsList
-    IsNull
-    IsPath
-    IsString
-    Length
-    Head
-    Tail
-    ConcatLists
-    ConcatStringsSep
-    Map
-    Filter
-    ReplaceStrings
-    Substring
-    BaseNameOf
-    DirOf
-    StringLength
-    ToJSON
-    FromJSON
-    StorePath
-    Throw
+    AttrNames,
+    AttrValues,
+    GetAttr,
+    HasAttr,
+    IsAttrs,
+    IsBool,
+    IsFunction,
+    IsInt,
+    IsList,
+    IsNull,
+    IsPath,
+    IsString,
+    Length,
+    Head,
+    Tail,
+    ConcatLists,
+    ConcatStringsSep,
+    Map,
+    Filter,
+    ReplaceStrings,
+    Substring,
+    BaseNameOf,
+    DirOf,
+    StringLength,
+    ToJSON,
+    FromJSON,
+    StorePath,
+    Throw,
 }
 
 // Curried builtins waiting for their remaining arguments.
 NixEvalOperation: enum {
-    GetAttr
-    HasAttr
-    Map
-    Filter
-    ConcatStringsSep
-    ReplaceStrings
-    Substring
+    GetAttr,
+    HasAttr,
+    Map,
+    Filter,
+    ConcatStringsSep,
+    ReplaceStrings,
+    Substring,
 
     arity: fn(self) -> Int Never! {
         if self == {
@@ -79,36 +79,36 @@ NixEvalOperation: enum {
 }
 
 NixEvalNative: enum {
-    MkShell
-    Import
-    ImportPackage(NixEvalPackageSet)
-    ExtendPackage(NixEvalPackageSet)
-    Fetch(NixEvalFetcher)
-    GetFlake
-    ToString
-    HasContext
-    Builtin(NixEvalBuiltin)
-    Partial(operation: NixEvalOperation, arguments: [Int])
-    Derivation(Bool)
+    MkShell,
+    Import,
+    ImportPackage(NixEvalPackageSet),
+    ExtendPackage(NixEvalPackageSet),
+    Fetch(NixEvalFetcher),
+    GetFlake,
+    ToString,
+    HasContext,
+    Builtin(NixEvalBuiltin),
+    Partial(operation: NixEvalOperation, arguments: [Int]),
+    Derivation(Bool),
 }
 
 NixEvalValue: enum {
-    Null
-    Bool(Bool)
-    Integer(Int)
-    Str(String)
-    Contextual(value: String, contexts: [String])
-    Path(String)
-    Package(String)
-    Packages(NixEvalPackageSet)
-    CrossPackages(String)
-    BuiltinsNamespace
-    LibraryNamespace
-    List([Int])
-    AttrSet([String:Int])
-    Derivation(fields: [String:Int], request: NixEvalDerivation?)
-    Function(lambda: Int, frame: Int)
-    Native(NixEvalNative)
+    Null,
+    Bool(Bool),
+    Integer(Int),
+    Str(String),
+    Contextual(value: String, contexts: [String]),
+    Path(String),
+    Package(String),
+    Packages(NixEvalPackageSet),
+    CrossPackages(String),
+    BuiltinsNamespace,
+    LibraryNamespace,
+    List([Int]),
+    AttrSet([String:Int]),
+    Derivation(fields: [String:Int], request: NixEvalDerivation?),
+    Function(lambda: Int, frame: Int),
+    Native(NixEvalNative),
 
     type_name: fn(self) -> String Never! {
         if self == {
@@ -226,8 +226,8 @@ nixeval_same_text: fn(text: String?, expected: String) -> Bool Never! {
 
 // A coerced string and its contexts (`package:<name>` or `path:<path>`).
 NixEvalText: struct {
-    value: String
-    contexts: [String]
+    value: String,
+    contexts: [String],
 
     into_value: fn(self) -> NixEvalValue Never! {
         if self.contexts.len() == 0 -> return NixEvalValue.Str(self.value)
@@ -236,19 +236,19 @@ NixEvalText: struct {
 }
 
 NixEvalThunk: enum {
-    Pending(expression: Int, frame: Int)
-    Evaluating
-    Evaluated(NixEvalValue)
-    Failed(String)
+    Pending(expression: Int, frame: Int),
+    Evaluating,
+    Evaluated(NixEvalValue),
+    Failed(String),
 }
 
 // One lexical scope. Child frames share their root's expression fuel.
 NixEvalFrame: struct {
-    parent: Int?
-    bindings: [String:Int]
-    scopes: [Int]
-    fuel: Int
-    base_path: String
+    parent: Int?,
+    bindings: [String:Int],
+    scopes: [Int],
+    fuel: Int,
+    base_path: String,
 }
 
 nixeval_package_name: fn(raw: String) -> String NixEvalError! {

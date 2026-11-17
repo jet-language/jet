@@ -87,12 +87,12 @@ IR_RANGE_DEPTH: 64
 IR_RANGE_VALUES: 20000
 
 IRRange: struct {
-    known: Bool
-    lo: Int
-    hi: Int
+    known: Bool,
+    lo: Int,
+    hi: Int,
     // Whether the value is an inline Int (a word: by its signed bits), each
     // bound then taken as written, even at a sentinel.
-    inline: Bool
+    inline: Bool,
 }
 
 IRRanges: struct {
@@ -100,30 +100,30 @@ IRRanges: struct {
     // an Int, whether it is an unsigned word, whether it is a word narrower
     // than 64 bits (its range is its type's: its arithmetic wraps or stops
     // at its width), its type's bounds, and its range so far.
-    ranged: [Bool]
-    exact: [Bool]
-    unsigned: [Bool]
-    narrow: [Bool]
-    cap_lo: [Int]
-    cap_hi: [Int]
-    known: [Bool]
-    lo: [Int]
-    hi: [Int]
-    inline: [Bool]
+    ranged: [Bool],
+    exact: [Bool],
+    unsigned: [Bool],
+    narrow: [Bool],
+    cap_lo: [Int],
+    cap_hi: [Int],
+    known: [Bool],
+    lo: [Int],
+    hi: [Int],
+    inline: [Bool],
     // Per block: the value of the condition its entry decides (-1: none),
     // whether the condition holds there (else it fails), and the nearest
     // block at or above it in the dominator tree that decides one (-1:
     // none).
-    cond: [Int]
-    holds: [Bool]
-    up: [Int]
+    cond: [Int],
+    holds: [Bool],
+    up: [Int],
     // Per value: the block of its write, and whether a deciding condition
     // compares it (else no branch narrows it).
-    home: [Int]
-    tested: [Bool]
+    home: [Int],
+    tested: [Bool],
     // Per value: whether it is a load of a List header's length (its first
     // word), a count of elements held in memory.
-    lengths: [Bool]
+    lengths: [Bool],
 }
 
 ir_range_top: fn() -> IRRange Never! {
@@ -341,8 +341,8 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
 // Per value, the values whose evaluation (ir_range_eval) reads its range:
 // `rows[start[v]..<start[v + 1]]`.
 IRRangeReaders: struct {
-    start: [Int]
-    rows: [Int]
+    start: [Int],
+    rows: [Int],
 }
 
 // The readers of every value, a superset of what ir_range_eval reads: a
@@ -436,10 +436,10 @@ ir_range_changed: fn(r: IRRanges, readers: IRRangeReaders, stale: &[Bool], value
 
 // What each value's last evaluation found (ir_range_eval).
 IRRangeFound: struct {
-    known: [Bool]
-    lo: [Int]
-    hi: [Int]
-    inline: [Bool]
+    known: [Bool],
+    lo: [Int],
+    hi: [Int],
+    inline: [Bool],
 }
 
 ir_range_found_set: fn(found: &IRRangeFound, value: Int, got: IRRange) Never! {

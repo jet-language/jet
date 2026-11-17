@@ -25,11 +25,11 @@ PKG_MAX_NIX_NAR_SIZE: 17179869184
 // `pkg_lock_parse_with_path` maps it to E1214 without re-reading a message.
 #Error
 LockError: enum {
-    Invalid(String)
-    UnsupportedVersion(String)
-    IO(IOError)
-    Incomplete(LockCompletenessError)
-    Reported(Diagnostic)
+    Invalid(String),
+    UnsupportedVersion(String),
+    IO(IOError),
+    Incomplete(LockCompletenessError),
+    Reported(Diagnostic),
 
     // Schema, record, or recorder failure with its complete message.
     // The top-level `version` names a schema this reader does not support.
@@ -66,47 +66,47 @@ impl LockCompletenessError -> LockError { LockError.Incomplete(self) }
 // Tier-1: one `embed_file`/`embed_bytes` (or generated-module)
 // input hashed at compile time: the relative path and the digest of its bytes.
 ComptimeInput: struct {
-    path: String
-    hash: String
+    path: String,
+    hash: String,
 }
 
 // One node in the resolved package graph.
 LockedPackage: struct {
-    name: String
-    version: String
-    source: LockSource
+    name: String,
+    version: String,
+    source: LockSource,
     // Portable Nix closure identity. Present exactly when `source` is
     // `LockSource.Nix`.
-    nix_closure: NixClosureRecord?{None}
+    nix_closure: NixClosureRecord?{None},
     // Exact resolved identity (only for git + registry deps).
-    locked: LockedRevision?{None}
+    locked: LockedRevision?{None},
     // Plan fingerprint = sha256 of (source tree hash + sorted dep fingerprints).
-    fingerprint: String{""}
+    fingerprint: String{""},
     // SHA-256 of the installed source tree; None for old locks.
-    content_hash: String?{None}
+    content_hash: String?{None},
     // Direct dependency names.
-    dependencies: [String]{[String]{}}
+    dependencies: [String]{[String]{}},
     // Optional `runtime:` ceiling from the package payload.
-    layer: RuntimeLayer?{None}
+    layer: RuntimeLayer?{None},
     // M2: minimum runtime profile inferred at last build.
-    inferred_layer: RuntimeLayer?{None}
+    inferred_layer: RuntimeLayer?{None},
     // The effect names this dependency's code used at the last
     // build, and the effects granted to it through `grants: { … }`.
-    effects: [String]{[String]{}}
-    effect_grants: [String]{[String]{}}
+    effects: [String]{[String]{}},
+    effect_grants: [String]{[String]{}},
     // Canonical role projection for inspect/provenance consumers.
-    required_effects: [String]{[String]{}}
-    granted_effects: [String]{[String]{}}
-    denied_effects: [String]{[String]{}}
-    effect_authority: String?{None}
+    required_effects: [String]{[String]{}},
+    granted_effects: [String]{[String]{}},
+    denied_effects: [String]{[String]{}},
+    effect_authority: String?{None},
     // (U24/A4): the realized-output envelope; None until the
     // package is realized (and for older locks, which round-trip unchanged).
-    envelope: LockEnvelope?{None}
+    envelope: LockEnvelope?{None},
     // Digest of the immutable Hangar receipt of this package.
-    receipt: String?{None}
+    receipt: String?{None},
     // The transparency, publisher, and build evidence above
     // the integrity floor.
-    provenance: DependencyProvenance?{None}
+    provenance: DependencyProvenance?{None},
 
     // The realized output digest recorded on the source, when it has one.
     output: fn(self) -> String? Never! {
@@ -319,14 +319,14 @@ LockedPackage: struct {
 }
 
 LockSource: enum {
-    Root
-    Path(String)
-    Git(url: String, selector: String)
-    Nix(reference: String, output: String)
-    Cran(reference: String, output: String, source_hash: String, repository: String, authority: String)
-    LuaRocks(reference: String, output: String, source_hash: String, repository: String, authority: String)
-    Registry(registry: String, reference: String, output: String, source_hash: String, repository: String, authority: String, tier: String, gate_status: String)
-    Foreign(language: ForeignLanguage, reference: String, output: String)
+    Root,
+    Path(String),
+    Git(url: String, selector: String),
+    Nix(reference: String, output: String),
+    Cran(reference: String, output: String, source_hash: String, repository: String, authority: String),
+    LuaRocks(reference: String, output: String, source_hash: String, repository: String, authority: String),
+    Registry(registry: String, reference: String, output: String, source_hash: String, repository: String, authority: String, tier: String, gate_status: String),
+    Foreign(language: ForeignLanguage, reference: String, output: String),
 }
 
 // A package realized through the Nix compatibility
@@ -342,30 +342,30 @@ LockSource: enum {
 // Hangar projection that materialized its binding.
 
 LockedRevision: struct {
-    rev: String
-    tree_hash: String
-    last_modified: Int
+    rev: String,
+    tree_hash: String,
+    last_modified: Int,
 }
 
 // The portable, content-addressed evidence needed to replay
 // one Nix output without a host Nix store or a package catalog. Every field
 // is an identity or a digest; host paths are not representable.
 NixClosureRecord: struct {
-    channel: String
-    revision: String
-    system: String
+    channel: String,
+    revision: String,
+    system: String,
     // Signed manifest digest for official catalogs; canonical index digest
     // for explicit local catalogs.
-    index_authority: String
-    derivation: String
-    output: String
-    nar_hash: String
-    size: Int
-    compression: String
-    references: [String]
-    upstream_proof: String
-    cache_key: String
-    project_cas_bundle: String
+    index_authority: String,
+    derivation: String,
+    output: String,
+    nar_hash: String,
+    size: Int,
+    compression: String,
+    references: [String],
+    upstream_proof: String,
+    cache_key: String,
+    project_cas_bundle: String,
 
     // Reject incomplete or path-bearing records before they become a replay
     // authority: no field that claims to be content addressed may smuggle a
@@ -454,13 +454,13 @@ NixClosureRecord: struct {
 // envelope: not a second envelope model, just its on-disk shape. `signature`
 // stays empty until package signing fills it.
 LockEnvelope: struct {
-    output_hash: String{""}
-    platform: String{""}
-    signature: String{""}
-    provenance: String{""}
+    output_hash: String{""},
+    platform: String{""},
+    signature: String{""},
+    provenance: String{""},
     // Nix package catalog provenance; empty for non-Nix envelopes.
-    catalog_tier: String{""}
-    catalog_trust: String{""}
+    catalog_tier: String{""},
+    catalog_trust: String{""},
 
     empty: fn() -> LockEnvelope Never! {
         LockEnvelope{output_hash: "", platform: "", signature: "", provenance: "", catalog_tier: "", catalog_trust: ""}
@@ -486,10 +486,10 @@ LockEnvelope: struct {
 // resolved from (`0.4`, `main`, …); every run except `jet update jet` reads
 // `version`.
 LockedToolchain: struct {
-    id: String
-    channel: String
-    version: String
-    envelope: LockEnvelope
+    id: String,
+    channel: String,
+    version: String,
+    envelope: LockEnvelope,
 
     validate_completeness: fn(self) LockCompletenessError! {
         name: if self.channel.trim() == "" -> "jet" else -> self.channel
@@ -506,9 +506,9 @@ LockedToolchain: struct {
 // selector (`owner/repo@github#latest`, `#main`, `#v0.x`). Realize-class
 // commands read `exact`; only update-class commands move it.
 LockedSourceChannel: struct {
-    name: String
-    channel: String
-    exact: String
+    name: String,
+    channel: String,
+    exact: String,
 
     validate_completeness: fn(self) LockCompletenessError! {
         name: if self.name.trim() == "" -> "<unnamed>" else -> self.name
@@ -528,70 +528,70 @@ LockedSourceChannel: struct {
 // only through a driver launches with, "" when the engine serves it itself;
 // `driver_size` is its byte size.
 LockedBrowser: struct {
-    engine: String
-    version: String
-    binary: String
-    protocol: String
-    size: Int
-    envelope: LockEnvelope
-    driver: String{""}
-    driver_size: Int{0}
+    engine: String,
+    version: String,
+    binary: String,
+    protocol: String,
+    size: Int,
+    envelope: LockEnvelope,
+    driver: String{""},
+    driver_size: Int{0},
 }
 
 LockedWorkspaceMember: struct {
-    name: String
-    path: String
-    source_digest: String
-    canonical_path: String
+    name: String,
+    path: String,
+    source_digest: String,
+    canonical_path: String,
     // Digest of the fully composed typed Package facts for this member.
-    package_digest: String
+    package_digest: String,
 }
 
 // One locked writer record for every computed build fact:
 // the stable on-disk provenance projection of the semantic resolver.
 LockedBuildContribution: struct {
-    package: String
-    key: String
-    value: String
-    scope: String
-    layer: String
-    source: String
-    reason: String
+    package: String,
+    key: String,
+    value: String,
+    scope: String,
+    layer: String,
+    source: String,
+    reason: String,
 }
 
 // The full lock graph.
 LockFile: struct {
-    version: Int
-    packages: [LockedPackage]
+    version: Int,
+    packages: [LockedPackage],
     // Root dependency names (direct deps of the workspace root).
-    root_dependencies: [String]
+    root_dependencies: [String],
     // The root package's one authority block.
-    authority: PackageAuthority?
+    authority: PackageAuthority?,
     // Monorepo workspace members live in this lockfile.
-    workspace_members: [LockedWorkspaceMember]
+    workspace_members: [LockedWorkspaceMember],
     // The workspace source identity, retained even when a
     // valid workspace has no members.
-    workspace_source_digest: String?
+    workspace_source_digest: String?,
     // The checked workspace overlay policy.
-    workspace_overlay_policy: OverlayPolicy
+    workspace_overlay_policy: OverlayPolicy,
     // Tier-1: embed/generated inputs hashed at compile time.
-    comptime_inputs: [ComptimeInput]
+    comptime_inputs: [ComptimeInput],
     // (A4): pinned toolchain objects.
-    toolchains: [LockedToolchain]
+    toolchains: [LockedToolchain],
     // (#1187): locked browser binaries.
-    browsers: [LockedBrowser]
+    browsers: [LockedBrowser],
     // Named source channels resolved to exact source refs.
-    source_channels: [LockedSourceChannel]
+    source_channels: [LockedSourceChannel],
     // Provenance for the build fact plane, replayed verbatim
     // by later locked builds.
-    build_stamp: BuildStamp?
+    build_stamp: BuildStamp?,
     // Computed build-fact writers, keyed by package.
-    build_contributions: [LockedBuildContribution]
+    build_contributions: [LockedBuildContribution],
     // Trust's SemanticLock blocks (`semantic-lock-version` through the
     // `[[semantic_record]]`/`[[lock_input]]`/`[[source_map]]` tail), kept
     // verbatim: the unified lock is their sole primary copy, so a
     // machine-lock rewrite carries them.
-    semantic_text: String
+    semantic_text: String,
 
     // A version-1 lock with no records.
     empty: fn() -> LockFile Never! {

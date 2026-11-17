@@ -2,8 +2,8 @@ use math: core.math
 
 #Codable
 Rational: struct {
-    numerator: Int
-    denominator: Int
+    numerator: Int,
+    denominator: Int,
 
     impl Literal.Int {
         // Context can construct an exact Rational directly.
@@ -125,8 +125,8 @@ Rational: struct {
 
 #Codable
 BuiltInExact: struct {
-    amount: Decimal
-    whole: Int
+    amount: Decimal,
+    whole: Int,
 }
 
 // Construction is the one fallible boundary. Arithmetic below keeps the
@@ -142,8 +142,8 @@ rational: fn(numerator: Int, denominator: Int) -> Rational? {
 
 #Codable
 ScaledDecimal: struct {
-    coefficient: Int
-    scale: Int
+    coefficient: Int,
+    scale: Int,
 
     impl Literal.Float {
         // The compiler passes the source digits as text, preserving trailing zeroes
@@ -321,14 +321,14 @@ ScaledDecimal: struct {
 }
 
 Rounding: enum {
-    Down
-    Up
-    HalfUp
+    Down,
+    Up,
+    HalfUp,
 }
 
 #Codable
 Money: struct {
-    cents: Int
+    cents: Int,
 
     impl Literal.Int {
         #run from_literal: fn(value: Int) -> Money { Money{cents: value} }

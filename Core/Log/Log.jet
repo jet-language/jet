@@ -38,16 +38,16 @@ use {
 // write and the cells are host: the sink and its format are the process's,
 // the level, filter, sampling, spans and trace id the calling thread's.
 LogField: struct {
-    key: String
-    value: String
-    kind: String
+    key: String,
+    value: String,
+    kind: String,
     redacted: Bool
 }
 
 // Readable but not constructible outside this module.
 LogSpan: struct {
-    id: Int
-    name: String
+    id: Int,
+    name: String,
 
     id: fn(self) -> Int Never! { self.id }
 
@@ -56,11 +56,11 @@ LogSpan: struct {
 
 /// A record's severity, least to most severe.
 LogLevel: enum {
-    Debug
-    Info
-    Warn
-    Error
-    Critical
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Critical,
     Fatal
 }
 
@@ -263,7 +263,7 @@ normalize_fields: fn(fields: [LogField]) -> [LogField] {
 
 // One pair of a level filter: `path` "" is every module.
 FilterPair: struct {
-    path: String
+    path: String,
     rank: Int
 }
 
@@ -580,8 +580,8 @@ split_csv: fn(text: String) -> [String] {
 
 /// A structured log event shared by formatters and handlers.
 LogRecord: struct {
-    level: LogLevel
-    message: String
+    level: LogLevel,
+    message: String,
     fields: [LogField]
 }
 
@@ -593,7 +593,7 @@ Formatter: struct {
 
 /// A level-filtered sink. `handle` applies the threshold before formatting.
 Handler: struct {
-    minimum: LogLevel
+    minimum: LogLevel,
     mode: String
 }
 
@@ -654,7 +654,7 @@ render_json: fn(event: LogRecord) -> String {
 }
 
 Pair: struct {
-    left: String
+    left: String,
     right: String
 }
 
@@ -732,17 +732,17 @@ clear: fn(event: LogRecord) -> LogRecord Never! { record(event.level, event.mess
 
 /// The role of a traced span, as OTLP numbers it.
 SpanKind: enum {
-    Internal
-    Server
-    Client
-    Producer
+    Internal,
+    Server,
+    Client,
+    Producer,
     Consumer
 }
 
 /// How a traced span ended: not said, ok, or failed with a message.
 SpanStatus: enum {
-    Unset
-    Ok
+    Unset,
+    Ok,
     Error(String)
 }
 
@@ -751,14 +751,14 @@ SpanStatus: enum {
 /// trace's root. Times are Unix nanoseconds. The attributes are typed log
 /// fields, and a redacted one exports `[redacted]`, never its value.
 TraceSpan: struct {
-    trace_id: String
-    span_id: String
-    parent_span_id: String
-    name: String
-    kind: SpanKind
-    start_ns: Int
-    end_ns: Int
-    attributes: [LogField]
+    trace_id: String,
+    span_id: String,
+    parent_span_id: String,
+    name: String,
+    kind: SpanKind,
+    start_ns: Int,
+    end_ns: Int,
+    attributes: [LogField],
     status: SpanStatus
 }
 

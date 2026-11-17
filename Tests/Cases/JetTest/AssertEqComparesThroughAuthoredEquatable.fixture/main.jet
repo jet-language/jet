@@ -1,7 +1,7 @@
 // Versions equal by precedence: build metadata does not take part.
 Version: struct {
-    number: Int
-    build: String
+    number: Int,
+    build: String,
 
     impl Equatable {
         equal: fn(self, rhs: Version) -> Bool { self.number == rhs.number }
@@ -11,8 +11,8 @@ Version: struct {
 // Equal by size, ordered by label: the two authored hooks disagree, and `==`
 // (and so assert_eq) is Equatable's operator, so `equal` answers.
 Box: struct {
-    size: Int
-    label: String
+    size: Int,
+    label: String,
 
     impl Equatable {
         equal: fn(self, rhs: Box) -> Bool { self.size == rhs.size }
@@ -32,8 +32,8 @@ Box: struct {
 
 // Ordered by rank alone with a derived `equal`: the authored `compare` answers.
 Ranked: struct {
-    rank: Int
-    note: String
+    rank: Int,
+    note: String,
 
     #Waive(agrees_with_equal, "the hooks disagree on purpose")
     impl Comparable {

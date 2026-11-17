@@ -658,10 +658,10 @@ ordering, Map lookup and Set membership:
 
 ```jet
 Email: struct {
-    address: String
+    address: String,
 
     impl KeyBy {
-        Key: String
+        Key: String,
 
         key: fn(self) -> String { self.address.lower() }
     }
@@ -1130,13 +1130,13 @@ They are bare bounds, so `fn<R: Reader>` needs no import:
 
 ```jet
 Reader: trait {
-    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
-    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!,
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,
 }
 
 Writer: trait {
-    write_bytes: fn(&self, bytes: [U8]) IOError!
-    flush: fn(&self) IOError!
+    write_bytes: fn(&self, bytes: [U8]) IOError!,
+    flush: fn(&self) IOError!,
     write: fn(&self, text: String) IOError! {
         self.write_bytes(text.bytes())
     }
@@ -2488,8 +2488,8 @@ through.
 
 ```jet
 Sale: struct {
-    item: String
-    amount: Float
+    item: String,
+    amount: Float,
 }
 
 run: fn() {
@@ -2590,8 +2590,8 @@ values rather than pre-rendering them.
 use reflect: core.reflect
 
 Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 
     impl Display {
         display: fn(self) -> String { "({self.x}, {self.y})" }
@@ -4476,8 +4476,8 @@ use data: core.data
 
 #Codable
 Ticket: struct {
-    team: String
-    minutes: Float
+    team: String,
+    minutes: Float,
 }
 
 run: fn() {

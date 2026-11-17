@@ -48,26 +48,26 @@ use {
 
 // The checked program as the bridge reads it (Rust `ProgramBundle`).
 RustBridgeProgram: struct {
-    modules: [RustBridgeModule]
+    modules: [RustBridgeModule],
     // Index of the entry module in `modules`.
-    entry: Int
-    project_root: String
+    entry: Int,
+    project_root: String,
     // Gathered C-FFI artifacts.
-    cffi: CFFI
+    cffi: CFFI,
 }
 
 // One loaded module of the checked program.
 RustBridgeModule: struct {
-    alias: String
-    path: String
-    items: [Item]
+    alias: String,
+    path: String,
+    items: [Item],
 }
 
 // Why the hidden bridge could not be prepared or built. Every refusal is a
 // user-facing diagnostic row.
 #Error
 RustBridgeError: struct {
-    diagnostics: [Diagnostic]
+    diagnostics: [Diagnostic],
 }
 
 // A plain bridge failure (E0704), the Rust `tool_error`.
@@ -85,25 +85,25 @@ impl ForeignBridgeError -> RustBridgeError {
 
 // One foreign function collected from the import graph.
 ExternEntry: struct {
-    jet_name: String
-    rust_path: String
-    wrapper_name: String
-    params: [{convention: AccessConvention, ty: Type}]
-    param_names: [String]
-    return_type: Type?
-    crate_spec: String
+    jet_name: String,
+    rust_path: String,
+    wrapper_name: String,
+    params: [{convention: AccessConvention, ty: Type}],
+    param_names: [String],
+    return_type: Type?,
+    crate_spec: String,
     // Human-facing hint for E0705 (`extern` line context).
-    line_hint: String
-    inline: InlineEntry?
+    line_hint: String,
+    inline: InlineEntry?,
     // The declaration names a native C symbol assembled by CFFI.
-    c_abi: Bool
+    c_abi: Bool,
     // Compiler-generated CBind declarations use the descriptor ABI.
-    generated: Bool
+    generated: Bool,
     // The entry originates in a C module rather than an `extern rust` block.
-    c_module: Bool
+    c_module: Bool,
     // The sibling foreign function that consumes a returned
     // handle, when the declaration carries `#Close(close)`.
-    close: String?
+    close: String?,
 
     has_list: fn(self) -> Bool Never! {
         loop param in self.params {
@@ -127,31 +127,31 @@ ExternEntry: struct {
 }
 
 InlineEntry: struct {
-    lang: String
-    source: String
-    param_names: [String]
+    lang: String,
+    source: String,
+    param_names: [String],
     // Sema-normalized assembly target/output/clobber facts.
-    asm_contract: InlineAsmContract?
+    asm_contract: InlineAsmContract?,
 }
 
 // Built FFI bridge artifact paths for rustc linking (jet_foundation::AST::FfiLink).
 FFILink: struct {
-    crate_name: String
+    crate_name: String,
     // Content-addressed identity of the bridge inputs.
-    cache_identity: String
+    cache_identity: String,
     // Queryable provenance sidecar for the published bridge artifacts.
-    provenance_path: String
-    rlib_path: String
+    provenance_path: String,
+    rlib_path: String,
     // Shared library with `*_cabi` trampolines for the resident JIT.
-    cdylib_path: String
+    cdylib_path: String,
     // Selected-target runtime dependencies emitted by Cargo.
-    target_deps_dir: String
+    target_deps_dir: String,
     // Host artifacts rustc needs while loading target metadata (proc macros).
-    host_deps_dir: String
+    host_deps_dir: String,
     // Opaque C handle facts captured by the bridge input.
-    handle_facts: [FFIHandleFact]
+    handle_facts: [FFIHandleFact],
     // Explicit native link closure captured by the bridge input.
-    link_closure: FFILinkClosure
+    link_closure: FFILinkClosure,
 
     // Cargo's dependency search paths, target artifacts first, no duplicates.
     dependency_dirs: fn(self) -> [String] Never! {
@@ -180,19 +180,19 @@ pkg_ffi_is_handle: fn(ty: Type, handle_names: [String]) -> Bool Never! {
 
 // One checked `#[repr(C)]` record declaration.
 CRecordDecl: struct {
-    rust_name: String
-    fields: [{name: String, ty: Type}]
-    alignment: Int?
+    rust_name: String,
+    fields: [{name: String, ty: Type}],
+    alignment: Int?,
 }
 
 // Checked `#[repr(C)]` record declarations used by the uniform native
 // trampoline.
 CRecordDefinitions: struct {
-    priv source: String
-    priv names: [String:String]
-    priv aliases: [String:Type]
-    priv records: [CRecordDecl]
-    priv handle_names: [String]
+    priv source: String,
+    priv names: [String:String],
+    priv aliases: [String:Type],
+    priv records: [CRecordDecl],
+    priv handle_names: [String],
 
     empty: fn() -> CRecordDefinitions Never! {
         CRecordDefinitions{source: "", names: [String:String]{}, aliases: [String:Type]{}, records: [CRecordDecl]{}, handle_names: [String]{}}

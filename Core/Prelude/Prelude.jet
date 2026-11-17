@@ -94,11 +94,11 @@ option_or_err: fn<T>(value: &&T?, why: &&String) -> T Err! {
 // root (`shop`). "" only in a value built by hand and in a `context.trace`
 // record, whose location table names no module (and no column: 0).
 SourceLocation: struct {
-    file: String
-    line: Int
-    column: Int
-    function: String
-    module: String{""}
+    file: String,
+    line: Int,
+    column: Int,
+    function: String,
+    module: String{""},
 
     impl Display {
         display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" }
@@ -116,7 +116,7 @@ DebugView: trait {
 
 // One row of a DebugView: the text before the colon, and the text after it.
 DebugItem: struct {
-    label: String
+    label: String,
     value: String
 }
 
@@ -129,7 +129,7 @@ DebugItem: struct {
 // type qualified by its module (`shop.Box<Int>`). Only the compiler builds
 // one: no text becomes a `Type`, and nothing casts through it.
 Type: struct {
-    priv path: String
+    priv path: String,
 
     impl Display {
         display: fn(self) -> String { "{self.path}" }
@@ -154,8 +154,8 @@ SendError: struct<T> {
 // not in the standard error family: no conversion takes it to `Err`.
 #Error
 TaskFailure: enum {
-    Cancelled
-    DeadlineBlown
+    Cancelled,
+    DeadlineBlown,
     Panicked(String)
 }
 
@@ -165,8 +165,8 @@ TaskFailure: enum {
 // `.Runtime` in the running program. Each copy folds its own phase, never the
 // optimizer: the same copy reads the same phase on every tier.
 Phase: enum {
-    Preparation
-    Build
+    Preparation,
+    Build,
     Runtime
 }
 
@@ -175,8 +175,8 @@ Phase: enum {
 // program can reach it without naming it: a reflected `CaseInfo` holds one,
 // and its layout comes from this declaration.
 CasePayload: enum {
-    Unit
-    Single(TypeId)
+    Unit,
+    Single(TypeId),
     Named([FieldInfo])
 }
 
@@ -188,39 +188,39 @@ CasePayload: enum {
 // default.
 Diagnostic: trait {
     // The report's code. None: the type's path, such as `web.BadPath`.
-    code: String?{None}
-    severity: Severity{.Error}
+    code: String?{None},
+    severity: Severity{.Error},
     // Which commands the finding fails.
-    tier: DiagnosticTier{.Error}
+    tier: DiagnosticTier{.Error},
     // The name `#Allow` and lint policy use; a `.Lint` diagnostic needs one.
-    lint_name: String?{None}
+    lint_name: String?{None},
     // The pipeline stages that report it.
-    stage: [DiagnosticStage]{[.Sema]}
-    moment: DiagnosticMoment{.Compile}
-    status: DiagnosticStatus{.Active}
+    stage: [DiagnosticStage]{[.Sema]},
+    moment: DiagnosticMoment{.Compile},
+    status: DiagnosticStatus{.Active},
     // A one-line summary. None: the `what` text.
-    meaning: String?{None}
+    meaning: String?{None},
     // Whether `jet explain` prints the what, why and fix texts in full.
-    detail: Bool{false}
+    detail: Bool{false},
     // The machine edit `jet fix` applies, if any. The `fix` text stays the
     // help a reader follows by hand.
-    structured_fix: DiagnosticEdit?{None}
+    structured_fix: DiagnosticEdit?{None},
     // Why no machine edit can apply. None: an edit applies, or none is classified.
-    no_fix: DiagnosticNoFix?{.Design}
+    no_fix: DiagnosticNoFix?{.Design},
     // The next step without a machine edit. None: the `fix` text.
-    fix_next: String?{None}
-    fix_safety: DiagnosticFixSafety?{None}
+    fix_next: String?{None},
+    fix_safety: DiagnosticFixSafety?{None},
     // Why an error refuses the program: `.Soundness` or `.Opinion`. None:
     // not yet classified.
-    safety_class: DiagnosticSafetyClass?{None}
+    safety_class: DiagnosticSafetyClass?{None},
     // One line: the fault accepting the program could cause, or why it would
     // run safely.
-    safety_reason: String?{None}
+    safety_reason: String?{None},
     // A `.Soundness` error's way out for an expert: the opt-in that reaches
     // the same program, or `none: ` and why nothing can.
-    expert_path: String?{None}
-    what: fn(self) -> String
-    why: fn(self) -> String
+    expert_path: String?{None},
+    what: fn(self) -> String,
+    why: fn(self) -> String,
     fix: fn(self) -> String
 }
 
@@ -229,50 +229,50 @@ Diagnostic: trait {
 // list it and fail, while `jet run`, `jet dev` and `jet test` never stop for
 // it. A `.Report` is advice that `jet lint` lists; it fails nothing.
 DiagnosticTier: enum {
-    Error
-    Tidy
+    Error,
+    Tidy,
     Report
 }
 
 // How a diagnostic stops the build. `.Warning` and `.Lint` reports don't, and
 // `#Allow(Type)` silences one.
 Severity: enum {
-    Error
-    Warning
+    Error,
+    Warning,
     Lint
 }
 
 // A part of the toolchain that reports a diagnostic. A row lists every part
 // that does (`[.Parse, .Sema]`).
 DiagnosticStage: enum {
-    Build
-    Compile
-    Comptime
-    Driver
-    Jet
-    Jetpack
-    Lex
-    Load
-    Parse
-    Repl
-    Runtime
-    Sema
+    Build,
+    Compile,
+    Comptime,
+    Driver,
+    Jet,
+    Jetpack,
+    Lex,
+    Load,
+    Parse,
+    Repl,
+    Runtime,
+    Sema,
     Tooling
 }
 
 // When a diagnostic can fire.
 DiagnosticMoment: enum {
-    Compile
-    Run
-    Test
+    Compile,
+    Run,
+    Test,
     Tool
 }
 
 // A retired code no longer fires; it stays so old logs remain explainable.
 // A reserved code holds its number for a rule not yet reported.
 DiagnosticStatus: enum {
-    Active
-    Reserved
+    Active,
+    Reserved,
     Retired
 }
 
@@ -280,7 +280,7 @@ DiagnosticStatus: enum {
 // memory, type, aliasing or resource fault. `.Opinion`: it would run safely,
 // and Jet refuses it for clarity or style.
 DiagnosticSafetyClass: enum {
-    Soundness
+    Soundness,
     Opinion
 }
 
@@ -291,32 +291,32 @@ DiagnosticSafetyClass: enum {
 // function `callee`, the call calls `replacement` instead and keeps its
 // arguments.
 DiagnosticEdit: enum {
-    SourceEdit
-    SuggestedSourceEdit
-    CryptoMisuse
-    Replace(from: String, to: String)
-    Remove(text: String)
-    Rewrite(callee: String, replacement: String)
-    GeneratedMarkerGroup
-    GeneratedMissingArms
-    GeneratedScriptRun
+    SourceEdit,
+    SuggestedSourceEdit,
+    CryptoMisuse,
+    Replace(from: String, to: String),
+    Remove(text: String),
+    Rewrite(callee: String, replacement: String),
+    GeneratedMarkerGroup,
+    GeneratedMissingArms,
+    GeneratedScriptRun,
     GeneratedRedundantTailReturn
 }
 
 // Why a diagnostic has no machine edit: the fix is a design choice, it would
 // change behavior, or more than one fix fits.
 DiagnosticNoFix: enum {
-    Design
-    Behavior
+    Design,
+    Behavior,
     Ambiguous
 }
 
 // How safe a machine edit is to apply without review.
 DiagnosticFixSafety: enum {
-    Formatting
-    BehaviorPreserving
-    APIChanging
-    NeedsReview
+    Formatting,
+    BehaviorPreserving,
+    APIChanging,
+    NeedsReview,
     TargetChanging
 }
 
@@ -330,7 +330,7 @@ CompilerEvent: enum {
 // `.Functions{marked: m}` watch hears, or a call a `.Calls{to: f}` watch
 // hears.
 CheckedItem: enum {
-    Function(FunctionInfo)
+    Function(FunctionInfo),
     Call(CompilerCall)
 }
 
@@ -347,15 +347,15 @@ CheckedItem: enum {
 // and `protects` (a TagProtects case), from core.compiler.lang.
 Marker: trait {
     // Where the marker may be written.
-    sites: [Site]
+    sites: [Site],
     // Whether one target may carry the marker more than once.
-    repeatable: Bool{false}
+    repeatable: Bool{false},
     // Whether the marker teaches its own argument menu in its errors.
-    owns_menu: Bool{false}
+    owns_menu: Bool{false},
     // Whether a setting on an outer scope reaches the scopes inside it.
-    inherits: Bool{false}
+    inherits: Bool{false},
     // How an inner setting meets an inherited one.
-    resolution: MarkerResolution{.SiteBound}
+    resolution: MarkerResolution{.SiteBound},
     // The scopes an inheriting setting may be written on.
     scopes: [MarkerScope]{[]}
 }
@@ -363,26 +363,26 @@ Marker: trait {
 // A place a marker is written. `TypeUse` is a type where it is used, which a
 // value tag marks (`#CardNumber String`).
 Site: enum {
-    Package
-    File
-    Module
-    Function
-    Method
-    Block
-    Statement
-    Expression
-    Type
-    Impl
-    Trait
-    Declaration
-    Constant
-    Field
-    Variant
-    Parameter
-    Test
-    Operation
-    Text
-    Arm
+    Package,
+    File,
+    Module,
+    Function,
+    Method,
+    Block,
+    Statement,
+    Expression,
+    Type,
+    Impl,
+    Trait,
+    Declaration,
+    Constant,
+    Field,
+    Variant,
+    Parameter,
+    Test,
+    Operation,
+    Text,
+    Arm,
     TypeUse
 }
 
@@ -391,18 +391,18 @@ Site: enum {
 // How an inner marker setting meets the one it inherits: it applies only
 // where written, replaces the outer one, merges with it, or may only tighten it.
 MarkerResolution: enum {
-    SiteBound
-    Override
-    Merge
+    SiteBound,
+    Override,
+    Merge,
     Tighten
 }
 
 // A scope an inheriting marker setting is written on.
 MarkerScope: enum {
-    Organization
-    Package
-    Module
-    Function
+    Organization,
+    Package,
+    Module,
+    Function,
     Block
 }
 
@@ -413,32 +413,32 @@ MarkerScope: enum {
 // Prelude declares planes.
 Fact: trait {
     // The plane's dotted compiler name. None: the struct's name.
-    name: String?{None}
+    name: String?{None},
     // What the fact attaches to.
-    holds: FactTarget
+    holds: FactTarget,
     // The way the fact may move without a gate.
-    safe: FactDirection
+    safe: FactDirection,
     // Every escape that may move the fact the other way.
-    gates: [Gate]{[]}
+    gates: [Gate]{[]},
     // Whether the plane contributes to carrier identity.
-    identity: Bool{false}
+    identity: Bool{false},
     // The prover that publishes the plane read-only. None: the checker.
     proved_by: String?{None}
 }
 
 // What a fact attaches to: a value, a scope, or the build.
 FactTarget: enum {
-    Value
-    Scope
+    Value,
+    Scope,
     Build
 }
 
 // The way a fact may move without a gate: it may only be gained, only
 // shrink, or only be discharged, or it is read-only and never moves.
 FactDirection: enum {
-    Gain
-    Shrink
-    Discharge
+    Gain,
+    Shrink,
+    Discharge,
     ReadOnly
 }
 
@@ -447,21 +447,21 @@ FactDirection: enum {
 // forced build setting, …), and `.Marker(Unsafe)` for an escape written as a
 // marker, whose type must be a marker.
 Gate: enum {
-    Approx
-    Rounded
-    Raw
-    Wrapping
-    Saturating
-    Checked
-    Detach
-    Drop
-    Provider
-    Digest
-    UnderscoreName
-    PolicyAllow
-    ManifestRuleEdit
-    Grant
-    Force
+    Approx,
+    Rounded,
+    Raw,
+    Wrapping,
+    Saturating,
+    Checked,
+    Detach,
+    Drop,
+    Provider,
+    Digest,
+    UnderscoreName,
+    PolicyAllow,
+    ManifestRuleEdit,
+    Grant,
+    Force,
     Marker(Type)
 }
 

@@ -137,14 +137,14 @@ wasm_prim_name: fn(code: Int) -> String Never! {
 //   instance export alias: names[0] exported by component instance `ok`
 //   primitive: ok = the primitive code
 WasmCtype: struct {
-    kind: Int
-    names: [String]
-    types: [Int]
-    ok: Int
-    err: Int
-    decl_kinds: [Int]
-    exports: Int
-    inner: [WasmCtype]
+    kind: Int,
+    names: [String],
+    types: [Int],
+    ok: Int,
+    err: Int,
+    decl_kinds: [Int],
+    exports: Int,
+    inner: [WasmCtype],
 
     of: fn(kind: Int) -> WasmCtype Never! {
         WasmCtype{kind: kind, names: [String]{}, types: [Int]{}, ok: WASM_CT_NONE, err: WASM_CT_NONE, decl_kinds: [Int]{}, exports: 0, inner: [WasmCtype]{}}
@@ -160,11 +160,11 @@ WasmCtype: struct {
 }
 
 WasmCanonOptions: struct {
-    encoding: Int
+    encoding: Int,
     // Core memory, realloc and post-return indexes; -1 when absent.
-    memory: Int
-    realloc: Int
-    post_return: Int
+    memory: Int,
+    realloc: Int,
+    post_return: Int,
 
     none: fn() -> WasmCanonOptions Never! {
         WasmCanonOptions{encoding: WASM_ENCODING_UTF8, memory: -1, realloc: -1, post_return: -1}
@@ -174,12 +174,12 @@ WasmCanonOptions: struct {
 // A core instance: an instantiation of module `source` (with its named
 // argument instances), or, when `source` is -1, a bag of inline exports.
 WasmCoreInstance: struct {
-    source: Int
-    arg_names: [String]
-    arg_instances: [Int]
-    export_names: [String]
-    export_sorts: [Int]
-    export_indexes: [Int]
+    source: Int,
+    arg_names: [String],
+    arg_instances: [Int],
+    export_names: [String],
+    export_sorts: [Int],
+    export_indexes: [Int],
 }
 
 WASM_ORIGIN_ALIAS: 0
@@ -200,53 +200,53 @@ WASM_ORIGIN_LIFT: 6
 // `name` of core instance `instance`, or, for funcs, a `canon` built-in
 // (`target` is the lowered component func or the resource type).
 WasmCoreItem: struct {
-    origin: Int
-    instance: Int
-    name: String
-    target: Int
-    options: WasmCanonOptions
+    origin: Int,
+    instance: Int,
+    name: String,
+    target: Int,
+    options: WasmCanonOptions,
 }
 
 // An entry of the component func or instance index space: an import (`target`
 // = import index), a `canon lift` of core func `target` at type `type_index`,
 // or export `name` of component instance `instance`.
 WasmCompItem: struct {
-    origin: Int
-    target: Int
-    type_index: Int
-    instance: Int
-    name: String
-    options: WasmCanonOptions
+    origin: Int,
+    target: Int,
+    type_index: Int,
+    instance: Int,
+    name: String,
+    options: WasmCanonOptions,
 }
 
 WasmCompImport: struct {
-    name: String
+    name: String,
     // The extern description: WASM_SORT_FUNC/INSTANCE/TYPE/COMPONENT and its type index.
-    kind: Int
-    type_index: Int
+    kind: Int,
+    type_index: Int,
 }
 
 WasmCompExport: struct {
-    name: String
-    sort: Int
-    index: Int
+    name: String,
+    sort: Int,
+    index: Int,
     // An ascribed type (-1 without one).
-    type_index: Int
+    type_index: Int,
 }
 
 WasmComponent: struct {
-    modules: [WasmModule]
-    core_instances: [WasmCoreInstance]
-    core_funcs: [WasmCoreItem]
-    core_tables: [WasmCoreItem]
-    core_memories: [WasmCoreItem]
-    core_globals: [WasmCoreItem]
-    core_types: [WasmCtype]
-    types: [WasmCtype]
-    funcs: [WasmCompItem]
-    instances: [WasmCompItem]
-    imports: [WasmCompImport]
-    exports: [WasmCompExport]
+    modules: [WasmModule],
+    core_instances: [WasmCoreInstance],
+    core_funcs: [WasmCoreItem],
+    core_tables: [WasmCoreItem],
+    core_memories: [WasmCoreItem],
+    core_globals: [WasmCoreItem],
+    core_types: [WasmCtype],
+    types: [WasmCtype],
+    funcs: [WasmCompItem],
+    instances: [WasmCompItem],
+    imports: [WasmCompImport],
+    exports: [WasmCompExport],
 
     empty: fn() -> WasmComponent Never! {
         WasmComponent{

@@ -35,8 +35,8 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // The box size of each function whose Returns can use a return slot (-1:
 // none), the instructions whose allocations it returns, by function.
 IROptSlotPlan: struct {
-    size: [Int]
-    allocs: [[Int]]
+    size: [Int],
+    allocs: [[Int]],
 }
 
 // The plan reads each function on its own (ir_opt_slot_scan), then the
@@ -116,21 +116,21 @@ ir_opt_return_slots: fn(m: &IRModule, threads: CompilerThreads) -> Int Never! {
 // function `start`, with what its scan found: their sizes and allocations
 // (IROptSlotPlan) and the functions they rule out (`marks`).
 IROptSlotPart: struct {
-    functions: [IRFunction]
-    start: Int
-    size: [Int]
-    allocs: [[Int]]
-    marks: [Int]
+    functions: [IRFunction],
+    start: Int,
+    size: [Int],
+    allocs: [[Int]],
+    marks: [Int],
 }
 
 // What every thread of ir_opt_return_slots reads: the module's lent rows
 // (ir_opt_lend), in a list of one, the runtime calls a box's life uses,
 // each function's result type, and once the scan is done the plan.
 IROptSlotView: struct {
-    views: [IRModule]
-    calls: [Int]
-    results: [Int]
-    plan: IROptSlotPlan
+    views: [IRModule],
+    calls: [Int],
+    results: [Int],
+    plan: IROptSlotPlan,
 }
 
 // Runs a return slot thread per slot from `at`; returns the functions they

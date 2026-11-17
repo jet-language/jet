@@ -21,15 +21,15 @@ use {
 }
 
 PackageOutputKind: enum {
-    Library
-    Executable
-    Service
-    Check
-    Environment
-    Image
-    Bundle
-    System
-    Fleet
+    Library,
+    Executable,
+    Service,
+    Check,
+    Environment,
+    Image,
+    Bundle,
+    System,
+    Fleet,
 
     is_runnable: fn(self) -> Bool Never! {
         if self == {
@@ -73,20 +73,20 @@ PackageOutputKind: enum {
 // The checked structured payload of an output; arrays, objects, booleans,
 // and numbers keep their shape.
 OutputPayload: enum {
-    Null
-    Bool(Bool)
-    Number(String)
-    String(String)
-    Array([OutputPayload])
-    Object([String:OutputPayload])
+    Null,
+    Bool(Bool),
+    Number(String),
+    String(String),
+    Array([OutputPayload]),
+    Object([String:OutputPayload]),
 }
 
 OutputFact: struct {
-    kind: PackageOutputKind
-    name: String
-    entry: String?
-    fields: [String:String]
-    payload: OutputPayload
+    kind: PackageOutputKind,
+    name: String,
+    entry: String?,
+    fields: [String:String],
+    payload: OutputPayload,
 
     // `Library{ loadable: true }` requests a `.jetlib`.
     is_loadable: fn(self) -> Bool Never! {
@@ -136,10 +136,10 @@ OutputFact: struct {
 }
 
 ServiceFact: struct {
-    enable: Bool
-    ports: [Int]
-    ready: String?
-    fields: [String:String]
+    enable: Bool,
+    ports: [Int],
+    ready: String?,
+    fields: [String:String],
 
     default: fn() -> ServiceFact Never! {
         ServiceFact{enable: false, ports: [Int]{}, ready: None, fields: [String:String]{}}
@@ -147,16 +147,16 @@ ServiceFact: struct {
 }
 
 EnvironmentFact: struct {
-    name: String
-    tools: [String]
-    services: [String:ServiceFact]
-    secrets: [String:String]
-    fields: [String:String]
+    name: String,
+    tools: [String],
+    services: [String:ServiceFact],
+    secrets: [String:String],
+    fields: [String:String],
 }
 
 MemberRef: enum {
-    Path(String)
-    Find(String)
+    Path(String),
+    Find(String),
 
     path: fn(self) -> String Never! {
         if self == {
@@ -167,11 +167,11 @@ MemberRef: enum {
 
 // The one claims ladder.
 ClaimsGrade: enum {
-    Unchecked
-    Checked
-    Examples(Int)
-    Generated(Int)
-    Proved
+    Unchecked,
+    Checked,
+    Examples(Int),
+    Generated(Int),
+    Proved,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -242,11 +242,11 @@ ClaimsGrade: enum {
 // A typed projection of the evidence ledger for claims inspection. Failed
 // records never raise the grade or satisfy a floor.
 ClaimsProjection: struct {
-    grade: ClaimsGrade
-    generated_attempts: Int
-    generated_successes: Int
-    examples_successes: Int
-    failed: Bool
+    grade: ClaimsGrade,
+    generated_attempts: Int,
+    generated_successes: Int,
+    examples_successes: Int,
+    failed: Bool,
 
     from_records: fn(records: [EvidenceRecord]) -> ClaimsProjection Never! {
         generated_attempts := 0
@@ -307,10 +307,10 @@ ClaimsProjection: struct {
 // One source-owned package policy exception scoped to an exact
 // `package#version` identity.
 PackagePolicyException: struct {
-    id: String
-    scope: String
-    reason: String
-    expires_at: Int
+    id: String,
+    scope: String,
+    reason: String,
+    expires_at: Int,
 
     summary: fn(self) -> String Never! {
         "id={self.id};scope={self.scope};reason={self.reason};expires={self.expires_at}"
@@ -324,25 +324,25 @@ PackagePolicyException: struct {
 // The package's non-memory governance
 // namespace. Memory denials live in `authority.deny`.
 PackagePolicy: struct {
-    declarations: [PolicyDeclaration]
+    declarations: [PolicyDeclaration],
     // `None` means no `lints:` block at all.
-    lints_deny: [String]?
+    lints_deny: [String]?,
     // `None`: no unsafe rule; empty: `.Deny`; otherwise `.Paths([...])`.
-    unsafe_paths: [String]?
+    unsafe_paths: [String]?,
     // `None`: no `memory:` field, so no kernel files; otherwise the
     // `.Kernel([...])` paths, the only files with raw memory operations.
-    memory_kernel: [String]?{None}
+    memory_kernel: [String]?{None},
     // `None`: no rule; false: `.Deny`; true: `.Allow`.
-    expert: Bool?
+    expert: Bool?,
     // `None`: no dependency wall; otherwise the `.List([...])` allow-list.
-    deps: [String]?
-    claims_min: ClaimsGrade?
+    deps: [String]?,
+    claims_min: ClaimsGrade?,
     // Contained dependencies, sorted.
-    contain: [String]
-    harden: Bool
-    licenses: [String]?
-    source_maps: [PolicySourceMap]
-    exceptions: [PackagePolicyException]
+    contain: [String],
+    harden: Bool,
+    licenses: [String]?,
+    source_maps: [PolicySourceMap],
+    exceptions: [PackagePolicyException],
 
     default: fn() -> PackagePolicy Never! {
         PackagePolicy{
@@ -409,19 +409,19 @@ PackagePolicy: struct {
 // Why a package guarantee policy would widen.
 #Error
 PolicyTightenError: struct {
-    message: String
+    message: String,
 }
 
 // Package-scope authority facts.
 PackageAuthority: struct {
     // The package's own bound; `None` = not written.
-    allow: [String]?
-    deny: [String]?
+    allow: [String]?,
+    deny: [String]?,
     // Guest-declared requirements, never a host grant.
-    needs: [String]
-    grants: [PackageGrant]
-    trust: TrustPolicy?
-    providers: [ProviderAuthority]
+    needs: [String],
+    grants: [PackageGrant],
+    trust: TrustPolicy?,
+    providers: [ProviderAuthority],
 
     default: fn() -> PackageAuthority Never! {
         PackageAuthority{allow: None, deny: None, needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
@@ -430,83 +430,83 @@ PackageAuthority: struct {
 
 // One `settings:` entry — a Tier-0 type and its default.
 SettingDecl: struct {
-    ty: String
-    default: String
+    ty: String,
+    default: String,
 }
 
 ConfigFacts: struct {
-    name: String?
-    version: String?
-    source: String?
-    deps: [String:DepSource]
-    services: [String:ServiceFact]
-    outputs: [String:OutputFact]
-    environments: [String:EnvironmentFact]
-    defaults: [String:String]
-    origin: String
+    name: String?,
+    version: String?,
+    source: String?,
+    deps: [String:DepSource],
+    services: [String:ServiceFact],
+    outputs: [String:OutputFact],
+    environments: [String:EnvironmentFact],
+    defaults: [String:String],
+    origin: String,
 }
 
 PackageFacts: struct {
-    name: String
-    version: String?
+    name: String,
+    version: String?,
     // The optional Jet self-toolchain pin.
-    jet: String?
-    source: String?
-    edition: String?
-    description: String?
-    license: String?
-    repository: String?
+    jet: String?,
+    source: String?,
+    edition: String?,
+    description: String?,
+    license: String?,
+    repository: String?,
     // The hosted whole-program allocator.
-    allocator: AllocatorPolicy
+    allocator: AllocatorPolicy,
     // The `log:` core.log level filter: comma-separated `level` and
     // `module=level` pairs.
-    log: String?{None}
-    targets: PackageTargets
+    log: String?{None},
+    targets: PackageTargets,
     // Optional runtime ceiling.
-    layer: RuntimeLayer?
-    deps: [String:DepSource]
+    layer: RuntimeLayer?,
+    deps: [String:DepSource],
     // Package-level development mode.
-    dev: DevPolicy
-    boundaries: [ImportBoundary]
-    packages: [PackageEntry]
-    services: [String:ServiceFact]
-    outputs: [String:OutputFact]
-    environments: [String:EnvironmentFact]
-    defaults: [String:String]
-    build_profiles: [BuildProfileDef]
+    dev: DevPolicy,
+    boundaries: [ImportBoundary],
+    packages: [PackageEntry],
+    services: [String:ServiceFact],
+    outputs: [String:OutputFact],
+    environments: [String:EnvironmentFact],
+    defaults: [String:String],
+    build_profiles: [BuildProfileDef],
     // `test: { … }` profiles and `suites: { … }` stock suites, in declaration order.
-    test_profiles: [TestProfileDef]
-    test_suites: [TestSuiteDef]
+    test_profiles: [TestProfileDef],
+    test_suites: [TestSuiteDef],
     // Standing capabilities granted to this package's `build: fn`.
-    build_allow: [String]
+    build_allow: [String],
     // Whether `authority` is present at all.
-    effects_enabled: Bool
-    effects_allow: [String]?
-    effects_deny: [String]?
-    grants: [PackageGrant]
-    authority: PackageAuthority
-    policy: PackagePolicy
-    settings: [String:SettingDecl]
+    effects_enabled: Bool,
+    effects_allow: [String]?,
+    effects_deny: [String]?,
+    grants: [PackageGrant],
+    authority: PackageAuthority,
+    policy: PackagePolicy,
+    settings: [String:SettingDecl],
     // `commands: { "fmt.check": true }`: the remembered `jet` flags, each
     // a quoted `<command>.<flag>` key (unquoted here) and its value as
     // written, in declaration order. The CLI checks them against its flag
     // registry (Compiler/JetCLI CommandSettings.jet).
-    commands: [ManifestEntry]{[ManifestEntry]{}}
+    commands: [ManifestEntry]{[ManifestEntry]{}},
     // `layers: { base: ["core.mem"], values: ["core.text"] }`: the module
     // layer table, lowest layer first (jet_foundation ModuleLayers.jet).
-    layers: [ModuleLayer]{[ModuleLayer]{}}
-    configs: [String]
+    layers: [ModuleLayer]{[ModuleLayer]{}},
+    configs: [String],
     // Resolved file-backed Config paths, relative to the Package root.
-    resolved_config_paths: [String]
+    resolved_config_paths: [String],
     // Inline `name: Config{ ... }` contributions by declared name.
-    inline_configs: [String:ConfigFacts]
-    members: [MemberRef]
+    inline_configs: [String:ConfigFacts],
+    members: [MemberRef],
     // Every successful contributor to a field, in composition order.
-    provenance: [String:[String]]
-    origin: String
+    provenance: [String:[String]],
+    origin: String,
     // The markers written on the package record, in order (`package.jet`'s
     // header; pkg_package_markers).
-    markers: [PackageMarker]{[PackageMarker]{}}
+    markers: [PackageMarker]{[PackageMarker]{}},
 
     default: fn() -> PackageFacts Never! {
         PackageFacts{

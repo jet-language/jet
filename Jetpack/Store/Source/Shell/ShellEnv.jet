@@ -38,30 +38,30 @@ env_shell_lease_var_names: fn(vars: [String:LeaseText]) -> [String] Never! {
 // How one command run treats the host environment, stdout, and the process.
 ShellRunOptions: struct {
     // Start from an empty environment: only declared facts enter the child.
-    clean: Bool
+    clean: Bool,
     // Keep the child's stdout out of a generated shell script.
-    silent: Bool
+    silent: Bool,
     // Stand in for this process: the exit status is forwarded as a shell
     // would report the command, a signal death as 128+n.
-    replace_process: Bool
+    replace_process: Bool,
 }
 
 // A composed environment: what to expose and how to label the prompt.
 ShellEnv: struct {
-    bin_dirs: [String]
+    bin_dirs: [String],
     // Provider-owned runtime search paths projected into child processes.
-    vars: [String:String]
+    vars: [String:String],
     // Variables that must not leak from the parent shell into this env.
-    unset_vars: [String]
-    refs: [String]
-    label: String
-    prompt_path: PromptPathMode
-    prompt_strip: PromptStripMode
+    unset_vars: [String],
+    refs: [String],
+    label: String,
+    prompt_path: PromptPathMode,
+    prompt_strip: PromptStripMode,
     // Cache verification leases stay live through child process handoff.
-    cache_leases: [CacheLease]
+    cache_leases: [CacheLease],
     // Variables naming paths inside leased outputs. Only `apply_to_base`
     // renders them, for a child its leases were passed to.
-    lease_vars: [String:LeaseText]{[String:LeaseText]{}}
+    lease_vars: [String:LeaseText]{[String:LeaseText]{}},
 
     // Leased bin dirs, then our bin dirs, then `base_path`, deduped in
     // first-seen order.
@@ -383,8 +383,8 @@ ShellEnv: struct {
 
 // A prepared child command and the scratch files it needs while it runs.
 ShellLaunch: struct {
-    spec: ProcessSpec
-    scratch: ShellScratch
+    spec: ProcessSpec,
+    scratch: ShellScratch,
 
     plain: fn(spec: ProcessSpec) -> ShellLaunch Never! {
         ShellLaunch{spec: spec, scratch: ShellScratch.empty()}

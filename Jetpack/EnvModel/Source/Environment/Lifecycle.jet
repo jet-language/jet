@@ -2,18 +2,18 @@
 // checks, the formatter package, the Git hook directory, and reload policy.
 
 HookAction: enum {
-    Task(String)
-    Command(String)
+    Task(String),
+    Command(String),
 }
 
 // The normal lifecycle spelling names one checked `#Job fn`.
 // The explicit expert escape remains a trust-gated command record.
 
 HookSpec: struct {
-    name: String
-    action: HookAction
-    cwd: String?{None}
-    trusted: Bool{false}
+    name: String,
+    action: HookAction,
+    cwd: String?{None},
+    trusted: Bool{false},
 }
 
 // One dotenv source and its disclosure policy. A bare string uses the safe
@@ -21,9 +21,9 @@ HookSpec: struct {
 // an explicit allowlist and names which allowed variables are secrets. Secret
 // names are facts only; values never enter plan fingerprints or dossiers.
 DotenvSpec: struct {
-    file: String{""}
-    allow: [String]{[String]{}}
-    secrets: [String]{[String]{}}
+    file: String{""},
+    allow: [String]{[String]{}},
+    secrets: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
         "{self.file}\t{self.allow.join(",")}\t{self.secrets.join(",")}"
@@ -33,28 +33,28 @@ DotenvSpec: struct {
 // One typed package ref used by `jet fmt --lang`. The formatter is
 // a package fact, not a shell command or a second process supervisor.
 FormatterSpec: struct {
-    package: String
+    package: String,
 }
 
 ReloadPolicy: enum {
-    Never
-    Prompt
-    Watch(paths: [String], debounce_ms: Int)
+    Never,
+    Prompt,
+    Watch(paths: [String], debounce_ms: Int),
 }
 
 EnvironmentLifecycle: struct {
-    dotenv: [DotenvSpec]{[DotenvSpec]{}}
-    unset: [String]{[String]{}}
-    on_enter: [HookSpec]{[HookSpec]{}}
-    checks: [HookSpec]{[HookSpec]{}}
+    dotenv: [DotenvSpec]{[DotenvSpec]{}},
+    unset: [String]{[String]{}},
+    on_enter: [HookSpec]{[HookSpec]{}},
+    checks: [HookSpec]{[HookSpec]{}},
     // External formatter package for non-`.jet` files.
-    formatter: FormatterSpec?{None}
+    formatter: FormatterSpec?{None},
     // Project-relative Git hook directory used by native Git.
-    git_hooks_path: String?{None}
-    reload: ReloadPolicy{ReloadPolicy.Prompt}
+    git_hooks_path: String?{None},
+    reload: ReloadPolicy{ReloadPolicy.Prompt},
     // Distinguish the default policy from an author-provided policy when
     // several imported modules are merged.
-    reload_explicit: Bool{false}
+    reload_explicit: Bool{false},
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{}

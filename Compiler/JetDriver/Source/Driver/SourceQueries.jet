@@ -6,28 +6,28 @@ use {
 }
 
 JetDriverSourceQueryModule: struct {
-    module_identity: String
-    package_identity: String
-    path: String
+    module_identity: String,
+    package_identity: String,
+    path: String,
     // The module's name in a type path (`web` in `web.BadPath`).
-    module_name: String{""}
-    physical_path: String
-    source: String
-    program: Program
+    module_name: String{""},
+    physical_path: String,
+    source: String,
+    program: Program,
 }
 
 JetDriverSourceQueryResult: struct {
-    modules: [JetDriverSourceQueryModule]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    modules: [JetDriverSourceQueryModule],
+    diagnostics: [Diagnostic],
+    complete: Bool,
     // None for a loose source or an omitted version; an explicitly empty
     // declared string remains Val(""). The CLI owns its display fallback.
-    entry_package_version: String?{None}
-    entry_module_index: Int{-1}
-    names: NameLedger?{None}
+    entry_package_version: String?{None},
+    entry_module_index: Int{-1},
+    names: NameLedger?{None},
     // The folder of each package the entry package's manifest lists, by
     // its name there.
-    dependency_roots: [String:String]{[String:String]{}}
+    dependency_roots: [String:String]{[String:String]{}},
 }
 
 jet_driver_source_query: fn(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {

@@ -36,9 +36,9 @@ REDIRECT: "exec </dev/null >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
 
 #Error
 MeasureError: struct {
-    message: String
+    message: String,
     // JSON.parse refused the text (a SyntaxError in JavaScript).
-    syntax: Bool
+    syntax: Bool,
 }
 
 measure_error: fn(message: String) -> MeasureError Never! {
@@ -48,8 +48,8 @@ measure_error: fn(message: String) -> MeasureError Never! {
 // The host's clock tick and page size: `getconf CLK_TCK` and `PAGESIZE`,
 // else 100 and 4096.
 Host: struct {
-    ns_per_tick: Float
-    page_bytes: Int
+    ns_per_tick: Float,
+    page_bytes: Int,
 }
 
 getconf_number: fn(name: String, fallback: Int) -[Exec, Time.Wait]> Int Never! {
@@ -67,16 +67,16 @@ measure_host: fn() -[Exec, Time.Wait]> Host Never! {
 // One sample of a process tree: CPU in nanoseconds, threads, resident bytes
 // and processes.
 TreeSample: struct {
-    cpu_ns: Float
-    threads: Int
-    rss_bytes: Int
-    processes: Int
+    cpu_ns: Float,
+    threads: Int,
+    rss_bytes: Int,
+    processes: Int,
 }
 
 Stat: struct {
-    cpu_ticks: Int
-    threads: Int
-    rss_bytes: Int
+    cpu_ticks: Int,
+    threads: Int,
+    rss_bytes: Int,
 }
 
 // /proc/<pid>/stat fields after the parenthesised command name: utime=14,
@@ -129,45 +129,45 @@ sample_tree: fn(root: Int, host: Host) -[FS]> TreeSample Never! {
 
 // A sample of the measured tree, `t_ns` from the spawn.
 Sample: struct {
-    t_ns: Float
-    cpu_ns: Float
-    threads: Int
-    rss_bytes: Int
-    processes: Int
+    t_ns: Float,
+    cpu_ns: Float,
+    threads: Int,
+    rss_bytes: Int,
+    processes: Int,
 }
 
 Rusage: struct {
-    user_ns: Int
-    sys_ns: Int
-    max_rss_bytes: Int
+    user_ns: Int,
+    sys_ns: Int,
+    max_rss_bytes: Int,
 }
 
 Measured: struct {
     // None when a signal ended the command.
-    code: Int?
-    signal: String?
-    killed: Bool
-    wall_ns: Int
-    spawn_unix_ms: Int
-    samples: [Sample]
-    rusage: Rusage?
-    peak_rss_bytes: Int
-    threads_used: Int
+    code: Int?,
+    signal: String?,
+    killed: Bool,
+    wall_ns: Int,
+    spawn_unix_ms: Int,
+    samples: [Sample],
+    rusage: Rusage?,
+    peak_rss_bytes: Int,
+    threads_used: Int,
 }
 
 Setting: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 MeasureOptions: struct {
-    cwd: String?
+    cwd: String?,
     // The child's whole environment; None inherits this process's.
-    env: [Setting]?
-    stdout_path: String
-    stderr_path: String
+    env: [Setting]?,
+    stdout_path: String,
+    stderr_path: String,
     // 0: no limit.
-    timeout_ms: Int
+    timeout_ms: Int,
 }
 
 // `\d+`.
@@ -297,10 +297,10 @@ js_max: fn(a: Float, b: Float) -> Float Never! {
 
 // The successful run that wrote a completed trace.
 Completed: struct {
-    exit_code: Int?
-    pid: Int
-    started_unix_ms: Int
-    finished_unix_ms: Int
+    exit_code: Int?,
+    pid: Int,
+    started_unix_ms: Int,
+    finished_unix_ms: Int,
 }
 
 safe: fn(value: Int) -> Bool Never! { value >= -MAX_SAFE_INTEGER && value <= MAX_SAFE_INTEGER }
@@ -372,8 +372,8 @@ read_trace: fn(file: String, completed: Completed?) -[FS]> [Dyn] MeasureError! {
 }
 
 Open: struct {
-    thread: String
-    stack: [Dyn]
+    thread: String,
+    stack: [Dyn],
 }
 
 check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
@@ -445,38 +445,38 @@ check_completed: fn(events: [Dyn], run: Completed) MeasureError! {
 }
 
 SpanTime: struct {
-    start: Float
-    end: Float
+    start: Float,
+    end: Float,
     // `event.args?.items ?? null`: None is null.
-    items: Dyn?
+    items: Dyn?,
 }
 
 KindSpans: struct {
-    key: String
-    kind: String
-    spans: [SpanTime]
+    key: String,
+    kind: String,
+    spans: [SpanTime],
 }
 
 OpenSpans: struct {
-    tid: String
-    cat: String
-    starts: [Float]
+    tid: String,
+    cat: String,
+    starts: [Float],
 }
 
 PhaseRow: struct {
-    kind: String
-    wall_ns: Float
-    span_ns: Float
-    cpu_ns: Float
-    count: Int
+    kind: String,
+    wall_ns: Float,
+    span_ns: Float,
+    cpu_ns: Float,
+    count: Int,
     // None is null.
-    items: Dyn?
+    items: Dyn?,
 }
 
 PhaseTable: struct {
-    phases: [PhaseRow]
-    first_begin_ns: Float?
-    unclosed: [String]
+    phases: [PhaseRow],
+    first_begin_ns: Float?,
+    unclosed: [String],
 }
 
 // Stable order of start time (`a.start - b.start`).
@@ -606,8 +606,8 @@ phase_table_json: fn(table: PhaseTable) -> Dyn Never! {
 }
 
 Counter: struct {
-    key: String
-    value: Float
+    key: String,
+    value: Float,
 }
 
 // `walk(value, key)`: a number adds to its counter, an object walks its

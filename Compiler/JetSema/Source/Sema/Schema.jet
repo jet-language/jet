@@ -4,21 +4,21 @@ use jet_foundation.[StructDef, Type, foundation_byte_text, type_name]
 SNAPSHOT_VERSION: U32{1}
 
 SnapshotField: struct {
-    name: String
-    ty: String
+    name: String,
+    ty: String,
 }
 
 #Error
 SchemaSnapshotError: struct {
-    message: String
+    message: String,
 }
 
 SchemaSnapshot: struct {
-    schema_version: U32
-    type_name: String
-    published_version: String
-    squashed_before: String?
-    fields: [SnapshotField]
+    schema_version: U32,
+    type_name: String,
+    published_version: String,
+    squashed_before: String?,
+    fields: [SnapshotField],
 
     write: fn(self) -> String Never! {
         fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}

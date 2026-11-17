@@ -67,7 +67,7 @@ layout_marker_refusal: fn(source: String, code: String, spelled: String) {
     }
     tagged: parse_source("#Layout(c, I32)\nE: enum {{ A }}".bytes())
     if tagged.diagnostics.len() != 0 -> panic("an enum C tag width was refused")
-    backed: parse_source("#Layout(U8)\nE: enum {{\n    A = 1\n    B\n}}".bytes())
+    backed: parse_source("#Layout(U8)\nE: enum {{\n    A = 1,\n    B,\n}}".bytes())
     if backed.diagnostics.len() != 0 -> panic("an enum integer backing was refused")
     if backed.program.items[0] == .Enum(definition) {
         if definition.type_markers.len() != 1 -> panic("an enum integer backing lost its marker")

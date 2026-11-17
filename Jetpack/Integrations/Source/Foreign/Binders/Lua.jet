@@ -31,11 +31,11 @@ use {
 
 // A Lua binding also names the directory holding the embeddable runtime.
 LuaBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    lib_dir: String
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    lib_dir: String,
+    provenance: String,
 }
 
 // The fixed C entry points every Lua binding imports; they drive both the
@@ -54,8 +54,8 @@ PKG_LUA_RESERVED: [String]{"Session", "TableView", "LuaError", "decode_response"
 
 // One lexical token of the discovery scan: a name or one of `(`, `)`, `,`.
 LuaToken: enum {
-    Word(String)
-    Punct(Int)
+    Word(String),
+    Punct(Int),
 }
 
 // The verb phrase a failing Lua build tool reports; its detail is the
@@ -126,7 +126,7 @@ pkg_lua_render_jet: fn(abi: String, functions: [String]) -> String Never! {
         out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
         out.push("    {name}_view: fn(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
     }
-    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\nTableView: struct {{ session: Int, table: Int }}\n#Error\nLuaError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\nTableView: struct {{ session: Int, table: Int }}\n#Error\nLuaError: enum {{ NotRunning, Timeout, Cancelled, Protocol, CommandFailed, Limit }}\n\n")
     out.push(pkg_render_lua_decode_status("LuaError"))
     out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
     out.push(PKG_LUA_JET_SESSION)

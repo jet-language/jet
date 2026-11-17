@@ -285,7 +285,7 @@ use {
 }
 
 State: struct {
-    done: Bool
+    done: Bool,
 }
 
 run: fn() (HTTPError | NetError | IOError)! {

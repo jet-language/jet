@@ -1,22 +1,22 @@
 // Canonical authority-gate read model.
 
 GateKind: enum {
-    Unsafe
-    Impure
-    DependencyGrant
-    BuildFlag
-    SessionFlag
-    TrustGrant
-    ForcePin
-    TaintScrub
-    DutyDrop
-    StateTransition
-    PrecisionDemotion
-    Nondeterministic
-    Structure
-    LintAllow
-    CheckRemoval
-    LinkOverride
+    Unsafe,
+    Impure,
+    DependencyGrant,
+    BuildFlag,
+    SessionFlag,
+    TrustGrant,
+    ForcePin,
+    TaintScrub,
+    DutyDrop,
+    StateTransition,
+    PrecisionDemotion,
+    Nondeterministic,
+    Structure,
+    LintAllow,
+    CheckRemoval,
+    LinkOverride,
 }
 
 // A build option value that removes a runtime memory-safety check
@@ -98,35 +98,35 @@ gate_kind_order: fn(kind: GateKind) -> Int Never! {
 }
 
 GateOperation: struct {
-    kind: String
-    span: Span
-    required: [String]
-    asserted: [String]
-    discharged: Bool
+    kind: String,
+    span: Span,
+    required: [String],
+    asserted: [String],
+    discharged: Bool,
 }
 
 GateEntry: struct {
-    kind: GateKind
-    domain: String
-    scope: String
-    source: String
-    span: Span?
-    subject: String
-    reason: String?
-    status: String?
-    detail: String
-    provenance: [String]
-    operations: [GateOperation]
+    kind: GateKind,
+    domain: String,
+    scope: String,
+    source: String,
+    span: Span?,
+    subject: String,
+    reason: String?,
+    status: String?,
+    detail: String,
+    provenance: [String],
+    operations: [GateOperation],
 }
 
 GateDiagnostic: struct {
-    source: String
-    diagnostic: Diagnostic
+    source: String,
+    diagnostic: Diagnostic,
 }
 
 GateLedger: struct {
-    rows: [GateEntry]{[GateEntry]{}}
-    diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
+    rows: [GateEntry]{[GateEntry]{}},
+    diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}},
 }
 
 gate_same_fact: fn(left: GateEntry, right: GateEntry) -> Bool Never! {

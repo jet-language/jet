@@ -44,34 +44,34 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 // no owner frees the bytes and a writer copies them first; it crosses only
 // as an Option's payload.
 IRRouteCarrier: enum {
-    Word
-    Flag
-    Float
-    Text
-    Unit
-    Handle(name: String)
-    HandleMut(name: String)
-    List(elem: IRRouteCarrier)
-    ListMut(elem: IRRouteCarrier)
-    Frozen(elem: IRRouteCarrier)
-    Option(some: IRRouteCarrier)
-    Tag(name: String, variants: String)
-    Tuple(items: [IRRouteCarrier])
+    Word,
+    Flag,
+    Float,
+    Text,
+    Unit,
+    Handle(name: String),
+    HandleMut(name: String),
+    List(elem: IRRouteCarrier),
+    ListMut(elem: IRRouteCarrier),
+    Frozen(elem: IRRouteCarrier),
+    Option(some: IRRouteCarrier),
+    Tag(name: String, variants: String),
+    Tuple(items: [IRRouteCarrier]),
 }
 
 IRRouteResult: enum {
-    Plain(carrier: IRRouteCarrier)
-    Option(some: IRRouteCarrier)
-    Result(ok: IRRouteCarrier, err: IRRouteCarrier)
-    Tuple(items: [IRRouteCarrier])
+    Plain(carrier: IRRouteCarrier),
+    Option(some: IRRouteCarrier),
+    Result(ok: IRRouteCarrier, err: IRRouteCarrier),
+    Tuple(items: [IRRouteCarrier]),
 }
 
 IRRoute: struct {
-    symbol: String
-    export: String
-    native_lists: Bool
-    params: [IRRouteCarrier]
-    result: IRRouteResult
+    symbol: String,
+    export: String,
+    native_lists: Bool,
+    params: [IRRouteCarrier],
+    result: IRRouteResult,
 }
 
 IR_RUNTIME_ROUTES: #run { [IRRoute]{
@@ -1536,8 +1536,8 @@ IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
 
 // Declaration-proven scalar records; the IR builder still proves the actual native field.
 IRRuntimeWordRecord: struct {
-    runtime: String
-    field: String
+    runtime: String,
+    field: String,
 }
 
 IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
@@ -1553,10 +1553,10 @@ IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
 // A "Text.Owned" field the carrier derives (no stored text) returns a fresh
 // String the read owns.
 IRHandleField: struct {
-    runtime: String
-    field: String
-    kind: String
-    header_bytes: Int
+    runtime: String,
+    field: String,
+    kind: String,
+    header_bytes: Int,
 }
 
 IR_HANDLE_FIELDS: #run { [IRHandleField]{
@@ -1697,20 +1697,20 @@ ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
 }
 
 IREnvironmentOp: enum {
-    Bytes
-    Set
-    Remove
-    Columns
-    Compare
-    Seed
-    Text
+    Bytes,
+    Set,
+    Remove,
+    Columns,
+    Compare,
+    Seed,
+    Text,
 }
 
 IREnvironmentRoute: struct {
-    symbol: String
-    export: String
-    op: IREnvironmentOp
-    arity: Int
+    symbol: String,
+    export: String,
+    op: IREnvironmentOp,
+    arity: Int,
 }
 
 IR_ENVIRONMENT_ROUTES: #run { [IREnvironmentRoute]{
@@ -1735,9 +1735,9 @@ ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {
 
 // Candidate source identities; the backend validates against the actual native layout.
 IRNativeType: struct {
-    jet_name: String
-    declaration: String
-    arguments: String
+    jet_name: String,
+    declaration: String,
+    arguments: String,
 }
 
 IR_NATIVE_TYPES: #run { [IRNativeType]{

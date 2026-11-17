@@ -3,7 +3,7 @@
 // and its `#{row}` struct is a module item checked like written code.
 Audit: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) -[Meta.Generate]> {
             tname: target.name
@@ -11,7 +11,7 @@ Audit: struct {
             row: "{tname}Row"
             if count > 3 -> reject(TooWide{name: tname, count: count})
             #{row}: struct {
-                label: String
+                label: String,
             }
             audit: fn(self) -> String { "{tname}: {count} fields" }
         }
@@ -19,8 +19,8 @@ Audit: struct {
 }
 
 TooWide: struct {
-    name: String
-    count: Int
+    name: String,
+    count: Int,
 
     impl Diagnostic {
         what: fn(self) -> String { "`{self.name}` has {self.count} fields" }
@@ -33,8 +33,8 @@ TooWide: struct {
 
 #Audit
 Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 }
 
 run: fn() {

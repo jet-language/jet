@@ -19,9 +19,9 @@ SERVICES_SUPERVISOR_ENV: ENV_JETPACK_SERVICE_SUPERVISOR
 // token and optional containment name so a reused PID
 // can never authorize a liveness claim or a signal.
 ServiceProcessState: struct {
-    pid: Int
-    start_identity: String
-    containment: String?
+    pid: Int,
+    start_identity: String,
+    containment: String?,
 
     encode: fn(self) -> String Never! {
         text := "version=1\npid={self.pid}\nstart={self.start_identity}\n"
@@ -32,8 +32,8 @@ ServiceProcessState: struct {
 
 // The `pid` record as found on disk.
 PersistedProcessState: enum {
-    Verified(ServiceProcessState)
-    LegacyPID(Int)
+    Verified(ServiceProcessState),
+    LegacyPID(Int),
 }
 
 // Written by Jetpack versions that persisted only a PID. It may be
@@ -49,11 +49,11 @@ services_verified_state: fn(record: PersistedProcessState) -> ServiceProcessStat
 
 // The lifecycle phase of one supervised generation.
 ServicePhase: enum {
-    Starting
-    Running
-    Ready
-    Failed
-    Stopped
+    Starting,
+    Running,
+    Ready,
+    Failed,
+    Stopped,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -89,23 +89,23 @@ ServicePhase: enum {
 // phase, and recovery reason keep a record explainable after the supervisor
 // or the service has exited.
 LifecycleFacts: struct {
-    backend: String
-    generation: Int
-    phase: ServicePhase
-    containment: String
-    recovery: String
-    pid: Int?
-    unit: String?
-    guardian: String?
-    dependencies: [String]
+    backend: String,
+    generation: Int,
+    phase: ServicePhase,
+    containment: String,
+    recovery: String,
+    pid: Int?,
+    unit: String?,
+    guardian: String?,
+    dependencies: [String],
 }
 
 // Which platform authority contains a service generation.
 ServiceAuthority: enum {
-    TestProcessGroup
-    LinuxSystemdUser(unit: String)
-    WindowsGuardianJobObject(guardian: String)
-    Unsupported
+    TestProcessGroup,
+    LinuxSystemdUser(unit: String),
+    WindowsGuardianJobObject(guardian: String),
+    Unsupported,
 
     // The service's own process group (the in-process host).
     // A delegated `systemd-run --user --scope` unit on Linux.

@@ -75,7 +75,7 @@ virtual: module
 
 /// A rendered page: its document title and its body markup.
 WebPage: struct {
-    title: String
+    title: String,
     body: String
 }
 
@@ -84,8 +84,8 @@ page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, 
 // One request into a handler adapter: the matched request and the route's
 // encoded loader data ("" when the route has no loader).
 __AppCall: struct {
-    request: HTTPRequest
-    data: String
+    request: HTTPRequest,
+    data: String,
 
     __input: fn<Target: Decode>(self, name: String) -> Target? {
         self.request.__route_input<Target>(name)
@@ -121,9 +121,9 @@ __AppCall: struct {
 }
 
 __AppReply: enum {
-    Page(WebPage)
-    JSON(String)
-    Rejected(String)
+    Page(WebPage),
+    JSON(String),
+    Rejected(String),
     Failed(String)
 }
 
@@ -133,7 +133,7 @@ priv AppHandlerCell: struct {
 
 // A registered adapter. Copies share the one handler.
 priv AppHandler: struct {
-    __cell: Shared<AppHandlerCell>
+    __cell: Shared<AppHandlerCell>,
 
     // A handler failure is the route's 500 answer, never the server's.
     run: fn(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
@@ -150,36 +150,36 @@ priv app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> 
 // One route and the facts its registration fixed. An empty identity string
 // is an absent boundary, loader or form.
 priv AppRoute: struct {
-    path: String
-    handler: AppHandler
-    identity: String
-    binding: String
-    mode: String
-    explicit_mode: Bool
-    loader: AppHandler?
-    loader_identity: String
-    loader_data_type: String
-    preload: Bool
-    pending: AppHandler?
-    pending_identity: String
-    error: AppHandler?
-    error_identity: String
+    path: String,
+    handler: AppHandler,
+    identity: String,
+    binding: String,
+    mode: String,
+    explicit_mode: Bool,
+    loader: AppHandler?,
+    loader_identity: String,
+    loader_data_type: String,
+    preload: Bool,
+    pending: AppHandler?,
+    pending_identity: String,
+    error: AppHandler?,
+    error_identity: String,
     form: String
 }
 
 // A server function (`handler` set) or the loader dependency row a loader
 // registration adds (`handler` None).
 priv AppAction: struct {
-    name: String
-    kind: String
-    handler: AppHandler?
+    name: String,
+    kind: String,
+    handler: AppHandler?,
     preload: Bool
 }
 
 priv AppMount: struct {
-    prefix: String
-    handler: AppHandler
-    effects: [String]
+    prefix: String,
+    handler: AppHandler,
+    effects: [String],
     security: [String]
 }
 
@@ -189,12 +189,12 @@ priv AppMount: struct {
 // `__remote_signed_in` when `signed_in`, and an upload endpoint when `upload`
 // is set too), the webhook, or the mounted handler, whichever is set.
 priv AppService: struct {
-    path: String
-    at: SourceLocation
-    remote: AppRemote?
-    signed_in: Bool
-    hook: AppWebhook?
-    mounted: AppHandler?
+    path: String,
+    at: SourceLocation,
+    remote: AppRemote?,
+    signed_in: Bool,
+    hook: AppWebhook?,
+    mounted: AppHandler?,
     upload: AppUpload?
 }
 
@@ -204,16 +204,16 @@ priv AppService: struct {
 // each step of its files (the app module's `FileJob`); and `service` keys
 // the app graph's `.api` row, whose `max_upload` bounds the body.
 priv AppUpload: struct {
-    service: String
-    at: Int
-    signed_in: Bool
-    check: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+    service: String,
+    at: Int,
+    signed_in: Bool,
+    check: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!,
     files: fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!
 }
 
 // An upload endpoint as its rows answer it (`app_upload_routes`).
 priv AppUploadEndpoint: struct {
-    remote: AppRemote
+    remote: AppRemote,
     upload: AppUpload
 }
 
@@ -225,51 +225,51 @@ priv AppUploadEndpoint: struct {
 // client shows, and `settled` the one the last settled navigation gave,
 // which an aborted navigation shows again.
 priv AppNavigation: struct {
-    path: String
-    request: HTTPRequest?
-    route: AppRoute?
-    screen: calls.AppScreen?
-    loaded: __AppReply?
-    shown: String
+    path: String,
+    request: HTTPRequest?,
+    route: AppRoute?,
+    screen: calls.AppScreen?,
+    loaded: __AppReply?,
+    shown: String,
     settled: String
 }
 
 priv AppState: struct {
-    routes: [AppRoute]
-    actions: [AppAction]
-    mounts: [AppMount]
-    routes_from: [String]
-    not_found: AppHandler?
-    security: [String]
-    assets: [String]
-    split: [String]
-    cache: [String]
-    a11y: [String]
-    adapters: [String]
-    hydration: String
+    routes: [AppRoute],
+    actions: [AppAction],
+    mounts: [AppMount],
+    routes_from: [String],
+    not_found: AppHandler?,
+    security: [String],
+    assets: [String],
+    split: [String],
+    cache: [String],
+    a11y: [String],
+    adapters: [String],
+    hydration: String,
     // The render mode the next registered route takes.
-    mode: String
-    explicit_mode: Bool
+    mode: String,
+    explicit_mode: Bool,
     // The one route table every row of the graph registers in.
-    table: HTTPMux
+    table: HTTPMux,
     // The images pages placed (`web.image`), the bytes of each variant
     // answered so far by URL path, and how variants are made.
-    images: [ImageNode]
-    image_bytes: [String:[U8]]
-    image_settings: ImageSettings
+    images: [ImageNode],
+    image_bytes: [String:[U8]],
+    image_settings: ImageSettings,
     // Whether the app is served under `jet dev`, which app_serve reads once
     // from the environment, so an image page reads no environment itself.
-    dev: Bool
+    dev: Bool,
     // The handler of GET `/a/*jet_image`, made with the first page, which is
     // where its file reads are charged; serving the app only adds the row.
-    image_handler: HTTPHandler?
+    image_handler: HTTPHandler?,
     // The endpoint and webhook rows, which a served app with a trace
     // export spans (`app_trace_install`).
-    traced: [AppTraced]
+    traced: [AppTraced],
     // The endpoints, webhooks and mounts registered since the app last
     // served, whose rows serving adds; in a cell of its own, since their
     // handlers can't be copied.
-    services: Shared<[AppService]>
+    services: Shared<[AppService]>,
     // The client's navigation over the page rows (`App.navigate`).
     navigation: AppNavigation
 }
@@ -295,7 +295,7 @@ Form: struct {
 /// Copies share the one graph.
 #RouteTable
 App: struct {
-    __state: Shared<AppState>
+    __state: Shared<AppState>,
 
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding; the page answers GET `path`.
@@ -914,7 +914,7 @@ priv app_service_routes: fn(app: App) -> [Shared<AppUploadEndpoint>] Never! {
 
 // The port a served app listens on and what chose it.
 priv AppPort: struct {
-    port: Int
+    port: Int,
     source: String
 }
 
@@ -1381,8 +1381,8 @@ priv C_APP_WORKER: "/sw.js"
 // maskable icon fills its square with (None for one that is transparent
 // around the image), and its address.
 priv InstallIcon: struct {
-    size: Int
-    fill: Int?
+    size: Int,
+    fill: Int?,
     path: String
 }
 
@@ -1770,7 +1770,7 @@ priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> String?
 
 #Codable
 priv ScreenTestBoard: struct {
-    board: String
+    board: String,
     tab: String
 }
 
@@ -1866,9 +1866,9 @@ priv screen_test_board_head: fn(board: ScreenTestBoard) -> calls.Head Never! {
 // endpoint as the token, and its `p256dh` key and `auth` secret.
 #Codable
 priv AppPushDevice: struct {
-    service: String
-    token: String
-    key: String?
+    service: String,
+    token: String,
+    key: String?,
     auth: String?
 }
 
@@ -1951,38 +1951,38 @@ C_IMAGE_LIMITS: Limits{max_input_bytes: 268435456, max_pixels: 40000000, max_out
 
 // How variants are made. No formats means each source's own format.
 priv ImageSettings: struct {
-    formats: [ImageFormat]
-    widths: [Int]
-    quality: Int
+    formats: [ImageFormat],
+    widths: [Int],
+    quality: Int,
     enabled: Bool
 }
 
 // One resized, re-encoded copy of a source, and the URL path naming it.
 priv ImageVariant: struct {
-    width: Int
-    height: Int
-    format: ImageFormat
+    width: Int,
+    height: Int,
+    format: ImageFormat,
     // The JPEG quality; 0 for a format without one.
-    quality: Int
-    key: String
+    quality: Int,
+    key: String,
     path: String
 }
 
 // One image source: its digest and size, the URL path of the original, and
 // its variants.
 priv ImageNode: struct {
-    source: String
-    digest: String
-    width: Int
-    height: Int
-    format: ImageFormat
-    path: String
+    source: String,
+    digest: String,
+    width: Int,
+    height: Int,
+    format: ImageFormat,
+    path: String,
     variants: [ImageVariant]
 }
 
 // A page body with its images placed, or why one could not be.
 priv ImagePage: struct {
-    body: String
+    body: String,
     failure: String
 }
 
@@ -2356,10 +2356,10 @@ priv app_mount_response: fn(handler: AppHandler, request: HTTPRequest) -[Net, FS
 // keeps. `kept` holds the replies a `.Public` policy lets the server keep,
 // by the call's JSON array of arguments (`app_kept_reply`).
 priv AppRemote: struct {
-    path: String
-    answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
-    limit: AppRemoteLimit
-    reply: String
+    path: String,
+    answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!,
+    limit: AppRemoteLimit,
+    reply: String,
     kept: Shared<[String:AppKeptReply]>
 }
 
@@ -2369,9 +2369,9 @@ priv AppRemote: struct {
 // at, and the count of this process's committed writes its run began at
 // (app.reply_cache.writes).
 priv AppKeptReply: struct {
-    reply: String
-    kept_ns: Int
-    fresh_ns: Int
+    reply: String,
+    kept_ns: Int,
+    fresh_ns: Int,
     writes: Int
 }
 
@@ -2415,14 +2415,14 @@ priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply
 // call's account, or else the call's network address. `calls` 0 is no
 // limit.
 priv AppRemoteLimit: struct {
-    calls: Int
-    window_ns: Int
+    calls: Int,
+    window_ns: Int,
     windows: Shared<[String:AppRemoteWindow]>
 }
 
 // One caller's window: when it began, and the calls counted in it.
 priv AppRemoteWindow: struct {
-    start_ns: Int
+    start_ns: Int,
     calls: Int
 }
 
@@ -3101,9 +3101,9 @@ priv app_signed_in_test: fn(table: HTTPMux, at: Int, origin: String, authorizati
 // of its path parameters in the method's order, and the two calls sema
 // builds from it and its `#App.SigningKey` method.
 priv AppWebhook: struct {
-    signature: Signature
-    params: [String]
-    key: fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!
+    signature: Signature,
+    params: [String],
+    key: fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!,
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
 }
 
@@ -3177,7 +3177,7 @@ priv app_webhook_delivery: fn(signature: Signature, github: String?, event: Dyn)
 // One traced row: its route pattern, and the endpoint method it runs ("" for
 // a webhook).
 priv AppTraced: struct {
-    pattern: String
+    pattern: String,
     method: String
 }
 
@@ -3190,8 +3190,8 @@ priv app_traced: fn(app: App, pattern: String, method: String) Never! {
 // serve the app: its schedule's name (`<service module>.<Service>.<method>`),
 // its cron line, and the call sema builds that runs it.
 priv AppSchedule: struct {
-    name: String
-    cron: String
+    name: String,
+    cron: String,
     run: fn(RemoteArgs) -> String [FieldError]!
 }
 
@@ -3226,10 +3226,10 @@ priv app_endpoint_method: fn(path: String) -> String Never! {
 // Where a served App's spans go, and how they are batched: every `delay_ms`
 // the queue of at most `max_queue` spans goes out, `batch` spans a request.
 priv AppTraceSettings: struct {
-    url: String
-    service: String
-    delay_ms: Int
-    max_queue: Int
+    url: String,
+    service: String,
+    delay_ms: Int,
+    max_queue: Int,
     batch: Int
 }
 
@@ -3300,16 +3300,16 @@ priv app_trace_count: fn(values: [String:String], name: String, fallback: Int, l
 // A started export: its settings, the traced rows each request is matched
 // against, the Unix time at monotonic 0, and the queue its task drains.
 priv AppTraceExport: struct {
-    settings: AppTraceSettings
-    rows: [AppTraceRow]
-    epoch_ns: Int
+    settings: AppTraceSettings,
+    rows: [AppTraceRow],
+    epoch_ns: Int,
     queue: Shared<AppTraceQueue>
 }
 
 // A traced row as the table matches it.
 priv AppTraceRow: struct {
-    segments: [http_server.HTTPSegment]
-    pattern: String
+    segments: [http_server.HTTPSegment],
+    pattern: String,
     method: String
 }
 
@@ -3318,10 +3318,10 @@ priv AppTraceRow: struct {
 // `dropped` counts every span lost that way or in a failed export, and `ids`
 // the spans pushed, which seeds their ids.
 priv AppTraceQueue: struct {
-    spans: [TraceSpan]
-    first: Int
-    count: Int
-    dropped: Int
+    spans: [TraceSpan],
+    first: Int,
+    count: Int,
+    dropped: Int,
     ids: Int
 }
 
@@ -3418,7 +3418,7 @@ priv app_trace_span: fn(export: AppTraceExport, row: AppTraceRow, request: HTTPR
 // A caller's trace context from its W3C `traceparent`; both ids are "" when
 // the header is absent or not valid.
 priv AppTraceParent: struct {
-    trace_id: String
+    trace_id: String,
     span_id: String
 }
 
@@ -3703,13 +3703,13 @@ priv app_facts_json: fn(app: App) -> String Never! {
 }
 
 Context: struct {
-    path: String
-    method: String
+    path: String,
+    method: String,
     session: String
 }
 
 Mount: struct {
-    path: String
+    path: String,
     page: String
 }
 
@@ -3744,7 +3744,7 @@ priv openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
 // OpenAPI document.
 #Error
 OpenAPIError: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }
@@ -3759,56 +3759,56 @@ priv openapi_fault: fn(message: String) -> OpenAPIError Never! { OpenAPIError{me
 
 priv OpenAPIParameter: struct {
     // Index into openapi_locations(): path, query, header, cookie.
-    location: Int
-    name: String
+    location: Int,
+    name: String,
     // The canonical rendered schema and its definition problems.
-    schema: String
-    schema_errors: [String]
-    required: Bool
+    schema: String,
+    schema_errors: [String],
+    required: Bool,
     catch_all: Bool
 }
 
 priv OpenAPIBody: struct {
-    required: Bool
-    content_type: String
-    schema: String
+    required: Bool,
+    content_type: String,
+    schema: String,
     schema_errors: [String]
 }
 
 priv OpenAPIResponse: struct {
-    status: Int
-    description: String
-    schema: String?
-    schema_errors: [String]
+    status: Int,
+    description: String,
+    schema: String?,
+    schema_errors: [String],
     content_type: String?
 }
 
 priv OpenAPISecurity: struct {
-    scheme: String
+    scheme: String,
     scopes: [String]
 }
 
 priv OpenAPIPattern: struct {
-    path: String
+    path: String,
     // The parsed segments, kind and name: equal keys are equal patterns.
-    key: String
-    names: [String]
+    key: String,
+    names: [String],
     catch_alls: [String]
 }
 
 priv OpenAPIRoute: struct {
     // Index into openapi_methods(), JetOpenApiHttpMethod order; a custom
     // method ranks after them all and is `token`, exactly as sent.
-    method: Int
-    token: String
-    path: String
-    names: [String]
-    catch_alls: [String]
-    operation_id: String
-    summary: String?
-    parameters: [OpenAPIParameter]
-    body: OpenAPIBody?
-    responses: [OpenAPIResponse]
+    method: Int,
+    token: String,
+    path: String,
+    names: [String],
+    catch_alls: [String],
+    operation_id: String,
+    summary: String?,
+    parameters: [OpenAPIParameter],
+    body: OpenAPIBody?,
+    responses: [OpenAPIResponse],
     security: [OpenAPISecurity]
 }
 

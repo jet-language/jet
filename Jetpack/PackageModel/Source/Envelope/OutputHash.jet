@@ -21,30 +21,30 @@ ENVELOPE_READ_CHUNK: 65536
 // Why an output tree could not be hashed; `message()` is the reference text.
 #Error
 EnvelopeError: enum {
-    MissingOutput(String)
-    Inspect(path: String, detail: String)
-    SymlinkRoot(String)
-    ReadLink(path: String, detail: String)
-    NixTarget(String)
-    Resolve(path: String, detail: String)
-    PathLaw(PathLawError)
-    ResolveDirectory(path: String, detail: String)
-    DirectoryEscapes(String)
-    ReadEntries(path: String, detail: String)
-    DirectoryVanished(path: String, detail: String)
-    DirectoryChanged(String)
-    SymlinkEscapes(String)
-    SpecialFile(String)
-    Hardlink(first: String, total: Int, seen: Int)
-    OpenNoFollow(path: String, detail: String)
-    InspectOpen(path: String, detail: String)
-    ChangedBefore(String)
-    Reinspect(path: String, detail: String)
-    FileChanged(String)
-    Snapshot(path: String, detail: String)
-    SparseProbe(path: String, detail: String)
-    SparseStat(path: String, detail: String)
-    Xattr(String)
+    MissingOutput(String),
+    Inspect(path: String, detail: String),
+    SymlinkRoot(String),
+    ReadLink(path: String, detail: String),
+    NixTarget(String),
+    Resolve(path: String, detail: String),
+    PathLaw(PathLawError),
+    ResolveDirectory(path: String, detail: String),
+    DirectoryEscapes(String),
+    ReadEntries(path: String, detail: String),
+    DirectoryVanished(path: String, detail: String),
+    DirectoryChanged(String),
+    SymlinkEscapes(String),
+    SpecialFile(String),
+    Hardlink(first: String, total: Int, seen: Int),
+    OpenNoFollow(path: String, detail: String),
+    InspectOpen(path: String, detail: String),
+    ChangedBefore(String),
+    Reinspect(path: String, detail: String),
+    FileChanged(String),
+    Snapshot(path: String, detail: String),
+    SparseProbe(path: String, detail: String),
+    SparseStat(path: String, detail: String),
+    Xattr(String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -78,9 +78,9 @@ EnvelopeError: enum {
 
 // The observation points of the canonical walk.
 EnvelopeWalkStage: enum {
-    Node
-    DirectorySnapshotted
-    FileOpened
+    Node,
+    DirectorySnapshotted,
+    FileOpened,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -92,16 +92,16 @@ EnvelopeWalkStage: enum {
 }
 
 EnvelopeWalkEvent: struct {
-    path: String
-    stage: EnvelopeWalkStage
+    path: String,
+    stage: EnvelopeWalkStage,
 }
 
 // The canonical traversal observation seam. `events` records every stage in
 // walk order; `react` is infallible and runs at each stage (reproducibility certification and
 // the concurrency proofs). The canonical archive stays the sole identity.
 EnvelopeWalkHook: struct {
-    events: [EnvelopeWalkEvent]
-    react: fn(String, EnvelopeWalkStage) -[FS]> Never!
+    events: [EnvelopeWalkEvent],
+    react: fn(String, EnvelopeWalkStage) -[FS]> Never!,
 
     // A hook that only records.
     recording: fn() -> EnvelopeWalkHook Never! {
@@ -119,7 +119,7 @@ pkg_envelope_walk_ignore: fn(path: String, stage: EnvelopeWalkStage) -[FS]> Neve
 // The streamed canonical archive: the magic, then header/payload records in
 // the reference byte order.
 EnvelopeArchive: struct {
-    priv hasher: Hasher
+    priv hasher: Hasher,
 
     new: fn() -> EnvelopeArchive Never! {
         envelope_archive := EnvelopeArchive{hasher: crypto.Hasher.new()}
@@ -182,11 +182,11 @@ pkg_try_output_hash_of_with_policy: fn(out: String, allow_semantic_xattrs: Bool,
 
 // One regular file's hardlink bookkeeping, keyed by its (device, inode).
 EnvelopeHardlink: struct {
-    key: FileID
-    first: String
-    seen: Int
-    total: Int
-    cas_key: String
+    key: FileID,
+    first: String,
+    seen: Int,
+    total: Int,
+    cas_key: String,
 }
 
 pkg_try_output_hash_of_with_hook: fn(out: String, allow_semantic_xattrs: Bool, hangar_root: String?, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
@@ -519,9 +519,9 @@ pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_m
 
 // One directory entry observed without following links.
 EnvelopeEntrySnapshot: struct {
-    name: String
-    kind: U8
-    identity: EnvelopeStableIdentity
+    name: String,
+    kind: U8,
+    identity: EnvelopeStableIdentity,
 }
 
 pkg_envelope_directory_snapshot: fn(path: String) -[FS]> [EnvelopeEntrySnapshot] EnvelopeError! {
@@ -555,13 +555,13 @@ pkg_envelope_snapshot_unchanged: fn(before: [EnvelopeEntrySnapshot], after: [Env
 // The (device, inode, length, mtime, ctime, mode, link count) identity a
 // node must keep while it is hashed.
 EnvelopeStableIdentity: struct {
-    device: Int
-    inode: Int
-    length: Int
-    modified_ns: Int
-    changed_ns: Int
-    mode: Int
-    links: Int
+    device: Int,
+    inode: Int,
+    length: Int,
+    modified_ns: Int,
+    changed_ns: Int,
+    mode: Int,
+    links: Int,
 
     of: fn(info: Stat) -> EnvelopeStableIdentity Never! {
         EnvelopeStableIdentity{

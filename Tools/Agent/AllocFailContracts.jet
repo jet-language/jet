@@ -54,59 +54,59 @@ MESSAGE: "memory allocation refused"
 
 #Error
 ContractError: struct {
-    message: String
+    message: String,
 }
 
 // One function declaration with a body. `contract` is the text before the
 // `!` that closes the signature ("" when inferred), starting at
 // `contract_start`; `bang` is the `!`'s offset, or -1.
 FnDecl: struct {
-    line: Int
-    name: String
-    contract: String
-    contract_start: Int
-    bang: Int
-    open: Int
-    close: Int
-    direct: Bool
-    calls: [String]
+    line: Int,
+    name: String,
+    contract: String,
+    contract_start: Int,
+    bang: Int,
+    open: Int,
+    close: Int,
+    direct: Bool,
+    calls: [String],
 }
 
 // One top-level `enum` or `struct` declaration; `open` and `close` are its
 // braces.
 TypeDecl: struct {
-    name: String
-    kind: String
-    open: Int
-    close: Int
-    generic: Bool
-    message_only: Bool
-    has_case: Bool
+    name: String,
+    kind: String,
+    open: Int,
+    close: Int,
+    generic: Bool,
+    message_only: Bool,
+    has_case: Bool,
 }
 
 Source: struct {
-    path: String
-    text: String
-    code: [U8]
-    fns: [FnDecl]
-    types: [TypeDecl]
+    path: String,
+    text: String,
+    code: [U8],
+    fns: [FnDecl],
+    types: [TypeDecl],
 }
 
 Edit: struct {
-    start: Int
-    end: Int
-    text: String
+    start: Int,
+    end: Int,
+    text: String,
 }
 
 // The rewrite of every source: its edits in offset order and the sites left
 // for a hand fix.
 Plan: struct {
-    edits: [Int:[Edit]]
-    manual: [String]
-    admitted: Int
-    converted: Int
-    dropped: Int
-    handled: Int
+    edits: [Int:[Edit]],
+    manual: [String],
+    admitted: Int,
+    converted: Int,
+    dropped: Int,
+    handled: Int,
 }
 
 byte: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -333,8 +333,8 @@ code_only: fn(text: String) -> [U8] {
 // The distinct names `code[open..<close]` calls, and whether one is a
 // growth method.
 CallNames: struct {
-    names: [String]
-    direct: Bool
+    names: [String],
+    direct: Bool,
 }
 
 call_names: fn(code: [U8], open: Int, close: Int, growth: [String:Bool]) -> CallNames {
@@ -560,9 +560,9 @@ newly_fallible: fn(sources: [Source], reached: [String:Bool]) -> [String:Bool] {
 
 // How a domain type takes an `AllocError`: "admit", "convert" or "manual".
 TypeChoice: struct {
-    how: String
-    source: Int
-    decl: Int
+    how: String,
+    source: Int,
+    decl: Int,
 }
 
 leaf: fn(name: String) -> String {
@@ -781,7 +781,8 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
 }
 
 // The edit that adds the out-of-memory case to an enum: a new line before a
-// closing brace on its own line, else `, Case` after the last member.
+// closing brace on its own line, ending the last member with a comma when it
+// has none, else `, Case` after the last member.
 case_edit: fn(code: [U8], domain: TypeDecl) -> Edit {
     line_start := domain.close
     loop line_start > 0 && is_space(byte(code, line_start - 1)) -> line_start -= 1
@@ -790,7 +791,11 @@ case_edit: fn(code: [U8], domain: TypeDecl) -> Edit {
         loop byte(code, member) == 10 -> member += 1
         indent_end := member
         loop is_space(byte(code, indent_end)) -> indent_end += 1
-        return Edit{start: line_start, end: line_start, text: "{slice(code, member, indent_end)}{CASE}\n"}
+        added: "{slice(code, member, indent_end)}{CASE},\n"
+        if byte(code, line_start - 2) == 44 || line_start - 1 <= domain.open + 1 {
+            return Edit{start: line_start, end: line_start, text: added}
+        }
+        return Edit{start: line_start - 1, end: line_start, text: ",\n{added}"}
     }
     Edit{start: line_start, end: line_start, text: ", {CASE}"}
 }
@@ -961,26 +966,26 @@ rewrite: fn(text: String, domains: String, never: String) -> String {
 }
 
 #Test("a message struct with impl blocks converts; other fields stay for a hand choice") {
-    text: "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl P.From(AllocError) {{\n    from: fn(error: AllocError) -> P {{ P{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
+    text: "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String,\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl P.From(AllocError) {{\n    from: fn(error: AllocError) -> P {{ P{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
     reason: "R: struct {{ reason: String }}\nf: fn(xs: &[Int]) R! {{\n    xs.push(1)\n}}\n"
     assert_eq(rewrite(reason, "convert", ""), reason)
     assert_eq(rewrite(rewrite(text, "convert", ""), "convert", ""), rewrite(text, "convert", ""))
 }
 
 #Test("admit widens a typed domain that reaches growth") {
-    text: "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) -> Int E! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n"
-    assert_eq(rewrite(text, "admit", ""), "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) -> Int (E | AllocError)! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n")
+    text: "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) -> Int E! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n"
+    assert_eq(rewrite(text, "admit", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) -> Int (E | AllocError)! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n")
     union: "h: fn(xs: &[Int]) (A | B)! {{\n    xs.push(1)\n}}\n"
     assert_eq(rewrite(union, "convert", ""), "h: fn(xs: &[Int]) (A | B | AllocError)! {{\n    xs.push(1)\n}}\n")
 }
 
 #Test("convert adds a case and one impl per domain type") {
-    text: "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A\n    OutOfMemory\n}}\n\nimpl E.From(AllocError) {{\n    from: fn(error: AllocError) -> E {{ E.OutOfMemory }}\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
+    text: "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A,\n    OutOfMemory,\n}}\n\nimpl E.From(AllocError) {{\n    from: fn(error: AllocError) -> E {{ E.OutOfMemory }}\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
     message: "S: struct {{ message: String }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n"
     assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl S.From(AllocError) {{\n    from: fn(error: AllocError) -> S {{ S{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n")
-    assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
+    assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A,\n}}\nf: fn(xs: &[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
 }
 
 #Test("never modes drop the contract or handle each whole statement") {

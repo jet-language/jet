@@ -789,9 +789,9 @@ sema_failure_dependency_conversion: fn(name: String, source: Type, target: Type,
 }
 
 SemaFailureProvenance: struct {
-    callee: String
-    definition: String
-    contract: String
+    callee: String,
+    definition: String,
+    contract: String,
 }
 
 sema_failure_definition_location: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
@@ -853,8 +853,8 @@ sema_failure_call_provenance: fn(expr: Expr?, environment: SemaScopeEnvironment,
 // whether it writes no failure contract (so the bundle failure solve may
 // still prove its failure set empty).
 SemaFailureCallee: struct {
-    key: String
-    inferable: Bool
+    key: String,
+    inferable: Bool,
 }
 
 sema_failure_callee: fn(expr: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFailureCallee? {
@@ -1753,10 +1753,10 @@ sema_control_is_core_compute_call: fn(value: Expr, environment: SemaScopeEnviron
 }
 
 SemaOrFallbackRoute: struct {
-    payload: Type
-    value: TOrFallback?
-    reaches_merge: Bool
-    ambient_err: TLocal?
+    payload: Type,
+    value: TOrFallback?,
+    reaches_merge: Bool,
+    ambient_err: TLocal?,
 }
 
 // A valueless builtin call (`print`, `assert`, `assert_eq`, `consume`,
@@ -2160,20 +2160,20 @@ sema_expression_if_subject_is_table_it: fn(subject: Expr) -> Bool {
 
 // A pattern binding a checked condition introduces into its success branch.
 SemaConditionBinding: struct {
-    symbol: Symbol
+    symbol: Symbol,
     // The symbol's key text (SemaScopeBinding.key).
-    key: String
+    key: String,
     // Borrowed payloads alias storage; only `&place` grants write access.
-    window: Bool
-    sources: [Expr]
+    window: Bool,
+    sources: [Expr],
 }
 
 // A checked `if`/arm condition: the checked condition, its Bool value for
 // coverage, and the pattern bindings its success branch declares.
 SemaCheckedCondition: struct {
-    condition: TIfCond
-    value: TExpr
-    bindings: [SemaConditionBinding]
+    condition: TIfCond,
+    value: TExpr,
+    bindings: [SemaConditionBinding],
 }
 
 // A condition check: the checked condition when it checked, and the bindings
@@ -2181,8 +2181,8 @@ SemaCheckedCondition: struct {
 // own error still names its bindings, so the branch does not cascade into
 // E0107 for them.
 SemaConditionCheck: struct {
-    checked: SemaCheckedCondition?
-    bindings: [SemaConditionBinding]
+    checked: SemaCheckedCondition?,
+    bindings: [SemaConditionBinding],
 }
 
 sema_expression_condition_checked: fn(checked: SemaCheckedCondition) -> SemaConditionCheck Never! {

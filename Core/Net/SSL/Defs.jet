@@ -756,66 +756,66 @@ SSL_FORCE_FLUSH: true
 /// code unchanged.
 #Error
 SSLError: enum {
-    CryptoInProgress
-    FeatureUnavailable
-    BadInputData
-    InvalidMac
-    InvalidRecord
-    ConnEOF
-    DecodeError
-    NoRNG
-    NoClientCertificate
-    UnsupportedExtension
-    NoApplicationProtocol
-    PrivateKeyRequired
-    CAChainRequired
-    UnexpectedMessage
-    FatalAlertMessage
-    UnrecognizedName
-    PeerCloseNotify
-    BadCertificate
-    ReceivedNewSessionTicket
-    CannotReadEarlyData
-    ReceivedEarlyData
-    CannotWriteEarlyData
-    CacheEntryNotFound
-    AllocFailed
-    HwAccelFailed
-    HwAccelFallthrough
-    BadProtocolVersion
-    HandshakeFailure
-    SessionTicketExpired
-    PKTypeMismatch
-    UnknownIdentity
-    InternalError
-    CounterWrapping
-    WaitingServerHelloRenego
-    HelloVerifyRequired
-    BufferTooSmall
-    WantRead
-    WantWrite
-    Timeout
-    ClientReconnect
-    UnexpectedRecord
-    NonFatal
-    IllegalParameter
-    ContinueProcessing
-    AsyncInProgress
-    EarlyMessage
-    UnexpectedCID
-    VersionMismatch
-    BadConfig
-    CertificateVerificationWithoutHostname
-    CorruptionDetected
-    GenericError
-    RandomFailed
-    Cipher(layer.CipherLayerError)
-    PK(pk.PKError)
-    X509(x509.X509Error)
-    ECP(ecp.EcpError)
-    DHM(dhm.DHMError)
-    Mpi(bn.MpiError)
-    Callback(Int)
+    CryptoInProgress,
+    FeatureUnavailable,
+    BadInputData,
+    InvalidMac,
+    InvalidRecord,
+    ConnEOF,
+    DecodeError,
+    NoRNG,
+    NoClientCertificate,
+    UnsupportedExtension,
+    NoApplicationProtocol,
+    PrivateKeyRequired,
+    CAChainRequired,
+    UnexpectedMessage,
+    FatalAlertMessage,
+    UnrecognizedName,
+    PeerCloseNotify,
+    BadCertificate,
+    ReceivedNewSessionTicket,
+    CannotReadEarlyData,
+    ReceivedEarlyData,
+    CannotWriteEarlyData,
+    CacheEntryNotFound,
+    AllocFailed,
+    HwAccelFailed,
+    HwAccelFallthrough,
+    BadProtocolVersion,
+    HandshakeFailure,
+    SessionTicketExpired,
+    PKTypeMismatch,
+    UnknownIdentity,
+    InternalError,
+    CounterWrapping,
+    WaitingServerHelloRenego,
+    HelloVerifyRequired,
+    BufferTooSmall,
+    WantRead,
+    WantWrite,
+    Timeout,
+    ClientReconnect,
+    UnexpectedRecord,
+    NonFatal,
+    IllegalParameter,
+    ContinueProcessing,
+    AsyncInProgress,
+    EarlyMessage,
+    UnexpectedCID,
+    VersionMismatch,
+    BadConfig,
+    CertificateVerificationWithoutHostname,
+    CorruptionDetected,
+    GenericError,
+    RandomFailed,
+    Cipher(layer.CipherLayerError),
+    PK(pk.PKError),
+    X509(x509.X509Error),
+    ECP(ecp.EcpError),
+    DHM(dhm.DHMError),
+    Mpi(bn.MpiError),
+    Callback(Int),
 }
 
 /// An asynchronous operation is not completed yet (CRYPTO_IN_PROGRESS).
@@ -1231,95 +1231,95 @@ dhm_code: fn(e: dhm.DHMError) -> Int Never! {
 /// in it, so it works in the context's input and output buffers without
 /// copying them. `data_offset` is relative to `buf_start`, as in C.
 SSLRecord: struct {
-    ctr: [U8]{[]}
-    rtype: Int{0}
-    ver: [U8]{[]}
-    buf_start: Int{0}
-    buf_len: Int{0}
-    data_offset: Int{0}
-    data_len: Int{0}
-    cid_len: Int{0}
-    cid: [U8]{[]}
+    ctr: [U8]{[]},
+    rtype: Int{0},
+    ver: [U8]{[]},
+    buf_start: Int{0},
+    buf_len: Int{0},
+    data_offset: Int{0},
+    data_len: Int{0},
+    cid_len: Int{0},
+    cid: [U8]{[]},
 }
 
 /// The keys and state that protect records in one direction pair
 /// (mbedtls_ssl_transform). The MAC contexts are the HMAC keys of
 /// non-AEAD suites; AEAD suites have none. `valid` marks a pool slot in use.
 SSLTransform: struct {
-    valid: Bool{false}
-    minlen: Int{0}
-    ivlen: Int{0}
-    fixed_ivlen: Int{0}
-    maclen: Int{0}
-    taglen: Int{0}
-    iv_enc: [U8]{[]}
-    iv_dec: [U8]{[]}
-    md_enc: hashes.HMACKey?{None}
-    md_dec: hashes.HMACKey?{None}
-    encrypt_then_mac: Int{0}
-    tls_version: Int{0}
-    cipher_enc: layer.CipherContext?{None}
-    cipher_dec: layer.CipherContext?{None}
-    in_cid: [U8]{[]}
-    out_cid: [U8]{[]}
-    randbytes: [U8]{[]}
+    valid: Bool{false},
+    minlen: Int{0},
+    ivlen: Int{0},
+    fixed_ivlen: Int{0},
+    maclen: Int{0},
+    taglen: Int{0},
+    iv_enc: [U8]{[]},
+    iv_dec: [U8]{[]},
+    md_enc: hashes.HMACKey?{None},
+    md_dec: hashes.HMACKey?{None},
+    encrypt_then_mac: Int{0},
+    tls_version: Int{0},
+    cipher_enc: layer.CipherContext?{None},
+    cipher_dec: layer.CipherContext?{None},
+    in_cid: [U8]{[]},
+    out_cid: [U8]{[]},
+    randbytes: [U8]{[]},
 }
 
 /// The TLS 1.3 secrets kept after the handshake
 /// (mbedtls_ssl_tls13_application_secrets).
 SSLTLS13AppSecrets: struct {
-    client_application_traffic_secret_n: [U8]{[]}
-    server_application_traffic_secret_n: [U8]{[]}
-    exporter_master_secret: [U8]{[]}
-    resumption_master_secret: [U8]{[]}
+    client_application_traffic_secret_n: [U8]{[]},
+    server_application_traffic_secret_n: [U8]{[]},
+    exporter_master_secret: [U8]{[]},
+    resumption_master_secret: [U8]{[]},
 }
 
 /// A negotiated or resumable session (mbedtls_ssl_session). `id` is the
 /// session ID (id_len is its length); `ticket` is None when no ticket is
 /// held; `peer_cert` is None when no peer chain was received.
 SSLSession: struct {
-    valid: Bool{false}
-    mfl_code: Int{0}
-    exported: Int{0}
-    endpoint: Int{0}
-    tls_version: Int{0}
-    start: Int{0}
-    ciphersuite: Int{0}
-    id: [U8]{[]}
-    master: [U8]{[]}
-    peer_cert: [x509crt.X509Crt]?{None}
-    verify_result: Int{0xFFFFFFFF}
-    ticket: [U8]?{None}
-    ticket_lifetime: Int{0}
-    ticket_creation_time: Int{0}
-    ticket_age_add: Int{0}
-    ticket_flags: Int{0}
-    resumption_key: [U8]{[]}
-    hostname: String?{None}
-    ticket_reception_time: Int{0}
-    encrypt_then_mac: Int{0}
-    app_secrets: SSLTLS13AppSecrets{SSLTLS13AppSecrets{}}
+    valid: Bool{false},
+    mfl_code: Int{0},
+    exported: Int{0},
+    endpoint: Int{0},
+    tls_version: Int{0},
+    start: Int{0},
+    ciphersuite: Int{0},
+    id: [U8]{[]},
+    master: [U8]{[]},
+    peer_cert: [x509crt.X509Crt]?{None},
+    verify_result: Int{0xFFFFFFFF},
+    ticket: [U8]?{None},
+    ticket_lifetime: Int{0},
+    ticket_creation_time: Int{0},
+    ticket_age_add: Int{0},
+    ticket_flags: Int{0},
+    resumption_key: [U8]{[]},
+    hostname: String?{None},
+    ticket_reception_time: Int{0},
+    encrypt_then_mac: Int{0},
+    app_secrets: SSLTLS13AppSecrets{SSLTLS13AppSecrets{}},
 }
 
 /// One own certificate chain and its private key (mbedtls_ssl_key_cert).
 SSLKeyCert: struct {
-    cert: [x509crt.X509Crt]
-    key: pk.PKContext
+    cert: [x509crt.X509Crt],
+    key: pk.PKContext,
 }
 
 /// One outgoing DTLS handshake or CCS message kept for retransmission
 /// (mbedtls_ssl_flight_item); `p` includes the handshake header.
 SSLFlightItem: struct {
-    p: [U8]
-    mtype: Int
+    p: [U8],
+    mtype: Int,
 }
 
 /// A buffered future handshake message (mbedtls_ssl_hs_buffer).
 SSLHsBuffer: struct {
-    is_valid: Bool{false}
-    is_fragmented: Bool{false}
-    is_complete: Bool{false}
-    data: [U8]{[]}
+    is_valid: Bool{false},
+    is_fragmented: Bool{false},
+    is_complete: Bool{false},
+    data: [U8]{[]},
 }
 
 /// What an SNI callback selects for the handshake: the certificates and
@@ -1328,17 +1328,17 @@ SSLHsBuffer: struct {
 /// set_hs_authmode, set_hs_dn_hints). None and an empty key_cert keep the
 /// configuration's.
 SSLHsOverride: struct {
-    key_cert: [SSLKeyCert]{[]}
-    ca_chain: [x509crt.X509Crt]?{None}
-    ca_crl: [x509crl.X509Crl]{[]}
-    authmode: Int{SSL_VERIFY_UNSET}
-    dn_hints: [x509crt.X509Crt]?{None}
+    key_cert: [SSLKeyCert]{[]},
+    ca_chain: [x509crt.X509Crt]?{None},
+    ca_crl: [x509crl.X509Crl]{[]},
+    authmode: Int{SSL_VERIFY_UNSET},
+    dn_hints: [x509crt.X509Crt]?{None},
 }
 
 /// What a server PSK callback selects for an identity
 /// (mbedtls_ssl_set_hs_psk). None refuses the identity.
 SSLPskResult: struct {
-    psk: [U8]?{None}
+    psk: [U8]?{None},
 }
 
 // ---------------------------------------------------------------------------
@@ -1349,78 +1349,78 @@ SSLPskResult: struct {
 
 /// Look up a cached session by ID (mbedtls_ssl_cache_get_t).
 SSLCacheGet: struct {
-    call: fn([U8]) -[Net]> SSLSession SSLError!
+    call: fn([U8]) -[Net]> SSLSession SSLError!,
 }
 
 /// Store a session under its ID (mbedtls_ssl_cache_set_t).
 SSLCacheSet: struct {
-    call: fn([U8], SSLSession) -[Net]> Bool SSLError!
+    call: fn([U8], SSLSession) -[Net]> Bool SSLError!,
 }
 
 /// The server's SNI callback: what to use for this server name
 /// (f_sni).
 SSLSniCallback: struct {
-    call: fn([U8]) -[Net]> SSLHsOverride SSLError!
+    call: fn([U8]) -[Net]> SSLHsOverride SSLError!,
 }
 
 /// The server's PSK callback: the key for this identity (f_psk).
 SSLPskCallback: struct {
-    call: fn([U8]) -[Net]> SSLPskResult SSLError!
+    call: fn([U8]) -[Net]> SSLPskResult SSLError!,
 }
 
 /// The server's certificate selection callback, run after the
 /// ClientHello is parsed: what to use for this handshake (f_cert_cb).
 SSLCertCallback: struct {
-    call: fn(SSLClientHelloInfo) -[Net]> SSLHsOverride SSLError!
+    call: fn(SSLClientHelloInfo) -[Net]> SSLHsOverride SSLError!,
 }
 
 /// What a certificate callback learns of the ClientHello: the SNI name
 /// and the signature algorithms the client offered.
 SSLClientHelloInfo: struct {
-    sni: [U8]?
-    sig_algs: [Int]
+    sni: [U8]?,
+    sig_algs: [Int],
 }
 
 /// Write a DTLS HelloVerifyRequest cookie for a client's transport ID
 /// (f_cookie_write).
 SSLCookieWrite: struct {
-    call: fn([U8]) -[Net]> [U8] SSLError!
+    call: fn([U8]) -[Net]> [U8] SSLError!,
 }
 
 /// Check a returned cookie against the client's transport ID
 /// (f_cookie_check).
 SSLCookieCheck: struct {
-    call: fn([U8], [U8]) -[Net]> Bool SSLError!
+    call: fn([U8], [U8]) -[Net]> Bool SSLError!,
 }
 
 /// A written session ticket: the ticket and its lifetime hint in seconds.
 SSLTicketWritten: struct {
-    ticket: [U8]
-    lifetime: Int
+    ticket: [U8],
+    lifetime: Int,
 }
 
 /// Seal a session into a ticket (mbedtls_ssl_ticket_write_t).
 SSLTicketWrite: struct {
-    call: fn(SSLSession) -[Net]> SSLTicketWritten SSLError!
+    call: fn(SSLSession) -[Net]> SSLTicketWritten SSLError!,
 }
 
 /// Open a ticket back into its session (mbedtls_ssl_ticket_parse_t).
 SSLTicketParse: struct {
-    call: fn([U8]) -[Net]> SSLSession SSLError!
+    call: fn([U8]) -[Net]> SSLSession SSLError!,
 }
 
 /// One exported secret (mbedtls_ssl_export_keys_t's arguments).
 SSLExportedKey: struct {
-    ktype: Int
-    secret: [U8]
-    client_random: [U8]
-    server_random: [U8]
-    tls_prf_type: Int
+    ktype: Int,
+    secret: [U8],
+    client_random: [U8],
+    server_random: [U8],
+    tls_prf_type: Int,
 }
 
 /// Receive each secret the handshake derives (f_export_keys).
 SSLExportKeys: struct {
-    call: fn(SSLExportedKey) -[Net]> Bool Never!
+    call: fn(SSLExportedKey) -[Net]> Bool Never!,
 }
 
 // ---------------------------------------------------------------------------
@@ -1430,55 +1430,55 @@ SSLExportKeys: struct {
 /// A context takes its own copy at ssl_setup. The random generator is not
 /// part of it: the calls that need randomness take one.
 SSLConfig: struct {
-    max_tls_version: Int{SSL_VERSION_UNKNOWN}
-    min_tls_version: Int{SSL_VERSION_UNKNOWN}
-    endpoint: Int{SSL_IS_CLIENT}
-    transport: Int{SSL_TRANSPORT_STREAM}
-    authmode: Int{SSL_VERIFY_NONE}
-    allow_legacy_renegotiation: Int{0}
-    mfl_code: Int{0}
-    encrypt_then_mac: Int{0}
-    extended_ms: Int{0}
-    anti_replay: Int{0}
-    disable_renegotiation: Int{0}
-    session_tickets: Int{0}
-    new_session_tickets_count: Int{0}
-    tls13_signal_new_session_tickets: Int{0}
-    cert_req_ca_list: Int{0}
-    respect_cli_pref: Int{0}
-    ignore_unexpected_cid: Int{0}
-    ciphersuite_list: [Int]{[]}
-    tls13_kex_modes: Int{0}
-    f_get_cache: SSLCacheGet?{None}
-    f_set_cache: SSLCacheSet?{None}
-    f_sni: SSLSniCallback?{None}
-    f_vrfy: x509crt.X509VerifyCallback?{None}
-    f_psk: SSLPskCallback?{None}
-    f_cookie_write: SSLCookieWrite?{None}
-    f_cookie_check: SSLCookieCheck?{None}
-    f_ticket_write: SSLTicketWrite?{None}
-    f_ticket_parse: SSLTicketParse?{None}
-    cid_len: Int{0}
-    cert_profile: x509crt.X509CrtProfile{x509crt.x509_crt_profile_default()}
-    key_cert: [SSLKeyCert]{[]}
-    ca_chain: [x509crt.X509Crt]?{None}
-    ca_crl: [x509crl.X509Crl]{[]}
-    sig_algs: [Int]{[]}
-    group_list: [Int]{[]}
-    dhm_p: bn.Mpi?{None}
-    dhm_g: bn.Mpi?{None}
-    psk: [U8]?{None}
-    psk_identity: [U8]?{None}
-    alpn_list: [String]?{None}
-    read_timeout: Int{0}
-    hs_timeout_min: Int{0}
-    hs_timeout_max: Int{0}
-    renego_max_records: Int{0}
-    renego_period: [U8]{[]}
-    badmac_limit: Int{0}
-    dhm_min_bitlen: Int{0}
-    f_cert_cb: SSLCertCallback?{None}
-    dn_hints: [x509crt.X509Crt]?{None}
+    max_tls_version: Int{SSL_VERSION_UNKNOWN},
+    min_tls_version: Int{SSL_VERSION_UNKNOWN},
+    endpoint: Int{SSL_IS_CLIENT},
+    transport: Int{SSL_TRANSPORT_STREAM},
+    authmode: Int{SSL_VERIFY_NONE},
+    allow_legacy_renegotiation: Int{0},
+    mfl_code: Int{0},
+    encrypt_then_mac: Int{0},
+    extended_ms: Int{0},
+    anti_replay: Int{0},
+    disable_renegotiation: Int{0},
+    session_tickets: Int{0},
+    new_session_tickets_count: Int{0},
+    tls13_signal_new_session_tickets: Int{0},
+    cert_req_ca_list: Int{0},
+    respect_cli_pref: Int{0},
+    ignore_unexpected_cid: Int{0},
+    ciphersuite_list: [Int]{[]},
+    tls13_kex_modes: Int{0},
+    f_get_cache: SSLCacheGet?{None},
+    f_set_cache: SSLCacheSet?{None},
+    f_sni: SSLSniCallback?{None},
+    f_vrfy: x509crt.X509VerifyCallback?{None},
+    f_psk: SSLPskCallback?{None},
+    f_cookie_write: SSLCookieWrite?{None},
+    f_cookie_check: SSLCookieCheck?{None},
+    f_ticket_write: SSLTicketWrite?{None},
+    f_ticket_parse: SSLTicketParse?{None},
+    cid_len: Int{0},
+    cert_profile: x509crt.X509CrtProfile{x509crt.x509_crt_profile_default()},
+    key_cert: [SSLKeyCert]{[]},
+    ca_chain: [x509crt.X509Crt]?{None},
+    ca_crl: [x509crl.X509Crl]{[]},
+    sig_algs: [Int]{[]},
+    group_list: [Int]{[]},
+    dhm_p: bn.Mpi?{None},
+    dhm_g: bn.Mpi?{None},
+    psk: [U8]?{None},
+    psk_identity: [U8]?{None},
+    alpn_list: [String]?{None},
+    read_timeout: Int{0},
+    hs_timeout_min: Int{0},
+    hs_timeout_max: Int{0},
+    renego_max_records: Int{0},
+    renego_period: [U8]{[]},
+    badmac_limit: Int{0},
+    dhm_min_bitlen: Int{0},
+    f_cert_cb: SSLCertCallback?{None},
+    dn_hints: [x509crt.X509Crt]?{None},
 }
 
 // ---------------------------------------------------------------------------
@@ -1492,89 +1492,89 @@ SSLConfig: struct {
 /// 0 feeds both transcript hashes (ssl_update_checksum_start), 1 SHA-256
 /// and 2 SHA-384 alone. `premaster` holds `pmslen` bytes of premaster.
 SSLHandshake: struct {
-    resume: Int{0}
-    cli_exts: Int{0}
-    sni_authmode: Int{SSL_VERIFY_UNSET}
-    certificate_request_sent: Int{0}
-    new_session_ticket: Int{0}
-    min_tls_version: Int{0}
-    extended_ms: Int{0}
-    retransmit_state: Int{0}
-    ciphersuite_info: suites.SSLCiphersuite?{None}
-    tls_prf_md: hashes.Md?{None}
-    calc_verify_md: hashes.Md?{None}
-    pmslen: Int{0}
-    checksum_md: Int{0}
+    resume: Int{0},
+    cli_exts: Int{0},
+    sni_authmode: Int{SSL_VERIFY_UNSET},
+    certificate_request_sent: Int{0},
+    new_session_ticket: Int{0},
+    min_tls_version: Int{0},
+    extended_ms: Int{0},
+    retransmit_state: Int{0},
+    ciphersuite_info: suites.SSLCiphersuite?{None},
+    tls_prf_md: hashes.Md?{None},
+    calc_verify_md: hashes.Md?{None},
+    pmslen: Int{0},
+    checksum_md: Int{0},
     // TLS 1.3.
-    key_exchange_mode: Int{0}
-    hello_retry_request_flag: Int{0}
-    ccs_sent: Int{0}
-    tls13_kex_modes: Int{0}
-    hrr_selected_group: Int{0}
-    new_session_tickets_count: Int{0}
-    received_sig_algs: [Int]{[]}
+    key_exchange_mode: Int{0},
+    hello_retry_request_flag: Int{0},
+    ccs_sent: Int{0},
+    tls13_kex_modes: Int{0},
+    hrr_selected_group: Int{0},
+    new_session_tickets_count: Int{0},
+    received_sig_algs: [Int]{[]},
     // Key exchange.
-    dhm_ctx: dhm.DHMContext?{None}
-    ecdh_ctx: ecdh.ECDHContext?{None}
+    dhm_ctx: dhm.DHMContext?{None},
+    ecdh_ctx: ecdh.ECDHContext?{None},
     // The groups the client's supported_groups offered that we know; None
     // without the extension (C's NULL).
-    curves_tls_id: [Int]?{None}
+    curves_tls_id: [Int]?{None},
     // The peer's TLS 1.3 key share (xxdh_psa_peerkey); our own key share
     // is in ecdh_ctx or dhm_ctx, by group.
-    xxdh_peerkey: [U8]{[]}
-    psk: [U8]?{None}
-    selected_identity: Int{0}
+    xxdh_peerkey: [U8]{[]},
+    psk: [U8]?{None},
+    selected_identity: Int{0},
     // The own key and certificate picked: an index into the SNI or
     // certificate callback's list when it set one, else the
     // configuration's; -1 for the configuration's first.
-    key_cert: Int{-1}
+    key_cert: Int{-1},
     // The callback's own keys and certificates; empty for none (C's NULL).
-    sni_key_cert: [SSLKeyCert]{[]}
-    sni_ca_chain: [x509crt.X509Crt]?{None}
-    sni_ca_crl: [x509crl.X509Crl]{[]}
+    sni_key_cert: [SSLKeyCert]{[]},
+    sni_ca_chain: [x509crt.X509Crt]?{None},
+    sni_ca_crl: [x509crl.X509Crl]{[]},
     // DTLS reassembly and buffering.
-    total_bytes_buffered: Int{0}
-    seen_ccs: Int{0}
-    hs: [SSLHsBuffer]{[]}
-    future_record: [U8]{[]}
-    future_record_epoch: Int{0}
-    cookie: [U8]?{None}
-    cookie_verify_result: Int{0}
-    out_msg_seq: Int{0}
-    in_msg_seq: Int{0}
-    retransmit_timeout: Int{0}
-    flight: [SSLFlightItem]{[]}
-    cur_msg: Int{-1}
-    cur_msg_p: Int{0}
-    in_flight_start_seq: Int{0}
-    alt_transform_out: Int{-1}
-    alt_out_ctr: [U8]{[]}
-    cid_in_use: Int{0}
-    peer_cid: [U8]{[]}
-    mtu: Int{0}
+    total_bytes_buffered: Int{0},
+    seen_ccs: Int{0},
+    hs: [SSLHsBuffer]{[]},
+    future_record: [U8]{[]},
+    future_record_epoch: Int{0},
+    cookie: [U8]?{None},
+    cookie_verify_result: Int{0},
+    out_msg_seq: Int{0},
+    in_msg_seq: Int{0},
+    retransmit_timeout: Int{0},
+    flight: [SSLFlightItem]{[]},
+    cur_msg: Int{-1},
+    cur_msg_p: Int{0},
+    in_flight_start_seq: Int{0},
+    alt_transform_out: Int{-1},
+    alt_out_ctr: [U8]{[]},
+    cid_in_use: Int{0},
+    peer_cid: [U8]{[]},
+    mtu: Int{0},
     // The running handshake transcript hashes, started at handshake
     // set-up (ssl_handshake_params_init).
-    fin_sha256: hashes.HashCtx?{None}
-    fin_sha384: hashes.HashCtx?{None}
-    offered_group_id: Int{0}
-    client_auth: Int{0}
+    fin_sha256: hashes.HashCtx?{None},
+    fin_sha384: hashes.HashCtx?{None},
+    offered_group_id: Int{0},
+    client_auth: Int{0},
     // TLS 1.3 Finished preparation (state_local).
-    finished_preparation_done: Int{0}
-    finished_digest: [U8]{[]}
-    randbytes: [U8]{[]}
-    premaster: [U8]{[]}
-    sent_extensions: Int{0}
-    received_extensions: Int{0}
-    certificate_request_context: [U8]{[]}
-    transform_handshake: Int{-1}
+    finished_preparation_done: Int{0},
+    finished_digest: [U8]{[]},
+    randbytes: [U8]{[]},
+    premaster: [U8]{[]},
+    sent_extensions: Int{0},
+    received_extensions: Int{0},
+    certificate_request_context: [U8]{[]},
+    transform_handshake: Int{-1},
     // The TLS 1.3 key schedule (tls13_master_secrets, tls13_hs_secrets).
-    tls13_early_secret: [U8]{[]}
-    tls13_handshake_secret: [U8]{[]}
-    tls13_app_secret: [U8]{[]}
-    client_handshake_traffic_secret: [U8]{[]}
-    server_handshake_traffic_secret: [U8]{[]}
-    sni_name: [U8]?{None}
-    dn_hints: [x509crt.X509Crt]?{None}
+    tls13_early_secret: [U8]{[]},
+    tls13_handshake_secret: [U8]{[]},
+    tls13_app_secret: [U8]{[]},
+    client_handshake_traffic_secret: [U8]{[]},
+    server_handshake_traffic_secret: [U8]{[]},
+    sni_name: [U8]?{None},
+    dn_hints: [x509crt.X509Crt]?{None},
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,97 +1587,97 @@ SSLHandshake: struct {
 /// `tx_room`, when not -1, is how many more bytes a write may queue
 /// before reporting WantWrite.
 SSLBio: struct {
-    rx: [U8]{[]}
-    rx_off: Int{0}
-    rx_dgrams: [[U8]]{[]}
-    rx_eof: Bool{false}
-    tx: [U8]{[]}
-    tx_dgrams: [[U8]]{[]}
-    tx_room: Int{-1}
+    rx: [U8]{[]},
+    rx_off: Int{0},
+    rx_dgrams: [[U8]]{[]},
+    rx_eof: Bool{false},
+    tx: [U8]{[]},
+    tx_dgrams: [[U8]]{[]},
+    tx_room: Int{-1},
 }
 
 /// The retransmission timer (mbedtls_ssl_set_timer_cb with mbedtls's
 /// timing delay): an intermediate and a final delay in milliseconds from
 /// when it was set; `fin_ms` 0 is canceled.
 SSLTimer: struct {
-    enabled: Bool{false}
-    int_ms: Int{0}
-    fin_ms: Int{0}
-    start_ns: Int{0}
+    enabled: Bool{false},
+    int_ms: Int{0},
+    fin_ms: Int{0},
+    start_ns: Int{0},
 }
 
 /// One SSL/TLS connection (mbedtls_ssl_context).
 SSLContext: struct {
-    conf: SSLConfig{SSLConfig{}}
-    has_conf: Bool{false}
-    state: Int{0}
-    renego_status: Int{0}
-    renego_records_seen: Int{0}
-    tls_version: Int{0}
-    badmac_seen_or_in_hsfraglen: Int{0}
-    f_vrfy: x509crt.X509VerifyCallback?{None}
-    bio: SSLBio{SSLBio{}}
-    spool: [SSLSession]{[]}
-    session_in: Int{-1}
-    session_out: Int{-1}
-    session: Int{-1}
-    session_negotiate: Int{-1}
-    handshake: SSLHandshake{SSLHandshake{}}
-    has_handshake: Bool{false}
-    tpool: [SSLTransform]{[]}
-    transform_in: Int{-1}
-    transform_out: Int{-1}
-    transform: Int{-1}
-    transform_negotiate: Int{-1}
-    transform_application: Int{-1}
-    timer: SSLTimer{SSLTimer{}}
+    conf: SSLConfig{SSLConfig{}},
+    has_conf: Bool{false},
+    state: Int{0},
+    renego_status: Int{0},
+    renego_records_seen: Int{0},
+    tls_version: Int{0},
+    badmac_seen_or_in_hsfraglen: Int{0},
+    f_vrfy: x509crt.X509VerifyCallback?{None},
+    bio: SSLBio{SSLBio{}},
+    spool: [SSLSession]{[]},
+    session_in: Int{-1},
+    session_out: Int{-1},
+    session: Int{-1},
+    session_negotiate: Int{-1},
+    handshake: SSLHandshake{SSLHandshake{}},
+    has_handshake: Bool{false},
+    tpool: [SSLTransform]{[]},
+    transform_in: Int{-1},
+    transform_out: Int{-1},
+    transform: Int{-1},
+    transform_negotiate: Int{-1},
+    transform_application: Int{-1},
+    timer: SSLTimer{SSLTimer{}},
     // The input buffer and the offsets C's in_* pointers have in it.
-    in_buf: [U8]{[]}
-    in_ctr: Int{0}
-    in_hdr: Int{0}
-    in_cid: Int{0}
-    in_len: Int{0}
-    in_iv: Int{0}
-    in_msg: Int{0}
-    in_offt: Int{-1}
-    in_msgtype: Int{0}
-    in_msglen: Int{0}
-    in_left: Int{0}
-    in_epoch: Int{0}
-    next_record_offset: Int{0}
-    in_window_top: U64{U64{0}}
-    in_window: U64{U64{0}}
-    in_hslen: Int{0}
-    nb_zero: Int{0}
-    keep_current_message: Int{0}
-    send_alert: Int{0}
-    alert_type: Int{0}
-    alert_reason: SSLError?{None}
-    disable_datagram_packing: Int{0}
+    in_buf: [U8]{[]},
+    in_ctr: Int{0},
+    in_hdr: Int{0},
+    in_cid: Int{0},
+    in_len: Int{0},
+    in_iv: Int{0},
+    in_msg: Int{0},
+    in_offt: Int{-1},
+    in_msgtype: Int{0},
+    in_msglen: Int{0},
+    in_left: Int{0},
+    in_epoch: Int{0},
+    next_record_offset: Int{0},
+    in_window_top: U64{U64{0}},
+    in_window: U64{U64{0}},
+    in_hslen: Int{0},
+    nb_zero: Int{0},
+    keep_current_message: Int{0},
+    send_alert: Int{0},
+    alert_type: Int{0},
+    alert_reason: SSLError?{None},
+    disable_datagram_packing: Int{0},
     // The output buffer and the offsets C's out_* pointers have in it.
-    out_buf: [U8]{[]}
-    out_ctr: Int{0}
-    out_hdr: Int{0}
-    out_cid: Int{0}
-    out_len: Int{0}
-    out_iv: Int{0}
-    out_msg: Int{0}
-    out_msgtype: Int{0}
-    out_msglen: Int{0}
-    out_left: Int{0}
-    cur_out_ctr: [U8]{[]}
-    mtu: Int{0}
-    hostname: String?{None}
-    hostname_skip_cn: Bool{false}
-    alpn_chosen: String?{None}
-    cli_id: [U8]?{None}
-    secure_renegotiation: Int{0}
-    verify_data_len: Int{0}
-    own_verify_data: [U8]{[]}
-    peer_verify_data: [U8]{[]}
-    own_cid: [U8]{[]}
-    negotiate_cid: Int{0}
-    f_export_keys: SSLExportKeys?{None}
+    out_buf: [U8]{[]},
+    out_ctr: Int{0},
+    out_hdr: Int{0},
+    out_cid: Int{0},
+    out_len: Int{0},
+    out_iv: Int{0},
+    out_msg: Int{0},
+    out_msgtype: Int{0},
+    out_msglen: Int{0},
+    out_left: Int{0},
+    cur_out_ctr: [U8]{[]},
+    mtu: Int{0},
+    hostname: String?{None},
+    hostname_skip_cn: Bool{false},
+    alpn_chosen: String?{None},
+    cli_id: [U8]?{None},
+    secure_renegotiation: Int{0},
+    verify_data_len: Int{0},
+    own_verify_data: [U8]{[]},
+    peer_verify_data: [U8]{[]},
+    own_cid: [U8]{[]},
+    negotiate_cid: Int{0},
+    f_export_keys: SSLExportKeys?{None},
 }
 
 // ---------------------------------------------------------------------------

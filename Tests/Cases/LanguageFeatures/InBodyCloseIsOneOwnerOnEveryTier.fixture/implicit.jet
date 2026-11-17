@@ -1,7 +1,7 @@
 // A binding of a struct holding an in-body Close value moves it; the old name
 // is gone, so nothing reads the value after its one close.
 Stream: struct {
-    fd: Int
+    fd: Int,
 
     impl Close {
         close: fn(&&self) { print("closed {self.fd}") }
@@ -9,7 +9,7 @@ Stream: struct {
 }
 
 FileReader: struct {
-    stream: Stream
+    stream: Stream,
 }
 
 keep: fn(r: FileReader) -> Int { r.stream.fd }

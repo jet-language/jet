@@ -6,9 +6,9 @@
 
 // A provider-qualified package identity.
 PackageIdentity: struct {
-    provider: String
-    name: String
-    version: String
+    provider: String,
+    name: String,
+    version: String,
 
     new: fn(provider: String, name: String, version: String) -> PackageIdentity Never! {
         PackageIdentity{provider: provider, name: name, version: version}
@@ -22,23 +22,23 @@ PackageIdentity: struct {
 }
 
 ProofStatus: enum {
-    Missing
-    Failed
-    Passed
+    Missing,
+    Failed,
+    Passed,
 }
 
 // A native package offered in place of a foreign one, with the proof that
 // makes it eligible.
 ReplacementCandidate: struct {
-    foreign_identity: PackageIdentity
-    native_identity: PackageIdentity
-    covered_public_symbols: [String]
-    unsupported_symbols: [String]
-    license: String
-    platforms: [String]
-    proof_status: ProofStatus
-    proof_digest: String
-    proof_inputs: [String]
+    foreign_identity: PackageIdentity,
+    native_identity: PackageIdentity,
+    covered_public_symbols: [String],
+    unsupported_symbols: [String],
+    license: String,
+    platforms: [String],
+    proof_status: ProofStatus,
+    proof_digest: String,
+    proof_inputs: [String],
 
     // A candidate that is listed but has no proof yet.
     visible_but_inactive: fn(foreign_identity: PackageIdentity, native_identity: PackageIdentity) -> ReplacementCandidate Never! {
@@ -100,10 +100,10 @@ ReplacementCandidate: struct {
 
 // One public API symbol with its effect and error shape.
 PublicSymbol: struct {
-    name: String
-    signature: String
-    effects: [String]
-    errors: [String]
+    name: String,
+    signature: String,
+    effects: [String],
+    errors: [String],
 
     new: fn(name: String, signature: String) -> PublicSymbol Never! {
         PublicSymbol{name: name, signature: signature, effects: [String]{}, errors: [String]{}}
@@ -124,12 +124,12 @@ PublicSymbol: struct {
 
 // Observed behavior of one example run.
 GoldenFixture: struct {
-    name: String
-    stdout: String
-    stderr: String
-    exit_code: Int
-    files: [{path: String, content: String}]
-    side_effects: [String]
+    name: String,
+    stdout: String,
+    stderr: String,
+    exit_code: Int,
+    files: [{path: String, content: String}],
+    side_effects: [String],
 
     new: fn(name: String, stdout: String) -> GoldenFixture Never! {
         GoldenFixture{name: name, stdout: stdout, stderr: "", exit_code: 0, files: [{path: String, content: String}]{}, side_effects: [String]{}}
@@ -146,11 +146,11 @@ GoldenFixture: struct {
 
 // The public surface of one package on which compatibility is proved.
 CompatibilitySurface: struct {
-    identity: PackageIdentity
-    public_symbols: [PublicSymbol]
-    examples: [String]
-    goldens: [GoldenFixture]
-    platforms: [String]
+    identity: PackageIdentity,
+    public_symbols: [PublicSymbol],
+    examples: [String],
+    goldens: [GoldenFixture],
+    platforms: [String],
 
     new: fn(identity: PackageIdentity) -> CompatibilitySurface Never! {
         CompatibilitySurface{identity: identity, public_symbols: [PublicSymbol]{}, examples: [String]{}, goldens: [GoldenFixture]{}, platforms: [String]{}}
@@ -217,29 +217,29 @@ CompatibilitySurface: struct {
 }
 
 ProofFailureKind: enum {
-    MissingPublicSymbol
-    SignatureMismatch
-    EffectMismatch
-    ErrorShapeMismatch
-    GoldenOutputDiff
-    PlatformMismatch
+    MissingPublicSymbol,
+    SignatureMismatch,
+    EffectMismatch,
+    ErrorShapeMismatch,
+    GoldenOutputDiff,
+    PlatformMismatch,
 }
 
 ProofFailure: struct {
-    kind: ProofFailureKind
-    name: String
-    expected: String
-    found: String
+    kind: ProofFailureKind,
+    name: String,
+    expected: String,
+    found: String,
 }
 
 ProofReport: struct {
-    foreign_identity: PackageIdentity
-    native_identity: PackageIdentity
-    platform: String
-    inputs: [String]
-    covered_public_symbols: [String]
-    failures: [ProofFailure]
-    digest: String
+    foreign_identity: PackageIdentity,
+    native_identity: PackageIdentity,
+    platform: String,
+    inputs: [String],
+    covered_public_symbols: [String],
+    failures: [ProofFailure],
+    digest: String,
 
     passed: fn(self) -> Bool Never! { self.failures.len() == 0 }
 
@@ -272,9 +272,9 @@ ProofReport: struct {
 }
 
 ReplacementPolicyMode: enum {
-    Allow
-    Deny
-    Prefer
+    Allow,
+    Deny,
+    Prefer,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -286,17 +286,17 @@ ReplacementPolicyMode: enum {
 }
 
 ReplacementPolicyRule: struct {
-    foreign_identity: String
-    native_identity: String
-    mode: ReplacementPolicyMode
-    owner_package: String
-    fingerprint: String
+    foreign_identity: String,
+    native_identity: String,
+    mode: ReplacementPolicyMode,
+    owner_package: String,
+    fingerprint: String,
 }
 
 // `policy.replacements`: per-pair rules over a default mode.
 ReplacementPolicy: struct {
-    default_mode: ReplacementPolicyMode
-    rules: [ReplacementPolicyRule]
+    default_mode: ReplacementPolicyMode,
+    rules: [ReplacementPolicyRule],
 
     // Deny everything.
     deny_all: fn() -> ReplacementPolicy Never! {
@@ -331,33 +331,33 @@ ReplacementPolicy: struct {
 }
 
 ReplacementDecision: enum {
-    Inactive(reason: String)
-    Denied(reason: String)
-    Active(ActiveReplacement)
+    Inactive(reason: String),
+    Denied(reason: String),
+    Active(ActiveReplacement),
 }
 
 ActiveReplacement: struct {
-    foreign_call_site: String
-    native_identity: PackageIdentity
-    policy_mode: ReplacementPolicyMode
-    lock_record: SemanticRecord
+    foreign_call_site: String,
+    native_identity: PackageIdentity,
+    policy_mode: ReplacementPolicyMode,
+    lock_record: SemanticRecord,
 }
 
 ImporterReplacementStatus: enum {
-    NoCandidate
-    CandidateFound
-    ProofFailed
-    ProofPassed
-    ReplacementActive
+    NoCandidate,
+    CandidateFound,
+    ProofFailed,
+    ProofPassed,
+    ReplacementActive,
 }
 
 // One importer progress line about a package's native replacement.
 ImporterProgressFact: struct {
-    foreign_identity: PackageIdentity
-    native_identity: PackageIdentity?
-    status: ImporterReplacementStatus
-    proof_digest: String
-    detail: String
+    foreign_identity: PackageIdentity,
+    native_identity: PackageIdentity?,
+    status: ImporterReplacementStatus,
+    proof_digest: String,
+    detail: String,
 
     no_candidate: fn(foreign_identity: PackageIdentity) -> ImporterProgressFact Never! {
         ImporterProgressFact{foreign_identity: foreign_identity, native_identity: None, status: ImporterReplacementStatus.NoCandidate, proof_digest: "", detail: "no native replacement candidate found"}

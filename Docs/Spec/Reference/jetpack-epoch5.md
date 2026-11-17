@@ -43,8 +43,8 @@ A minimal manifest uses the Jet grammar directly:
 name: "demo"
 version: "0.1.0"
 outputs: {
-    app: .Executable{ entry: run }
-    check: .Check{ entry: check }
+    app: .Executable{ entry: run },
+    check: .Check{ entry: check },
 }
 defaults: { run: app, test: check }
 configs: ["config/dev.jet"]

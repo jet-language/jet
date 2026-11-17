@@ -465,7 +465,7 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
 }
 
 #Test("a routed module's types load by name, and each method once its type and its name are reached") {
-    text: "Box: struct {{\n    width: Float\n\n    area: fn(self) -> Float Never! {{ self.width * self.width }}\n    spare: fn(self) -> Float Never! {{ self.width }}\n    __hidden: fn(self) -> Float Never! {{ 0.0 }}\n}}\n\nPad: struct {{\n    size: Float\n\n    area: fn(self) -> Float Never! {{ self.size }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n"
+    text: "Box: struct {{\n    width: Float,\n\n    area: fn(self) -> Float Never! {{ self.width * self.width }}\n    spare: fn(self) -> Float Never! {{ self.width }}\n    __hidden: fn(self) -> Float Never! {{ 0.0 }}\n}}\n\nPad: struct {{\n    size: Float,\n\n    area: fn(self) -> Float Never! {{ self.size }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n"
     load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().area()) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_types(load, "core.math"), [String]{"Box"})
     assert_eq(reach_test_methods(load, "core.math", "Box"), [String]{"area", "__hidden"})
@@ -485,7 +485,7 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
 }
 
 #Test("a routed type reached only through an alias keeps its trait impls, and a method only comptime calls still loads") {
-    text: "Shape: trait {{\n    area: fn(self) -> Float Never!\n}}\n\nBox: struct {{\n    width: Float\n\n    spare: fn(self) -> Float Never! {{ self.width }}\n\n    impl Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nSquare: Box\n\nBoxes: [Box]\n\nmake: fn() -> Square Never! {{ Square{{width: 2.0}} }}\n"
+    text: "Shape: trait {{\n    area: fn(self) -> Float Never!,\n}}\n\nBox: struct {{\n    width: Float,\n\n    spare: fn(self) -> Float Never! {{ self.width }}\n\n    impl Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nSquare: Box\n\nBoxes: [Box]\n\nmake: fn() -> Square Never! {{ Square{{width: 2.0}} }}\n"
     // `make` names only the bare-path alias `Square`; a trait call (`area`
     // through Shape) needs the impl, which stays with its type.
     aliased: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make()) }}\n", "core.math", [String]{}, text)
@@ -516,8 +516,8 @@ reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDrive
 }
 
 #Test("a Core impl of another module's trait loads only once its type and its trait are both reached") {
-    math: "use {{\n    shape: core.text\n}}\n\nBox: struct {{\n    width: Float\n\n    impl shape.Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
-    text: "Shape: trait {{\n    area: fn(self) -> Float Never!\n}}\n\nlabel: fn() -> Int Never! {{ 3 }}\n"
+    math: "use {{\n    shape: core.text\n}}\n\nBox: struct {{\n    width: Float,\n\n    impl shape.Shape {{\n        area: fn(self) -> Float Never! {{ self.width * self.width }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    text: "Shape: trait {{\n    area: fn(self) -> Float Never!,\n}}\n\nlabel: fn() -> Int Never! {{ 3 }}\n"
     // The type alone: the impl stays out, and so does the trait's module it
     // alone would import.
     typed: reach_test_load_pair("use m: core.math\nrun: fn() {{ print(m.make().width) }}\n", math, text)
@@ -535,7 +535,7 @@ reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDrive
 }
 
 #Test("a Core type's codec impl loads only once reached code names the codec trait or calls its verb") {
-    text: "Box: struct {{\n    width: Float\n\n    impl Encode {{\n        encode: fn(self) -> Dyn {{ Dyn.Text(\"box\") }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    text: "Box: struct {{\n    width: Float,\n\n    impl Encode {{\n        encode: fn(self) -> Dyn {{ Dyn.Text(\"box\") }}\n    }}\n}}\n\nmake: fn() -> Box Never! {{ Box{{width: 2.0}} }}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
     typed: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().width) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_methods(typed, "core.math", "Box"), [String]{})
     called: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.make().encode()) }}\n", "core.math", [String]{}, text)
@@ -548,7 +548,7 @@ reach_test_load_pair: fn(source: String, math: String, text: String) -> JetDrive
 }
 
 #Test("a routed module's precise family loads with its type, and an imaginary literal reaches Complex") {
-    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int\n}}\n\n__fraction_add: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float\n}}\n\n__complex_add: fn(a: Complex) -> Complex Never! {{ a }}\n"
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\nFraction: struct {{\n    n: Int,\n}}\n\n__fraction_add: fn(a: Fraction) -> Fraction Never! {{ a }}\n\nComplex: struct {{\n    re: Float,\n}}\n\n__complex_add: fn(a: Complex) -> Complex Never! {{ a }}\n"
     // The two family members are core.math registry members this text owns.
     owned: [String]{"__fraction_add", "__complex_add"}
     plain: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.plain()) }}\n", "core.math", owned, text)

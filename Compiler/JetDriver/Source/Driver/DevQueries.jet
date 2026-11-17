@@ -9,13 +9,13 @@ use {
 // The stock dev loop: watch the package and hot reload, no dev server.
 JetDriverDevConfig: struct {
     // Extra watched paths, relative to the dev file's directory.
-    watch: [String]
+    watch: [String],
     // The dev server port `d.serve` chose.
-    port: Int?
+    port: Int?,
     // "Hot" or "Restart".
-    reload: String
+    reload: String,
     // Whether a `dev: fn(d: Dev)` configured this (false: the stock loop).
-    configured: Bool
+    configured: Bool,
 }
 
 jet_driver_dev_config_stock: fn() -> JetDriverDevConfig Never! {
@@ -23,7 +23,7 @@ jet_driver_dev_config_stock: fn() -> JetDriverDevConfig Never! {
 }
 
 JetDriverDevAdapter: struct {
-    state: Shared<JetDriverDevConfig>
+    state: Shared<JetDriverDevConfig>,
 
     impl JetEvalBuildHostAdapter {
         clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never! {
@@ -58,10 +58,10 @@ jet_driver_dev_host_call: fn(state: Shared<JetDriverDevConfig>, member: String, 
 }
 
 JetDriverDevQueryResult: struct {
-    config: JetDriverDevConfig
-    diagnostics: [Diagnostic]
-    complete: Bool
-    internal_problem: String?
+    config: JetDriverDevConfig,
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    internal_problem: String?,
 }
 
 jet_driver_dev_query_failed: fn(diagnostics: &&[Diagnostic], problem: &&String?) -> JetDriverDevQueryResult Never! {

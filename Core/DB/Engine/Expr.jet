@@ -373,7 +373,7 @@ expr_is_single_table_constraint: fn(a: &ast.AST, e: Int, src: Int, i_src: Int) -
 // exprNodeIsConstantOrGroupBy's walker: WalkState.u is the GROUP BY list,
 // e_code the answer.
 ConstOrGroupByWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -1949,8 +1949,8 @@ expr_if_false_dup: fn(p: &cg.Parse, a: &ast.AST, e0: Int, dest: Int, jump_if_nul
 // matches a literal of pB bound to the same value. `used` collects the
 // variables consulted, for the Vdbe's expmask.
 ParseVarMatch: struct {
-    vars: [base.Mem]
-    used: [Int]
+    vars: [base.Mem],
+    used: [Int],
 
     impl SQLVarMatch {
         var_match: fn(&self, a: &ast.AST, var: Int, e: Int) -> Bool Never! {
@@ -2033,7 +2033,7 @@ expr_implies_expr: fn(p: &cg.Parse, a: &ast.AST, e1: Int, e2: Int, i_tab: Int) -
 // impliesNotNullRow, with the walk's u the cursor and mw_flags whether it
 // is for a RIGHT JOIN.
 ImpliesNotNullRowWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -2134,9 +2134,9 @@ expr_implies_non_null_row: fn(p: &cg.Parse, a: &ast.AST, e0: Int, i_tab: Int, is
 
 // exprIdxCover: a column of cursor `cur` the index (columns `cols`) lacks.
 IdxCoverWalker: struct {
-    cur: Int
-    cols: [Int]
-    code: Int
+    cur: Int,
+    cols: [Int],
+    code: Int,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -2179,7 +2179,7 @@ expr_covered_by_index: fn(db: conn.Conn, a: &ast.AST, e: Int, i_cur: Int, ix: In
 // agginfoPersistExprCb with sqlite3SelectWalkNoop: an AggInfo entry whose
 // expression is the node walked gets a copy of it, as the node may change.
 AggInfoPersistWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -2263,7 +2263,7 @@ find_or_create_agg_info_column: fn(p: &cg.Parse, a: &ast.AST, ai: Int, e: Int) N
 // analyzeAggregate, with the walk's u the NameContext whose AggInfo it
 // fills and its depth the SELECT nesting.
 AnalyzeAggWalker: struct {
-    unused: Int
+    unused: Int,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {

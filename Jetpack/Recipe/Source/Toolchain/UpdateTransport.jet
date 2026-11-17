@@ -24,22 +24,22 @@ TOOLCHAIN_READ_CHUNK: 65536
 
 // Where a channel is published.
 ToolchainEndpoint: enum {
-    File(String)
-    HTTP(ToolchainHTTPEndpoint)
+    File(String),
+    HTTP(ToolchainHTTPEndpoint),
 }
 
 ToolchainHTTPEndpoint: struct {
-    base: String
-    origin: ToolchainHTTPOrigin
+    base: String,
+    origin: ToolchainHTTPOrigin,
 
     url: fn(self, relative: String) -> String Never! { "{self.base}/{relative}" }
 }
 
 // An HTTP origin: scheme, host and effective port.
 ToolchainHTTPOrigin: struct {
-    scheme: String
-    host: ToolchainHTTPHost
-    port: Int
+    scheme: String,
+    host: ToolchainHTTPHost,
+    port: Int,
 
     is_loopback: fn(self) -> Bool Never! {
         if self.host == {
@@ -65,9 +65,9 @@ ToolchainHTTPOrigin: struct {
 }
 
 ToolchainHTTPHost: enum {
-    Name(String)
-    V4(IPv4)
-    V6(IPv6)
+    Name(String),
+    V4(IPv4),
+    V6(IPv6),
 }
 
 // Rust `configured_endpoint`: the environment override, else the Jetpack
@@ -151,8 +151,8 @@ recipe_update_parse_http_url: fn(raw: String) -> ToolchainHTTPOrigin RecipeError
 }
 
 ToolchainHostPort: struct {
-    host: ToolchainHTTPHost
-    port: Int
+    host: ToolchainHTTPHost,
+    port: Int,
 }
 
 // A structural authority: no userinfo or percent-escapes, bracketed IPv6,

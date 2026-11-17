@@ -189,7 +189,7 @@ reader_allow_duplicates: fn<R: Reader>(input: &&R, limits: EncodingLimits{Encodi
 }
 
 JSONReader: struct<R: Reader> {
-    input: stream.JSONPull<R>
+    input: stream.JSONPull<R>,
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
@@ -198,7 +198,7 @@ JSONReader: struct<R: Reader> {
 /// a socket, or any other `Writer`. The source push engine owns framing,
 /// canonicalization, limits and sticky errors.
 JSONWriter: struct<W: Writer> {
-    output: stream.JSONPush<W>
+    output: stream.JSONPush<W>,
 
     write: fn(&self, event: &&DataEvent) -[IO]> EncodingError! { self.output.write(event) }
 
@@ -325,30 +325,30 @@ patch_with_limits: fn(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn Encodin
 events: fn(value: Dyn) -> [DataEvent] Never! { append_events(value) }
 
 Parser: struct {
-    bytes: [U8]
-    index: Int
-    line: Int
-    column: Int
-    depth: Int
-    max_depth: Int
-    path: [String]
-    allow_duplicates: Bool
-    typed_numbers: Bool
+    bytes: [U8],
+    index: Int,
+    line: Int,
+    column: Int,
+    depth: Int,
+    max_depth: Int,
+    path: [String],
+    allow_duplicates: Bool,
+    typed_numbers: Bool,
     // Numbers parse as their validated `Dyn.Number` lexemes (parse_json).
-    exact_numbers: Bool
+    exact_numbers: Bool,
     // The typed-decode cursor (`impl Parser.__DecodeSource`): the first
     // syntax error, which ends every later read; per open container, whether
     // it is an Object, whether no member is read yet, and where its keys
     // start in `seen`; the open Objects' keys, and the key map of an Object
     // past JSON_SEEN_SCAN keys (`names`, owned by frame `names_frame`).
-    failure: EncodingError?
-    open: [Bool]
-    fresh: [Bool]
-    seen_base: [Int]
-    seen: [String]
-    names: [[String:Bool]]
-    names_frame: [Int]
-    key: String
+    failure: EncodingError?,
+    open: [Bool],
+    fresh: [Bool],
+    seen_base: [Int],
+    seen: [String],
+    names: [[String:Bool]],
+    names_frame: [Int],
+    key: String,
 
     new: fn(bytes: [U8], allow_duplicates: Bool) -> Parser Never! {
         Parser{
@@ -1786,11 +1786,11 @@ PATCH_COPY: 4
 PATCH_TEST: 5
 
 PatchOp: struct {
-    kind: Int
-    name: String
-    path: [String]
-    from: [String]
-    value: Dyn
+    kind: Int,
+    name: String,
+    path: [String],
+    from: [String],
+    value: Dyn,
 }
 
 // The first member named `name`, scanning the object's ordered pairs.

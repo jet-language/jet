@@ -19,10 +19,10 @@ use {
 }
 
 CppScalar: enum {
-    Int
-    Float
-    Bool
-    Callback
+    Int,
+    Float,
+    Bool,
+    Callback,
 
     jet: fn(self) -> String Never! {
         if self == {
@@ -53,37 +53,37 @@ CppScalar: enum {
 }
 
 CppParam: struct {
-    name: String
-    kind: CppScalar
+    name: String,
+    kind: CppScalar,
 }
 
 CppRoutine: struct {
-    cpp_name: String
-    jet_name: String
-    params: [CppParam]
-    result: CppScalar
+    cpp_name: String,
+    jet_name: String,
+    params: [CppParam],
+    result: CppScalar,
 }
 
 CppClass: struct {
-    name: String
-    cpp_name: String
-    ctor: [CppParam]
-    methods: [CppRoutine]
+    name: String,
+    cpp_name: String,
+    ctor: [CppParam],
+    methods: [CppRoutine],
 }
 
 // A function template before instantiation: its type parameters and the raw
 // clang parameter/result spellings.
 CppFunctionTemplate: struct {
-    cpp_name: String
-    type_params: [String]
-    params: [{name: String, spelling: String}]
-    result: String
+    cpp_name: String,
+    type_params: [String],
+    params: [{name: String, spelling: String}],
+    result: String,
 }
 
 CppSurface: struct {
-    classes: [CppClass]
-    functions: [CppRoutine]
-    templates: [CppFunctionTemplate]
+    classes: [CppClass],
+    functions: [CppRoutine],
+    templates: [CppFunctionTemplate],
 
     empty: fn() -> CppSurface Never! {
         CppSurface{classes: [CppClass]{}, functions: [CppRoutine]{}, templates: [CppFunctionTemplate]{}}

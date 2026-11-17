@@ -60,8 +60,8 @@ use {
 }
 
 ParsedType: struct {
-    ty: Type
-    span: Span
+    ty: Type,
+    span: Span,
 }
 
 parser_parse_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
@@ -477,26 +477,21 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     ParsedType{ty: Type.Tuple{fields: fields}, span: parser_cover(open.span, close.span)}
 }
 
-// `{name: Type, …}`: a record type, an unnamed struct with named members. A
-// newline between members separates them as a comma does.
+// `{name: Type, …}`: a record type, an unnamed struct with named members.
+// Its members are separated by commas, on one line or many.
 parser_parse_record_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     open: parser_bump(state)
     fields := [TypeTupleField]{}
     loop {
         loop parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
+        member_start: state.position
         name: parser_expect_name(state, "for a record member name")
         parser_expect(state, TOKEN_COLON, "`:` after a record member name")
         ty: parser_parse_type(state, depth + 1)
         fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
-        kind: parser_current_kind(state)
-        if kind == TOKEN_RBRACE -> break
-        if kind != TOKEN_COMMA && kind != TOKEN_SEMI {
-            token: parser_current(state)
-            parser_add_error(state, token.span, "expected `,` between record type members", "a record type lists its named members in source order", "add a comma or close the record type with `}}`")
-            break
-        }
-        parser_bump(state)
+        parser_finish_data_member(state, "record member")
+        if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF || parser_aborting(state) || state.position == member_start -> break
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after the record type")
     span: parser_cover(open.span, close.span)

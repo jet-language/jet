@@ -14,13 +14,13 @@ use {
 
 #Codable
 Count: struct {
-    name: String
-    runs: Int
+    name: String,
+    runs: Int,
 }
 
 #Error
 BoardError: enum {
-    Failed(String)
+    Failed(String),
 }
 
 counts_in: fn(store: db.Store) -> db.Table<String, Count> {
@@ -37,10 +37,10 @@ runs_now: fn(counts: db.Table<String, Count>) -[DB.Read]> Int BoardError! {
 }
 
 Board: struct {
-    store: db.Store
+    store: db.Store,
     // How often this replica's schedule ran, whether its run counted or
     // was dropped.
-    tries: Shared<Int>
+    tries: Shared<Int>,
 
     // Counts a run, at midnight UTC on each leap day. The try counts first,
     // as a dropped run fails its read and returns at once.

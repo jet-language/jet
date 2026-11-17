@@ -28,23 +28,23 @@
 //   protects     .Integrity: it guards what may flow into a trusted place
 //
 Policy: struct {
-    settings: [PolicySetting]
+    settings: [PolicySetting],
 
     impl Marker {
-        sites: [.Package, .Module, .Function, .Method, .Block]
-        inherits: true
-        resolution: .Tighten
-        scopes: [.Package, .Module, .Function, .Block]
+        sites: [.Package, .Module, .Function, .Method, .Block],
+        inherits: true,
+        resolution: .Tighten,
+        scopes: [.Package, .Module, .Function, .Block],
     }
 }
 
 // `#Overflow(.Wrapping)`: the fixed-width overflow mode of one function,
 // method or block body. It is lexical, so it has no module or package site.
 Overflow: struct {
-    mode: OverflowMode
+    mode: OverflowMode,
 
     impl Marker {
-        sites: [.Function, .Method, .Block]
+        sites: [.Function, .Method, .Block],
     }
 }
 
@@ -53,27 +53,27 @@ Overflow: struct {
 // also refuses every compile-time run of it. It is lexical, so it has no
 // module or package site.
 Runtime: struct {
-    mode: RuntimeMode
+    mode: RuntimeMode,
 
     impl Marker {
-        sites: [.Function, .Method, .Block]
+        sites: [.Function, .Method, .Block],
     }
 }
 
 Unsafe: struct {
-    reason: String
-    obligations: ObligationMode{.None}
+    reason: String,
+    obligations: ObligationMode{.None},
 
     impl Marker {
-        sites: [.Function, .Method, .Block, .Operation]
+        sites: [.Function, .Method, .Block, .Operation],
     }
 }
 
 Scrub: struct {
-    tag: Ident
+    tag: Ident,
 
     impl Marker {
-        sites: [.Function, .Method]
+        sites: [.Function, .Method],
     }
 }
 
@@ -81,10 +81,10 @@ Scrub: struct {
 // inputs change. A function uses the bounded default or `bound: none`; the
 // field form is bare `#Memo` before `name: T -> expr`.
 Memo: struct {
-    bound: MemoBound{.Default}
+    bound: MemoBound{.Default},
 
     impl Marker {
-        sites: [.Function, .Field]
+        sites: [.Function, .Field],
     }
 }
 
@@ -92,24 +92,24 @@ Memo: struct {
 // is a pure expression (the `#Pure` checker); it is checked in every build
 // unless a module's build policy strips it.
 Pre: struct {
-    condition: Value
-    message: String
+    condition: Value,
+    message: String,
 
     impl Marker {
-        sites: [.Function, .Method]
-        repeatable: true
+        sites: [.Function, .Method],
+        repeatable: true,
     }
 }
 
 // A postcondition, `#Post(cond, "msg")`; `result` names the return value
 // inside `cond`.
 Post: struct {
-    condition: Value
-    message: String
+    condition: Value,
+    message: String,
 
     impl Marker {
-        sites: [.Function, .Method]
-        repeatable: true
+        sites: [.Function, .Method],
+        repeatable: true,
     }
 }
 
@@ -118,10 +118,10 @@ Post: struct {
 // `#Kernel(.parallel) name: fn …`: the mode is a closed argument, so another
 // execution mode needs a new owner ruling.
 Kernel: struct {
-    mode: KernelMode
+    mode: KernelMode,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
@@ -135,10 +135,10 @@ Kernel: struct {
 // (E1016), one that reads `context.trace` (E1017), and one with a foreign
 // body, `#FFI(c)`, `#FFI(asm)` or `#Import(c)` (E1021).
 Inline: struct {
-    mode: InlineMode{.Hint}
+    mode: InlineMode{.Hint},
 
     impl Marker {
-        sites: [.Function, .Method, .Constant]
+        sites: [.Function, .Method, .Constant],
     }
 }
 
@@ -148,10 +148,10 @@ Inline: struct {
 // (`!Mem.Stack(above: N)`, `jet inspect memory`) counts n calls of it on a
 // recursive path. Depth 0 is invalid.
 MaxDepth: struct {
-    depth: Int
+    depth: Int,
 
     impl Marker {
-        sites: [.Function, .Method]
+        sites: [.Function, .Method],
     }
 }
 
@@ -160,14 +160,14 @@ MaxDepth: struct {
 // a workload whose measured result favors scalar execution.
 Scalar: struct {
     impl Marker {
-        sites: [.Function, .Method]
+        sites: [.Function, .Method],
     }
 }
 
 // A typed Add/Mul impl may derive its reverse lookup.
 Commutative: struct {
     impl Marker {
-        sites: [.Impl]
+        sites: [.Impl],
     }
 }
 
@@ -175,38 +175,38 @@ Commutative: struct {
 // impl's trait for its type and lists it as waived, with the reason
 // (JetSema TraitLaws.jet).
 Waive: struct {
-    law: Ident
-    reason: String
+    law: Ident,
+    reason: String,
 
     impl Marker {
-        sites: [.Impl]
-        repeatable: true
+        sites: [.Impl],
+        repeatable: true,
     }
 }
 
 Job: struct {
-    scope: JobScope{.Dev}
-    packages: Value{[]}
-    cwd: Value{none}
-    inputs: Value{[]}
-    outputs: Value{[]}
-    skip: Value{none}
-    cache: Value{.Uncached}
-    limits: Value{none}
-    after: Value{[]}
-    parallel: Value{none}
+    scope: JobScope{.Dev},
+    packages: Value{[]},
+    cwd: Value{none},
+    inputs: Value{[]},
+    outputs: Value{[]},
+    skip: Value{none},
+    cache: Value{.Uncached},
+    limits: Value{none},
+    after: Value{[]},
+    parallel: Value{none},
     // The schedule: a positive Duration cadence or a daily
     // UTC "HH:MM" time.
-    every: Duration | String{none}
+    every: Duration | String{none},
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
 Replayable: struct {
     impl Marker {
-        sites: [.Function, .Method]
+        sites: [.Function, .Method],
     }
 }
 
@@ -214,30 +214,30 @@ Replayable: struct {
 // and the parser reports each marker with the edit that writes them (E0175).
 // The shape stays declared, the arrow binding `to`, so old sources parse.
 State: struct {
-    state: State
-    to: State{none}
+    state: State,
+    to: State{none},
 
     impl Marker {
-        sites: [.Function, .Method]
+        sites: [.Function, .Method],
     }
 }
 
 FFI: struct {
-    language: FFILanguage
+    language: FFILanguage,
 
     impl Marker {
-        sites: [.Function]
-        owns_menu: true
+        sites: [.Function],
+        owns_menu: true,
     }
 }
 
 // `#Undo(inverse)` names the compensating function a foreign binding
 // registers on the enclosing transaction's rollback path.
 Undo: struct {
-    inverse: Ident
+    inverse: Ident,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
@@ -245,26 +245,26 @@ Undo: struct {
 // `close(handle)` protocol; the named foreign function is checked against the
 // returned handle before the binding is registered.
 Close: struct {
-    close: Ident
+    close: Ident,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
 // A C declaration's native calling convention. C is the implicit default;
 // another ABI is never inherited.
 ABI: struct {
-    name: ABI
+    name: ABI,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
 MustUse: struct {
     impl Marker {
-        sites: [.Function, .Method, .Type]
+        sites: [.Function, .Method, .Type],
     }
 }
 
@@ -272,19 +272,19 @@ MustUse: struct {
 // callable contract.
 Error: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 // The one retiring lifecycle rung. `removed_in` is
 // optional until package editions own removal; before then it remains warn-only.
 Deprecated: struct {
-    since: String
-    use: String
-    removed_in: String{none}
+    since: String,
+    use: String,
+    removed_in: String{none},
 
     impl Marker {
-        sites: [.Function, .Method, .Type]
+        sites: [.Function, .Method, .Type],
     }
 }
 
@@ -299,53 +299,53 @@ Deprecated: struct {
 // the wire and `.Flatten` splices a struct field's keys into the enclosing
 // object.
 Codable: struct {
-    form: CodableField{none}
-    only: CodableDirection{none}
-    unknown: CodableUnknown{none}
-    tag: CodableTag{none}
-    published: Bool{false}
+    form: CodableField{none},
+    only: CodableDirection{none},
+    unknown: CodableUnknown{none},
+    tag: CodableTag{none},
+    published: Bool{false},
 
     impl Marker {
-        sites: [.Type, .Field]
+        sites: [.Type, .Field],
     }
 }
 
 // Named typed receipt section declaration.
 Receipt: struct {
-    name: String
+    name: String,
 
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 Comparable: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 Equatable: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 Debug: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 Numeric: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 Printable: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -353,10 +353,10 @@ Printable: struct {
 // parsing, defaults, help, completion, validation and audit facts. The marker
 // is optional; plain `run: fn()` stays a complete entry.
 CLI: struct {
-    pack: Ident{none}
+    pack: Ident{none},
 
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -364,23 +364,23 @@ CLI: struct {
 // construction.
 Patchable: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 UnitFamily: struct {
-    family: Ident
-    dimension: Value{nominal}
-    base: Ident{"first member when converting"}
+    family: Ident,
+    dimension: Value{nominal},
+    base: Ident{"first member when converting"},
 
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
 SingleUse: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -389,12 +389,12 @@ SingleUse: struct {
 // The layout parser teaches the menu: `c`, `columnar`, and an enum's
 // backing width `U8` … `I64`, with E1105 otherwise.
 Layout: struct {
-    kind: Layout
-    tag: Value{none}
+    kind: Layout,
+    tag: Value{none},
 
     impl Marker {
-        sites: [.Type]
-        owns_menu: true
+        sites: [.Type],
+        owns_menu: true,
     }
 }
 
@@ -404,7 +404,7 @@ Layout: struct {
 // E1125.
 Specified: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -415,7 +415,7 @@ Specified: struct {
 // nothing to run on into (E1128).
 Through: struct {
     impl Marker {
-        sites: [.Arm]
+        sites: [.Arm],
     }
 }
 
@@ -425,13 +425,13 @@ Through: struct {
 // on a computed field is E1131.
 As: struct {
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
 Redact: struct {
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
@@ -439,30 +439,30 @@ Redact: struct {
 // projection arguments below); a NamingCase (`.Camel`) on a type sets the
 // wire casing of all its fields or variants.
 Rename: struct {
-    name: String | NamingCase
-    json: String{none}
-    cbor: String{none}
-    csv: String{none}
-    toml: String{none}
-    yaml: String{none}
-    xml: String{none}
-    args: String{none}
-    env: String{none}
-    db: String{none}
-    layout: String{none}
+    name: String | NamingCase,
+    json: String{none},
+    cbor: String{none},
+    csv: String{none},
+    toml: String{none},
+    yaml: String{none},
+    xml: String{none},
+    args: String{none},
+    env: String{none},
+    db: String{none},
+    layout: String{none},
 
     impl Marker {
-        sites: [.Field, .Variant, .Type]
+        sites: [.Field, .Variant, .Type],
     }
 }
 
 // Field and command help for CLI-derived arguments.
 Doc: struct {
-    text: String
+    text: String,
 
     impl Marker {
-        sites: [.Field, .Type, .Variant, .Method]
-        companion: [Job, .Function]
+        sites: [.Field, .Type, .Variant, .Method],
+        companion: [Job, .Function],
     }
 }
 
@@ -471,12 +471,12 @@ Doc: struct {
 // `env:` the environment fallback. Command input beats the environment, which
 // beats the typed default.
 Arg: struct {
-    flag_only: Bool{false}
-    short: String{none}
-    env: String{none}
+    flag_only: Bool{false},
+    short: String{none},
+    env: String{none},
 
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
@@ -485,35 +485,35 @@ Arg: struct {
 // builds.
 Persist: struct {
     impl Marker {
-        sites: [.Declaration]
+        sites: [.Declaration],
     }
 }
 
 Track: struct {
     impl Marker {
-        sites: [.Declaration]
+        sites: [.Declaration],
     }
 }
 
 Local: struct {
     impl Marker {
-        sites: [.Declaration]
+        sites: [.Declaration],
     }
 }
 
 Shared: struct {
     impl Marker {
-        sites: [.Declaration]
+        sites: [.Declaration],
     }
 }
 
 Meta: struct {
-    category: String{""}
-    tunable: Bool{false}
-    maturity: Maturity{.Tested}
+    category: String{""},
+    tunable: Bool{false},
+    maturity: Maturity{.Tested},
 
     impl Marker {
-        sites: [.Function, .Method, .Declaration, .Constant]
+        sites: [.Function, .Method, .Declaration, .Constant],
     }
 }
 
@@ -521,74 +521,74 @@ Meta: struct {
 // function marker; no startup registration call or second metadata surface.
 DevPanel: struct {
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
 Todo: struct {
     impl Marker {
-        sites: [.Expression]
+        sites: [.Expression],
     }
 }
 
 Shield: struct {
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Impure: struct {
-    reason: String{none}
+    reason: String{none},
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 FX: struct {
-    grant: [Effect]
+    grant: [Effect],
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Transact: struct {
-    name: Ident
+    name: Ident,
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Region: struct {
-    name: Ident
+    name: Ident,
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Live: struct {
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Nondeterministic: struct {
-    reason: String
+    reason: String,
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Context: struct {
-    allocator: Value{default}
-    logger: Value{default}
+    allocator: Value{default},
+    logger: Value{default},
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
@@ -599,7 +599,7 @@ Context: struct {
 // field name (E0761).
 ContextKey: struct {
     impl Marker {
-        sites: [.Declaration]
+        sites: [.Declaration],
     }
 }
 
@@ -607,26 +607,26 @@ ContextKey: struct {
 // `Duration` from entry or an `Instant`. A nested deadline can only shorten
 // the one in force; the earliest wins.
 Deadline: struct {
-    limit: Duration | Instant
+    limit: Duration | Instant,
 
     impl Marker {
-        sites: [.Block, .Function]
+        sites: [.Block, .Function],
     }
 }
 
 Reactive: struct {
     impl Marker {
-        sites: [.Function, .Method, .Block]
+        sites: [.Function, .Method, .Block],
     }
 }
 
 // `#Off` erases a statement or block from every build; `#Off(.Release)` only
 // from release builds. Either body is type-checked in every build.
 Off: struct {
-    build: BuildCondition{none}
+    build: BuildCondition{none},
 
     impl Marker {
-        sites: [.Statement, .Block]
+        sites: [.Statement, .Block],
     }
 }
 
@@ -634,10 +634,10 @@ Off: struct {
 // compile's `--deep-checks` request selects its function. The body is
 // type-checked in every build.
 On: struct {
-    build: BuildCondition
+    build: BuildCondition,
 
     impl Marker {
-        sites: [.Statement, .Block]
+        sites: [.Statement, .Block],
     }
 }
 
@@ -646,30 +646,30 @@ On: struct {
 // `.expect_fail([E30xx,] message: "text")` checks a
 // region's raw stop message. Whole-test expected_fail remains the known-bug mark.
 Test: struct {
-    name: String{"function name"}
-    faults: [Effect]{[]}
-    expected_fail: Bool{false}
+    name: String{"function name"},
+    faults: [Effect]{[]},
+    expected_fail: Bool{false},
 
     impl Marker {
-        sites: [.Test]
+        sites: [.Test],
     }
 }
 
 Target: struct {
-    target: Target
+    target: Target,
 
     impl Marker {
-        sites: [.File, .Module, .Function]
+        sites: [.File, .Module, .Function],
     }
 }
 
 // #2793: target interrupt vector plus bounded effect row.
 Interrupt: struct {
-    vector: Ident
-    effects: [Effect]
+    vector: Ident,
+    effects: [Effect],
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
@@ -677,35 +677,35 @@ Interrupt: struct {
 // equivalent `value.function(…)` spelling.
 Root: struct {
     impl Marker {
-        sites: [.Parameter]
+        sites: [.Parameter],
     }
 }
 
 HTML: struct {
-    page: Path
+    page: Path,
 
     impl Marker {
-        sites: [.File, .Block]
+        sites: [.File, .Block],
     }
 }
 
 NoPrelude: struct {
     impl Marker {
-        sites: [.File]
+        sites: [.File],
     }
 }
 
 SQL: struct {
-    row: Type{none}
+    row: Type{none},
 
     impl Marker {
-        sites: [.Block]
+        sites: [.Block],
     }
 }
 
 Bindgen: struct {
     impl Marker {
-        sites: [.Module]
+        sites: [.Module],
     }
 }
 
@@ -713,19 +713,19 @@ Bindgen: struct {
 // silences that one lint there; the lint is named by its diagnostic type path
 // (JetSema/Source/Sema/LintAllowances.jet).
 Allow: struct {
-    lint: Ident
-    reason: String{none}
+    lint: Ident,
+    reason: String{none},
 
     impl Marker {
-        sites: [.Declaration, .Field, .Statement]
-        repeatable: true
+        sites: [.Declaration, .Field, .Statement],
+        repeatable: true,
     }
 }
 
 // Stable-address storage is not a code-generation hint.
 Static: struct {
     impl Marker {
-        sites: [.Constant]
+        sites: [.Constant],
     }
 }
 
@@ -734,7 +734,7 @@ Static: struct {
 #FX(!DB, !Exec, !Net)
 Input: struct {
     impl Marker {
-        sites: [.TypeUse]
+        sites: [.TypeUse],
         protects: .Integrity
     }
 }
@@ -749,7 +749,7 @@ PII: struct {
 #FX(!DB, !Exec, !Net)
 Secret: struct {
     impl Marker {
-        sites: [.TypeUse]
+        sites: [.TypeUse],
         timing: .Fixed
     }
 }

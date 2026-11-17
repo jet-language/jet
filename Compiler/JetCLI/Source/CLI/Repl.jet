@@ -66,16 +66,16 @@ JET_CLI_REPL_EVAL_LABEL: "<eval>"
 
 // One live binding: its checked type and the text its value displays as.
 JetCLIReplBinding: struct {
-    name: String
-    ty: Type?
-    shown: String
-    mutable: Bool
+    name: String,
+    ty: Type?,
+    shown: String,
+    mutable: Bool,
 }
 
 JetCLIReplStatus: enum {
-    Ok
-    Error
-    Interrupted
+    Ok,
+    Error,
+    Interrupted,
 }
 
 // What a session fixes when it starts: the invocation's authority rows
@@ -83,65 +83,65 @@ JetCLIReplStatus: enum {
 // (`--deep-checks`). Nothing in a session changes them, and a session started
 // with other options neither resets nor takes over this one.
 JetCLIReplOptions: struct {
-    invocation: JetCLIInvocationAuthority?{None}
-    deep_checks: DeepChecks{DeepChecks{}}
+    invocation: JetCLIInvocationAuthority?{None},
+    deep_checks: DeepChecks{DeepChecks{}},
 }
 
 // `Turn`: one notebook turn of the session.
 JetCLIReplTurn: struct {
-    id: Int
-    summary: String
-    status: JetCLIReplStatus
-    folded: Bool
-    pinned: Bool
+    id: Int,
+    summary: String,
+    status: JetCLIReplStatus,
+    folded: Bool,
+    pinned: Bool,
 }
 
 JetCLIReplSession: struct {
-    nonce: String
+    nonce: String,
     // The session's private directory and the file its checks anchor at.
-    dir: String
-    anchor: String
-    anchor_real: String
+    dir: String,
+    anchor: String,
+    anchor_real: String,
     // Where turns run: the project directory, else the working directory.
-    base_dir: String
-    invocation: JetCLIInvocationAuthority?
-    deep_checks: DeepChecks
-    color: Bool
-    step: Int
-    imports: [String]
-    items: [String]
-    statements: [String]
-    bindings: [JetCLIReplBinding]
-    turns: [JetCLIReplTurn]
-    noted_print: Bool
+    base_dir: String,
+    invocation: JetCLIInvocationAuthority?,
+    deep_checks: DeepChecks,
+    color: Bool,
+    step: Int,
+    imports: [String],
+    items: [String],
+    statements: [String],
+    bindings: [JetCLIReplBinding],
+    turns: [JetCLIReplTurn],
+    noted_print: Bool,
     // What `:reset` returns to: the project's items and imports.
-    baseline_imports: [String]
-    baseline_items: [String]
+    baseline_imports: [String],
+    baseline_items: [String],
     // A turn the authority gate refused: the session then exits nonzero,
     // so a piped session that was denied an effect never reads as success.
-    denied: Bool
+    denied: Bool,
     // The effects the session has named in its notice (jet_cli_repl_refusal).
-    noticed: [String]
+    noticed: [String],
 }
 
 // One value a turn shows: the binding (or the echo) and its checked type.
 JetCLIReplReport: struct {
-    name: String
-    ty: Type?
-    mutable: Bool
+    name: String,
+    ty: Type?,
+    mutable: Bool,
 }
 
 JetCLIReplValue: struct {
-    index: Int
-    shown: String
+    index: Int,
+    shown: String,
 }
 
 // `TurnOutcome`: what the child reported for one program.
 JetCLIReplOutcome: enum {
-    Done(stdout: String, stderr: String, values: [JetCLIReplValue])
-    Stopped(stdout: String, report: String)
-    Interrupted
-    Unstarted(diagnostic: Diagnostic)
+    Done(stdout: String, stderr: String, values: [JetCLIReplValue]),
+    Stopped(stdout: String, report: String),
+    Interrupted,
+    Unstarted(diagnostic: Diagnostic),
 }
 
 // The program ran and stopped with an error; `report` is its stderr.
@@ -149,9 +149,9 @@ JetCLIReplOutcome: enum {
 // One turn program compiled here: an item or import checked with the
 // session, or a turn's statements built into the binary its child runs.
 JetCLIReplChecked: enum {
-    Checked(binary: String, locals: [JetCLIReplLocal])
-    Failed(diagnostics: [Diagnostic], reports: Bool)
-    Refused(report: String)
+    Checked(binary: String, locals: [JetCLIReplLocal]),
+    Failed(diagnostics: [Diagnostic], reports: Bool),
+    Refused(report: String),
 }
 
 // The built binary ("" for a check) and the checked `let` locals of `run`.
@@ -160,25 +160,25 @@ JetCLIReplChecked: enum {
 // The report that stopped the compile or the build.
 
 JetCLIReplLocal: struct {
-    name: String
-    ty: Type
+    name: String,
+    ty: Type,
 }
 
 // A session program and where its parts start, in bytes: `reports_at` is
 // where the lines that print the turn's values begin.
 JetCLIReplSource: struct {
-    text: String
-    import_at: Int
-    item_at: Int
-    statements_at: Int
-    reports_at: Int
+    text: String,
+    import_at: Int,
+    item_at: Int,
+    statements_at: Int,
+    reports_at: Int,
 }
 
 // `TurnResult` for the line loop and `jet eval`.
 JetCLIReplTurnResult: enum {
-    Done(stdout: String, stderr: String, echo: JetCLIReplReport?, shown: String)
-    Failed(stdout: String, stderr: String, diagnostics: [Diagnostic], report: String)
-    Interrupted
+    Done(stdout: String, stderr: String, echo: JetCLIReplReport?, shown: String),
+    Failed(stdout: String, stderr: String, diagnostics: [Diagnostic], report: String),
+    Interrupted,
 }
 
 jet_cli_repl_out: fn(text: String) {

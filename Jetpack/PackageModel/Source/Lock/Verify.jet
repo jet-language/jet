@@ -17,9 +17,9 @@ use {
 // report a missing generated fact without treating it as a request to move a
 // declared dependency.
 LockIncompleteKind: enum {
-    Dependency
-    Toolchain
-    SourceChannel
+    Dependency,
+    Toolchain,
+    SourceChannel,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -33,7 +33,7 @@ LockIncompleteKind: enum {
 // Safe regeneration data for a lock diagnostic. `argv` stays separate from a
 // shell command string so CLI hosts can run it without interpolation.
 LockRegeneration: struct {
-    argv: [String]
+    argv: [String],
 
     dependency: fn() -> LockRegeneration Never! {
         LockRegeneration{argv: [String]{BINARY_NAME, "fetch"}}
@@ -59,10 +59,10 @@ LockRegeneration: struct {
 // offline realization needs.
 #Error
 LockCompletenessError: struct {
-    kind: LockIncompleteKind
-    name: String
-    missing_field: String
-    regeneration: LockRegeneration
+    kind: LockIncompleteKind,
+    name: String,
+    missing_field: String,
+    regeneration: LockRegeneration,
 
     missing: fn(kind: LockIncompleteKind, name: String, missing_field: String, regeneration: LockRegeneration) -> LockCompletenessError Never! {
         LockCompletenessError{kind: kind, name: name, missing_field: missing_field, regeneration: regeneration}

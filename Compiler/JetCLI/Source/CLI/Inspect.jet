@@ -62,23 +62,23 @@ JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisio
 // `InspectScope`: `Target` is a source file or a package directory (a target
 // machine name for the `target` plane).
 JetCLIInspectScope: enum {
-    Package
-    Target(target: String)
-    Live(pid: Int)
-    Replay(artifact: String)
+    Package,
+    Target(target: String),
+    Live(pid: Int),
+    Replay(artifact: String),
 }
 
 // `InspectRequest`: the plane, its scope, and the plane flags kept for the
 // projection.
 JetCLIInspectRequest: struct {
-    plane: String
-    scope: JetCLIInspectScope
-    options: [String]
+    plane: String,
+    scope: JetCLIInspectScope,
+    options: [String],
 }
 
 JetCLIInspectParse: enum {
-    Parsed(request: JetCLIInspectRequest)
-    Failed(message: String)
+    Parsed(request: JetCLIInspectRequest),
+    Failed(message: String),
 }
 
 // `parse_inspect_pid`: a positive `u32`.
@@ -407,42 +407,42 @@ jet_cli_inspect_impact: fn(argv: [String], color: Bool, json: Bool, threads: Int
 // `graph`, `query`, or `explain-build`, and `subject` the explain-build
 // subject.
 JetCLIInspectJob: struct {
-    action: String
-    file: String
-    subject: String?
-    json: Bool
-    verbose: Bool{false}
-    color: Bool
-    threads: Int?
+    action: String,
+    file: String,
+    subject: String?,
+    json: Bool,
+    verbose: Bool{false},
+    color: Bool,
+    threads: Int?,
     // The stderr notices entry resolution wrote, which go out first.
-    notice: String
+    notice: String,
     // A bare or directory scope (a project check, `CheckScope::Project`) rather
     // than an explicitly named file.
-    project: Bool
+    project: Bool,
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
-    depth: Int{3}
+    depth: Int{3},
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
-    root: String{""}
+    root: String{""},
     // `decisions`, `memory` and `choices`: the profile name, the build options it
     // compiles under (the profile's, with the build option flags over them),
     // and the scope name (`subject` is the named target).
-    profile: String{"debug"}
-    build: BuildOptions?{None}
-    scope: String{""}
+    profile: String{"debug"},
+    build: BuildOptions?{None},
+    scope: String{""},
     // `decisions --estimate`: list each large raw value with its zstd
     // estimate (InspectDecisions.jet jet_cli_large_values).
-    estimate: Bool{false}
+    estimate: Bool{false},
     // `explain-effects`: the file holding the site when it is a module the
     // compiled entry loads, and the 1-based line it names (0 for a whole file).
-    site: String{""}
-    line: Int{0}
+    site: String{""},
+    line: Int{0},
 }
 
 // The entry an inspect scope names, and the stderr notices project entry
 // resolution wrote (a migrated retired entry), which go out first.
 JetCLIInspectEntry: enum {
-    File(path: String, notice: String)
-    Refused(plan: JetCLIPlan)
+    File(path: String, notice: String),
+    Refused(plan: JetCLIPlan),
 }
 
 // `write_mode_diagnostic` then exit: one plain stderr line, with its E2104
@@ -503,32 +503,32 @@ jet_cli_inspect_entry: fn(scope: JetCLIInspectScope, plane: String, color: Bool)
 // crates/jet-foundation `CoverageFact`: one plane's repair coverage over the
 // active diagnostic rows.
 JetCLICoverageFact: struct {
-    plane: String
-    rows: Int
-    edit_covered: Int
-    reason_covered: Int
-    behavior_reasons: Int
-    design_reasons: Int
-    ambiguous_reasons: Int
-    uncovered: Int
+    plane: String,
+    rows: Int,
+    edit_covered: Int,
+    reason_covered: Int,
+    behavior_reasons: Int,
+    design_reasons: Int,
+    ambiguous_reasons: Int,
+    uncovered: Int,
 }
 
 // `CoverageBaselineRow`, keyed by its plane.
 JetCLICoverageBaselineRow: struct {
-    plane: String
-    edit_covered: Int
-    reason_covered: Int
-    total: Int
+    plane: String,
+    edit_covered: Int,
+    reason_covered: Int,
+    total: Int,
 }
 
 JetCLICoverageFacts: enum {
-    Facts(facts: [JetCLICoverageFact])
-    Invalid(message: String)
+    Facts(facts: [JetCLICoverageFact]),
+    Invalid(message: String),
 }
 
 JetCLICoverageBaseline: enum {
-    Rows(rows: [JetCLICoverageBaselineRow])
-    Invalid(message: String)
+    Rows(rows: [JetCLICoverageBaselineRow]),
+    Invalid(message: String),
 }
 
 // `diagnostic_coverage_entries` folded by `try_facts`: one fact per source
@@ -1027,8 +1027,8 @@ jet_cli_compiler_diagnostics: fn(diagnostics: [Diagnostic]) -> JetCLIStatusValue
 // `SourcePositionIndex::line_col` for every byte offset: lines and columns
 // count Unicode scalars from 1; an offset inside a scalar counts that scalar.
 JetCLIPositions: struct {
-    lines: [Int]
-    columns: [Int]
+    lines: [Int],
+    columns: [Int],
 }
 
 jet_cli_compiler_positions: fn(bytes: [U8]) -> JetCLIPositions Never! {
@@ -1301,11 +1301,11 @@ jet_cli_compiler_syntax_tree: fn(source: String) -> JetCLIStatusValue Never! {
 
 // `OperatorImpl`, with its operand and result types by name.
 JetCLIOperatorImpl: struct {
-    left: String
-    trait_name: String
-    rhs: String
-    result: String
-    explicit_rhs: Bool
+    left: String,
+    trait_name: String,
+    rhs: String,
+    result: String,
+    explicit_rhs: Bool,
 }
 
 jet_cli_inspect_plain_number: fn(name: String) -> Bool Never! {
@@ -1825,11 +1825,11 @@ jet_cli_inspect_checked_build_host: fn(job: JetCLIInspectJob) -> JetDriverVerbOu
 
 // jet-impact `ImpactEdge` / `ImpactRef`.
 JetCLIImpactEdge: struct {
-    depth: Int
-    caller: String
-    callee: String
-    module_path: String
-    span: Span
+    depth: Int,
+    caller: String,
+    callee: String,
+    module_path: String,
+    span: Span,
 }
 
 // Over jet-impact `impact_report`: the symbol's definition (`module.name`

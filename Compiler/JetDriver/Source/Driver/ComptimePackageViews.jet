@@ -46,10 +46,10 @@ use {
 
 #Error
 JetDriverPackageReadError: struct {
-    code: String
-    file: String
-    message: String
-    cause: String
+    code: String,
+    file: String,
+    message: String,
+    cause: String,
 }
 
 jet_driver_package_read_error: fn(file: String, message: String, cause: String) -> JetDriverPackageReadError Never! {
@@ -96,9 +96,9 @@ jet_driver_package_inline_parse_error: fn(error: PackageParseError) -> JetDriver
 
 // A leading inline `package: { … }` carrier, its block, and its source.
 JetDriverInlinePackageCarrier: struct {
-    file: CheckedFile
-    block: InlinePackageBlock
-    source: String
+    file: CheckedFile,
+    block: InlinePackageBlock,
+    source: String,
 }
 
 // `checked_inline_package`: the first entry candidate that carries an inline
@@ -197,9 +197,9 @@ jet_driver_package_read_lock: fn(root: String) -[FS, Env]> TComptimeValue JetDri
 // `PackageSourceLoader`: the profile evaluator's files, each read through the
 // pinned root's authority and revalidated after evaluation.
 JetDriverPackageSourceLoader: struct {
-    resolver: AuthorityResolver
-    checked_inputs: [CheckedFile]
-    last_file: String
+    resolver: AuthorityResolver,
+    checked_inputs: [CheckedFile],
+    last_file: String,
 
     impl SourceLoader {
         read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError! {

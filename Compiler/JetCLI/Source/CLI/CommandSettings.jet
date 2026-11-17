@@ -35,41 +35,41 @@ use {
 // true or false, a string, or a list of strings, as JetCLIFlagValue says the
 // flag takes; any other value is refused (E2104).
 JetCLICommandSetting: struct {
-    key: String
-    value: Dyn
-    line: Int{0}
+    key: String,
+    value: Dyn,
+    line: Int{0},
 }
 
 // One place that holds settings; `source` names it in diagnostics.
 JetCLICommandSettingLayer: struct {
-    source: String
-    settings: [JetCLICommandSetting]
+    source: String,
+    settings: [JetCLICommandSetting],
 }
 
 // The words the layers add to one command line, or every problem they have.
 JetCLICommandSettingWords: enum {
-    Words(words: [String])
-    Refused(reports: [Diagnostic])
+    Words(words: [String]),
+    Refused(reports: [Diagnostic]),
 }
 
 // A command that has settings: the word that dispatches it, which its flags
 // are scoped by, and its key prefix.
 JetCLISettingCommand: struct {
-    word: String
-    path: String
+    word: String,
+    path: String,
 }
 
 // One checked setting: the command it belongs to, its flag, and the words it
 // writes; or its report.
 JetCLISettingCheck: enum {
-    Flag(path: String, spec: JetCLIFlagSpec, words: [String])
-    Refused(report: Diagnostic)
+    Flag(path: String, spec: JetCLIFlagSpec, words: [String]),
+    Refused(report: Diagnostic),
 }
 
 // A flag the layers remember for this command line, and its words.
 JetCLISettingChosen: struct {
-    long: String
-    words: [String]
+    long: String,
+    words: [String],
 }
 
 // The key name of a flag: `--no-sign` is `no_sign`, `-p` is `p`.

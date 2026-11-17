@@ -24,7 +24,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 }
 
 #Test("suffix_failure_contracts_cover_nested_type_positions") {
-    parsed: program("Holder: struct {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nBox<T>: T? IOError!\nfetch: fn(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nsave: fn() IOError! {{}}\nrun: fn() {{}}\n")
+    parsed: program("Holder: struct {{\noptional: Int?,\nunit: IOError!,\nunion: Int (DbError | TimeoutError)!,\ncallback: fn(Int? IOError!) IOError!,\nimpossible: Never!,\n}}\nBox<T>: T? IOError!\nfetch: fn(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nsave: fn() IOError! {{}}\nrun: fn() {{}}\n")
     holder: loop item in parsed.items {
         if item == .Struct(def) && def.name == "Holder" {
             break def
@@ -80,7 +80,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 }
 
 #Test("built_in_marker_accepts_positional_string_argument") {
-    parsed: program("#CLI\nServeArgs: struct {{\n#Doc(\"port\") port: Int{{3000}}\n}}\nrun: fn(args: ServeArgs) {{}}\n")
+    parsed: program("#CLI\nServeArgs: struct {{\n#Doc(\"port\") port: Int{{3000}},\n}}\nrun: fn(args: ServeArgs) {{}}\n")
     field: loop item in parsed.items {
         if item == .Struct(def) && !def.fields.is_empty() {
             break def.fields[0]

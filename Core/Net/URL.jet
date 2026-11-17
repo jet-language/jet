@@ -15,28 +15,28 @@ use {
 
 #Error
 URLError: enum {
-    Syntax
-    Percent
+    Syntax,
+    Percent,
 }
 
 URLPart: struct {
-    text: String
-    hole: Bool
+    text: String,
+    hole: Bool,
 }
 
 URL: struct {
-    scheme_text: String
-    user_text: String
-    password_text: String
-    host_text: String
-    port_value: Int
-    port_explicit: Bool
-    path_text: String
-    query_text: String
-    fragment_text: String
-    raw: String
-    host_recipe: [URLPart]
-    path_recipe: [URLPart]
+    scheme_text: String,
+    user_text: String,
+    password_text: String,
+    host_text: String,
+    port_value: Int,
+    port_explicit: Bool,
+    path_text: String,
+    query_text: String,
+    fragment_text: String,
+    raw: String,
+    host_recipe: [URLPart],
+    path_recipe: [URLPart],
 
     impl Display {
         display: fn(self) -> String { unparse(self) }
@@ -169,8 +169,8 @@ URL: struct {
     // the program runs; holes stay opaque, so their slashes and dot segments never
     // become URL grammar.
     impl CheckedText {
-        Error: URLLiteralError
-        Hole: String
+        Error: URLLiteralError,
+        Hole: String,
 
         check: fn(text: String) -[]> URLLiteralError! {
             if url_literal_reason(text) == .Val(reason) {
@@ -210,7 +210,7 @@ userinfo_text: fn(url: URL) -> String Never! {
 // Why a checked URL literal was rejected.
 #Error
 URLLiteralError: struct {
-    reason: String
+    reason: String,
 }
 
 // A marker that occurs in none of `literals`, standing for each hole while the
@@ -329,7 +329,7 @@ literal: fn(literals: [String], holes: [String]) -> URL Never! {
 }
 
 URLHoleCursor: struct {
-    index: Int
+    index: Int,
 }
 
 // `raw` keeps the constructor's canonical rendering, including explicitly

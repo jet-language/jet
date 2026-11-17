@@ -18,7 +18,7 @@ scope: module
 
 #Error
 AllocError: struct {
-    requested_bytes: Int
+    requested_bytes: Int,
     allocator: String
 }
 
@@ -179,10 +179,10 @@ __region_release: fn(address: Int, bytes: Int) Never! { __region_release(address
 /// unmaps it. `claim` hands blocks out in address order and never reuses
 /// them; reuse is the allocator's job.
 Region: struct {
-    priv base: Int
-    priv size: Int
-    priv cursor: Int
-    priv mapped: Bool
+    priv base: Int,
+    priv size: Int,
+    priv cursor: Int,
+    priv mapped: Bool,
 
     /// A region of `bytes` of fresh private memory. A size of zero or less,
     /// or a system refusal, is an AllocError.
@@ -244,8 +244,8 @@ Region: struct {
 /// single use: it ends by going back to an allocator's `release`, and it
 /// cannot be copied or forged. `split` and `join` change it in place.
 #SingleUse Block: struct {
-    priv address: Int
-    priv size: Int
+    priv address: Int,
+    priv size: Int,
 
     /// The first address of the block.
     address: fn(self) -> Int Never! { self.address }
@@ -282,8 +282,8 @@ Region: struct {
 /// on false the block is unchanged. Neither fails: the runtime calls
 /// `release` for a `#Context(allocator:)` block inside a drop.
 Allocator: trait {
-    allocate: fn(&self, size: Int, align: Int) -> Block AllocError!
-    release: fn(&self, block: &&Block) Never!
+    allocate: fn(&self, size: Int, align: Int) -> Block AllocError!,
+    release: fn(&self, block: &&Block) Never!,
     resize: fn(&self, block: &Block, new_size: Int) -> Bool Never!
 }
 

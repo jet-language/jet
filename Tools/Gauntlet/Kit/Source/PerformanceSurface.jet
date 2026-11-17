@@ -72,72 +72,72 @@ PS_HELP: "Usage: node Tools/Gauntlet/Harness/performance-surface.mjs [options]\n
 
 // One thing wrong with a receipt: its kind and why.
 SurfaceIssue: struct {
-    kind: String
-    cause: String
+    kind: String,
+    cause: String,
 }
 
 // The bootstrap settings, each as a receipt holds it.
 BootstrapOptions: struct {
-    resamples: Dyn
-    seed: Dyn
-    lower_rank: Dyn
-    upper_rank: Dyn
+    resamples: Dyn,
+    seed: Dyn,
+    lower_rank: Dyn,
+    upper_rank: Dyn,
 }
 
 // The statistics of a paired timing: each arm's median, their ratio, the
 // paired ratios and differences, and the bootstrap confidence.
 SurfaceStatistics: struct {
-    surface_median: Float
-    plain_median: Float
-    ratio: Float
-    ratios: [Float]
-    differences: [Float]
-    bootstrap: Dyn
+    surface_median: Float,
+    plain_median: Float,
+    ratio: Float,
+    ratios: [Float],
+    differences: [Float],
+    bootstrap: Dyn,
 }
 
 // What the build of one arm is given.
 ArmBuild: struct {
-    binary: String
-    source: String
-    scratch_root: String
-    label: String
-    timeout_ms: Int
+    binary: String,
+    source: String,
+    scratch_root: String,
+    label: String,
+    timeout_ms: Int,
 }
 
 // What one timed run of an arm is given.
 ArmRun: struct {
-    executable: String
-    source: String
-    expected_output: String
-    scratch_root: String
-    label: String
-    timeout_ms: Int
-    context: Dyn
+    executable: String,
+    source: String,
+    expected_output: String,
+    scratch_root: String,
+    label: String,
+    timeout_ms: Int,
+    context: Dyn,
 }
 
 // What a measurement is given: absolute repository, compiler and scratch
 // paths, the compiler's identity, the manifest pair row measured (null for
 // the compound pair) and the manifest (null for none).
 SurfaceOptions: struct {
-    repo_dir: String
-    artifact_path: String
-    scratch_root: String
-    identity: Dyn
-    pair: Dyn
-    manifest: Dyn
-    timeout_ms: Int
-    generated_at: String
-    generated_command: String
-    build_line: Dyn
-    historical_receipts: Dyn
-    prior_canonical_receipt: Dyn
+    repo_dir: String,
+    artifact_path: String,
+    scratch_root: String,
+    identity: Dyn,
+    pair: Dyn,
+    manifest: Dyn,
+    timeout_ms: Int,
+    generated_at: String,
+    generated_command: String,
+    build_line: Dyn,
+    historical_receipts: Dyn,
+    prior_canonical_receipt: Dyn,
 }
 
 // A measured receipt, its validation and its pair row.
 SurfaceMeasure: struct {
-    receipt: Dyn
-    validation: Dyn
-    pair: Dyn
+    receipt: Dyn,
+    validation: Dyn,
+    pair: Dyn,
 }
 
 // The source of one spelling of the compound pair: `step` adds each i.
@@ -1060,10 +1060,10 @@ make_trial: fn(index: Int, order: String, surface: Dyn, plain: Dyn) -> Dyn {
 
 // The sampled rows of a measurement and its order vectors.
 Sampled: struct {
-    warmup_orders: [String]
-    trial_orders: [String]
-    warmups: [Dyn]
-    trials: [Dyn]
+    warmup_orders: [String],
+    trial_orders: [String],
+    warmups: [Dyn],
+    trials: [Dyn],
 }
 
 // The pair row of a measurement.
@@ -1315,9 +1315,9 @@ snapshot_path: fn(canonical_path: String, generated_at: String) -> String {
 // the receipts it linked (else `default_links`) and `default_links`, each
 // with its digest, and the first thing that went wrong, if any.
 History: struct {
-    links: [String]
-    digests: Dyn
-    issue: String?
+    links: [String],
+    digests: Dyn,
+    issue: String?,
 }
 
 // The prior canonical receipt at `canonical_path`, the snapshot it is
@@ -1356,13 +1356,13 @@ prepare_history: fn(canonical_path: String, generated_at: String, repo: String, 
 
 // What the command line asks: a help request, or each option given.
 SurfaceArgs: struct {
-    help: Bool
-    artifact: String?
-    scratch: String?
-    output: String?
-    canonical: String?
-    timeout_ms: Int?
-    pair: String?
+    help: Bool,
+    artifact: String?,
+    scratch: String?,
+    output: String?,
+    canonical: String?,
+    timeout_ms: Int?,
+    pair: String?,
 }
 
 parse_surface_args: fn(argv: [String]) -> SurfaceArgs Err! {

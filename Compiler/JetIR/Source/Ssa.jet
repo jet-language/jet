@@ -26,71 +26,71 @@
 // dominators.
 
 IRSsaKind: enum {
-    Param
-    Def
-    Phi
-    Undef
+    Param,
+    Def,
+    Phi,
+    Undef,
 }
 
 // Where an edge into a join leaves: falling through (a Loop's entry, an
 // Else, an End), a Br, a BrIf, or an If without an Else's false branch.
 IRSsaEdgeKind: enum {
-    Fall
-    Br
-    BrIf
-    IfFalse
+    Fall,
+    Br,
+    BrIf,
+    IfFalse,
 }
 
 IRSsa: struct {
     // Per value: its slot (and so its type row), kind, and the parameter
     // slot, defining instruction or phi index; `repl` the value it was
     // replaced by (itself when none: ir_ssa_find).
-    val_slot: [Int]
-    val_kind: [IRSsaKind]
-    val_at: [Int]
-    repl: [Int]
+    val_slot: [Int],
+    val_kind: [IRSsaKind],
+    val_at: [Int],
+    repl: [Int],
     // Per slot: its Undef value, -1 until one is read.
-    undef: [Int]
+    undef: [Int],
     // Per instruction: the value it defines, the values its operands a, b
     // and c read (-1 when the operand is not a slot read), and its block
     // (-1 in unreachable code).
-    def: [Int]
-    use_a: [Int]
-    use_b: [Int]
-    use_c: [Int]
-    block: [Int]
+    def: [Int],
+    use_a: [Int],
+    use_b: [Int],
+    use_c: [Int],
+    block: [Int],
     // Per args-pool entry: the value the call operand reads (-1: none).
-    use_args: [Int]
+    use_args: [Int],
     // Per block: predecessors (for a join, in its edges' order), immediate
     // dominator, and preorder/postorder numbers of the dominator tree.
-    preds: [[Int]]
-    idom: [Int]
-    pre: [Int]
-    post: [Int]
+    preds: [[Int]],
+    idom: [Int],
+    pre: [Int],
+    post: [Int],
     // Per instruction: the join of the construct it opens (-1).
-    join_of: [Int]
+    join_of: [Int],
     // Per join: its opener, merged slots, phis (by slot position), edges,
     // and the block its phis start (-1 until reached).
-    join_opener: [Int]
-    join_slots: [[Int]]
-    join_phis: [[Int]]
-    join_edges: [[Int]]
-    join_block: [Int]
+    join_opener: [Int],
+    join_slots: [[Int]],
+    join_phis: [[Int]],
+    join_edges: [[Int]],
+    join_block: [Int],
     // Per edge: kind, the instruction its copies go before (an IfFalse
     // edge's: the If's End), the block it leaves, its join, and where its
     // values (one per merged slot) start in `edge_vals`.
-    edge_kind: [IRSsaEdgeKind]
-    edge_at: [Int]
-    edge_block: [Int]
-    edge_join: [Int]
-    edge_start: [Int]
-    edge_vals: [Int]
+    edge_kind: [IRSsaEdgeKind],
+    edge_at: [Int],
+    edge_block: [Int],
+    edge_join: [Int],
+    edge_start: [Int],
+    edge_vals: [Int],
     // Per edge: its position among its join's edges.
-    edge_pos: [Int]
+    edge_pos: [Int],
     // Per phi: its join, its slot position there, and its value.
-    phi_join: [Int]
-    phi_index: [Int]
-    phi_val: [Int]
+    phi_join: [Int],
+    phi_index: [Int],
+    phi_val: [Int],
 }
 
 ir_ssa_find: fn(s: IRSsa, value: Int) -> Int Never! {

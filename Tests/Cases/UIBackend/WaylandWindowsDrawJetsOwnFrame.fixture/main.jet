@@ -23,11 +23,11 @@ use {
 // content is the whole window.
 
 FakeMode: enum {
-    Framed
-    ServerSide
-    NoDecoration
-    NoSubcompositor
-    Fullscreen
+    Framed,
+    ServerSide,
+    NoDecoration,
+    NoSubcompositor,
+    Fullscreen,
     Fractional
 }
 
@@ -41,85 +41,85 @@ FakeMode: enum {
 
 // A wl_buffer: its pool (an index into `pools`), offset, size and format.
 FakeBuffer: struct {
-    id: Int
-    pool: Int
-    offset: Int
-    width: Int
-    height: Int
+    id: Int,
+    pool: Int,
+    offset: Int,
+    width: Int,
+    height: Int,
     format: Int
 }
 
 // The chrome surface's double-buffered state.
 FakeChrome: struct {
-    buffer: Int
-    dest_w: Int
-    dest_h: Int
-    scale: Int
+    buffer: Int,
+    dest_w: Int,
+    dest_h: Int,
+    scale: Int,
     input: String
 }
 
 Fake: struct {
-    stream: net.UnixStream
-    mode: FakeMode
-    inbox: [U8]
-    out: [U8]
-    globals: [String]
-    registry: Int
-    compositor: Int
-    subcompositor: Int
-    shm: Int
-    wm_base: Int
-    decoration_manager: Int
-    decoration: Int
-    fractional_manager: Int
-    viewporter: Int
-    seat: Int
-    pointer: Int
-    touch: Int
-    cursor_manager: Int
-    cursor_device: Int
-    surface: Int
-    chrome: Int
-    subsurface: Int
-    xdg_surface: Int
-    toplevel: Int
-    fractional: Int
-    viewport: Int
-    chrome_viewport: Int
-    region: Int
-    region_text: String
+    stream: net.UnixStream,
+    mode: FakeMode,
+    inbox: [U8],
+    out: [U8],
+    globals: [String],
+    registry: Int,
+    compositor: Int,
+    subcompositor: Int,
+    shm: Int,
+    wm_base: Int,
+    decoration_manager: Int,
+    decoration: Int,
+    fractional_manager: Int,
+    viewporter: Int,
+    seat: Int,
+    pointer: Int,
+    touch: Int,
+    cursor_manager: Int,
+    cursor_device: Int,
+    surface: Int,
+    chrome: Int,
+    subsurface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
+    fractional: Int,
+    viewport: Int,
+    chrome_viewport: Int,
+    region: Int,
+    region_text: String,
     // Every pool, and the descriptors the window sent, one per pool in order.
-    pools: [Int]
-    fds: [sys.Fd]
-    buffers: [FakeBuffer]
+    pools: [Int],
+    fds: [sys.Fd],
+    buffers: [FakeBuffer],
     // The content surface: pending, then current at commit.
-    attached: Int
-    current: Int
-    acked: Int
-    callbacks: [Int]
-    destination_w: Int
-    destination_h: Int
-    buffer_scale: Int
+    attached: Int,
+    current: Int,
+    acked: Int,
+    callbacks: [Int],
+    destination_w: Int,
+    destination_h: Int,
+    buffer_scale: Int,
     // The chrome: pending, cached by its commit, shown by the content's.
-    chrome_pending: FakeChrome
-    chrome_cached: FakeChrome
-    chrome_shown: FakeChrome
-    chrome_dirty: Bool
-    position_x: Int
-    position_y: Int
-    shown_x: Int
-    shown_y: Int
-    geometry: String
-    serial: Int
+    chrome_pending: FakeChrome,
+    chrome_cached: FakeChrome,
+    chrome_shown: FakeChrome,
+    chrome_dirty: Bool,
+    position_x: Int,
+    position_y: Int,
+    shown_x: Int,
+    shown_y: Int,
+    geometry: String,
+    serial: Int,
     // Configure serials not yet acked, oldest first.
-    configures: [Int]
-    scale120: Int
-    phase: Int
-    settled: Int
-    enter_serial: Int
-    commits: Int
-    report: [String]
-    failures: [String]
+    configures: [Int],
+    scale120: Int,
+    phase: Int,
+    settled: Int,
+    enter_serial: Int,
+    commits: Int,
+    report: [String],
+    failures: [String],
     // The close button was pressed: the window may hang up any time now.
     closing: Bool
 }

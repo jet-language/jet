@@ -31,27 +31,27 @@
 
 // What binding reads from a runtime image.
 LinkImageView: struct {
-    base: Int
-    phoff: Int
-    phnum: Int
+    base: Int,
+    phoff: Int,
+    phnum: Int,
     // End of the loaded bytes in the file.
-    load_end: Int
-    program_base: Int
+    load_end: Int,
+    program_base: Int,
     // The `main` places: address, relocation type, addend.
-    sites: [Int]
-    symtab_at: Int
-    symtab_count: Int
-    first_global: Int
-    strtab_at: Int
-    strtab_size: Int
+    sites: [Int],
+    symtab_at: Int,
+    symtab_count: Int,
+    first_global: Int,
+    strtab_at: Int,
+    strtab_size: Int,
     // Headers 1 through alloc_headers describe the loaded sections.
-    shoff: Int
-    alloc_headers: Int
-    names_at: Int
+    shoff: Int,
+    alloc_headers: Int,
+    names_at: Int,
     // The `.jet.exports` index (RuntimePack.jet link_image_export_index):
     // its slot table's offset and slot count, 0 slots when the image has none.
-    exports_at: Int
-    exports_slots: Int
+    exports_at: Int,
+    exports_slots: Int,
 }
 
 link_image_u16: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -504,20 +504,20 @@ link_bind_symbols: fn(out: &[U8], origin: Int, headers: &[LinkSectionHeader], lo
 // file `debug_file` and the build id `build_id` both files' notes hold;
 // others have both empty.
 X64Executable: struct {
-    image: [U8]
-    image_path: String
-    image_stamp: [Int]
-    image_at: Int
-    image_end: Int
-    image_gap_at: Int
-    image_gap: Int
-    patch_at: [Int]
-    patch_bytes: [[U8]]
-    tail_at: Int
-    tail: [U8]
-    debug_file: [U8]
-    build_id: [U8]
-    image_symbols_left: Bool{false}
+    image: [U8],
+    image_path: String,
+    image_stamp: [Int],
+    image_at: Int,
+    image_end: Int,
+    image_gap_at: Int,
+    image_gap: Int,
+    patch_at: [Int],
+    patch_bytes: [[U8]],
+    tail_at: Int,
+    tail: [U8],
+    debug_file: [U8],
+    build_id: [U8],
+    image_symbols_left: Bool{false},
 }
 
 // The executable whose file is `bytes`.
@@ -664,9 +664,9 @@ link_bind_shifted_symbols: fn(tail: &[U8], from: Int, to: Int, shift: Int) Never
 // bound: with `unwritten`, why its object can't be written
 // (x64_bind_functions_at).
 X64BindResult: struct {
-    executable: X64Executable
-    errors: [String]
-    unwritten: Bool{false}
+    executable: X64Executable,
+    errors: [String],
+    unwritten: Bool{false},
 }
 
 // Bind the program object `program` (named `name` in reports) to the

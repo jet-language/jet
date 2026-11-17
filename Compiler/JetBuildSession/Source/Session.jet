@@ -9,64 +9,64 @@ use {
 }
 
 BuildSessionPolicy: struct {
-    plugins_denied: String?
-    plugin_grants: [String:[String]]
+    plugins_denied: String?,
+    plugin_grants: [String:[String]],
 }
 
 BuildSessionValue: enum {
-    Unit
-    Text(value: String)
-    Bool(value: Bool)
-    Int(value: Int)
-    Char(value: Char)
-    Enum(variant: String)
-    List(values: [BuildSessionValue])
-    Handle(type_name: String, session: Int, id: Int)
-    Span(start: Int, end: Int, file: String)
+    Unit,
+    Text(value: String),
+    Bool(value: Bool),
+    Int(value: Int),
+    Char(value: Char),
+    Enum(variant: String),
+    List(values: [BuildSessionValue]),
+    Handle(type_name: String, session: Int, id: Int),
+    Span(start: Int, end: Int, file: String),
 }
 
 // `file` is the source file the offsets index, as a reflected
 // `SourceSpan` names it; "" is the build file's own source.
 
 BuildSessionDiagnostic: struct {
-    code: String
-    what: String
-    why: String
-    fix: String
-    start: Int
-    end: Int
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    start: Int,
+    end: Int,
     // The source file `start` and `end` index, from the `SourceSpan` a
     // project rule reported at; "" is the build file.
-    file: String{""}
-    error: BuildSessionError?{None}
+    file: String{""},
+    error: BuildSessionError?{None},
 }
 
 BuildSessionReply: enum {
-    Value(value: BuildSessionValue)
-    Failure(error: BuildSessionDiagnostic)
-    HostRequest(method: String, args: [BuildSessionValue])
+    Value(value: BuildSessionValue),
+    Failure(error: BuildSessionDiagnostic),
+    HostRequest(method: String, args: [BuildSessionValue]),
 }
 
 BuildSessionGeneratedModule: struct {
-    name: String
-    path: String
-    source: String
-    source_digest: String
-    plugin: Int?
+    name: String,
+    path: String,
+    source: String,
+    source_digest: String,
+    plugin: Int?,
     // The `b.generate` call's span in the build file, which a report from
     // the generated module names as its source.
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
     // `meta.rewrite_body(f, code)`: the function whose body `source`
     // replaces. The driver makes the module that function with the new body
     // and withdraws the original (JetDriver BuildQueries.jet).
-    rewrites: String?{None}
+    rewrites: String?{None},
     // The identity of the dependency that declares `rewrites`, which the
     // module belongs to; None for this build's own package.
-    package: String?{None}
+    package: String?{None},
     // The function that made the module through a `Compiler` value and where
     // ("`f` at file:line"), which a report from the module names.
-    producer: String?{None}
+    producer: String?{None},
     // What a `Compiler` value made the module under: the `Meta` effects its
     // call performs (`Meta.Generate` for `meta.add`, with `Meta.Types` and
     // `Meta.Raw` when it adds source text, `Meta.Rewrite` for
@@ -75,19 +75,19 @@ BuildSessionGeneratedModule: struct {
     // returns, since every later call on the session is refused. Provenance
     // reports both, and the module's check node identity digests both
     // (JetDriver BuildQueries.jet).
-    authority: String?{None}
-    consent: String?{None}
+    authority: String?{None},
+    consent: String?{None},
     // The struct `meta.add_struct` declared in the module, which a later
     // `meta.find_type` of the same target names (build_session_made_structs).
-    declares: String?{None}
+    declares: String?{None},
     // The handoffs the `Compiler` value took before the call that made the
     // module, the root's first ("`build` handed it to `install` at
     // main.jet:9"). Empty when the root's own function made it.
-    handoffs: [String]{[String]{}}
+    handoffs: [String]{[String]{}},
     // The module's stable identity: a digest of the package it belongs to and
     // its path, so a rebuild, a new body or a moved call keeps it
     // (build_session_add_generated).
-    identity: String{""}
+    identity: String{""},
 }
 
 // `meta.report(finding, at: c)`: a finding a package lint raised at the
@@ -96,57 +96,57 @@ BuildSessionGeneratedModule: struct {
 // names it) and byte span of the call. The build query reports it after
 // the build returns (JetDriver BuildQueries.jet jet_driver_build_findings).
 BuildSessionFinding: struct {
-    code: String
-    tier: String
-    what: String
-    why: String
-    fix: String
-    file: String
-    at_start: Int
-    at_end: Int
+    code: String,
+    tier: String,
+    what: String,
+    why: String,
+    fix: String,
+    file: String,
+    at_start: Int,
+    at_end: Int,
     // The function the call calls instead under the finding's
     // `syntax.rewrite` fix, as the fix writes it; "" for none.
-    rewrite: String
+    rewrite: String,
 }
 
 BuildSessionContribution: struct {
-    key: String
-    value: BuildSessionValue
-    source: String
-    start: Int
-    end: Int
+    key: String,
+    value: BuildSessionValue,
+    source: String,
+    start: Int,
+    end: Int,
 }
 
 BuildSessionToolchain: struct {
-    name: String
-    role: String
-    host_triple: String
-    target_triple: String
-    sdk: String?
-    linker: String?
-    sysroot: String?
+    name: String,
+    role: String,
+    host_triple: String,
+    target_triple: String,
+    sdk: String?,
+    linker: String?,
+    sysroot: String?,
 }
 
 BuildSessionProbe: struct {
-    name: String
-    kind: String
-    value: String
-    code: String
-    reproducibility: String
-    toolchain: Int
+    name: String,
+    kind: String,
+    value: String,
+    code: String,
+    reproducibility: String,
+    toolchain: Int,
 }
 
 BuildSessionSigning: struct {
-    name: String
-    label: String
+    name: String,
+    label: String,
 }
 
 BuildSessionPlugin: struct {
-    name: String
-    version: String
-    api_version: String
-    component_digest: String
-    grants: [String]
+    name: String,
+    version: String,
+    api_version: String,
+    component_digest: String,
+    grants: [String],
 }
 
 // A `b.run` step: the BuildFile `tool` it runs, its arguments, the files it
@@ -156,30 +156,30 @@ BuildSessionPlugin: struct {
 // `action_timeout` option's), and the span of its `b.run` call, where a step
 // that declares no output is reported.
 BuildSessionAction: struct {
-    name: String
-    inputs: [String]
-    outputs: [String]
-    kept: [String]
-    folders: [Int]
-    programs: [BuildSessionProgram]
-    argv: [String]
-    caps: [String]
-    toolchain: Int
-    probes: [Int]
-    signing: Int?
-    tool: Int
-    timeout_ms: Int?{None}
-    start: Int{0}
-    end: Int{0}
+    name: String,
+    inputs: [String],
+    outputs: [String],
+    kept: [String],
+    folders: [Int],
+    programs: [BuildSessionProgram],
+    argv: [String],
+    caps: [String],
+    toolchain: Int,
+    probes: [Int],
+    signing: Int?,
+    tool: Int,
+    timeout_ms: Int?{None},
+    start: Int{0},
+    end: Int{0},
 }
 
 // A found program passed to a step (`.file(b.found(probe))`): argument `at`
 // of the step is `flag` followed by the path the find_program `probe` finds
 // when the step runs.
 BuildSessionProgram: struct {
-    at: Int
-    flag: String
-    probe: Int
+    at: Int,
+    flag: String,
+    probe: Int,
 }
 
 // A file the build knows (BuildFile): `found` is the program a find_program
@@ -195,42 +195,42 @@ BuildSessionProgram: struct {
 // from the folder the find_folder `probe` chooses (at `.jet/found/<probe>`)
 // or from `path` in this package.
 BuildSessionFile: struct {
-    kind: String
-    path: String
-    probe: Int?
-    action: Int?
-    target: Int?{None}
-    from: String?{None}
+    kind: String,
+    path: String,
+    probe: Int?,
+    action: Int?,
+    target: Int?{None},
+    from: String?{None},
 }
 
 BuildSessionTarget: struct {
-    name: String
-    kind: String
-    sources: [String]
-    inputs: [String]
-    outputs: [String]
-    actions: [Int]
-    deps: [Int]
-    probes: [Int]
-    toolchain: Int
-    signing: Int?
-    metadata: [String:String]
-    plugin: Int?
+    name: String,
+    kind: String,
+    sources: [String],
+    inputs: [String],
+    outputs: [String],
+    actions: [Int],
+    deps: [Int],
+    probes: [Int],
+    toolchain: Int,
+    signing: Int?,
+    metadata: [String:String],
+    plugin: Int?,
     // The span of the `b.add_*` call that declared the target, where a report
     // about one of its sources is placed.
-    start: Int{0}
-    end: Int{0}
+    start: Int{0},
+    end: Int{0},
 }
 
 // A build option `build: fn` set (`b.optimize(.O2)`) or pinned
 // (`b.pin(.optimize, .O2)`): its row and value as the option table spells
 // them (JetFoundation BuildOptions.jet), and the call's span.
 BuildSessionOption: struct {
-    name: String
-    value: String
-    pinned: Bool
-    start: Int
-    end: Int
+    name: String,
+    value: String,
+    pinned: Bool,
+    start: Int,
+    end: Int,
 }
 
 // One `Compiler` value `b.compiler(target)` made: the target it acts on, the
@@ -240,57 +240,57 @@ BuildSessionOption: struct {
 // `b.compiler` made, which holds the consent, and `handoffs` the chain of
 // passes that led here, root first.
 BuildSessionCompiler: struct {
-    target: Int
-    start: Int
-    end: Int
-    rewritable: [String]{[String]{}}
-    root: Int{-1}
-    handoffs: [String]{[String]{}}
+    target: Int,
+    start: Int,
+    end: Int,
+    rewritable: [String]{[String]{}},
+    root: Int{-1},
+    handoffs: [String]{[String]{}},
 }
 
 BuildSessionState: struct {
-    id: Int
-    active: Bool
-    package: String
-    compiler_version: String
-    policy: BuildSessionPolicy
-    actions: [BuildSessionAction]
-    files: [BuildSessionFile]
-    targets: [BuildSessionTarget]
-    toolchains: [BuildSessionToolchain]
-    signing: [BuildSessionSigning]
-    probes: [BuildSessionProbe]
-    plugins: [BuildSessionPlugin]
-    generated: [BuildSessionGeneratedModule]
-    contributions: [BuildSessionContribution]
-    diagnostics: [BuildSessionDiagnostic]
-    nodes: [BuildGraphNode]
+    id: Int,
+    active: Bool,
+    package: String,
+    compiler_version: String,
+    policy: BuildSessionPolicy,
+    actions: [BuildSessionAction],
+    files: [BuildSessionFile],
+    targets: [BuildSessionTarget],
+    toolchains: [BuildSessionToolchain],
+    signing: [BuildSessionSigning],
+    probes: [BuildSessionProbe],
+    plugins: [BuildSessionPlugin],
+    generated: [BuildSessionGeneratedModule],
+    contributions: [BuildSessionContribution],
+    diagnostics: [BuildSessionDiagnostic],
+    nodes: [BuildGraphNode],
     // One row per option `build: fn` set, the last call's value.
-    options: [BuildSessionOption]
+    options: [BuildSessionOption],
     // The target `b.default(t)` selected, or -1 for every target.
-    default_target: Int
+    default_target: Int,
     // The words after `--` on `jet build`, which `b.args()` returns.
-    args: [String]
+    args: [String],
     // The folder of each package package.jet lists, by its name
     // (`b.dependency(name)`).
-    dependencies: [String:String]{[String:String]{}}
+    dependencies: [String:String]{[String:String]{}},
     // The `Compiler` values this build made, by handle id.
-    compilers: [BuildSessionCompiler]{[BuildSessionCompiler]{}}
+    compilers: [BuildSessionCompiler]{[BuildSessionCompiler]{}},
     // The loader's identity of the build's package, which tells its own
     // functions from a dependency's (`meta.rewrite_body`).
-    identity: String{""}
+    identity: String{""},
     // Whether a call of `build: fn` was refused and the refusal stopped the
     // run (build_session_refuse): that report is the build's own, not a
     // restated check report.
-    refused: Bool{false}
+    refused: Bool{false},
     // Each finding `meta.report` raised, in call order.
-    findings: [BuildSessionFinding]{[BuildSessionFinding]{}}
-    start: Int
-    end: Int
+    findings: [BuildSessionFinding]{[BuildSessionFinding]{}},
+    start: Int,
+    end: Int,
 }
 
 BuildSession: struct {
-    storage: Shared<BuildSessionState>
+    storage: Shared<BuildSessionState>,
 }
 
 build_session_new: fn(session_id: Int, package: String, compiler_version: String, policy: BuildSessionPolicy) -> BuildSession Never! {
@@ -851,8 +851,8 @@ build_session_compiler_root: fn(state: BuildSessionState, compiler: Int) -> Int 
 // A struct `meta.add_struct` declared: its name and its `TypeId` identity,
 // its module and name (`point.Point`).
 BuildSessionMadeStruct: struct {
-    name: String
-    identity: String
+    name: String,
+    identity: String,
 }
 
 // The structs `meta.add_struct` has declared so far in the modules of the
@@ -1066,55 +1066,55 @@ build_session_append_unique: fn(values: &[String], value: String) Never! {
 // Parser/transport/gate failures remain diagnostics; never infer a variant by
 // parsing a diagnostic's display text.
 BuildSessionError: enum {
-    EmptyTargetName
-    EmptyActionName
-    EmptyToolchainName
-    EmptySigningIdentityName
-    EmptyProbeName
-    DuplicateTargetName(value: String)
-    DuplicateActionName(value: String)
-    CompilerPackageDependencyMissing(package: String, dependency: String)
-    DuplicateToolchainName(value: String)
-    DuplicateSigningIdentityName(value: String)
-    DuplicateProbeName(value: String)
-    EmptyPath
-    InvalidPath(value: String)
-    EmptyToolchainTriple(value: String)
-    EmptyIdentityField(value: String)
-    MissingLockedProvenance(value: String)
-    EmptyProbeField(value: String)
-    EmptyActionArgv(value: String)
-    StepWithoutOutputs(value: String)
-    DuplicateActionOutput(action: String, output: String)
-    DuplicateBuildOutput(output: String, first_action: String, second_action: String)
-    UnknownTarget(id: Int)
-    UnknownAction(id: Int)
-    UnknownToolchain(id: Int)
-    UnknownSigningIdentity(id: Int)
-    UnknownProbe(id: Int)
-    PolicyDenied(subject: String, allowed: Bool, reason: String, required_caps: [String])
-    EmptyPluginField(value: String)
-    InvalidPluginDigest(value: String)
-    PackagedPlugin(value: String)
-    PluginVersionMismatch(plugin: String, expected: String, actual: String)
-    EmptyGeneratedModuleField(value: String)
-    InvalidGeneratedModulePath(value: String)
-    DuplicateGeneratedModuleName(value: String)
-    DuplicateGeneratedModulePath(value: String)
-    GeneratedModuleCycle(name: String, path: String)
-    TargetDependencyCycle(nodes: [String])
-    ActionDependencyCycle(nodes: [String])
+    EmptyTargetName,
+    EmptyActionName,
+    EmptyToolchainName,
+    EmptySigningIdentityName,
+    EmptyProbeName,
+    DuplicateTargetName(value: String),
+    DuplicateActionName(value: String),
+    CompilerPackageDependencyMissing(package: String, dependency: String),
+    DuplicateToolchainName(value: String),
+    DuplicateSigningIdentityName(value: String),
+    DuplicateProbeName(value: String),
+    EmptyPath,
+    InvalidPath(value: String),
+    EmptyToolchainTriple(value: String),
+    EmptyIdentityField(value: String),
+    MissingLockedProvenance(value: String),
+    EmptyProbeField(value: String),
+    EmptyActionArgv(value: String),
+    StepWithoutOutputs(value: String),
+    DuplicateActionOutput(action: String, output: String),
+    DuplicateBuildOutput(output: String, first_action: String, second_action: String),
+    UnknownTarget(id: Int),
+    UnknownAction(id: Int),
+    UnknownToolchain(id: Int),
+    UnknownSigningIdentity(id: Int),
+    UnknownProbe(id: Int),
+    PolicyDenied(subject: String, allowed: Bool, reason: String, required_caps: [String]),
+    EmptyPluginField(value: String),
+    InvalidPluginDigest(value: String),
+    PackagedPlugin(value: String),
+    PluginVersionMismatch(plugin: String, expected: String, actual: String),
+    EmptyGeneratedModuleField(value: String),
+    InvalidGeneratedModulePath(value: String),
+    DuplicateGeneratedModuleName(value: String),
+    DuplicateGeneratedModulePath(value: String),
+    GeneratedModuleCycle(name: String, path: String),
+    TargetDependencyCycle(nodes: [String]),
+    ActionDependencyCycle(nodes: [String]),
 }
 
 BuildSessionErrorField: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 BuildSessionErrorProjection: struct {
-    variant: String
-    text: String
-    fields: [BuildSessionErrorField]
+    variant: String,
+    text: String,
+    fields: [BuildSessionErrorField],
 }
 
 build_session_error_field: fn(name: String, value: String) -> BuildSessionErrorField Never! {

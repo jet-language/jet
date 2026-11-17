@@ -207,9 +207,9 @@ package is a type, the package's public surface is that type's members, and
 
 ```jet
 package {
-    name: "invoices"
+    name: "invoices",
     authority: {
-        allow: [FS.Read, Log]
+        allow: [FS.Read, Log],
         deny:  [Net, Exec]
     }
 }
@@ -223,10 +223,10 @@ supply-chain review into type checking:
 
 ```jet
 package {
-    name: "shop"
-    deps: { json: "1.4", sql: "2.0" }
+    name: "shop",
+    deps: { json: "1.4", sql: "2.0" },
     authority: {
-        allow:  [Net, FS, Log]
+        allow:  [Net, FS, Log],
         grants: { json: [], sql: [Net, Log] }   // json gets nothing, sql gets Net and Log
     }
 }

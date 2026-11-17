@@ -28,11 +28,11 @@ paused_error: fn(message: String) -> PausedEvaluateError Never! {
 }
 
 SessionState: enum {
-    Running
-    Paused
-    Finished
-    Stale
-    Cancelled
+    Running,
+    Paused,
+    Finished,
+    Stale,
+    Cancelled,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -46,8 +46,8 @@ SessionState: enum {
 }
 
 EvaluationMode: enum {
-    ReadOnly
-    Mutate
+    ReadOnly,
+    Mutate,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -58,9 +58,9 @@ EvaluationMode: enum {
 }
 
 Publication: enum {
-    Published
-    Redacted
-    Absent
+    Published,
+    Redacted,
+    Absent,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -72,12 +72,12 @@ Publication: enum {
 }
 
 AggregateKind: enum {
-    Record
-    List
-    Map
-    Set
-    Tuple
-    Variant
+    Record,
+    List,
+    Map,
+    Set,
+    Tuple,
+    Variant,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -93,13 +93,13 @@ AggregateKind: enum {
 
 // FloatBits is the exact IEEE-754 bit pattern; Bytes are length plus SHA-256.
 TypedValue: enum {
-    Unit
-    Bool(value: Bool)
-    Int(value: Int)
-    FloatBits(bits: Int)
-    Text(text: String)
-    Bytes(length: Int, sha256: String)
-    Aggregate(kind: AggregateKind, length: Int)
+    Unit,
+    Bool(value: Bool),
+    Int(value: Int),
+    FloatBits(bits: Int),
+    Text(text: String),
+    Bytes(length: Int, sha256: String),
+    Aggregate(kind: AggregateKind, length: Int),
 
     validate: fn(self) PausedEvaluateError! {
         if self == {
@@ -143,10 +143,10 @@ TypedValue: enum {
 }
 
 SourceLocation: struct {
-    source_id: String
-    source_revision: String
-    start: Int
-    end: Int
+    source_id: String,
+    source_revision: String,
+    start: Int,
+    end: Int,
 
     new: fn(source_id: String, source_revision: String, start: Int, end: Int) -> SourceLocation PausedEvaluateError! {
         location: SourceLocation{source_id: source_id, source_revision: source_revision, start: start, end: end}
@@ -167,11 +167,11 @@ SourceLocation: struct {
 }
 
 SessionIdentity: struct {
-    session_id: String
-    source_id: String
-    source_revision: String
-    pause_id: String
-    frame_id: String
+    session_id: String,
+    source_id: String,
+    source_revision: String,
+    pause_id: String,
+    frame_id: String,
 
     new: fn(session_id: String, source_id: String, source_revision: String, pause_id: String, frame_id: String) -> SessionIdentity PausedEvaluateError! {
         identity: SessionIdentity{session_id: session_id, source_id: source_id, source_revision: source_revision, pause_id: pause_id, frame_id: frame_id}
@@ -199,8 +199,8 @@ SessionIdentity: struct {
 
 // One capability a request needs in one lexical scope.
 AuthorityRequirement: struct {
-    capability: String
-    scope_id: String
+    capability: String,
+    scope_id: String,
 
     new: fn(capability: String, scope_id: String) -> AuthorityRequirement PausedEvaluateError! {
         requirement: AuthorityRequirement{capability: capability, scope_id: scope_id}
@@ -223,8 +223,8 @@ AuthorityRequirement: struct {
 
 // One capability a session grants in one lexical scope.
 AuthorityGrant: struct {
-    capability: String
-    scope_id: String
+    capability: String,
+    scope_id: String,
 
     new: fn(capability: String, scope_id: String) -> AuthorityGrant PausedEvaluateError! {
         grant: AuthorityGrant{capability: capability, scope_id: scope_id}
@@ -235,7 +235,7 @@ AuthorityGrant: struct {
 }
 
 AuthoritySet: struct {
-    grants: [AuthorityGrant]
+    grants: [AuthorityGrant],
 
     // The grants in canonical `capability@scope` order, each once.
     new: fn(grants: [AuthorityGrant]) -> AuthoritySet Never! {
@@ -290,10 +290,10 @@ authority_requirements_canonical: fn(requirements: [AuthorityRequirement]) -> [A
 }
 
 EvaluationBudget: struct {
-    max_depth: Int
-    max_nodes: Int
-    max_bytes: Int
-    max_steps: Int
+    max_depth: Int,
+    max_nodes: Int,
+    max_bytes: Int,
+    max_steps: Int,
 
     new: fn(max_depth: Int, max_nodes: Int, max_bytes: Int, max_steps: Int) -> EvaluationBudget PausedEvaluateError! {
         budget: EvaluationBudget{max_depth: max_depth, max_nodes: max_nodes, max_bytes: max_bytes, max_steps: max_steps}
@@ -325,10 +325,10 @@ EvaluationBudget: struct {
 DEFAULT_EVALUATION_BUDGET: EvaluationBudget{max_depth: 32, max_nodes: 1024, max_bytes: 262144, max_steps: 100000}
 
 EvaluationUsage: struct {
-    depth: Int
-    nodes: Int
-    bytes: Int
-    steps: Int
+    depth: Int,
+    nodes: Int,
+    bytes: Int,
+    steps: Int,
 
     json: fn(self) -> String Never! {
         "{{\"depth\":{self.depth},\"nodes\":{self.nodes},\"bytes\":{self.bytes},\"steps\":{self.steps}}}"
@@ -340,8 +340,8 @@ evaluation_usage_zero: fn() -> EvaluationUsage Never! {
 }
 
 Cancellation: struct {
-    requested: Bool
-    reason: String?
+    requested: Bool,
+    reason: String?,
 
     validate: fn(self) PausedEvaluateError! {
         if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)
@@ -360,14 +360,14 @@ cancellation_requested: fn(reason: String) -> Cancellation PausedEvaluateError! 
 }
 
 ValueProjection: struct {
-    id: String
-    name: String
-    type_name: String
-    source: SourceLocation
-    publication: Publication
-    value: TypedValue?
-    children: [ValueProjection]
-    truncated: Bool
+    id: String,
+    name: String,
+    type_name: String,
+    source: SourceLocation,
+    publication: Publication,
+    value: TypedValue?,
+    children: [ValueProjection],
+    truncated: Bool,
 
     validate: fn(self) PausedEvaluateError! {
         ids := [String:Bool]{}
@@ -460,11 +460,11 @@ measure_projection: fn(value: ValueProjection, depth: Int, usage: &EvaluationUsa
 }
 
 LexicalScope: struct {
-    id: String
-    name: String
-    parent_id: String?
-    source: SourceLocation
-    bindings: [ValueProjection]
+    id: String,
+    name: String,
+    parent_id: String?,
+    source: SourceLocation,
+    bindings: [ValueProjection],
 
     new: fn(id: String, name: String, parent_id: String?, source: SourceLocation, bindings: [ValueProjection]) -> LexicalScope PausedEvaluateError! {
         scope: LexicalScope{id: id, name: name, parent_id: parent_id, source: source, bindings: bindings}
@@ -488,11 +488,11 @@ LexicalScope: struct {
 }
 
 ScopeProjection: struct {
-    id: String
-    name: String
-    parent_id: String?
-    source: SourceLocation
-    bindings: [ValueProjection]
+    id: String,
+    name: String,
+    parent_id: String?,
+    source: SourceLocation,
+    bindings: [ValueProjection],
 
     json: fn(self) -> String Never! {
         bindings := [String]{}
@@ -508,10 +508,10 @@ ScopeProjection: struct {
 }
 
 ProjectionStats: struct {
-    usage: EvaluationUsage
-    truncated: Bool
-    published: Int
-    redacted: Int
+    usage: EvaluationUsage,
+    truncated: Bool,
+    published: Int,
+    redacted: Int,
 }
 
 projection_stats_zero: fn() -> ProjectionStats Never! {
@@ -520,8 +520,8 @@ projection_stats_zero: fn() -> ProjectionStats Never! {
 
 // One projected scope plus the accounting its projection spent.
 ScopeProjectionResult: struct {
-    scope: ScopeProjection
-    stats: ProjectionStats
+    scope: ScopeProjection,
+    stats: ProjectionStats,
 }
 
 // The visible bindings of `scope` (only `selected_value` when given), ordered
@@ -554,12 +554,12 @@ project_scope: fn(scope: LexicalScope, identity: SessionIdentity, budget: Evalua
 }
 
 PausedSession: struct {
-    identity: SessionIdentity
-    state: SessionState
-    scopes: [LexicalScope]
-    authority: AuthoritySet
-    budget: EvaluationBudget
-    cancellation: Cancellation
+    identity: SessionIdentity,
+    state: SessionState,
+    scopes: [LexicalScope],
+    authority: AuthoritySet,
+    budget: EvaluationBudget,
+    cancellation: Cancellation,
 
     cancel: fn(&self, reason: String) PausedEvaluateError! {
         self.cancellation = cancellation_requested(reason)
@@ -595,13 +595,13 @@ paused_session: fn(identity: SessionIdentity, state: SessionState, scopes: [Lexi
 }
 
 InspectRequest: struct {
-    request_id: String
-    identity: SessionIdentity
-    scope_id: String
-    value_id: String?
-    budget: EvaluationBudget
-    authority: [AuthorityRequirement]
-    cancellation: Cancellation
+    request_id: String,
+    identity: SessionIdentity,
+    scope_id: String,
+    value_id: String?,
+    budget: EvaluationBudget,
+    authority: [AuthorityRequirement],
+    cancellation: Cancellation,
 
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.request_id, "request id")
@@ -624,15 +624,15 @@ InspectRequest: struct {
 }
 
 EvaluateRequest: struct {
-    request_id: String
-    identity: SessionIdentity
-    scope_id: String
-    expression: String
-    mode: EvaluationMode
-    effects: [String]
-    authority: [AuthorityRequirement]
-    budget: EvaluationBudget
-    cancellation: Cancellation
+    request_id: String,
+    identity: SessionIdentity,
+    scope_id: String,
+    expression: String,
+    mode: EvaluationMode,
+    effects: [String],
+    authority: [AuthorityRequirement],
+    budget: EvaluationBudget,
+    cancellation: Cancellation,
 
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.request_id, "request id")
@@ -655,20 +655,20 @@ EvaluateRequest: struct {
 }
 
 EvaluatorStatus: enum {
-    Completed
-    Failed
-    Cancelled
+    Completed,
+    Failed,
+    Cancelled,
 }
 
 ObservationFact: struct {
-    event_id: String
-    kind: String
-    session_id: String
-    source_id: String
-    source_revision: String
-    scope_id: String
-    target_id: String
-    effect_ref: String
+    event_id: String,
+    kind: String,
+    session_id: String,
+    source_id: String,
+    source_revision: String,
+    scope_id: String,
+    target_id: String,
+    effect_ref: String,
 
     validate_shape: fn(self) PausedEvaluateError! {
         valid_id(self.event_id, "observation id")
@@ -694,14 +694,14 @@ ObservationFact: struct {
 }
 
 EvaluatorResult: struct {
-    identity: SessionIdentity
-    scope_id: String
-    status: EvaluatorStatus
-    value: ValueProjection?
-    usage: EvaluationUsage
-    changed: Bool
-    observation: ObservationFact?
-    error: String?
+    identity: SessionIdentity,
+    scope_id: String,
+    status: EvaluatorStatus,
+    value: ValueProjection?,
+    usage: EvaluationUsage,
+    changed: Bool,
+    observation: ObservationFact?,
+    error: String?,
 }
 
 evaluator_completed: fn(identity: SessionIdentity, scope_id: String, value: ValueProjection?, usage: EvaluationUsage) -> EvaluatorResult Never! {
@@ -717,8 +717,8 @@ evaluator_cancelled: fn(identity: SessionIdentity, scope_id: String, usage: Eval
 }
 
 AuditOutcome: enum {
-    Accepted
-    Rejected
+    Accepted,
+    Rejected,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -730,23 +730,23 @@ AuditOutcome: enum {
 
 #Error
 RejectReason: enum {
-    InvalidRequest
-    SessionNotPaused
-    StaleSession
-    SessionIdentityMismatch
-    SourceIdentityMismatch
-    PauseIdentityMismatch
-    FrameIdentityMismatch
-    ScopeNotFound
-    ValueNotFound
-    ValueNotPublished
-    InsufficientAuthority
-    BudgetExceeded
-    Cancelled
-    EvaluatorFailed
-    MutationNotAllowed
-    ObservationMissing
-    InvalidEvaluatorResult
+    InvalidRequest,
+    SessionNotPaused,
+    StaleSession,
+    SessionIdentityMismatch,
+    SourceIdentityMismatch,
+    PauseIdentityMismatch,
+    FrameIdentityMismatch,
+    ScopeNotFound,
+    ValueNotFound,
+    ValueNotPublished,
+    InsufficientAuthority,
+    BudgetExceeded,
+    Cancelled,
+    EvaluatorFailed,
+    MutationNotAllowed,
+    ObservationMissing,
+    InvalidEvaluatorResult,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -772,19 +772,19 @@ RejectReason: enum {
 }
 
 AuditReceipt: struct {
-    receipt_id: String
-    operation: String
-    request_id: String
-    outcome: AuditOutcome
-    reason: RejectReason?
-    identity: SessionIdentity
-    scope_id: String
-    authority: [AuthorityRequirement]
-    usage: EvaluationUsage
-    truncated: Bool
-    published_values: Int
-    redacted_values: Int
-    observation_id: String?
+    receipt_id: String,
+    operation: String,
+    request_id: String,
+    outcome: AuditOutcome,
+    reason: RejectReason?,
+    identity: SessionIdentity,
+    scope_id: String,
+    authority: [AuthorityRequirement],
+    usage: EvaluationUsage,
+    truncated: Bool,
+    published_values: Int,
+    redacted_values: Int,
+    observation_id: String?,
 
     json: fn(self) -> String Never! {
         reason: if self.reason == {
@@ -832,8 +832,8 @@ audit_receipt: fn(operation: String, request_id: String, identity: SessionIdenti
 // A rejected paused request: why, plus the audit receipt of the rejection.
 #Error
 RequestError: struct {
-    reason: RejectReason
-    audit: AuditReceipt
+    reason: RejectReason,
+    audit: AuditReceipt,
 
     json: fn(self) -> String Never! {
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":false,\"error\":\"{self.reason.as_str()}\",\"audit\":{self.audit.json()}}}"
@@ -841,11 +841,11 @@ RequestError: struct {
 }
 
 InspectResponse: struct {
-    identity: SessionIdentity
-    scope: ScopeProjection
-    selected_value_id: String?
-    truncated: Bool
-    audit: AuditReceipt
+    identity: SessionIdentity,
+    scope: ScopeProjection,
+    selected_value_id: String?,
+    truncated: Bool,
+    audit: AuditReceipt,
 
     json: fn(self) -> String Never! {
         selected_value_id: if self.selected_value_id == {
@@ -857,15 +857,15 @@ InspectResponse: struct {
 }
 
 EvaluateResponse: struct {
-    identity: SessionIdentity
-    scope_id: String
-    expression_hash: String
-    mode: EvaluationMode
-    value: ValueProjection?
-    changed: Bool
-    observation: ObservationFact?
-    truncated: Bool
-    audit: AuditReceipt
+    identity: SessionIdentity,
+    scope_id: String,
+    expression_hash: String,
+    mode: EvaluationMode,
+    value: ValueProjection?,
+    changed: Bool,
+    observation: ObservationFact?,
+    truncated: Bool,
+    audit: AuditReceipt,
 
     json: fn(self) -> String Never! {
         value: if self.value == {
@@ -964,10 +964,10 @@ evaluator_error_valid: fn(error: String?) -> Bool Never! {
 
 #Error
 PausedEvaluateHostError: enum {
-    SessionUnavailable
-    EvaluatorUnavailable
-    InvalidRequest(detail: String)
-    Rejected(rejection: RequestError)
+    SessionUnavailable,
+    EvaluatorUnavailable,
+    InvalidRequest(detail: String),
+    Rejected(rejection: RequestError),
 
     json: fn(self) -> String Never! {
         if self == {
@@ -990,8 +990,8 @@ PausedEvaluateHostError: enum {
 
 // One wrapper per devtools connection: facts are injected, never evaluated here.
 PausedEvaluateHost: struct {
-    session: PausedSession?
-    evaluator_result: EvaluatorResult?
+    session: PausedSession?,
+    evaluator_result: EvaluatorResult?,
 
     set_session: fn(&self, session: PausedSession) Never! { self.session = Val(session) }
 

@@ -8,22 +8,22 @@ C_MAX_STORE_SUBSCRIBERS: 1000000
 
 #Error
 WebStoreError: enum {
-    NotFound
-    Invalid
+    NotFound,
+    Invalid,
 }
 
 WebStore: struct<T> {
-    name: String
-    state: Signal<T>
-    initial: T
-    transactions: [WebStoreTransaction<T>]
-    event_log: [WebStoreEvent]
-    history: [T]
-    cursor: Int
-    generation: Int
-    history_enabled: Bool
-    history_limit: Int
-    subs: Int
+    name: String,
+    state: Signal<T>,
+    initial: T,
+    transactions: [WebStoreTransaction<T>],
+    event_log: [WebStoreEvent],
+    history: [T],
+    cursor: Int,
+    generation: Int,
+    history_enabled: Bool,
+    history_limit: Int,
+    subs: Int,
 
     value: fn(self) -> T Never! { value<T>(self) }
 
@@ -55,44 +55,44 @@ WebStore: struct<T> {
 }
 
 WebStoreEvent: struct {
-    kind: String
-    cursor: Int
-    generation: Int
-    diff: String
-    transaction: String
+    kind: String,
+    cursor: Int,
+    generation: Int,
+    diff: String,
+    transaction: String,
 }
 
 WebStoreTransaction: struct<T> {
-    action: String
-    after: T
-    generation: Int
-    changed_fields: [String]
-    before: T
-    diff: String
+    action: String,
+    after: T,
+    generation: Int,
+    changed_fields: [String],
+    before: T,
+    diff: String,
 }
 
 WebStorePatch: struct<T> {
-    store: WebStore<T>
-    backup: T
-    transaction: WebStoreTransaction<T>
-    active: Bool
+    store: WebStore<T>,
+    backup: T,
+    transaction: WebStoreTransaction<T>,
+    active: Bool,
 }
 
 WebStoreSubscription: struct {
-    id: Int
-    active: Bool
-    selector: String
+    id: Int,
+    active: Bool,
+    selector: String,
 }
 
 WebStoreInspection: struct {
-    name: String
-    cursor: Int
-    generation: Int
-    history_len: Int
+    name: String,
+    cursor: Int,
+    generation: Int,
+    history_len: Int,
 }
 
 Derived: struct<T> {
-    value: T
+    value: T,
 
     get: fn(self) -> T Never! { self.value }
 }

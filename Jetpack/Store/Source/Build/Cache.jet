@@ -42,20 +42,20 @@ BUILD_READ_CHUNK_BYTES: 1048576
 // Rust `io::Error`: the kind the cache decisions branch on, and the message
 // `io_action` reports.
 BuildIOKind: enum {
-    NotFound
-    InvalidInput
-    InvalidData
-    PermissionDenied
-    NotADirectory
-    AlreadyExists
-    Unsupported
-    Other
+    NotFound,
+    InvalidInput,
+    InvalidData,
+    PermissionDenied,
+    NotADirectory,
+    AlreadyExists,
+    Unsupported,
+    Other,
 }
 
 #Error
 BuildIOError: struct {
-    kind: BuildIOKind
-    message: String
+    kind: BuildIOKind,
+    message: String,
 
     new: fn(kind: BuildIOKind, message: String) -> BuildIOError Never! {
         BuildIOError{kind: kind, message: message}
@@ -77,68 +77,68 @@ BuildIOError: struct {
 // `executable`: a declared input whose owner may run it, which the work tree
 // receives runnable too.
 ActionInputSnapshot: struct {
-    path: String
-    digest: ContentDigest
-    byte_len: Int
-    executable: Bool{false}
+    path: String,
+    digest: ContentDigest,
+    byte_len: Int,
+    executable: Bool{false},
 }
 
 // One declared input as it was hashed: the snapshot the action key uses and
 // the exact bytes the work tree receives, so execution never reads the input
 // a second time.
 ActionInputCapture: struct {
-    snapshot: ActionInputSnapshot
-    bytes: [U8]
+    snapshot: ActionInputSnapshot,
+    bytes: [U8],
 }
 
 // `executable`: a declared output its action left runnable by its owner,
 // which is published and restored runnable too.
 ActionOutputRecord: struct {
-    path: String
-    digest: ContentDigest
-    byte_len: Int
-    executable: Bool{false}
+    path: String,
+    digest: ContentDigest,
+    byte_len: Int,
+    executable: Bool{false},
 }
 
 ActionOutcome: enum {
-    Succeeded(exit_code: Int)
-    Failed(exit_code: Int)
-    RestoredFromCache
+    Succeeded(exit_code: Int),
+    Failed(exit_code: Int),
+    RestoredFromCache,
 }
 
 CacheHitReason: enum {
-    LocalActionRecordMatched
-    DeclaredOutputsRestored
+    LocalActionRecordMatched,
+    DeclaredOutputsRestored,
 }
 
 CacheMissReason: enum {
-    NoLocalActionRecord
-    ActionKeyChanged
-    DeclaredOutputMissing
-    CacheRecordInvalid
-    CacheRestoreFailed
-    RemoteDenied
-    AmbientEffect
-    FrontEndIncomplete
-    ReuseOff
+    NoLocalActionRecord,
+    ActionKeyChanged,
+    DeclaredOutputMissing,
+    CacheRecordInvalid,
+    CacheRestoreFailed,
+    RemoteDenied,
+    AmbientEffect,
+    FrontEndIncomplete,
+    ReuseOff,
 }
 
 // The action has an ambient effect, so it always runs.
 // No store was given: compile caches are off, so every action runs.
 
 ActionCacheStatus: enum {
-    Hit(CacheHitReason)
-    Miss(CacheMissReason)
+    Hit(CacheHitReason),
+    Miss(CacheMissReason),
 }
 
 // A local action record (Rust `ActionResultRecord`). A failed record carries
 // the structured report that reached the build edge; success never does.
 ActionResultRecord: struct {
-    key: String
-    outcome: ActionOutcome
-    outputs: [ActionOutputRecord]
-    failure_report: DiagnosticBuildError?
-    status: ActionCacheStatus
+    key: String,
+    outcome: ActionOutcome,
+    outputs: [ActionOutputRecord],
+    failure_report: DiagnosticBuildError?,
+    status: ActionCacheStatus,
 }
 
 // Rust `snapshot_declared_inputs`: every declared input read without
@@ -319,9 +319,9 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
 
 // What publishing a declared output does to the file under the project root.
 BuildOutputWrite: enum {
-    Write
-    Unchanged
-    HandEdited
+    Write,
+    Unchanged,
+    HandEdited,
 }
 
 // Write the made bytes.

@@ -3,14 +3,14 @@
 use app
 
 TaskID: struct {
-    value: Int
+    value: Int,
 }
 
 #Error
 TaskError: enum {
-    NotFound
-    Unreachable(String)
-    SignedOut
+    NotFound,
+    Unreachable(String),
+    SignedOut,
 }
 
 // A call through an `app.Remote<Crew>` can fail on the way; each failure
@@ -36,7 +36,7 @@ reason: fn(error: TaskError) -> String {
 new_task_id: fn() -> TaskID { TaskID{value: 1} }
 
 Crew: struct {
-    name: String
+    name: String,
 
     // A signed-in caller moves a task.
     #App.SignedIn move_task: fn(self, id: TaskID) -> Int TaskError! {

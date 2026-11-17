@@ -26,42 +26,42 @@
 // Size: a positive size in `k`, `m` or `g` (also `kib`, `mib`, `gib`) units
 // (`--memory=16G`, `memory: 16gib`, `t.memory("16G")`).
 TestSettingKind: enum {
-    Switch
-    Count
-    Seed
-    Text
-    Path
-    Capture
-    Shard
-    Levels
-    Duration
-    Size
+    Switch,
+    Count,
+    Seed,
+    Text,
+    Path,
+    Capture,
+    Shard,
+    Levels,
+    Duration,
+    Size,
 }
 
 // `typed`: the JET_CLI_FLAG_TYPED_REASONS row that says why the flag is typed
 // each time instead of being the remembered setting `test.<name>`; empty when
 // it is that setting (a profile or `test: fn` writes any row).
 TestSettingRow: struct {
-    name: String
-    kind: TestSettingKind
-    ported: Bool
-    help: String
-    typed: String{""}
+    name: String,
+    kind: TestSettingKind,
+    ported: Bool,
+    help: String,
+    typed: String{""},
 }
 
 // One chosen value: its row's name, the canonical value text
 // (test_setting_value) and the layer that wrote it (`profile `ui``,
 // `test: fn`, `flag`).
 TestSetting: struct {
-    name: String
-    value: String
-    source: String
+    name: String,
+    value: String,
+    source: String,
 }
 
 // Why settings text can't be read (test_settings_parse_lines).
 #Error
 TestSettingError: struct {
-    message: String
+    message: String,
 }
 
 // The environment variable that names the plan file of `jet test`'s plan
@@ -292,8 +292,8 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
 }
 
 TestSettingSizeUnit: struct {
-    suffix: String
-    bytes: Int
+    suffix: String,
+    bytes: Int,
 }
 
 // Longest suffix first, so `gib` is not read as `b`.

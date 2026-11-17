@@ -16,7 +16,7 @@ Batch<T>: [T]
 // A hand-written codec: its own error has the empty path, and the decode
 // that holds it adds the field's path.
 Email: struct {
-    address: String
+    address: String,
 
     impl Encode {
         encode: fn(self) -> Dyn { Dyn.Text(self.address.copy()) }
@@ -34,35 +34,35 @@ Email: struct {
 }
 
 Level: enum {
-    Low
-    High
+    Low,
+    High,
 }
 
 Shape: enum {
-    Dot
-    Circle(radius: Int)
-    Square(Int)
+    Dot,
+    Circle(radius: Int),
+    Square(Int),
 }
 
 Page: struct<T> {
-    items: [T]
-    total: Int
+    items: [T],
+    total: Int,
 }
 
 #Rename(.Camel)
 Account: struct {
-    user_name: String
-    #Rename("mail") email: Email
-    score: Percent
-    level: Level
-    shapes: [Shape]
-    tags: Batch<String>
-    born: LocalDate
+    user_name: String,
+    #Rename("mail") email: Email,
+    score: Percent,
+    level: Level,
+    shapes: [Shape],
+    tags: Batch<String>,
+    born: LocalDate,
     // Skipped: never read from the wire, so it takes its default.
-    #Codable(.Skip) visits: Int
+    #Codable(.Skip) visits: Int,
     // Read-only: computed from the stored fields, never decoded.
-    label: String -> "{user_name} <{email.address}>"
-    note: String?
+    label: String -> "{user_name} <{email.address}>",
+    note: String?,
 
     validate { check(user_name.len() > 2, at: user_name, "is too short") }
 }

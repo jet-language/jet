@@ -10,9 +10,9 @@
 
 // How an owned trait's method takes its receiver.
 OwnedReceiver: enum {
-    Static
-    Any
-    Fixed(access: AccessConvention)
+    Static,
+    Any,
+    Fixed(access: AccessConvention),
 }
 
 // No receiver: `zero: fn() -> Self`.
@@ -20,31 +20,31 @@ OwnedReceiver: enum {
 
 // A parameter after the receiver: `buffer: &[U8]` takes Write access.
 OwnedParam: struct {
-    name: String
-    access: AccessConvention
-    ty: Type
+    name: String,
+    access: AccessConvention,
+    ty: Type,
 }
 
 // `Self` and the trait's associated type names resolve per impl.
 OwnedMethod: struct {
-    name: String
-    receiver: OwnedReceiver
-    params: [OwnedParam]
+    name: String,
+    receiver: OwnedReceiver,
+    params: [OwnedParam],
     // None: the method returns no value.
-    returns: Type?
+    returns: Type?,
     // A default: the method as Traits.jet writes it, header and body. An
     // impl that leaves the method out gets this body (TraitImpls.jet).
-    default_source: String?{None}
+    default_source: String?{None},
 }
 
 OwnedContract: enum {
-    Methods(methods: [OwnedMethod], associated: [String], shares: String?)
-    Operator(hook: String, result: Type?)
-    Codec(verb: String)
-    Literal(source: Type)
-    Conversion(hook: String)
-    CheckedText
-    Derived
+    Methods(methods: [OwnedMethod], associated: [String], shares: String?),
+    Operator(hook: String, result: Type?),
+    Codec(verb: String),
+    Literal(source: Type),
+    Conversion(hook: String),
+    CheckedText,
+    Derived,
 }
 
 // Fixed methods and associated types. `shares` names the trait whose
@@ -63,39 +63,39 @@ OwnedContract: enum {
 // the compiler reads.
 
 OwnedTrait: struct {
-    name: String
+    name: String,
     // The orphan rule counts the trait as declared by every program (E0902).
-    local: Bool
+    local: Bool,
     // A generic bound may name it bare, with no declaring module.
-    bare_bound: Bool
+    bare_bound: Bool,
     // Its impl methods return their declared type as written, never through
     // the implicit failure carrier.
-    raw_return: Bool
-    contract: OwnedContract
+    raw_return: Bool,
+    contract: OwnedContract,
     // The source operators its hook implements: `==` and `!=` for `Equatable`.
-    operators: [String]
+    operators: [String],
     // `#Commutative` on a typed impl also answers the swapped operands.
-    commutative: Bool
+    commutative: Bool,
     // The traits every type with this one also has.
-    requires: [String]
+    requires: [String],
     // `#Name` on a struct or enum derives it structurally; `!Name` refuses it.
-    auto_derive: Bool
+    auto_derive: Bool,
     // The marker that derives it with the family's other traits (`Codable`).
-    auto_derive_family: String?
+    auto_derive_family: String?,
     // `#Name` on a distinct type re-exposes it from the base type.
-    bundle: Bool
+    bundle: Bool,
     // A list, map, option or union has it when its elements do.
-    through_elements: Bool
+    through_elements: Bool,
     // Its laws, as Traits.jet writes them (TraitDef.laws).
-    laws: [OwnedLaw]{[OwnedLaw]{}}
+    laws: [OwnedLaw]{[OwnedLaw]{}},
 }
 
 // One law of an owned trait: its name and the whole `#Test name: fn(…) { … }`
 // as written, which `jet test` parses for each implementing type
 // (TraitLaws.jet).
 OwnedLaw: struct {
-    name: String
-    source: String
+    name: String,
+    source: String,
 }
 
 owned_trait: fn(name: String) -> OwnedTrait? Never! {

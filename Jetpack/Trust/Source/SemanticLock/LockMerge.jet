@@ -5,38 +5,38 @@
 use jet_pkg_model.[pkg_overlay_sorted_unique]
 
 LockConflict: struct {
-    semantic_key: String
-    owner_package: String
-    left_identity: String
-    right_identity: String
-    left_reason: String
-    right_reason: String
+    semantic_key: String,
+    owner_package: String,
+    left_identity: String,
+    right_identity: String,
+    left_reason: String,
+    right_reason: String,
 }
 
 MergeOutcome: struct {
-    merged: SemanticLockFile
-    conflicts: [LockConflict]
+    merged: SemanticLockFile,
+    conflicts: [LockConflict],
 }
 
 ExplainFact: struct {
-    semantic_key: String
-    owners: [String]
+    semantic_key: String,
+    owners: [String],
     // Every rationale that competed for this resolved record. The first
     // rationale is not a sufficient explanation when overlays merge several
     // declarations into one winner.
-    contenders: [LockRationale]
-    provider: String
-    platform: String
-    exact_artifact: String
-    policy_fingerprint: String
-    update_command: String
-    offline_satisfied: Bool
+    contenders: [LockRationale],
+    provider: String,
+    platform: String,
+    exact_artifact: String,
+    policy_fingerprint: String,
+    update_command: String,
+    offline_satisfied: Bool,
 }
 
 // The resolution of one semantic key present on both sides.
 LockMergeStep: enum {
-    Keep(SemanticRecord)
-    Conflict(LockConflict)
+    Keep(SemanticRecord),
+    Conflict(LockConflict),
 }
 
 trust_merge_semantic_locks: fn(base: SemanticLockFile, left: SemanticLockFile, right: SemanticLockFile) -> MergeOutcome Never! {

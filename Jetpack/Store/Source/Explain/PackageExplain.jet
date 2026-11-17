@@ -10,12 +10,12 @@ use {
 }
 
 ExplainLens: enum {
-    All
-    WhyDepends
-    WhatDepends
-    Closure
-    WhyLive
-    Rebuild
+    All,
+    WhyDepends,
+    WhatDepends,
+    Closure,
+    WhyLive,
+    Rebuild,
 
     parse: fn(raw: String) -> ExplainLens? Never! {
         if raw == {
@@ -43,8 +43,8 @@ ExplainLens: enum {
 // One persisted fact the explanation could not prove (`loss`) or two facts
 // that disagree (`conflict`).
 ExplainReportKind: enum {
-    Loss
-    Conflict
+    Loss,
+    Conflict,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -55,8 +55,8 @@ ExplainReportKind: enum {
 }
 
 ExplainReport: struct {
-    kind: ExplainReportKind
-    message: String
+    kind: ExplainReportKind,
+    message: String,
 
     loss: fn(message: String) -> ExplainReport Never! {
         ExplainReport{kind: ExplainReportKind.Loss, message: message}
@@ -93,17 +93,17 @@ ExplainReport: struct {
 }
 
 ExplainEntry: struct {
-    id: String
-    name: String
-    version: String
-    reference: String
-    output_hash: String
-    output_path: String
-    bin_path: String
-    rlib_path: String
-    receipt: String
-    realized_at: Int
-    last_used_at: Int
+    id: String,
+    name: String,
+    version: String,
+    reference: String,
+    output_hash: String,
+    output_path: String,
+    bin_path: String,
+    rlib_path: String,
+    receipt: String,
+    realized_at: Int,
+    last_used_at: Int,
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -123,11 +123,11 @@ ExplainEntry: struct {
 }
 
 ExplainObject: struct {
-    digest: String
-    path: String
-    external: Bool
-    known: Bool
-    owners: [String]
+    digest: String,
+    path: String,
+    external: Bool,
+    known: Bool,
+    owners: [String],
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -141,11 +141,11 @@ ExplainObject: struct {
 }
 
 ExplainGraph: struct {
-    direct_dependencies: [ExplainObject]
-    dependencies: [ExplainObject]
-    direct_referrers: [ExplainObject]
-    referrers: [ExplainObject]
-    closure: [ExplainObject]
+    direct_dependencies: [ExplainObject],
+    dependencies: [ExplainObject],
+    direct_referrers: [ExplainObject],
+    referrers: [ExplainObject],
+    closure: [ExplainObject],
 
     empty: fn() -> ExplainGraph Never! {
         ExplainGraph{direct_dependencies: [ExplainObject]{}, dependencies: [ExplainObject]{}, direct_referrers: [ExplainObject]{}, referrers: [ExplainObject]{}, closure: [ExplainObject]{}}
@@ -169,10 +169,10 @@ store_explain_objects_tree: fn(objects: [ExplainObject]) -> Dyn Never! {
 }
 
 ExplainProfile: struct {
-    profile: String
-    generation: Int
-    output_hash: String
-    provider_facts: ProviderFacts
+    profile: String,
+    generation: Int,
+    output_hash: String,
+    provider_facts: ProviderFacts,
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -185,16 +185,16 @@ ExplainProfile: struct {
 }
 
 ExplainProvider: struct {
-    provider: String
-    immutable_source: String
-    source_digest: String
-    toolchain_facts: String
-    policy_facts: String
-    producer_facts: [String:String]
-    provider_facts: ProviderFacts?
-    locked_provider_facts: ProviderFacts?
-    profile_facts: [ExplainProfile]
-    native_document: String
+    provider: String,
+    immutable_source: String,
+    source_digest: String,
+    toolchain_facts: String,
+    policy_facts: String,
+    producer_facts: [String:String],
+    provider_facts: ProviderFacts?,
+    locked_provider_facts: ProviderFacts?,
+    profile_facts: [ExplainProfile],
+    native_document: String,
 
     to_tree: fn(self) -> Dyn Never! {
         facts := [String:Dyn]{}
@@ -225,14 +225,14 @@ store_explain_facts_tree: fn(facts: ProviderFacts?) -> Dyn Never! {
 }
 
 ExplainRoot: struct {
-    kind: String
-    id: String
-    producer: String
-    phase: String
-    label: String
-    reference: String
-    targets: [String]
-    reason: String
+    kind: String,
+    id: String,
+    producer: String,
+    phase: String,
+    label: String,
+    reference: String,
+    targets: [String],
+    reason: String,
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -249,9 +249,9 @@ ExplainRoot: struct {
 }
 
 ExplainLiveness: struct {
-    live: Bool
-    roots: [ExplainRoot]
-    reason: String
+    live: Bool,
+    roots: [ExplainRoot],
+    reason: String,
 
     empty: fn() -> ExplainLiveness Never! {
         ExplainLiveness{live: false, roots: [ExplainRoot]{}, reason: ""}
@@ -269,14 +269,14 @@ ExplainLiveness: struct {
 }
 
 ExplainAttempt: struct {
-    id: String
-    package: String
-    reference: String
-    provider: String
-    status: String
-    failed_step: Int
-    scratch_dir: String
-    log_dir: String
+    id: String,
+    package: String,
+    reference: String,
+    provider: String,
+    status: String,
+    failed_step: Int,
+    scratch_dir: String,
+    log_dir: String,
 
     from_attempt: fn(attempt: BuildAttempt) -> ExplainAttempt Never! {
         ExplainAttempt{id: attempt.id, package: attempt.package, reference: attempt.reference, provider: attempt.provider, status: attempt.status, failed_step: attempt.failed_step, scratch_dir: attempt.scratch_dir, log_dir: attempt.log_dir}
@@ -297,13 +297,13 @@ ExplainAttempt: struct {
 }
 
 ExplainCacheAdmission: struct {
-    role: String
-    decision: String
-    builder: String
-    provenance: String
-    receipt_version: Int?
-    receipt_expires_unix: Int?
-    reason: String
+    role: String,
+    decision: String,
+    builder: String,
+    provenance: String,
+    receipt_version: Int?,
+    receipt_expires_unix: Int?,
+    reason: String,
 
     to_tree: fn(self) -> Dyn Never! {
         object := [String:Dyn]{}
@@ -334,13 +334,13 @@ store_explain_optional_int_text: fn(value: Int?) -> String Never! {
 }
 
 ExplainRebuild: struct {
-    decision: String
-    reason: String
-    action_key: String
-    cache_identity: [String:String]
-    cache_admissions: [ExplainCacheAdmission]
-    checks: [String:String]
-    attempt: ExplainAttempt?
+    decision: String,
+    reason: String,
+    action_key: String,
+    cache_identity: [String:String],
+    cache_admissions: [ExplainCacheAdmission],
+    checks: [String:String],
+    attempt: ExplainAttempt?,
 
     empty: fn() -> ExplainRebuild Never! {
         ExplainRebuild{decision: "", reason: "", action_key: "", cache_identity: [String:String]{}, cache_admissions: [ExplainCacheAdmission]{}, checks: [String:String]{}, attempt: None}
@@ -373,15 +373,15 @@ store_explain_sorted_text_map: fn(map: [String:String]) -> Dyn Never! {
 }
 
 PackageExplain: struct {
-    schema: String
-    query: String
-    lens: String
-    entry: ExplainEntry?
-    provider: ExplainProvider?
-    graph: ExplainGraph
-    liveness: ExplainLiveness
-    rebuild: ExplainRebuild
-    reports: [ExplainReport]
+    schema: String,
+    query: String,
+    lens: String,
+    entry: ExplainEntry?,
+    provider: ExplainProvider?,
+    graph: ExplainGraph,
+    liveness: ExplainLiveness,
+    rebuild: ExplainRebuild,
+    reports: [ExplainReport],
 
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
     to_json: fn(self) -> String ReportError! {
@@ -1233,8 +1233,8 @@ store_explain_rebuild_projection: fn(verification: &StoreVerification, roots: Ha
 
 // The first rebuild trigger in priority order, else `realized`.
 RebuildDecision: struct {
-    decision: String
-    reason: String
+    decision: String,
+    reason: String,
 
     required: fn(reason: String) -> RebuildDecision Never! {
         RebuildDecision{decision: "rebuild-required", reason: reason}

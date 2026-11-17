@@ -17,13 +17,13 @@ WAT_STRING: 2
 // The s-expression tree: node 0 is the synthetic root; children are linked
 // first-child / next-sibling.
 WatTree: struct {
-    kinds: [Int]
-    texts: [String]
-    datas: [[U8]]
-    ats: [Int]
-    firsts: [Int]
-    nexts: [Int]
-    lasts: [Int]
+    kinds: [Int],
+    texts: [String],
+    datas: [[U8]],
+    ats: [Int],
+    firsts: [Int],
+    nexts: [Int],
+    lasts: [Int],
 
     add: fn(&self, kind: Int, text: String, data: [U8], at: Int, parent: Int) -> Int Never! {
         id: self.kinds.len()
@@ -326,40 +326,40 @@ wat_looks_textual: fn(text: String) -> Bool Never! {
 // Core modules.
 
 WatSig: struct {
-    type_index: Int
-    params: [Int]
-    names: [String]
-    results: [Int]
-    next: Int
+    type_index: Int,
+    params: [Int],
+    names: [String],
+    results: [Int],
+    next: Int,
 }
 
 WatModule: struct {
-    tree: WatTree
-    ops: WasmOpTable
-    types: [WasmFuncType]
-    counts: [String:Int]
-    names: [String:Int]
-    field_index: [Int:Int]
-    func_types: [Int]
-    func_nodes: [Int]
-    imports: [U8]
-    import_count: Int
-    tables: [U8]
-    table_count: Int
-    memories: [U8]
-    memory_count: Int
-    globals: [U8]
-    global_count: Int
-    exports: [U8]
-    export_count: Int
-    start: Int
-    elems: [U8]
-    elem_count: Int
-    datas: [U8]
-    data_count: Int
-    needs_datacount: Bool
-    labels: [String]
-    locals: [String:Int]
+    tree: WatTree,
+    ops: WasmOpTable,
+    types: [WasmFuncType],
+    counts: [String:Int],
+    names: [String:Int],
+    field_index: [Int:Int],
+    func_types: [Int],
+    func_nodes: [Int],
+    imports: [U8],
+    import_count: Int,
+    tables: [U8],
+    table_count: Int,
+    memories: [U8],
+    memory_count: Int,
+    globals: [U8],
+    global_count: Int,
+    exports: [U8],
+    export_count: Int,
+    start: Int,
+    elems: [U8],
+    elem_count: Int,
+    datas: [U8],
+    data_count: Int,
+    needs_datacount: Bool,
+    labels: [String],
+    locals: [String:Int],
 
     fail: fn(self, id: Int, message: String) -> WasmError Never! { self.tree.fail(id, message) }
 
@@ -1285,11 +1285,11 @@ wat_op: fn(m: &WatModule, out: &[U8], node: Int, items: [Int], from: Int) -> Int
 // become type-section entries) or an instance type's (they become `type`
 // declarations).
 WatTypeSpace: struct {
-    instance: Bool
-    count: Int
-    names: [String:Int]
-    defs: [U8]
-    pending: Int
+    instance: Bool,
+    count: Int,
+    names: [String:Int],
+    defs: [U8],
+    pending: Int,
 
     new: fn(instance: Bool) -> WatTypeSpace Never! {
         WatTypeSpace{instance: instance, count: 0, names: [String:Int]{}, defs: [U8]{}, pending: 0}
@@ -1308,11 +1308,11 @@ WatTypeSpace: struct {
 }
 
 WatComponent: struct {
-    tree: WatTree
-    out: [U8]
-    counts: [String:Int]
-    names: [String:Int]
-    types: WatTypeSpace
+    tree: WatTree,
+    out: [U8],
+    counts: [String:Int],
+    names: [String:Int],
+    types: WatTypeSpace,
 
     fail: fn(self, id: Int, message: String) -> WasmError Never! { self.tree.fail(id, message) }
 

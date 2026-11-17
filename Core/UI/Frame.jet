@@ -113,23 +113,23 @@ EDGE_RIGHT: 8
 
 // The colors of one theme, 0xAARRGGBB with straight alpha.
 Palette: struct {
-    header_active: Int
-    header_inactive: Int
-    text_active: Int
+    header_active: Int,
+    header_inactive: Int,
+    text_active: Int,
     // An unfocused window is still operable, so its title stays readable
     // (4.5:1 on its header) rather than taking the disabled-text exception.
-    text_inactive: Int
+    text_inactive: Int,
     // A glyph under the pointer.
-    glyph_hover: Int
+    glyph_hover: Int,
     // The line just outside the window's edge.
-    outline: Int
-    button_idle: Int
-    button_hover: Int
-    button_press: Int
-    close_hover: Int
-    close_press: Int
+    outline: Int,
+    button_idle: Int,
+    button_hover: Int,
+    button_press: Int,
+    close_hover: Int,
+    close_press: Int,
     // The keyboard focus ring.
-    focus: Int
+    focus: Int,
 }
 
 // The dark theme, the default: the header on Jet black, a muted gray title
@@ -183,20 +183,20 @@ WHITE: 0xFFFFFFFF
 
 // A title-bar button.
 FrameButton: enum {
-    Nothing
-    Minimize
-    Maximize
-    Close
+    Nothing,
+    Minimize,
+    Maximize,
+    Close,
 }
 
 // The part of the frame a point is on. `Edge` carries xdg_toplevel's
 // resize edge.
 FrameSpot: enum {
-    Outside
-    Content
-    Title
-    Button(FrameButton)
-    Edge(Int)
+    Outside,
+    Content,
+    Title,
+    Button(FrameButton),
+    Edge(Int),
 }
 
 // What the header shows. `square` drops the rounded corners and the
@@ -206,15 +206,15 @@ FrameSpot: enum {
 // focus, ringed (`Nothing` while the content has it). `dark` picks the
 // dark theme, else the light one.
 FrameLook: struct {
-    title: String
-    active: Bool
-    square: Bool
-    maximized: Bool
-    coarse: Bool
-    hover: FrameButton
-    pressed: FrameButton
-    focus: FrameButton
-    dark: Bool
+    title: String,
+    active: Bool,
+    square: Bool,
+    maximized: Bool,
+    coarse: Bool,
+    hover: FrameButton,
+    pressed: FrameButton,
+    focus: FrameButton,
+    dark: Bool,
 }
 
 // The shadow and outline of a small window, `box_width` by `box_height`
@@ -222,31 +222,31 @@ FrameLook: struct {
 // theme. Any larger window's ring is this one's corners with its straight
 // middle rows and columns repeated: see `kit_index`.
 Kit: struct {
-    active: Bool
-    dark: Bool
-    scale120: Int
-    margin: Int
-    box_width: Int
-    box_height: Int
-    width: Int
-    height: Int
-    pixels: [U8]
+    active: Bool,
+    dark: Bool,
+    scale120: Int,
+    margin: Int,
+    box_width: Int,
+    box_height: Int,
+    width: Int,
+    height: Int,
+    pixels: [U8],
 }
 
 // A row of a window's shadow ring: `left`'s bytes, `fill_count` copies of
 // the pixel `fill` (a little-endian ARGB8888 word), then `right`'s bytes.
 KitRow: struct {
-    left: [U8]
-    fill: Int
-    fill_count: Int
-    right: [U8]
+    left: [U8],
+    fill: Int,
+    fill_count: Int,
+    right: [U8],
 }
 
 // The title face, its glyphs, and the kits made so far.
 Painter: struct {
-    face: font.Face
-    cache: font.GlyphCache
-    kits: [Kit]
+    face: font.Face,
+    cache: font.GlyphCache,
+    kits: [Kit],
 }
 
 painter: fn() -> Painter { Painter{face: font.regular(), cache: font.cache(), kits: [Kit]{}} }

@@ -28,17 +28,17 @@ use {
 // reader supplies an authority-backed implementation so profile evaluation
 // cannot fall back to ambient filesystem reads.
 SourceLoader: trait {
-    read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError!
-    list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError!
+    read_file: fn(&self, relative: String) -[FS, Env]> String EnvModelEvalError!,
+    list_jet_files: fn(&self, relative: String) -[FS, Env]> [String] EnvModelEvalError!,
     // Package cross-checks are needed only for image declarations. A loader
     // may decline them (None) when the graph has no image that names a
     // package.
-    package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError!
+    package_facts: fn(&self) -[FS, Env]> PackageFacts? EnvModelEvalError!,
 }
 
 // The ambient-filesystem loader below one canonical environment root.
 FileSystemSourceLoader: struct {
-    root: String
+    root: String,
 
     // `relative` below the root, canonicalized and proven still inside it.
     checked_path: fn(self, relative: String) -[FS, Env]> String EnvModelEvalError! {
@@ -123,9 +123,9 @@ FileSystemSourceLoader: struct {
 // What `PackageFacts.load` found at a package root: no manifest, the
 // composed facts, or a manifest that does not load (Rust `Some(Err(_))`).
 EnvModelPackageRoot: enum {
-    Absent
-    Loaded(facts: PackageFacts)
-    Malformed
+    Absent,
+    Loaded(facts: PackageFacts),
+    Malformed,
 }
 
 envmodel_source_loader_error: fn(path: String, cause: String) -> EnvModelEvalError Never! {
@@ -161,10 +161,10 @@ envmodel_module_decl: fn(item: Item) -> ModuleDecl? Never! {
 // this unit's own `src`; `base_dir` is the dir the file's relative refs and
 // `embed_file` calls resolve against.
 EvalUnit: struct {
-    items: [Item]
-    src: String
-    base_dir: String
-    source_path: String
+    items: [Item],
+    src: String,
+    base_dir: String,
+    source_path: String,
 }
 
 // Walk every `imports: find("<dir>")` directive in the root unit's modules,

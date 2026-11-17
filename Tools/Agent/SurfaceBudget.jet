@@ -44,18 +44,18 @@ USAGE: "usage: jet Tools/Agent/SurfaceBudget.jet [--check | --report | --ballot 
 
 // One counted kind of language surface.
 SurfaceKind: enum {
-    Keyword
-    LexicalForm
-    Marker
-    Fact
-    Command
+    Keyword,
+    LexicalForm,
+    Marker,
+    Fact,
+    Command,
 }
 
 SURFACE_KINDS: [SurfaceKind]{.Keyword, .LexicalForm, .Marker, .Fact, .Command}
 
 #Error
 SurfaceBudgetError: struct {
-    message: String
+    message: String,
 }
 
 budget_fail: fn(message: String) -> SurfaceBudgetError Never! {
@@ -176,10 +176,10 @@ word_byte: fn(n: U8) -> Bool Never! {
 
 // One ceiling row of the ledger.
 CeilingRow: struct {
-    line: Int
-    kind: String
-    ceiling: Int
-    why: String
+    line: Int,
+    kind: String,
+    ceiling: Int,
+    why: String,
 }
 
 // The ledger's rows (`#` lines and blank lines are comments), and a problem
@@ -393,13 +393,13 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
 }
 
 #Test("each kind is counted from its canonical rows") {
-    keywords: "LexerKeyword: struct {{\n    retired: Bool\n}}\n\nLEXER_KEYWORDS: [LexerKeyword]{{\n    {{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\", retired: false}},\n    {{constant: \"KW_COPY\", kind: \"KwCopy\", tag: \"K_COPY\", retired: true}},\n    {{constant: \"KW_IF\", kind: \"KwIf\", tag: \"K_IF\", retired: false}},\n}}\n"
+    keywords: "LexerKeyword: struct {{\n    retired: Bool,\n}}\n\nLEXER_KEYWORDS: [LexerKeyword]{{\n    {{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\", retired: false}},\n    {{constant: \"KW_COPY\", kind: \"KwCopy\", tag: \"K_COPY\", retired: true}},\n    {{constant: \"KW_IF\", kind: \"KwIf\", tag: \"K_IF\", retired: false}},\n}}\n"
     // The retired row stays reserved but is not counted.
     assert_eq(count_kind(.Keyword, keywords), 2)
     forms: "LEXICAL_LEDGER: [LexicalEntry]{{\n    {{ spelling: \":\", meaning: \"binding\" }},\n    {{ spelling: \"#\", meaning: \"marker\" }},\n}}\nOTHER: [LexicalEntry]{{\n    {{ spelling: \"x\", meaning: \"y\" }},\n}}\n"
     assert_eq(count_kind(.LexicalForm, forms), 2)
     // A comment that mentions `impl Marker` is no declaration.
-    markers: "// each marker has an `impl Marker {{ … }}` block\nPolicy: struct {{\n    impl Marker {{\n        inherits: true\n    }}\n}}\nInline: struct {{\n    impl Marker {{}}\n}}\n"
+    markers: "// each marker has an `impl Marker {{ … }}` block\nPolicy: struct {{\n    impl Marker {{\n        inherits: true,\n    }}\n}}\nInline: struct {{\n    impl Marker {{}}\n}}\n"
     assert_eq(count_kind(.Marker, markers), 2)
     assert_eq(count_kind(.Fact, "Flow: struct {{\n    impl Fact {{}}\n}}\n"), 1)
     commands: "JET_CLI_COMMANDS: #run {{ [JetCLICommandSpec]{{\n    {{\n        name: \"registry\",\n        actions: [JetCLIActionSpec]{{\n            {{name: \"publish\", handler: \"Publish\"}},\n        }},\n    }},\n    {{\n        name: \"build\",\n        actions: [JetCLIActionSpec]{{}},\n    }},\n}} }}\n"

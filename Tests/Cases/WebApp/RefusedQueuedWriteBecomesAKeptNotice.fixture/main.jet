@@ -26,17 +26,17 @@ use {
 
 #Codable
 Card: struct {
-    id: Int
-    title: String
-    version: Int
+    id: Int,
+    title: String,
+    version: Int,
 }
 
 #Error
 BoardError: enum {
-    Missing(Int)
-    Conflict(Int)
-    Failed(String)
-    Unreachable(String)
+    Missing(Int),
+    Conflict(Int),
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> BoardError {
@@ -53,7 +53,7 @@ tasks_in: fn(store: db.Store) -> db.Table<Int, Card> {
 }
 
 Board: struct {
-    store: db.Store
+    store: db.Store,
 
     // Retitles task `id`, made against its version `version`: `.Conflict`
     // with the task's version when the task has changed since.

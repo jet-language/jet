@@ -11,38 +11,38 @@ use {
 
 #Error
 XMLError: struct {
-    kind: XMLReason
-    byte_offset: Int?
-    line: Int?
-    column: Int?
-    path: String
-    reason: String
+    kind: XMLReason,
+    byte_offset: Int?,
+    line: Int?,
+    column: Int?,
+    path: String,
+    reason: String,
 }
 
 XMLReason: enum {
-    InvalidEncoding
-    Malformed
-    MismatchedTag
-    InvalidName
-    Namespace
-    DuplicateAttribute
-    Entity
-    EntityCycle
-    Limit
-    Canonicalization
-    Shape
-    Unsupported
+    InvalidEncoding,
+    Malformed,
+    MismatchedTag,
+    InvalidName,
+    Namespace,
+    DuplicateAttribute,
+    Entity,
+    EntityCycle,
+    Limit,
+    Canonicalization,
+    Shape,
+    Unsupported,
 }
 
 XMLLimits: struct {
-    max_depth: Int
-    max_nodes: Int
-    max_attributes_per_element: Int
-    max_name_bytes: Int
-    max_text_bytes: Int
-    max_entity_declarations: Int
-    max_entity_depth: Int
-    max_entity_replacement_bytes: Int
+    max_depth: Int,
+    max_nodes: Int,
+    max_attributes_per_element: Int,
+    max_name_bytes: Int,
+    max_text_bytes: Int,
+    max_entity_declarations: Int,
+    max_entity_depth: Int,
+    max_entity_replacement_bytes: Int,
 
     safe: fn() -> XMLLimits Never! {
         XMLLimits{
@@ -59,14 +59,14 @@ XMLLimits: struct {
 }
 
 XMLEntityPolicy: enum {
-    Preserve
-    Reject
-    Resolve([String:String])
+    Preserve,
+    Reject,
+    Resolve([String:String]),
 }
 
 XMLParseOptions: struct {
-    entities: XMLEntityPolicy
-    limits: XMLLimits
+    entities: XMLEntityPolicy,
+    limits: XMLLimits,
 
     safe: fn() -> XMLParseOptions Never! {
         XMLParseOptions{entities: .Preserve, limits: XMLLimits.safe()}
@@ -74,20 +74,20 @@ XMLParseOptions: struct {
 }
 
 XMLEncoding: enum {
-    UTF8
-    UTF8BOM
-    UTF16LE
-    UTF16BE
+    UTF8,
+    UTF8BOM,
+    UTF16LE,
+    UTF16BE,
 }
 
 XMLLexicalPolicy: enum {
-    PreserveValid
-    Deterministic
+    PreserveValid,
+    Deterministic,
 }
 
 XMLRenderOptions: struct {
-    encoding: XMLEncoding
-    lexical: XMLLexicalPolicy
+    encoding: XMLEncoding,
+    lexical: XMLLexicalPolicy,
 
     safe: fn() -> XMLRenderOptions Never! {
         XMLRenderOptions{encoding: .UTF8, lexical: .PreserveValid}
@@ -95,14 +95,14 @@ XMLRenderOptions: struct {
 }
 
 XMLCanonicalMode: enum {
-    Inclusive11
-    Exclusive10
+    Inclusive11,
+    Exclusive10,
 }
 
 XMLCanonical: struct {
-    mode: XMLCanonicalMode
-    comments: Bool
-    inclusive_prefixes: [String]
+    mode: XMLCanonicalMode,
+    comments: Bool,
+    inclusive_prefixes: [String],
 
     inclusive11: fn() -> XMLCanonical Never! {
         XMLCanonical{mode: .Inclusive11, comments: false, inclusive_prefixes: [String]{}}
@@ -174,13 +174,13 @@ decode_bytes: fn<T: Decode>(bytes: [U8], options: XMLParseOptions{XMLParseOption
 /// Bounded XML events over any byte source (a FileReader, a socket, or any
 /// other `Reader`) retain lexical bytes and latch the first stream error.
 XMLReader: struct<R: Reader> {
-    input: R
-    limits: EncodingLimits
-    scanner: engine.StreamScanner
-    terminal: EncodingError?
-    total: Int
-    eof: Bool
-    allocation: stream.AllocationBudget
+    input: R,
+    limits: EncodingLimits,
+    scanner: engine.StreamScanner,
+    terminal: EncodingError?,
+    total: Int,
+    eof: Bool,
+    allocation: stream.AllocationBudget,
 
     fail: fn(&self, error: EncodingError) -> Dyn? EncodingError! {
         self.terminal = Val(error.copy())
@@ -292,13 +292,13 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()},
 /// sink in one write; the first error latches and every later call returns
 /// it.
 XMLWriter: struct<W: Writer> {
-    output: W
-    limits: EncodingLimits
-    renderer: engine.StreamWriter
-    terminal: EncodingError?
-    total: Int
-    finished: Bool
-    allocation: stream.AllocationBudget
+    output: W,
+    limits: EncodingLimits,
+    renderer: engine.StreamWriter,
+    terminal: EncodingError?,
+    total: Int,
+    finished: Bool,
+    allocation: stream.AllocationBudget,
 
     fail: fn(&self, error: EncodingError) EncodingError! {
         self.terminal = Val(error.copy())

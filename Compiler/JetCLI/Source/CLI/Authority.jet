@@ -41,17 +41,17 @@ JET_CLI_INLINE_PACKAGE_DEFAULT: "inline Package default"
 // One application's authority: the sema fact (`required`) and the policy
 // facts (`granted`, `denied`, and the policy's name), each a sorted set.
 JetCLIAuthority: struct {
-    required: [String]
-    granted: [String]
-    denied: [String]
-    authority: String
+    required: [String],
+    granted: [String],
+    denied: [String],
+    authority: String,
     // The rights this invocation's `--deny` removed: E1803 names the command
     // line, not the policy, when one of them stops the run.
-    invocation_denied: [String]
+    invocation_denied: [String],
     // The only paths the run may read (jet_cli_merged_read_scope): its
     // package's `FS.Read("<path>")` grants with this invocation's. Empty when
     // its reads are not confined.
-    read_scope: [String]
+    read_scope: [String],
 }
 
 // The `--allow`, `--deny` and `-A` (`--allow-all`) rows of this invocation,
@@ -60,10 +60,10 @@ JetCLIAuthority: struct {
 // `jet run <package>` target (RemoteRun.jet), whose effect notice is a
 // first-run question.
 JetCLIInvocationAuthority: struct {
-    all: Bool
-    allow: [String]
-    deny: [String]
-    remote: JetCLIRemoteRunOrigin?{None}
+    all: Bool,
+    allow: [String],
+    deny: [String],
+    remote: JetCLIRemoteRunOrigin?{None},
 }
 
 // A file whose first line is a `#!/...` launch line (`#!/usr/bin/env jet`)
@@ -72,9 +72,9 @@ JetCLIInvocationAuthority: struct {
 jet_cli_is_script: fn(source: String) -> Bool Never! { source.starts_with("#!/") }
 
 JetCLIVerdict: enum {
-    Allowed
-    Denied
-    Missing
+    Allowed,
+    Denied,
+    Missing,
 }
 
 // A sorted set of the values (Rust `BTreeSet<String>`).

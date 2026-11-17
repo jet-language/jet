@@ -45,17 +45,17 @@ EXPONENT_BLINDING: 28
 /// bignum error mbedtls adds to the RSA code.
 #Error
 RSAError: enum {
-    BadInput(bn.MpiError?)
-    InvalidPadding
-    KeyGenFailed(bn.MpiError?)
-    KeyCheckFailed(bn.MpiError?)
-    PublicFailed(bn.MpiError?)
-    PrivateFailed(bn.MpiError?)
-    VerifyFailed
-    OutputTooLarge
-    RNGFailed
-    Mpi(bn.MpiError)
-    Asn1(asn1.ASN1Error)
+    BadInput(bn.MpiError?),
+    InvalidPadding,
+    KeyGenFailed(bn.MpiError?),
+    KeyCheckFailed(bn.MpiError?),
+    PublicFailed(bn.MpiError?),
+    PrivateFailed(bn.MpiError?),
+    VerifyFailed,
+    OutputTooLarge,
+    RNGFailed,
+    Mpi(bn.MpiError),
+    Asn1(asn1.ASN1Error),
 }
 
 /// Bad input parameters (BAD_INPUT_DATA, -0x4080).
@@ -75,17 +75,17 @@ impl bn.MpiError -> RSAError { RSAError.Mpi(self) }
 
 /// The encoding scheme (MBEDTLS_RSA_PKCS_V15, MBEDTLS_RSA_PKCS_V21).
 RSAPadding: enum {
-    PKCSV15
-    PKCSV21
+    PKCSV15,
+    PKCSV21,
 }
 
 /// One core parameter of a key, for import and export.
 RSAPart: enum {
-    N
-    P
-    Q
-    D
-    E
+    N,
+    P,
+    Q,
+    D,
+    E,
 }
 
 /// An RSA key (mbedtls_rsa_context): modulus n of `len` bytes, exponents e
@@ -93,22 +93,22 @@ RSAPart: enum {
 /// dq = d mod (q - 1) and qp = q^-1 mod p, the cached R^2 of each modulus,
 /// and the blinding pair vi = vf^-e mod n, vf.
 RSAContext: struct {
-    len: Int
-    n: bn.Mpi
-    e: bn.Mpi
-    d: bn.Mpi
-    p: bn.Mpi
-    q: bn.Mpi
-    dp: bn.Mpi
-    dq: bn.Mpi
-    qp: bn.Mpi
-    rn: bn.Mpi
-    rp: bn.Mpi
-    rq: bn.Mpi
-    vi: bn.Mpi
-    vf: bn.Mpi
-    padding: RSAPadding
-    hash_id: hashes.Md?
+    len: Int,
+    n: bn.Mpi,
+    e: bn.Mpi,
+    d: bn.Mpi,
+    p: bn.Mpi,
+    q: bn.Mpi,
+    dp: bn.Mpi,
+    dq: bn.Mpi,
+    qp: bn.Mpi,
+    rn: bn.Mpi,
+    rp: bn.Mpi,
+    rq: bn.Mpi,
+    vi: bn.Mpi,
+    vf: bn.Mpi,
+    padding: RSAPadding,
+    hash_id: hashes.Md?,
 }
 
 /// An empty key with v1.5 padding and no hash (mbedtls_rsa_init).
@@ -1044,10 +1044,10 @@ unpadded_len: fn(olen: U64) -> Int Never! { Int{wrapping(U32{olen})} }
 /// on bad padding or a message longer than the output they are zero and
 /// olen is plaintext_max_size.
 V15Unpadded: struct {
-    out: [U8]
-    olen: U64
-    bad: ctime.CtCond
-    too_large: ctime.CtCond
+    out: [U8],
+    olen: U64,
+    bad: ctime.CtCond,
+    too_large: ctime.CtCond,
 }
 
 /// EME-PKCS1-v1_5 decoding in constant time and constant memory trace
@@ -1114,8 +1114,8 @@ rsa_pkcs1_decrypt: fn<R: RNG>(ctx: &RSAContext, rng: &R, input: [U8], output_max
 /// `out` is always that many bytes, the message when `bad` is false and
 /// zeros when it is true.
 V15Fixed: struct {
-    out: [U8]
-    bad: ctime.CtCond
+    out: [U8],
+    bad: ctime.CtCond,
 }
 
 /// RSAES-PKCS1-v1_5 decryption of a message of exactly `len` bytes, such as
@@ -1152,8 +1152,8 @@ priv v15_fixed_of_block: fn(buf: &[U8], len: Int) -> V15Fixed Never! {
 
 /// The decryption result and problem of mbedtls_rsa_decrypt_decompose_ret.
 DecomposedRet: struct {
-    ret: Int
-    problem: Int
+    ret: Int,
+    problem: Int,
 }
 
 /// Split a combined error code in constant time: invalid_padding_in and

@@ -64,88 +64,88 @@ VT_DISCONNECT: 7
 Host: trait {
     // Whether the module of VTable vt has method `method` (VT_*): its
     // pointer is not NULL.
-    vtab_has: fn(&self, db: conn.Conn, vt: Int, method: Int) -[]> Bool Never!
+    vtab_has: fn(&self, db: conn.Conn, vt: Int, method: Int) -[]> Bool Never!,
     // sqlite3_module.iVersion of VTable vt's module.
-    vtab_version: fn(&self, db: conn.Conn, vt: Int) -[]> Int Never!
+    vtab_version: fn(&self, db: conn.Conn, vt: Int) -[]> Int Never!,
     // Call method `method` of VTable vt's instance; arg is the savepoint
     // of VT_SAVEPOINT, VT_RELEASE and VT_ROLLBACK_TO. Its result code.
-    vtab_call: fn(&self, db: &conn.Conn, vt: Int, method: Int, arg: Int) -[DB]> Int Never!
+    vtab_call: fn(&self, db: &conn.Conn, vt: Int, method: Int, arg: Int) -[DB]> Int Never!,
     // xClose of the Host's virtual table cursor `cursor` on VTable vt.
-    vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) -[DB]> Never!
+    vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) -[DB]> Never!,
     // Take sqlite3_vtab.zErrMsg of VTable vt's instance; None when unset.
     // (No `Never!`: a generic call of a trait method returning `T? Never!`
     // loses the optional in the backend.)
-    vtab_take_errmsg: fn(&self, db: conn.Conn, vt: Int) -[]> [U8]?
+    vtab_take_errmsg: fn(&self, db: conn.Conn, vt: Int) -[]> [U8]?,
     // xOpen on VTable vt: cursor gets the new cursor's handle.
-    vtab_open: fn(&self, db: &conn.Conn, vt: Int, cursor: &Int) -[DB]> Int Never!
+    vtab_open: fn(&self, db: &conn.Conn, vt: Int, cursor: &Int) -[DB]> Int Never!,
     // xFilter of `cursor` with idxNum, idxStr and the argc values in the
     // registers from Vdbe.mem index arg.
-    vtab_filter: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, idx_num: Int, idx_str: [U8]?, arg: Int, argc: Int) -[DB]> Int Never!
+    vtab_filter: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, idx_num: Int, idx_str: [U8]?, arg: Int, argc: Int) -[DB]> Int Never!,
     // xEof of `cursor`.
-    vtab_eof: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Bool Never!
+    vtab_eof: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Bool Never!,
     // xNext of `cursor`.
-    vtab_next: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Int Never!
+    vtab_next: fn(&self, db: &conn.Conn, cursor: Int) -[DB]> Int Never!,
     // xColumn of `cursor` for column col, the result going to the context
     // Vdbe.fctx (its out register).
-    vtab_column: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, col: Int) -[DB]> Int Never!
+    vtab_column: fn(&self, db: &conn.Conn, v: &conn.Vdbe, cursor: Int, col: Int) -[DB]> Int Never!,
     // xRowid of `cursor`.
-    vtab_rowid: fn(&self, db: &conn.Conn, cursor: Int, rowid: &Int) -[DB]> Int Never!
+    vtab_rowid: fn(&self, db: &conn.Conn, cursor: Int, rowid: &Int) -[DB]> Int Never!,
     // xUpdate of VTable vt with the argc values in the registers from
     // Vdbe.mem index arg; rowid gets an inserted row's rowid.
-    vtab_update: fn(&self, db: &conn.Conn, v: &conn.Vdbe, vt: Int, arg: Int, argc: Int, rowid: &Int) -[DB]> Int Never!
+    vtab_update: fn(&self, db: &conn.Conn, v: &conn.Vdbe, vt: Int, arg: Int, argc: Int, rowid: &Int) -[DB]> Int Never!,
     // xRename of VTable vt.
-    vtab_rename: fn(&self, db: &conn.Conn, vt: Int, name: [U8]) -[DB]> Int Never!
+    vtab_rename: fn(&self, db: &conn.Conn, vt: Int, name: [U8]) -[DB]> Int Never!,
     // xIntegrity of VTable vt, for table `table` of schema `schema`.
-    vtab_integrity: fn(&self, db: &conn.Conn, vt: Int, schema: [U8], table: [U8], flags: Int, err: &[U8]?) -[DB]> Int Never!
+    vtab_integrity: fn(&self, db: &conn.Conn, vt: Int, schema: [U8], table: [U8], flags: Int, err: &[U8]?) -[DB]> Int Never!,
     // sqlite3VtabCallCreate: create the virtual table `name` of database
     // i_db.
-    vtab_call_create: fn(&self, db: &conn.Conn, i_db: Int, name: [U8], err: &[U8]?) -[DB]> Int Never!
+    vtab_call_create: fn(&self, db: &conn.Conn, i_db: Int, name: [U8], err: &[U8]?) -[DB]> Int Never!,
     // sqlite3VtabCallDestroy: destroy the virtual table `name` of database
     // i_db.
-    vtab_call_destroy: fn(&self, db: &conn.Conn, i_db: Int, name: [U8]) -[DB]> Int Never!
+    vtab_call_destroy: fn(&self, db: &conn.Conn, i_db: Int, name: [U8]) -[DB]> Int Never!,
     // Call method `method` (FN_*) of the function of the context Vdbe.fctx.
-    func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never!
+    func_call: fn(&self, db: &conn.Conn, v: &conn.Vdbe, method: Int) -[DB]> Never!,
     // The commit hook's answer, nonzero to turn the commit into a
     // rollback; 0 when no hook is set.
-    commit_hook: fn(&self, db: &conn.Conn) -[DB]> Int Never!
+    commit_hook: fn(&self, db: &conn.Conn) -[DB]> Int Never!,
     // Call the rollback hook, if one is set.
-    rollback_hook: fn(&self, db: &conn.Conn) -[DB]> Never!
+    rollback_hook: fn(&self, db: &conn.Conn) -[DB]> Never!,
     // Whether an update hook is set (db->xUpdateCallback).
-    has_update_hook: fn(&self, db: conn.Conn) -[]> Bool Never!
+    has_update_hook: fn(&self, db: conn.Conn) -[]> Bool Never!,
     // The update hook for operation op (SQLITE_INSERT, SQLITE_DELETE,
     // SQLITE_UPDATE) on row rowid of table `table` in database db_name.
-    update_hook: fn(&self, db: &conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) -[DB]> Never!
+    update_hook: fn(&self, db: &conn.Conn, op: Int, db_name: [U8], table: [U8], rowid: Int) -[DB]> Never!,
     // The progress handler: true to interrupt (only called while
     // Conn.n_progress_ops is set).
-    progress: fn(&self, db: &conn.Conn) -[DB]> Bool Never!
+    progress: fn(&self, db: &conn.Conn) -[DB]> Bool Never!,
     // The trace callback for `event` (conn.TRACE_STMT with the statement's
     // text, conn.TRACE_ROW), called while Conn.m_trace has the event.
-    trace: fn(&self, db: &conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) -[DB]> Never!
+    trace: fn(&self, db: &conn.Conn, v: conn.Vdbe, event: Int, text: [U8]) -[DB]> Never!,
     // The profile callbacks (sqlite3_profile's xProfile with
     // conn.TRACE_XPROFILE, the trace callback's conn.TRACE_PROFILE) for a
     // statement that ran elapsed_ns nanoseconds.
-    profile: fn(&self, db: &conn.Conn, v: conn.Vdbe, elapsed_ns: Int) -[DB]> Never!
+    profile: fn(&self, db: &conn.Conn, v: conn.Vdbe, elapsed_ns: Int) -[DB]> Never!,
     // The sqlite3_wal_hook callback (Conn.wal_hook is conn.WAL_HOOK_USER)
     // after a commit left n_frame frames in database db_name's log.
-    wal_hook: fn(&self, db: &conn.Conn, db_name: [U8], n_frame: Int) -[DB]> Int Never!
+    wal_hook: fn(&self, db: &conn.Conn, db_name: [U8], n_frame: Int) -[DB]> Int Never!,
     // sqlite3_exec of sql (OP_SqlExec), with the authorizer and the trace
     // callback off when `quiet`.
-    sql_exec: fn(&self, db: &conn.Conn, sql: [U8], quiet: Bool, err: &[U8]?) -[DB]> Int Never!
+    sql_exec: fn(&self, db: &conn.Conn, sql: [U8], quiet: Bool, err: &[U8]?) -[DB]> Int Never!,
     // sqlite3InitOne: read the schema of database i_db.
-    init_one: fn(&self, db: &conn.Conn, i_db: Int, flags: Int, err: &[U8]?) -[DB]> Int Never!
+    init_one: fn(&self, db: &conn.Conn, i_db: Int, flags: Int, err: &[U8]?) -[DB]> Int Never!,
     // OP_ParseSchema's reparse: the schema rows of database i_db that
     // match `where`, through sqlite3InitCallback, with db->init.busy set;
     // SQLITE_CORRUPT when no row matches.
-    parse_schema: fn(&self, db: &conn.Conn, i_db: Int, where: [U8], err: &[U8]?) -[DB]> Int Never!
+    parse_schema: fn(&self, db: &conn.Conn, i_db: Int, where: [U8], err: &[U8]?) -[DB]> Int Never!,
     // sqlite3AnalysisLoad of database i_db.
-    load_analysis: fn(&self, db: &conn.Conn, i_db: Int) -[DB]> Int Never!
+    load_analysis: fn(&self, db: &conn.Conn, i_db: Int) -[DB]> Int Never!,
     // sqlite3RunVacuum of database i_db, into the file named by `into`
     // when set.
-    run_vacuum: fn(&self, db: &conn.Conn, i_db: Int, into: base.Mem?, err: &[U8]?) -[DB]> Int Never!
+    run_vacuum: fn(&self, db: &conn.Conn, i_db: Int, into: base.Mem?, err: &[U8]?) -[DB]> Int Never!,
     // sqlite3Reprepare: compile v's SQL again (after SQLITE_SCHEMA or an
     // EXPLAIN mode change) and move the new program, with v's bindings,
     // into v; the connection's error on failure.
-    reprepare: fn(&self, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never!
+    reprepare: fn(&self, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never!,
 }
 
 // The methods of a function call (Host.func_call): xSFunc, xStep,
@@ -485,10 +485,10 @@ multi_load: fn(db: &conn.Conn, v: &conn.Vdbe, dest: Int, vals: [base.Mem], resul
 
 // One op of an op list (struct VdbeOpList).
 VdbeOpList: struct {
-    opcode: Int
-    p1: Int
-    p2: Int
-    p3: Int
+    opcode: Int,
+    p1: Int,
+    p2: Int,
+    p3: Int,
 }
 
 // sqlite3VdbeAddOpList: append the ops of list, a jump's positive P2

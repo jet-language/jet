@@ -190,7 +190,7 @@ When the project grows, move that block's body into `package.jet` unchanged.
 
 ```jet
 package {
-    name: "fetcher"
+    name: "fetcher",
     authority: { allow: [Net] }
 }
 ```

@@ -146,9 +146,9 @@ diagnostic_column_at: fn(source: String, offset: Int) -> Int Never! {
 // scan of the whole file (the self-hosted compiler unit is one 25 MB file
 // with thousands of lints).
 DiagnosticSourceText: struct {
-    bytes: [U8]
+    bytes: [U8],
     // The byte offset of each line's first byte, ascending; line one is 0.
-    line_starts: [Int]
+    line_starts: [Int],
 }
 
 diagnostic_source_text: fn(source: String) -> DiagnosticSourceText Never! {
@@ -190,8 +190,8 @@ diagnostic_source_column: fn(text: DiagnosticSourceText, offset: Int) -> Int Nev
 // The sources one batch renders, each indexed once (DiagnosticSourceText).
 // A batch spans few files, so lookup is a scan of `keys`.
 DiagnosticSourceTexts: struct {
-    keys: [String]
-    texts: [DiagnosticSourceText]
+    keys: [String],
+    texts: [DiagnosticSourceText],
 }
 
 diagnostic_source_texts: fn() -> DiagnosticSourceTexts Never! {
@@ -397,8 +397,8 @@ diagnostic_stop_line: fn(code: String, what: String) -> String Never! {
 // The code and What of one line `diagnostic_stop_line` wrote, as a tool reads
 // back the stop another Jet program printed; None for any other line.
 DiagnosticStopHead: struct {
-    code: String
-    what: String
+    code: String,
+    what: String,
 }
 
 diagnostic_stop_parse: fn(line: String) -> DiagnosticStopHead? Never! {

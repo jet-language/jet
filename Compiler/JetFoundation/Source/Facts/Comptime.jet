@@ -2,19 +2,19 @@
 // evaluator and the backends. They hold no checked-tree nodes.
 
 TComptimeMapEntry: struct {
-    key: TComptimeKey
-    value: TComptimeValue
+    key: TComptimeKey,
+    value: TComptimeValue,
 }
 
 TComptimeKey: enum {
-    Int(value: Int)
-    BigInt(decimal: String)
-    String(value: String)
-    Bool(value: Bool)
-    Char(value: Int)
-    Tuple(fields: [TComptimeKeyField])
-    Struct(type_name: String, fields: [TComptimeKeyField])
-    Enum(type_name: String, variant: String)
+    Int(value: Int),
+    BigInt(decimal: String),
+    String(value: String),
+    Bool(value: Bool),
+    Char(value: Int),
+    Tuple(fields: [TComptimeKeyField]),
+    Struct(type_name: String, fields: [TComptimeKeyField]),
+    Enum(type_name: String, variant: String),
 }
 
 // An Int outside the i64 word is keyed by its BigInt decimal.
@@ -26,43 +26,43 @@ checked_comptime_integer_key: fn(number: Int) -> TComptimeKey Never! {
 }
 
 TComptimeKeyField: struct {
-    name: String
-    key: TComptimeKey
+    name: String,
+    key: TComptimeKey,
 }
 
 TComptimeField: struct {
-    name: String
-    value: TComptimeValue
+    name: String,
+    value: TComptimeValue,
 }
 
 TComptimeEnumArg: struct {
-    name: String?
-    value: TComptimeValue
+    name: String?,
+    value: TComptimeValue,
 }
 
 TComptimeReport: enum {
-    Clean(ty: Type)
-    Told(value: TComptimeValue)
+    Clean(ty: Type),
+    Told(value: TComptimeValue),
 }
 
 // `Function` is a named function as a value (`f: double`), by its function
 // key: the program makes the function value where it reads the constant.
 TComptimeValue: enum {
-    Int(value: Int)
-    Float(value: Float, bits: Int)
-    Bool(value: Bool)
-    Char(value: Int)
-    String(value: String)
-    BigInt(decimal: String)
-    Bytes(value: [U8])
-    List(values: [TComptimeValue])
-    Map(entries: [TComptimeMapEntry])
-    Struct(type_name: String, fields: [TComptimeField])
-    Enum(type_name: String, variant: String, args: [TComptimeEnumArg])
-    Present(value: TComptimeValue)
-    Failed(report: TComptimeReport)
-    Unit
-    Function(key: String)
+    Int(value: Int),
+    Float(value: Float, bits: Int),
+    Bool(value: Bool),
+    Char(value: Int),
+    String(value: String),
+    BigInt(decimal: String),
+    Bytes(value: [U8]),
+    List(values: [TComptimeValue]),
+    Map(entries: [TComptimeMapEntry]),
+    Struct(type_name: String, fields: [TComptimeField]),
+    Enum(type_name: String, variant: String, args: [TComptimeEnumArg]),
+    Present(value: TComptimeValue),
+    Failed(report: TComptimeReport),
+    Unit,
+    Function(key: String),
 }
 
 // The UTF-8 text of a comptime Char's Unicode scalar value, as

@@ -27,39 +27,39 @@ BUILD_MAX_ACTIONS: 100000
 // A target within one context (Rust `TargetRef`; the typed `ExecutableTarget`
 // family converts into it, so every `add_*` returns this reference).
 TargetRef: struct {
-    id: Int
-    context: Int
+    id: Int,
+    context: Int,
 }
 
 HermeticActionHandle: struct {
-    id: Int
-    context: Int
+    id: Int,
+    context: Int,
 }
 
 ToolchainHandle: struct {
-    id: Int
-    context: Int
+    id: Int,
+    context: Int,
 }
 
 SigningIdentityHandle: struct {
-    id: Int
-    context: Int
+    id: Int,
+    context: Int,
 }
 
 ProbeHandle: struct {
-    id: Int
-    context: Int
+    id: Int,
+    context: Int,
 }
 
 TargetKind: enum {
-    Executable
-    Library
-    Test
-    AssetBundle
-    Doc
-    Install
-    Package
-    Publish
+    Executable,
+    Library,
+    Test,
+    AssetBundle,
+    Doc,
+    Install,
+    Package,
+    Publish,
 
     // Rust derived `Debug`.
     debug_name: fn(self) -> String Never! {
@@ -94,15 +94,15 @@ build_path_is_relative_normal: fn(path: String) -> Bool Never! {
 }
 
 TargetSpec: struct {
-    sources: [String]
-    inputs: [String]
-    outputs: [String]
-    deps: [TargetRef]
-    actions: [HermeticActionHandle]
-    probes: [ProbeHandle]
-    toolchain: ToolchainHandle?
-    signing_identity: SigningIdentityHandle?
-    metadata: [String:String]
+    sources: [String],
+    inputs: [String],
+    outputs: [String],
+    deps: [TargetRef],
+    actions: [HermeticActionHandle],
+    probes: [ProbeHandle],
+    toolchain: ToolchainHandle?,
+    signing_identity: SigningIdentityHandle?,
+    metadata: [String:String],
 
     new: fn() -> TargetSpec Never! {
         TargetSpec{
@@ -174,27 +174,27 @@ TargetSpec: struct {
 }
 
 HermeticBuildTarget: struct {
-    id: Int
-    name: String
-    kind: TargetKind
-    sources: [String]
-    inputs: [String]
-    outputs: [String]
-    deps: [TargetRef]
-    actions: [HermeticActionHandle]
-    probes: [ProbeHandle]
-    toolchain: ToolchainHandle
-    signing_identity: SigningIdentityHandle?
-    metadata: [String:String]
+    id: Int,
+    name: String,
+    kind: TargetKind,
+    sources: [String],
+    inputs: [String],
+    outputs: [String],
+    deps: [TargetRef],
+    actions: [HermeticActionHandle],
+    probes: [ProbeHandle],
+    toolchain: ToolchainHandle,
+    signing_identity: SigningIdentityHandle?,
+    metadata: [String:String],
 }
 
 BuildResourcePool: enum {
-    CPU
-    Memory
-    Linker
-    Console
-    GPU
-    Custom(String)
+    CPU,
+    Memory,
+    Linker,
+    Console,
+    GPU,
+    Custom(String),
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -221,17 +221,17 @@ BuildResourcePool: enum {
 }
 
 BuildResourcePoolSpec: struct {
-    pool: BuildResourcePool
-    slots: Int
+    pool: BuildResourcePool,
+    slots: Int,
 }
 
 // Distinct executable identities under one plan (E4-JP2 / #419).
 ActionKind: enum {
-    Compile
-    Docs
-    Debug
-    SourceArchive
-    Generic
+    Compile,
+    Docs,
+    Debug,
+    SourceArchive,
+    Generic,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -253,8 +253,8 @@ ActionKind: enum {
 // digest of the bytes the last build left there, from that build's receipt;
 // None before any build has.
 KeptOutput: struct {
-    path: String
-    written: String?
+    path: String,
+    written: String?,
 }
 
 // A folder an action reads whole (`.file(b.folder(path))`): bound read-only
@@ -262,9 +262,9 @@ KeptOutput: struct {
 // else from the folder the find_folder probe `found` chose, else from `path`
 // under the project root. The action key hashes every file in it.
 ActionFolder: struct {
-    path: String
-    source: String?
-    found: ProbeHandle?
+    path: String,
+    source: String?,
+    found: ProbeHandle?,
 }
 
 // A found program an action is passed (`.file(b.found(probe))`): argument
@@ -272,42 +272,42 @@ ActionFolder: struct {
 // finds as the action starts, the path the program has inside the sandbox.
 // The action key hashes the program's bytes.
 ActionProgram: struct {
-    at: Int
-    flag: String
-    probe: ProbeHandle
+    at: Int,
+    flag: String,
+    probe: ProbeHandle,
 }
 
 ActionSpec: struct {
-    inputs: [String]
-    outputs: [String]
+    inputs: [String],
+    outputs: [String],
     // The outputs that stay in git; no action key names them.
-    kept: [KeptOutput]
+    kept: [KeptOutput],
     // The folders it reads whole.
-    folders: [ActionFolder]
+    folders: [ActionFolder],
     // The found programs it is passed.
-    programs: [ActionProgram]
-    argv: [String]
-    env: [String:String]
+    programs: [ActionProgram],
+    argv: [String],
+    env: [String:String],
     // Only allowlisted env keys enter the action identity. Empty means the
     // declared `env` map itself is the allowlist. Kept sorted and unique
     // (Rust `BTreeSet`).
-    env_allowlist: [String]
+    env_allowlist: [String],
     // Sorted by canonical effect rank and unique (Rust `BTreeSet`). The
     // action is reused exactly when none of them is ambient
     // (build_effects_reusable).
-    caps: [BuildEffect]
-    kind: ActionKind
-    toolchain: ToolchainHandle?
-    probes: [ProbeHandle]
-    signing_identity: SigningIdentityHandle?
-    labels: [String:String]
-    helper_versions: [String:String]
+    caps: [BuildEffect],
+    kind: ActionKind,
+    toolchain: ToolchainHandle?,
+    probes: [ProbeHandle],
+    signing_identity: SigningIdentityHandle?,
+    labels: [String:String],
+    helper_versions: [String:String],
     // Sorted by rank, then custom name, and unique (Rust `BTreeSet`).
-    resource_pools: [BuildResourcePool]
-    variant_identity: String?
+    resource_pools: [BuildResourcePool],
+    variant_identity: String?,
     // How long the action may run, in milliseconds; None takes the
     // sandbox's default.
-    timeout_ms: Int?
+    timeout_ms: Int?,
 
     new: fn(argv: [String]) -> ActionSpec Never! {
         ActionSpec{
@@ -451,26 +451,26 @@ ActionSpec: struct {
 }
 
 HermeticBuildAction: struct {
-    id: Int
-    name: String
-    inputs: [String]
-    outputs: [String]
-    kept: [KeptOutput]
-    folders: [ActionFolder]
-    programs: [ActionProgram]
-    argv: [String]
-    env: [String:String]
-    env_allowlist: [String]
-    caps: [BuildEffect]
-    kind: ActionKind
-    toolchain: ToolchainHandle
-    probes: [ProbeHandle]
-    signing_identity: SigningIdentityHandle?
-    labels: [String:String]
-    helper_versions: [String:String]
-    resource_pools: [BuildResourcePool]
-    variant_identity: String?
-    timeout_ms: Int?
+    id: Int,
+    name: String,
+    inputs: [String],
+    outputs: [String],
+    kept: [KeptOutput],
+    folders: [ActionFolder],
+    programs: [ActionProgram],
+    argv: [String],
+    env: [String:String],
+    env_allowlist: [String],
+    caps: [BuildEffect],
+    kind: ActionKind,
+    toolchain: ToolchainHandle,
+    probes: [ProbeHandle],
+    signing_identity: SigningIdentityHandle?,
+    labels: [String:String],
+    helper_versions: [String:String],
+    resource_pools: [BuildResourcePool],
+    variant_identity: String?,
+    timeout_ms: Int?,
 
     reusable: fn(self) -> Bool Never! { build_effects_reusable(self.caps) }
 }
@@ -516,8 +516,8 @@ build_insert_pool: fn(values: &[BuildResourcePool], pool: BuildResourcePool) Nev
 }
 
 LockRecord: struct {
-    key: String
-    digest: String
+    key: String,
+    digest: String,
 
     new: fn(key: String, digest: String) -> LockRecord Never! {
         LockRecord{key: key, digest: digest}
@@ -525,15 +525,15 @@ LockRecord: struct {
 }
 
 ProvenanceSource: enum {
-    InferredHost
-    JetpackDependency(String)
-    AmbientRecord(String)
-    UserDeclared(String)
+    InferredHost,
+    JetpackDependency(String),
+    AmbientRecord(String),
+    UserDeclared(String),
 }
 
 BuildProvenance: struct {
-    source: ProvenanceSource
-    lock: LockRecord?
+    source: ProvenanceSource,
+    lock: LockRecord?,
 
     inferred_host: fn() -> BuildProvenance Never! {
         BuildProvenance{source: ProvenanceSource.InferredHost, lock: None}
@@ -553,9 +553,9 @@ BuildProvenance: struct {
 }
 
 SDKIdentity: struct {
-    name: String
-    version: String
-    provenance: BuildProvenance
+    name: String,
+    version: String,
+    provenance: BuildProvenance,
 
     new: fn(name: String, version: String, provenance: BuildProvenance) -> SDKIdentity Never! {
         SDKIdentity{name: name, version: version, provenance: provenance}
@@ -563,8 +563,8 @@ SDKIdentity: struct {
 }
 
 LinkerIdentity: struct {
-    name: String
-    provenance: BuildProvenance
+    name: String,
+    provenance: BuildProvenance,
 
     new: fn(name: String, provenance: BuildProvenance) -> LinkerIdentity Never! {
         LinkerIdentity{name: name, provenance: provenance}
@@ -573,9 +573,9 @@ LinkerIdentity: struct {
 
 // Sysroot identity for cross compilation (E4-JP15).
 SysrootIdentity: struct {
-    name: String
-    path_digest: String
-    provenance: BuildProvenance
+    name: String,
+    path_digest: String,
+    provenance: BuildProvenance,
 
     new: fn(name: String, path_digest: String, provenance: BuildProvenance) -> SysrootIdentity Never! {
         SysrootIdentity{name: name, path_digest: path_digest, provenance: provenance}
@@ -583,8 +583,8 @@ SysrootIdentity: struct {
 }
 
 SigningIdentitySpec: struct {
-    label: String
-    provenance: BuildProvenance
+    label: String,
+    provenance: BuildProvenance,
 
     new: fn(label: String, provenance: BuildProvenance) -> SigningIdentitySpec Never! {
         SigningIdentitySpec{label: label, provenance: provenance}
@@ -592,44 +592,44 @@ SigningIdentitySpec: struct {
 }
 
 HermeticBuildSigningIdentity: struct {
-    id: Int
-    name: String
-    label: String
-    provenance: BuildProvenance
+    id: Int,
+    name: String,
+    label: String,
+    provenance: BuildProvenance,
 }
 
 ToolchainRole: enum {
-    Host
-    Target
+    Host,
+    Target,
 }
 
 // How an action resolves its executable. Declared-only is the hermetic path
 // of provisioned toolchains: no executable may come from PATH or an
 // undeclared filesystem spelling.
 ToolchainResolution: enum {
-    Ambient
-    DeclaredOnly
+    Ambient,
+    DeclaredOnly,
 }
 
 // A read-only host directory made visible to a sandboxed action. `identity`
 // empty means the source path itself is the identity.
 BuildMount: struct {
-    source: String
-    destination: String
-    identity: String
+    source: String,
+    destination: String,
+    identity: String,
 }
 
 ToolchainSpec: struct {
-    role: ToolchainRole
-    host_triple: String
-    target_triple: String
-    sdk: SDKIdentity?
-    linker: LinkerIdentity?
-    sysroot: SysrootIdentity?
-    tools: [String:String]
-    resolution: ToolchainResolution
-    mounts: [BuildMount]
-    provenance: BuildProvenance
+    role: ToolchainRole,
+    host_triple: String,
+    target_triple: String,
+    sdk: SDKIdentity?,
+    linker: LinkerIdentity?,
+    sysroot: SysrootIdentity?,
+    tools: [String:String],
+    resolution: ToolchainResolution,
+    mounts: [BuildMount],
+    provenance: BuildProvenance,
 
     target: fn(target_triple: String, provenance: BuildProvenance) -> ToolchainSpec Never! {
         ToolchainSpec{
@@ -706,23 +706,23 @@ ToolchainSpec: struct {
 }
 
 HermeticBuildToolchain: struct {
-    id: Int
-    name: String
-    role: ToolchainRole
-    host_triple: String
-    target_triple: String
-    sdk: SDKIdentity?
-    linker: LinkerIdentity?
-    sysroot: SysrootIdentity?
-    tools: [String:String]
-    resolution: ToolchainResolution
-    mounts: [BuildMount]
-    provenance: BuildProvenance
+    id: Int,
+    name: String,
+    role: ToolchainRole,
+    host_triple: String,
+    target_triple: String,
+    sdk: SDKIdentity?,
+    linker: LinkerIdentity?,
+    sysroot: SysrootIdentity?,
+    tools: [String:String],
+    resolution: ToolchainResolution,
+    mounts: [BuildMount],
+    provenance: BuildProvenance,
 }
 
 ReproducibilityClass: enum {
-    Reproducible
-    Ambient
+    Reproducible,
+    Ambient,
 
     // Rust derived `Debug`.
     debug_name: fn(self) -> String Never! {
@@ -734,21 +734,21 @@ ReproducibilityClass: enum {
 }
 
 ProbeKind: enum {
-    FindProgram(program: String)
-    FindFolder(file: String)
-    PkgConfig(package: String, min_version: String?)
-    HeaderCheck(header: String)
-    CompileCheck(name: String, includes: [String], code: String)
+    FindProgram(program: String),
+    FindFolder(file: String),
+    PkgConfig(package: String, min_version: String?),
+    HeaderCheck(header: String),
+    CompileCheck(name: String, includes: [String], code: String),
 }
 
 // A folder on the machine holding `file` (jetpack_foundation
 // foundation_find_folder).
 
 ProbeSpec: struct {
-    kind: ProbeKind
-    reproducibility: ReproducibilityClass
-    provenance: BuildProvenance
-    toolchain: ToolchainHandle?
+    kind: ProbeKind,
+    reproducibility: ReproducibilityClass,
+    provenance: BuildProvenance,
+    toolchain: ToolchainHandle?,
 
     find_program: fn(program: String) -> ProbeSpec Never! {
         ProbeSpec{kind: ProbeKind.FindProgram{program: program}, reproducibility: ReproducibilityClass.Ambient, provenance: BuildProvenance.ambient_record("find_program"), toolchain: None}
@@ -801,25 +801,25 @@ ProbeSpec: struct {
 }
 
 HermeticBuildProbe: struct {
-    id: Int
-    name: String
-    kind: ProbeKind
-    reproducibility: ReproducibilityClass
-    provenance: BuildProvenance
-    toolchain: ToolchainHandle
+    id: Int,
+    name: String,
+    kind: ProbeKind,
+    reproducibility: ReproducibilityClass,
+    provenance: BuildProvenance,
+    toolchain: ToolchainHandle,
 }
 
 BuildNameKind: enum {
-    Target
-    Action
-    Toolchain
-    SigningIdentity
-    Probe
+    Target,
+    Action,
+    Toolchain,
+    SigningIdentity,
+    Probe,
 }
 
 // One dependency cycle in traversal order; the first name repeats last.
 DependencyCycle: struct {
-    nodes: [String]
+    nodes: [String],
 
     // The rendered loop: `` `a` -> `b` -> `a` ``. Rust `Debug` prints it too.
     chain: fn(self) -> String Never! {
@@ -832,38 +832,38 @@ DependencyCycle: struct {
 // variant names (`PackagedPlugin` carries the action-budget refusal).
 #Error
 HermeticBuildError: enum {
-    EmptyTargetName
-    EmptyActionName
-    EmptyToolchainName
-    EmptySigningIdentityName
-    EmptyProbeName
-    DuplicateTargetName(String)
-    DuplicateActionName(String)
-    DuplicateToolchainName(String)
-    DuplicateSigningIdentityName(String)
-    DuplicateProbeName(String)
-    EmptyPath
-    InvalidPath(String)
-    EmptyToolchainTriple(String)
-    EmptyIdentityField(String)
-    MissingLockedProvenance(String)
-    EmptyProbeField(String)
-    EmptyActionArgv(String)
-    EmptyEnvName(String)
-    UndeclaredEnvName(action: String, key: String)
-    ReusableActionWithoutOutputs(String)
-    DuplicateActionOutput(action: String, output: String)
-    UndeclaredKeptOutput(action: String, output: String)
-    OutputInFolder(action: String, output: String, folder: String)
-    DuplicateBuildOutput(output: String, first_action: String, second_action: String)
-    UnknownTarget(Int)
-    UnknownAction(Int)
-    UnknownToolchain(Int)
-    UnknownSigningIdentity(Int)
-    UnknownProbe(Int)
-    PackagedPlugin(String)
-    TargetDependencyCycle(DependencyCycle)
-    ActionDependencyCycle(DependencyCycle)
+    EmptyTargetName,
+    EmptyActionName,
+    EmptyToolchainName,
+    EmptySigningIdentityName,
+    EmptyProbeName,
+    DuplicateTargetName(String),
+    DuplicateActionName(String),
+    DuplicateToolchainName(String),
+    DuplicateSigningIdentityName(String),
+    DuplicateProbeName(String),
+    EmptyPath,
+    InvalidPath(String),
+    EmptyToolchainTriple(String),
+    EmptyIdentityField(String),
+    MissingLockedProvenance(String),
+    EmptyProbeField(String),
+    EmptyActionArgv(String),
+    EmptyEnvName(String),
+    UndeclaredEnvName(action: String, key: String),
+    ReusableActionWithoutOutputs(String),
+    DuplicateActionOutput(action: String, output: String),
+    UndeclaredKeptOutput(action: String, output: String),
+    OutputInFolder(action: String, output: String, folder: String),
+    DuplicateBuildOutput(output: String, first_action: String, second_action: String),
+    UnknownTarget(Int),
+    UnknownAction(Int),
+    UnknownToolchain(Int),
+    UnknownSigningIdentity(Int),
+    UnknownProbe(Int),
+    PackagedPlugin(String),
+    TargetDependencyCycle(DependencyCycle),
+    ActionDependencyCycle(DependencyCycle),
 
     // An action with no ambient effect, whose record would restore nothing.
     // A kept output the action doesn't declare as one of its outputs.

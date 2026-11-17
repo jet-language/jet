@@ -16,43 +16,43 @@ use {
 }
 
 JetEvalErrorKind: enum {
-    Source
-    Compiler
-    Unsupported
-    Fuel
-    Ownership
-    Effect
-    ComptimePanic
+    Source,
+    Compiler,
+    Unsupported,
+    Fuel,
+    Ownership,
+    Effect,
+    ComptimePanic,
 }
 
 JetEvalInternalProblem: struct {
-    span: Span?
-    message: String
+    span: Span?,
+    message: String,
 }
 
 JetEvalError: struct {
-    kind: JetEvalErrorKind
-    diagnostic: Diagnostic
+    kind: JetEvalErrorKind,
+    diagnostic: Diagnostic,
 }
 
 // Installed only for a checked fn-build or fn-dev invocation, which the IR
 // machine runs (IR/Host.jet). The ordinary comptime evaluation deliberately
 // cannot acquire network or wait rights.
 JetEvalBuildHostAdapter: trait {
-    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never!
+    clone_adapter: fn(self) -[]> JetEvalBuildHostAdapter Never!,
     // Build host method `member` (`Build.add_executable`, `BuildPlan.graph`,
     // `Dev.watch`) on `args`, the receiver first; `fallible` when the checked
     // call returns a Result, `impure` when it sits in an `#Impure` block.
     // None: no method of this host.
-    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?
+    build_call: fn(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply?,
 }
 
 // A host method's answer (a build host's, a compiler query host's): its
 // value (a fallible method's success as Present, its typed failure as a
 // told Failed), or the diagnostic that stops the evaluation.
 JetEvalBuildReply: enum {
-    Value(value: TComptimeValue)
-    Failure(diagnostic: Diagnostic)
+    Value(value: TComptimeValue),
+    Failure(diagnostic: Diagnostic),
 }
 
 // The compiler's answer to a Tier-1 comptime input (`embed_file`,
@@ -64,13 +64,13 @@ JetEvalBuildReply: enum {
 // reports.
 #Error
 JetEvalComptimeInputError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 }
 
 JetEvalComptimeInputAdapter: trait {
-    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never!
-    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!
-    comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError!
+    clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never!,
+    comptime_input: fn(self, builtin: String, path: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError!,
+    comptime_fetch: fn(self, url: String, sha256: String, span: Span) -[FS.Read, Net, Time.Wait]> TComptimeValue JetEvalComptimeInputError!,
 }
 
 // The compiler's answer to a `core.compiler` query (`compiler.lex(source)`,
@@ -83,10 +83,10 @@ JetEvalComptimeInputAdapter: trait {
 // through the compiler service (Exec, Time.Wait); a check's trace spans read
 // the task CPU clock (Time).
 JetEvalCompilerQueryHost: trait {
-    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost Never!
+    clone_compiler_host: fn(self) -[]> JetEvalCompilerQueryHost Never!,
     // Query `query` on `args`: its typed Result (Present, or a told Failed
     // CompilerError). None: no query of this host.
-    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply?
+    compiler_query: fn(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time]> JetEvalBuildReply?,
 }
 
 JetEvalConfig: struct {
@@ -95,37 +95,37 @@ JetEvalConfig: struct {
     // or `dev: fn` run is one call, so the `meta.events` handlers a build
     // runs spend the build's budget. A negative fuel has no limit: a program
     // run, like a built binary.
-    fuel: Int
-    max_call_depth: Int
-    max_collection_len: Int
-    globals: [String:TComptimeValue]
-    runtime_execution: Bool
-    build_host_adapter: JetEvalBuildHostAdapter?{None}
-    comptime_input_adapter: JetEvalComptimeInputAdapter?{None}
-    compiler_query_host: JetEvalCompilerQueryHost?{None}
+    fuel: Int,
+    max_call_depth: Int,
+    max_collection_len: Int,
+    globals: [String:TComptimeValue],
+    runtime_execution: Bool,
+    build_host_adapter: JetEvalBuildHostAdapter?{None},
+    comptime_input_adapter: JetEvalComptimeInputAdapter?{None},
+    compiler_query_host: JetEvalCompilerQueryHost?{None},
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
-    host_hooks: Shared<SemaRegistrationHostHooks>
+    host_hooks: Shared<SemaRegistrationHostHooks>,
     // The compile session's native children over the runtime image
     // (IR/Native.jet); None: this toolchain has no runtime image, so
     // compile-time code can't run.
-    native: Shared<JetEvalNativeSession>?{None}
+    native: Shared<JetEvalNativeSession>?{None},
     // `jet eval`'s `run`: an ambient effect is refused as the evaluator mode
     // refuses it (E3401, jet_eval_effect_fail), not as a comptime effect a
     // gate admits (E3410).
-    eval_entry: Bool{false}
+    eval_entry: Bool{false},
     // The evaluated item sits inside an `#Impure` block: a Tier-2 effect is
     // refused for the missing invocation gate (E3411), not the block (E3410).
-    impure: Bool{false}
+    impure: Bool{false},
     // The invocation opened the impure gate (`--gate impure=allow`): the file
     // calls of code inside `#Impure` run natively in the comptime child, and
     // any other Tier-2 effect there is refused as one the child doesn't admit
     // (E3401), never as a missing gate.
-    impure_gate: Bool{false}
+    impure_gate: Bool{false},
     // The evaluated item's first call with a host effect, written as its
     // source names it (`core.files.read()`): a refused system call names it
     // in place of the effect class.
-    effect_call: String?{None}
+    effect_call: String?{None},
 }
 
 jet_eval_default_config: fn() -> JetEvalConfig Never! {

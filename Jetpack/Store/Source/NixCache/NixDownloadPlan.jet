@@ -14,26 +14,26 @@ STORE_NIX_INT_MAX: 9223372036854775807
 STORE_NIX_THROUGHPUT_CONFIG: "config/nix-cache-v1.throughput"
 
 NixPlanState: enum {
-    New
-    Cached
-    Repaired
+    New,
+    Cached,
+    Repaired,
 }
 
 NixPlanItem: struct {
-    package: String
-    state: NixPlanState
-    download_bytes: Int
-    disk_bytes: Int
+    package: String,
+    state: NixPlanState,
+    download_bytes: Int,
+    disk_bytes: Int,
 }
 
 NixDownloadPlan: struct {
-    new: Int
-    cached: Int
-    repaired: Int
-    download_bytes: Int
-    disk_bytes: Int
-    estimated_seconds: Int?
-    items: [NixPlanItem]
+    new: Int,
+    cached: Int,
+    repaired: Int,
+    download_bytes: Int,
+    disk_bytes: Int,
+    estimated_seconds: Int?,
+    items: [NixPlanItem],
 
     empty: fn() -> NixDownloadPlan Never! {
         NixDownloadPlan{new: 0, cached: 0, repaired: 0, download_bytes: 0, disk_bytes: 0, estimated_seconds: None, items: [NixPlanItem]{}}

@@ -20,13 +20,13 @@ TRUST_GRANT_PREFIX: "grant:"
 // The authority a typed grant carries. JetOS fleet/activation authorities
 // are not part of this port.
 TrustAuthority: enum {
-    Package
-    Build
-    Env
-    Service
-    Image
-    VaultWrite
-    Integration
+    Package,
+    Build,
+    Env,
+    Service,
+    Image,
+    VaultWrite,
+    Integration,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -69,9 +69,9 @@ TrustAuthority: enum {
 TrustGrant: struct {
     // Kept as written: a stored grant may name an authority this build
     // does not know, and must still round-trip and revoke.
-    authority: String
-    subject: String
-    scope: String
+    authority: String,
+    subject: String,
+    scope: String,
 
     key: fn(self) -> String Never! { "{self.authority}:{self.subject}" }
 
@@ -83,10 +83,10 @@ TrustGrant: struct {
 }
 
 TrustRecord: enum {
-    Hash(hash: String)
-    Pattern(pattern: String)
-    Grant(TrustGrant)
-    Raw(line: String)
+    Hash(hash: String),
+    Pattern(pattern: String),
+    Grant(TrustGrant),
+    Raw(line: String),
 
     parse: fn(line: String) -> TrustRecord Never! {
         if line.starts_with(TRUST_HASH_PREFIX) {

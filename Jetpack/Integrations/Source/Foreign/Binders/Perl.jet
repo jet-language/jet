@@ -100,8 +100,8 @@ PKG_PERL_RESERVED: [String]{"open", "cancel", "close", "decode_response", "Sessi
 // A discovered sub: its Perl name (the worker's lookup key) and its
 // snake-cased Jet name.
 PerlBoundFunction: struct {
-    perl: String
-    jet: String
+    perl: String,
+    jet: String,
 }
 
 // Bind the named top-level subs of the Perl script at `path`.
@@ -242,7 +242,7 @@ pkg_perl_render_jet: fn(lib: String, functions: [PerlBoundFunction]) -> String N
         name: function.jet
         out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nPerlError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(&&session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\nopen: fn() -[FFI.Perl]> Session PerlError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nPerlError: enum {{ NotRunning, Timeout, Cancelled, Protocol, CommandFailed, Limit }}\n\nimpl Session.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(&&session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\nopen: fn() -[FFI.Perl]> Session PerlError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
     out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name: function.jet

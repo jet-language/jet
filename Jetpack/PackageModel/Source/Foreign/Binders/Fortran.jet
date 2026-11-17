@@ -15,24 +15,24 @@ FORTRAN_TOOL_ACTION: "rejected the ISO_C_BINDING source"
 FORTRAN_COLUMN_MAJOR: "column-major"
 
 FortranBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    layouts: [FortranArrayLayoutFact]
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    layouts: [FortranArrayLayoutFact],
+    provenance: String,
 }
 
 // One fixed-shape array parameter's extents and storage order.
 FortranArrayLayoutFact: struct {
-    routine: String
-    parameter: String
-    extents: [Int]
-    order: String
+    routine: String,
+    parameter: String,
+    extents: [Int],
+    order: String,
 }
 
 FortranScalar: enum {
-    Int
-    Float
+    Int,
+    Float,
 
     jet: fn(self) -> String Never! {
         if self == {
@@ -50,8 +50,8 @@ FortranScalar: enum {
 }
 
 FortranParam: enum {
-    Scalar(FortranScalar)
-    Array(scalar: FortranScalar, extents: [Int])
+    Scalar(FortranScalar),
+    Array(scalar: FortranScalar, extents: [Int]),
 
     jet: fn(self) -> String Never! {
         if self == {
@@ -78,15 +78,15 @@ FortranParam: enum {
 }
 
 FortranNamedParam: struct {
-    name: String
-    param: FortranParam
+    name: String,
+    param: FortranParam,
 }
 
 FortranRoutine: struct {
-    jet_name: String
-    symbol: String
-    params: [FortranNamedParam]
-    result: FortranScalar
+    jet_name: String,
+    symbol: String,
+    params: [FortranNamedParam],
+    result: FortranScalar,
 
     has_arrays: fn(self) -> Bool Never! {
         loop entry in self.params {
@@ -97,10 +97,10 @@ FortranRoutine: struct {
 }
 
 FortranDeclaration: struct {
-    scalar: FortranScalar
-    value: Bool
-    intent_in: Bool
-    extents: [Int]?
+    scalar: FortranScalar,
+    value: Bool,
+    intent_in: Bool,
+    extents: [Int]?,
 }
 
 // Discover supported routines, generate the Jet wrapper, compile the Fortran

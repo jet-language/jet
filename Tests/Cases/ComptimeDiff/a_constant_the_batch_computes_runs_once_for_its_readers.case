@@ -8,7 +8,7 @@
 # five times each, PAIR three times.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-write: main.jet = "Pair: struct {\n    a: Int\n    b: String\n}\n\nbase: fn() -> Int {\n    debug(\"BASE computed\")\n    20\n}\n\nrows: fn() -> [Int] {\n    debug(\"ROWS computed\")\n    [1, 2, 3]\n}\n\npair: fn() -> Pair {\n    debug(\"PAIR computed\")\n    Pair{a: 7, b: \"seven\"}\n}\n\nBASE: #run base()\nDOUBLE: #run (BASE * 2)\nSUM: #run (BASE + BASE + DOUBLE)\nROWS: #run rows()\nTOTAL: #run (ROWS[0] + ROWS[1] + ROWS[2])\nCOUNT: #run ROWS.len()\nPAIR: #run pair()\nLABEL: #run \"{PAIR.b}{PAIR.a}\"\n\nrun: fn() {\n    print(\"{BASE} {DOUBLE} {SUM} {TOTAL} {COUNT} {LABEL} {ROWS.len()} {PAIR.a}\")\n}\n"
+write: main.jet = "Pair: struct {\n    a: Int,\n    b: String,\n}\n\nbase: fn() -> Int {\n    debug(\"BASE computed\")\n    20\n}\n\nrows: fn() -> [Int] {\n    debug(\"ROWS computed\")\n    [1, 2, 3]\n}\n\npair: fn() -> Pair {\n    debug(\"PAIR computed\")\n    Pair{a: 7, b: \"seven\"}\n}\n\nBASE: #run base()\nDOUBLE: #run (BASE * 2)\nSUM: #run (BASE + BASE + DOUBLE)\nROWS: #run rows()\nTOTAL: #run (ROWS[0] + ROWS[1] + ROWS[2])\nCOUNT: #run ROWS.len()\nPAIR: #run pair()\nLABEL: #run \"{PAIR.b}{PAIR.a}\"\n\nrun: fn() {\n    print(\"{BASE} {DOUBLE} {SUM} {TOTAL} {COUNT} {LABEL} {ROWS.len()} {PAIR.a}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
 stdout: = "20 40 80 6 3 seven7 3 7\n"

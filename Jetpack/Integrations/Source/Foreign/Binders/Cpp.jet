@@ -42,29 +42,29 @@ CPP_TOOL_CAPTURE_LIMIT: 67108864
 
 // One explicit template instantiation the caller asks for.
 CppTemplateInstantiation: struct {
-    qualified_name: String
-    cpp_args: [String]
-    jet_name: String
+    qualified_name: String,
+    cpp_args: [String],
+    jet_name: String,
 }
 
 CppBindOptions: struct {
-    lib: String
-    target: String
-    clang: String
-    archiver: String
-    include_dirs: [String]
-    library_dirs: [String]
-    libraries: [String]
-    namespaces: [String]
-    templates: [CppTemplateInstantiation]
+    lib: String,
+    target: String,
+    clang: String,
+    archiver: String,
+    include_dirs: [String],
+    library_dirs: [String],
+    libraries: [String],
+    namespaces: [String],
+    templates: [CppTemplateInstantiation],
 }
 
 // Checked descriptor overlay for a C++ library. The binder infers no
 // semantics from generated names; the caller supplies the stable overlay
 // identity and its source, and both invalidate the cache when they change.
 CppOverlay: struct {
-    identity: String
-    source: String
+    identity: String,
+    source: String,
 
     default: fn() -> CppOverlay Never! { CppOverlay{identity: "none", source: "none"} }
 
@@ -76,17 +76,17 @@ CppOverlay: struct {
 }
 
 CppBindResult: struct {
-    source: String
-    bound: [String]
+    source: String,
+    bound: [String],
     // Content-addressed archive; a stable projection is also materialized for
     // ordinary `use cpp.<lib>` discovery.
-    archive: String
-    provenance: String
+    archive: String,
+    provenance: String,
     // Adaptation plans carried with this surface; each points back to the
     // same boundary digest.
-    plans: [BindingPlan]
+    plans: [BindingPlan],
     // The one boundary row consumed by inspect, comparison, and debugging.
-    boundary: ForeignBoundaryContract
+    boundary: ForeignBoundaryContract,
 }
 
 pkg_cpp_bind: fn(header: String, cache: String, options: CppBindOptions) -[FS, Env, Exec, Time.Wait]> CppBindResult ForeignBindError! {

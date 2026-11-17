@@ -35,17 +35,17 @@ STORE_LIFECYCLE_MAX_SEQUENCE_TEXT: "18446744073709551615"
 
 // The durable publication steps a write passes, for fault injection.
 LifecycleWritePhase: enum {
-    BeforeWrite
-    AfterWrite
-    AfterFileSync
-    AfterRename
-    AfterDirectorySync
+    BeforeWrite,
+    AfterWrite,
+    AfterFileSync,
+    AfterRename,
+    AfterDirectorySync,
 }
 
 // Fault injection for journal writes: fail with an OS error code at a phase.
 LifecycleWriteControl: struct {
-    fail: LifecycleWritePhase?
-    raw_os_error: Int
+    fail: LifecycleWritePhase?,
+    raw_os_error: Int,
 
     none: fn() -> LifecycleWriteControl Never! {
         LifecycleWriteControl{fail: None, raw_os_error: 5}
@@ -65,24 +65,24 @@ LifecycleWriteControl: struct {
 // The Hangar lock plus the closure inputs every lifecycle operation reads
 // under it (Rust `with_lifecycle_lock`). Dropping it releases the lock.
 LifecycleSession: struct {
-    lock: RuntimeLock
-    known: [String]
-    closure_head: String
+    lock: RuntimeLock,
+    known: [String],
+    closure_head: String,
 }
 
 // One authenticated transaction after the snapshot.
 LifecycleJournalTransaction: struct {
-    sequence: Int
-    name: String
-    entry: LifecycleJournalEntry
+    sequence: Int,
+    name: String,
+    entry: LifecycleJournalEntry,
 }
 
 // Rust `JournalScan`.
 LifecycleJournalScan: struct {
-    snapshot: LifecycleSnapshotRecord?
-    transactions: [LifecycleJournalTransaction]
-    transaction_names: [String]
-    last_sequence: Int
+    snapshot: LifecycleSnapshotRecord?,
+    transactions: [LifecycleJournalTransaction],
+    transaction_names: [String],
+    last_sequence: Int,
 
     through: fn(self) -> Int Never! {
         if self.snapshot == {

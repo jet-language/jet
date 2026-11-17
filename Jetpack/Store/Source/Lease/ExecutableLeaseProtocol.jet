@@ -48,10 +48,10 @@ LEASE_REQUEST_FIELDS: [String]{"op", "key", "request", "lease", "generation", "p
 LEASE_RECEIPT_FIELDS: [String]{"lease", "generation", "pid", "owner", "package", "version", "reference", "output", "snapshot", "members", "mac"}
 
 LeaseOperation: enum {
-    Acquire
-    Replace
-    Rollback
-    Release
+    Acquire,
+    Replace,
+    Rollback,
+    Release,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -74,27 +74,27 @@ LeaseOperation: enum {
 }
 
 LeaseMember: struct {
-    name: String
-    digest: String
+    name: String,
+    digest: String,
 }
 
 LeaseRequest: struct {
-    operation: LeaseOperation
-    key_id: String
-    request_id: String
-    lease_id: String
-    generation: Int
-    owner_pid: Int
-    owner_scope: String
-    package: String
-    version: String
-    reference: String
-    output_digest: String
-    previous_output_digest: String
-    snapshot_rel: String
-    members: [LeaseMember]
-    nonce: String
-    mac: String
+    operation: LeaseOperation,
+    key_id: String,
+    request_id: String,
+    lease_id: String,
+    generation: Int,
+    owner_pid: Int,
+    owner_scope: String,
+    package: String,
+    version: String,
+    reference: String,
+    output_digest: String,
+    previous_output_digest: String,
+    snapshot_rel: String,
+    members: [LeaseMember],
+    nonce: String,
+    mac: String,
 
     // The canonical frame, with or without the authentication tag.
     encode_fields: fn(self, include_mac: Bool) -> String IOError! {
@@ -127,18 +127,18 @@ LeaseRequest: struct {
 }
 
 LeaseReceipt: struct {
-    lease_id: String
-    generation: Int
-    owner_pid: Int
-    owner_scope: String
-    package: String
+    lease_id: String,
+    generation: Int,
+    owner_pid: Int,
+    owner_scope: String,
+    package: String,
     // Empty for unversioned artifacts; output_digest still pins their identity.
-    version: String
-    reference: String
-    output_digest: String
-    snapshot_rel: String
-    members: [LeaseMember]
-    mac: String
+    version: String,
+    reference: String,
+    output_digest: String,
+    snapshot_rel: String,
+    members: [LeaseMember],
+    mac: String,
 }
 
 store_lease_invalid: fn(message: String) -> IOError Never! {

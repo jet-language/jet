@@ -35,15 +35,15 @@ NATIVE_TAG_VARIABLE: 0x34
 // One member of a struct or union type: its name, offset and type (a
 // NativeImage.types key).
 NativeMember: struct {
-    name: String
-    offset: Int
-    ty: Int
+    name: String,
+    offset: Int,
+    ty: Int,
 }
 
 // One enumerator of an enumeration type.
 NativeEnumerator: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 // A type DIE: its name ("" for an unnamed pointer), byte size and DW_TAG
@@ -54,18 +54,18 @@ NativeEnumerator: struct {
 // NativeImage.enumerators; a struct without members (an opaque one) has
 // group -1.
 NativeType: struct {
-    name: String
-    size: Int
-    tag: Int
-    encoding: X64DebugEncoding
-    target: Int
-    group: Int
+    name: String,
+    size: Int,
+    tag: Int,
+    encoding: X64DebugEncoding,
+    target: Int,
+    group: Int,
 }
 
 // Whether a DWARF variable is a parameter or a local.
 NativeVariableRole: enum {
-    Parameter
-    Local
+    Parameter,
+    Local,
 }
 
 // One parameter or local: its name, declaration line, type (a
@@ -73,42 +73,42 @@ NativeVariableRole: enum {
 // `.debug_loclists`, -1 when it has none. `base` is its unit's base address
 // for offset-pair entries.
 NativeVariable: struct {
-    name: String
-    line: Int
-    ty: Int
-    list: Int
-    base: Int
-    role: NativeVariableRole
+    name: String,
+    line: Int,
+    ty: Int,
+    list: Int,
+    base: Int,
+    role: NativeVariableRole,
 }
 
 // One subprogram: its code [low, high), name and variables in DIE order.
 NativeFunction: struct {
-    low: Int
-    high: Int
-    name: String
-    variables: [NativeVariable]
+    low: Int,
+    high: Int,
+    name: String,
+    variables: [NativeVariable],
 }
 
 // The facts of one image. `types` is keyed by the type DIE's offset in
 // `.debug_info`; `members` and `enumerators` hold each struct's, union's and
 // enumeration's in DIE order, as its group names them.
 NativeImage: struct {
-    lines: X64Jetline
-    functions: [NativeFunction]
-    types: [Int:NativeType]
-    members: [[NativeMember]]
-    enumerators: [[NativeEnumerator]]
-    loclists: [U8]
+    lines: X64Jetline,
+    functions: [NativeFunction],
+    types: [Int:NativeType],
+    members: [[NativeMember]],
+    enumerators: [[NativeEnumerator]],
+    loclists: [U8],
 }
 
 // One range of a variable's location list: [start, end), and the DWARF
 // expression that locates it there, the bytes [from, to) of
 // NativeImage.loclists.
 NativeRange: struct {
-    start: Int
-    end: Int
-    from: Int
-    to: Int
+    start: Int,
+    end: Int,
+    from: Int,
+    to: Int,
 }
 
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
@@ -167,19 +167,19 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 
 // The attribute values of one DIE the reader uses; a missing number is -1.
 NativeDie: struct {
-    tag: Int
-    offset: Int
-    children: Bool
-    name: String
-    ty: Int
-    low: Int
-    length: Int
-    location: Int
-    size: Int
-    member_offset: Int
-    encoding: Int
-    value: Int
-    line: Int
+    tag: Int,
+    offset: Int,
+    children: Bool,
+    name: String,
+    ty: Int,
+    low: Int,
+    length: Int,
+    location: Int,
+    size: Int,
+    member_offset: Int,
+    encoding: Int,
+    value: Int,
+    line: Int,
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.

@@ -115,13 +115,13 @@ use jet_foundation.[
 ]
 
 SemaStatementResult: struct {
-    value: [TStmt]
-    complete: Bool
+    value: [TStmt],
+    complete: Bool,
 }
 
 SemaStatementRollbackMethods: struct {
-    snapshot: TMethodRef
-    restore: TMethodRef
+    snapshot: TMethodRef,
+    restore: TMethodRef,
 }
 
 sema_stmt_binary_type: fn(op: BinOp) -> TBinaryOp Never! { sema_expr_tree_binary_op(op) }
@@ -515,9 +515,9 @@ sema_stmt_single_byte_literal: fn(arg: CallArg) -> Int? Never! {
 // and carries a Safe edit that writes the typed start. With no implying use
 // the report stays as the literal check wrote it.
 SemaEmptyStartUse: struct {
-    ty: Type
-    span: Span
-    what: String
+    ty: Type,
+    span: Span,
+    what: String,
 }
 
 // "list" for `[]`, "map" for an empty map literal, "none" for bare `None`.
@@ -823,10 +823,10 @@ sema_stmt_lint_walk_filter: fn(var: String, collection: Expr, body: [Stmt], envi
 }
 
 SemaStmtWalkFacts: struct {
-    path_uses: Int
-    path_bases: [Int]
-    variable_uses: [Int]
-    fallback_exit: Bool
+    path_uses: Int,
+    path_bases: [Int],
+    variable_uses: [Int],
+    fallback_exit: Bool,
 }
 
 sema_stmt_note_walk_use: fn(facts: &SemaStmtWalkFacts, var: String, expression: Expr) Never! {
@@ -1308,9 +1308,9 @@ sema_stmt_guard_path: fn(reversed: [Expr]) -> String? {
 }
 
 SemaGuardComparison: struct {
-    op: BinOp
-    name: String
-    value: Int
+    op: BinOp,
+    name: String,
+    value: Int,
 }
 
 // A guard condition as written. The reference quotes the source text; this
@@ -2018,8 +2018,8 @@ sema_stmt_through_bound_names: fn(value: Expr, names: &[BindName]) Never! {
 }
 
 SemaStmtThroughScan: struct {
-    names: [String]
-    found: NamedSpan?
+    names: [String],
+    found: NamedSpan?,
 }
 
 sema_stmt_through_note_read: fn(scan: &SemaStmtThroughScan, value: Expr) Never! {
@@ -2296,13 +2296,13 @@ sema_range_backward_diagnostic: fn(start: Expr, end: Expr, step: Expr?, exclusiv
 }
 
 SemaForInIterableFact: struct {
-    method_kind: TForInMethod
-    item_type: Type
+    method_kind: TForInMethod,
+    item_type: Type,
 }
 
 SemaForInPairTypes: struct {
-    first: Type
-    second: Type
+    first: Type,
+    second: Type,
 }
 
 sema_stmt_for_in_named_type_name: fn(ty: Type) -> String? {
@@ -2347,9 +2347,9 @@ sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
 // `impl Trait { … }` block in the nominal's own body, whose methods the
 // nominal registers.
 SemaForInTraitImpl: struct {
-    module_index: Int
-    associated_types: [NamedType]
-    method_keys: [String:String]
+    module_index: Int,
+    associated_types: [NamedType],
+    method_keys: [String:String],
 }
 
 sema_stmt_for_in_trait_impl: fn(graph: SemaRegistrationGraph, trait_name: String, identity: String) -> SemaForInTraitImpl? {
@@ -4487,10 +4487,10 @@ sema_stmt_destructure_init_is_temporary: fn(init: Expr) -> Bool Never! {
 }
 
 SemaRefutableFallbackCheck: struct {
-    or_fallback: TOrFallback?
-    statements: [TStmt]
-    complete: Bool
-    ambient_err: TLocal?
+    or_fallback: TOrFallback?,
+    statements: [TStmt],
+    complete: Bool,
+    ambient_err: TLocal?,
 }
 
 sema_stmt_refutable_expr_diverges: fn(expr: Expr) -> Bool Never! {
@@ -4567,11 +4567,11 @@ sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaSc
 // name, the source of the Map, the key and the fallback group, and the span of
 // the take.
 SemaStmtMapGroupTake: struct {
-    name: String
-    map: String
-    key: String
-    fallback: String
-    span: Span
+    name: String,
+    map: String,
+    key: String,
+    fallback: String,
+    span: Span,
 }
 
 // L0534: `group := groups.get(key) ?? fallback`, a write such as
@@ -5070,8 +5070,8 @@ sema_stmt_check_state_loop_unchanged: fn(tables: ASTTables, init: Binding, cond:
 }
 
 SemaStmtNameScan: struct {
-    name: String
-    found: Bool
+    name: String,
+    found: Bool,
 }
 
 sema_stmt_expr_mentions: fn(tables: ASTTables, expression: ExprNode, name: String) -> Bool Never! {
@@ -5844,9 +5844,9 @@ sema_stmt_check_optional_refinement: fn(name: BindName, fallback: OrFallback, sp
 // One integer local whose interval a guard table narrows for the rest of the
 // block.
 SemaStmtBoundsRefinement: struct {
-    name: String
-    name_span: Span
-    bounds: TIntegerBounds
+    name: String,
+    name_span: Span,
+    bounds: TIntegerBounds,
 }
 
 // After `if i >= limit -> exit` with no `else`, the rest of the block runs
@@ -9780,8 +9780,8 @@ sema_stmt_check_stored_lambda_result: fn(binding: Binding, init: TExpr, diagnost
 // declared, or projected onto a callee the #3708 failure solve proves
 // infallible after this one check (`sema_failure_reconcile_infallible`).
 SemaStmtDiscardedCall: struct {
-    call: TExpr
-    infallible: Bool
+    call: TExpr,
+    infallible: Bool,
 }
 
 sema_stmt_discarded_call: fn(checked: TExpr) -> SemaStmtDiscardedCall? Never! {

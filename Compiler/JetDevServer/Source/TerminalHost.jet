@@ -22,27 +22,27 @@ terminal_panel_availability: fn(access: TerminalHostAccess) -> [JetDevtoolsPanel
 
 #Error
 TerminalHostError: struct {
-    message: String
+    message: String,
 
     impl Display { display: fn(self) -> String { self.message } }
 }
 TerminalHostAccess: struct {
-    local: Bool
-    release: Bool
-    read_only: Bool
+    local: Bool,
+    release: Bool,
+    read_only: Bool,
 
     interactive: fn() -> TerminalHostAccess { TerminalHostAccess{local: true, release: false, read_only: false} }
     local_details_enabled: fn(self) -> Bool { self.local && !self.release }
     actions_enabled: fn(self) -> Bool { !self.read_only }
 }
 TerminalHostCapabilities: struct {
-    tty: Bool
-    ansi: Bool
-    no_color: Bool
-    width: Int
-    verbose: Bool
-    quiet: Bool
-    access: TerminalHostAccess
+    tty: Bool,
+    ansi: Bool,
+    no_color: Bool,
+    width: Int,
+    verbose: Bool,
+    quiet: Bool,
+    access: TerminalHostAccess,
 
     new: fn(tty: Bool, ansi: Bool, no_color: Bool, width: Int, verbose: Bool, quiet: Bool, access: TerminalHostAccess) -> TerminalHostCapabilities {
         TerminalHostCapabilities{tty: tty, ansi: ansi, no_color: no_color, width: terminal_at_least_one(width), verbose: verbose, quiet: quiet, access: access}
@@ -52,19 +52,19 @@ TerminalHostCapabilities: struct {
     color_enabled: fn(self) -> Bool { self.tty && self.ansi && !self.no_color }
 }
 TerminalBounds: struct {
-    x: Int
-    y: Int
-    width: Int
-    height: Int
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
 
     right: fn(self) -> Int { self.x + self.width }
     bottom: fn(self) -> Int { self.y + self.height }
     contains: fn(self, x: Int, y: Int) -> Bool { x >= self.x && y >= self.y && x < self.right() && y < self.bottom() }
 }
 TerminalViewport: struct {
-    width: Int
-    height: Int
-    scroll: Int
+    width: Int,
+    height: Int,
+    scroll: Int,
 
     new: fn(width: Int, height: Int) -> TerminalViewport { TerminalViewport.with_scroll(width, height, 0) }
     with_scroll: fn(width: Int, height: Int, scroll: Int) -> TerminalViewport {
@@ -74,10 +74,10 @@ TerminalViewport: struct {
     resize: fn(self, width: Int, height: Int) -> TerminalViewport { TerminalViewport.with_scroll(width, height, self.scroll) }
 }
 TerminalHostConfig: struct {
-    viewport: TerminalViewport
-    capabilities: TerminalHostCapabilities
-    max_events: Int
-    max_nodes: Int
+    viewport: TerminalViewport,
+    capabilities: TerminalHostCapabilities,
+    max_events: Int,
+    max_nodes: Int,
 
     new: fn(viewport: TerminalViewport, capabilities: TerminalHostCapabilities) -> TerminalHostConfig {
         TerminalHostConfig{viewport: viewport, capabilities: capabilities, max_events: MAX_TERMINAL_EVENTS, max_nodes: MAX_TERMINAL_NODES}
@@ -103,7 +103,7 @@ TerminalHostConfig: struct {
     }
 }
 TerminalFactValue: enum {
-    Text(value: String) Integer(value: Int) Boolean(value: Bool) DurationMs(value: Int)
+    Text(value: String), Integer(value: Int), Boolean(value: Bool), DurationMs(value: Int),
 
     display: fn(self) -> String {
         if self == {
@@ -115,9 +115,9 @@ TerminalFactValue: enum {
     }
 }
 TerminalHostFact: struct {
-    key: String
-    value: TerminalFactValue?
-    published: Bool
+    key: String,
+    value: TerminalFactValue?,
+    published: Bool,
 
     redacted: fn(key: String) -> TerminalHostFact { TerminalHostFact{key: key, value: None, published: false} }
     text: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Text{value: value}), published: true} }
@@ -138,16 +138,16 @@ TerminalHostFact: struct {
     }
 }
 TerminalHostEvent: struct {
-    protocol: String
-    session_id: String
-    revision: String
-    sequence: Int
-    observed_at: Int
-    source: String
-    kind: String
-    entity: String
-    panel_id: JetDevtoolsPanelID
-    facts: [TerminalHostFact]
+    protocol: String,
+    session_id: String,
+    revision: String,
+    sequence: Int,
+    observed_at: Int,
+    source: String,
+    kind: String,
+    entity: String,
+    panel_id: JetDevtoolsPanelID,
+    facts: [TerminalHostFact],
 
     from_devtools_event: fn(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelID) -> TerminalHostEvent {
         facts := [TerminalHostFact]{}
@@ -185,14 +185,14 @@ TerminalHostEvent: struct {
     key: fn(self) -> String { "event:{self.revision}:{self.sequence}:{self.kind}:{self.entity}" }
 }
 TerminalFocus: struct {
-    panel_id: String?
-    item_key: String?
+    panel_id: String?,
+    item_key: String?,
 
     panel: fn(panel_id: String) -> TerminalFocus { TerminalFocus{panel_id: Val(panel_id), item_key: None} }
     item: fn(panel_id: String, item_key: String) -> TerminalFocus { TerminalFocus{panel_id: Val(panel_id), item_key: Val(item_key)} }
 }
 // A key press; `TerminalKey.Character` holds the one typed character.
-TerminalInput: enum { Key(key: TerminalKey) Resize(viewport: TerminalViewport) }
+TerminalInput: enum { Key(key: TerminalKey), Resize(viewport: TerminalViewport) }
 impl TerminalAction {
     label: fn(self) -> String {
         if self == {
@@ -224,16 +224,16 @@ TerminalStatus: struct { label: String, detail: String, freshness: TerminalFresh
 TerminalTableRow: struct { key: String, cells: [String] }
 TerminalTable: struct { columns: [String], rows: [TerminalTableRow] }
 TerminalNode: struct {
-    id: String
-    kind: TerminalNodeKind
-    label: String
-    bounds: TerminalBounds
-    freshness: TerminalFreshness
-    focusable: Bool
-    text: String?
-    status: TerminalStatus?
-    table: TerminalTable?
-    children: [TerminalNode]
+    id: String,
+    kind: TerminalNodeKind,
+    label: String,
+    bounds: TerminalBounds,
+    freshness: TerminalFreshness,
+    focusable: Bool,
+    text: String?,
+    status: TerminalStatus?,
+    table: TerminalTable?,
+    children: [TerminalNode],
 
     container: fn(id: String, kind: TerminalNodeKind, label: String, bounds: TerminalBounds, freshness: TerminalFreshness, children: [TerminalNode]) -> TerminalNode {
         TerminalNode{id: id, kind: kind, label: label, bounds: bounds, freshness: freshness, focusable: false, text: None, status: None, table: None, children: children}
@@ -266,11 +266,11 @@ TerminalNode: struct {
     }
 }
 TerminalPanelTree: struct {
-    root: TerminalNode
-    bounds: TerminalBounds
-    node_count: Int
-    node_limit: Int
-    panel_count: Int
+    root: TerminalNode,
+    bounds: TerminalBounds,
+    node_count: Int,
+    node_limit: Int,
+    panel_count: Int,
 
     panel: fn(self, panel_id: String) -> TerminalNode? {
         loop node in self.root.children {
@@ -285,24 +285,24 @@ TerminalPanelTree: struct {
     }
 }
 TerminalFrame: struct {
-    protocol: String
-    session_id: String
-    source_id: String?
-    build_id: String?
-    world_id: String?
-    observed_at: Int?
-    status: DevtoolsStatusFact?
-    revision: String
-    cursor: Int?
-    viewport: TerminalViewport
-    capabilities: TerminalHostCapabilities
-    focus: TerminalFocus
-    keyboard: TerminalKeyboardState
-    freshness: TerminalFreshness
-    event_count: Int
-    event_limit: Int
-    tree: TerminalPanelTree
-    lines: [String]
+    protocol: String,
+    session_id: String,
+    source_id: String?,
+    build_id: String?,
+    world_id: String?,
+    observed_at: Int?,
+    status: DevtoolsStatusFact?,
+    revision: String,
+    cursor: Int?,
+    viewport: TerminalViewport,
+    capabilities: TerminalHostCapabilities,
+    focus: TerminalFocus,
+    keyboard: TerminalKeyboardState,
+    freshness: TerminalFreshness,
+    event_count: Int,
+    event_limit: Int,
+    tree: TerminalPanelTree,
+    lines: [String],
 
     text: fn(self) -> String { self.lines.join("\n") }
     plain_lines: fn(self) -> [String] { loop line in self.lines -> terminal_strip_ansi(line) }
@@ -341,14 +341,14 @@ TerminalFrame: struct {
     }
 }
 TerminalDiff: struct {
-    from_revision: String
-    to_revision: String
-    operations: [TerminalDiffOperation]
-    viewport_changed: Bool
-    focus_changed: Bool
-    keyboard_changed: Bool
-    metadata_changed: Bool
-    lines_changed: Bool
+    from_revision: String,
+    to_revision: String,
+    operations: [TerminalDiffOperation],
+    viewport_changed: Bool,
+    focus_changed: Bool,
+    keyboard_changed: Bool,
+    metadata_changed: Bool,
+    lines_changed: Bool,
 
     initial: fn(frame: TerminalFrame) -> TerminalDiff {
         nodes: frame.tree.nodes()
@@ -369,20 +369,20 @@ TerminalDiff: struct {
 }
 // Retains the bounded typed event ring; derives frames without a second panel model.
 TerminalHost: struct {
-    config: TerminalHostConfig
+    config: TerminalHostConfig,
     // Oldest first, bounded by config.max_events.
-    events: [TerminalHostEvent]
-    session_id: String?
-    source_id: String?
-    build_id: String?
-    world_id: String?
-    revision: String?
-    cursor: Int?
-    time_cursor: Int?
-    observed_at: Int?
-    status: DevtoolsStatusFact?
-    focus: TerminalFocus
-    keyboard: TerminalKeyboardState
+    events: [TerminalHostEvent],
+    session_id: String?,
+    source_id: String?,
+    build_id: String?,
+    world_id: String?,
+    revision: String?,
+    cursor: Int?,
+    time_cursor: Int?,
+    observed_at: Int?,
+    status: DevtoolsStatusFact?,
+    focus: TerminalFocus,
+    keyboard: TerminalKeyboardState,
 
     new: fn(config: TerminalHostConfig) -> TerminalHost {
         bounded: config.with_limits(config.max_events, config.max_nodes)
@@ -877,22 +877,22 @@ terminal_panel_freshness: fn(events: [TerminalHostEvent], cursor: Int?) -> Termi
 terminal_overall_freshness: fn(events: [TerminalHostEvent], cursor: Int?) -> TerminalFreshness { terminal_panel_freshness(events, cursor) }
 
 TerminalRenderInput: struct {
-    tree: TerminalPanelTree
-    viewport: TerminalViewport
-    capabilities: TerminalHostCapabilities
-    session_id: String
-    source_id: String?
-    build_id: String?
-    world_id: String?
-    revision: String
-    cursor: Int?
-    observed_at: Int?
-    status: DevtoolsStatusFact?
-    focus: TerminalFocus
-    keyboard: TerminalKeyboardState
-    event_count: Int
-    event_limit: Int
-    freshness: TerminalFreshness
+    tree: TerminalPanelTree,
+    viewport: TerminalViewport,
+    capabilities: TerminalHostCapabilities,
+    session_id: String,
+    source_id: String?,
+    build_id: String?,
+    world_id: String?,
+    revision: String,
+    cursor: Int?,
+    observed_at: Int?,
+    status: DevtoolsStatusFact?,
+    focus: TerminalFocus,
+    keyboard: TerminalKeyboardState,
+    event_count: Int,
+    event_limit: Int,
+    freshness: TerminalFreshness,
 }
 terminal_optional_number: fn(value: Int?) -> String {
     number: value ?? return "-"

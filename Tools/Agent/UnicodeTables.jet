@@ -75,96 +75,96 @@ MAX_SCALAR: 1114111
 
 #Error
 TableError: struct {
-    message: String
+    message: String,
 }
 
 fail: fn(message: String) -> TableError { TableError{message: message} }
 
 // A scalar range and its label (0 where the range carries none).
 Span: struct {
-    a: Int
-    b: Int
-    label: Int
+    a: Int,
+    b: Int,
+    label: Int,
 }
 
 // A property-file row: its scalar range and its `;` fields after the range.
 PropRow: struct {
-    a: Int
-    b: Int
-    fields: [String]
+    a: Int,
+    b: Int,
+    fields: [String],
 }
 
 // A scalar's full mapping; `cps` keeps first-insertion order.
 Mapping: struct {
-    cps: [Int]
-    seqs: [Int:[Int]]
+    cps: [Int],
+    seqs: [Int:[Int]],
 }
 
 MapEntry: struct {
-    cp: Int
-    seq: [Int]
+    cp: Int,
+    seq: [Int],
 }
 
 NameRow: struct {
-    cp: Int
-    name: String
+    cp: Int,
+    name: String,
 }
 
 // One table record: keys lo..=hi carry `value`.
 Leaf: struct {
-    lo: Int
-    hi: Int
-    value: Int
+    lo: Int,
+    hi: Int,
+    value: Int,
 }
 
 // One generated file: its repository path and its bytes.
 Output: struct {
-    path: String
-    bytes: [U8]
+    path: String,
+    bytes: [U8],
 }
 
 text_output: fn(path: String, text: String) -> Output { Output{path: path, bytes: text.bytes()} }
 
 Asset: struct {
-    symbol: String
-    unit: String
-    kind: Int
-    count: Int
-    stride: Int
-    bytes: Int
-    sha256: String
-    data: [U8]
+    symbol: String,
+    unit: String,
+    kind: Int,
+    count: Int,
+    stride: Int,
+    bytes: Int,
+    sha256: String,
+    data: [U8],
 }
 
 Ucd: struct {
-    ccc: [Span]
-    canon: Mapping
-    compat: Mapping
-    lower: Mapping
-    upper: Mapping
-    title: Mapping
-    fold: Mapping
-    simple_fold: Mapping
-    names: [NameRow]
-    general_category: [Span]
-    letters: [Span]
-    numerics: [Span]
-    exclusions: [Span]
-    east_asian_width: [Span]
-    extended_pictographic: [Span]
-    emoji_presentation: [Span]
-    emoji: [Span]
-    grapheme: [Span]
-    word: [Span]
-    sentence: [Span]
-    incb: [Span]
-    alphabetic: [Span]
-    cased: [Span]
-    case_ignorable: [Span]
-    lowercase: [Span]
-    uppercase: [Span]
-    default_ignorable: [Span]
-    white_space: [Span]
+    ccc: [Span],
+    canon: Mapping,
+    compat: Mapping,
+    lower: Mapping,
+    upper: Mapping,
+    title: Mapping,
+    fold: Mapping,
+    simple_fold: Mapping,
+    names: [NameRow],
+    general_category: [Span],
+    letters: [Span],
+    numerics: [Span],
+    exclusions: [Span],
+    east_asian_width: [Span],
+    extended_pictographic: [Span],
+    emoji_presentation: [Span],
+    emoji: [Span],
+    grapheme: [Span],
+    word: [Span],
+    sentence: [Span],
+    incb: [Span],
+    alphabetic: [Span],
+    cased: [Span],
+    case_ignorable: [Span],
+    lowercase: [Span],
+    uppercase: [Span],
+    default_ignorable: [Span],
+    white_space: [Span],
 }
 
 new_mapping: fn() -> Mapping { Mapping{cps: [Int]{}, seqs: [Int:[Int]]{}} }
@@ -620,8 +620,8 @@ value_lookup: fn(signature: String, leaves: [Leaf], missing: Int, scalar_keys: B
 // delta coalesce into one record; a full mapping packs up to three 21-bit
 // scalars (low lane first) into one pool entry.
 MappingTable: struct {
-    leaves: [Leaf]
-    pool: [Int]
+    leaves: [Leaf],
+    pool: [Int],
 }
 
 mapping_table: fn(mapping: Mapping) -> MappingTable TableError! {

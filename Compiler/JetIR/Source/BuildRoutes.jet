@@ -1672,13 +1672,13 @@ ir_tally_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operat
 // capacity word and entries List, the List's row, the entry row with its key
 // and value members, and the entry stride.
 IRCacheShape: struct {
-    capacity: Int
-    entries: Int
-    list: Int
-    entry: Int
-    key: IRMember
-    value: IRMember
-    stride: Int
+    capacity: Int,
+    entries: Int,
+    list: Int,
+    entry: Int,
+    key: IRMember,
+    value: IRMember,
+    stride: Int,
 }
 
 ir_cache_shape: fn(m: &IRModule, p: IRProgram, ty: Type) -> IRCacheShape? Never! {
@@ -5259,10 +5259,10 @@ ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
 // A List of records lent to a route as runtime record handles: the List,
 // its element row, the handle buffer and the drop of each handle.
 IRRecordHandles: struct {
-    list: Int
-    item_row: Int
-    handles: Int
-    drop: String
+    list: Int,
+    item_row: Int,
+    handles: Int,
+    drop: String,
 }
 
 // The buffer of runtime record handles for the records in `list`, one
@@ -6072,11 +6072,11 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
 // call read it inline (ir_reader_read_inline), else -1 and the payload is in
 // `out`.
 IRRouteSplit: struct {
-    selector: Int
-    out: Int
-    value: Int
-    ok: IRRouteCarrier
-    err: IRRouteCarrier
+    selector: Int,
+    out: Int,
+    value: Int,
+    ok: IRRouteCarrier,
+    err: IRRouteCarrier,
 }
 
 // The Result box, of checked type `result`, of route call `split`: the side
@@ -6150,9 +6150,9 @@ ir_route_split_ok: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteS
 // jet_reader_read_*, jet_reader_peek): the bytes its field spans, whether
 // they are big-endian, and whether the read advances the position.
 IRReaderRead: struct {
-    bytes: Int
-    big_endian: Bool
-    advance: Bool
+    bytes: Int,
+    big_endian: Bool,
+    advance: Bool,
 }
 
 ir_reader_read: fn(export: String) -> IRReaderRead? Never! {
@@ -6435,8 +6435,8 @@ ir_reflect_cases: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value_ty: Type, 
 // One payload member of a reflected case: its type and its read, borrowed
 // from the value that holds it.
 IRReflectMember: struct {
-    ty: Type
-    read: Int
+    ty: Type,
+    read: Int,
 }
 
 // One case entry at `at` (its name, path and member count, then each member's

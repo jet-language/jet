@@ -136,11 +136,11 @@ WASM_OP_TABLE_SIZE: 0xfc10
 WASM_OP_TABLE_FILL: 0xfc11
 
 WasmOpInfo: struct {
-    name: String
-    op: Int
-    imm: Int
-    sig: String
-    width: Int
+    name: String,
+    op: Int,
+    imm: Int,
+    sig: String,
+    width: Int,
 }
 
 wasm_op: fn(name: String, op: Int, imm: Int, sig: String) -> WasmOpInfo Never! {
@@ -361,9 +361,9 @@ wasm_op_rows: fn() -> [WasmOpInfo] Never! {
 // untyped `select` (0x1b) owns the name; the typed form is chosen by the text
 // reader when a result type follows.
 WasmOpTable: struct {
-    rows: [WasmOpInfo]
-    by_op: [Int:Int]
-    by_name: [String:Int]
+    rows: [WasmOpInfo],
+    by_op: [Int:Int],
+    by_name: [String:Int],
 
     new: fn() -> WasmOpTable Never! {
         rows: wasm_op_rows()

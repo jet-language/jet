@@ -12,9 +12,9 @@ use files: core.files
 // A private stage directory beside the output root. It is removed unless it
 // was published.
 PrivateStage: struct {
-    path: String
-    parent: PinnedRecipeDirectory
-    name: String
+    path: String,
+    parent: PinnedRecipeDirectory,
+    name: String,
 
     new: fn(output_root: String) -[FS, Env, Rand]> PrivateStage RecipeDiagnostic! {
         parent: recipe_output_parent(output_root) ?? return Err(RecipeDiagnostic.recipe_io("could not create private recipe stage", err))
@@ -46,8 +46,8 @@ PrivateStage: struct {
 
 // The admitted plan of one recipe: its fingerprint and step order.
 RecipeAdmission: struct {
-    plan_fingerprint: String
-    order: [Int]
+    plan_fingerprint: String,
+    order: [Int],
 }
 
 // Validate, lower and admit a recipe graph before any step runs. Every
@@ -229,8 +229,8 @@ recipe_run_tool: fn(exe: String, args: [String], ctx: RecipeBuildContext) -[FS, 
 // Which sandbox preparation step failed, and why.
 #Error
 RecipeSandboxFailure: struct {
-    what: String
-    error: RecipeError
+    what: String,
+    error: RecipeError,
 }
 
 // Create the private source and output trees and snapshot the staged source

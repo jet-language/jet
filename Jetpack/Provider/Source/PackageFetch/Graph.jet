@@ -5,48 +5,48 @@ use {
 
 // Full package graph policy, independent of CLI dispatch.
 PackageFetchOptions: struct {
-    locked: Bool{false}
-    update: Bool{false}
-    update_dep: String?{None}
-    resolution: PublicationResolveMode{.Conservative}
+    locked: Bool{false},
+    update: Bool{false},
+    update_dep: String?{None},
+    resolution: PublicationResolveMode{.Conservative},
 }
 
 #Error
 PackageFetchError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 }
 
 PackageFetchResult: struct {
-    lock: LockFile
-    directories: [String:String]
+    lock: LockFile,
+    directories: [String:String],
     // Dependency views a fetch found stale and replaced, by name.
-    replaced_views: [String]{[String]{}}
+    replaced_views: [String]{[String]{}},
 }
 
 PackageFetchNode: struct {
-    package: LockedPackage
-    directory: String
+    package: LockedPackage,
+    directory: String,
 }
 
 PackageFetchVersion: struct {
-    version: String
-    chain: [String]
+    version: String,
+    chain: [String],
 }
 
 PackageFetchResolver: struct {
-    root: String
-    previous: LockFile?
-    options: PackageFetchOptions
-    policy: PackagePolicy
-    nodes: [String:PackageFetchNode]
-    versions: [String:PackageFetchVersion]
-    visiting: [String]
-    registry_plan: [String:PublicationIndexEntry]
-    update_scope: [String]
-    foreign: [String:ForeignRealization]
-    advisory_loaded: Bool
-    advisory: PublicationAdvisoryPolicy?
-    replaced_views: [String]{[String]{}}
+    root: String,
+    previous: LockFile?,
+    options: PackageFetchOptions,
+    policy: PackagePolicy,
+    nodes: [String:PackageFetchNode],
+    versions: [String:PackageFetchVersion],
+    visiting: [String],
+    registry_plan: [String:PublicationIndexEntry],
+    update_scope: [String],
+    foreign: [String:ForeignRealization],
+    advisory_loaded: Bool,
+    advisory: PublicationAdvisoryPolicy?,
+    replaced_views: [String]{[String]{}},
 }
 
 pkg_fetch_error: fn(code: String, what: String, why: String, fix: String) -> PackageFetchError Never! {

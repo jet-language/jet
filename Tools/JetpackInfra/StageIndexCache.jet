@@ -86,97 +86,97 @@ LEGACY_OUTPUT_NAMES: ["v1", "index-v1", "generations", "current"]
 
 #Error
 StageError: struct {
-    message: String
+    message: String,
 }
 
 Mode: enum {
-    Stage
-    Publish
+    Stage,
+    Publish,
 }
 
 // Which publication tree a walk compares: index files have per-kind bounds.
 Kind: enum {
-    Index
-    Cache
+    Index,
+    Cache,
 }
 
 // What opening a directory does when the name is missing.
 Absent: enum {
-    Refuse
-    Create
+    Refuse,
+    Create,
 }
 
 // How much an already published generation is checked again: `Source` also
 // revalidates the whole staged tree, `Generation` only the published copy.
 Recheck: enum {
-    Source
-    Generation
+    Source,
+    Generation,
 }
 
 // What a name in a held directory is, without following a final link.
 Entry: enum {
-    Missing
-    Present(files.Stat)
+    Missing,
+    Present(files.Stat),
 }
 
 Options: struct {
-    mode: Mode
-    channel: String
-    staging: String
-    index_destination: String
-    cache_destination: String
-    index_root: String
-    hangar_root: String
-    output: String
-    role: String
-    manifest: String
-    manifest_is_default: Bool
-    jetpack: String
+    mode: Mode,
+    channel: String,
+    staging: String,
+    index_destination: String,
+    cache_destination: String,
+    index_root: String,
+    hangar_root: String,
+    output: String,
+    role: String,
+    manifest: String,
+    manifest_is_default: Bool,
+    jetpack: String,
 }
 
 Target: struct {
-    revision: String
-    system: String
-    url: String
-    signature_url: String
-    sha256: String
-    compressed_length: Int
-    decoded_length: Int
-    record_count: Int
-    index_signature_sha256: String
-    discoverable: Bool
+    revision: String,
+    system: String,
+    url: String,
+    signature_url: String,
+    sha256: String,
+    compressed_length: Int,
+    decoded_length: Int,
+    record_count: Int,
+    index_signature_sha256: String,
+    discoverable: Bool,
 }
 
 Manifest: struct {
-    channel: String
-    generation: Int
-    issued_unix: Int
-    expires_unix: Int
-    targets: [Target]
+    channel: String,
+    generation: Int,
+    issued_unix: Int,
+    expires_unix: Int,
+    targets: [Target],
 }
 
 // The manifest and signature bytes exactly as read, and what they say.
 ManifestInfo: struct {
-    bytes: [U8]
-    signature: [U8]
-    manifest: Manifest
+    bytes: [U8],
+    signature: [U8],
+    manifest: Manifest,
 }
 
 Generation: struct {
-    id: String
-    generation: Int
+    id: String,
+    generation: Int,
 }
 
 // Where a publication root's `current` link points.
 Pointer: enum {
-    Unset
-    At(Generation)
+    Unset,
+    At(Generation),
 }
 
 // A directory's entries and the directory's own state when they were listed.
 Listing: struct {
-    entries: [files.DirectoryEntry]
-    snapshot: files.Stat
+    entries: [files.DirectoryEntry],
+    snapshot: files.Stat,
 }
 
 run: fn() { main(process.args()) ?? process.fail(1, "stage-index-cache: {err.message}") }

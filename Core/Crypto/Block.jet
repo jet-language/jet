@@ -22,8 +22,8 @@ use {
 /// Why an ARIA or Camellia operation failed.
 #Error
 BlockError: enum {
-    BadInputData
-    InvalidInputLength
+    BadInputData,
+    InvalidInputLength,
 }
 
 /// A key of another length than 16, 24 or 32 bytes, or a stream offset
@@ -37,8 +37,8 @@ BlockError: enum {
 /// The direction of a CBC or CFB128 operation (MBEDTLS_ARIA_ENCRYPT,
 /// MBEDTLS_CAMELLIA_DECRYPT, ...).
 BlockMode: enum {
-    Encrypt
-    Decrypt
+    Encrypt,
+    Decrypt,
 }
 
 /// The bytes of an ARIA or Camellia block.
@@ -47,7 +47,7 @@ BLOCK_SIZE: 16
 /// A key whose schedule runs one 16-byte block in place; the shared modes
 /// run on it. `s` is four words of scratch state the caller wipes.
 Block128: trait {
-    crypt_block: fn(self, s: &[U32], b: &[U8]) Never!
+    crypt_block: fn(self, s: &[U32], b: &[U8]) Never!,
 }
 
 get_le32: fn(b: [U8], off: Int) -> U32 Never! {
@@ -82,8 +82,8 @@ wipe_bytes: fn(b: &[U8]) Never! {
 /// (12, 14 or 16) of the key size, in the order its direction runs them
 /// (mbedtls_aria_context).
 ARIAKey: struct {
-    rk: [U32]
-    nr: Int
+    rk: [U32],
+    nr: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -300,8 +300,8 @@ aria_block: fn(k: ARIAKey, s: &[U32], b: &[U8]) Never! {
 /// six-round groups, in the order its direction runs them
 /// (mbedtls_camellia_context).
 CamelliaKey: struct {
-    rk: [U32]
-    nr: Int
+    rk: [U32],
+    nr: Int,
 
     impl Close {
         close: fn(&&self) {

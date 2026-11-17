@@ -43,67 +43,67 @@ EFFECT_BUILD_ENTRY: "build"
 // directly performed effects, the static call edges, and whether an open
 // callee makes the function conservatively maximal.
 PackageEffectSummary: struct {
-    direct: [String]
-    edges: [String]
-    maximal: Bool
+    direct: [String],
+    edges: [String],
+    maximal: Bool,
 }
 
 // A dependency import of the entry module and the root-side span where it
 // crosses the budget boundary (`ImportKind::Module` name span, or the
 // module-alias span of an unqualified import).
 EffectBudgetImport: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 // The selected runnable output of the entry module (`ConstDef.resolved_output`
 // with `selected`): its defining module and semantic name.
 EffectBudgetOutput: struct {
-    module_index: Int
-    semantic_name: String
+    module_index: Int,
+    semantic_name: String,
 }
 
 // One loaded module as the budget reads it (Rust `LoadedModule`).
 EffectBudgetModule: struct {
-    path: String
-    alias: String
+    path: String,
+    alias: String,
     // `Sema::effect_key` of every function, method, and trait-impl method the
     // module defines, in item order.
-    function_keys: [String]
-    function_spans: [String:Span]
-    imports: [EffectBudgetImport]
+    function_keys: [String],
+    function_spans: [String:Span],
+    imports: [EffectBudgetImport],
     // Whether the module declares the `build(Build)` entry.
-    has_build_entry: Bool
+    has_build_entry: Bool,
 }
 
 // The checked program as the budget reads it (Rust `ProgramBundle`).
 EffectBudgetProgram: struct {
-    entry: Int
-    modules: [EffectBudgetModule]
+    entry: Int,
+    modules: [EffectBudgetModule],
     // Dependency name -> its source root (`deps:` and hangar-realized `use`).
-    dep_roots: [String:String]
-    selected_output: EffectBudgetOutput?
+    dep_roots: [String:String],
+    selected_output: EffectBudgetOutput?,
 }
 
 EffectBudgetWitness: struct {
-    path: String
-    span: Span
+    path: String,
+    span: Span,
 }
 
 // One package's (root, or a dependency) aggregated effects.
 PackageEffects: struct {
     // `root` for the building package itself, else the dependency name.
-    name: String
-    effects: [String]
+    name: String,
+    effects: [String],
     // For each effect, one deterministic static call path from the first
     // reached function that reaches it down to the function that performs
     // it; the last entry is the effect's site (E1220, E0749).
-    effect_chains: [String:[String]]
-    effect_witnesses: [String:EffectBudgetWitness]
+    effect_chains: [String:[String]],
+    effect_witnesses: [String:EffectBudgetWitness],
     // Function identities where a deniable Panic stop enters the graph.
-    panic_sites: [String]
+    panic_sites: [String],
     // Root-side source location where a dependency crosses the boundary.
-    boundary_span: Span?
+    boundary_span: Span?,
 }
 
 // `Sema::effect_key`: `Type::name` for methods, the bare name otherwise.
@@ -463,16 +463,16 @@ pkg_effect_grant_for: fn(manifest: PackageFacts, dependency: String) -> [String]
 // path from the first reached function down to the function that performs it
 // (empty when the build saw no path), and that function's source location.
 PackageEffectReach: struct {
-    effect_name: String
-    chain: [String]
-    witness: EffectBudgetWitness?
+    effect_name: String,
+    chain: [String],
+    witness: EffectBudgetWitness?,
 }
 
 // A dependency whose inferred effect row reaches effects the row the project
 // lock recorded for it doesn't cover: what a dependency update widened.
 PackageEffectGain: struct {
-    name: String
-    reaches: [PackageEffectReach]
+    name: String,
+    reaches: [PackageEffectReach],
 }
 
 // Record each dependency's inferred effect row (`entries`, one build's

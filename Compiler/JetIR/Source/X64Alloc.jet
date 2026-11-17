@@ -85,9 +85,9 @@ IR_X64_LOOP_WEIGHT: 16
 
 // How a slot's value is held.
 IRX64Class: enum {
-    Empty
-    General
-    Float
+    Empty,
+    General,
+    Float,
 }
 
 // Unit: nothing is stored.
@@ -100,11 +100,11 @@ IRX64Class: enum {
 // The layout facts selection reads of a type row: scalars only, so a copy
 // never copies the checked type.
 IRX64Shape: struct {
-    kind: IRTypeKind
-    size: Int
-    align: Int
-    signed: Bool
-    bits: Int
+    kind: IRTypeKind,
+    size: Int,
+    align: Int,
+    signed: Bool,
+    bits: Int,
 }
 
 ir_x64_shape: fn(ty: IRType) -> IRX64Shape Never! {
@@ -126,24 +126,24 @@ ir_x64_row_class: fn(m: IRModule, row: Int) -> IRX64Class Never! {
 IRX64Allocation: struct {
     // Per slot: the register holding it (callee-saved, or r8 or r9), -1
     // for none.
-    regs: [Int]
+    regs: [Int],
     // Per slot: the xmm register holding a Float slot, -1 for none; and the
     // slots holding one, in slot order.
-    xmms: [Int]
-    xmm_slots: [Int]
+    xmms: [Int],
+    xmm_slots: [Int],
     // The General slots in r8 or r9 whose ranges hold exact Int routes
     // (ir_x64_int_calls), in slot order: each has a frame home it is kept
     // in across their calls.
-    routed: [Int]
+    routed: [Int],
     // Per slot: the rbp displacement of its frame home (0 for a slot in a
     // register but a routed one, a constant slot, a frame address or a Unit
     // slot).
-    homes: [Int]
+    homes: [Int],
     // Per slot: whether it is a constant (a General temporary whose only
     // write is a Const): it has no place, every read is its immediate
     // `values[slot]` and its Const emits nothing.
-    consts: [Bool]
-    values: [Int]
+    consts: [Bool],
+    values: [Int],
     // Per slot: the rbp displacement of the storage a frame address (a
     // General temporary whose only write is a StackAddress, or a temporary
     // or local whose only write is a copy, move or in-bounds Offset of a
@@ -152,25 +152,25 @@ IRX64Allocation: struct {
     // Offset or CopyBytes through it addresses rbp directly and any other
     // read is a `lea`. A named one is its variable's FrameAddress for the
     // debugger (X64Select.jet ir_x64_variables).
-    frames: [Int]
+    frames: [Int],
     // Per slot: the first and last instruction index of its live range
     // (-1 for a parameter's start); start > end when it is never referenced.
-    starts: [Int]
-    ends: [Int]
+    starts: [Int],
+    ends: [Int],
     // Per instruction: the rbp displacement of a StackAddress's storage or
     // of an aggregate-returning call's result storage (0 for none).
-    stack: [Int]
+    stack: [Int],
     // The callee-saved registers the slots use, in push order.
-    saved: [Int]
+    saved: [Int],
     // Bytes `sub rsp` reserves below the saved registers.
-    frame_bytes: Int
+    frame_bytes: Int,
     // rbp displacement of the hidden result pointer of a function that
     // returns an aggregate, 0 for none.
-    result_home: Int
+    result_home: Int,
     // The slot whose StackAddress storage is the caller's result storage
     // (ir_x64_result_storage), -1 for none: its StackAddress loads the
     // hidden result pointer and a Return of it copies nothing.
-    result_storage: Int
+    result_storage: Int,
 }
 
 // Which operands of an instruction are slots it reads: none; `a`; `a` and

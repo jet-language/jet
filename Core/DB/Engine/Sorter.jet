@@ -19,18 +19,18 @@ use {
 VdbeSorter: struct {
     // The KeyInfo the records sort by: the cursor's, with n_key_field set
     // to OP_SorterOpen's P2 when that is not zero (sqlite3VdbeSorterInit).
-    key_info: record.KeyInfo
+    key_info: record.KeyInfo,
     // Every record written, and C's list links: `head` is the newest
     // record (SorterList.pList), next[i] the one after record i, -1 at the
     // end.
-    records: [[U8]]
-    next: [Int]
-    head: Int
+    records: [[U8]],
+    next: [Int],
+    head: Int,
     // SortSubtask.pUnpacked: the second key of a merge comparison.
-    unpacked: record.UnpackedRecord
+    unpacked: record.UnpackedRecord,
     // VdbeSorter.pUnpacked: OP_SorterCompare's key, built with the
     // cursor's KeyInfo on first use (None until then).
-    cmp_unpacked: record.UnpackedRecord?
+    cmp_unpacked: record.UnpackedRecord?,
 }
 
 // sqlite3VdbeSorterInit: a sorter for a cursor whose KeyInfo is `info`.

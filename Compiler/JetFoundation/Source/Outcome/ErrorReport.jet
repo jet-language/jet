@@ -12,7 +12,7 @@ JET_ERROR_REPORT_JSON_DEPTH: 64
 // The Rust original reports wire failures as the Rust error string.
 #Error
 JetErrorReportError: struct {
-    message: String
+    message: String,
 }
 
 jet_error_report_error: fn(message: String) -> JetErrorReportError Never! {
@@ -20,31 +20,31 @@ jet_error_report_error: fn(message: String) -> JetErrorReportError Never! {
 }
 
 JetErrorContextFrame: struct {
-    text: String
-    file: String
-    line: Int
+    text: String,
+    file: String,
+    line: Int,
 }
 
 JetErrorConversion: struct {
-    source: String
-    target: String
+    source: String,
+    target: String,
 }
 
 // `value` is raw canonical JSON, never a quoted rendering of the typed field.
 JetErrorField: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 JetErrorSpan: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 JetErrorDetails: struct {
-    variant: String
-    fields: [JetErrorField]
-    source_span: JetErrorSpan?{None}
+    variant: String,
+    fields: [JetErrorField],
+    source_span: JetErrorSpan?{None},
 
     to_json: fn(self) -> String Never! {
         fields := [String]{}
@@ -60,24 +60,24 @@ JetErrorDetails: struct {
 }
 
 JetErrorJourneyFrame: struct {
-    fn_name: String
-    file: String
-    line: Int
-    column: Int
-    note: String
-    hops: Int
+    fn_name: String,
+    file: String,
+    line: Int,
+    column: Int,
+    note: String,
+    hops: Int,
 }
 
 JetErrorReport: struct {
-    code: String?{None}
-    message: String
-    typed_identity: String?{None}
-    causes: [JetErrorReport]{[JetErrorReport]{}}
-    context_frames: [JetErrorContextFrame]{[JetErrorContextFrame]{}}
-    origin: JetErrorJourneyFrame?{None}
-    source_journey: [JetErrorJourneyFrame]{[JetErrorJourneyFrame]{}}
-    conversion_history: [JetErrorConversion]{[JetErrorConversion]{}}
-    details: JetErrorDetails?{None}
+    code: String?{None},
+    message: String,
+    typed_identity: String?{None},
+    causes: [JetErrorReport]{[JetErrorReport]{}},
+    context_frames: [JetErrorContextFrame]{[JetErrorContextFrame]{}},
+    origin: JetErrorJourneyFrame?{None},
+    source_journey: [JetErrorJourneyFrame]{[JetErrorJourneyFrame]{}},
+    conversion_history: [JetErrorConversion]{[JetErrorConversion]{}},
+    details: JetErrorDetails?{None},
 
     to_json: fn(self) -> String Never! {
         code: if self.code == {

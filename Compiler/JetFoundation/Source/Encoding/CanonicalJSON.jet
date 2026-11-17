@@ -1,25 +1,25 @@
 // A-canonical receipt/proof JSON: sorted unique object keys, integers as
 // canonical decimal text, one trailing LF. This is NOT RFC 8785 JCS.
 CanonicalJSON: enum {
-    Null
-    Bool(Bool)
-    Integer(String)
-    String(String)
-    Array([CanonicalJSON])
-    Object([CanonicalJSONField])
+    Null,
+    Bool(Bool),
+    Integer(String),
+    String(String),
+    Array([CanonicalJSON]),
+    Object([CanonicalJSONField]),
 }
 
 // Rust keeps a BTreeMap; the fields here are always sorted by key bytes.
 
 CanonicalJSONField: struct {
-    key: String
-    value: CanonicalJSON
+    key: String,
+    value: CanonicalJSON,
 }
 
 // Rust's `String` refusal.
 #Error
 CanonicalJSONError: struct {
-    message: String
+    message: String,
 }
 
 // Rust `CanonicalJson::object`: a repeated key is refused.

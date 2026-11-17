@@ -830,7 +830,7 @@ heads.
 
 ```jet
 Circle: struct {
-    radius: Float
+    radius: Float,
 
     area: fn(self) -> Float {
         3.14159 * self.radius * self.radius
@@ -886,8 +886,8 @@ and ownership are checked on the member the call selects, on every tier.
 
 ```jet
 Counter: struct {
-    value: Int
-    step: fn(Int) -> Int
+    value: Int,
+    step: fn(Int) -> Int,
     step: fn(self, amount: Int) -> Int Never! { self.value + amount }
 }
 
@@ -932,7 +932,7 @@ module owns the implementation:
 
 ```jet
 Shape: trait {
-    area: fn(self) -> Float
+    area: fn(self) -> Float,
 }
 
 impl Circle.Shape {
@@ -1101,7 +1101,7 @@ destination and holds no ceiling entry (E0734):
 #FX(!Net)
 Audited: struct {
     impl Marker {
-        sites: [.TypeUse]
+        sites: [.TypeUse],
         from: [Net]
     }
 }
@@ -1393,9 +1393,9 @@ where an `E` is wanted is a type error.
 ```jet
 #Layout(U8)
 Opcode: enum {
-    Nop
-    Load = 16
-    Store
+    Nop,
+    Load = 16,
+    Store,
 }
 
 op: Opcode.from_int(17) ?? return
@@ -1481,7 +1481,7 @@ D-META-SPELL1).
 
 ```jet
 Packet: struct<N: Int> {
-    data: [U8#N]
+    data: [U8#N],
 }
 
 size_of: fn<N: Int>(packet: Packet<N>) -> Int { N }
@@ -1937,7 +1937,7 @@ read receiver; `&self` is a write receiver; `&&self` consumes the receiver.
 
 ```jet
 Player: struct {
-    hp: Int
+    hp: Int,
 }
 
 impl Player {
@@ -2070,8 +2070,8 @@ An ordinary owned field owns its value:
 
 ```jet
 Span: struct {
-    text: String
-    meta: String
+    text: String,
+    meta: String,
 }
 
 describe: fn(source: String, kind: String) {
@@ -2241,8 +2241,8 @@ rule: use a total update with an explicit missing-key fallback instead. See the
 
 ```jet
 AppConfig: struct {
-    name: String
-    hits: Int
+    name: String,
+    hits: Int,
 }
 
 handle: fn(id: Int, config: Shared<AppConfig>) -> String {
@@ -2349,10 +2349,10 @@ parameter, `add` and `remove` are **E0205**.
 
 ```jet
 Player: struct {
-    name: String
-    hp: Int
-    attack: Int
-    target: ID<Player>?
+    name: String,
+    hp: Int,
+    attack: Int,
+    target: ID<Player>?,
 }
 
 run: fn() {
@@ -2463,7 +2463,7 @@ parameters; calls stay plain, because the signature decides
 
 ```jet
 Player: struct {
-    hp: Int
+    hp: Int,
 }
 
 damage: fn(player: &Player, amount: Int) {
@@ -2626,8 +2626,8 @@ Bool` says which effects a `#Transact` rollback can't take back, per case
 
 ```jet
 FS: enum {
-    Read
-    Write
+    Read,
+    Write,
 
     impl Effect {
         irreversible: fn(self) -> Bool { self == .Write }
@@ -2659,8 +2659,8 @@ kernel effects it relies on (D-EFFTYPE-USES1, D-DECL-TYPES1):
 ```jet
 #FX(Net)
 Query: enum {
-    Read
-    Write
+    Read,
+    Write,
 
     impl Effect {}
 }
@@ -2686,7 +2686,7 @@ A *package effect* is a library effect that is a kind of another effect. Its
 ```jet
 Audit: struct {
     impl Effect {
-        parent: Log
+        parent: Log,
     }
 }
 
@@ -2713,7 +2713,7 @@ the bare type `-[Bucket]>` names every value (D-EFFTYPE-MODVALUE1):
 
 ```jet
 Bucket: struct {
-    name: String
+    name: String,
 
     impl Effect {}
 }
@@ -3040,7 +3040,7 @@ call:
 ```jet
 #FX(IO, !FS)
 Report: struct {
-    title: String
+    title: String,
 
     show: fn(self) { print(self.title) }
 }
@@ -3137,7 +3137,7 @@ A trait method may declare an upper bound:
 
 ```jet
 Shape: trait {
-    area: fn(self) -[]> Int
+    area: fn(self) -[]> Int,
 }
 
 impl Square.Shape {
@@ -3953,7 +3953,7 @@ An environment may declare project-local development services:
 
 ```jet
 services: {
-    database: { enable: true }
+    database: { enable: true },
 }
 ```
 
@@ -4439,7 +4439,7 @@ add_work: fn(group: Group, value: Int) {
 }
 
 Crawler: struct {
-    step: Int
+    step: Int,
 
     add_stepped: fn(self, group: Group, value: Int) {
         step: self.step
@@ -6393,9 +6393,9 @@ into typed input with one parameter whose type is a `#CLI` struct:
 ```jet
 #CLI
 ServeArgs: struct {
-    #[Doc("port to listen on"), Arg(env: "PORT")] port: Int{3000}
-    #Arg(short: "v") verbose: Bool
-    config: String?
+    #[Doc("port to listen on"), Arg(env: "PORT")] port: Int{3000},
+    #Arg(short: "v") verbose: Bool,
+    config: String?,
 }
 
 run: fn(args: ServeArgs) {

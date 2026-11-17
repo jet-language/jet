@@ -1,0 +1,31 @@
+# The registered brace-layout1 plan (toolchain a0.0.45) adds the comma after
+# every data member of a brace body that a line break or a space alone
+# ended: struct fields and their comments, a one-line struct, enum cases,
+# a case with a payload and a case group, a nested record type, a trait's
+# associated type, constant and requirement, `impl` settings, a record
+# value, a Jet program quoted in a string and in a raw string, and a
+# Markdown file's ```jet fence. A trailing comment goes after the comma.
+# Members with a code body, a shell fence and prose that only looks like a
+# body stay as written. The old program is kept as `before.old`, read as a
+# Jet source through `--source-list`. A second run finds nothing left to
+# rewrite. Checked `--against` the untouched copies in `Old/`, both
+# rewrites mean what their sources meant, while a hand rewrite that also
+# changed a field's type, `swapped.old`, is reported as changed and fails
+# the check.
+fixture: BraceLayout1AddsEveryMissingComma/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- brace-layout1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "EDIT guide.md 2\nEDIT before.old 24\nTOTAL 26 sites in 2 files\n"
+file: before.old = BraceLayout1AddsEveryMissingComma/before.out
+file: guide.md = BraceLayout1AddsEveryMissingComma/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- brace-layout1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "TOTAL 0 sites in 0 files\n"
+file: before.old = BraceLayout1AddsEveryMissingComma/before.out
+file: guide.md = BraceLayout1AddsEveryMissingComma/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- brace-layout1 --against Old guide.md --source-list sources.txt
+exit: 0
+stdout: = "SAME 2 of 2 files\n"
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- brace-layout1 --against Old --source-list swapped.txt
+exit: 1
+stdout: = "CHANGED swapped.old: the first difference is in `Field`: `Int, ty_span: S, serde_markers: [], redact: false, computed:` became `Float, ty_span: S, serde_markers: [], redact: false, compute`\nSAME 0 of 1 files\n"

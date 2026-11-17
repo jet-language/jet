@@ -286,10 +286,10 @@ facts:
 perf.receipt: module {
     budgets: [Budget]{{name: "binary", scope: .Target("hello"), metric: .BinarySize, provider: .BuildArtifact("hello"), comparison: .Absolute, limit: .AtMost(1MiB), applies: BudgetApplies{
         targets: .Only([.Class(.Native)]),
-        profiles: .Only([.Dev])
+        profiles: .Only([.Dev]),
     }}, {name: "startup", scope: .Target("hello"), metric: .StartupTime, provider: .BuildArtifact("hello"), comparison: .AbsoluteFrom("card-2142/linux-x86-64-dev"), limit: .AtMost(50ms), applies: BudgetApplies{
         targets: .Only([.Class(.Native)]),
-        profiles: .Only([.Dev])
+        profiles: .Only([.Dev]),
     }}}
 }
 ```

@@ -17,8 +17,8 @@ HANGAR_MAX_STORE_META_BYTES: 1048576
 
 // The resolved root, and whether it is the default user-owned root.
 HangarRoots: struct {
-    root: String
-    dev_mode: Bool
+    root: String,
+    dev_mode: Bool,
 
     // An explicit non-default root for an isolated operation; it never
     // inherits the native user-data spelling.
@@ -122,10 +122,10 @@ pkg_legacy_user_hangar_dir: fn() -[Env]> String Never! {
 
 // JP0 cache identity. Legacy records have empty fields and can never hit.
 CacheIdentity: struct {
-    source_fingerprint: String
-    recipe_fingerprint: String
-    policy_fingerprint: String
-    platform: String
+    source_fingerprint: String,
+    recipe_fingerprint: String,
+    policy_fingerprint: String,
+    platform: String,
 
     empty: fn() -> CacheIdentity Never! {
         CacheIdentity{source_fingerprint: "", recipe_fingerprint: "", policy_fingerprint: "", platform: ""}
@@ -136,35 +136,35 @@ CacheIdentity: struct {
 StoreEntry: struct {
     // Directory name under the hangar, e.g. `fastfetch-2.1.0-<fp>` (
     // name and version first, fingerprint last).
-    id: String
-    name: String
+    id: String,
+    name: String,
     // Package version, or empty when the provider cannot determine one.
-    version: String
-    reference: String
+    version: String,
+    reference: String,
     // The realized output root (often a `/nix/store/...` path).
-    out: String
+    out: String,
     // The `bin` directory to add to PATH.
-    bin: String
+    bin: String,
     // The built Rust rlib of a library package compiled from Cargo.toml
     // empty otherwise.
-    rlib: String
+    rlib: String,
     // The A4 envelope; empty for pre-envelope records.
-    envelope: Envelope
-    cache_identity: CacheIdentity
+    envelope: Envelope,
+    cache_identity: CacheIdentity,
     // Content digests this object references (runtime/build closure edges).
-    references: [String]
+    references: [String],
     // Named outputs -> content digests (`out` is the primary).
-    named_outputs: [String:String]
+    named_outputs: [String:String],
     // Explicit platform artifact kind that permits semantic xattrs on ingest.
-    platform_artifact_kind: String
+    platform_artifact_kind: String,
     // Versioned canonical producer/action/source replay record.
-    producer_record: String
+    producer_record: String,
     // Digest of the immutable Hangar receipt.
-    receipt: String
+    receipt: String,
     // Unix seconds when this hangar object was first realized.
-    realized_at: Int
+    realized_at: Int,
     // Unix seconds when Jetpack last reused/refreshed this object.
-    last_used_at: Int
+    last_used_at: Int,
 
     // The `meta.json` text the engine writes when recording an entry.
     meta_json: fn(self) -> String Never! {
@@ -220,21 +220,21 @@ pkg_hangar_json_string_object: fn(map: [String:String]) -> String Never! {
 // A `meta.json` record parsed back into typed fields; the engine's
 // `read_meta` shares this parser.
 ParsedMeta: struct {
-    name: String
-    version: String
-    reference: String
-    out: String
-    bin: String
-    rlib: String
-    envelope: Envelope
-    cache_identity: CacheIdentity
-    references: [String]
-    named_outputs: [String:String]
-    platform_artifact_kind: String
-    producer_record: String
-    receipt: String
-    realized_at: Int?
-    last_used_at: Int?
+    name: String,
+    version: String,
+    reference: String,
+    out: String,
+    bin: String,
+    rlib: String,
+    envelope: Envelope,
+    cache_identity: CacheIdentity,
+    references: [String],
+    named_outputs: [String:String],
+    platform_artifact_kind: String,
+    producer_record: String,
+    receipt: String,
+    realized_at: Int?,
+    last_used_at: Int?,
 }
 
 pkg_parse_meta: fn(text: String) -> ParsedMeta? Never! {
@@ -316,8 +316,8 @@ pkg_meta_unsigned: fn(object: [String:Dyn], key: String) -> Int? Never! {
 // A malformed or over-budget read of the recorded store projection.
 #Error
 HangarReadError: enum {
-    IO(IOError)
-    InvalidData(String)
+    IO(IOError),
+    InvalidData(String),
 
     message: fn(self) -> String Never! {
         if self == {

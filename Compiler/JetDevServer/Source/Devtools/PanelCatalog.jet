@@ -183,13 +183,13 @@ impl JetDevtoolsPanelFreshnessPolicy {
 // One immutable, backend-neutral panel declaration. `authority` is the
 // primary grant; every entry of `required_capabilities` is needed.
 JetDevtoolsPanelDescriptor: struct {
-    id: JetDevtoolsPanelID
-    title: String
-    order: Int
-    required_capabilities: [JetDevtoolsPanelCapability]
-    authority: JetDevtoolsPanelCapability
-    supported_hosts: [JetDevtoolsHostKind]
-    freshness: JetDevtoolsPanelFreshnessPolicy
+    id: JetDevtoolsPanelID,
+    title: String,
+    order: Int,
+    required_capabilities: [JetDevtoolsPanelCapability],
+    authority: JetDevtoolsPanelCapability,
+    supported_hosts: [JetDevtoolsHostKind],
+    freshness: JetDevtoolsPanelFreshnessPolicy,
 
     // A descriptor every host supports, ordered by its id's canonical order.
     canonical: fn(id: JetDevtoolsPanelID, &&required_capabilities: [JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
@@ -237,8 +237,8 @@ descriptors: fn() -> [JetDevtoolsPanelDescriptor] Never! {
 
 // Why one host under one grant set cannot project a descriptor.
 JetDevtoolsPanelUnavailableReason: enum {
-    UnsupportedHost(host: JetDevtoolsHostKind)
-    MissingCapability(capability: JetDevtoolsPanelCapability)
+    UnsupportedHost(host: JetDevtoolsHostKind),
+    MissingCapability(capability: JetDevtoolsPanelCapability),
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -263,8 +263,8 @@ JetDevtoolsPanelUnavailableReason: enum {
 // One complete availability row. An unavailable row stays in the list with
 // its reasons, so a host can explain every missing panel.
 JetDevtoolsPanelAvailability: struct {
-    descriptor: JetDevtoolsPanelDescriptor
-    reasons: [JetDevtoolsPanelUnavailableReason]
+    descriptor: JetDevtoolsPanelDescriptor,
+    reasons: [JetDevtoolsPanelUnavailableReason],
 
     is_available: fn(self) -> Bool Never! { self.reasons.len() == 0 }
     unavailable_reasons: fn(self) -> [JetDevtoolsPanelUnavailableReason] Never! { self.reasons }
@@ -273,13 +273,13 @@ JetDevtoolsPanelAvailability: struct {
 // One panel's view over the canonical envelope. Every host gets the same
 // event records and cursor metadata; adapters only render this row.
 JetDevtoolsPanelProjection: struct {
-    availability: JetDevtoolsPanelAvailability
-    events: [JetDevtoolsEvent]
-    selected: Bool
-    cursor: Int?
-    freshness: JetDevtoolsFreshnessFact
-    reset: Bool
-    truncated: Bool
+    availability: JetDevtoolsPanelAvailability,
+    events: [JetDevtoolsEvent],
+    selected: Bool,
+    cursor: Int?,
+    freshness: JetDevtoolsFreshnessFact,
+    reset: Bool,
+    truncated: Bool,
 }
 
 impl JetDevtoolsPanelCatalogError {
@@ -301,7 +301,7 @@ impl JetDevtoolsPanelCatalogError {
 
 // One validated first-party panel catalog, in ascending order.
 JetDevtoolsPanelCatalog: struct {
-    descriptor_list: [JetDevtoolsPanelDescriptor]
+    descriptor_list: [JetDevtoolsPanelDescriptor],
 
     // Validate `descriptors` and keep them sorted by their unique order.
     new: fn(&&descriptors: [JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {

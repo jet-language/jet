@@ -7,9 +7,9 @@ use {
 }
 
 JetDriverCDependency: struct {
-    library: String
-    root: String
-    target: String
+    library: String,
+    root: String,
+    target: String,
 }
 
 jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverCDependency] {
@@ -34,8 +34,8 @@ jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [J
 // One parameter of an inline C body's C ABI: its checked type, by pointer
 // when the declaration writes it.
 JetDriverInlineCParam: struct {
-    ty: Type
-    write: Bool
+    ty: Type,
+    write: Bool,
 }
 
 // One `#FFI(c)` (or `#FFI(cpp)`) inline body of the checked foreign rows:
@@ -43,13 +43,13 @@ JetDriverInlineCParam: struct {
 // (None when the span holds none) and its position among the program's
 // foreign rows in foreign identity order, which names its translation unit.
 JetDriverInlineC: struct {
-    index: Int
-    name: String
-    symbol: String
-    params: [JetDriverInlineCParam]
-    return_type: Type?
-    body: String?
-    cpp: Bool
+    index: Int,
+    name: String,
+    symbol: String,
+    params: [JetDriverInlineCParam],
+    return_type: Type?,
+    body: String?,
+    cpp: Bool,
 }
 
 // One checked foreign declaration (`#Import(<lang>)` or `#FFI(<lang>)`): its
@@ -57,21 +57,21 @@ JetDriverInlineC: struct {
 // symbol, its source site, a file path and 1-based line, and the identity of
 // the module declaring it, whose C providers link it.
 JetDriverForeignDeclaration: struct {
-    name: String
-    language: String
-    symbol: String
-    path: String
-    line: Int
-    module_identity: ModuleID{ModuleID{id: U32{0}}}
+    name: String,
+    language: String,
+    symbol: String,
+    path: String,
+    line: Int,
+    module_identity: ModuleID{ModuleID{id: U32{0}}},
 }
 
 // One C provider of a checked module (`#Import c.<lib>`): the module's
 // identity, the provider library and its direct and transitive links.
 JetDriverForeignProvider: struct {
-    module_identity: ModuleID
-    library: String
-    direct_links: [String]
-    transitive_links: [String]
+    module_identity: ModuleID,
+    library: String,
+    direct_links: [String],
+    transitive_links: [String],
 }
 
 // What the native link closure reads of the checked foreign declarations:
@@ -81,13 +81,13 @@ JetDriverForeignProvider: struct {
 // declarations, in foreign identity order, are every checked foreign row;
 // the providers, in module order, every C provider.
 JetDriverForeignLinkFacts: struct {
-    libraries: [String]
-    direct_links: [String]
-    transitive_links: [String]
-    c_or_rust_rows: Bool
-    inline_c: [JetDriverInlineC]
-    declarations: [JetDriverForeignDeclaration]
-    providers: [JetDriverForeignProvider]{[JetDriverForeignProvider]{}}
+    libraries: [String],
+    direct_links: [String],
+    transitive_links: [String],
+    c_or_rust_rows: Bool,
+    inline_c: [JetDriverInlineC],
+    declarations: [JetDriverForeignDeclaration],
+    providers: [JetDriverForeignProvider]{[JetDriverForeignProvider]{}},
 }
 
 jet_driver_foreign_link_empty: fn() -> JetDriverForeignLinkFacts Never! {
@@ -180,8 +180,8 @@ jet_driver_inline_c_body: fn(source_files: [SourceFile], path: String, start: In
 // The newline offsets of each source file a foreign row names, in order,
 // scanned once per file: `files` gives a path's row of `newlines`.
 JetDriverForeignLines: struct {
-    files: [String:Int]{[String:Int]{}}
-    newlines: [[Int]]{[[Int]]{}}
+    files: [String:Int]{[String:Int]{}},
+    newlines: [[Int]]{[[Int]]{}},
 }
 
 // The 1-based line of byte `offset` in the source file `path` (the first of

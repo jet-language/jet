@@ -18,9 +18,9 @@ DOCTOR_STALE_AFTER: 2592000
 
 // Overall health, ordered: the report takes the worst check.
 DoctorHealth: enum {
-    Healthy
-    Degraded
-    Broken
+    Healthy,
+    Degraded,
+    Broken,
 
     word: fn(self) -> String Never! {
         if self == {
@@ -49,10 +49,10 @@ DoctorHealth: enum {
 
 // One named finding with its detail and the fix to run (empty when healthy).
 DoctorCheck: struct {
-    name: String
-    health: DoctorHealth
-    detail: String
-    fix: String
+    name: String,
+    health: DoctorHealth,
+    detail: String,
+    fix: String,
 
     ok: fn(name: String, detail: String) -> DoctorCheck Never! {
         DoctorCheck{name: name, health: DoctorHealth.Healthy, detail: detail, fix: ""}
@@ -68,7 +68,7 @@ DoctorCheck: struct {
 }
 
 DoctorReport: struct {
-    checks: [DoctorCheck]
+    checks: [DoctorCheck],
 
     // Run every check against the resolved Jetpack root and `project`.
     run: fn(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
@@ -251,12 +251,12 @@ cli_doctor_check_leases: fn(roots: HangarRoots) -[FS, Env]> DoctorCheck Never! {
 // Why a configured registry endpoint is unusable.
 #Error
 DoctorRegistryFailure: enum {
-    EmbeddedCredentials
-    LocalIndexMissing
-    ClientUnavailable
-    Rejected
-    TimedOut
-    ProbeFailed
+    EmbeddedCredentials,
+    LocalIndexMissing,
+    ClientUnavailable,
+    Rejected,
+    TimedOut,
+    ProbeFailed,
 
     reason: fn(self) -> String Never! {
         if self == {
@@ -448,7 +448,7 @@ cli_doctor_is_ascii_hex: fn(value: String) -> Bool Never! {
 // The key pair could not be read into Core Ed25519 keys.
 #Error
 DoctorSigningKeyError: struct {
-    detail: String
+    detail: String,
 }
 
 // Derive the public key from the secret seed with Core Ed25519 and compare

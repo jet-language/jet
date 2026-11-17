@@ -148,36 +148,36 @@ use {
 }
 
 ParsedItemOrImport: struct {
-    item: Item?
+    item: Item?,
     // One import for a `use` line, one per row for a `use { … }` block.
-    imports: [ImportDecl]{[ImportDecl]{}}
-    handled: Bool
+    imports: [ImportDecl]{[ImportDecl]{}},
+    handled: Bool,
     // What a struct or enum declares beside itself, each an item of its own:
     // the marker of `impl Marker { … }` and the effect names of
     // `impl Effect { … }`.
-    companions: [Item]{[Item]{}}
+    companions: [Item]{[Item]{}},
 }
 
 ParsedItemModifiers: struct {
-    is_pub: Bool
-    is_package_pub: Bool
-    is_comptime: Bool
-    markers: [Marker]
-    start_span: Span
+    is_pub: Bool,
+    is_package_pub: Bool,
+    is_comptime: Bool,
+    markers: [Marker],
+    start_span: Span,
     // `pub use` re-exports (the only remaining `pub`, ballot pending).
-    reexport: Bool{false}
+    reexport: Bool{false},
     // The markers came from at least one `#[…]` list (Rust's grouped marker path).
-    grouped_markers: Bool{false}
+    grouped_markers: Bool{false},
 }
 
 ParsedFunction: struct {
-    value: Func
-    has_body: Bool
+    value: Func,
+    has_body: Bool,
 }
 
 ParsedUserPolicy: struct {
-    value: UserPolicyDecl
-    valid: Bool
+    value: UserPolicyDecl,
+    valid: Bool,
 }
 
 parser_user_policy_ahead: fn(state: &JetParserState) -> Bool Never! {
@@ -1315,18 +1315,18 @@ parser_guest_import_symbol: fn(function: Func) -> String? Never! {
 }
 
 ParsedFuncEffects: struct {
-    effects: [EffectRowEntry]?
-    via: NamedSpan?
+    effects: [EffectRowEntry]?,
+    via: NamedSpan?,
 }
 
 ParsedCallableResult: struct {
-    return_type: Type?
-    return_type_span: Span?
-    effects: [EffectRowEntry]?
-    via: NamedSpan?
-    prefix_effect: Bool
+    return_type: Type?,
+    return_type_span: Span?,
+    effects: [EffectRowEntry]?,
+    via: NamedSpan?,
+    prefix_effect: Bool,
     // The result follows a plain `->` (not an effect arrow or a bare `E!`).
-    plain_arrow: Bool
+    plain_arrow: Bool,
 }
 
 // The start of an effect arrow `-[`.
@@ -2097,9 +2097,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                 .None -> { value.state = Val(section) }
                 .Val(_) -> parser_report_repeated_state_section(state, section, type_name)
             }
-            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
-                parser_bump(state)
-            }
+            parser_skip_semicolons(state)
             next
         }
         if parser_take_prep_fn(state) -> member_modifiers.is_comptime = true
@@ -2111,9 +2109,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             parser_bump(state)
             target: parser_parse_expression(state, 1, 0)
             value.cli_bindings.push(CLICommandBinding{name: parser_value(state, command_name), name_span: command_name.span, markers: member_modifiers.markers, target: target.expr})
-            if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
-                parser_bump(state)
-            }
+            parser_finish_data_member(state, "command binding")
             next
         }
         // (Rust `at_validate_block` / `validate_block`):
@@ -2184,14 +2180,10 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                     marker_index += 1
                 }
                 value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed.move(), default: default.move(), default_ct: None})
-                separator_kind := parser_current_kind(state)
-                if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI {
-                    parser_bump(state)
-                }
+                parser_finish_data_member(state, "field")
             }
         }
-        // A member's own separator is optional (a field may end at `}`), so
-        // only a member that consumed nothing is reported and skipped.
+        // A member that consumed nothing is reported and skipped.
         if state.position == member_start && !parser_aborting(state) {
             parser_add_error_here(state, "expected a separator between struct members", "struct fields and methods are separated by commas or statement terminators", "add a separator or close the struct")
             parser_recover_statement(state)
@@ -2274,11 +2266,11 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             kind == TOKEN_KW_IMPL -> {
                 value.trait_impls.push(parser_parse_trait_impl_block(state, markers))
             }
-            else -> parser_parse_variant_entry(state, "", value, markers, inside)
+            else -> {
+                parser_parse_variant_entry(state, "", value, markers, inside)
+                parser_finish_data_member(state, "case")
+            }
         }
-        // Cases are separated as struct fields are: a `,` or a line break.
-        separator_kind := parser_current_kind(state)
-        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after enum variants")
     value.span = parser_cover(modifiers.start_span, close.span)
@@ -2375,9 +2367,7 @@ parser_parse_variant_entry: fn(state: &JetParserState, prefix: String, value: &E
         }
         entry_markers: if kind == TOKEN_HASH -> parser_parse_variant_markers(state) else -> [Marker]{}
         parser_parse_variant_entry(state, path, value, entry_markers, inside)
-        // Leaves are separated as struct fields are: a `,` or a line break.
-        separator_kind := parser_current_kind(state)
-        if separator_kind == TOKEN_COMMA || separator_kind == TOKEN_SEMI -> parser_bump(state)
+        parser_finish_data_member(state, "case")
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the variant group")
     if parser_aborting(state) {
@@ -2521,7 +2511,7 @@ parser_parse_impl_assoc_type: fn(state: &JetParserState) -> NamedType {
     assoc: parser_bump(state)
     parser_bump(state)
     ty: parser_parse_type(state, 0)
-    parser_finish_data_member(state)
+    parser_finish_data_member(state, "associated type")
     NamedType{name: parser_value(state, assoc), span: assoc.span, ty: ty.ty}
 }
 
@@ -2530,19 +2520,40 @@ parser_parse_impl_constant: fn(state: &JetParserState) -> ImplConstValue {
     name_token: parser_bump(state)
     parser_bump(state)
     value: parser_parse_expression(state, 1, 0)
-    parser_finish_data_member(state)
+    parser_finish_data_member(state, "trait constant")
     ImplConstValue{name: parser_value(state, name_token), name_span: name_token.span, value: value.expr, span: parser_cover(name_token.span, value.span)}
 }
 
-// A data member of a brace body (an associated type, a trait constant or
-// its value, a requirement without a body) ends at its `,`, its line break,
-// or the closing `}`.
-parser_finish_data_member: fn(state: &JetParserState) -[]> {
+// A data member of a brace body (a struct field or command binding, an enum
+// case or case group, a record entry, an associated type, a trait constant
+// or its value, a requirement without a body, an `impl Marker`, `impl Fact`
+// or `impl Effect` setting) ends at its `,`, or before the `}` that closes
+// the body. A line break alone does not end it; a member with a code body
+// (a method, a nested impl, `validate`, `state`) takes no comma. A missing
+// comma leaves the members readable, so it is reported without abandoning
+// the body, and one parse finds every missing comma.
+parser_finish_data_member: fn(state: &JetParserState, what: String) -[]> {
     if parser_current_kind(state) == TOKEN_COMMA {
         parser_bump(state)
         return
     }
-    parser_finish_statement(state)
+    ahead := 0
+    loop parser_kind_at(state, ahead) == TOKEN_SEMI -> ahead += 1
+    closer: parser_kind_at(state, ahead)
+    if closer != TOKEN_RBRACE && closer != TOKEN_EOF {
+        end: parser_data_member_end(state)
+        parser_add_report(state, diagnostic_from_registry("E0003", Val(Span{start: end, end: end}), "expected `,` after this {what}", "the data members of a brace body are separated by commas, on one line or many", "add `,` after the {what}"))
+    }
+    parser_skip_semicolons(state)
+}
+
+// The end of the last code token before the cursor, before the line breaks
+// and comments that follow it.
+parser_data_member_end: fn(state: JetParserState) -[]> Int {
+    index := state.position - 1
+    loop index >= 0 && (state.tokens[index].kind == TOKEN_SEMI || parser_is_trivia(state.tokens[index].kind)) -> index -= 1
+    if index < 0 -> return 0
+    state.tokens[index].span.end
 }
 
 parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
@@ -2822,7 +2833,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 parser_bump(state)
                 kw: parser_bump(state)
                 assoc_types.push(NamedSpan{name: parser_value(state, assoc), span: parser_cover(assoc.span, kw.span)})
-                parser_finish_data_member(state)
+                parser_finish_data_member(state, "associated type")
             }
             // `name: Type`, or `name: Type{default}`: a trait constant.
             parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON -> {
@@ -2837,7 +2848,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                     end = parsed_default.span
                 }
                 constants.push(TraitConstDecl{name: parser_value(state, constant_name), name_span: constant_name.span, ty: constant_type.ty, ty_span: constant_type.span, default: default.move(), span: parser_cover(constant_name.span, end)})
-                parser_finish_data_member(state)
+                parser_finish_data_member(state, "trait constant")
             }
             // Markers before a requirement attach to it, as they do to any
             // method; sema judges them against the applied-rule vocabulary.
@@ -2862,9 +2873,7 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
                 parsed: parser_parse_function(state, method_modifiers, false)
                 method := parsed.value
                 default_body := [Stmt]?{None}
-                if parsed.has_body -> default_body = Val(method.body) else if parser_current_kind(state) == TOKEN_COMMA {
-                    parser_bump(state)
-                }
+                if parsed.has_body -> default_body = Val(method.body) else -> parser_finish_data_member(state, "requirement")
                 methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, type_params: method.type_params, params: method.params, return_type: method.return_type, span: method.span, default_body: default_body.move(), is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance, markers: method.markers})
             }
             else -> {

@@ -14,24 +14,24 @@ use {
 }
 
 Issue: struct {
-    action: String
+    action: String,
 }
 
 Payment: struct {
-    id: String
+    id: String,
 }
 
 #Codable
 Count: struct {
-    name: String
-    events: Int
+    name: String,
+    events: Int,
 }
 
 #Error
 HookError: enum {
-    Refused
-    Failed(String)
-    Unreachable(String)
+    Refused,
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> HookError {
@@ -65,8 +65,8 @@ counted: fn(store: db.Store) -[DB.Read, DB.Write]> Int HookError! {
 }
 
 Hooks: struct {
-    store: db.Store
-    secret: String
+    store: db.Store,
+    secret: String,
 
     // An issue event counts; a `fail` action is refused after it counted, so
     // its run rolls back.

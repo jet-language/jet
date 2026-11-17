@@ -48,15 +48,15 @@ use {
 }
 
 SemaCallTypedArguments: struct {
-    values: [TExpr]
-    slots: [Int]
-    required_types: [Type]
+    values: [TExpr],
+    slots: [Int],
+    required_types: [Type],
     // Each argument's written position (`-1` for a default). When a default
     // reads an earlier parameter, every argument is pinned in
     // `binder_ref_<site>_<slot>` in the Rust reference's source order.
-    source_indices: [Int]
-    pin_arguments: Bool{false}
-    binder_site: Int{0}
+    source_indices: [Int],
+    pin_arguments: Bool{false},
+    binder_site: Int{0},
 }
 
 sema_call_resolved_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type Never! {
@@ -434,8 +434,8 @@ sema_call_c_callback_context_read: fn(argument: Expr, environment: SemaScopeEnvi
 // A `root.member` or `root.get(key)` the callback body writes, before it is
 // known whether `root` names the task context.
 SemaCallContextReadSite: struct {
-    root: String
-    member: String
+    root: String,
+    member: String,
 }
 
 sema_call_note_context_read: fn(tables: ASTTables, reads: &[SemaCallContextReadSite], expression: ExprNode) {
@@ -970,12 +970,12 @@ sema_call_literal_has_nul: fn(value: Expr) -> Bool Never! {
 // (Core/Crypto/Crypto.jet, Expert.jet return CryptoError outside it).
 // `bytes`: the bound is on a byte list's length, not on an Int.
 SemaCryptoBound: struct {
-    parameter: String
-    reason: DiagnosticCryptoMisuseReason
-    noun: String
-    bytes: Bool
-    low: Int
-    high: Int?
+    parameter: String,
+    reason: DiagnosticCryptoMisuseReason,
+    noun: String,
+    bytes: Bool,
+    low: Int,
+    high: Int?,
 }
 
 sema_crypto_int: fn(parameter: String, reason: DiagnosticCryptoMisuseReason, noun: String, low: Int, high: Int?) -> SemaCryptoBound Never! {

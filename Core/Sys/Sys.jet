@@ -28,8 +28,8 @@ use {
 // The runtime builds an EnvError by its position (jet.runtime.sys).
 #Error
 EnvError: enum {
-    InvalidName
-    InvalidValue
+    InvalidName,
+    InvalidValue,
     NonUnicode
 }
 
@@ -577,15 +577,15 @@ env_text: fn(text: String, vars: [String:String], source: String{"env text"}) ->
 
 /// An env file line being read: its bytes and the index of the next one.
 EnvLine: struct {
-    raw: [U8]
+    raw: [U8],
     at: Int
 }
 
 /// What an env file is read against: the values from outside it (`vars`),
 /// what it has assigned so far, and the names it has made read-only.
 EnvScope: struct {
-    vars: [String:String]
-    assigned: [String:String]
+    vars: [String:String],
+    assigned: [String:String],
     readonly: [String]
 }
 
@@ -997,7 +997,7 @@ cpu_count: fn() -[Env]> Int Never! {
 // unconfirmed host, unless its package sets `policy.harden`: then its entry
 // refuses to start there.
 TimingHost: enum {
-    Confirmed
+    Confirmed,
     Unconfirmed
 }
 
@@ -1069,15 +1069,15 @@ times: fn() -[Env]> [Float] Never! {
 /// Which processes `usage` measures: this program, or every child it has
 /// waited for.
 UsageOf: enum {
-    Program
+    Program,
     Children
 }
 
 /// CPU time in user code and in the kernel, and the peak resident memory in
 /// bytes on every platform (Linux reports KiB; Core converts once).
 ResourceUsage: struct {
-    user: Duration
-    system: Duration
+    user: Duration,
+    system: Duration,
     peak_memory: Int
 }
 
@@ -1185,10 +1185,10 @@ lock_memory: fn(future: Bool{false}) -[Env]> IOError! {
 /// waits or yields; `RoundRobin` runs one `round_robin_interval` at a time
 /// among the processes of its priority.
 Scheduling: enum {
-    Normal
-    Batch
-    Idle
-    Fifo(priority: Int)
+    Normal,
+    Batch,
+    Idle,
+    Fifo(priority: Int),
     RoundRobin(priority: Int)
 }
 
@@ -1514,7 +1514,7 @@ close_fd: fn(fd: Int) -[FS, Env]> Never! { core.sys.__close_fd_os(fd) }
 // close-on-exec. Descriptors from another process are read with `read_at`,
 // never mapped, so a peer that truncates its file cannot fault this one.
 Fd: struct {
-    priv token: Int
+    priv token: Int,
 
     impl Close {
         close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
@@ -1585,8 +1585,8 @@ open_socket_pair: fn() -[Env]> [Fd] IOError! {
 // end writes the other reads through the terminal's line discipline. Both
 // ends block; `Fd.read` and `Fd.write` wait with a timeout.
 PseudoTerminal: struct {
-    primary: Fd
-    secondary: Fd
+    primary: Fd,
+    secondary: Fd,
     path: String
 }
 
@@ -1612,8 +1612,8 @@ __fd_token: fn(fd: Fd) -> Int { fd.token }
 // Every access is bounds-checked; dropping it unmaps the memory and closes
 // the descriptor.
 SharedMemory: struct {
-    priv token: Int
-    priv size: Int
+    priv token: Int,
+    priv size: Int,
 
     impl Close {
         close: fn(&&self) { core.sys.__fd_close_raw(self.token) }
@@ -1763,7 +1763,7 @@ priv fd_words: module {
 // them (little-endian words): XRGB8888 is B, G, R, X in memory and XBGR8888
 // is R, G, B, X.
 PixelFormat: enum {
-    XRGB8888
+    XRGB8888,
     XBGR8888
 }
 
@@ -1786,7 +1786,7 @@ mkfifo: fn(path: String, mode: Int) -[FS, Env]> IOError! {
 /// writes a byte stream (a terminal, /dev/null), a block device reads and
 /// writes whole blocks (a disk).
 DeviceKind: enum {
-    Character
+    Character,
     Block
 }
 
@@ -1845,8 +1845,8 @@ setgid: fn(gid: Int) -[Env]> IOError! { call_unit(core.sys.__setgid(gid), "setgi
 /// checks access against `effective`; `saved` lets a privileged program give
 /// up an ID and later take it back.
 Ids: struct {
-    real: Int
-    effective: Int
+    real: Int,
+    effective: Int,
     saved: Int
 }
 
@@ -1877,19 +1877,19 @@ set_group_ids: fn(real: Int?{None}, effective: Int?{None}, saved: Int?{None}) -[
 
 /// One account of the user database, a line of /etc/passwd.
 User: struct {
-    name: String
-    uid: Int
-    gid: Int
-    gecos: String
-    home: String
+    name: String,
+    uid: Int,
+    gid: Int,
+    gecos: String,
+    home: String,
     shell: String
 }
 
 /// One group of the group database, a line of /etc/group. `members` lists
 /// the users that have it as a supplementary group.
 Group: struct {
-    name: String
-    gid: Int
+    name: String,
+    gid: Int,
     members: [String]
 }
 
@@ -2506,19 +2506,19 @@ config_error: fn(reason: String) -> [FieldError] Never! {
 }
 
 ConfigEntry: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
     segments: [String]
 }
 
 ConfigValue: struct {
-    folded: String
-    name: String
+    folded: String,
+    name: String,
     value: String
 }
 
 ConfigTree: enum {
-    Text(String)
+    Text(String),
     Object([{key: String, value: ConfigTree}])
 }
 

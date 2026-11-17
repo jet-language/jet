@@ -26,15 +26,15 @@ use {
 
 #Codable
 Note: struct {
-    id: Int
-    text: String
+    id: Int,
+    text: String,
 }
 
 #Error
 BoardError: enum {
-    Refused
-    Failed(String)
-    Unreachable(String)
+    Refused,
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> BoardError {
@@ -88,11 +88,11 @@ ran_add: fn(ran: Shared<[Int]>, id: Int) {
 }
 
 Board: struct {
-    store: db.Store
+    store: db.Store,
     // Whether job 3 waits a minute before writing its note.
-    slow: Bool
+    slow: Bool,
     // The jobs started in this server, by ID.
-    ran: Shared<[Int]>
+    ran: Shared<[Int]>,
 
     // Writes row `id + 100` and queues job `id`; refused after both when
     // `refuse`, so its call rolls back.

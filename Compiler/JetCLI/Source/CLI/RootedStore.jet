@@ -28,9 +28,9 @@ JET_CLI_ROOTED_READ_CHUNK: 65536
 // rename but never flushes; its readers treat a torn file as absent and the
 // next writer rebuilds it.
 JetCLIRootedDirectory: struct {
-    path: String
-    handle: cli_files.Directory
-    durable: Bool
+    path: String,
+    handle: cli_files.Directory,
+    durable: Bool,
 
     // Hold `parts` below the canonical absolute `root`, one part at a time,
     // never following a link. A missing part is created with mode 0o700 when
@@ -412,11 +412,11 @@ JetCLIRootedDirectory: struct {
 
 // One listed entry, described without following a link.
 JetCLIRootedEntry: struct {
-    name: String
-    is_file: Bool
-    is_dir: Bool
-    is_symlink: Bool
-    size: Int
+    name: String,
+    is_file: Bool,
+    is_dir: Bool,
+    is_symlink: Bool,
+    size: Int,
 }
 
 jet_cli_rooted_fill: fn(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?, durable: Bool) -[FS, Time.Wait]> IOError! {

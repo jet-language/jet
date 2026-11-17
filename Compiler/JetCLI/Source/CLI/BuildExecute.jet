@@ -84,26 +84,26 @@ jet_cli_package_declares_build_entry: fn(file: String) -[FS, Env]> Bool Never! {
 // running the build (`id` its target). `name` is the step's or target's own;
 // `needs` are the nodes that finish before it starts.
 JetCLIBuildNode: struct {
-    kind: JetCLIBuildNodeKind
-    id: Int
-    name: String
-    needs: [Int]
+    kind: JetCLIBuildNodeKind,
+    id: Int,
+    name: String,
+    needs: [Int],
 }
 
 JetCLIBuildNodeKind: enum {
-    Step
-    Image
-    Library
-    Host
+    Step,
+    Image,
+    Library,
+    Host,
 }
 
 // The steps a build runs, the targets it builds for the machine running it
 // (`b.host`), and the targets whose image a step reads (`b.image`); the
 // steps use each such target whether or not it is selected.
 JetCLIBuildNeeds: struct {
-    steps: [Int]
-    host: [Int]
-    images: [Int]
+    steps: [Int],
+    host: [Int],
+    images: [Int],
 }
 
 // Run the graph `build: fn` declared under the project root `root`, as one
@@ -324,11 +324,11 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
 // `target` is the output of the target that compiled beside them, and
 // `target_ms` its wall time; None when none did.
 JetCLIBuildStepsRan: struct {
-    batches: [[Int]]
-    results: [[ActionOutcome BuildExecutionError!]]
-    walls: [Int]
-    target: JetDriverVerbOutput?
-    target_ms: Int
+    batches: [[Int]],
+    results: [[ActionOutcome BuildExecutionError!]],
+    walls: [Int],
+    target: JetDriverVerbOutput?,
+    target_ms: Int,
 }
 
 // Run the ready steps `ready`, batch by batch, each batch one `build.step`
@@ -491,8 +491,8 @@ jet_cli_build_kept: fn(root: String, graph: BuildPlanExecution, reused: [Int:Boo
 // digest of each kept output's bytes as it left them. Both are empty before
 // any build has recorded one.
 JetCLIBuildLast: struct {
-    made: [String]
-    kept: [String:String]
+    made: [String],
+    kept: [String:String],
 }
 
 jet_cli_build_last: fn(root: String) -[FS]> JetCLIBuildLast Never! {

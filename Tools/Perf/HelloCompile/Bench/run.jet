@@ -37,32 +37,32 @@ ELF_MAGIC: [U8]{U8{127}, U8{69}, U8{76}, U8{70}}
 // build directory, and the binary it writes (None for Jet's, found after the
 // builds).
 Toolchain: struct {
-    label: String
-    source: String
-    build: fn(String) -> [String]
-    out: String?
+    label: String,
+    source: String,
+    build: fn(String) -> [String],
+    out: String?,
 }
 
 // One build: its exit code (minus the signal that ended it), wall seconds,
 // peak megabytes, and the last 600 characters of its output when it failed.
 #Codable(only: .Encode)
 Phase: struct {
-    rc: Int
-    wall_s: Float
-    peak_tree_mb: Float
-    log: String?
+    rc: Int,
+    wall_s: Float,
+    peak_tree_mb: Float,
+    log: String?,
 }
 
 // One toolchain's row; a binary, size or run time it does not have is null.
 #Codable(only: .Encode)
 Row: struct {
-    toolchain: String
-    cold: Phase
-    warm: Phase
-    binary: Dyn
-    size_bytes: Dyn
-    stripped_bytes: Dyn
-    run_ms: Dyn
+    toolchain: String,
+    cold: Phase,
+    warm: Phase,
+    binary: Dyn,
+    size_bytes: Dyn,
+    stripped_bytes: Dyn,
+    run_ms: Dyn,
 }
 
 run: fn() -> Never Err! {

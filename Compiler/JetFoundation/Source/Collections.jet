@@ -83,136 +83,136 @@ compiler_take_rows: fn<T>(rows: &[T]) -> [T] Never! {
 }
 
 SemaCollectionKind: enum {
-    List(element: Type)
-    FixedList(element: Type)
-    Iter(element: Type)
-    ViewIter(element: Type)
-    View(element: Type)
-    Map(key: Type, value: Type)
-    Set(element: Type)
-    Rank(element: Type)
-    Bits
-    Tally(element: Type)
-    Cache(key: Type, value: Type)
-    Queue(element: Type)
-    PriorityQueue(element: Type)
+    List(element: Type),
+    FixedList(element: Type),
+    Iter(element: Type),
+    ViewIter(element: Type),
+    View(element: Type),
+    Map(key: Type, value: Type),
+    Set(element: Type),
+    Rank(element: Type),
+    Bits,
+    Tally(element: Type),
+    Cache(key: Type, value: Type),
+    Queue(element: Type),
+    PriorityQueue(element: Type),
 }
 
 SemaCollectionOperation: enum {
-    Builtin(operation: TBuiltinOp)
-    Closure(operation: TClosureOp)
-    ListShuffle
-    SetClosure(operation: TClosureOp)
-    SetMinimum
-    IterToSet
-    SetBits
+    Builtin(operation: TBuiltinOp),
+    Closure(operation: TClosureOp),
+    ListShuffle,
+    SetClosure(operation: TClosureOp),
+    SetMinimum,
+    IterToSet,
+    SetBits,
 }
 
 // Receiver families a row applies to. `List` covers fixed lists and `Iter`
 // covers view iterators; `Sequence` is the shared list-and-iterator surface.
 CollectionReceivers: enum {
-    List
-    Iter
-    View
-    Sequence
-    Map
-    Set
-    Rank
-    Bits
-    Tally
-    Cache
-    Queue
-    PriorityQueue
+    List,
+    Iter,
+    View,
+    Sequence,
+    Map,
+    Set,
+    Rank,
+    Bits,
+    Tally,
+    Cache,
+    Queue,
+    PriorityQueue,
 }
 
 // Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
 CollectionAccess: enum {
-    Read
-    Write
-    Move
-    Sequence
+    Read,
+    Write,
+    Move,
+    Sequence,
 }
 
 // Positional argument shapes. The callback shapes name their parameter and
 // return types; `Seed` is checked from the written expression.
 CollectionArg: enum {
-    Element
-    Key
-    Value
-    Integer
-    Text
-    IntegerList
-    Range
-    RemoveBy
-    ElementList
-    KeyList
-    SameKind
-    Entries
-    Seed
-    ItemFn
-    ItemPredicate
-    PairPredicate
-    DisjointFn
-    Accumulator
-    Comparator
-    SortKey
-    EntryFn
-    EntryPredicate
-    EntryAccumulator
-    EntryFlatMap
-    EntryMerge
+    Element,
+    Key,
+    Value,
+    Integer,
+    Text,
+    IntegerList,
+    Range,
+    RemoveBy,
+    ElementList,
+    KeyList,
+    SameKind,
+    Entries,
+    Seed,
+    ItemFn,
+    ItemPredicate,
+    PairPredicate,
+    DisjointFn,
+    Accumulator,
+    Comparator,
+    SortKey,
+    EntryFn,
+    EntryPredicate,
+    EntryAccumulator,
+    EntryFlatMap,
+    EntryMerge,
 }
 
 // Result projections over the receiver element, key, callback result and seed.
 CollectionResult: enum {
-    Unit
-    Bool
-    Int
-    Float
-    Text
-    Element
-    Receiver
-    OptionElement
-    OptionInt
-    OptionKey
-    ElementList
-    KeyList
-    ElementSet
-    ElementIter
-    KeyIter
-    SameKind
-    Entries
-    EntryPairs
-    AllocUnit
-    AllocOptionValue
-    Lazy
-    LazyChunks
-    LazyIndexed
-    LazyIndexes
-    LazyScan
-    LazyFilterMap
-    Mapped
-    Filtered
-    ListMapped
-    ListFiltered
-    EntryMapped
-    EntryFiltered
-    FlatMapped
-    Flattened
-    Folded
-    Sorted
-    Grouped
-    CountedBy
-    Partitioned
-    Counts
-    Unzipped
-    SplitPair
-    MinMax
-    TryCollected
-    WriteViewPair
-    WriteViewList
-    DisjointUnit
-    Bits
+    Unit,
+    Bool,
+    Int,
+    Float,
+    Text,
+    Element,
+    Receiver,
+    OptionElement,
+    OptionInt,
+    OptionKey,
+    ElementList,
+    KeyList,
+    ElementSet,
+    ElementIter,
+    KeyIter,
+    SameKind,
+    Entries,
+    EntryPairs,
+    AllocUnit,
+    AllocOptionValue,
+    Lazy,
+    LazyChunks,
+    LazyIndexed,
+    LazyIndexes,
+    LazyScan,
+    LazyFilterMap,
+    Mapped,
+    Filtered,
+    ListMapped,
+    ListFiltered,
+    EntryMapped,
+    EntryFiltered,
+    FlatMapped,
+    Flattened,
+    Folded,
+    Sorted,
+    Grouped,
+    CountedBy,
+    Partitioned,
+    Counts,
+    Unzipped,
+    SplitPair,
+    MinMax,
+    TryCollected,
+    WriteViewPair,
+    WriteViewList,
+    DisjointUnit,
+    Bits,
 }
 
 // `bits()`: the U64 word of a Set stored as bits.
@@ -221,111 +221,111 @@ CollectionResult: enum {
 // or closure op; the others select one from the checked callback and element
 // facts at the call site.
 CollectionOp: enum {
-    Builtin(op: TBuiltinOp)
-    Closure(op: TClosureOp)
-    SetClosure(op: TClosureOp)
-    SetMinimum
-    IterToSet
-    SetBits
-    ListShuffle
-    Copy
-    SeqMap
-    SeqFilter
-    SeqEach
-    SeqFold
-    SetMap
-    SetFilter
-    SetEach
-    SortBy
-    SortByDesc
-    Sum
-    Product
-    Min
-    Max
-    Average
-    Indexed
-    Unzip
-    Split
-    SplitWrite
-    Partition
-    ListRemove
-    PriorityQueueRemove
-    MapMerge
-    MapTopN
-    MapToList
-    ListMinMax
-    ListMinMaxBy
+    Builtin(op: TBuiltinOp),
+    Closure(op: TClosureOp),
+    SetClosure(op: TClosureOp),
+    SetMinimum,
+    IterToSet,
+    SetBits,
+    ListShuffle,
+    Copy,
+    SeqMap,
+    SeqFilter,
+    SeqEach,
+    SeqFold,
+    SetMap,
+    SetFilter,
+    SetEach,
+    SortBy,
+    SortByDesc,
+    Sum,
+    Product,
+    Min,
+    Max,
+    Average,
+    Indexed,
+    Unzip,
+    Split,
+    SplitWrite,
+    Partition,
+    ListRemove,
+    PriorityQueueRemove,
+    MapMerge,
+    MapTopN,
+    MapToList,
+    ListMinMax,
+    ListMinMaxBy,
 }
 
 CollectionLaw: enum {
-    Measure
-    Lookup
-    Mutate
-    TryMutate
-    Build
-    Copy
-    Adapt
-    Window
-    Disjoint
-    Visit
-    Each
-    Decide
-    Stream
-    Fold
-    Group
-    Drain
-    Reorder
-    SortBy
-    Search
-    MergeEntries
-    Pull
+    Measure,
+    Lookup,
+    Mutate,
+    TryMutate,
+    Build,
+    Copy,
+    Adapt,
+    Window,
+    Disjoint,
+    Visit,
+    Each,
+    Decide,
+    Stream,
+    Fold,
+    Group,
+    Drain,
+    Reorder,
+    SortBy,
+    Search,
+    MergeEntries,
+    Pull,
 }
 
 // Current: checked and lowered on every engine. SourceOnly: checked by the
 // self-hosted compiler before every engine carries it. Proposed: ratified but
 // not accepted by the checker yet.
 CollectionStatus: enum {
-    Current
-    SourceOnly
-    Proposed
+    Current,
+    SourceOnly,
+    Proposed,
 }
 
 CollectionLawFacts: struct {
-    law: CollectionLaw
-    timing: String
-    result: String
-    callbacks: String
-    stop: String
-    failure: String
-    buffering: String
+    law: CollectionLaw,
+    timing: String,
+    result: String,
+    callbacks: String,
+    stop: String,
+    failure: String,
+    buffering: String,
 }
 
 CollectionOperationRow: struct {
-    receivers: CollectionReceivers
-    name: String
-    minimum_arity: Int
-    maximum_arity: Int
-    access: CollectionAccess
-    args: [CollectionArg]
-    result: CollectionResult
-    op: CollectionOp
-    law: CollectionLaw
-    empty: String
-    status: CollectionStatus
+    receivers: CollectionReceivers,
+    name: String,
+    minimum_arity: Int,
+    maximum_arity: Int,
+    access: CollectionAccess,
+    args: [CollectionArg],
+    result: CollectionResult,
+    op: CollectionOp,
+    law: CollectionLaw,
+    empty: String,
+    status: CollectionStatus,
     // The row keeps its element arguments in the receiver, so each one is taken.
-    stores: Bool{false}
+    stores: Bool{false},
 }
 
 SemaCollectionMethodContract: struct {
-    receiver: Type
-    kind: SemaCollectionKind
-    row: CollectionOperationRow
-    minimum_arity: Int
-    maximum_arity: Int
-    receiver_access: AccessConvention
-    callback_indices: [Int]
-    seed_indices: [Int]
-    accepts_comparator: Bool
+    receiver: Type,
+    kind: SemaCollectionKind,
+    row: CollectionOperationRow,
+    minimum_arity: Int,
+    maximum_arity: Int,
+    receiver_access: AccessConvention,
+    callback_indices: [Int],
+    seed_indices: [Int],
+    accepts_comparator: Bool,
 }
 
 // BEGIN COLLECTION LAWS

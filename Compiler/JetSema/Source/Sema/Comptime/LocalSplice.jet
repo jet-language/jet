@@ -89,21 +89,21 @@ use jet_foundation.[
 // The rows of one module result that its function checks fill, moved out so
 // a check can fill them afresh (sema_module_body_rows_take).
 SemaModuleBodyRows: struct {
-    functions: [FnBody]
-    call_facts: [SemaCallSiteFact]
-    hardware_use: TargetHardwareUse
-    name_references: [SemaNameReferenceFact]
-    comptime_requests: [SemaComptimeRequest]
-    comptime_body_sources: [SemaComptimeBodySource]
-    compute_facts: [SemaComputeFunctionFacts]
-    exact_int_reachable: Bool
-    copy_events: [SemaCopyEvent]
-    diagnostics: [Diagnostic]
-    complete: Bool
-    failure_facts: [SemaFunctionFailureFacts]
-    incomplete_reasons: [String]
-    injected_function_keys: [String]
-    tests: [TTestFact]
+    functions: [FnBody],
+    call_facts: [SemaCallSiteFact],
+    hardware_use: TargetHardwareUse,
+    name_references: [SemaNameReferenceFact],
+    comptime_requests: [SemaComptimeRequest],
+    comptime_body_sources: [SemaComptimeBodySource],
+    compute_facts: [SemaComputeFunctionFacts],
+    exact_int_reachable: Bool,
+    copy_events: [SemaCopyEvent],
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    failure_facts: [SemaFunctionFailureFacts],
+    incomplete_reasons: [String],
+    injected_function_keys: [String],
+    tests: [TTestFact],
 }
 
 // Where sema_local_splice_owners lands the owner bodies: in a finalized
@@ -113,9 +113,9 @@ SemaModuleBodyRows: struct {
 // them afresh; or in those of its body half (sema_finalize_bodies), before
 // that demand too.
 SemaLocalSpliceInto: enum {
-    Finalized
-    Unstamped
-    Undemanded
+    Finalized,
+    Unstamped,
+    Undemanded,
 }
 
 // Whether the bodies a splice lands in (`into`) carry the whole-program
@@ -145,8 +145,8 @@ sema_local_splice_demanded: fn(into: SemaLocalSpliceInto) -> Bool Never! {
 // The codec demand (graph.codec_demand) and the derive demand
 // (graph.derive_demand) a run of checks records into.
 SemaLocalSpliceDemand: struct {
-    codecs: Shared<SemaCodecDemand>
-    derived: Shared<SemaDeriveDemand>
+    codecs: Shared<SemaCodecDemand>,
+    derived: Shared<SemaDeriveDemand>,
 }
 
 sema_local_splice_demand_empty: fn() -> SemaLocalSpliceDemand Never! {
@@ -298,9 +298,9 @@ sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], indexes: [Int],
 // replace, and the landed sources. Their trees are large, so they drop on a
 // detached task while the compile goes on (sema_local_splice_release).
 SemaLocalSpliceAside: struct {
-    rows: [SemaModuleBodyRows]
-    functions: [FnBody]
-    sources: [SemaComptimeBodySource]
+    rows: [SemaModuleBodyRows],
+    functions: [FnBody],
+    sources: [SemaComptimeBodySource],
 }
 
 sema_local_splice_aside: fn() -> SemaLocalSpliceAside Never! {
@@ -468,9 +468,9 @@ sema_local_splice_valued: fn(landed: [String:Bool], after: [SemaModuleBodyRows])
 // site that got a value (sema_local_splice_valued), and `computed` those of
 // them whose value is not a failure (sema_local_splice_computed).
 SemaLocalSpliceSites: struct {
-    owners: [String:Bool]
-    valued: [String:Bool]
-    computed: [String:Bool]
+    owners: [String:Bool],
+    valued: [String:Bool],
+    computed: [String:Bool],
 }
 
 // Why the two checks of the owner modules (`earlier` against the finalized
@@ -522,23 +522,23 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
 // sites and bodies give (`refusal`), and the owner bodies that stand
 // (`settled`).
 SemaLocalSpliceHold: struct {
-    rows: SemaModuleBodyRows
-    difference: String?
-    diagnostics_differ: Bool
-    old_texts: [String]
-    new_texts: [String]
-    module_texts: [String]
-    refusal: String?
-    settled: Int
+    rows: SemaModuleBodyRows,
+    difference: String?,
+    diagnostics_differ: Bool,
+    old_texts: [String],
+    new_texts: [String],
+    module_texts: [String],
+    refusal: String?,
+    settled: Int,
 }
 
 // A thread's owner modules (sema_local_splice_hold_part): the earlier
 // check's rows of positions `first` on, last first, and their comparisons,
 // in position order.
 SemaLocalSpliceHoldPart: struct {
-    first: Int
-    rows: [SemaModuleBodyRows]
-    holds: [SemaLocalSpliceHold]
+    first: Int,
+    rows: [SemaModuleBodyRows],
+    holds: [SemaLocalSpliceHold],
 }
 
 // The fewest body nodes of the earlier check's rows a thread compares:
@@ -764,9 +764,9 @@ sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModule
 // What a local value splice hands back: the graph, whether the pass's values
 // landed, and the `module\nkey` of each landed site that got a value.
 SemaLocalValueSplice: struct {
-    graph: SemaRegistrationGraph
-    spliced: Bool
-    valued: [String:Bool]
+    graph: SemaRegistrationGraph,
+    spliced: Bool,
+    valued: [String:Bool],
 }
 
 // A splice that does not land: the graph comes back, no site valued.

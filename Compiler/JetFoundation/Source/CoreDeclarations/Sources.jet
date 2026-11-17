@@ -16,16 +16,16 @@ CORE_DECLARATIONS_ENCODING_PATH: "Core/Encoding/Encoding.jet"
 // One name an owned wrapper may call a runtime unit through: `alias.` for a
 // unit import, `name(` for an imported unit member.
 CoreDeclRuntimeLocal: struct {
-    local: String
-    unit: String
+    local: String,
+    unit: String,
 }
 
 // One `use` target: its alias ("" for none), its module path and the item
 // list of a `module.[…]` import.
 CoreDeclUse: struct {
-    alias: String
-    target: String
-    items: String?
+    alias: String,
+    target: String,
+    items: String?,
 }
 
 // `[A-Za-z0-9_.]` from byte `start`: the end of the run.
@@ -271,7 +271,7 @@ core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat
     // enum's own methods and impls follow it.
     cases := [String]{}
     loop line in foundation_byte_text(encoding.bytes(), body_start, body_start + close).split("\n") {
-        trimmed: line.trim()
+        trimmed: line.trim().removesuffix(",")
         if trimmed == "" && cases.len() > 0 -> break
         if trimmed != "" -> cases.push(trimmed)
     }

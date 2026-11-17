@@ -68,30 +68,30 @@ ini: module
 
 /// Handle-free streaming events. Number is public; writers reject it as Unsupported.
 DataEvent: enum {
-    Null
-    Bool(Bool)
-    Int(Int)
-    Float(Float)
-    Number(String)
-    Text(String)
-    Bytes([U8])
-    ArrayStart
-    ArrayEnd
-    ObjectStart
-    Key(String)
+    Null,
+    Bool(Bool),
+    Int(Int),
+    Float(Float),
+    Number(String),
+    Text(String),
+    Bytes([U8]),
+    ArrayStart,
+    ArrayEnd,
+    ObjectStart,
+    Key(String),
     ObjectEnd
 }
 
 #Equatable
 EncodingFormat: enum {
-    JSON
-    JSONL
-    CSV
-    TOML
-    YAML
-    XML
-    CBOR
-    ETF
+    JSON,
+    JSONL,
+    CSV,
+    TOML,
+    YAML,
+    XML,
+    CBOR,
+    ETF,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -109,11 +109,11 @@ EncodingFormat: enum {
 
 #Equatable
 EncodingErrorKind: enum {
-    Syntax
-    Truncated
-    Unsupported
-    Limit
-    IO
+    Syntax,
+    Truncated,
+    Unsupported,
+    Limit,
+    IO,
     State
 }
 
@@ -132,8 +132,8 @@ encoding_kind_name: fn(kind: EncodingErrorKind) -> String Never! {
 // jet.runtime.encoding stream bindings can fail with it.
 #[Error, Equatable]
 EncodingCause: struct {
-    kind: String
-    os_code: Int?
+    kind: String,
+    os_code: Int?,
     message: String
 }
 
@@ -154,14 +154,14 @@ encoding_error_text: fn(format: String, kind: String, byte_offset: Int, line: In
 
 #[Error, Equatable]
 EncodingError: struct {
-    format: EncodingFormat
-    kind: EncodingErrorKind
-    byte_offset: Int
-    line: Int?
-    column: Int?
-    path: String
-    reason: String
-    cause: EncodingCause?
+    format: EncodingFormat,
+    kind: EncodingErrorKind,
+    byte_offset: Int,
+    line: Int?,
+    column: Int?,
+    path: String,
+    reason: String,
+    cause: EncodingCause?,
 
     impl Display {
         display: fn(self) -> String { self.display_text() }
@@ -188,12 +188,12 @@ EncodingError: struct {
 
 #Equatable
 EncodingLimits: struct {
-    buffer_bytes: Int
-    max_depth: Int
-    max_item_bytes: Int
-    max_total_bytes: Int?
-    max_expansion_depth: Int
-    max_expansion_bytes: Int
+    buffer_bytes: Int,
+    max_depth: Int,
+    max_item_bytes: Int,
+    max_total_bytes: Int?,
+    max_expansion_depth: Int,
+    max_expansion_bytes: Int,
 
     safe: fn() -> EncodingLimits Never! {
         EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
@@ -203,7 +203,7 @@ EncodingLimits: struct {
 /// Error returned by the root hexadecimal decoder.
 #Error
 HexError: struct {
-    reason: String
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { self.reason }
@@ -381,31 +381,31 @@ __decode_dyn: fn(tree: Dyn) -> Dyn [FieldError]! { Ok(tree.copy()) }
 // a type that decodes from a tree. Core-private.
 __DecodeSource: trait {
     // Enters the Object at the cursor; false (nothing read) for any other value.
-    begin_object: fn(&self) -> Bool Never!
+    begin_object: fn(&self) -> Bool Never!,
     // How many members the Object at the cursor has, read without moving the
     // cursor; -1 for any other value, and for every value of a source that
     // can't count them before reading them. A generated enum `__read` reads a
     // one-member Object in place and captures any other value.
-    object_members: fn(self) -> Int Never!
+    object_members: fn(self) -> Int Never!,
     // Moves to the open Object's next member, its value at the cursor; false,
     // and the Object closed, after the last one.
-    next_key: fn(&self) -> Bool Never!
-    key_is: fn(self, name: String) -> Bool Never!
-    key_text: fn(self) -> String Never!
+    next_key: fn(&self) -> Bool Never!,
+    key_is: fn(self, name: String) -> Bool Never!,
+    key_text: fn(self) -> String Never!,
     // Enters the Array at the cursor; false (nothing read) for any other value.
-    begin_array: fn(&self) -> Bool Never!
+    begin_array: fn(&self) -> Bool Never!,
     // Moves to the open Array's next item; false, and the Array closed,
     // after the last one.
-    next_item: fn(&self) -> Bool Never!
+    next_item: fn(&self) -> Bool Never!,
     // Reads a Null at the cursor; false (nothing read) for any other value.
-    take_null: fn(&self) -> Bool Never!
+    take_null: fn(&self) -> Bool Never!,
     // Reads past the value at the cursor.
-    skip: fn(&self) Never!
+    skip: fn(&self) Never!,
     // The value at the cursor as its typed-decode tree.
-    capture: fn(&self) -> Dyn Never!
-    read_int: fn(&self) -> Int [FieldError]!
-    read_bool: fn(&self) -> Bool [FieldError]!
-    read_float: fn(&self) -> Float [FieldError]!
+    capture: fn(&self) -> Dyn Never!,
+    read_int: fn(&self) -> Int [FieldError]!,
+    read_bool: fn(&self) -> Bool [FieldError]!,
+    read_float: fn(&self) -> Float [FieldError]!,
     read_string: fn(&self) -> String [FieldError]!
 }
 
@@ -499,10 +499,10 @@ __Decoding: struct {
 // containers themselves and the position read in each.
 __DecodeTree: struct {
     // The value at the cursor.
-    pending: Dyn
-    key: String
-    open: [Dyn]
-    at: [Int]
+    pending: Dyn,
+    key: String,
+    open: [Dyn],
+    at: [Int],
 
     new: fn(tree: Dyn) -> __DecodeTree Never! {
         __DecodeTree{pending: tree.copy(), key: "", open: [Dyn]{}, at: [Int]{}}

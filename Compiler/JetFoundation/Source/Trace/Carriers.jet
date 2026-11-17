@@ -1,25 +1,25 @@
 // Typed artifact carriers, independent of streaming compiler trace.
 TraceToolchain: struct {
-    jet_version: String
-    compiler_build_id: String
-    stdlib_id: String
-    runner_id: String
+    jet_version: String,
+    compiler_build_id: String,
+    stdlib_id: String,
+    runner_id: String,
 }
 
 TraceHardware: struct {
-    cpu_arch: String
-    logical_cpus: U64
-    os: String
-    target: String
+    cpu_arch: String,
+    logical_cpus: U64,
+    os: String,
+    target: String,
 }
 
 CapturePolicy: struct {
-    allowlist: [String]
-    browser_rows_truncated: Bool
-    io_rows_truncated: Bool
-    native_rows_truncated: Bool
-    span_rows_truncated: Bool
-    task_rows_truncated: Bool
+    allowlist: [String],
+    browser_rows_truncated: Bool,
+    io_rows_truncated: Bool,
+    native_rows_truncated: Bool,
+    span_rows_truncated: Bool,
+    task_rows_truncated: Bool,
 }
 
 capture_policy_default_exclusions: fn() -> CapturePolicy Never! {
@@ -27,43 +27,43 @@ capture_policy_default_exclusions: fn() -> CapturePolicy Never! {
 }
 
 JetSymbolRef: struct {
-    path: String
-    name: String
+    path: String,
+    name: String,
 }
 
 TraceProfileSource: struct {
-    path: String
-    sha256: String
-    start_line: U64
-    start_column: U64
-    end_line: U64
-    end_column: U64
+    path: String,
+    sha256: String,
+    start_line: U64,
+    start_column: U64,
+    end_line: U64,
+    end_column: U64,
 }
 
 TraceProfileRow: struct {
-    clock: String
-    execution_count: U64?
-    sample_count: U64
-    sample_weight: U64
-    source: TraceProfileSource
-    symbol: JetSymbolRef
+    clock: String,
+    execution_count: U64?,
+    sample_count: U64,
+    sample_weight: U64,
+    source: TraceProfileSource,
+    symbol: JetSymbolRef,
 }
 
 TraceProfile: struct {
-    method: String
-    status: String
-    coverage: String
-    rows: [TraceProfileRow]
-    row_limit: U64
-    rows_truncated: Bool
-    overhead_ns: U64?
-    overhead_status: String
-    overhead_reason: String
-    reason: String
-    window_status: String
-    window_wall_ns: U64?
-    window_cpu_ns: U64?
-    window_reason: String
+    method: String,
+    status: String,
+    coverage: String,
+    rows: [TraceProfileRow],
+    row_limit: U64,
+    rows_truncated: Bool,
+    overhead_ns: U64?,
+    overhead_status: String,
+    overhead_reason: String,
+    reason: String,
+    window_status: String,
+    window_wall_ns: U64?,
+    window_cpu_ns: U64?,
+    window_reason: String,
 }
 
 trace_profile_unsupported: fn(reason: String) -> TraceProfile Never! {
@@ -86,92 +86,92 @@ trace_profile_unsupported: fn(reason: String) -> TraceProfile Never! {
 }
 
 TraceSample: struct {
-    domain: String
-    duration_ns: U64
-    symbol: JetSymbolRef
+    domain: String,
+    duration_ns: U64,
+    symbol: JetSymbolRef,
 }
 
 TraceGameFunctionSource: struct {
-    source_id: String
-    file: String
-    start_line: U64
-    start_column: U64
-    end_line: U64
-    end_column: U64
+    source_id: String,
+    file: String,
+    start_line: U64,
+    start_column: U64,
+    end_line: U64,
+    end_column: U64,
 }
 
 TraceGameFunction: struct {
-    function_id: String
-    name: String
-    source: TraceGameFunctionSource
+    function_id: String,
+    name: String,
+    source: TraceGameFunctionSource,
 }
 
 TraceGameFrame: struct {
-    sequence: U64
-    frame_id: U64
-    scene: String
-    frame_index: U64
-    build: String
-    revision: String
-    trace_id: String
-    start_ns: U64
-    cpu_ns: U64
-    gpu_ns: U64?
-    responsible_function: TraceGameFunction?
+    sequence: U64,
+    frame_id: U64,
+    scene: String,
+    frame_index: U64,
+    build: String,
+    revision: String,
+    trace_id: String,
+    start_ns: U64,
+    cpu_ns: U64,
+    gpu_ns: U64?,
+    responsible_function: TraceGameFunction?,
 }
 
 TraceGameDrawEvent: struct {
-    sequence: U64
-    frame_id: U64
-    scene: String
-    frame_index: U64
-    build: String
-    revision: String
-    trace_id: String
-    event_index: U64
-    event_id: U64
-    function: TraceGameFunction
-    phase: String
-    domain: String
-    start_ns: U64
-    duration_ns: U64
-    object_id: String?
-    resource_id: String?
+    sequence: U64,
+    frame_id: U64,
+    scene: String,
+    frame_index: U64,
+    build: String,
+    revision: String,
+    trace_id: String,
+    event_index: U64,
+    event_id: U64,
+    function: TraceGameFunction,
+    phase: String,
+    domain: String,
+    start_ns: U64,
+    duration_ns: U64,
+    object_id: String?,
+    resource_id: String?,
 }
 
 TraceAllocation: struct {
-    count: U64
-    bytes: U64
-    symbol: JetSymbolRef
+    count: U64,
+    bytes: U64,
+    symbol: JetSymbolRef,
 }
 
 TraceTask: struct {
-    id: U64
-    parent: U64
-    state: String
-    wait: String
-    cancelled: Bool
-    symbol: JetSymbolRef
+    id: U64,
+    parent: U64,
+    state: String,
+    wait: String,
+    cancelled: Bool,
+    symbol: JetSymbolRef,
 }
 
 TraceLock: struct {
-    kind: String
-    id: U64
-    depth: U64
-    capacity: U64?
-    send_waiters: U64
-    recv_waiters: U64
-    closed: Bool
-    symbol: JetSymbolRef
+    kind: String,
+    id: U64,
+    depth: U64,
+    capacity: U64?,
+    send_waiters: U64,
+    recv_waiters: U64,
+    closed: Bool,
+    symbol: JetSymbolRef,
 }
 
 TraceIO: struct {
-    start_ns: U64
-    end_ns: U64
-    kind: String
-    task_id: U64
-    wait: String
-    symbol: JetSymbolRef
+    start_ns: U64,
+    end_ns: U64,
+    kind: String,
+    task_id: U64,
+    wait: String,
+    symbol: JetSymbolRef,
 }
 
 trace_io_kind_for_wait: fn(wait: String) -> String? Never! {
@@ -184,75 +184,75 @@ trace_io_kind_for_wait: fn(wait: String) -> String? Never! {
 }
 
 TraceNative: struct {
-    clock: String
-    duration_ns: U64?
-    observed_at_ns: U64
-    reason: String
-    status: String
-    symbol: JetSymbolRef
-    target: String
-    task_id: U64?
+    clock: String,
+    duration_ns: U64?,
+    observed_at_ns: U64,
+    reason: String,
+    status: String,
+    symbol: JetSymbolRef,
+    target: String,
+    task_id: U64?,
 }
 
 TraceSpan: struct {
-    clock: String
-    end_ns: U64?
-    kind: String
-    parent_task_id: U64?
-    reason: String
-    start_ns: U64?
-    status: String
-    symbol: JetSymbolRef
-    task_id: U64?
+    clock: String,
+    end_ns: U64?,
+    kind: String,
+    parent_task_id: U64?,
+    reason: String,
+    start_ns: U64?,
+    status: String,
+    symbol: JetSymbolRef,
+    task_id: U64?,
 }
 
 TraceBrowser: struct {
-    class: String
-    duration_ns: U64
-    start_ns: U64
-    symbol: JetSymbolRef
+    class: String,
+    duration_ns: U64,
+    start_ns: U64,
+    symbol: JetSymbolRef,
 }
 
 SourceIdentity: struct {
-    path: String
-    sha256: String
-    symbols: [{name: String, kind: String}]
+    path: String,
+    sha256: String,
+    symbols: [{name: String, kind: String}],
 }
 
 TraceSourceMap: struct {
-    kind: String
-    path: String
-    sha256: String
-    map: String
+    kind: String,
+    path: String,
+    sha256: String,
+    map: String,
 }
 
 TraceReceiptSection: struct {
-    name: String
-    type_name: String
-    value: CanonicalJSON
-    digest: String
+    name: String,
+    type_name: String,
+    value: CanonicalJSON,
+    digest: String,
 }
 
 TraceSkeleton: struct {
-    command: String
-    argv: [String]
-    toolchain: TraceToolchain
-    hardware: TraceHardware
-    capture_policy: CapturePolicy
-    samples: [TraceSample]
-    profile: TraceProfile
-    allocations: [TraceAllocation]
-    browser: [TraceBrowser]
-    game_frames: [TraceGameFrame]
-    game_draw_events: [TraceGameDrawEvent]
-    tasks: [TraceTask]
-    locks: [TraceLock]
-    io: [TraceIO]
-    native: [TraceNative]
-    spans: [TraceSpan]
-    receipt_sections: [TraceReceiptSection]
-    source_identity: [SourceIdentity]
-    source_maps: [TraceSourceMap]
+    command: String,
+    argv: [String],
+    toolchain: TraceToolchain,
+    hardware: TraceHardware,
+    capture_policy: CapturePolicy,
+    samples: [TraceSample],
+    profile: TraceProfile,
+    allocations: [TraceAllocation],
+    browser: [TraceBrowser],
+    game_frames: [TraceGameFrame],
+    game_draw_events: [TraceGameDrawEvent],
+    tasks: [TraceTask],
+    locks: [TraceLock],
+    io: [TraceIO],
+    native: [TraceNative],
+    spans: [TraceSpan],
+    receipt_sections: [TraceReceiptSection],
+    source_identity: [SourceIdentity],
+    source_maps: [TraceSourceMap],
 }
 
 jettrace_uint: fn(value: U64) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }

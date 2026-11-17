@@ -79,8 +79,8 @@ x509_create_byte: fn(s: [U8], at: Int, end: Int) -> U8 Never! {
 // One attribute type's OID and the string tag its values take by default
 // (x509_attr_descriptor_t).
 X509AttrDescr: struct {
-    oid: [U8]
-    default_tag: Int
+    oid: [U8],
+    default_tag: Int,
 }
 
 // The descriptor of one attribute type.
@@ -309,9 +309,9 @@ x509_write_extensions: fn(buf: &[U8], p: &Int, start: Int, exts: [asn1.NamedData
 /// URI or iPAddress is the bytes of `name`, a directoryName the names of
 /// `directory`, the first written last as x509_write_names writes them.
 X509SanEntry: struct {
-    kind: Int
-    name: [U8]
-    directory: [asn1.NamedData]
+    kind: Int,
+    name: [U8],
+    directory: [asn1.NamedData],
 }
 
 // Whether a GeneralName of tag number `kind` is written from bytes of its
@@ -390,16 +390,16 @@ x509write_signed: fn(size: Int, tbs: [U8], sig_oid: [U8], sig: [U8], pk_alg: oid
 /// X509_CRT_VERSION_* value, `md_alg` the digest the issuer signs, and the
 /// two keys are set directly; the setters below fill the rest.
 X509WriteCert: struct {
-    version: Int
-    serial: [U8]
-    subject_key: pk.PKContext
-    issuer_key: pk.PKContext
-    subject: [asn1.NamedData]
-    issuer: [asn1.NamedData]
-    md_alg: hashes.Md?
-    not_before: [U8]
-    not_after: [U8]
-    extensions: [asn1.NamedData]
+    version: Int,
+    serial: [U8],
+    subject_key: pk.PKContext,
+    issuer_key: pk.PKContext,
+    subject: [asn1.NamedData],
+    issuer: [asn1.NamedData],
+    md_alg: hashes.Md?,
+    not_before: [U8],
+    not_after: [U8],
+    extensions: [asn1.NamedData],
 }
 
 /// A version 3 certificate with no keys, names, serial, validity, digest or
@@ -680,10 +680,10 @@ x509write_crt_pem: fn<R: RNG>(ctx: &X509WriteCert, size: Int, rng: &R) -> [U8] x
 /// A certificate request to write (mbedtls_x509write_csr). `key` and
 /// `md_alg` are set directly; the setters below fill the rest.
 X509WriteCSR: struct {
-    key: pk.PKContext
-    subject: [asn1.NamedData]
-    md_alg: hashes.Md?
-    extensions: [asn1.NamedData]
+    key: pk.PKContext,
+    subject: [asn1.NamedData],
+    md_alg: hashes.Md?,
+    extensions: [asn1.NamedData],
 }
 
 /// A request with no key, subject, digest or extensions

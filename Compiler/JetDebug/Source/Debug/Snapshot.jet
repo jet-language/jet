@@ -9,25 +9,25 @@ use {
 
 // Rust ValueSnapshot: one value captured at a real paused source statement.
 ValueSnapshot: struct {
-    name: String
-    type_name: String
-    value: String
+    name: String,
+    type_name: String,
+    value: String,
 }
 
 // Rust FrameSnapshot: one Jet frame captured at a real paused statement.
 FrameSnapshot: struct {
-    function: String
-    line: Int
+    function: String,
+    line: Int,
 }
 
 // Rust DebugSnapshot plus pause_id/frame_id/identity_digest. Identities hash
 // the exact `function:line|frame:line...|name:type=value...` material and keep
 // the first 24 SHA-256 hex characters.
 DebugSnapshot: struct {
-    function: String
-    line: Int
-    locals: [ValueSnapshot]
-    call_stack: [FrameSnapshot]
+    function: String,
+    line: Int,
+    locals: [ValueSnapshot],
+    call_stack: [FrameSnapshot],
 
     // Stable identity for this actual paused fact set.
     pause_id: fn(self) -> String Never! {
@@ -70,48 +70,48 @@ debug_snapshot_frame_key: fn(snapshot: DebugSnapshot) -> [String] Never! {
 
 // Rust DebugAggregateKind: aggregate shape retained by the safe evaluator.
 DebugAggregateKind: enum {
-    Record
-    List
-    Map
-    Set
-    Tuple
-    Variant
+    Record,
+    List,
+    Map,
+    Set,
+    Tuple,
+    Variant,
 }
 
 // Rust DebugValue: a value after the backend removed unsafe runtime layout.
 // FloatBits is the exact IEEE-754 u64 bit pattern; Bytes are length+SHA-256;
 // aggregates publish shape and length only.
 DebugValue: enum {
-    Unit
-    Bool(value: Bool)
-    Int(value: Int)
-    FloatBits(bits: Int)
-    Text(text: String)
-    Bytes(length: Int, sha256: String)
-    Aggregate(kind: DebugAggregateKind, length: Int)
+    Unit,
+    Bool(value: Bool),
+    Int(value: Int),
+    FloatBits(bits: Int),
+    Text(text: String),
+    Bytes(length: Int, sha256: String),
+    Aggregate(kind: DebugAggregateKind, length: Int),
 }
 
 // Rust DebugEvaluationUsage: bounded accounting for one safe evaluation.
 DebugEvaluationUsage: struct {
-    depth: Int
-    nodes: Int
-    bytes: Int
-    steps: Int
+    depth: Int,
+    nodes: Int,
+    bytes: Int,
+    steps: Int,
 }
 
 // Rust DebugEvaluation: a read-only Jet local path resolved from a real pause.
 DebugEvaluation: struct {
-    expression: String
-    name: String
-    type_name: String
-    value: DebugValue
-    usage: DebugEvaluationUsage
+    expression: String,
+    name: String,
+    type_name: String,
+    value: DebugValue,
+    usage: DebugEvaluationUsage,
 }
 
 // Rust evaluate_snapshot's `Err(String)`.
 #Error
 DebugEvaluationError: struct {
-    message: String
+    message: String,
 }
 
 debug_evaluation_error: fn(message: String) -> DebugEvaluationError Never! {
@@ -234,12 +234,12 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
 
 // The scalar a published type name holds.
 DebugScalarClass: enum {
-    Bool
-    Int
-    Float
-    Unit
-    Text
-    Other
+    Bool,
+    Int,
+    Float,
+    Unit,
+    Text,
+    Other,
 }
 
 // The class of `type_name`, read from the language's own primitive

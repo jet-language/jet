@@ -20,15 +20,15 @@ use {
 // formula, or the reason and plain detail why it has none. `pre` when the
 // assumptions hold a `#Pre`.
 JetCLISolverObligation: struct {
-    kind: String
-    function: String
-    callee: String
-    span: Span
-    claim: String
-    formula: JetCLISolverFormula?
-    reason: String
-    detail: String
-    pre: Bool
+    kind: String,
+    function: String,
+    callee: String,
+    span: Span,
+    claim: String,
+    formula: JetCLISolverFormula?,
+    reason: String,
+    detail: String,
+    pre: Bool,
 }
 
 // A callee parameter a call pinned: its caller-side value, or None when the
@@ -36,25 +36,25 @@ JetCLISolverObligation: struct {
 // the pin under the parameter's name with the pin's symbol, so a pin is
 // matched by symbol, else by its generated name.
 JetCLISolverPin: struct {
-    name: String
-    symbol: SymbolID?
-    value: JetCLISolverAffine?
+    name: String,
+    symbol: SymbolID?,
+    value: JetCLISolverAffine?,
 }
 
 // The integer names a formula may read: parameters and immutable `let`s, and
 // the call pins in force.
 JetCLISolverScope: struct {
-    names: [String]
-    pins: [JetCLISolverPin]
+    names: [String],
+    pins: [JetCLISolverPin],
 }
 
 // What a call obligation names its callee by: the run's declaration table
 // with the symbol table its keys are rows of, and each checked function's
 // name by key.
 JetCLISolverCallees: struct {
-    decls: DeclTable
-    symbols: SymbolTable
-    names: [String:String]
+    decls: DeclTable,
+    symbols: SymbolTable,
+    names: [String:String],
 }
 
 jet_cli_solver_unsupported: fn(detail: String) -> JetCLISolverUnknown Never! {
@@ -64,9 +64,9 @@ jet_cli_solver_unsupported: fn(detail: String) -> JetCLISolverUnknown Never! {
 // Integer types the formula language covers and their value bounds: Int is
 // unbounded; a fixed-width integer and an inline range are bounded.
 JetCLISolverBounds: struct {
-    integer: Bool
-    lo: Int?
-    hi: Int?
+    integer: Bool,
+    lo: Int?,
+    hi: Int?,
 }
 
 jet_cli_solver_type_bounds: fn(ty: Type) -> JetCLISolverBounds Never! {
@@ -553,8 +553,8 @@ jet_cli_solver_call_block: fn(function: FnBody, block: Int, source: String, call
 // One obligation with its formula's canonical bytes (its reason when it has
 // none), for deduplication.
 JetCLISolverKeyedObligation: struct {
-    text: String
-    obligation: JetCLISolverObligation
+    text: String,
+    obligation: JetCLISolverObligation,
 }
 
 jet_cli_solver_obligation_order: fn(left: JetCLISolverKeyedObligation, right: JetCLISolverKeyedObligation) -> Ordering Never! {

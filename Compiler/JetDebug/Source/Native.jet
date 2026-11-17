@@ -14,7 +14,7 @@ use {
 
 #Error
 NativeDebugError: struct {
-    detail: String
+    detail: String,
 
     // E2203, the registered failure of the native debugger.
     diagnostic: fn(self) -> Diagnostic Never! { native_debug_unavailable(self.detail) }
@@ -29,72 +29,72 @@ native_debug_unavailable: fn(detail: String) -> Diagnostic Never! {
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0.
 NativeFrame: struct {
-    function: String
-    file: String
-    line: Int
+    function: String,
+    file: String,
+    line: Int,
 }
 
 // One local of the selected frame, in Jet terms. A value the image's debug
 // information cannot show is NATIVE_DEBUG_UNAVAILABLE.
 NativeLocal: struct {
-    name: String
-    type_name: String
-    value: String
+    name: String,
+    type_name: String,
+    value: String,
 }
 
 NativeStopKind: enum {
-    Paused
-    Exited
-    Signaled
+    Paused,
+    Exited,
+    Signaled,
 }
 
 // Where a run-control command left the program: paused at `frame` for
 // `reason`, exited with `code`, or ended by the signal named in `reason`.
 NativeStop: struct {
-    kind: NativeStopKind
-    reason: String
-    code: Int
-    frame: NativeFrame?
+    kind: NativeStopKind,
+    reason: String,
+    code: Int,
+    frame: NativeFrame?,
 }
 
 // A breakpoint `jet debug --break` asks for: a Jet source file's base name,
 // as the line table names it, and a line of it.
 NativeBreak: struct {
-    file: String
-    line: Int
+    file: String,
+    line: Int,
 }
 
 // A breakpoint: its number and the code addresses it traps.
 NativeBreakpoint: struct {
-    number: Int
-    addresses: [Int]
+    number: Int,
+    addresses: [Int],
 }
 
 // A trap byte written into the program's code: its address and the byte it
 // replaced.
 NativeSite: struct {
-    address: Int
-    byte: Int
+    address: Int,
+    byte: Int,
 }
 
 // What resuming the program ended in: a SIGTRAP stop (Paused: a trap byte or
 // a finished single step), its exit with `code`, or its death by the signal
 // `code`.
 NativeEvent: struct {
-    kind: NativeStopKind
-    code: Int
+    kind: NativeStopKind,
+    code: Int,
 }
 
 // What running to a return address ended in: the return, or another stop.
 NativeReturn: enum {
-    Returned
-    Stopped(stop: NativeStop)
+    Returned,
+    Stopped(stop: NativeStop),
 }
 
 // Which calls a line step enters: none, or those with Jet line information.
 NativeStepCalls: enum {
-    Over
-    Into
+    Over,
+    Into,
 }
 
 // One frame of the stopped program, as the unwinder found it: its code
@@ -102,25 +102,25 @@ NativeStepCalls: enum {
 // registers in the kernel's order, `known[i]` saying whether register i holds
 // this frame's value.
 NativeUnwound: struct {
-    pc: Int
-    cfa: Int
-    registers: [Int]
-    known: [Bool]
+    pc: Int,
+    cfa: Int,
+    registers: [Int],
+    known: [Bool],
 }
 
 NativeSession: struct {
-    binary: String
-    image: NativeImage
-    trace: X64Trace
-    output_path: String
-    output_read: Int
+    binary: String,
+    image: NativeImage,
+    trace: X64Trace,
+    output_path: String,
+    output_read: Int,
     // Whether the program has been launched; while it runs, its trace has a
     // pid.
-    started: Bool
-    breakpoints: [NativeBreakpoint]
-    numbered: Int
-    sites: [NativeSite]
-    selected: Int
+    started: Bool,
+    breakpoints: [NativeBreakpoint],
+    numbered: Int,
+    sites: [NativeSite],
+    selected: Int,
 
     // Load the debug facts of `binary` (a native image with debug info). The
     // program's output is written to `output_path`; nothing runs until
@@ -851,9 +851,9 @@ NATIVE_DEBUG_DWARF_REGISTERS: [Int]{10, 12, 11, 5, 13, 14, 4, 19, 9, 8, 7, 6, 3,
 // One callee-saved register a prologue pushes: its kernel register index,
 // the address after the push and its slot below the frame pointer.
 NativeSave: struct {
-    register: Int
-    after: Int
-    slot: Int
+    register: Int,
+    after: Int,
+    slot: Int,
 }
 
 // Whether `prologue` (a function's first bytes, at `low`) opens a frame:
@@ -1089,8 +1089,8 @@ NATIVE_DEBUG_SHOWN_DEPTH: 4
 
 // What one console command printed, and where it left the program.
 NativeDebugStep: struct {
-    text: String
-    stop: NativeStop
+    text: String,
+    stop: NativeStop,
 }
 
 native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {
@@ -1150,14 +1150,14 @@ native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
 // Bytes a readout may read: the stopped program's memory, when there is a
 // program, and `blocks` (each its bytes from its address) before it.
 NativeMemory: struct {
-    trace: X64Trace?
-    blocks: [NativeBlock]
+    trace: X64Trace?,
+    blocks: [NativeBlock],
 }
 
 // Known bytes from `address`.
 NativeBlock: struct {
-    address: Int
-    bytes: [U8]
+    address: Int,
+    bytes: [U8],
 }
 
 // The parameters and locals live at `lookup` in `frame`, rendered as Jet

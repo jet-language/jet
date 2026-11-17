@@ -5,22 +5,22 @@
 // build fact row (Prelude/Facts.jet), and the provider dossier writes one fact
 // per capability in this order.
 TargetCapability: enum {
-    Allocator
-    Memory
-    Atomic64
-    MMIO
-    Hardware
-    TimeWall
-    TimeMonotonic
-    TimeZoneData
-    TimeSleep
-    Entropy
-    Scheduler
-    IORead
-    IOWrite
-    Panic
-    PanicReport
-    Startup
+    Allocator,
+    Memory,
+    Atomic64,
+    MMIO,
+    Hardware,
+    TimeWall,
+    TimeMonotonic,
+    TimeZoneData,
+    TimeSleep,
+    Entropy,
+    Scheduler,
+    IORead,
+    IOWrite,
+    Panic,
+    PanicReport,
+    Startup,
 }
 
 TARGET_CAPABILITY_ALL: #run { [TargetCapability]{
@@ -43,96 +43,96 @@ TARGET_CAPABILITY_ALL: #run { [TargetCapability]{
 } }
 
 TargetUnsafeGate: struct {
-    reason: String
+    reason: String,
 }
 
 MMIOAccess: struct {
-    address: Int
-    size: ByteSize
-    unsafe_gate: TargetUnsafeGate?
+    address: Int,
+    size: ByteSize,
+    unsafe_gate: TargetUnsafeGate?,
 }
 
 TargetMachineUse: struct {
-    stack_bytes: Int
-    static_ram_bytes: Int
-    heap_required: Bool
-    core_apis: [String]
-    mmio: [MMIOAccess]
-    required_capabilities: [TargetCapability]
+    stack_bytes: Int,
+    static_ram_bytes: Int,
+    heap_required: Bool,
+    core_apis: [String],
+    mmio: [MMIOAccess],
+    required_capabilities: [TargetCapability],
 }
 
 SizeBudgetReport: struct {
-    artifact_bytes: Int
-    flash_bytes: Int
-    flash_ok: Bool
-    ram_bytes: Int
-    ram_used_bytes: Int
-    ram_ok: Bool
+    artifact_bytes: Int,
+    flash_bytes: Int,
+    flash_ok: Bool,
+    ram_bytes: Int,
+    ram_used_bytes: Int,
+    ram_ok: Bool,
 }
 
 #Error
 TargetMachineError: enum {
-    MissingTargetTriple
-    MissingMemoryKind(kind: MemoryKind)
-    DuplicateMemoryRegion(name: String)
-    EmptyMemoryRegion(name: String)
-    MemoryAddressOverflow(name: String)
-    OverlappingMemoryRegions(first: String, second: String)
-    MissingLinkerInput
-    LinkerFileMissingPath
-    LinkerFileMissingHash(path: String)
-    MissingAllocatorPolicy
-    AllocatorRegionUnknown(region: String)
-    AllocatorRegionNotRam(region: String)
-    AllocatorRegionTooSmall(region: String, requested_bytes: Int, available_bytes: Int)
-    HostedAllocatorRequiresOS
-    MissingPanicPolicy
-    MissingTargetCapability(capability: String)
-    HostedCapabilityRequiresOS(capability: String)
-    InvalidProviderContract(capability: String, provider: String, sha256: String)
-    RamOverflow(used_bytes: Int, ram_bytes: Int)
-    HeapRequiresAllocator
-    CoreAPIUnavailable(api: String, required: RuntimeLayer, available: RuntimeLayer)
-    MMIOOutsideRegion(address: Int, size_bytes: Int)
-    MMIOMissingUnsafeGate(address: Int)
-    MMIOEmptyUnsafeReason(address: Int)
-    HostedHasNoLinkerScript
-    HostedHasNoStartup
-    UnsupportedStartupTriple(triple: String)
-    ExecutionTierUnsupported(tier: String, machine: String)
-    FirmwareToolchainMissing(tool: String)
-    FirmwareBuildFailed(detail: String)
-    SizeBudgetExceeded(report: SizeBudgetReport)
-    HardwareFactsMissingSVD
-    InvalidHardwareSVD(source: String, sha256: String)
-    HardwareFactEmptyName(kind: String)
-    DuplicateRegisterBlock(name: String)
-    RegisterBlockEmpty(name: String)
-    RegisterBlockAddressOverflow(name: String)
-    RegisterBlockOutsideRegion(name: String, address: Int, size_bytes: Int)
-    DuplicateRegister(block: String, register: String)
-    RegisterAddressOverflow(block: String, register: String)
-    RegisterOutsideBlock(block: String, register: String)
-    UnknownRegisterBlock(block: String)
-    UnknownRegister(block: String, register: String)
-    RegisterWidthMismatch(block: String, register: String, expected: RegisterWidth, actual: RegisterWidth)
-    RegisterReadDenied(block: String, register: String)
-    RegisterWriteDenied(block: String, register: String)
-    DuplicateInterrupt(name: String)
-    DuplicateInterruptVector(vector: Int)
-    InvalidInterruptEffect(interrupt: String, effect_name: String)
-    UnknownInterrupt(interrupt: String)
-    InterruptEffectForbidden(interrupt: String, handler: String, effect_name: String)
-    InterruptHandlerUnbounded(interrupt: String, handler: String)
-    DuplicateDMAChannel(name: String)
-    DuplicateDMAChannelNumber(channel: Int)
-    DMATransferSizeZero(channel: String)
-    UnknownDMAChannel(channel: String)
-    DMAOwnershipMismatch(channel: String, buffer: String, expected: TargetDMAOwner, actual: TargetDMAOwner)
-    DMAStartWhileInFlight(channel: String, buffer: String)
-    DMAWaitWithoutTransfer(channel: String, buffer: String)
-    DMABufferUnavailable(channel: String, buffer: String)
-    DMAWaitChannelMismatch(channel: String, buffer: String)
+    MissingTargetTriple,
+    MissingMemoryKind(kind: MemoryKind),
+    DuplicateMemoryRegion(name: String),
+    EmptyMemoryRegion(name: String),
+    MemoryAddressOverflow(name: String),
+    OverlappingMemoryRegions(first: String, second: String),
+    MissingLinkerInput,
+    LinkerFileMissingPath,
+    LinkerFileMissingHash(path: String),
+    MissingAllocatorPolicy,
+    AllocatorRegionUnknown(region: String),
+    AllocatorRegionNotRam(region: String),
+    AllocatorRegionTooSmall(region: String, requested_bytes: Int, available_bytes: Int),
+    HostedAllocatorRequiresOS,
+    MissingPanicPolicy,
+    MissingTargetCapability(capability: String),
+    HostedCapabilityRequiresOS(capability: String),
+    InvalidProviderContract(capability: String, provider: String, sha256: String),
+    RamOverflow(used_bytes: Int, ram_bytes: Int),
+    HeapRequiresAllocator,
+    CoreAPIUnavailable(api: String, required: RuntimeLayer, available: RuntimeLayer),
+    MMIOOutsideRegion(address: Int, size_bytes: Int),
+    MMIOMissingUnsafeGate(address: Int),
+    MMIOEmptyUnsafeReason(address: Int),
+    HostedHasNoLinkerScript,
+    HostedHasNoStartup,
+    UnsupportedStartupTriple(triple: String),
+    ExecutionTierUnsupported(tier: String, machine: String),
+    FirmwareToolchainMissing(tool: String),
+    FirmwareBuildFailed(detail: String),
+    SizeBudgetExceeded(report: SizeBudgetReport),
+    HardwareFactsMissingSVD,
+    InvalidHardwareSVD(source: String, sha256: String),
+    HardwareFactEmptyName(kind: String),
+    DuplicateRegisterBlock(name: String),
+    RegisterBlockEmpty(name: String),
+    RegisterBlockAddressOverflow(name: String),
+    RegisterBlockOutsideRegion(name: String, address: Int, size_bytes: Int),
+    DuplicateRegister(block: String, register: String),
+    RegisterAddressOverflow(block: String, register: String),
+    RegisterOutsideBlock(block: String, register: String),
+    UnknownRegisterBlock(block: String),
+    UnknownRegister(block: String, register: String),
+    RegisterWidthMismatch(block: String, register: String, expected: RegisterWidth, actual: RegisterWidth),
+    RegisterReadDenied(block: String, register: String),
+    RegisterWriteDenied(block: String, register: String),
+    DuplicateInterrupt(name: String),
+    DuplicateInterruptVector(vector: Int),
+    InvalidInterruptEffect(interrupt: String, effect_name: String),
+    UnknownInterrupt(interrupt: String),
+    InterruptEffectForbidden(interrupt: String, handler: String, effect_name: String),
+    InterruptHandlerUnbounded(interrupt: String, handler: String),
+    DuplicateDMAChannel(name: String),
+    DuplicateDMAChannelNumber(channel: Int),
+    DMATransferSizeZero(channel: String),
+    UnknownDMAChannel(channel: String),
+    DMAOwnershipMismatch(channel: String, buffer: String, expected: TargetDMAOwner, actual: TargetDMAOwner),
+    DMAStartWhileInFlight(channel: String, buffer: String),
+    DMAWaitWithoutTransfer(channel: String, buffer: String),
+    DMABufferUnavailable(channel: String, buffer: String),
+    DMAWaitChannelMismatch(channel: String, buffer: String),
 }
 
 jet_target_abi_c: fn() -> ProviderABI Never! { ProviderABI{calling_convention: "C", version: "1"} }
@@ -1593,8 +1593,8 @@ jet_target_machine_wasm_no_os: fn(package_version: String) -> TargetMachine Neve
 
 // Rust ExecutionTier: the tier a selected machine runs a program on.
 TargetExecutionTier: enum {
-    AOT
-    Dev
+    AOT,
+    Dev,
 }
 
 jet_target_execution_tier_name: fn(tier: TargetExecutionTier) -> String Never! {

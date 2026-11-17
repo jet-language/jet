@@ -206,33 +206,33 @@ QUICK_TIME_FLOOR_NS: 100000000
 QUICK_MEMORY_FLOOR_BYTES: 67108864
 
 Options: struct {
-    tree: String
-    modes: [String]
-    cpus: [Int]
-    threads: Int
-    memory: Int
-    timeout: Int
-    work: String
-    out: String
-    tool: String
-    budget: String
-    runs: Int
-    lane: String
-    programs: [String]
-    arms: [String]
-    samples: Int
-    warmups: Int
-    receipt: String
-    baseline: String
-    write_baseline: String
-    profile: String
+    tree: String,
+    modes: [String],
+    cpus: [Int],
+    threads: Int,
+    memory: Int,
+    timeout: Int,
+    work: String,
+    out: String,
+    tool: String,
+    budget: String,
+    runs: Int,
+    lane: String,
+    programs: [String],
+    arms: [String],
+    samples: Int,
+    warmups: Int,
+    receipt: String,
+    baseline: String,
+    write_baseline: String,
+    profile: String,
     // The speed gate's seed jet ("" outside the gate) and perf.
-    against: String
-    perf: String
+    against: String,
+    perf: String,
     // The batch gate's previous and current build directories ("" outside
     // it).
-    batch: String
-    current: String
+    batch: String,
+    current: String,
 }
 
 // budget.json: per-phase ns per source line by column, each row naming the
@@ -240,92 +240,92 @@ Options: struct {
 // A row sums its `spans` less its `exclude` spans; the `residual` row is the
 // wall outside every other row.
 BudgetPin: struct {
-    id: String
-    phase: String
-    spans: [String]?
-    exclude: [String]?
-    residual: Bool?
-    budget: [String:Float]
-    owners: [String]
+    id: String,
+    phase: String,
+    spans: [String]?,
+    exclude: [String]?,
+    residual: Bool?,
+    budget: [String:Float],
+    owners: [String],
 }
 
 OutsideTrace: struct {
-    budget: [String:Float]
-    owners: [String]
+    budget: [String:Float],
+    owners: [String],
 }
 
 BudgetTarget: struct {
-    column: String
-    lines_per_second: Int
+    column: String,
+    lines_per_second: Int,
 }
 
 BudgetFile: struct {
-    target: BudgetTarget
-    rows: [BudgetPin]
-    outside_trace: OutsideTrace?
+    target: BudgetTarget,
+    rows: [BudgetPin],
+    outside_trace: OutsideTrace?,
 }
 
 TraceArgs: struct {
-    proc_cpu_ns: Int?
-    cpu_ns: Int?
-    value: Int?
-    items: Int?
-    unix_ms: Int?
-    name: String?
+    proc_cpu_ns: Int?,
+    cpu_ns: Int?,
+    value: Int?,
+    items: Int?,
+    unix_ms: Int?,
+    name: String?,
 }
 
 TraceEvent: struct {
-    name: String
-    ph: String
-    cat: String?
-    ts: Int?
-    pid: Int?
-    tid: Int
-    args: TraceArgs?
+    name: String,
+    ph: String,
+    cat: String?,
+    ts: Int?,
+    pid: Int?,
+    tid: Int,
+    args: TraceArgs?,
 }
 
 OpenSpan: struct {
-    kind: String
-    ts: Int
+    kind: String,
+    ts: Int,
 }
 
 // A top-level phase: its wall, its process CPU (`proc_cpu_ns`: every thread
 // over the span) and, in a batch build, its own thread's CPU (`cpu_ns`).
 Phase: struct {
-    kind: String
-    wall_ns: Int{0}
-    cpu_ns: Int{0}
-    thread_cpu_ns: Int{0}
-    count: Int{0}
+    kind: String,
+    wall_ns: Int{0},
+    cpu_ns: Int{0},
+    thread_cpu_ns: Int{0},
+    count: Int{0},
 }
 
 Trace: struct {
-    phases: [Phase]
-    user_lines: Int
-    core_lines: Int
+    phases: [Phase],
+    user_lines: Int,
+    core_lines: Int,
     // The opening lane's first span start and last span end, microseconds.
-    first_us: Int
-    last_us: Int
+    first_us: Int,
+    last_us: Int,
 }
 
 Run: struct {
-    mode: String
+    mode: String,
     // 1-based: the compile's place among the mode's --runs.
-    repeat: Int
+    repeat: Int,
     // The speed gate's "seed" or "new"; "" outside the gate.
-    compiler: String
-    rc: Int
-    wall_ns: Int
-    cpu_ns: Int
+    compiler: String,
+    rc: Int,
+    wall_ns: Int,
+    cpu_ns: Int,
     // User-mode instructions and cycles of the compile and its children;
     // -1 when not counted.
-    instructions: Int
-    cycles: Int
-    peak_bytes: Int
-    lines: Int
-    trace: Trace?
-    note: String
-    budget: String
+    instructions: Int,
+    cycles: Int,
+    peak_bytes: Int,
+    lines: Int,
+    trace: Trace?,
+    note: String,
+    budget: String,
 }
 
 usage: fn(message: String) -> Never {
@@ -579,17 +579,17 @@ packages: fn(options: Options, verb: String) -> [String] {
 // apply is 0.
 #Codable
 Source: struct {
-    kind: String
-    generator: String
-    sha256: String
-    physical_lines: Int
-    code_lines: Int
-    bytes: Int
-    functions: Int
-    types: Int
-    comptime_items: Int
-    sections: Int
-    files: Int
+    kind: String,
+    generator: String,
+    sha256: String,
+    physical_lines: Int,
+    code_lines: Int,
+    bytes: Int,
+    functions: Int,
+    types: Int,
+    comptime_items: Int,
+    sections: Int,
+    files: Int,
 }
 
 // The compiler corpus: each member source of the compiler's packages and
@@ -900,20 +900,20 @@ GATE_PHASE_FLOOR_NS: 500000000
 // One round's value of a quantity for each compiler; negative when it was
 // not measured.
 Paired: struct {
-    seed: Int
-    new: Int
+    seed: Int,
+    new: Int,
 }
 
 // One judged quantity of a mode: each compiler's median, the median and the
 // spread of the per-round ratios new / seed (0 when not taken), the verdict.
 GateRow: struct {
-    mode: String
-    metric: String
-    seed: Int
-    new: Int
-    ratio: Float
-    spread: Float
-    status: String
+    mode: String,
+    metric: String,
+    seed: Int,
+    new: Int,
+    ratio: Float,
+    spread: Float,
+    status: String,
 }
 
 // The middle value (the lower middle of an even count); 0 when empty.
@@ -979,8 +979,8 @@ add_kinds: fn(kinds: &[String], run: Run) {
 // compile (`seed` in the train gate, `previous` in the batch A/B) and the
 // candidate's.
 RoundPair: struct {
-    base: Int
-    candidate: Int
+    base: Int,
+    candidate: Int,
 }
 
 // Whether `run` is a compile of `mode` by the compiler labelled `label` that
@@ -1143,12 +1143,12 @@ AB_INSTRUCTIONS_LIMIT: 1.03
 // perf.txt (-1 when not counted), and every process's top-level phases from
 // trace.txt.
 BatchBuild: struct {
-    cpu_ns: Int
-    wall_ns: Int
-    peak_bytes: Int
-    status: Int
-    instructions: Int
-    phases: [Phase]
+    cpu_ns: Int,
+    wall_ns: Int,
+    peak_bytes: Int,
+    status: Int,
+    instructions: Int,
+    phases: [Phase],
 }
 
 // The value of a `time -v` report line `KEY: VALUE`; None when it has none.
@@ -1480,72 +1480,72 @@ run_batch: fn(options: Options) -> Int {
 
 // bench.json: each generated program's pin.
 BenchPin: struct {
-    code_lines: Int
-    seed: Int
-    source_sha256: String
-    expected_output: String
+    code_lines: Int,
+    seed: Int,
+    source_sha256: String,
+    expected_output: String,
 }
 
 BenchFile: struct {
-    programs: [String:BenchPin]
+    programs: [String:BenchPin],
 }
 
 // The manifest's cell: what the full lane gates on.
 CellThreshold: struct {
-    arm: String
-    wall_ns_lt: Int?
-    lines_per_second_min: Int?
+    arm: String,
+    wall_ns_lt: Int?,
+    lines_per_second_min: Int?,
 }
 
 CellProgram: struct {
-    id: String
-    threshold: CellThreshold
+    id: String,
+    threshold: CellThreshold,
 }
 
 CellGates: struct {
-    memory: [String:Int]
+    memory: [String:Int],
 }
 
 AxisCell: struct {
-    cache_lane: String
-    programs: [CellProgram]
-    gates: CellGates
+    cache_lane: String,
+    programs: [CellProgram],
+    gates: CellGates,
 }
 
 ManifestAxes: struct {
-    compile_throughput: AxisCell
+    compile_throughput: AxisCell,
 }
 
 Manifest: struct {
-    axes: ManifestAxes
+    axes: ManifestAxes,
 }
 
 // Tools/Perf/baseline.json's regression budgets.
 PerfBudgets: struct {
-    latency_regression_pct: Int
-    memory_regression_pct: Int
+    latency_regression_pct: Int,
+    memory_regression_pct: Int,
 }
 
 PerfBaseline: struct {
-    budgets: PerfBudgets
+    budgets: PerfBudgets,
 }
 
 // generate/run.jet's line for a `mixed` program.
 GeneratedStats: struct {
-    physical_lines: Int
-    code_lines: Int
-    bytes: Int
-    functions: Int
-    types: Int
-    comptime_items: Int
-    sections: Int
+    physical_lines: Int,
+    code_lines: Int,
+    bytes: Int,
+    functions: Int,
+    types: Int,
+    comptime_items: Int,
+    sections: Int,
 }
 
 Generated: struct {
-    entry: String
-    source_sha256: String
-    expected: String
-    stats: GeneratedStats
+    entry: String,
+    source_sha256: String,
+    expected: String,
+    stats: GeneratedStats,
 }
 
 // One phase kind of a sample: the union wall of its spans over every lane,
@@ -1554,252 +1554,252 @@ Generated: struct {
 // they report (-1: none).
 #Codable
 PhaseRow: struct {
-    kind: String
-    wall_ns: Int
-    span_ns: Int
-    cpu_ns: Int
-    count: Int
-    items: Int
+    kind: String,
+    wall_ns: Int,
+    span_ns: Int,
+    cpu_ns: Int,
+    count: Int,
+    items: Int,
 }
 
 #Codable
 Counter: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 // One compile of a program. `startup_ns` is spawn to the first phase span
 // (-1: no trace), `run_exit` the artifact's exit (-1: not run).
 #Codable
 Sample: struct {
-    label: String
-    wall_ns: Int
-    cpu_user_ns: Int
-    cpu_sys_ns: Int
-    peak_rss_bytes: Int
-    parallelism_pct: Int
-    startup_ns: Int
-    phases: [PhaseRow]
-    counters: [Counter]
-    artifact_sha256: String
-    diagnostic_sha256: String
-    run_exit: Int
-    stdout_sha256: String
-    problems: [String]
+    label: String,
+    wall_ns: Int,
+    cpu_user_ns: Int,
+    cpu_sys_ns: Int,
+    peak_rss_bytes: Int,
+    parallelism_pct: Int,
+    startup_ns: Int,
+    phases: [PhaseRow],
+    counters: [Counter],
+    artifact_sha256: String,
+    diagnostic_sha256: String,
+    run_exit: Int,
+    stdout_sha256: String,
+    problems: [String],
 }
 
 #Codable
 Stat: struct {
-    median: Int
-    min: Int
-    max: Int
+    median: Int,
+    min: Int,
+    max: Int,
 }
 
 #Codable
 PhaseSummary: struct {
-    kind: String
-    wall_ns: Int
-    cpu_ns: Int
-    samples: Int
+    kind: String,
+    wall_ns: Int,
+    cpu_ns: Int,
+    samples: Int,
 }
 
 #Codable
 Summary: struct {
-    wall_ns: Stat
-    cpu_user_ns: Stat
-    cpu_sys_ns: Stat
-    peak_rss_bytes: Stat
-    parallelism_pct: Stat
-    startup_ns: Int
-    phases: [PhaseSummary]
+    wall_ns: Stat,
+    cpu_user_ns: Stat,
+    cpu_sys_ns: Stat,
+    peak_rss_bytes: Stat,
+    parallelism_pct: Stat,
+    startup_ns: Int,
+    phases: [PhaseSummary],
 }
 
 #Codable
 Arm: struct {
-    id: String
-    threads: String
-    samples: [Sample]
-    summary: Summary?
+    id: String,
+    threads: String,
+    samples: [Sample],
+    summary: Summary?,
 }
 
 #Codable
 Program: struct {
-    id: String
-    entry: String
-    expected: String
-    golden: Bool
-    source: Source
-    arms: [Arm]
+    id: String,
+    entry: String,
+    expected: String,
+    golden: Bool,
+    source: Source,
+    arms: [Arm],
 }
 
 // One budget.json row against a summary (`actual_ns` -1: unmeasured;
 // `budget_ns` -1: the row has no budget in the column).
 #Codable
 BudgetRow: struct {
-    id: String
-    phase: String
-    budget_ns: Int
-    actual_ns: Int
-    status: String
-    owners: [String]
+    id: String,
+    phase: String,
+    budget_ns: Int,
+    actual_ns: Int,
+    status: String,
+    owners: [String],
 }
 
 #Codable
 BudgetCheck: struct {
-    column: String
-    code_lines: Int
-    rows: [BudgetRow]
-    over: [String]
+    column: String,
+    code_lines: Int,
+    rows: [BudgetRow],
+    over: [String],
 }
 
 // A program's full-lane gates: pass, fail or "-" (not gated).
 #Codable
 Gate: struct {
-    program: String
-    determinism: String
-    memory: String
-    threshold: String
-    lines_per_second_median: Int
-    lines_per_second_min: Int
-    phase_budgets: BudgetCheck?
+    program: String,
+    determinism: String,
+    memory: String,
+    threshold: String,
+    lines_per_second_median: Int,
+    lines_per_second_min: Int,
+    phase_budgets: BudgetCheck?,
 }
 
 #Codable
 Comparison: struct {
-    program: String
-    arm: String
-    metric: String
-    baseline: Int
-    current: Int
-    limit: Int
-    status: String
+    program: String,
+    arm: String,
+    metric: String,
+    baseline: Int,
+    current: Int,
+    limit: Int,
+    status: String,
 }
 
 #Codable
 Quick: struct {
-    baseline: String
-    latency_regression_pct: Int
-    memory_regression_pct: Int
-    time_floor_ns: Int
-    memory_floor_bytes: Int
-    comparisons: [Comparison]
+    baseline: String,
+    latency_regression_pct: Int,
+    memory_regression_pct: Int,
+    time_floor_ns: Int,
+    memory_floor_bytes: Int,
+    comparisons: [Comparison],
 }
 
 #Codable
 Machine: struct {
-    cpu_model: String
-    cores: Int
-    threads: Int
-    memory_bytes: Int
-    governor: String
-    kernel: String
-    hostname: String
+    cpu_model: String,
+    cores: Int,
+    threads: Int,
+    memory_bytes: Int,
+    governor: String,
+    kernel: String,
+    hostname: String,
 }
 
 #Codable
 Heavy: struct {
-    pid: Int
-    name: String
-    rss_bytes: Int
+    pid: Int,
+    name: String,
+    rss_bytes: Int,
 }
 
 #Codable
 Contention: struct {
-    load1: String
-    heavy_processes: [Heavy]
+    load1: String,
+    heavy_processes: [Heavy],
 }
 
 #Codable
 Commit: struct {
-    head: String
-    dirty: Bool
+    head: String,
+    dirty: Bool,
 }
 
 #Codable
 Compiler: struct {
-    path: String
-    sha256: String
-    identity: String
-    build_profile: String
+    path: String,
+    sha256: String,
+    identity: String,
+    build_profile: String,
 }
 
 #Codable
 Receipt: struct {
-    schema: String
-    lane: String
-    started_unix_ms: Int
-    finished_unix_ms: Int
-    root: String
-    commit: Commit
-    machine: Machine
-    contention_start: Contention
-    contention_end: Contention
-    compiler: Compiler
-    cache_lane: String
-    samples: Int
-    warmups: Int
-    programs: [Program]
-    gates: [Gate]
-    quick: Quick?
-    failures: [String]
-    passed: Bool
+    schema: String,
+    lane: String,
+    started_unix_ms: Int,
+    finished_unix_ms: Int,
+    root: String,
+    commit: Commit,
+    machine: Machine,
+    contention_start: Contention,
+    contention_end: Contention,
+    compiler: Compiler,
+    cache_lane: String,
+    samples: Int,
+    warmups: Int,
+    programs: [Program],
+    gates: [Gate],
+    quick: Quick?,
+    failures: [String],
+    passed: Bool,
 }
 
 #Codable
 PhaseWall: struct {
-    kind: String
-    wall_ns: Int
+    kind: String,
+    wall_ns: Int,
 }
 
 #Codable
 BaselineArm: struct {
-    arm: String
-    wall_ns: Int
-    peak_rss_bytes: Int
-    phases: [PhaseWall]
+    arm: String,
+    wall_ns: Int,
+    peak_rss_bytes: Int,
+    phases: [PhaseWall],
 }
 
 #Codable
 BaselineProgram: struct {
-    program: String
-    source_sha256: String
-    arms: [BaselineArm]
+    program: String,
+    source_sha256: String,
+    arms: [BaselineArm],
 }
 
 // The quick lane's baseline: per program and arm, the median wall, peak
 // memory and phase walls of a passing run.
 #Codable
 Baseline: struct {
-    schema: String
-    recorded_from: Compiler
-    commit: Commit
-    machine: Machine
-    programs: [BaselineProgram]
+    schema: String,
+    recorded_from: Compiler,
+    commit: Commit,
+    machine: Machine,
+    programs: [BaselineProgram],
 }
 
 // The phase spans of a trace (spans named their kind), on every lane.
 SpanTime: struct {
-    start_us: Int
-    end_us: Int
-    cpu_ns: Int
-    items: Int?
+    start_us: Int,
+    end_us: Int,
+    cpu_ns: Int,
+    items: Int?,
 }
 
 OpenPhase: struct {
-    lane: Int
-    kind: String
-    start_us: Int
-    closed: Bool
+    lane: Int,
+    kind: String,
+    start_us: Int,
+    closed: Bool,
 }
 
 CellTrace: struct {
-    phases: [PhaseRow]
+    phases: [PhaseRow],
     // The first phase span's start, microseconds of trace time (-1: none).
-    first_us: Int
-    unclosed: [String]
-    counters: [Counter]
+    first_us: Int,
+    unclosed: [String],
+    counters: [Counter],
     // trace.start's wall clock (-1: none).
-    start_unix_ms: Int
+    start_unix_ms: Int,
 }
 
 read_cell_trace: fn(text: String) -> CellTrace {
@@ -2245,11 +2245,11 @@ commit_of: fn(tree: String) -> Commit {
 // program's) or the corpus (selfhost's, copied per sample), its entry, its
 // build folder and its golden.
 Prepared: struct {
-    program: Program
-    project: String
-    build_dir: String
-    selfhost: Bool
-    failures: [String]
+    program: Program,
+    project: String,
+    build_dir: String,
+    selfhost: Bool,
+    failures: [String],
 }
 
 prepare_bench: fn(options: Options, pins: BenchFile, id: String, dir: String) -> Prepared {

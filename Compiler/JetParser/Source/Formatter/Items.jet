@@ -114,24 +114,24 @@ JFMT_MEMBER_MARKER: 12
 JFMT_MEMBER_LAW: 13
 
 JetFmtMember: struct {
-    kind: Int
-    index: Int
-    start: Int
+    kind: Int,
+    index: Int,
+    start: Int,
 }
 
 // The vectors a type body's members index into.
 JetFmtTypeBody: struct {
-    state: StateDecl?
-    fields: [Field]
-    cli_bindings: [CLICommandBinding]
-    trait_impls: [TraitImplBlock]
-    methods: [Func]
-    validate_body: [Stmt]
-    marker: MarkerDecl?{None}
-    marker_expand_span: Span?{None}
-    effect_impl: EffectImpl?{None}
+    state: StateDecl?,
+    fields: [Field],
+    cli_bindings: [CLICommandBinding],
+    trait_impls: [TraitImplBlock],
+    methods: [Func],
+    validate_body: [Stmt],
+    marker: MarkerDecl?{None},
+    marker_expand_span: Span?{None},
+    effect_impl: EffectImpl?{None},
     // The declaration's markers; its `#X: value` lines are members.
-    markers: [Marker]{[Marker]{}}
+    markers: [Marker]{[Marker]{}},
 }
 
 // Rust `TypeBodyMember::is_compact` / `ImplBodyMember::is_compact`: data
@@ -836,6 +836,7 @@ jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
             jfmt_write(f, param.name)
             jfmt_write(f, ": ")
             jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+            jfmt_write(f, ",")
         }
         f.indent -= 1
         jfmt_end_block(f)
@@ -1311,7 +1312,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
         if member.kind == JFMT_MEMBER_ASSOC_TYPE {
             jfmt_emit_leading_declaration(f, member.start)
             jfmt_write(f, t.assoc_types[member.index].name)
-            jfmt_write(f, ": type")
+            jfmt_write(f, ": type,")
             jfmt_newline(f)
             next
         }
@@ -1332,6 +1333,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
                 jfmt_fmt_expr(f, expr, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
                 jfmt_write(f, "}}")
             }
+            jfmt_write(f, ",")
             jfmt_newline(f)
             next
         }
@@ -1382,6 +1384,8 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             jfmt_fmt_block_lines(f, body, jfmt_inside_markers(m.markers))
             f.indent -= 1
             jfmt_end_block(f)
+        } else {
+            jfmt_write(f, ",")
         }
         jfmt_newline(f)
     }
@@ -1785,6 +1789,7 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
             jfmt_write(f, row.name)
             jfmt_write(f, ": ")
             jfmt_fmt_type(f, row.ty)
+            jfmt_write(f, ",")
         } else if member.kind == JFMT_MEMBER_MARKER {
             jfmt_fmt_marker_line(f, markers[member.index])
         } else if member.kind == JFMT_MEMBER_CONSTANT {
@@ -1793,6 +1798,7 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
             jfmt_write(f, constant.name)
             jfmt_write(f, ": ")
             jfmt_fmt_expr(f, constant.value, JFMT_PREC_OR_FALLBACK)
+            jfmt_write(f, ",")
         } else {
             method: methods[member.index]
             jfmt_emit_leading_declaration(f, method.name_span.start)
@@ -2007,9 +2013,9 @@ jfmt_fmt_policy_rule: fn(f: &JetFmt, declarations: [PolicyDeclaration]) {
 
 // Rust `fmt_param_list`'s local `Entry`: a parameter or a zone separator.
 JetFmtParamEntry: struct {
-    param: Int
-    zone: String
-    span: Span
+    param: Int,
+    zone: String,
+    span: Span,
 }
 
 // Reprint a parameter list with its zone separators. `/` goes
@@ -2258,10 +2264,14 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_emit_leading_declaration(f, field.name_span.start)
         skipped: codable_skips(field.serde_markers) || codable_flattens(field.serde_markers)
         jfmt_fmt_field(f, field, derives_decode && !skipped)
+        jfmt_write(f, ",")
+        jfmt_emit_trailing(f, jfmt_field_source_end(field))
     } else if member.kind == JFMT_MEMBER_CLI_BINDING {
         binding: body.cli_bindings[member.index]
         jfmt_emit_leading_declaration(f, binding.name_span.start)
         jfmt_fmt_cli_binding(f, binding)
+        jfmt_write(f, ",")
+        jfmt_emit_trailing(f, expr_span(binding.target).end)
     } else if member.kind == JFMT_MEMBER_TRAIT_IMPL {
         jfmt_fmt_trait_impl_block(f, body.trait_impls[member.index])
     } else if member.kind == JFMT_MEMBER_METHOD {
@@ -2332,6 +2342,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
         jfmt_write(f, foundation_byte_text(setting.name.bytes(), 1, setting.name.bytes().len()))
         jfmt_write(f, ": ")
         jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, ",")
         rows += 1
     }
     if declaration.group == .Val(members) {
@@ -2340,7 +2351,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, impls: [TraitImplB
         jfmt_write(f, "group: #[")
         group_source: if members.len() > 0 -> jfmt_source_marker_group_span(f, members[0].name_span.start) else -> JetFmtSourceList?{None}
         jfmt_fmt_marker_list(f, members, group_source)
-        jfmt_write(f, "]")
+        jfmt_write(f, "],")
         rows += 1
     }
     if declaration.body != None {
@@ -2401,7 +2412,7 @@ jfmt_fmt_effect_impl: fn(f: &JetFmt, declared: EffectImpl) {
     f.indent += 1
     if declared.parent == .Val(written) {
         jfmt_emit_leading(f, written.span.start)
-        jfmt_write(f, "parent: {written.name}")
+        jfmt_write(f, "parent: {written.name},")
         if declared.irreversible != None -> jfmt_newline(f)
     }
     if declared.irreversible == .Val(body) {
@@ -2480,9 +2491,20 @@ jfmt_fmt_struct: fn(f: &JetFmt, s: StructDef) {
         jfmt_fmt_empty_type_body(f, s.name_span.end, s.span.end)
         return
     }
+    derives_decode: jfmt_has_name(s.derives, "Decode")
+    if jfmt_type_body_stays_on_one_line(f, members, s.name_span.end) {
+        jfmt_write(f, " {{ ")
+        loop (position, member) in jfmt_sort_members(members) {
+            if position > 0 -> jfmt_write(f, ", ")
+            field: s.fields[member.index]
+            skipped: codable_skips(field.serde_markers) || codable_flattens(field.serde_markers)
+            jfmt_fmt_field(f, field, derives_decode && !skipped)
+        }
+        jfmt_write(f, " }}")
+        return
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
-    derives_decode: jfmt_has_name(s.derives, "Decode")
     f.indent += 1
     body: JetFmtTypeBody{state: s.state, fields: s.fields, cli_bindings: s.cli_bindings, trait_impls: s.trait_impls, methods: s.methods, validate_body: s.validate_block, marker: s.marker, marker_expand_span: s.marker_expand_span, effect_impl: s.effect_impl, markers: s.type_markers}
     jfmt_fmt_type_body_members(f, jfmt_sort_members(members), body, derives_decode, false)
@@ -2505,6 +2527,22 @@ jfmt_fmt_empty_type_body: fn(f: &JetFmt, open: Int, end: Int) {
     jfmt_write(f, "}}")
 }
 
+// A struct body of fields alone stays on one line when its source body is
+// one line without comments; any other member opens the body.
+jfmt_type_body_stays_on_one_line: fn(f: JetFmt, members: [JetFmtMember], after: Int) -[]> Bool {
+    loop member in members {
+        if member.kind != JFMT_MEMBER_FIELD -> return false
+    }
+    jfmt_source_body_is_one_line(f, after)
+}
+
+// Whether the first `{ … }` after `after` is written on one line without
+// comments. A body with no source, as generated code has, is not.
+jfmt_source_body_is_one_line: fn(f: JetFmt, after: Int) -[]> Bool {
+    body: jfmt_source_list_span_after(f, after, JFMT_DELIM_BRACE) ?? return false
+    !jfmt_source_span_multiline(f, body.span)
+}
+
 jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     // Type markers are retained nodes, not flag
     // reconstruction. The flags below remain semantic data only.
@@ -2523,9 +2561,16 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
         jfmt_fmt_empty_type_body(f, e.name_span.end, e.span.end)
         return
     }
+    derives_decode: jfmt_has_name(e.derives, "Decode")
+    cases_only: !inside_marker && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && e.state == None
+    if cases_only && jfmt_source_body_is_one_line(f, e.name_span.end) {
+        jfmt_write(f, " {{ ")
+        jfmt_fmt_enum_entries(f, e, "", derives_decode, true)
+        jfmt_write(f, " }}")
+        return
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
-    derives_decode: jfmt_has_name(e.derives, "Decode")
     f.indent += 1
     // Marker lines keep their place among the variants: each prints before
     // the variant that follows it, and those after the last variant are
@@ -2542,11 +2587,15 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
                 if !marker.inside || marker.span.start <= previous || marker.span.start > start {
                     next
                 }
+                jfmt_emit_leading_declaration(f, marker.span.start)
                 jfmt_fmt_marker_line(f, marker)
                 jfmt_newline(f)
             }
             previous = start
+            jfmt_emit_leading_declaration(f, start)
             jfmt_fmt_variant(f, e.variants[index], derives_decode)
+            jfmt_write(f, ",")
+            jfmt_emit_trailing(f, jfmt_variant_source_end(e.variants[index]))
         }
     } else {
         loop marker in e.type_markers {
@@ -2554,7 +2603,7 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
             jfmt_fmt_marker_line(f, marker)
             jfmt_newline(f)
         }
-        jfmt_fmt_enum_grouped(f, e, derives_decode)
+        jfmt_fmt_enum_entries(f, e, "", derives_decode, false)
     }
     members := [JetFmtMember]{}
     loop index in 0..<e.trait_impls.len() {
@@ -2584,41 +2633,66 @@ jfmt_fmt_variant: fn(f: &JetFmt, v: Variant, derives_decode: Bool) {
     jfmt_fmt_variant_name_and_payload(f, v, v.name, derives_decode)
 }
 
-// Rust `EnumFmtEntry`: a leaf variant or a nested group.
-JetFmtEnumEntry: struct {
-    is_group: Bool
-    index: Int
-    order: Int
+// Where a case's own text ends in the source, before its comma.
+jfmt_variant_source_end: fn(v: Variant) -[]> Int {
+    if v.discriminant_expr == .Val(expr) -> return expr_span(expr).end
+    if v.payload == {
+        .Single(_, span) -> span.end
+        .Named(fields) -> if fields.len() > 0 -> fields[fields.len() - 1].ty_span.end else -> v.name_span.end
+        .Unit -> v.name_span.end
+    }
 }
 
-// Emit grouped enum bodies from flat leaves + `groups` metadata.
-jfmt_fmt_enum_grouped: fn(f: &JetFmt, e: EnumDef, derives_decode: Bool) {
-    entries: jfmt_enum_entries_at_prefix(e, "")
-    loop position in 0..<entries.len() {
-        if position > 0 -> jfmt_newline(f)
-        entry: entries[position]
-        if entry.is_group -> jfmt_fmt_enum_group(f, e, e.groups[entry.index], derives_decode) else {
-            jfmt_fmt_variant(f, e.variants[entry.index], derives_decode)
+// Rust `EnumFmtEntry`: a leaf variant or a nested group.
+JetFmtEnumEntry: struct {
+    is_group: Bool,
+    index: Int,
+    order: Int,
+}
+
+// The cases and case groups of `e` under `prefix`, each followed by `,` on
+// its own line, or separated by `, ` on one line.
+jfmt_fmt_enum_entries: fn(f: &JetFmt, e: EnumDef, prefix: String, derives_decode: Bool, one_line: Bool) -[]> {
+    loop (position, entry) in jfmt_enum_entries_at_prefix(e, prefix) {
+        if position > 0 {
+            if one_line -> jfmt_write(f, ", ") else -> jfmt_newline(f)
+        }
+        if entry.is_group {
+            g: e.groups[entry.index]
+            if !one_line -> jfmt_emit_leading_declaration(f, g.name_span.start)
+            jfmt_fmt_enum_group(f, e, g, derives_decode, one_line)
+            if !one_line {
+                jfmt_write(f, ",")
+                jfmt_emit_trailing(f, g.name_span.end)
+            }
+        } else {
+            v: e.variants[entry.index]
+            if !one_line -> jfmt_emit_leading_declaration(f, v.name_span.start)
+            leaf: if prefix != "" && v.name.starts_with(prefix) -> foundation_byte_text(v.name.bytes(), prefix.bytes().len(), v.name.bytes().len()) else -> v.name
+            jfmt_fmt_variant_name_and_payload(f, v, leaf, derives_decode)
+            if !one_line {
+                jfmt_write(f, ",")
+                jfmt_emit_trailing(f, jfmt_variant_source_end(v))
+            }
         }
     }
 }
 
-jfmt_fmt_enum_group: fn(f: &JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bool) {
+// A case group stays on one line inside a one-line body, or when its own
+// source body is one line without comments.
+jfmt_fmt_enum_group: fn(f: &JetFmt, e: EnumDef, g: EnumGroup, derives_decode: Bool, one_line: Bool) -[]> {
     jfmt_write(f, jfmt_last_segment(g.path, "."))
+    prefix: "{g.path}."
+    if one_line || jfmt_source_body_is_one_line(f, g.name_span.end) {
+        jfmt_write(f, " {{ ")
+        jfmt_fmt_enum_entries(f, e, prefix, derives_decode, true)
+        jfmt_write(f, " }}")
+        return
+    }
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
-    prefix: "{g.path}."
-    entries: jfmt_enum_entries_at_prefix(e, prefix)
-    loop position in 0..<entries.len() {
-        if position > 0 -> jfmt_newline(f)
-        entry: entries[position]
-        if entry.is_group -> jfmt_fmt_enum_group(f, e, e.groups[entry.index], derives_decode) else {
-            v: e.variants[entry.index]
-            leaf: if v.name.starts_with(prefix) -> foundation_byte_text(v.name.bytes(), prefix.bytes().len(), v.name.bytes().len()) else -> v.name
-            jfmt_fmt_variant_name_and_payload(f, v, leaf, derives_decode)
-        }
-    }
+    jfmt_fmt_enum_entries(f, e, prefix, derives_decode, false)
     f.indent -= 1
     jfmt_end_block(f)
 }
@@ -3013,10 +3087,13 @@ jfmt_fmt_field: fn(f: &JetFmt, field: Field, derives_decode: Bool) {
         jfmt_fmt_expr(f, expr, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
         jfmt_write(f, "}}")
     }
-    end := field.ty_span.end
-    if field.computed == .Val(expr) -> end = expr_span(expr).end
-    if field.default == .Val(expr) -> end = expr_span(expr).end
-    jfmt_emit_trailing(f, end)
+}
+
+// Where a field's own text ends in the source, before its comma.
+jfmt_field_source_end: fn(field: Field) -[]> Int {
+    if field.default == .Val(expr) -> return expr_span(expr).end
+    if field.computed == .Val(expr) -> return expr_span(expr).end
+    field.ty_span.end
 }
 
 // Format a callable program-struct member without lowering
@@ -3035,5 +3112,4 @@ jfmt_fmt_cli_binding: fn(f: &JetFmt, binding: CLICommandBinding) {
     jfmt_write(f, binding.name)
     jfmt_write(f, " = ")
     jfmt_fmt_expr(f, binding.target, JFMT_PREC_OR_FALLBACK)
-    jfmt_emit_trailing(f, expr_span(binding.target).end)
 }

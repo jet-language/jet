@@ -12,30 +12,30 @@ use jet_foundation.[EFFECT_VOCABULARY_LEAVES]
 FOREIGN_LANGUAGE_COUNT: #run pkg_foreign_language_count(embed_file("ForeignLanguages.jet"), EFFECT_VOCABULARY_LEAVES)
 
 ForeignLanguage: enum {
-    Go
-    Java
-    DotNet
-    Fortran
-    Cobol
-    Tcl
-    Lua
-    Ada
-    Pascal
-    Dart
-    PowerShell
-    Perl
-    Ruby
-    Php
-    R
-    Com
-    C
-    Cpp
-    Asm
-    Py
-    Octave
-    Rust
-    JS
-    Swift
+    Go,
+    Java,
+    DotNet,
+    Fortran,
+    Cobol,
+    Tcl,
+    Lua,
+    Ada,
+    Pascal,
+    Dart,
+    PowerShell,
+    Perl,
+    Ruby,
+    Php,
+    R,
+    Com,
+    C,
+    Cpp,
+    Asm,
+    Py,
+    Octave,
+    Rust,
+    JS,
+    Swift,
 
     // Every language in declaration order.
     all: fn() -> [ForeignLanguage] Never! {
@@ -126,7 +126,7 @@ pkg_foreign_language_problem: fn(text: String, named: [String], leaves: [String]
             next
         }
         if inside && (line == "}}" || line.trim() == "") -> break
-        if inside -> cases.push(line.trim())
+        if inside -> cases.push(line.trim().removesuffix(","))
     }
     problem: pkg_foreign_language_difference("the cases of ForeignLanguage", cases, declared)
     if problem != "" -> return problem

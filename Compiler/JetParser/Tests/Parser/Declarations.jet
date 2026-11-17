@@ -14,10 +14,10 @@ marker_test_decl: fn(source: String) -> MarkerDecl {
 #Test("a_marker_struct_reads_its_fields_and_settings") {
     program: parser_test_program(
         `Inline: struct {
-    mode: InlineMode
+    mode: InlineMode,
 
     impl Marker {
-        sites: [.Function, .Method, .Constant]
+        sites: [.Function, .Method, .Constant],
     }
 }
 run: fn() {}
@@ -55,8 +55,8 @@ run: fn() {}
     empty: marker_test_decl(
         `Empty: struct {
     impl Marker {
-        sites: []
-        repeatable: false
+        sites: [],
+        repeatable: false,
     }
 }
 run: fn() {}
@@ -70,11 +70,11 @@ run: fn() {}
     many: marker_test_decl(
         `Many: struct {
     impl Marker {
-        sites: [.Type, .Field]
-        repeatable: true
-        inherits: false
-        scopes: [.Type, .Field]
-        resolution: .Merge
+        sites: [.Type, .Field],
+        repeatable: true,
+        inherits: false,
+        scopes: [.Type, .Field],
+        resolution: .Merge,
     }
 }
 run: fn() {}
@@ -97,8 +97,8 @@ run: fn() {}
         `#FX(!Net, !Log)
 Audited: struct {
     impl Marker {
-        sites: [.TypeUse]
-        from: [Net, store.read]
+        sites: [.TypeUse],
+        from: [Net, store.read],
         timing: .Fixed
     }
 }
@@ -145,9 +145,9 @@ run: fn() {}
     program: parser_test_program(
         `Exactness: struct {
     impl Fact {
-        holds: .Value
-        safe: .Gain
-        gates: [approx, raw]
+        holds: .Value,
+        safe: .Gain,
+        gates: [approx, raw],
     }
 }
 run: fn() {}
@@ -169,11 +169,11 @@ run: fn() {}
 #Test("fact_plane_struct_formats_stably") {
     source: `TypeNominal: struct {
     impl Fact {
-        name: "Type.Nominal"
-        holds: .Value
-        safe: .Gain
-        gates: []
-        identity: true
+        name: "Type.Nominal",
+        holds: .Value,
+        safe: .Gain,
+        gates: [],
+        identity: true,
     }
 }
 
@@ -185,7 +185,7 @@ run: fn() {}
 #Test("fact_plane_struct_refuses_other_members_and_a_second_block") {
     members: parser_test_errors(
         `Flow: struct {
-    level: Int
+    level: Int,
     impl Fact {
         holds: .Value
     }
@@ -230,9 +230,9 @@ run: fn() {}
     }
     named: parser_test_result(
         `Label: struct {
-    tag: String
-    effect: Int
-    derive: Bool
+    tag: String,
+    effect: Int,
+    derive: Bool,
 }
 describe: fn(tag: String, effect: Int, derive: Bool) -> String {
     marker: Label{tag: tag, effect: effect, derive: derive}
@@ -282,13 +282,13 @@ run: fn() {}
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
     decl: marker_test_decl(
         `Pre: struct {
-    condition: String
-    message: String{"failed"}
-    tags: [String]
+    condition: String,
+    message: String{"failed"},
+    tags: [String],
 
     impl Marker {
-        sites: [.Function, .Method]
-        repeatable: true
+        sites: [.Function, .Method],
+        repeatable: true,
     }
 }
 run: fn() {}
@@ -310,7 +310,7 @@ run: fn() {}
     group: marker_test_decl(
         `Fast: struct {
     impl Marker {
-        group: #[Inline(.Always), Scalar]
+        group: #[Inline(.Always), Scalar],
     }
 }
 run: fn() {}
@@ -321,7 +321,7 @@ run: fn() {}
     template: marker_test_decl(
         `Logged: struct {
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
 
         expand: fn(self, target: Target) {
             print("logged")
@@ -338,7 +338,7 @@ run: fn() {}
     diagnostics: parser_test_errors(
         `Bad: struct {
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
         render: fn(self) {}
     }
 }
@@ -357,9 +357,9 @@ run: fn() {}
     program: parser_test_program(
         `Traced: struct {
     impl Marker {
-        sites: [.Function]
-        sites: [.Method]
-        colour: .Red
+        sites: [.Function],
+        sites: [.Method],
+        colour: .Red,
     }
 }
 run: fn() {}
@@ -379,7 +379,7 @@ run: fn() {}
     program: parser_test_program(
         `Pair: struct {
     impl Marker {
-        group: #[Inline, Scalar]
+        group: #[Inline, Scalar],
     }
 }
 run: fn() {}
@@ -393,7 +393,7 @@ run: fn() {}
     program: parser_test_program(
         `Door: struct {
     state { Open, Closed }
-    value: Int
+    value: Int,
 }
 run: fn() {}
 `,
@@ -414,7 +414,7 @@ run: fn() {}
         Cancelled
         Open: Draft | Confirmed
     }
-    id: Int
+    id: Int,
 }
 run: fn() {}
 `
@@ -450,9 +450,9 @@ run: fn() {}
 
 #Test("enum_body_owns_one_state_list") {
     source: `Door: enum {
-    Shut
-    Open
-    Locked(code: Int)
+    Shut,
+    Open,
+    Locked(code: Int),
     state {
         Shut -> Open, Locked
         Open -> Shut
@@ -585,7 +585,7 @@ run: fn() {}
 
 #Test("trait_blocks_in_a_type_body_read_dotted_using_and_operator_heads") {
     source: `Meters: struct {
-    v: Int
+    v: Int,
 
     impl Literal.Int {
         #run from_literal: fn(value: Int) -> Meters { Meters{v: value} }
@@ -621,11 +621,11 @@ run: fn() {}
 
 #Test("a_trait_takes_type_parameters_and_each_use_names_its_arguments") {
     source: `Holds: trait<T, U> {
-    first: fn(self) -> T
+    first: fn(self) -> T,
 }
 
 Scores: struct {
-    values: [Int]
+    values: [Int],
 
     impl Holds<Int, [String]> {
         first: fn(self) -> Int { self.values[0] }
@@ -711,14 +711,14 @@ inbody_test_apply: fn(source: String, edits: [TextEdit]) -> String {
 #Test("marker_lines_inside_a_body_are_the_markers_above_it") {
     above: `#[Layout(c), Deprecated("x"), Codable, !Debug]
 Pixel: struct {
-    r: Int
+    r: Int,
 }
 
 #[MustUse, Inline]
 area: fn() -> Int { 1 }
 `
     inside: `Pixel: struct {
-    r: Int
+    r: Int,
     #Layout: c
     #Deprecated: "x"
     #Codable: true
@@ -750,7 +750,7 @@ area: fn() -> Int {
 
 #Test("moving_a_marker_set_above_and_back_inside_restores_the_body") {
     inside: `Pixel: struct {
-    r: Int
+    r: Int,
     #Layout: c
     #Codable: true
 }
@@ -765,7 +765,7 @@ area: fn() -> Int {
         moved,
         `#[Layout(c), Codable]
 Pixel: struct {
-    r: Int
+    r: Int,
 }
 
 #MustUse
@@ -782,7 +782,7 @@ area: fn() -> Int {
 #Test("markers_above_and_inside_are_e0942_with_a_move_either_way") {
     source: `#Codable
 Pixel: struct {
-    r: Int
+    r: Int,
     #Layout: c
 }
 `
@@ -792,7 +792,7 @@ Pixel: struct {
         inbody_test_apply(source, [TextEdit]{upward}),
         `#[Codable, Layout(c)]
 Pixel: struct {
-    r: Int
+    r: Int,
 }
 `,
     )
@@ -801,7 +801,7 @@ Pixel: struct {
     assert_eq(
         inbody_test_apply(source, alternatives),
         `Pixel: struct {
-    r: Int
+    r: Int,
     #Codable: true
     #Layout: c
 }
@@ -852,12 +852,12 @@ Pixel: struct {
     source: `Audit: struct {}
 
 impl Audit.Effect {
-    parent: Log.Audit
+    parent: Log.Audit,
 }
 
 Ledger: enum {
-    Read
-    Post
+    Read,
+    Post,
 }
 
 impl Ledger.Effect {
@@ -943,7 +943,7 @@ impl Audit.Effect {
 
 #Test("a_trait_derive_is_a_type_marker_whose_template_writes_the_impl") {
     source: `Describe: trait {
-    describe: fn(self) -> String
+    describe: fn(self) -> String,
 }
 
 impl Describe.Derive {

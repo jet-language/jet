@@ -9,11 +9,11 @@ use files: core.files
 // digest, and the stable metadata fingerprint (the two usage timestamps are
 // excluded; they may change without invalidating an activation).
 EnvironmentSelection: struct {
-    reference: String
-    name: String
-    version: String
-    output_hash: String
-    metadata: String
+    reference: String,
+    name: String,
+    version: String,
+    output_hash: String,
+    metadata: String,
 
     // The (reference, name, version, output) half used to pre-filter.
     base_key: fn(self) -> String Never! {
@@ -39,7 +39,7 @@ store_environment_entry_selection: fn(entry: StoreEntry) -> EnvironmentSelection
 // Selected entries keyed by their full selection; among duplicates the most
 // recently used (then greatest id) wins.
 EnvironmentEntryIndex: struct {
-    priv by_selection: [String:StoreEntry]
+    priv by_selection: [String:StoreEntry],
 
     from_entries: fn(entries: [StoreEntry]) -> EnvironmentEntryIndex Never! {
         index := EnvironmentEntryIndex{by_selection: [String:StoreEntry]{}}

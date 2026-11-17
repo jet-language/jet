@@ -31,20 +31,20 @@ ARROW_SURFACE_MARKDOWN_ROOTS: [String]{"Docs/", "Examples/"}
 ARROW_SURFACE_EXEMPT_LABELS: [String]{"retired", "Retired", "superseded", "Superseded", "historical", "Historical", "former", "Former", "Before", "before", "old spelling", "old form", "no longer", "not accepted", "rejected", "Rejected", "migration", "Migration", "teaching diagnostic", "Ada", "Rust", "JavaScript", "TypeScript"}
 
 ArrowSurfaceHit: struct {
-    offset: Int
-    spelling: String
+    offset: Int,
+    spelling: String,
 }
 
 ArrowSurfaceLine: struct {
-    line: Int
-    text: String
-    spelling: String
+    line: Int,
+    text: String,
+    spelling: String,
 }
 
 ArrowSurfaceFence: struct {
-    marker: Int
-    width: Int
-    rest: String
+    marker: Int,
+    width: Int,
+    rest: String,
 }
 
 arrow_surface_slice: fn(bytes: [U8], start: Int, end: Int) -> String {
@@ -428,7 +428,7 @@ arrow_surface_ui_subject_lines: fn(path: String) -> [Int] {
 #Test("arrow surface scan reads tokens, not text") {
     flagged: [String]{"f: fn() => Int {{ 1 }}", "f: fn() :> Int {{ 1 }}", "f: fn() =[IO]=> Int {{ 1 }}", "f: fn() :[IO]> Int {{ 1 }}", "f: fn() =[IO]> Int {{ 1 }}", "f: fn() Int ParseError! -[IO]> {{ 1 }}", "f: fn() (ParseError | IOError)! -[IO]> {{ 1 }}", "f: fn() [FieldError]! -[IO]> {{ 1 }}", "h: fn(Int) Int E!-[IO]>", "f: fn() {{ loop {{ ?break }} }}", "f: fn() {{ loop {{ ?return }} }}", "f: fn() {{ loop {{ ?next }} }}", "f: fn() {{ loop {{ break.outer }} }}", "f: fn() {{ loop {{ break @outer }} }}", "f: fn() {{ loop {{ next @outer }} }}", "g: take(a) (x) -> x", "g: take(a) -> a", "p: protocol {{\n    client -> server: Ping\n}}"}
     loop source in flagged -> assert(arrow_surface_source_hits(source).len() == 1, source)
-    lawful: [String]{"f: fn() -[IO]> Int {{ 1 }}", "f: fn() -> Int {{ 1 }}", "f: fn() -[IO]> Int ParseError! {{ 1 }}", "f: fn() -[IO]> (ParseError | IOError)! {{ 1 }}", "f: fn() -[IO]> [FieldError]! {{ 1 }}", "// f: fn() Int E! -[IO]>\nx: 1", "// f: fn() => Int\nx: 1", "s: \"a => b, :[IO]>\"", "f: fn() {{ loop {{ break(outer) }} }}", "f: fn() {{ loop {{ next(outer) }} }}", "n: next.x", "t: take(9.99)", "r: fn() {{ loop x in xs.take(2) -> print(x) }}", "v: <:a:> + 1", "c: a <=> b", "w: a >= b", "l: x = [1]", "p: protocol {{\n    client: Ping()\n}}"}
+    lawful: [String]{"f: fn() -[IO]> Int {{ 1 }}", "f: fn() -> Int {{ 1 }}", "f: fn() -[IO]> Int ParseError! {{ 1 }}", "f: fn() -[IO]> (ParseError | IOError)! {{ 1 }}", "f: fn() -[IO]> [FieldError]! {{ 1 }}", "// f: fn() Int E! -[IO]>\nx: 1", "// f: fn() => Int\nx: 1", "s: \"a => b, :[IO]>\"", "f: fn() {{ loop {{ break(outer) }} }}", "f: fn() {{ loop {{ next(outer) }} }}", "n: next.x", "t: take(9.99)", "r: fn() {{ loop x in xs.take(2) -> print(x) }}", "v: <:a:> + 1", "c: a <=> b", "w: a >= b", "l: x = [1]", "p: protocol {{\n    client: Ping(),\n}}"}
     loop source in lawful -> assert(arrow_surface_source_hits(source).is_empty(), source)
     assert_eq(arrow_surface_source_hits("s: \"{{f(fn() => 1)}}\"").len(), 1)
 }

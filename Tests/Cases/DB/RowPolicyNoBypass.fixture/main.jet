@@ -18,9 +18,9 @@ use {
 
 #Codable
 Note: struct {
-    id: Int
-    owner: auth.AccountID
-    text: String
+    id: Int,
+    owner: auth.AccountID,
+    text: String,
 }
 
 ann: fn() -> auth.AccountID { auth.AccountID.from_string("ann") }
@@ -29,14 +29,14 @@ eve: fn() -> auth.AccountID { auth.AccountID.from_string("eve") }
 
 #Error
 NoteError: enum {
-    Unopened
-    Read
+    Unopened,
+    Read,
 }
 
 // The store every path reads through. Each path opens the table from here
 // rather than capturing it, as a request handler or a job would.
 Notes: struct {
-    store: db.Store?
+    store: db.Store?,
 }
 
 NOTES: Shared{Notes{store: None}}
@@ -128,13 +128,13 @@ acting: fn() -> String {
 }
 
 Event: struct {
-    action: String
+    action: String,
 }
 
 #Error
 DeskError: enum {
-    Unreachable(String)
-    SignedOut
+    Unreachable(String),
+    SignedOut,
 }
 
 impl app.CallError -> DeskError {
@@ -147,7 +147,7 @@ impl app.CallError -> DeskError {
 }
 
 Desk: struct {
-    secret: String
+    secret: String,
 
     // Any caller asks whom its request acts for.
     #App.Public whoami: fn(self) -> String DeskError! { Ok(acting()) }

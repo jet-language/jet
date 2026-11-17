@@ -20,9 +20,9 @@ env_shell_control: fn(code: Int) -> String Never! { String.from_bytes([U8]{U8{co
 
 // The shells Jetpack can decorate. Anything else falls back to `bash`.
 ShellKind: enum {
-    Bash
-    Zsh
-    Fish
+    Bash,
+    Zsh,
+    Fish,
 
     binary: fn(self) -> String Never! {
         if self == {
@@ -94,10 +94,10 @@ ShellKind: enum {
 // `ShellEnv.enter` still gets the jetpack prompt. `env_vars` must be set on
 // the outer command; `cleanup` runs once the caller's blocking wait returns.
 BrandedShell: struct {
-    command_tail: [String]
-    env_vars: [{name: String, value: String}]
-    priv cleanup_file: String?
-    priv cleanup_dir: String?
+    command_tail: [String],
+    env_vars: [{name: String, value: String}],
+    priv cleanup_file: String?,
+    priv cleanup_dir: String?,
 
     cleanup: fn(self) -[FS]> {
         if self.cleanup_file == {
@@ -292,8 +292,8 @@ env_shell_fish_init: fn(label: String, path: PromptPathMode, strip: PromptStripM
 // The scratch files and directories one shell entry owns; closing removes
 // them, so a temporary shell leaves nothing behind.
 ShellScratch: struct {
-    scratch_files: [String]
-    scratch_dirs: [String]
+    scratch_files: [String],
+    scratch_dirs: [String],
 
     empty: fn() -> ShellScratch Never! {
         ShellScratch{scratch_files: [String]{}, scratch_dirs: [String]{}}

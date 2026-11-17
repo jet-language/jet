@@ -73,74 +73,74 @@ OUTPUT_LIMIT: 268435456
 // from this checkout ("" when written here), the text written, and the exit
 // codes `jet run` may end with.
 Program: struct {
-    name: String
-    file: String
-    copied: String
-    text: String
-    run_codes: [Int]
+    name: String,
+    file: String,
+    copied: String,
+    text: String,
+    run_codes: [Int],
 }
 
 // An arm: its name and the JET_TOOLCHAIN_ROOT it names ("" for built-in
 // Core).
 Arm: struct {
-    name: String
-    root: String
+    name: String,
+    root: String,
 }
 
 // One untraced run: wall (ns), user and sys (µs), own peak (KiB), major and
 // minor faults.
 Sample: struct {
-    wall_ns: Int
-    user_us: Int
-    sys_us: Int
-    peak_kib: Int
-    major: Int
-    minor: Int
+    wall_ns: Int,
+    user_us: Int,
+    sys_us: Int,
+    peak_kib: Int,
+    major: Int,
+    minor: Int,
 }
 
 Total: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 // One traced run: each top-level phase's CPU (ns, in first order) and the
 // user code's CPU (ns).
 Phases: struct {
-    phases: [Total]
-    user_code_ns: Int
+    phases: [Total],
+    user_code_ns: Int,
 }
 
 // One row of the A/B: the arm, program and command, and each jet's runs
 // (index 0 the jet before, 1 the jet after).
 Row: struct {
-    arm: String
-    program: String
-    command: String
-    warm: [[Sample]]
-    cold: [[Sample]]
-    traced: [[Phases]]
-    counters: [[Total]]
+    arm: String,
+    program: String,
+    command: String,
+    warm: [[Sample]],
+    cold: [[Sample]],
+    traced: [[Phases]],
+    counters: [[Total]],
 }
 
 TraceArgs: struct {
-    value: Int?
-    cpu_ns: Int?
+    value: Int?,
+    cpu_ns: Int?,
 }
 
 TraceEvent: struct {
-    name: String
-    cat: String?
-    ph: String
-    tid: Int?
-    args: TraceArgs?
+    name: String,
+    cat: String?,
+    ph: String,
+    tid: Int?,
+    args: TraceArgs?,
 }
 
 // An open span of a traced run: its phase key, whether it is the user's,
 // and whether it or a span around it is.
 Open: struct {
-    key: String
-    own: Bool
-    under: Bool
+    key: String,
+    own: Bool,
+    under: Bool,
 }
 
 // The Core counters the receipt shows, in its order.

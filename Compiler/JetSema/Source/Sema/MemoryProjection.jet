@@ -3,33 +3,33 @@
 use jet_foundation.[Span, EffectRowEntry]
 
 SemaMemoryProjection: enum {
-    Proven
-    Violated(call_path: [String], operation: String)
-    OpenWorld(call_path: [String], reason: String)
+    Proven,
+    Violated(call_path: [String], operation: String),
+    OpenWorld(call_path: [String], reason: String),
 }
 
 SemaMemoryFactDeclaration: struct {
-    fact: String
-    roots: [String]
-    span: Span
-    source: String
-    provenance: String
+    fact: String,
+    roots: [String],
+    span: Span,
+    source: String,
+    provenance: String,
 }
 
 SemaMemoryProjectionRow: struct {
-    root: String
-    fact: String
-    projection: SemaMemoryProjection
+    root: String,
+    fact: String,
+    projection: SemaMemoryProjection,
 }
 
 SemaCheckedMemoryFacts: struct {
-    declarations: [SemaMemoryFactDeclaration]
-    projections: [SemaMemoryProjectionRow]
+    declarations: [SemaMemoryFactDeclaration],
+    projections: [SemaMemoryProjectionRow],
 }
 
 SemaMemoryProjectionFacts: struct {
-    declarations: [SemaMemoryFactDeclaration]
-    projections: [SemaMemoryProjectionRow]
+    declarations: [SemaMemoryFactDeclaration],
+    projections: [SemaMemoryProjectionRow],
 }
 
 sema_effect_memory_projection: fn(finding: SemaMemoryFinding) -> SemaMemoryProjection Never! {

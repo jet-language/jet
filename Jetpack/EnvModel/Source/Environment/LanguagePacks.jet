@@ -9,20 +9,20 @@ use {
 ENVMODEL_LANGUAGE_PLATFORMS: [String]{"aarch64-macos", "aarch64-linux", "x86_64-macos", "x86_64-linux"}
 
 LanguagePack: struct {
-    name: String{""}
-    packages: [String]{[String]{}}
-    venv_packages: [String]{[String]{}}
-    variables: [String:String]{[String:String]{}}
-    commands: [String:String]{[String:String]{}}
+    name: String{""},
+    packages: [String]{[String]{}},
+    venv_packages: [String]{[String]{}},
+    variables: [String:String]{[String:String]{}},
+    commands: [String:String]{[String:String]{}},
     // Execution authority for the pack. `native` means the pack is selected
     // for the host platform recorded in `platforms`.
-    host: String{""}
-    platforms: [String]{[String]{}}
+    host: String{""},
+    platforms: [String]{[String]{}},
     // Union of the licenses declared by the catalog entries in this pack.
-    license: String{""}
+    license: String{""},
     // Command names the pack promises to expose. A missing mapping is a
     // catalog error, never an empty PATH entry.
-    required_tools: [String]{[String]{}}
+    required_tools: [String]{[String]{}},
 
     // Stable identity for one catalog entry. Pack metadata is environment
     // policy, not presentation: variables and commands must invalidate trust
@@ -88,12 +88,12 @@ LanguagePack: struct {
 // into ordinary package refs; the typed selection remains in the plan for
 // trust, cache, and user-facing disclosure.
 LanguageSpec: struct {
-    name: String{""}
-    enable: Bool{false}
-    version: String?{None}
-    channel: String?{None}
-    venv: Bool{false}
-    extra_packages: [String]{[String]{}}
+    name: String{""},
+    enable: Bool{false},
+    version: String?{None},
+    channel: String?{None},
+    venv: Bool{false},
+    extra_packages: [String]{[String]{}},
 
     key: fn(self) -> String Never! { envmodel_language_key(self.name) }
 
@@ -112,15 +112,15 @@ LanguageSpec: struct {
 // selection preserves author facts; `included` and `omitted` make the package
 // projection explicit for trust, image, and diagnostics consumers.
 LanguageProjection: struct {
-    selection: LanguageSpec{LanguageSpec{}}
-    pack: LanguagePack{LanguagePack{}}
-    included: [String]{[String]{}}
-    omitted: [String]{[String]{}}
-    changed: [String]{[String]{}}
-    host: String{""}
-    platform: String{""}
-    license: String{""}
-    missing_tools: [String]{[String]{}}
+    selection: LanguageSpec{LanguageSpec{}},
+    pack: LanguagePack{LanguagePack{}},
+    included: [String]{[String]{}},
+    omitted: [String]{[String]{}},
+    changed: [String]{[String]{}},
+    host: String{""},
+    platform: String{""},
+    license: String{""},
+    missing_tools: [String]{[String]{}},
 
     fingerprint: fn(self) -> String Never! {
         "selection={self.selection.fingerprint()}\npack={self.pack.fingerprint()}included={self.included.join(",")}\nomitted={self.omitted.join(",")}\nchanged={self.changed.join(",")}\nhost={self.host}\nplatform={self.platform}\nlicense={self.license}\nmissing-tools={self.missing_tools.join(",")}\n"
@@ -128,16 +128,16 @@ LanguageProjection: struct {
 }
 
 LanguageExpansion: struct {
-    applied: [String]{[String]{}}
+    applied: [String]{[String]{}},
     // The exact catalog entries used by this expansion. Keeping these with the
     // derived package list makes the expansion the one runtime fact shared by
     // planning, trust, activation, and disclosure.
-    packs: [LanguagePack]{[LanguagePack]{}}
-    selections: [LanguageSpec]{[LanguageSpec]{}}
-    packages: [String]{[String]{}}
-    variables: [String:String]{[String:String]{}}
-    commands: [String:String]{[String:String]{}}
-    projections: [LanguageProjection]{[LanguageProjection]{}}
+    packs: [LanguagePack]{[LanguagePack]{}},
+    selections: [LanguageSpec]{[LanguageSpec]{}},
+    packages: [String]{[String]{}},
+    variables: [String:String]{[String:String]{}},
+    commands: [String:String]{[String:String]{}},
+    projections: [LanguageProjection]{[LanguageProjection]{}},
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-language-expansion-v1\n"}
@@ -161,7 +161,7 @@ LanguageExpansion: struct {
 }
 
 LanguagePackCatalog: struct {
-    priv packs: [String:LanguagePack]{[String:LanguagePack]{}}
+    priv packs: [String:LanguagePack]{[String:LanguagePack]{}},
 
     empty: fn() -> LanguagePackCatalog Never! { LanguagePackCatalog{} }
 
@@ -390,10 +390,10 @@ envmodel_core_language_packs: fn() -> [LanguagePack] Never! {
 
 // One extended catalog row: every tool is both a command and a required tool.
 LanguageCatalogRow: struct {
-    name: String
-    packages: [String]
-    tools: [String]
-    license: String
+    name: String,
+    packages: [String],
+    tools: [String],
+    license: String,
 
     pack: fn(self) -> LanguagePack Never! {
         commands := [String:String]{}

@@ -32,7 +32,7 @@ MARKER: Regex{"^#[A-Z][A-Za-z0-9]*$"}
 
 #Error
 VocabularyRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> VocabularyRowsError Never! {
@@ -40,20 +40,20 @@ rows_fail: fn(message: String) -> VocabularyRowsError Never! {
 }
 
 VocabularyVariant: struct {
-    name: String
-    payload: String
+    name: String,
+    payload: String,
 }
 
 VocabularyType: struct {
-    name: String
-    markers: String
-    variants: [VocabularyVariant]
+    name: String,
+    markers: String,
+    variants: [VocabularyVariant],
 }
 
 // One package's rows file and the file generated from it.
 VocabularyFile: struct {
-    rows_path: String
-    output_path: String
+    rows_path: String,
+    output_path: String,
 }
 
 // The vocabulary types `text` (a Vocabulary.tsv read from `path`) declares.
@@ -120,7 +120,7 @@ render_vocabulary: fn(rows_path: String, types: [VocabularyType]) -> String Neve
             loop marker in vocabulary.markers.split(" ").to_list() -> out = "{out}{marker}\n"
         }
         out = "{out}{vocabulary.name}: enum {{\n"
-        loop variant in vocabulary.variants -> out = "{out}    {variant.name}{variant.payload}\n"
+        loop variant in vocabulary.variants -> out = "{out}    {variant.name}{variant.payload},\n"
         out = "{out}}}\n"
     }
     out
@@ -186,8 +186,8 @@ vocabulary_rows_error: fn(text: String) -> String Never! {
     assert_eq(types.len(), 2)
     rendered: render_vocabulary("t.tsv", types)
     assert(rendered.starts_with(GENERATED_BY))
-    assert(rendered.contains("\nPhase: enum {{\n    Ready\n    Paused\n}}\n"))
-    assert(rendered.contains("\n#Error\nFault: enum {{\n    Timeout(after_ms: Int)\n}}\n"))
+    assert(rendered.contains("\nPhase: enum {{\n    Ready,\n    Paused,\n}}\n"))
+    assert(rendered.contains("\n#Error\nFault: enum {{\n    Timeout(after_ms: Int),\n}}\n"))
     assert(vocabulary_rows_error("Phase\tReady\n").contains("3 tab-separated columns"))
     assert(vocabulary_rows_error("phase\t\tReady\n").contains("not a type name"))
     assert(vocabulary_rows_error("Phase\t\tReady\nPhase\t\tReady\n").contains("declared twice"))

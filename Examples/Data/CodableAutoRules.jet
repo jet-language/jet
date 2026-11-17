@@ -6,27 +6,27 @@
 use core.encoding.json
 
 Level: enum {
-    Low
-    High
+    Low,
+    High,
 }
 
 Step: enum {
-    Wait
-    Pause(Int)
-    Move(dx: Int, dy: Int)
+    Wait,
+    Pause(Int),
+    Move(dx: Int, dy: Int),
 }
 
 Task: struct {
-    name: String
-    level: Level
-    steps: [Step]
-    note: String?
+    name: String,
+    level: Level,
+    steps: [Step],
+    note: String?,
 }
 
 // Opted out of the generated codec; its hand-written Encode is its only one.
 #!Codable
 Tag: struct {
-    label: String
+    label: String,
 
     impl Encode {
         encode: fn(self) -> Dyn { Dyn.Text("#{self.label}") }
@@ -35,14 +35,14 @@ Tag: struct {
 
 // Encode-only: `Tag` has no Decode, so `Labelled` derives Encode alone.
 Labelled: struct {
-    #Rename("tag") label: Tag
-    id: Int
+    #Rename("tag") label: Tag,
+    id: Int,
 }
 
 // A function field has no wire form: `Hook` is simply not Codable.
 Hook: struct {
-    name: String
-    apply: fn(Int) -> Int
+    name: String,
+    apply: fn(Int) -> Int,
 }
 
 run: fn() [FieldError]! {

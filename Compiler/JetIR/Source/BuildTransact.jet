@@ -34,35 +34,35 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_ST
 // with only `depth_site`, the site word its count lives under
 // (BuildDepth.jet): an early exit leaves them.
 IRTxFrame: struct {
-    handle: Int
-    stm: Int
-    snapshots: [IRTxSnapshot]
-    loops: Int
-    shield: Bool
-    deadline: Int
-    sentry: Int{-1}
-    sentry_frame: Int{-1}
+    handle: Int,
+    stm: Int,
+    snapshots: [IRTxSnapshot],
+    loops: Int,
+    shield: Bool,
+    deadline: Int,
+    sentry: Int{-1},
+    sentry_frame: Int{-1},
     // The scope is an `#Unsafe` gate's body, whose file the sentry report
     // names: raw accesses built inside it pass their own site.
-    gate: Bool{false}
-    terminal: Bool{false}
-    effect_scope: Int{-1}
-    depth_site: Int{-1}
-    values: Int{0}
-    allocator: Int{-1}
-    bindings: Int{0}
+    gate: Bool{false},
+    terminal: Bool{false},
+    effect_scope: Int{-1},
+    depth_site: Int{-1},
+    values: Int{0},
+    allocator: Int{-1},
+    bindings: Int{0},
 }
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
 // exit, through `restore` of its Rollback implementation `rollback` when it
 // has one, else as a copy.
 IRTxSnapshot: struct {
-    local: TLocal
-    ty: Type
-    saved: TLocal
-    saved_ty: Type
-    rollback: Type?
-    restore: TMethodRef?
+    local: TLocal,
+    ty: Type,
+    saved: TLocal,
+    saved_ty: Type,
+    rollback: Type?,
+    restore: TMethodRef?,
 }
 
 ir_transaction_row: fn(m: &IRModule) -> Int Never! {

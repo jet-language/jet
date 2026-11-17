@@ -130,8 +130,8 @@ ir_opt_inverse: fn(op: IROp) -> IROp Never! {
 // The matching End of every opener and the Else of every If (-1 when none),
 // by instruction index, over the current (Nop-holding) instruction list.
 OptNesting: struct {
-    end: [Int]
-    els: [Int]
+    end: [Int],
+    els: [Int],
 }
 
 ir_opt_nesting: fn(f: IRFunction) -> OptNesting Never! {
@@ -225,8 +225,8 @@ ir_opt_set_copy: fn(f: &IRFunction, at: Int, source: Int) Never! {
 // The ids of the String routes the fold reads (-2 when the module calls
 // none).
 OptTextRoutes: struct {
-    clone: Int
-    scalars: Int
+    clone: Int,
+    scalars: Int,
 }
 
 // The Unicode scalars of UTF-8 text `bytes`: its bytes less its
@@ -688,16 +688,16 @@ ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, ex
 // per instruction the If of the short circuit whose Copy it is (-1 for
 // none), and the constructs open at it (an Else or End counted closed).
 OptShortPlan: struct {
-    nesting: OptNesting
-    seeds: [Int]
-    open: [Int]
+    nesting: OptNesting,
+    seeds: [Int],
+    open: [Int],
 }
 
 // A moved range: the constructs open at its first instruction, and how many
 // constructs deeper each Br leaving it lands.
 OptShift: struct {
-    open: Int
-    shift: Int
+    open: Int,
+    shift: Int,
 }
 
 // The Copy writing r before If `at` (r = copy c1), or -1 when `at` does not
@@ -763,12 +763,12 @@ ir_opt_short_circuit_at: fn(f: IRFunction, facts: OptFacts, nesting: OptNesting,
 // The instruction rows of a function being rebuilt (Ir_opt_compact
 // recomputes the structural indexes).
 OptRows: struct {
-    op: [IROp]
-    dst: [Int]
-    a: [Int]
-    b: [Int]
-    c: [Int]
-    line: [Int]
+    op: [IROp],
+    dst: [Int],
+    a: [Int],
+    b: [Int],
+    c: [Int],
+    line: [Int],
 }
 
 ir_opt_row: fn(rows: &OptRows, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {

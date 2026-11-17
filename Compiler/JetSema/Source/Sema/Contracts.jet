@@ -50,24 +50,24 @@ use jet_foundation.[
 ]
 
 SemaContractDeclaration: struct {
-    complete: Bool
-    post: [TContract]
+    complete: Bool,
+    post: [TContract],
     // The checked `#Pre` clauses; only the solver reads them (FnBody.pre).
-    pre: [TContract]{[TContract]{}}
-    result: TContractResult
+    pre: [TContract]{[TContract]{}},
+    result: TContractResult,
 }
 
 SemaContractCall: struct {
-    bindings: [TStmt]
-    contracts: [TContract]
+    bindings: [TStmt],
+    contracts: [TContract],
 }
 
 // The call a `#Post` decided while building computes again: the callee as
 // the call wrote it, called over the pinned arguments, and the type that
 // call checked to. Only a direct call by name has one.
 SemaContractRecall: struct {
-    call: Call
-    result_type: Type
+    call: Call,
+    result_type: Type,
 }
 
 sema_contract_success_type: fn(return_type: Type?) -> Type Never! {
@@ -884,11 +884,11 @@ sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program
 // `root_receiver`: the first parameter is `#Root`, so the callee also takes
 // the receiver-first spelling (RootCalls.jet).
 SemaContractCalleeFacts: struct {
-    call_checks: Int
-    is_pure: Bool
-    root_receiver: Bool
-    param_names: [String]
-    param_view_from: [[String]?]
+    call_checks: Int,
+    is_pure: Bool,
+    root_receiver: Bool,
+    param_names: [String],
+    param_view_from: [[String]?],
 }
 
 sema_contract_callee_facts: fn(func: Func) -> SemaContractCalleeFacts Never! {

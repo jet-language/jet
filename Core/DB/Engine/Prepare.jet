@@ -66,12 +66,12 @@ SCHEMA_TABLE_SQL: "CREATE TABLE x(type text,name text,tbl_name text,rootpage int
 // struct InitData (sqliteInt.h): the state sqlite3InitCallback shares with
 // sqlite3InitOne and OP_ParseSchema. err is *pzErrMsg.
 InitData: struct {
-    i_db: Int
-    rc: Int
-    err: [U8]?
-    init_flags: Int
-    n_init_row: Int
-    mx_page: Int
+    i_db: Int,
+    rc: Int,
+    err: [U8]?,
+    init_flags: Int,
+    n_init_row: Int,
+    mx_page: Int,
 }
 
 init_data_new: fn(i_db: Int, init_flags: Int) -> InitData Never! {
@@ -81,16 +81,16 @@ init_data_new: fn(i_db: Int, init_flags: Int) -> InitData Never! {
 // The Vdbe sqlite3Reprepare recompiles, as sqlite3Prepare's pReprepare
 // reads it: whether it is an EXPLAIN, and its bound values.
 PrepareFrom: struct {
-    explain: Int
-    vars: [base.Mem]
+    explain: Int,
+    vars: [base.Mem],
 }
 
 // sqlite3Prepare's results: the result code, the statement slot (-1 for
 // none) and the byte offset of the unparsed rest of the SQL (*pzTail).
 Prepared: struct {
-    rc: Int
-    stmt: Int
-    tail: Int
+    rc: Int,
+    stmt: Int,
+    tail: Int,
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ finish_coding: fn(p: &cg.Parse, a: &ast.AST) -[DB]> Never! {
 // The grammar's builder.
 
 EngineBuilder: struct {
-    p: cg.Parse
+    p: cg.Parse,
 
     impl parse.SQLBuilder {
         finish_coding: fn(&self, a: &ast.AST) -[DB]> Never! { finish_coding(self.p, a) }
@@ -429,7 +429,7 @@ alter_table: fn(p: &cg.Parse, a: &ast.AST, src: Int) -[DB]> Never! {
 // The Parse's Gen.
 
 EngineGen: struct {
-    unused: Int
+    unused: Int,
 
     impl cg.Gen {
         // sqlite3ReadSchema (prepare.c).
@@ -577,7 +577,7 @@ EngineGen: struct {
 // The VDBE's Host.
 
 EngineHost: struct {
-    unused: Int
+    unused: Int,
 
     impl aux.Host {
         // No virtual table module can be registered in this build, so no

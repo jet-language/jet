@@ -9,10 +9,10 @@
 // One step of a build recipe. Names are internal; the user-facing spellings
 // are the finite `Recipe.build(steps: […])` forms.
 BuildStep: enum {
-    Fetch(url: String, sha256: String)
-    Exec(tool: String, args: [String])
-    Install(src: String, dest: String)
-    InstallTree(src: String, dest: String)
+    Fetch(url: String, sha256: String),
+    Exec(tool: String, args: [String]),
+    Install(src: String, dest: String),
+    InstallTree(src: String, dest: String),
 
     // A locked network fetch. `sha256` must be present; an empty hash is
     // ungranted ambient network (`E1236`).
@@ -61,7 +61,7 @@ BuildStep: enum {
 
 // A build recipe over a staged source tree.
 BuildRecipe: struct {
-    steps: [BuildStep]
+    steps: [BuildStep],
 
     // A stable content hash of the recipe, used by the trust gate.
     recipe_hash: fn(self) -> String Never! {
@@ -123,7 +123,7 @@ BuildRecipe: struct {
 // Length-frames every field so delimiters, newlines, and empty values cannot
 // make two different declared plans share one identity.
 RecipeCanonicalWriter: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     new: fn(domain: String) -> RecipeCanonicalWriter Never! {
         writer := RecipeCanonicalWriter{bytes: [U8]{}}

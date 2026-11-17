@@ -115,9 +115,9 @@ test: fn(t: Test) -> Int {
 // The jet under test, the checkout, and the `name@version` its builds stamp
 // on their identities (as the bootstrap chain does), or a failing `setup` row.
 SuiteSetup: struct {
-    jet: String
-    checkout: String
-    version: String
+    jet: String,
+    checkout: String,
+    version: String,
 }
 
 suite_setup: fn(rows: TestRows) -> SuiteSetup? {
@@ -386,11 +386,11 @@ pool_runs: fn(setup: SuiteSetup, suite: String, paths: [String], specs: [Process
 // `build` its `jet build`, which package_suite_rows runs in the package
 // batch. A non-empty `error` leaves no unit to run.
 JetpackPrep: struct {
-    assembled: String
-    map: JetpackMap
-    engine: String
-    build: ProcessSpec?
-    error: String
+    assembled: String,
+    map: JetpackMap,
+    engine: String,
+    build: ProcessSpec?,
+    error: String,
 }
 
 // `jet Jetpack/Bootstrap/Assemble.jet` in `aot` mode and, without
@@ -486,15 +486,15 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
 // Whether the engine unit ran to its summary, its source files, from the
 // checkout, and the claims its run reported.
 JetpackUnit: struct {
-    ran: Bool
-    files: [String]
-    claims: [String]
+    ran: Bool,
+    files: [String],
+    claims: [String],
 }
 
 // One claim of the engine unit and its tests.list section.
 JetpackClaim: struct {
-    name: String
-    section: String
+    name: String,
+    section: String,
 }
 
 // A claim's row id, `Jetpack/<section>: <claim>`.
@@ -516,8 +516,8 @@ jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String
 // The unit's claims in order with their sections, and the source files it
 // joins, from its source map.
 JetpackMap: struct {
-    claims: [JetpackClaim]
-    files: [String]
+    claims: [JetpackClaim],
+    files: [String],
 }
 
 jetpack_map: fn(path: String) -> JetpackMap Err! {
@@ -648,9 +648,9 @@ COVERAGE_ROW: "#Test coverage"
 // from the checkout, their names, and whether it is a script (a `#!` file),
 // whose #Tests only `jet test <script>` runs.
 TestSource: struct {
-    path: String
-    names: [String]
-    script: Bool
+    path: String,
+    names: [String],
+    script: Bool,
 }
 
 // Every TestSource outside test data and TEST_INPUT_TREES. The trees are
@@ -689,9 +689,9 @@ jet_sources: fn(checkout: String, relative: String, found: &[String]) Err! {
 // What the packages suite ran: the names each run (a package or a script)
 // reported, the runs whose own row failed, and the engine unit.
 TestRuns: struct {
-    ran: [String:[String]]
-    broke: [String]
-    unit: JetpackUnit
+    ran: [String:[String]],
+    broke: [String],
+    unit: JetpackUnit,
 }
 
 // The row COVERAGE_ROW: every TestSource belongs to a run a suite makes, and
@@ -877,9 +877,9 @@ CENSUS_COUNTER: "JET_PHASE_COUNTERS {{\"phase\":\"ir.opt\",\"marked_calls\":"
 // One census build: the row of `ids` it counts toward, the argument that
 // names the file it builds, and its arguments.
 CensusRun: struct {
-    row: Int
-    file: Int
-    args: [String]
+    row: Int,
+    file: Int,
+    args: [String],
 }
 
 inline_census_rows: fn(rows: TestRows) {
@@ -1028,24 +1028,24 @@ FUZZ_MEMORY: 2147483648
 // file its first-level run is pinned to ("" for none) and that file's text,
 // and whether its check row is selected.
 FuzzProgram: struct {
-    id: String
-    name: String
-    cwd: String
-    refused: Bool
-    runs: Bool
-    pin: String
-    pinned: String
-    checked: Bool
+    id: String,
+    name: String,
+    cwd: String,
+    refused: Bool,
+    runs: Bool,
+    pin: String,
+    pinned: String,
+    checked: Bool,
 }
 
 // How one run of a program ended: why it failed outright ("" when it did
 // not crash, hang or fail to start), its exit code, its stdout, and the
 // first error line of its stderr.
 FuzzOutcome: struct {
-    failure: String
-    code: Int
-    output: String
-    errors: String
+    failure: String,
+    code: Int,
+    output: String,
+    errors: String,
 }
 
 fuzz_rows: fn(rows: TestRows) {

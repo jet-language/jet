@@ -136,7 +136,7 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
     loop line in source.split("\n") {
         if line == "    impl Diagnostic {{" -> count += 1
         if !line.starts_with("        stage: [") -> next
-        stage: line.remove_prefix("        stage: [").remove_suffix("]").replace(", .", "/").remove_prefix(".").lower()
+        stage: line.remove_prefix("        stage: [").remove_suffix("],").replace(", .", "/").remove_prefix(".").lower()
         if !diagnostic_stage_is_registered(stage) -> unknown.push("Prelude impl {count}: `{stage}`")
     }
     assert(count > 100, "the Prelude diagnostic impls must be readable")
@@ -427,7 +427,7 @@ registry_coverage_block_names: fn(text: String, head: String) -> [String] {
             next
         }
         if line == "}}" -> return names
-        entry: line.trim()
+        entry: line.trim().removesuffix(",")
         if entry.is_empty() || entry.starts_with("//") -> next
         name: entry.split(":").to_list()[0].split("(").to_list()[0]
         names.push("{name}")
@@ -441,7 +441,7 @@ registry_coverage_block_names: fn(text: String, head: String) -> [String] {
 #Test("the fact reader takes every Fact constant and every case of its law enums") {
     prelude: registry_coverage_files.read("Core/Prelude/Prelude.jet") ?? panic("read Core/Prelude/Prelude.jet: {err}")
     gates: loop name in registry_coverage_block_names(prelude, "Gate: enum {{") -> if name == "Marker" -> ".Marker(Unsafe)" else -> ".{name}"
-    plane: "Probe: struct {{\n    impl Fact {{\n        name: \"Probe.Plane\"\n        holds: .Value\n        safe: .Gain\n        gates: [{gates.join(", ")}]\n        identity: true\n        proved_by: \"probe\"\n    }}\n}}\n"
+    plane: "Probe: struct {{\n    impl Fact {{\n        name: \"Probe.Plane\",\n        holds: .Value,\n        safe: .Gain,\n        gates: [{gates.join(", ")}],\n        identity: true,\n        proved_by: \"probe\",\n    }}\n}}\n"
     loop constant in registry_coverage_block_names(prelude, "Fact: trait {{") {
         assert(plane.contains("\n        {constant}: "), "the probe plane sets no `{constant}`")
     }

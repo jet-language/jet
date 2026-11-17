@@ -24,7 +24,7 @@
 use {
     fl_files: core.files
     jet_cli.[jet_cli_fmt_ordinary]
-    jet_driver.[jet_driver_inline_package]
+    jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[name_text]
     jet_lexer.[
         STRING_PART_BYTE,
@@ -128,29 +128,29 @@ FL_PAYLOAD_FILE: "pkg.jet"
 // One lexed token, detached from its source's name table. `own_line` marks a
 // comment that starts its source line.
 FmtTok: struct {
-    kind: Int
-    text: String
-    parts: [FmtPart]
-    own_line: Bool{false}
+    kind: Int,
+    text: String,
+    parts: [FmtPart],
+    own_line: Bool{false},
 }
 
 FmtPart: struct {
-    kind: Int
-    text: String
-    byte: Int
-    tokens: [FmtTok]
+    kind: Int,
+    text: String,
+    byte: Int,
+    tokens: [FmtTok],
 }
 
 FmtGroup: struct {
-    category: Int
-    tokens: [FmtTok]
+    category: Int,
+    tokens: [FmtTok],
 }
 
 // A rewrite that consumed tokens on both sides, or `ok: false`.
 FmtStep: struct {
-    ok: Bool
-    original: Int
-    formatted: Int
+    ok: Bool,
+    original: Int,
+    formatted: Int,
 }
 
 fl_no_step: fn() -> FmtStep { FmtStep{ok: false, original: 0, formatted: 0} }
@@ -1632,14 +1632,21 @@ fl_parse_invalid: fn(src: String) -> Bool {
     if lexed.diagnostics.len() > 0 -> return true
     // fmt refuses a malformed inline `package:` carrier (E1360-E1362) before it parses.
     if jet_driver_inline_package(src).error != None -> return true
-    !jfmt_check_parse_accepts(parse_source(src.bytes()).diagnostics)
+    !jfmt_check_parse_accepts(parse_source(fl_program_source(src).bytes()).diagnostics)
+}
+
+// What fmt parses of a file: its source with an inline `package:` carrier
+// masked away (jet_cli_fmt_ordinary), since the carrier is a manifest, not
+// program source.
+fl_program_source: fn(src: String) -> String {
+    jet_driver_mask_inline_package(src, jet_driver_inline_package(src))
 }
 
 // A fixture whose parse recovers through a teaching diagnostic (or E0081)
 // spells a retired or invalid form on purpose; fmt rewrites it to canon.
 fl_teaching_codes: fn(src: String) -> [String] {
     codes := [String]{}
-    loop diagnostic in parse_source(src.bytes()).diagnostics {
+    loop diagnostic in parse_source(fl_program_source(src).bytes()).diagnostics {
         if jfmt_is_teaching_parse_diag(diagnostic.code) || diagnostic.code == FL_CODE_BODYLESS_FN {
             codes.push(diagnostic.code.copy())
         }
@@ -1804,13 +1811,13 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
 // head on the owner, where `Tree.Node<Int>{ … }` would read as a typed literal.
 #Test("fmt_keeps_declaration_privacy_and_owner_type_arguments") {
     cases: [[String]]{
-        {"priv Hidden: struct {{\n    impl Marker {{\n        sites: [.Function]\n    }}\n}}\n", "priv Hidden: struct"},
-        {"priv Point: struct {{\n    x: Int\n}}\n", "priv Point: struct"},
-        {"priv Mode: enum {{\n    On\n    Off\n}}\n", "priv Mode: enum"},
-        {"priv Shape: trait {{\n    area: fn(self) -> Int\n}}\n", "priv Shape: trait"},
+        {"priv Hidden: struct {{\n    impl Marker {{\n        sites: [.Function],\n    }}\n}}\n", "priv Hidden: struct"},
+        {"priv Point: struct {{\n    x: Int,\n}}\n", "priv Point: struct"},
+        {"priv Mode: enum {{\n    On,\n    Off,\n}}\n", "priv Mode: enum"},
+        {"priv Shape: trait {{\n    area: fn(self) -> Int,\n}}\n", "priv Shape: trait"},
         {"priv Meters: distinct Int\n", "priv Meters: distinct Int"},
         {"priv LIMIT: 3\n", "priv LIMIT: 3"},
-        {"Tree: enum<T> {{\n    Leaf\n    Node(value: T, left: Tree<T>, right: Tree<T>)\n}}\n\nleaf: fn() -> Tree<Int> {{\n    Tree<Int>.Node{{value: 1, left: Tree<Int>.Leaf, right: Tree<Int>.Leaf}}\n}}\n", "Tree<Int>.Node{{"},
+        {"Tree: enum<T> {{\n    Leaf,\n    Node(value: T, left: Tree<T>, right: Tree<T>),\n}}\n\nleaf: fn() -> Tree<Int> {{\n    Tree<Int>.Node{{value: 1, left: Tree<Int>.Leaf, right: Tree<Int>.Leaf}}\n}}\n", "Tree<Int>.Node{{"},
     }
     loop row in cases {
         result: jet_cli_fmt_ordinary(row[0], false, false)
@@ -1975,8 +1982,6 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/Effects/fx_cap_memory_bound_is_only_a_denial.jet",
         "Tests/UI/Effects/fx_cap_scope_argument_is_plain_text.jet",
         "Tests/UI/Generics/generic_call_diagnostics_cover_arity_and_bound_failures_4.jet",
-        "Tests/UI/InlinePackageCycle/run.jet",
-        "Tests/UI/InlinePackageStaleLock/run.jet",
         "Tests/UI/MarkerInbody/complex_value_needs_parentheses.jet",
         "Tests/UI/MarkerInbody/false_without_signed_form.jet",
         "Tests/UI/MarkerInbody/mixing_above_and_inside.jet",
@@ -2002,6 +2007,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "Tests/UI/binpat_rest_not_final.jet",
         "Tests/UI/binpat_take_pattern_bad_width.jet",
         "Tests/UI/bit_xor_update_in_condition.jet",
+        "Tests/UI/brace_layout_missing_commas_are_each_reported.jet",
         "Tests/UI/caret_is_not_power.jet",
         "Tests/UI/caret_is_not_power_update.jet",
         "Tests/UI/cffi_e3206_reserved_segment.jet",

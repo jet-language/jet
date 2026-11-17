@@ -49,30 +49,30 @@ use jet_foundation.[
 JET_FAILURE_UNION_JOIN_ROUND_CAP: 64
 
 SemaFailureCaseField: struct {
-    label: String?
-    ty: Type
+    label: String?,
+    ty: Type,
     // The argument's span, where a check against another payload reports.
-    span: Span
+    span: Span,
 }
 
 // One `Err(.Case(payload))` written where the default `Err`
 // route is expected. The payload types come from the checked arguments.
 SemaFailureCase: struct {
-    name: String
-    payload: [SemaFailureCaseField]
-    span: Span
+    name: String,
+    payload: [SemaFailureCaseField],
+    span: Span,
 }
 
 SemaFailureUnionRow: struct {
-    key: String
-    name: String
-    module_index: Int
-    members: [Type]
-    general: Bool
-    edges: [String]
-    cases: [SemaFailureCase]
+    key: String,
+    name: String,
+    module_index: Int,
+    members: [Type],
+    general: Bool,
+    edges: [String],
+    cases: [SemaFailureCase],
     // Position of the function's registry row in its module's `functions`.
-    function_row: Int
+    function_row: Int,
 }
 
 // A case creation the mint already reported: a case of a type it refused, or
@@ -82,9 +82,9 @@ SemaFailureUnionRow: struct {
 // case, another payload count or label) and a payload type mismatch (E0108)
 // at one of its `arguments`.
 SemaFailureSettledCase: struct {
-    module_index: Int
-    site: Span
-    arguments: [Span]
+    module_index: Int,
+    site: Span,
+    arguments: [Span],
 }
 
 // A typed failure a caller could match: not the general `Err`, a message,
@@ -453,10 +453,10 @@ sema_failure_union_success: fn(function: Func) -> Type Never! {
 // One contract to project: the function key, its registered top-level row,
 // and the new return type.
 SemaFailureProjection: struct {
-    key: String
-    module_index: Int
-    row: Int
-    return_type: Type
+    key: String,
+    module_index: Int,
+    row: Int,
+    return_type: Type,
 }
 
 // The top-level function row `function_key` registers in `module_index`,
@@ -564,10 +564,10 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
 // `#Error enum`'s declaring module), whether any type was minted, and the
 // case creations the mint's reports cover.
 SemaFailureUnionProjected: struct {
-    keys: [String]
-    modules: [Int]
-    minted: Bool
-    settled: [SemaFailureSettledCase]
+    keys: [String],
+    modules: [Int],
+    minted: Bool,
+    settled: [SemaFailureSettledCase],
 }
 
 // Join the default-route rows of the unannotated

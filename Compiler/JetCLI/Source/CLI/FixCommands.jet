@@ -12,8 +12,8 @@ use {
 // compares an edited file's against them). `repairs`: the fixes of those
 // errors, a subset of `fixes` (jet_cli_fix_round).
 JetCLIFixQuery: enum {
-    Fixes(fixes: [JetCLIFix], errors: [String], repairs: [JetCLIFix])
-    Refused(output: JetDriverVerbOutput)
+    Fixes(fixes: [JetCLIFix], errors: [String], repairs: [JetCLIFix]),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The fixes one `jet fix` round applies: the error repairs alone while the
@@ -21,8 +21,8 @@ JetCLIFixQuery: enum {
 // unused-binding fix read beside an unknown name may rename the binding the
 // name's repair points at). `held` when fixes wait for the next round.
 JetCLIFixRound: struct {
-    fixes: [JetCLIFix]
-    held: Bool
+    fixes: [JetCLIFix],
+    held: Bool,
 }
 
 jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> JetCLIFixRound Never! {
@@ -294,8 +294,8 @@ jet_cli_fix_resolve: fn(files: &[JetCLIFixFile], canonical: String, fixes: &&[Je
 
 // An edit without its path, and the row of the file it changes.
 JetCLIFixPlaced: struct {
-    edit: TextEdit
-    row: Int
+    edit: TextEdit,
+    row: Int,
 }
 
 jet_cli_fix_place: fn(files: &[JetCLIFixFile], canonical: String, edit: &&TextEdit) -> JetCLIFixPlaced {
@@ -399,9 +399,9 @@ jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
 // What `jet fix` writes besides `--markers`: the checker's suggestions, the
 // `--style` moves, or each inferred failure contract (`--pin-failures`).
 JetCLIFixMode: enum {
-    Suggestions
-    Style
-    PinFailures
+    Suggestions,
+    Style,
+    PinFailures,
 }
 
 jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mode: JetCLIFixMode, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {

@@ -71,8 +71,8 @@ wasm_is_number: fn(code: Int) -> Bool Never! {
 wasm_is_ref: fn(code: Int) -> Bool Never! { code == WASM_FUNCREF || code == WASM_EXTERNREF }
 
 WasmFuncType: struct {
-    params: [Int]
-    results: [Int]
+    params: [Int],
+    results: [Int],
 
     render: fn(self) -> String Never! {
         params: (loop code in self.params -> wasm_type_name(code)).join(" ")
@@ -82,64 +82,64 @@ WasmFuncType: struct {
 }
 
 WasmLimits: struct {
-    min: Int
-    max: Int?
+    min: Int,
+    max: Int?,
 }
 
 WasmTableType: struct {
-    elem: Int
-    limits: WasmLimits
+    elem: Int,
+    limits: WasmLimits,
 }
 
 WasmGlobalType: struct {
-    value: Int
-    mutable: Bool
+    value: Int,
+    mutable: Bool,
 }
 
 // A constant expression: one constant, `global.get`, `ref.null` or
 // `ref.func`. `op` is its opcode; `value` the constant (float bit pattern),
 // global or function index, or the null's reference type.
 WasmConstExpr: struct {
-    op: Int
-    value: Int
+    op: Int,
+    value: Int,
 }
 
 WasmImport: struct {
-    module_name: String
-    name: String
-    kind: Int
+    module_name: String,
+    name: String,
+    kind: Int,
     // A function import's type index.
-    type_index: Int
-    table: WasmTableType?
-    memory: WasmLimits?
-    global: WasmGlobalType?
+    type_index: Int,
+    table: WasmTableType?,
+    memory: WasmLimits?,
+    global: WasmGlobalType?,
 }
 
 WasmGlobal: struct {
-    ty: WasmGlobalType
-    init: WasmConstExpr
+    ty: WasmGlobalType,
+    init: WasmConstExpr,
 }
 
 WasmModuleExport: struct {
-    name: String
-    kind: Int
-    index: Int
+    name: String,
+    kind: Int,
+    index: Int,
 }
 
 // An element segment. `items` are function indexes; -1 is a null reference.
 WasmElem: struct {
-    mode: Int
-    table: Int
-    offset: WasmConstExpr
-    elem_type: Int
-    items: [Int]
+    mode: Int,
+    table: Int,
+    offset: WasmConstExpr,
+    elem_type: Int,
+    items: [Int],
 }
 
 WasmData: struct {
-    mode: Int
-    memory: Int
-    offset: WasmConstExpr
-    bytes: [U8]
+    mode: Int,
+    memory: Int,
+    offset: WasmConstExpr,
+    bytes: [U8],
 }
 
 // One function body. Instruction k is op[k] with immediates a[k], b[k]; at[k]
@@ -158,34 +158,34 @@ WasmData: struct {
 //   table.init a = element segment, b = table; elem.drop a = segment;
 //   memory.init/data.drop a = data segment
 WasmCode: struct {
-    locals: [Int]
-    op: [Int]
-    a: [Int]
-    b: [Int]
-    at: [Int]
-    tables: [[Int]]
+    locals: [Int],
+    op: [Int],
+    a: [Int],
+    b: [Int],
+    at: [Int],
+    tables: [[Int]],
     // The body's first byte (after the local declarations) and its end.
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 WasmModule: struct {
-    types: [WasmFuncType]
-    imports: [WasmImport]
+    types: [WasmFuncType],
+    imports: [WasmImport],
     // The type index of each defined (non-imported) function.
-    funcs: [Int]
-    tables: [WasmTableType]
-    memories: [WasmLimits]
-    globals: [WasmGlobal]
-    exports: [WasmModuleExport]
-    start: Int?
-    elems: [WasmElem]
-    datas: [WasmData]
-    data_count: Int?
-    codes: [WasmCode]
+    funcs: [Int],
+    tables: [WasmTableType],
+    memories: [WasmLimits],
+    globals: [WasmGlobal],
+    exports: [WasmModuleExport],
+    start: Int?,
+    elems: [WasmElem],
+    datas: [WasmData],
+    data_count: Int?,
+    codes: [WasmCode],
     // The name section's module name and function names ("" when absent).
-    name: String
-    function_names: [Int:String]
+    name: String,
+    function_names: [Int:String],
 
     empty: fn() -> WasmModule Never! {
         WasmModule{

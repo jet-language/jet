@@ -213,8 +213,8 @@ JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
 } }
 
 JetDriverFilePath: struct {
-    path: String
-    valid: Bool
+    path: String,
+    valid: Bool,
 }
 
 jet_driver_set_failed_stage: fn(current: JetDriverStage?, next: JetDriverStage) -> JetDriverStage? {
@@ -419,14 +419,14 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
 }
 
 JetDriverAuthorityBound: struct {
-    allow: [String]?
-    deny: [String]?
-    grants: [PackageGrant]
+    allow: [String]?,
+    deny: [String]?,
+    grants: [PackageGrant],
 }
 
 JetDriverParsedAuthorityList: struct {
-    values: [String]?
-    next_index: Int
+    values: [String]?,
+    next_index: Int,
 }
 
 // The source span of one list entry, from its first token through its last
@@ -740,8 +740,8 @@ jet_driver_package_identity: fn(name: String, version: String) -> String Never! 
 }
 
 JetDriverManifestFieldValue: struct {
-    text: String
-    next_index: Int
+    text: String,
+    next_index: Int,
 }
 
 jet_driver_manifest_field_value: fn(source: String, tokens: [Token], start_index: Int) -> JetDriverManifestFieldValue Never! {
@@ -917,10 +917,10 @@ jet_driver_parse_program_allocator: fn(value: String, span: Span, diagnostics: &
 }
 
 JetDriverVersion: struct {
-    major: Int
-    minor: Int
-    patch: Int
-    valid: Bool
+    major: Int,
+    minor: Int,
+    patch: Int,
+    valid: Bool,
 }
 
 jet_driver_parse_decimal: fn(value: String) -> Int? {
@@ -1288,8 +1288,8 @@ jet_driver_manifest_outputs: fn(tokens: [Token], tables: TokenTables, open_index
 // The file of the entry root whose leading `package: { … }` block is the
 // root's Package.
 JetDriverInlineCarrier: struct {
-    file_index: Int
-    block: JetDriverInlinePackage
+    file_index: Int,
+    block: JetDriverInlinePackage,
 }
 
 // The entry root's inline Package carrier (Rust Loader `load_file`): the
@@ -2701,8 +2701,8 @@ jet_driver_is_foreign_provider_import: fn(declaration: ImportDecl) -> Bool Never
 // visited module, deduplicated through a list, made loading quadratic or
 // worse in the number of imports.
 JetDriverModuleEdges: struct {
-    slots: [U32:Int]
-    targets: [[ModuleID]]
+    slots: [U32:Int],
+    targets: [[ModuleID]],
 }
 
 jet_driver_module_edges: fn() -> JetDriverModuleEdges Never! {
@@ -3086,10 +3086,10 @@ jet_driver_namespace_first_item: fn(module_row: JetDriverLoadedModule) -> Int Ne
 // name no source spells). A default's range runs from the declared type to
 // the next declaration, so it covers the whole default expression.
 JetDriverDefaultRegion: struct {
-    key: String
-    module_index: Int
-    start: Int
-    end: Int
+    key: String,
+    module_index: Int,
+    start: Int,
+    end: Int,
 }
 
 jet_driver_param_default_regions: fn(key: String, params: [Param], last_end: Int, module_index: Int, regions: &[JetDriverDefaultRegion]) Never! {
@@ -3312,24 +3312,24 @@ JET_DRIVER_REACH_MIN_BYTES: 262144
 // What every namespace reach thread reads: per package table its wanted
 // words and name -> member position table, and the defaults' words.
 JetDriverReachShared: struct {
-    wanted: [NameTable]
-    owners: [[String:Int]]
-    default_slots: [String:Int]
-    default_words: [[String]]
-    always: [String]
+    wanted: [NameTable],
+    owners: [[String:Int]],
+    default_slots: [String:Int],
+    default_words: [[String]],
+    always: [String],
 }
 
 // One member's reach: its package table, its position in it, its source.
 JetDriverReachJob: struct {
-    table_index: Int
-    position: Int
-    source: String
+    table_index: Int,
+    position: Int,
+    source: String,
 }
 
 // One thread's consecutive jobs and, after the scan, their refs in order.
 JetDriverReachPart: struct {
-    jobs: [JetDriverReachJob]
-    refs: [[String]]
+    jobs: [JetDriverReachJob],
+    refs: [[String]],
 }
 
 // Reaches `parts[from..]`, one task per part and the last part on this
@@ -3580,12 +3580,12 @@ jet_driver_check_reserved_import: fn(declaration: ImportDecl, diagnostics: &[Dia
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
 JetDriverInlinePackage: struct {
-    found: Bool
-    start: Int
-    end: Int
-    body_start: Int
-    body_end: Int
-    error: Diagnostic?
+    found: Bool,
+    start: Int,
+    end: Int,
+    body_start: Int,
+    body_end: Int,
+    error: Diagnostic?,
 }
 
 jet_driver_inline_byte: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -3758,8 +3758,8 @@ jet_driver_inline_package_spot: fn(bytes: [U8], from: Int) -> Bool Never! {
 // end, no close without its open and every open closed — so the scan of
 // the bytes after it starts from that state too.
 JetDriverInlineScan: struct {
-    found: Int
-    clean: Bool
+    found: Int,
+    clean: Bool,
 }
 
 jet_driver_inline_item_scan: fn(bytes: [U8], from: Int, to: Int) -> JetDriverInlineScan Never! {
@@ -3884,14 +3884,14 @@ JET_DRIVER_INLINE_SCAN_MIN_BYTES: 262144
 
 // What every item scan thread reads.
 JetDriverInlineShared: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 // One thread's byte range and, after the scan, its one output row.
 JetDriverInlinePart: struct {
-    start: Int
-    end: Int
-    outputs: [JetDriverInlineScan]
+    start: Int,
+    end: Int,
+    outputs: [JetDriverInlineScan],
 }
 
 // jet_driver_inline_top_level_package on the compiler threads: the bytes
@@ -4004,47 +4004,47 @@ jet_driver_inline_package_body: fn(source: String, carrier: JetDriverInlinePacka
 
 // Small parse-owned facts; neither the public AST nor image schema retains tokens.
 JetDriverCoreIdentifierDemand: struct {
-    bare_names: [String]
-    option_or_err: Bool
+    bare_names: [String],
+    option_or_err: Bool,
     // A `.abs` or `.pow` receiver call: Int `abs` and the typed `abs`
     // helpers, and Float and F32 `pow`, lower to their `Core/Math/Math.jet`
     // source helpers, so core.math loads.
-    math_receiver: Bool
+    math_receiver: Bool,
     // The Core source modules the spelling needs: a `Regex{…}` checked
     // literal (produced by `core.regex.compile`) needs core.regex, and a
     // receiver call of a CoreSource method row (`.matches(…)`,
     // `.first_lines(…)`) needs the module of its source helper.
-    source_modules: [String]{[String]{}}
+    source_modules: [String]{[String]{}},
     // The owner module of each boundary typed literal the source spells
     // (`DateTime{"…"}` is core.time; boundary_head_owner_module): the
     // literal is checked by that module's CheckedText impl, so it loads.
-    typed_head_modules: [String]{[String]{}}
+    typed_head_modules: [String]{[String]{}},
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
-    format_selector: Bool{false}
+    format_selector: Bool{false},
     // A `.suite(…)` receiver call (`t.suite("perf", body)`)
     // runs the `core.testing.__suite_run` source body, and
     // a bare `expect(…)` call (`expect(value).snapshot()`) the `core.testing.snap`
     // one, so core.testing loads.
-    test_suite: Bool{false}
+    test_suite: Bool{false},
     // A `.with_event_time(…)` receiver call (`stream.with_event_time(f)`)
     // and the `.key_by`/`.window` stages after it run
     // their `Core/Data/Data.jet` source stages, so core.data loads.
-    stream_event_time: Bool{false}
+    stream_event_time: Bool{false},
     // A `#UnitFamily` declaration: its units' explicit conversions lower to
     // their `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
-    unit_family: Bool{false}
+    unit_family: Bool{false},
     // The receiver of each `Dest.from_<unit>(…)` call (`Dest` capitalized):
     // an explicit conversion between Prelude unit types lowers to its
     // `Core/Math/Math.jet` exact helper, so core.math loads when a receiver
     // can name one (jet_driver_unit_conversion); `String.from_bytes` loads
     // nothing. Syntactic, as for `.abs`: Sema alone decides whether `Dest`
     // is a unit type.
-    conversion_receivers: [String]{[String]{}}
+    conversion_receivers: [String]{[String]{}},
     // A `Dest.from_<unit>_rounded(…)` call: a rounded conversion across a
     // measured unit wraps its scalar in a `core.units` Measurement
     // (`__measurement_result`), so core.units and core.math load.
-    rounded_conversion: Bool{false}
+    rounded_conversion: Bool{false},
     // A generic `.decode<T>()` call or a `FieldError.under(…)` call: Dyn decode
     // and `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
     // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
@@ -4053,12 +4053,12 @@ JetDriverCoreIdentifierDemand: struct {
     // core.encoding source (`__DecodeSource`, `__DecodeTree`), so it loads
     // core.encoding too. A `FieldError` value or type alone is
     // compiler-owned and loads nothing.
-    codec_decode: Bool{false}
+    codec_decode: Bool{false},
     // A `.send(…)` receiver call: `Sender.send` fails with core.prelude's
     // `SendError<T>`, a type the source need not spell, so core.prelude
     // loads. Syntactic, as for `.abs`: Sema alone decides whether the
     // receiver is a Sender.
-    channel_send: Bool{false}
+    channel_send: Bool{false},
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core: core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (hmac_sha256). Natively that member's
@@ -4066,12 +4066,12 @@ JetDriverCoreIdentifierDemand: struct {
     // `<head>.<segment>` (and `<head>.<segment>.<segment>`) chain whose first
     // segment names a Core module, and the loader loads that module when
     // `<head>` aliases `core`.
-    core_paths: [String]
+    core_paths: [String],
     // The method of each `input.<method>` call the source spells (`input`
     // not itself a member): `input.csv<Row>()` is core.encoding.csv
     // `__input_csv` (core_input_method_modules), so the encoding module the
     // method names loads when it is one.
-    input_methods: [String]{[String]{}}
+    input_methods: [String]{[String]{}},
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -4092,22 +4092,22 @@ JetDriverCoreIdentifierDemand: struct {
 // a whole Core parse asked to keep them left out of its program, each at its
 // index `dropped_at` among the items it parsed (jet_driver_parse_core_text).
 JetDriverParsedUnit: struct {
-    parsed: ParseResult
-    demand: JetDriverCoreIdentifierDemand
-    lines: Int{0}
-    tokens: Int{0}
-    line_starts: [Int]{[Int]{}}
-    words: JetDriverUnitWords?{None}
-    lazy: [Span]{[Span]{}}
-    item_ends: [Int]{[Int]{}}
-    holds: Bool{false}
-    from_heads: Bool{false}
-    decoded: Bool{false}
-    ready_regions: JetDriverCoreReady?{None}
-    ready_held: JetDriverCoreReady?{None}
-    mentions: SemaUnitSourceMentions?{None}
-    dropped: [Item]{[Item]{}}
-    dropped_at: [Int]{[Int]{}}
+    parsed: ParseResult,
+    demand: JetDriverCoreIdentifierDemand,
+    lines: Int{0},
+    tokens: Int{0},
+    line_starts: [Int]{[Int]{}},
+    words: JetDriverUnitWords?{None},
+    lazy: [Span]{[Span]{}},
+    item_ends: [Int]{[Int]{}},
+    holds: Bool{false},
+    from_heads: Bool{false},
+    decoded: Bool{false},
+    ready_regions: JetDriverCoreReady?{None},
+    ready_held: JetDriverCoreReady?{None},
+    mentions: SemaUnitSourceMentions?{None},
+    dropped: [Item]{[Item]{}},
+    dropped_at: [Int]{[Int]{}},
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -4153,48 +4153,48 @@ jet_driver_unit_conversion: fn(receivers: [String], catalog: &NameTable) -> Bool
 JetDriverCoreDemandNames: struct {
     // `task.timeout(…)` installs its deadline through the
     // `core.time.__task_timeout` source function, so core.time loads.
-    task_name: Int
-    timeout_name: Int
-    or_err_name: Int
-    abs_name: Int
-    pow_name: Int
-    regex_name: Int
+    task_name: Int,
+    timeout_name: Int,
+    or_err_name: Int,
+    abs_name: Int,
+    pow_name: Int,
+    regex_name: Int,
     // A `Matrix<M, N>` shape type: `Matrix * Matrix` is the core.compute
     // `matmul` source, so that module loads.
-    matrix_name: Int
+    matrix_name: Int,
     // The CoreSource method row names and, at the same index, the module of
     // each one's source helper.
-    source_method_names: [Int]
-    source_method_modules: [String]
-    test_suite_name: Int
-    expect_name: Int
-    event_time_name: Int
-    unit_family_name: Int
-    decode_name: Int
-    migration_name: Int
-    field_error_name: Int
-    input_name: Int
-    send_name: Int
-    field_error_under_name: Int
-    bare: [Int]
-    bare_alias: [[Int]]
+    source_method_names: [Int],
+    source_method_modules: [String],
+    test_suite_name: Int,
+    expect_name: Int,
+    event_time_name: Int,
+    unit_family_name: Int,
+    decode_name: Int,
+    migration_name: Int,
+    field_error_name: Int,
+    input_name: Int,
+    send_name: Int,
+    field_error_under_name: Int,
+    bare: [Int],
+    bare_alias: [[Int]],
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
     // or alias it is, -1 for none, -2 when it names two rows (the scan then
     // checks every row), so a bare name costs one lookup per identifier.
-    bare_rows: [Int]
+    bare_rows: [Int],
     // Ids of the segments of the Core module paths (`files` for `core.files`,
     // `encoding` and `json` for `core.encoding.json`), for the qualified-path
     // demand.
-    core_segments: [Int]
+    core_segments: [Int],
     // Per BOUNDARY_TYPED_HEADS row, the id of its name.
-    typed_heads: [Int]
+    typed_heads: [Int],
     // `context`, the `Context` of `#Context(…)`, and per
     // SEMA_CONTEXT_CORE_FIELDS row the id of the field's name: `context.logger`
     // and a `#Context(logger: …)` label read and set core.log's `logger` key,
     // so that module loads (jet_driver_context_field_spelled).
-    context_name: Int
-    context_marker_name: Int
-    context_fields: [Int]
+    context_name: Int,
+    context_marker_name: Int,
+    context_fields: [Int],
 }
 
 jet_driver_core_demand_name: fn(tables: TokenTables, text: String) -> Int Never! {
@@ -4454,17 +4454,17 @@ jet_driver_interpolation_has_selector: fn(tokens: [Token], tables: TokenTables) 
 // What every demand scan thread reads: the lexed unit (moved in, moved
 // back after the join) and the demand name ids.
 JetDriverDemandShared: struct {
-    lexed: [Lexed]
-    names: JetDriverCoreDemandNames
-    collect_bare: Bool
+    lexed: [Lexed],
+    names: JetDriverCoreDemandNames,
+    collect_bare: Bool,
 }
 
 // One thread's item runs `runs[start..<end]` and, after the scan, its one
 // output row.
 JetDriverDemandPart: struct {
-    start: Int
-    end: Int
-    outputs: [JetDriverCoreIdentifierDemand]
+    start: Int,
+    end: Int,
+    outputs: [JetDriverCoreIdentifierDemand],
 }
 
 // A demand scan thread is admitted for at least this many tokens.
@@ -4472,8 +4472,8 @@ JET_DRIVER_DEMAND_MIN_TOKENS: 65536
 
 // The demand scan's result: the lexed unit back from the scan and its demand.
 JetDriverDemandScan: struct {
-    lexed: Lexed
-    demand: JetDriverCoreIdentifierDemand
+    lexed: Lexed,
+    demand: JetDriverCoreIdentifierDemand,
 }
 
 // jet_driver_collect_core_identifier_demand over the lexer's item runs on
@@ -4640,12 +4640,12 @@ jet_driver_parse_user_source: fn(text: String) -> ParseResult {
 // One unit's parse input, resolved before any parse runs so a parse thread
 // reads only its own source text, never the request.
 JetDriverParseJob: enum {
-    Source(text: String)
-    RuntimeEntry(text: String)
-    Prelude(text: String)
-    Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
-    CoreInterfaced(text: String, module_name: String, owned_members: [String], runtime: Bool, path: String, interface: [U8], fragments_at: Int)
-    Missing
+    Source(text: String),
+    RuntimeEntry(text: String),
+    Prelude(text: String),
+    Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool),
+    CoreInterfaced(text: String, module_name: String, owned_members: [String], runtime: Bool, path: String, interface: [U8], fragments_at: Int),
+    Missing,
 }
 
 // A user source file.
@@ -5275,28 +5275,28 @@ jet_driver_parse_part: fn(jobs: [JetDriverParseJob], threads: CompilerThreads, s
 // waves before (the pool's `shared`, name_pool_adopt), one table held as a
 // row so the wave takes it back after the join.
 JetDriverParseInputs: struct {
-    jobs: [JetDriverParseJob]
-    order: [Int]
-    spellings: [NameTable]
+    jobs: [JetDriverParseJob],
+    order: [Int],
+    spellings: [NameTable],
 }
 
 // The next unclaimed rank, taken with one atomic add under a read guard each
 // thread holds for its run.
 JetDriverParseQueue: struct {
-    next: Atomic<Int>
+    next: Atomic<Int>,
 }
 
 // One claimed job's parse, at its position in the wave.
 JetDriverParseClaimed: struct {
-    position: Int
-    unit: JetDriverParsedUnit
+    position: Int,
+    unit: JetDriverParsedUnit,
 }
 
 // What one parse thread returns: its claimed parses and the spellings it
 // met first (its pool's `own`, name_pool_adopt).
 JetDriverParseThread: struct {
-    claimed: [JetDriverParseClaimed]
-    spellings: NameTable
+    claimed: [JetDriverParseClaimed],
+    spellings: NameTable,
 }
 
 // Runs claiming threads `from..<workers`, one task each, moves every unit a
@@ -5346,8 +5346,8 @@ JET_DRIVER_PARSE_SCRATCH_PER_BYTE: 64
 // A parse wave's units, in `pending` order, last-first, and the load's
 // spellings (name_pool_adopt) with the ones the wave met first added.
 JetDriverParseWave: struct {
-    units: [JetDriverParsedUnit]
-    spellings: NameTable
+    units: [JetDriverParsedUnit],
+    spellings: NameTable,
 }
 
 // Parses `pending[first..]`, the units queued since the last wave, on the

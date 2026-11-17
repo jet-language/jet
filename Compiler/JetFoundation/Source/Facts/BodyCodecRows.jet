@@ -24,18 +24,18 @@ use body_codec_math: core.math
 // The bytes a put wrote, and the ids and, in `indexed` mode, the strings
 // they name by position.
 BodyCodecOut: struct {
-    bytes: [U8]
-    symbols: [SymbolID]
-    decls: [DeclID]
-    modules: [ModuleID]
+    bytes: [U8],
+    symbols: [SymbolID],
+    decls: [DeclID],
+    modules: [ModuleID],
     // Each listed id's position, by its id.
-    symbol_at: [U32:Int]
-    decl_at: [Int:Int]
-    module_at: [U32:Int]
-    indexed: Bool{false}
-    strings: [String]{[String]{}}
+    symbol_at: [U32:Int],
+    decl_at: [Int:Int],
+    module_at: [U32:Int],
+    indexed: Bool{false},
+    strings: [String]{[String]{}},
     // Each listed string's position, by the string.
-    string_at: [String:Int]{[String:Int]{}}
+    string_at: [String:Int]{[String:Int]{}},
 }
 
 body_codec_out: fn() -> BodyCodecOut Never! {
@@ -51,15 +51,15 @@ body_codec_out: fn() -> BodyCodecOut Never! {
 // it, and so do those of every body read with one pool the caller keeps; in
 // `indexed` mode it is the one of `strings` at the position the bytes hold.
 BodyCodecIn: struct {
-    at: Int
-    end: Int
-    failed: Bool
-    symbols: [SymbolID]
-    decls: [DeclID]
-    modules: [ModuleID]
-    spellings: NameTable{name_table_sized(2)}
-    indexed: Bool{false}
-    strings: [String]{[String]{}}
+    at: Int,
+    end: Int,
+    failed: Bool,
+    symbols: [SymbolID],
+    decls: [DeclID],
+    modules: [ModuleID],
+    spellings: NameTable{name_table_sized(2)},
+    indexed: Bool{false},
+    strings: [String]{[String]{}},
 }
 
 body_codec_put_uvarint: fn(out: &BodyCodecOut, value: Int) Never! {

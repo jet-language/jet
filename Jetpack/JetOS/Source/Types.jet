@@ -15,41 +15,41 @@ JETOS_VM_GUEST_PROOF_MARKER: "JETOS_GUEST_PROOF:"
 JETOS_VM_PROOF_TIMEOUT_MS: 300000
 
 JetOSFlags: struct {
-    fixtures: String?
-    offline: Bool
-    name: String?
-    manual_disk: String?
-    disk: String?
-    json: Bool
-    assume_yes: Bool
+    fixtures: String?,
+    offline: Bool,
+    name: String?,
+    manual_disk: String?,
+    disk: String?,
+    json: Bool,
+    assume_yes: Bool,
     // Exact Core Cargo build identity's one-shot trust approval.
-    trust: Bool
+    trust: Bool,
     // Shared global --host selection, also consumed by import.
-    host: String?
+    host: String?,
     // The real VM backend supplies default boot packages itself.
-    real_tier: Bool
+    real_tier: Bool,
 }
 
 JetOSTarget: struct {
-    config: String
-    host: String
+    config: String,
+    host: String,
 }
 
 JetOSGeneration: struct {
-    name: String
-    host: String
-    path: String
-    created_at: Int
+    name: String,
+    host: String,
+    path: String,
+    created_at: Int,
 }
 
 // The held lease and original identity are not flattened into metadata;
 // realization/consumption owns their lifecycle.
 JetOSRealizedPackage: struct {
-    entry: StoreEntry
-    lease: CacheLease
-    original_out: String
-    original_reference_text: String
-    consumption_override: String?
+    entry: StoreEntry,
+    lease: CacheLease,
+    original_out: String,
+    original_reference_text: String,
+    consumption_override: String?,
 
     // The held lease remains authoritative: a durable member is consumed only
     // after the lease revalidates it.
@@ -71,10 +71,10 @@ JetOSRealizedPackage: struct {
 }
 
 JetOSBootProfile: struct {
-    loader: String
-    kernel: String
-    init: String
-    initrd_modules: [String]
+    loader: String,
+    kernel: String,
+    init: String,
+    initrd_modules: [String],
 
     to_dyn: fn(self) -> Dyn Never! {
         Dyn.Object(
@@ -91,19 +91,19 @@ JetOSBootProfile: struct {
 }
 
 JetOSOptionContender: struct {
-    value: String
-    tier: String
-    priority: Int
-    source_order: Int
-    winner: Bool
+    value: String,
+    tier: String,
+    priority: Int,
+    source_order: Int,
+    winner: Bool,
 }
 
 JetOSResolvedOption: struct {
-    key: String
-    value: String
-    tier: String
-    priority: Int
-    contenders: [JetOSOptionContender]
+    key: String,
+    value: String,
+    tier: String,
+    priority: Int,
+    contenders: [JetOSOptionContender],
 
     // Field and contender order are stable.
     to_json: fn(self) -> String Never! {

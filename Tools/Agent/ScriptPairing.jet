@@ -92,7 +92,7 @@ TEST_SUFFIXES: [String]{".test.mjs", ".test.js"}
 
 #Error
 PairingError: struct {
-    message: String
+    message: String,
 }
 
 pairing_fail: fn(message: String) -> PairingError Never! {
@@ -102,46 +102,46 @@ pairing_fail: fn(message: String) -> PairingError Never! {
 // What the rule makes of one file: a Jet program, a file that is no
 // script, a script outside SCOPE, or a script the rule holds.
 FileClass: enum {
-    Jet
-    Other
-    OutOfScope
-    Script
+    Jet,
+    Other,
+    OutOfScope,
+    Script,
 }
 
 // A script the entries pair: the entry and the Jet twin.
 Pair: struct {
-    entry: String
-    twin: String
+    entry: String,
+    twin: String,
 }
 
 // A tool entry's original and the pair it gives.
 Pairing: struct {
-    path: String
-    pair: Pair
+    path: String,
+    pair: Pair,
 }
 
 // One relative import between two in-scope tool scripts: `from` imports
 // `to`.
 Link: struct {
-    from: String
-    to: String
+    from: String,
+    to: String,
 }
 
 // How the entries cover a script no entry pairs: the entries that do, and
 // what keeps it uncovered (the importers that are neither paired nor
 // covered, or a test's imports that are not).
 Coverage: struct {
-    entries: [String]
-    missing: [String]
+    entries: [String],
+    missing: [String],
 }
 
 // Every pairing the in-scope tool entries make, the imports between the
 // in-scope tool scripts, and the problems of incomplete in-scope tool
 // entries.
 Entries: struct {
-    pairings: [Pairing]
-    links: [Link]
-    problems: [String]
+    pairings: [Pairing],
+    links: [Link],
+    problems: [String],
 }
 
 field: fn(tree: Dyn, name: String) -> Dyn Never! {
@@ -474,8 +474,8 @@ refusals: fn(repo: String, added: [String], entries: Entries) -[FS]> [String] Ne
 //   (a land tree) needs.
 // - Own: the repository at `repo` alone, whatever the caller exports.
 GitScope: enum {
-    Caller
-    Own
+    Caller,
+    Own,
 }
 
 git_lines: fn(repo: String, args: [String], scope: GitScope) -[Exec, Time.Wait]> [String] PairingError! {

@@ -38,13 +38,13 @@ use {
 
 // One bridge build request.
 RustBridgeBuild: struct {
-    entries: [ExternEntry]
-    handle_facts: [FFIHandleFact]
-    record_defs: CRecordDefinitions
-    link_closure: FFILinkClosure
-    native_link_args: [String]
-    selected_target: String
-    project_root: String?
+    entries: [ExternEntry],
+    handle_facts: [FFIHandleFact],
+    record_defs: CRecordDefinitions,
+    link_closure: FFILinkClosure,
+    native_link_args: [String],
+    selected_target: String,
+    project_root: String?,
 }
 
 // Cross-process lock guarding the slow path (rewrite + `cargo build`) of one
@@ -52,7 +52,7 @@ RustBridgeBuild: struct {
 // two processes on different keys never block each other here. Closing the
 // handle releases it.
 FFIBuildLock: struct {
-    dir: String
+    dir: String,
 
     // Blocks until the lock is held. A lock older than two minutes (far
     // longer than any bridge build) is stolen, so a killed build cannot

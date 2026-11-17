@@ -124,7 +124,7 @@ PACKAGE_NAMES: [String]{
 
 // Jetpack is a package/environment engine: it reads and writes the store,
 // spawns builders, fetches over the network, and reads the environment.
-PACKAGE_SOURCE: "name: \"jetpack_bootstrap\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{\n    \n        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]\n    \n}}\n"
+PACKAGE_SOURCE: "name: \"jetpack_bootstrap\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{\n    \n        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait],\n    \n}}\n"
 
 run: fn() {
     args: process.args()
@@ -184,23 +184,23 @@ checkout_root: fn(cwd: String) -> String {
 // What one assembly reads: the mode, the source root, the area selection and
 // the scratch directory of the mode.
 Config: struct {
-    mode: String
-    root: String
+    mode: String,
+    root: String,
     // The `# == Area ==` sections to assemble, in their given order; None: all.
-    areas: [String]?
+    areas: [String]?,
     // JETPACK_BOOTSTRAP_OWN_AREA as set (an empty value is an area no section names).
-    own: String?
+    own: String?,
     // The tests.list sections whose claims run; None: every section.
-    test_sections: [String]?
-    deps_from_head: Bool
-    scratch: String
+    test_sections: [String]?,
+    deps_from_head: Bool,
+    scratch: String,
 }
 
 // The counts an assembly reports.
 Assembled: struct {
-    units: Int
-    claims: Int
-    skipped: Int
+    units: Int,
+    claims: Int,
+    skipped: Int,
 }
 
 env_config: fn(mode: String, root: String, cwd: String) -> Config Err! {
@@ -253,36 +253,36 @@ tool_jet: fn() -> String {
 // One listed source: its repository path, its bytes, its text with embeds
 // rebased, its manifest line and its section.
 Entry: struct {
-    path: String
-    bytes: [U8]
-    text: String
-    place: String
-    section: String
+    path: String,
+    bytes: [U8],
+    text: String,
+    place: String,
+    section: String,
 }
 
 // One file's place in the unit, for the source map.
 Mapped: struct {
-    path: String
-    sha256: String
-    original_bytes: Int
-    original_lines: Int
-    line_starts: [Int]
-    start_byte: Int
-    end_byte: Int
-    start_line: Int
-    end_line: Int
+    path: String,
+    sha256: String,
+    original_bytes: Int,
+    original_lines: Int,
+    line_starts: [Int],
+    start_byte: Int,
+    end_byte: Int,
+    start_line: Int,
+    end_line: Int,
 }
 
 // A test claim and its tests.list section.
 Claim: struct {
-    name: String
-    section: String
+    name: String,
+    section: String,
 }
 
 // The staged `embed_file` copies, in first-seen order, each with the file it copies.
 Embeds: struct {
-    copies: [String]
-    targets: [String:String]
+    copies: [String],
+    targets: [String:String],
 }
 
 // Assemble the unit `config` names into its scratch directory. `members` are
@@ -570,8 +570,8 @@ source_map: fn(config: Config, mapped: [Mapped], embeds: Embeds, claims: [Claim]
 
 // A Jetpack file under an area's Source or Tests tree, and its area folder.
 Inventoried: struct {
-    area: String
-    path: String
+    area: String,
+    path: String,
 }
 
 // Every `.jet` file (but package.jet) under Jetpack/<Area>/Source and Tests of
@@ -712,8 +712,8 @@ split_lines: fn(text: String) -> [String] {
 
 // A manifest section header, `# == Name ==` or `# == Name (detail) ==`.
 Header: struct {
-    name: String
-    detail: String
+    name: String,
+    detail: String,
 }
 
 // The header `line` (trimmed) opens, None when it opens none.
@@ -1047,9 +1047,9 @@ normalize_join: fn(directory: String, path: String) -> String {
 
 // The area graph of areas.list, checked against the manifests' sections.
 AreaGraph: struct {
-    order: [String]
-    deps: [String:[String]]
-    sources: [String:[String]]
+    order: [String],
+    deps: [String:[String]],
+    sources: [String:[String]],
 
     // The area and its transitive dependencies, bottom-up.
     closure: fn(self, area: String) -> [String] Err! {
@@ -1073,8 +1073,8 @@ AreaGraph: struct {
 
 // Each section of manifest `file` with its listed paths, in section order.
 Sections: struct {
-    names: [String]
-    paths: [String:[String]]
+    names: [String],
+    paths: [String:[String]],
 }
 
 manifest_sections: fn(root: String, file: String) -> Sections Err! {
@@ -1229,15 +1229,15 @@ listed_paths: fn(text: String) -> [String] {
 
 // A top-level declaration: its name and whether it is a function.
 Declaration: struct {
-    name: String
-    is_fn: Bool
+    name: String,
+    is_fn: Bool,
 }
 
 // The texts the drift check reads, each read once; a file that cannot be read is
 // empty (the assembly reports it).
 SourceCache: struct {
-    root: String
-    texts: [String:String]
+    root: String,
+    texts: [String:String],
 
     code_of: fn(&self, path: String) -> String {
         if self.texts.get(path) == .Val(known) -> return known.copy()  // copy: the cache keeps it
@@ -1430,9 +1430,9 @@ declarations: fn(source: String) -> [Declaration] {
 
 // A declaration starting at line start `at`; `end` 0 when none starts there.
 DeclarationAt: struct {
-    name: String
-    is_fn: Bool
-    end: Int
+    name: String,
+    is_fn: Bool,
+    end: Int,
 }
 
 declaration_at: fn(raw: [U8], at: Int) -> DeclarationAt {
@@ -1509,8 +1509,8 @@ variants: fn(source: String) -> [String] {
 // The body of an enum declared at line start `at`: from after its `{` line
 // to the `}` that opens a line. `end` 0 when no enum starts there.
 EnumBody: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 enum_body: fn(raw: [U8], at: Int) -> EnumBody {
@@ -1581,8 +1581,8 @@ declared: fn(source: String) -> [String] {
 // The words a file's code names, in first-use order, and the ones it calls.
 // A function is used only when called; a same-named local binding is not a use.
 Referenced: struct {
-    names: [String]
-    called: [String:Bool]
+    names: [String],
+    called: [String:Bool],
 }
 
 referenced: fn(source: String) -> Referenced {
@@ -1740,9 +1740,9 @@ blank_package_imports: fn(text: String, names: [String]) -> String {
 // offset of its `[` and the offset after its `]`; None when the line starts
 // none.
 CoreGroup: struct {
-    module_end: Int
-    open: Int
-    end: Int
+    module_end: Int,
+    open: Int,
+    end: Int,
 }
 
 core_group: fn(raw: [U8], at: Int) -> CoreGroup? {
@@ -2154,9 +2154,9 @@ compiler_fixture: fn(items: String) -> String {
         "name: \"jet-cli\"\n",
         // Prelude source held in a raw string: its `Err: struct` declares nothing.
         "Compiler/JetSema/Source/Derives.jet",
-        "PRELUDE_SOURCE: #run {{ ```// The default error.\nErr: struct {{\n    message: String\n}}\n``` }}\n",
+        "PRELUDE_SOURCE: #run {{ ```// The default error.\nErr: struct {{\n    message: String,\n}}\n``` }}\n",
         "Compiler/JetWasm/Source/Module.jet",
-        "Export: struct {{\n    name: String\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
+        "Export: struct {{\n    name: String,\n}}\nwasm_size: fn() -> Int {{\n    0\n}}\n",
         "Jetpack/Bootstrap/sources.list",
         "# == Compiler front end ==\nCompiler/JetFront/Source/Items.jet\n",
         "Jetpack/Bootstrap/tests.list",
@@ -2168,7 +2168,7 @@ compiler_fixture: fn(items: String) -> String {
 }
 
 #Test("a raw string's text and an enum's own variants name no dependency") {
-    root: compiler_fixture("Marker: enum {{\n    Plain\n    Export, Named(String)\n}}\nfront_marker: fn() -> Marker {{ Marker.Export }}\nfront_error: fn(message: String) -> Err {{ Err{{message: message}} }}\nNOTE: `calls wasm_size() with \"quotes\" and // slashes`\n")
+    root: compiler_fixture("Marker: enum {{\n    Plain,\n    Export, Named(String),\n}}\nfront_marker: fn() -> Marker {{ Marker.Export }}\nfront_error: fn(message: String) -> Err {{ Err{{message: message}} }}\nNOTE: `calls wasm_size() with \"quotes\" and // slashes`\n")
     // The fixture's members as Tools/Agent/CompilerPackages.jet sources lists them.
     members: [String]{"Compiler/JetFront/Source/Items.jet", "Compiler/JetSema/Source/Derives.jet", "Compiler/JetWasm/Source/Module.jet"}
     assert_eq(slice_drift(root, members).join("\n"), "")

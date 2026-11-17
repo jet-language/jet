@@ -49,8 +49,8 @@ unsupported_error: fn(format: EncodingFormat, offset: Int, reason: String) -> En
 // Streaming reads distinguish optional EOF from typed IO failures, and writes
 // borrow bounded byte windows over existing registered file leaves.
 CSVRow: struct {
-    line: Int
-    fields: [String]
+    line: Int,
+    fields: [String],
 }
 
 /// Physical rows. `delimiter` is one character other than a quote
@@ -131,7 +131,7 @@ ragged_reason: fn(record: Int, cells: Int, columns: Int) -> String Never! {
 // is unbounded.
 #Error
 TypedCSVError: struct {
-    reason: String
+    reason: String,
 }
 
 // `TypedCSV.cursor` while the record itself is at the cursor; -1 once its
@@ -151,22 +151,22 @@ TYPED_CSV_RECORD: -2
 // read, and an Int, Float or Bool cell in plain decimal form is parsed in
 // place, to what the cell's text-cell decode gives.
 TypedCSV: struct {
-    raw: [U8]
+    raw: [U8],
     // The next byte to scan, and the line it is on and that line's first byte.
-    at: Int
-    line: Int
-    line_start: Int
+    at: Int,
+    line: Int,
+    line_start: Int,
     // The one-based number of the record being scanned.
-    record: Int
+    record: Int,
     // Each field's start and end in `raw`, and the fields with `""` escapes.
-    spans: [Int]
-    escapes: [Int]
+    spans: [Int],
+    escapes: [Int],
     // The syntax error that ended the scan.
-    failure: TypedCSVError?
-    header: [String]
+    failure: TypedCSVError?,
+    header: [String],
     // TYPED_CSV_RECORD, or the open record's member at the cursor:
     // header.len() once it is closed.
-    cursor: Int
+    cursor: Int,
 
     new: fn(text: String) -> TypedCSV Never! {
         TypedCSV{raw: text.bytes(), at: 0, line: 1, line_start: 0, record: 1, spans: [Int]{}, escapes: [Int]{}, failure: None, header: [String]{}, cursor: TYPED_CSV_RECORD}
@@ -519,8 +519,8 @@ csv_cell: fn(value: Dyn) -> String Never! {
 /// apostrophe; `Keep` writes it as it is. Reading never strips an
 /// apostrophe, so a cell that already opens with one round-trips exactly.
 CSVFormulas: enum {
-    Escape
-    Keep
+    Escape,
+    Keep,
 }
 
 // Does `formulas` escape text cell `cell`: it opens a formula and is not a
@@ -722,8 +722,8 @@ priv encode_field: fn(field: String, formulas: CSVFormulas) -> String {
 }
 
 DictRow: struct {
-    fields: [String]
-    values: [String]
+    fields: [String],
+    values: [String],
 }
 
 dict_rows: fn(text: String) -> [DictRow] EncodingError! {
@@ -786,17 +786,17 @@ csv_limits: fn(limits: EncodingLimits) EncodingError! {
 // A bounded record writer to any byte sink (a FileWriter, a socket, or any
 // other `Writer`). Each record goes to it in one write, its CRLF in another.
 CSVWriter: struct<W: Writer> {
-    output: W
-    limits: EncodingLimits
-    terminal: EncodingError?
-    total: Int
-    record_index: Int
-    finished: Bool
-    pending_crlf: Bool
+    output: W,
+    limits: EncodingLimits,
+    terminal: EncodingError?,
+    total: Int,
+    record_index: Int,
+    finished: Bool,
+    pending_crlf: Bool,
     // The bytes of one write to `output`, kept so their room is reused.
-    buffer: [U8]
+    buffer: [U8],
     // What a text cell that opens a formula is written as.
-    formulas: CSVFormulas
+    formulas: CSVFormulas,
 
     error: fn(self, kind: EncodingErrorKind, field: Int, reason: String) -> EncodingError Never! {
         codec_error(kind, self.total, self.record_index + 1, 1, "$[{self.record_index}][{field}]", reason)
@@ -935,47 +935,47 @@ priv csv_row: fn(line: Int, fields: &&[String]) -> CSVRow Never! {
 // A bounded record reader over any byte source (a FileReader, a socket, or
 // any other `Reader`), read `buffer_bytes` at a time.
 CSVReader: struct<R: Reader> {
-    input: R
-    limits: EncodingLimits
-    delimiter: Int
+    input: R,
+    limits: EncodingLimits,
+    delimiter: Int,
     // One entry per byte value: 1 for each byte that ends a run of plain
     // field bytes (a quote, CR, LF, the delimiter, any byte from 128).
-    priv stops: [U8]
-    header: Bool
-    skip_blank: Bool
-    field: [U8]
-    fields: [String]
-    fields_heap: Int
+    priv stops: [U8],
+    header: Bool,
+    skip_blank: Bool,
+    field: [U8],
+    fields: [String],
+    fields_heap: Int,
     // The last record's field count: a new record's fields start with room for that many.
-    record_width: Int
-    allocation: stream.AllocationBudget
-    quoted: Bool
-    after_quote: Bool
-    pending_cr: Bool
-    pending_cr_line: Int
-    pending_cr_column: Int
-    record: Int
-    parser_line: Int
-    parser_column: Int
-    record_line: Int
-    record_has_content: Bool
-    ended_record: Bool
-    saw_input: Bool
-    total: Int
-    offset: Int
-    line: Int
-    column: Int
-    eof: Bool
-    terminal: EncodingError?
-    char0: U8
-    char1: U8
-    char2: U8
-    char3: U8
-    char_width: Int
+    record_width: Int,
+    allocation: stream.AllocationBudget,
+    quoted: Bool,
+    after_quote: Bool,
+    pending_cr: Bool,
+    pending_cr_line: Int,
+    pending_cr_column: Int,
+    record: Int,
+    parser_line: Int,
+    parser_column: Int,
+    record_line: Int,
+    record_has_content: Bool,
+    ended_record: Bool,
+    saw_input: Bool,
+    total: Int,
+    offset: Int,
+    line: Int,
+    column: Int,
+    eof: Bool,
+    terminal: EncodingError?,
+    char0: U8,
+    char1: U8,
+    char2: U8,
+    char3: U8,
+    char_width: Int,
     // The bytes read ahead from `input` (buffer_bytes at a time, charged to
     // `allocation` once), and how many of them `byte` has taken.
-    buffer: [U8]
-    buffered: Int
+    buffer: [U8],
+    buffered: Int,
 
     path: fn(self) -> String Never! { "$[{self.record - 1}][{self.fields.len()}]" }
 

@@ -508,22 +508,22 @@ parse_complete: fn(source: String) {
 }
 
 #Test("or_pattern_arm_after_braceless_call_keeps_payloads_and_guard") {
-    parse_complete("\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Idle(Int)\n    Closed\n}}\n\nclassify: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) /* before pipe */ | /* after pipe */ .Reconnecting(id) /* before pipe */ | .Idle(id) /* before guard */ && id > 0 /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
+    parse_complete("\nConn: enum {{\n    Active(Int),\n    Reconnecting(Int),\n    Idle(Int),\n    Closed,\n}}\n\nclassify: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) /* before pipe */ | /* after pipe */ .Reconnecting(id) /* before pipe */ | .Idle(id) /* before guard */ && id > 0 /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
 }
 
 #Test("or_pattern_arm_after_nested_value_dispatch_keeps_outer_boundary") {
-    parse_complete("\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Idle(Int)\n    Closed\n}}\n\nclassify_nested: fn(c: Conn, code: Int) -> String {{\n    if c == {{\n        .Closed -> return if code == {{\n            0 -> \"zero\"\n            else -> \"other\"\n        }}\n        .Active(id) | .Reconnecting(id) | .Idle(id) /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
+    parse_complete("\nConn: enum {{\n    Active(Int),\n    Reconnecting(Int),\n    Idle(Int),\n    Closed,\n}}\n\nclassify_nested: fn(c: Conn, code: Int) -> String {{\n    if c == {{\n        .Closed -> return if code == {{\n            0 -> \"zero\"\n            else -> \"other\"\n        }}\n        .Active(id) | .Reconnecting(id) | .Idle(id) /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
 }
 
 #Test("leading_dot_fluent_chain_stays_one_expression") {
-    parse_complete("\nBox: struct {{\n    value: Int\n}}\n\nchain: fn(value: Box) -> Box {{\n    return value\n        .next()\n        .finish()\n}}\n")
+    parse_complete("\nBox: struct {{\n    value: Int,\n}}\n\nchain: fn(value: Box) -> Box {{\n    return value\n        .next()\n        .finish()\n}}\n")
 }
 
 #Test("malformed_or_pattern_does_not_gain_a_terminator_boundary") {
     loop source in
         [
-        "\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Closed\n}}\n\ntrailing_pipe: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
-        "\nConn: enum {{\n    Active(Int)\n    Reconnecting(Int)\n    Closed\n}}\n\nsplit_guard: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | .Reconnecting(id)\n            && id > 0\n            -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
+        "\nConn: enum {{\n    Active(Int),\n    Reconnecting(Int),\n    Closed,\n}}\n\ntrailing_pipe: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
+        "\nConn: enum {{\n    Active(Int),\n    Reconnecting(Int),\n    Closed,\n}}\n\nsplit_guard: fn(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | .Reconnecting(id)\n            && id > 0\n            -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",
     ] {
         result: parser_test_result(source)
         assert(!result.diagnostics.is_empty(), "malformed dispatch head must be rejected")

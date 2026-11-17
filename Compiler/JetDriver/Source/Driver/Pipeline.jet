@@ -986,29 +986,29 @@ jet_driver_selected_target_machine: fn(
 JetDriverComptimeRunIndex: struct {
     // Function key -> the module that registers it; `ambiguous_owners` holds
     // the keys registered more than once, which have no unique owner.
-    owners: [String:ModuleID]
-    ambiguous_owners: [String:Bool]
-    owners_built: Bool
+    owners: [String:ModuleID],
+    ambiguous_owners: [String:Bool],
+    owners_built: Bool,
     // Each function any closure or prefetch of the run named, by its node
     // id: `node_keys` interns `module\nkey` to the id, and `nodes`,
     // `checked_at`, `waiting_at` and the `prefetched` rows hold one row per
     // id.
-    node_keys: NameRows{name_rows()}
-    nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}}
+    node_keys: NameRows{name_rows()},
+    nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}},
     // The first row of each node's function in the run's checked
     // functions, or -1.
-    checked_at: [Int]{[Int]{}}
+    checked_at: [Int]{[Int]{}},
     // The row in `waiting_functions` of each node's function's last check,
     // which waits on constants with no value yet, or -1. Until one of those
     // waits has a value, checking the function again gives the same result
     // (every other constant it reads already has its value), so each
     // closure that reaches it reuses that check instead of making its own.
-    waiting_at: [Int]{[Int]{}}
-    waiting_functions: [SemaComptimeFunctionResult]
+    waiting_at: [Int]{[Int]{}},
+    waiting_functions: [SemaComptimeFunctionResult],
     // Checked function row -> what a closure reads of that row besides the
     // result itself (JetDriverComptimeClosureRow), so each later closure
     // that reuses the row skips its body walks.
-    closure_rows: [Int:JetDriverComptimeClosureRow]{[Int:JetDriverComptimeClosureRow]{}}
+    closure_rows: [Int:JetDriverComptimeClosureRow]{[Int:JetDriverComptimeClosureRow]{}},
     // Per node, the check jet_driver_comptime_prefetch made of its function
     // ahead of the pass (its one row, or none), which the first closure that
     // would check it takes instead (jet_driver_comptime_prefetched), and,
@@ -1018,29 +1018,29 @@ JetDriverComptimeRunIndex: struct {
     // `prefetched_marks` (-1: none). Rows by node, not maps: a closure takes
     // each check out in place, where a map's removal shifts every later
     // entry.
-    prefetched: [[SemaComptimeFunctionResult]]{[[SemaComptimeFunctionResult]]{}}
-    prefetched_refs: [[JetDriverComptimeFunctionRef]]{[[JetDriverComptimeFunctionRef]]{}}
-    prefetched_has_refs: [Bool]{[Bool]{}}
-    prefetched_marks: [Int]{[Int]{}}
+    prefetched: [[SemaComptimeFunctionResult]]{[[SemaComptimeFunctionResult]]{}},
+    prefetched_refs: [[JetDriverComptimeFunctionRef]]{[[JetDriverComptimeFunctionRef]]{}},
+    prefetched_has_refs: [Bool]{[Bool]{}},
+    prefetched_marks: [Int]{[Int]{}},
     // The functions the pass's prefetch walk checked whose checks waited on
     // constants with no value, row by row with those waits: the walk drops
     // such a check and does not follow it (jet_driver_comptime_prefetch_keep).
-    waited_jobs: [SemaComptimeFunctionJob]{[SemaComptimeFunctionJob]{}}
-    waited_on: [[String]]{[[String]]{}}
+    waited_jobs: [SemaComptimeFunctionJob]{[SemaComptimeFunctionJob]{}},
+    waited_on: [[String]]{[[String]]{}},
     // What the run's body walks have read of each nominal type's render
     // methods (jet_driver_comptime_owner_refs).
-    render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}}
+    render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}},
     // The `#run` sites the current pass has yet to land (its items and the
     // batch it took over, jet_driver_comptime_pass_sites), other than local
     // values: each site's key, under the source offset its span starts at.
     // A function check that captured one ran before its value landed
     // (jet_driver_comptime_site_waits).
-    pass_sites: [Int:[String]]{[Int:[String]]{}}
+    pass_sites: [Int:[String]]{[Int:[String]]{}},
     // Constant key -> the functions its landed value names
     // (TComptimeValue.Function, `f: double` in a folded record), which a
     // closure whose bodies read the constant queues as it queues a function
     // value a body names (jet_driver_comptime_precise_refs).
-    value_functions: [String:[String:Bool]]{[String:[String:Bool]]{}}
+    value_functions: [String:[String:Bool]]{[String:[String:Bool]]{}},
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1058,15 +1058,15 @@ JetDriverComptimeRunIndex: struct {
 // The impurities are the row's closure row's (JetDriverComptimeClosureRow)
 // once a closure asked.
 JetDriverComptimeClosureNode: struct {
-    settled: Bool{false}
-    row: Int{-1}
-    foreign: SemaComptimeFunctionResult?{None}
-    successors: [Int]{[Int]{}}
-    obligations: Bool{false}
-    module_known: Bool{false}
-    module_impurity: String?{None}
-    local_known: Bool{false}
-    local_impurity: String?{None}
+    settled: Bool{false},
+    row: Int{-1},
+    foreign: SemaComptimeFunctionResult?{None},
+    successors: [Int]{[Int]{}},
+    obligations: Bool{false},
+    module_known: Bool{false},
+    module_impurity: String?{None},
+    local_known: Bool{false},
+    local_impurity: String?{None},
 }
 
 // What a closure reads of one checked function row besides its result, the
@@ -1077,11 +1077,11 @@ JetDriverComptimeClosureNode: struct {
 // keeps that value from being computed while building
 // (jet_driver_comptime_row_impurity).
 JetDriverComptimeClosureRow: struct {
-    refs: [JetDriverComptimeFunctionRef]
-    module_known: Bool{false}
-    module_impurity: String?{None}
-    local_known: Bool{false}
-    local_impurity: String?{None}
+    refs: [JetDriverComptimeFunctionRef],
+    module_known: Bool{false},
+    module_impurity: String?{None},
+    local_known: Bool{false},
+    local_impurity: String?{None},
 }
 
 jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult], values: [SemaComptimeItemValue]) -> JetDriverComptimeRunIndex Never! {
@@ -1199,40 +1199,40 @@ jet_driver_comptime_function_owner: fn(index: JetDriverComptimeRunIndex, functio
 }
 
 JetDriverComptimeFunctionRef: struct {
-    module_identity: ModuleID
-    function_key: String
+    module_identity: ModuleID,
+    function_key: String,
 }
 
 JetDriverComptimeFunctionClosure: struct {
-    functions: [FnBody]
+    functions: [FnBody],
     // A closure walked over settled nodes (jet_driver_comptime_settled_closure)
     // names its bodies by their rows of the run's checked functions instead,
     // in closure order; a batch takes them as `functions`
     // (jet_driver_comptime_closure_bodies).
-    rows: [Int]{[Int]{}}
-    waiting_dependencies: [String]
-    complete: Bool
+    rows: [Int]{[Int]{}},
+    waiting_dependencies: [String],
+    complete: Bool,
     // Each incomplete reachable function's recorded causes (its function key).
-    incomplete: [SemaTotalityRow]{[SemaTotalityRow]{}}
+    incomplete: [SemaTotalityRow]{[SemaTotalityRow]{}},
     // Why the reachable functions keep the evaluation from running while
     // building: an impure call site (sema_comptime_call_facts_impurity) or a
     // body that can't be baked in (sema_comptime_body_unfoldable), or None.
-    impurity: String?{None}
+    impurity: String?{None},
     // The foreign functions the closure reaches, which no check reads as Jet
     // (SemaComptimeFunctionResult.foreign): a call of one stops the run.
-    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
+    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}},
     // A function check of the closure captured a `#run` site the pass has
     // yet to land, and the closure waits on it
     // (jet_driver_comptime_site_waits).
-    site_waits: Bool{false}
+    site_waits: Bool{false},
 }
 
 JetDriverComptimeWaitRow: struct {
-    key: String
-    name: String
-    module_identity: ModuleID
-    span: Span
-    dependencies: [String]
+    key: String,
+    name: String,
+    module_identity: ModuleID,
+    span: Span,
+    dependencies: [String],
 }
 
 // Queues function `function_key` of `module_identity` once, its node in
@@ -2081,58 +2081,58 @@ jet_driver_comptime_prefetch_node: fn(index: JetDriverComptimeRunIndex, seen: &[
 // modules (moved in, or empty), handed back at the run's end; `sites` the
 // value sites of the program's graph, through which landings apply.
 JetDriverComptimeStaging: struct {
-    staged: Bool
-    program: Shared<[IRProgram]>
-    landed: Int
-    taken: [String:Bool]
-    declared: [SemaGraphModuleResult]
-    sites: SemaComptimeValueSites
+    staged: Bool,
+    program: Shared<[IRProgram]>,
+    landed: Int,
+    taken: [String:Bool],
+    declared: [SemaGraphModuleResult],
+    sites: SemaComptimeValueSites,
 }
 
 // A comptime item that checked completely and waits for its value: it
 // evaluates `request`, whose checked function closure is `function_keys`
 // (`module\nkey`, in closure order) of its batch's functions.
 JetDriverComptimeEntry: struct {
-    source: SemaComptimeItemSource
-    request: SemaComptimeItemRequest
-    function_keys: [String]
+    source: SemaComptimeItemSource,
+    request: SemaComptimeItemRequest,
+    function_keys: [String],
     // Whether the build computes its constant for the entries after it,
     // which read it by calling its item function (TConstantDef.item_function):
     // its type landed as it joined (jet_driver_comptime_type_land).
-    computed: Bool{false}
+    computed: Bool{false},
 }
 
 // Checked items evaluated together on one IR build, in order.
 JetDriverComptimeBatch: struct {
-    entries: [JetDriverComptimeEntry]
+    entries: [JetDriverComptimeEntry],
     // The union of the entries' checked closures, each function once, in
     // the order the entries first name them; `function_rows` maps each
     // function's `module\nkey` to its position.
-    functions: [FnBody]
-    function_rows: [String:Int]
+    functions: [FnBody],
+    function_rows: [String:Int],
     // The source key of every entry: an item check that waits on one of
     // them reads a value the batch still holds back. True for a computed
     // entry (JetDriverComptimeEntry.computed), which a later entry may read.
-    keys: [String:Bool]
+    keys: [String:Bool],
     // Whether no evaluated entry reaches a declaration or has a closure
     // (jet_driver_comptime_entry_bare), so the batch builds with no
     // declaration rows.
-    bare: Bool
+    bare: Bool,
     // The union of the entries' reached foreign functions, each once
     // (JetDriverComptimeFunctionClosure.foreign).
-    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
+    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}},
 }
 
 // What evaluating a batch did to the run.
 JetDriverComptimeFlush: struct {
     // The run's result when an entry ended the run.
-    stop: JetDriverComptimeRunResult?
+    stop: JetDriverComptimeRunResult?,
     // Whether a value landed or a checked-text item passed.
-    progressed: Bool
+    progressed: Bool,
     // Module values whose evaluation could not complete (the IR builder
     // refused their code, evaluation trapped, failed or ran out of budget),
     // each refused (jet_driver_module_value_refused), reporting nothing here.
-    refused: [JetDriverModuleValueRefusal]{[JetDriverModuleValueRefusal]{}}
+    refused: [JetDriverModuleValueRefusal]{[JetDriverModuleValueRefusal]{}},
 }
 
 // Work counters of one comptime run (#4601 scaling gate), written to the
@@ -2140,10 +2140,10 @@ JetDriverComptimeFlush: struct {
 // programs built, item functions evaluated, and functions built into those
 // programs (closure functions plus item functions).
 JetDriverComptimeCounters: struct {
-    items_checked: Int
-    programs_built: Int
-    item_functions_evaluated: Int
-    functions_built: Int
+    items_checked: Int,
+    programs_built: Int,
+    item_functions_evaluated: Int,
+    functions_built: Int,
 }
 
 jet_driver_comptime_wait_row_find: fn(rows: [JetDriverComptimeWaitRow], key: String) -> JetDriverComptimeWaitRow? {
@@ -2270,20 +2270,20 @@ jet_driver_partition_checked_functions: fn(functions: &[FnBody], mask: [Bool], k
 // ones it was given (jet_driver_run_comptime) or computed, so a caller that
 // lent them gets them back.
 JetDriverComptimeRunResult: struct {
-    values: [SemaComptimeItemValue]
-    functions: [SemaComptimeFunctionResult]
-    trace: JetDriverCompileTrace
-    complete: Bool
-    soft_stop: Bool
-    internal_problem: String?
-    graph: SemaRegistrationGraph?
-    partial_graph: SemaRegistrationGraph?
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    trace: JetDriverCompileTrace,
+    complete: Bool,
+    soft_stop: Bool,
+    internal_problem: String?,
+    graph: SemaRegistrationGraph?,
+    partial_graph: SemaRegistrationGraph?,
     // Set by a run that completed: its owner hands the tables' graph on as
     // `graph` (jet_driver_run_comptime); otherwise as `partial_graph`.
-    graph_finished: Bool
-    trail: SemaGraphTrail
-    declared: [SemaGraphModuleResult]
-    graph_facts: SemaComptimeGraphFacts?
+    graph_finished: Bool,
+    trail: SemaGraphTrail,
+    declared: [SemaGraphModuleResult],
+    graph_facts: SemaComptimeGraphFacts?,
 }
 
 jet_driver_comptime_run_result: fn(
@@ -2445,8 +2445,8 @@ jet_driver_comptime_item_value: fn(source: SemaComptimeItemSource, value: TCompt
 
 // A module value refused while building, and why.
 JetDriverModuleValueRefusal: struct {
-    source: SemaComptimeItemSource
-    reason: String
+    source: SemaComptimeItemSource,
+    reason: String,
 }
 
 // Why the call sites `call_facts` keep an evaluation from running while
@@ -3968,8 +3968,8 @@ jet_driver_comptime_run: fn(
 // plain lets. So an item that reaches nothing builds with no declaration
 // rows exactly as with the staged rows of every module.
 JetDriverComptimeReach: struct {
-    everything: Bool
-    functions: [String]
+    everything: Bool,
+    functions: [String],
 }
 
 jet_driver_comptime_reach_type: fn(reach: &JetDriverComptimeReach, ty: Type) Never! {
@@ -4333,8 +4333,8 @@ jet_driver_test_modules: fn(load: JetDriverLoadResult, core_tests: String) -> [U
 // functions whose `#On(.Deep)` bodies it emits (IRChecks.deep), and an E2120
 // or E2121 for each scope that keeps none.
 JetDriverDeepChecks: struct {
-    selected: [String]
-    diagnostics: [Diagnostic]
+    selected: [String],
+    diagnostics: [Diagnostic],
 }
 
 // `--deep-checks` (JetDriverCompileRequest.deep_checks) over the checked
@@ -4448,10 +4448,10 @@ jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table
 // (Guest.jet sema_guest_runtime_binding), which exports nothing and carries
 // its jet.runtime interface row (jet_driver_runtime_interface_row).
 JetDriverCExportRow: struct {
-    key: String
-    name: String
-    exported: Bool
-    runtime_interface: RuntimeInterfaceRow?
+    key: String,
+    name: String,
+    exported: Bool,
+    runtime_interface: RuntimeInterfaceRow?,
 }
 
 // The entry module's `#Export(c)` functions and runtime bindings in
@@ -4484,10 +4484,10 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
 // `.Internal` jobs never reach argv, and typed job arguments
 // are not built, so a job with parameters is not selectable either.
 JetDriverJobRow: struct {
-    key: String
-    name: String
-    shipped: Bool
-    selectable: Bool
+    key: String,
+    name: String,
+    shipped: Bool,
+    selectable: Bool,
 }
 
 // The entry module's jobs in declaration order, read from the registration
@@ -4708,17 +4708,17 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool
 // output is never shipped: the result keeps every error report, so its
 // receipt never passes.
 JetDriverKeepGoingLog: struct {
-    enabled: Bool
-    skip: [String]
-    rows: [String]
+    enabled: Bool,
+    skip: [String],
+    rows: [String],
     // Row bodies (all but the phase) already recorded, so a failure seen by
     // two phases is one row.
-    seen: [String:Bool]
+    seen: [String:Bool],
     // No index mark: each call reads the whole stage list and `seen` keeps
     // one row per report, so a stage that rebuilds or replaces its list
     // still has every error recorded (#5662).
     // Rows before this index are written to the trace sink.
-    streamed: Int
+    streamed: Int,
 }
 
 jet_driver_keep_going_log: fn(options: JetDriverKeepGoing?) -> JetDriverKeepGoingLog Never! {
@@ -4945,35 +4945,35 @@ jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Boo
 // rows remain in compile.doc_modules; source_modules selects real loaded
 // sources and excludes only Loader's explicit ABI-only Core fallback.
 JetDriverCheckedProjectionResult: struct {
-    compile: JetDriverCompileResult
-    source_modules: [Int]
-    entry_module: Int?
-    schema_ingress: JetDriverSchemaIngress?
+    compile: JetDriverCompileResult,
+    source_modules: [Int],
+    entry_module: Int?,
+    schema_ingress: JetDriverSchemaIngress?,
     // The entry module's jobs (jet_driver_job_rows): the list a run's
     // unknown-job report (E1294) names.
-    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}},
     // `jet budget`'s checked budget specs (sema_budget_located_specs_graph),
     // in declaration order, each with its source location, and the
     // CompilerFacts its specs measure.
-    budget_specs: [JetDriverBudgetSpec]{[JetDriverBudgetSpec]{}}
-    budget_facts: JetDriverBudgetFacts{jet_driver_budget_facts_empty()}
+    budget_specs: [JetDriverBudgetSpec]{[JetDriverBudgetSpec]{}},
+    budget_facts: JetDriverBudgetFacts{jet_driver_budget_facts_empty()},
 }
 
 // One checked budget spec and where it is written (Rust `source_location`):
 // the source file its span starts in, and the 1-based line and column there.
 JetDriverBudgetSpec: struct {
-    spec: BudgetSpec
-    source_path: String
-    line: Int
-    column: Int
+    spec: BudgetSpec,
+    source_path: String,
+    line: Int,
+    column: Int,
 }
 
 // The exact checked front-end facts `jet budget`'s CompilerFacts provider
 // measures (Rust `compiler_fact`).
 JetDriverBudgetFacts: struct {
-    public_api_items: Int
-    dependency_count: Int
-    effect_count: Int
+    public_api_items: Int,
+    dependency_count: Int,
+    effect_count: Int,
 }
 
 jet_driver_budget_facts_empty: fn() -> JetDriverBudgetFacts Never! {
@@ -4991,29 +4991,29 @@ jet_driver_budget_facts_empty: fn() -> JetDriverBudgetFacts Never! {
 // a build, or a check stopped before lowering, drops it on a detached task
 // (jet_driver_release_aside).
 JetDriverHeldState: struct {
-    load: JetDriverLoadResult
-    registration: SemaRegistrationGraph
-    checked: SemaGraphResult
-    functions: [FnBody]
-    modules: [SemaGraphModuleResult]
-    values: [SemaComptimeItemValue]
-    stage: SemaComptimeDeclarationStage
-    run: JetDriverComptimeRunResult
-    trail: SemaGraphTrail
+    load: JetDriverLoadResult,
+    registration: SemaRegistrationGraph,
+    checked: SemaGraphResult,
+    functions: [FnBody],
+    modules: [SemaGraphModuleResult],
+    values: [SemaComptimeItemValue],
+    stage: SemaComptimeDeclarationStage,
+    run: JetDriverComptimeRunResult,
+    trail: SemaGraphTrail,
 }
 
 JetDriverCheckedProjectionCapture: struct {
-    source_modules: [Int]{[Int]{}}
-    entry_module: Int?{None}
-    schema_ingress: JetDriverSchemaIngress?{None}
-    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    source_modules: [Int]{[Int]{}},
+    entry_module: Int?{None},
+    schema_ingress: JetDriverSchemaIngress?{None},
+    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}},
     // `jet_driver_budget_projection`: collect the graph's budget specs.
-    budget: Bool{false}
-    budget_specs: [JetDriverBudgetSpec]{[JetDriverBudgetSpec]{}}
-    budget_facts: JetDriverBudgetFacts{jet_driver_budget_facts_empty()}
+    budget: Bool{false},
+    budget_specs: [JetDriverBudgetSpec]{[JetDriverBudgetSpec]{}},
+    budget_facts: JetDriverBudgetFacts{jet_driver_budget_facts_empty()},
     // `jet_driver_lowering_inputs`: stop right before IR lowering and keep its inputs.
-    stop_before_lowering: Bool{false}
-    lowering_inputs: JetDriverLoweringInputs?{None}
+    stop_before_lowering: Bool{false},
+    lowering_inputs: JetDriverLoweringInputs?{None},
 }
 
 // What the slot IR builder reads: the checked functions, after Core pruning
@@ -5027,39 +5027,39 @@ JetDriverCheckedProjectionCapture: struct {
 // compile has no entry: it carries the tests and Check
 // Outputs its harness runs (jet_driver_test_plan) instead.
 JetDriverLoweringInputs: struct {
-    functions: [FnBody]
-    modules: [SemaGraphModuleResult]
+    functions: [FnBody],
+    modules: [SemaGraphModuleResult],
     // The run's declaration table: every direct call's callee is a row.
-    decls: DeclTable
+    decls: DeclTable,
     // The run's symbol table: every SymbolID the functions' bodies name.
-    symbols: SymbolTable
-    sources: [String:String]
-    entry_module_identity: ModuleID
+    symbols: SymbolTable,
+    sources: [String:String],
+    entry_module_identity: ModuleID,
     // The canonical effect module every compile registers and checks afresh
     // (jet_driver_canonical_effect_module): `modules` leaves it out.
-    canonical_effect_module_identity: ModuleID
+    canonical_effect_module_identity: ModuleID,
     // The load's module identities: every ModuleID the rows name.
-    module_table: ModuleTable
-    entry_key: String?
-    tests: [TTestFact]{[TTestFact]{}}
-    output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}}
-    c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
+    module_table: ModuleTable,
+    entry_key: String?,
+    tests: [TTestFact]{[TTestFact]{}},
+    output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}},
+    c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}},
     // The entry module's jobs (jet_driver_job_rows).
-    jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    jobs: [JetDriverJobRow]{[JetDriverJobRow]{}},
     // The checked functions whose `#On(.Deep)` bodies the build emits, by
     // key (jet_driver_deep_checks).
-    deep_checks: [String]{[String]{}}
+    deep_checks: [String]{[String]{}},
     // The Core library's check (JetDriverCompileRequest.core_seal): the
     // lines of the Core seal (JetSema CoreSeal.jet sema_core_seal_lines).
-    core_seal: [String]{[String]{}}
+    core_seal: [String]{[String]{}},
     // The Core library's check: the Core function checks as captured, which
     // the Core library writes as the bodies file (JetSema CoreBodies.jet).
-    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}}
+    core_bodies: SemaCoreCaptures{SemaCoreCaptures{bodies: [SemaCoreBody]{}, context: ""}},
 }
 
 JetDriverLoweringInputsResult: struct {
-    compile: JetDriverCompileResult
-    inputs: JetDriverLoweringInputs?
+    compile: JetDriverCompileResult,
+    inputs: JetDriverLoweringInputs?,
 }
 
 // The native executable route's front: the ordinary checked compile of
@@ -5115,10 +5115,10 @@ jet_driver_lowering_inputs_selection: fn(request: &JetDriverCompileRequest, mode
 // The checked modules' declarations the IR builder reads, in module order,
 // moved out of `checked`.
 JetDriverCheckedDeclarations: struct {
-    type_defs: [TTypeDef]
-    impls: [TImplDef]
-    constants: [TConstantDef]
-    foreign: [SemaCheckedForeignFunction]
+    type_defs: [TTypeDef],
+    impls: [TImplDef],
+    constants: [TConstantDef],
+    foreign: [SemaCheckedForeignFunction],
 }
 
 jet_driver_checked_declarations: fn(checked: &JetDriverLoweringInputs) -> JetDriverCheckedDeclarations Never! {
@@ -5288,12 +5288,12 @@ jet_driver_compile_borrowed: fn(request: JetDriverCompileRequest) -> JetDriverCo
 }
 
 JetDriverCompileSelectionRestore: struct {
-    mode: JetDriverCompileMode
-    capture_build_program: Bool
-    capture_build_nodes: Bool
-    entry_path: String?
-    selected_entry: String?
-    restore_selected_entry: Bool
+    mode: JetDriverCompileMode,
+    capture_build_program: Bool,
+    capture_build_nodes: Bool,
+    entry_path: String?,
+    selected_entry: String?,
+    restore_selected_entry: Bool,
 }
 
 jet_driver_compile_selection_restore: fn(request: &JetDriverCompileRequest, saved: &&JetDriverCompileSelectionRestore) Never! {
@@ -5411,8 +5411,8 @@ jet_driver_root_loop_waits: fn(load: JetDriverLoadResult) -> [SemaRootLoopValue]
 // The function keys each registration module declares: `modules` binds a
 // module id to its row of `keys`. Hashed sets, only looked up.
 JetDriverRegisteredKeys: struct {
-    modules: [U32:Int]
-    keys: [NameRows]
+    modules: [U32:Int],
+    keys: [NameRows],
 }
 
 // The function keys each registration module declares, by module identity.
@@ -6725,9 +6725,9 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
 // `authority`, and the project lock records each dependency's row (Jetpack
 // pkg_lock_record_effect_rows).
 JetDriverPackageEffectRows: struct {
-    program: EffectBudgetProgram
-    module_identities: [ModuleID]
-    entries: [PackageEffects]
+    program: EffectBudgetProgram,
+    module_identities: [ModuleID],
+    entries: [PackageEffects],
 }
 
 // The package effect rows of the build of `entry_key`, when the build writes

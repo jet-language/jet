@@ -48,10 +48,10 @@ store_project_write_atomic: fn(path: String, bytes: [U8]) -[FS, Env, Rand]> Arti
 
 // Identity of one file's current bytes on disk, short of reading them.
 ProjectFileStamp: struct {
-    size: Int
-    modified_ns: Int
-    changed_ns: Int
-    inode: Int
+    size: Int,
+    modified_ns: Int,
+    changed_ns: Int,
+    inode: Int,
 }
 
 // Without change time and inode a stamp cannot rule out an in-place rewrite, so
@@ -77,8 +77,8 @@ store_project_file_stamp: fn(path: String) -[FS, Env]> String? Never! {
 
 // One recorded stamp and the digest computed under it.
 ProjectStampedDigest: struct {
-    stamp: ProjectFileStamp
-    digest: String
+    stamp: ProjectFileStamp,
+    digest: String,
 }
 
 store_project_entry_int: fn(entry: RecordValue, name: String) -> Int? Never! {
@@ -93,8 +93,8 @@ store_project_entry_text: fn(entry: RecordValue, name: String) -> String? Never!
 
 // The `.jet/stamps` table.
 StampTable: struct {
-    priv entries: [String:ProjectStampedDigest]
-    priv changed: Bool
+    priv entries: [String:ProjectStampedDigest],
+    priv changed: Bool,
 
     load: fn(workspace_root: String) -[FS]> StampTable Never! {
         table := StampTable{entries: [String:ProjectStampedDigest]{}, changed: false}

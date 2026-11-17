@@ -33,8 +33,8 @@ fmt_core_stable: fn(source: String) -> String {
 
 #Test("inferred_braces_and_blocks_round_trip") {
     source: `Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 }
 
 make: fn() -> Point { {x: 1, y: 2} }
@@ -72,7 +72,7 @@ run: fn() {
 
 #Test("repeated_struct_list_heads_preserve_explicit_heads") {
     source: `Point: struct {
-    x: Int
+    x: Int,
 }
 
 run: fn() {
@@ -121,9 +121,9 @@ run: fn() {
 #Test("field_markers_format_to_themselves") {
     loop source in
         [
-        "Login: struct {{\n    user: String\n    #Redact password: String\n}}\n",
-        "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String\n}}\n",
-        "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String\n}}\n",
+        "Login: struct {{\n    user: String,\n    #Redact password: String,\n}}\n",
+        "Login: struct {{\n    #[Redact, Rename(\"pw\")] password: String,\n}}\n",
+        "Login: struct {{\n    #[Rename(\"pw\"), Redact] password: String,\n}}\n",
     ] -> assert_eq(fmt_core_stable(source), source)
 }
 
@@ -171,7 +171,7 @@ run: fn() {
 #Test("banner_comment_keeps_its_blank_line") {
     source: "// --- helpers ---\n\nhelper: fn() -> Int {{ 1 }}\n\n// --- entry ---\n\n// Prints the helper.\nrun: fn() {{ print(helper()) }}\n"
     assert_eq(fmt_core_stable(source), source)
-    member: "Point: struct {{\n    // --- position ---\n\n    x: Int\n    // The height.\n    y: Int\n}}\n"
+    member: "Point: struct {{\n    // --- position ---\n\n    x: Int,\n    // The height.\n    y: Int,\n}}\n"
     assert_eq(fmt_core_stable(member), member)
 }
 
@@ -291,7 +291,7 @@ run: fn() {
 // table as an `if` chain that evaluates the subject once per arm.
 #Test("value_table_subject_with_a_typed_literal_stays_a_table") {
     source: `P: struct {
-    n: Int
+    n: Int,
 }
 
 h: fn(p: P) -> Int Err! { Ok(p.n) }
@@ -325,9 +325,9 @@ g: fn() -> String {
 #Test("a comment above a trait member stays above it") {
     source: `Edit: trait {
     // Sets a field from text.
-    set: fn(&self, field: String, text: String) -> Bool
+    set: fn(&self, field: String, text: String) -> Bool,
     // The current field names.
-    names: fn(self) -> [String]
+    names: fn(self) -> [String],
 }
 `
     formatted: fmt_core_stable(source)
@@ -340,16 +340,16 @@ g: fn() -> String {
 #Test("a marker setting written twice keeps both rows") {
     // Sema reports the second row (E0937); fmt keeps what was written.
     source: `Traced: struct {
-    label: String
+    label: String,
 
     impl Marker {
-        sites: [.Function]
-        sites: [.Method]
+        sites: [.Function],
+        sites: [.Method],
     }
 }
 `
     formatted: fmt_core_stable(source)
-    assert(formatted.contains("sites: [.Function]\n        sites: [.Method]"), "both rows print, in written order")
+    assert(formatted.contains("sites: [.Function],\n        sites: [.Method],"), "both rows print, in written order")
 }
 
 #Test("a prepared value keeps the braces its author wrote") {
@@ -486,7 +486,7 @@ pick: fn(found: Int?, light: Light) -> Bool {
 // the in-body `impl Effect {}` does.
 #Test("empty_effect_impl_beside_its_type_stays_on_one_line") {
     source: `Bucket: struct {
-    name: String
+    name: String,
 }
 
 impl Bucket.Effect {}

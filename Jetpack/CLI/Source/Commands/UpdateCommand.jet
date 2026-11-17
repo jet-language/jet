@@ -12,7 +12,7 @@ cli_render_channel_update_row: fn(theme: Theme, scope: String, name: String, nam
 
 // One confirmation shared by every scope of one `update` run.
 UpdateConfirmation: struct {
-    decision: Bool?
+    decision: Bool?,
 
     new: fn() -> UpdateConfirmation Never! { UpdateConfirmation{decision: None} }
 
@@ -27,16 +27,16 @@ UpdateConfirmation: struct {
 // One channel source move: before and after pins, how many refs it serves,
 // and its download size when known.
 ProjectSourceUpdate: struct {
-    source: ChannelSource
-    before: String
-    after: String
-    package_count: Int
-    download_bytes: Int?
+    source: ChannelSource,
+    before: String,
+    after: String,
+    package_count: Int,
+    download_bytes: Int?,
 }
 
 ProjectUpdatePlan: struct {
-    project_dir: String
-    updates: [ProjectSourceUpdate]
+    project_dir: String,
+    updates: [ProjectSourceUpdate],
 }
 
 cli_package_noun: fn(count: Int) -> String Never! {
@@ -62,8 +62,8 @@ cli_update_download_bytes: fn(updates: [ProjectSourceUpdate]) -> Int? Never! {
 // Which scopes this `update` touches: explicit `--deps`/`--tools`, else the
 // `tools` word, else a named source, else both.
 UpdateScopes: struct {
-    deps: Bool
-    tools: Bool
+    deps: Bool,
+    tools: Bool,
 }
 
 cli_update_scopes: fn(parsed: CLIParsed) -> UpdateScopes Never! {
