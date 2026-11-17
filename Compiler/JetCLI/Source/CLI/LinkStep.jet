@@ -8,11 +8,11 @@
 // gets the link inputs Jet writes to the project, a post-link hook the file
 // before it and the path its step writes the next to. Each answers a
 // core.build `BuildAction`. A link action with no command is Jet's own link,
-// run in process over the action's inputs; any other action is declared as a
-// `b.run` step in a build session of its own and runs in the build sandbox
-// through the executor every build step runs in. The steps run on every
-// build, and a failure is E3506, naming the output, the hook and where the
-// option was written.
+// run in process over the action's inputs; any other action is declared as
+// `b.action` declares one, in a build session of its own, and runs in the
+// build sandbox through the executor every build step runs in. The steps run
+// on every build, and a failure is E3506, naming the output, the hook and
+// where the option was written.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -20,9 +20,10 @@ use {
     jet_build_session.[BuildSessionPolicy, BuildSessionValue, build_plan_execution, build_session_call, build_session_finish, build_session_new]
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
+        JetDriverBuildAction,
         JetDriverCompileResult,
-        JetDriverLinkAction,
         JetDriverLinkInputs,
+        jet_driver_build_action_session_args,
         jet_driver_link_stage_action,
         jet_driver_link_stage_declared,
         jet_driver_link_stage_program,
@@ -168,7 +169,7 @@ jet_cli_link_step_undeclared: fn(snapshot: JetDriverAuthorizedSourceSnapshot, st
 
 // Link `action`'s inputs with Jet's own link, in process, to its one output,
 // which must be the executable `step` links.
-jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverLinkAction, options: BuildOptions, result: JetDriverCompileResult) -[FS, Env]> JetCLIBuilt Never! {
+jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverBuildAction, options: BuildOptions, result: JetDriverCompileResult) -[FS, Env]> JetCLIBuilt Never! {
     if action.outputs.len() != 1 || action.outputs[0] != step.output {
         return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link makes {action.outputs.len()} files, not `{step.output}` alone", None, "keep `outputs: [inputs.output]` on a `BuildAction` with no command")
     }
@@ -189,28 +190,14 @@ jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverLinkAction, opt
 }
 
 // Run `action`, a command, as the one step of a build session of its own,
-// in the build sandbox; the step must make `made`. None when it ran, else
-// the report of why not.
-jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverLinkAction, made: String, options: BuildOptions, result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -[FS, Env, Exec, IO, Net, Time, Rand]> JetCLIBuilt? Never! {
+// declared as `b.action` declares it, in the build sandbox; the step must
+// make `made`. None when it ran, else the report of why not.
+jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, made: String, options: BuildOptions, result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -[FS, Env, Exec, IO, Net, Time, Rand]> JetCLIBuilt? Never! {
     if !action.outputs.contains(made) {
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` doesn't make `{made}`", None, "list `{step.makes}` in the `outputs` of the `BuildAction` the hook returns"))
     }
     session := build_session_new(1, cli_files.basename(step.binary), "", BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}})
-    declared: build_session_call(
-        session,
-        "action",
-        [BuildSessionValue]{
-            BuildSessionValue.Text{value: action.name},
-            jet_cli_link_step_strings(action.run),
-            jet_cli_link_step_strings(action.inputs),
-            jet_cli_link_step_strings(action.outputs),
-            jet_cli_link_step_strings(action.allow),
-        },
-        None,
-        true,
-        0,
-        0,
-    )
+    declared: build_session_call(session, "action", jet_driver_build_action_session_args(action), None, true, 0, 0)
     if declared == .Failure(error) {
         return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` is refused: {error.what}", None, error.fix))
     }
@@ -244,11 +231,6 @@ jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverLinkAction, mad
             None
         }
     }
-}
-
-// `values` as a session's list of strings.
-jet_cli_link_step_strings: fn(values: [String]) -> BuildSessionValue Never! {
-    BuildSessionValue.List{values: loop value in values -> BuildSessionValue.Text{value: value}}
 }
 
 // The E3506 report of `step`.

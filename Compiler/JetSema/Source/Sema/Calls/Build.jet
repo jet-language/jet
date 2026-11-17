@@ -38,6 +38,12 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
             parameters = [Type]{Type.String, Type.Named{name: "BuildFile"}, strings}
             result = sema_build_result("BuildStepHandle")
         }
+        // The step a core.build `BuildAction` describes, declared as the
+        // `b.run` step its command, files and effects spell.
+        method == "action" && arity == 1 -> {
+            parameters = [Type]{Type.Named{name: "BuildAction"}}
+            result = sema_build_result("BuildStepHandle")
+        }
         method == "found" && arity == 1 -> {
             parameters = [Type]{Type.Named{name: "BuildProbe"}}
             result = Type.Named{name: "BuildFile"}
@@ -103,7 +109,7 @@ sema_build_context_arity_description: fn(method: String) -> String Never! {
     if method == "toolchain" -> return "2 to 6"
     if method == "probe" -> return "3 to 6"
     if method == "plan" -> return "0 or 1"
-    if method == "default" || method == "compiler" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" {
+    if method == "default" || method == "compiler" || method == "found" || method == "host" || method == "image" || method == "dependency" || method == "folder" || method == "action" {
         return "1"
     }
     if method == "run" -> return "3"

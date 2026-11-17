@@ -1,0 +1,19 @@
+# Claim: `b.action(step)` declares the step a core.build `BuildAction`
+# describes, as `b.run` declares the step its command, files and effects
+# spell: the command's program is found as a `find_program` probe finds it,
+# its other words are the step's arguments, and the step reads its inputs
+# and makes its outputs in the build sandbox, with the effects in `allow`.
+# A link or post-link hook's action is declared the same way. `b.action`
+# takes the one value, never the step spelled as arguments.
+fixture: BuildActionStep.fixture
+artifact: app
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet build main.jet --allow=Exec,FS
+exit: 0
+file: greet.txt = "hello world" # the step read its input and made its output
+step: jet build spelled.jet --allow=Exec,FS
+exit: nonzero
+stderr: ~ "`Build.action` expects 1 arguments, got 2" # one `BuildAction`, not its fields
+stderr: ~ "E0104"

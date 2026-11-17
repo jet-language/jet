@@ -1,0 +1,57 @@
+// A core.build `BuildAction` value as the driver reads it, for a hook's
+// answer and for `b.action`, and the arguments of the session step it
+// declares.
+use {
+    jet_build_session.[BuildSessionValue]
+    jet_driver.[jet_driver_build_action_of, jet_driver_build_action_session_args]
+    jet_foundation.[TComptimeEnumArg, TComptimeField, TComptimeValue]
+}
+
+build_action_value_strings: fn(items: [String]) -> TComptimeValue Never! {
+    TComptimeValue.List{values: loop item in items -> TComptimeValue.String{value: item}}
+}
+
+// A `sign` action; `stray` adds a field no `BuildAction` has.
+build_action_value: fn(stray: Bool) -> TComptimeValue Never! {
+    exec: TComptimeValue.Enum{type_name: "Effect", variant: "Exec", args: [TComptimeEnumArg]{}}
+    fields := [TComptimeField]{
+        TComptimeField{name: "name", value: TComptimeValue.String{value: "sign"}},
+        TComptimeField{name: "run", value: build_action_value_strings([String]{"sh", "-c", "true"})},
+        TComptimeField{name: "inputs", value: build_action_value_strings([String]{"app.0"})},
+        TComptimeField{name: "outputs", value: build_action_value_strings([String]{"app"})},
+        TComptimeField{name: "allow", value: TComptimeValue.List{values: [TComptimeValue]{exec}}},
+    }
+    if stray {
+        fields.push(TComptimeField{name: "env", value: build_action_value_strings([String]{})})
+    }
+    TComptimeValue.Struct{type_name: "BuildAction", fields: fields}
+}
+
+#Test("a BuildAction value reads as its name, command, files and effect names") {
+    action: jet_driver_build_action_of(build_action_value(false)) ?? panic("a BuildAction value reads as one")
+    assert_eq(action.name, "sign")
+    assert_eq(action.run, [String]{"sh", "-c", "true"})
+    assert_eq(action.inputs, [String]{"app.0"})
+    assert_eq(action.outputs, [String]{"app"})
+    assert_eq(action.allow, [String]{"Exec"})
+}
+
+#Test("a value that is no BuildAction reads as none") {
+    assert(jet_driver_build_action_of(TComptimeValue.String{value: "sign"}) == None)
+    assert(jet_driver_build_action_of(build_action_value(true)) == None)
+}
+
+#Test("a BuildAction spells the session step's name, command, inputs, outputs and effects") {
+    action: jet_driver_build_action_of(build_action_value(false)) ?? panic("a BuildAction value reads as one")
+    args: jet_driver_build_action_session_args(action)
+    assert_eq(args.len(), 5)
+    assert(args[0] == BuildSessionValue.Text{value: "sign"})
+    if args[1] == .List(values) {
+        assert_eq(values.len(), 3)
+        assert(values[2] == BuildSessionValue.Text{value: "true"})
+    } else { panic("the command is a list of strings") }
+    if args[4] == .List(values) {
+        assert_eq(values.len(), 1)
+        assert(values[0] == BuildSessionValue.Text{value: "Exec"})
+    } else { panic("the effects are a list of names") }
+}

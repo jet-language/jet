@@ -1,0 +1,11 @@
+use steps: core.build
+
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run a described step") {
+        greet: b.action(steps.action("greet", run: ["sh", "-c", "read -r word < greeting.txt; printf 'hello %s' \"$word\" > greet.txt"], inputs: ["greeting.txt"], outputs: ["greet.txt"], allow: [.Exec, .FS]))
+        app: b.add_executable("app", ["main.jet"], [greet])
+        b.default(app)
+    }
+}
+
+run: fn() {}

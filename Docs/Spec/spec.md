@@ -7091,8 +7091,15 @@ A step is also a plain value. `build.action(name, run:, inputs:, outputs:,
 allow:)` of `core.build` makes a `BuildAction`: the command `run` runs, the
 files it reads and the files it makes, and the effects it may use, as cases
 of `core.compiler.lang`'s `Effect` (`allow: [.Exec]`). Making one runs
-nothing; a function returns one for Jet to run, as a link hook does (`link`
-in Output places, link inputs and targets).
+nothing; a function returns one for Jet to run, as a link or post-link hook
+does (`link` and `post_link` in Output places, link inputs and targets).
+`b.action(step)` declares the step a `BuildAction` describes and returns its
+`BuildStepHandle`, as `b.run` declares the step it spells: the command's
+program is found as a `find_program` probe of the same name finds it, its
+other words are the step's arguments, each input is a file it reads and
+each output one it makes, and `allow` are its effects. A link or post-link
+hook's action is declared the same way. Example:
+[`Tests/Cases/BuildEntry/build_action_declares_a_step.case`](../../Tests/Cases/BuildEntry/build_action_declares_a_step.case).
 
 A step can also read a whole folder. `b.folder(path)` is the folder at `path`
 in the build's package (`.` is the package itself), `.folder(path)` on
