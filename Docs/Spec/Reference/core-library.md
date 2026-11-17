@@ -5669,7 +5669,7 @@ tasks never read or change the process registry. The module source is
 | `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
 | `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
-| `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Not delivered on any target yet. See below. |
+| `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6247,10 +6247,18 @@ its result's text as a text node. core.ui lays the tree out as every
 backend does, one unit a logical pixel, and draws it: a white background,
 each leaf but text a box filled with its color (else light gray), and each
 label in black from its box's top left, 16 units to the em. A text's color
-is its ink. The window draws again when another screen opens or it takes
-another size, and shows an empty box for the not-found state. Closing the
-window ends the process with status 0. A desktop with no display, or a
-display that fails, adds a notice. A side below one pixel panics.
+is its ink. The window routes its input to the tree. The primary pointer
+button focuses the button or text input under it and clicks a button,
+running its handler; Tab moves the focus through the buttons and text
+inputs in order; a key pressed with exactly a button's `shortcut:`
+modifiers clicks it (a command shortcut takes Control or Super); Enter or
+space with no modifier clicks the focused button; typed text and Backspace
+edit the focused text input; and a drop on a text input with `on_drop:`
+gives its handler each text and URI item. The window draws again when
+another screen opens, typing changes the tree, or it takes another size,
+and shows an empty box for the not-found state. Closing the window ends
+the process with status 0. A desktop with no display, or a display that
+fails, adds a notice. A side below one pixel panics.
 
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
@@ -6364,9 +6372,13 @@ error, E-APP-TARGET-FEATURE.
 the person drops on it: each one of a kind in `types` goes to `on_drop` as a
 `PickedFile`, and a notice `on_drop` fails with shows beside `body`, as a
 button's does. A native target delivers a drop through the window that
-shows `body`. The Linux window (`graph.window`) does not take a drop for
-`body` yet, so each native target keeps a notice saying its drop target is
-not built yet and gives `body` back as it is. A page's drop gives the
+shows `body`. On Linux the app's window (`graph.window`) takes a drag that
+drops a list of URIs on `body` (Wayland's wl_data_device, as
+`text/uri-list`): each local file (`file://`) in it whose name ends as the
+kind's pattern does (`*.csv` for `CSV`) is a `PickedFile` backed by its
+path, and `on_drop` gets them once, in the list's order; a drop with none
+calls nothing. The other native targets keep a notice saying their drop
+target is not built yet and give `body` back as it is. A page's drop gives the
 browser's own file handles, which the page runtime can't hand to the app
 yet, so `app.drop_files` in code whose target is the web output is a
 compile error, E-APP-TARGET-FEATURE.

@@ -391,6 +391,33 @@ sema_pattern_flat_union_owner_name: fn(carrier: Type, variant: String, env: Sema
     Val(type_name(sema_pattern_unwrap_tags(owner)))
 }
 
+// The type a trait-value arm's variant names. The written arm (`Box<Int>`)
+// parses as type position does; the checked tree's variant is the arm's tag
+// (`key<Int>`, a declaration key with its arguments' carrier identities),
+// which a later pass over the tree reads back to the same type.
+sema_pattern_trait_arm_written: fn(variant: String) -[]> Type {
+    if !variant.contains("::") || !variant.ends_with(">") {
+        return parse_type_text(variant) ?? Type.Named{name: variant}
+    }
+    parts: variant.split_once("<") ?? return Type.Named{name: variant}
+    inner: parts.after.removesuffix(">")
+    bytes := inner.bytes()
+    args := [Type]{}
+    depth := 0
+    start := 0
+    loop index in 0..<bytes.len() {
+        byte := bytes[index]
+        if byte == (U8{60}) || byte == (U8{91}) || byte == (U8{40}) -> depth += 1
+        if byte == (U8{62}) || byte == (U8{93}) || byte == (U8{41}) -> depth -= 1
+        if byte == (U8{44}) && depth == 0 {
+            args.push(sema_pattern_trait_arm_written((String.from_bytes(bytes.slice(start, index)) ?? "").trim()))
+            start = index + 1
+        }
+    }
+    args.push(sema_pattern_trait_arm_written((String.from_bytes(bytes.slice(start, bytes.len())) ?? "").trim()))
+    Type.Apply{name: parts.before, args: args}
+}
+
 // A type arm over a trait value of `bounds` (`.Square(q)`, `.geo.Point(p)`,
 // `.Box<Int>(b)`): the arm names the type its name names in type position,
 // which must implement the trait, and binds the value the trait value holds.
@@ -402,7 +429,7 @@ sema_pattern_trait_arm: fn(subject: Type, bounds: [String], variant: String, env
     trait_shown: bounds.join(" + ")
     graph: program.registration_graph ?? return result
     caller: sema_scope_caller_row(env, graph)
-    written: parse_type_text(variant) ?? Type.Named{name: variant}
+    written: sema_pattern_trait_arm_written(variant)
     held: sema_type_resolve_declared_recursive(graph, written, caller, env.generic_params)
     if held == .TraitObject(_) {
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names a trait, not a type", "a trait value always holds a value of one concrete type, and an arm names that type", "name a type that implements `{trait_shown}`"))

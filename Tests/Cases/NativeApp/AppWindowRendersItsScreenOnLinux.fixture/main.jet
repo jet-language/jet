@@ -1,0 +1,44 @@
+// Crewboard in a Linux window. The board screen shows a blue panel above a
+// button that opens the inbox, whose screen shows a red panel. The window
+// draws the board once the app launches, a click on the button opens the
+// inbox, which the window draws next, and closing the window ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+BoardView: struct {}
+
+InboxView: struct {}
+
+board: fn(view: BoardView) -> UINode {
+    ui.box(
+        [
+            ui.node_color("", 200.0, 30.0, Color{r: 51, g: 102, b: 255, a: 255}),
+            ui.button(
+                "Inbox",
+                fn() {
+                    app.go(InboxView{})
+                },
+            ),
+        ],
+    )
+}
+
+inbox: fn(view: InboxView) -> UINode {
+    ui.box([ui.node_color("", 200.0, 30.0, Color{r: 204, g: 51, b: 51, a: 255})])
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).screen("/inbox", inbox).window(width: 200, height: 100)
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}

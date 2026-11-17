@@ -133,15 +133,13 @@ boundary_head_owner_module: fn(name: String) -> String? {
     boundary_head_carrier_module(name)
 }
 
-// The Core module whose same-named record is the built-in value. Path stays
-// the native boundary carrier, distinct from core.files.path's record.
+// The Core module whose same-named record is the built-in value: the module
+// that declares the head's bare spelling (CORE_BARE_SOURCE_MODULES). Path
+// stays the native boundary carrier, distinct from core.files.path's record.
 boundary_head_carrier_module: fn(name: String) -> String? {
-    if name == "URL" -> return Val("core.net.url")
+    if name == "Path" || !BOUNDARY_TYPED_HEADS.contains(name) -> return None
     if name == "DateTime" -> return Val("core.time")
-    if name == "HTML" -> return Val("core.text.html")
-    if name == "Sh" -> return Val("core.process")
-    if name == "SQL" -> return Val("core.db")
-    None
+    core_bare_source_module(name)
 }
 
 // #4318: why a checked clone duplicates its operand. Every copy carries the

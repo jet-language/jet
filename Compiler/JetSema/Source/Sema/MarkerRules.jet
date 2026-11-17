@@ -388,6 +388,19 @@ sema_marker_rules_catalog_rule_index: fn(rules: [TAppliedRule], name: String) ->
     None
 }
 
+// A checked text block whose declared rule takes a type as its first header
+// argument (`#SQL(Row) {{ … }}`, `row: Type` in the Prelude declaration): the
+// header names a declared type position.
+sema_marker_rules_type_header: fn(program: SemaProgramTables, name: String) -[]> Bool {
+    if program.registration_graph == .Val(graph) && graph.marker_catalog == .Val(registry) {
+        index: sema_marker_rules_catalog_rule_index(registry.applied_rules, name) ?? return false
+        if registry.applied_rules[index].signature.params.len() > 0 {
+            return registry.applied_rules[index].signature.params[0].source_type == "Type"
+        }
+    }
+    false
+}
+
 sema_marker_rules_user_rule_index: fn(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Int? {
     loop (index, rule) in registry.marker_rules {
         if marker.declaration_module != None {

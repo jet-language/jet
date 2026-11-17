@@ -1,0 +1,33 @@
+// @fixture_module
+// A package's checked text head: `check` rejects an unbalanced query with
+// the package's own reason.
+#Error
+CypherError: struct {
+    reason: String,
+}
+
+Cypher: struct {
+    text: String,
+    params: [String],
+
+    impl CheckedText {
+        Error: CypherError,
+        Hole: String,
+
+        check: fn(text: String) -[]> CypherError! {
+            depth := 0
+            loop byte in text.bytes() {
+                if byte == (U8{40}) -> depth += 1
+                if byte == (U8{41}) -> depth -= 1
+            }
+            if depth != 0 -> return Err(CypherError{reason: "a Cypher query leaves a bracket open"})
+            return Ok()
+        }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> String { "{value}" }
+
+        build: fn(parts: [String], holes: [String]) -[]> Cypher {
+            Cypher{text: parts.join("$"), params: holes.copy()}
+        }
+    }
+}
