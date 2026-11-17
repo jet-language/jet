@@ -1,0 +1,6 @@
+use core.build
+
+step: build.action("wasm-ld", run: ["wasm-ld", "-o", "app.wasm", "app.o"], inputs: ["app.o"], outputs: ["app.wasm"], allow: [.Exec])
+print("{step.name}: {step.run.join(" ")}")
+print("reads {step.inputs.join(", ")}, makes {step.outputs.join(", ")}")
+print(if step.allow.len() == 1 && step.allow[0] == .Exec -> "may run programs" else -> "other effects")

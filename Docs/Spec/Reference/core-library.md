@@ -7441,11 +7441,12 @@ subquery from another table) is refused.
 | `store.execute(sql: SQL) -[DB.Write]> Int DBError!` | count | Write through the connection, with no row policy; schema and transaction-control SQL stay with `db.migrate` and `begin`. |
 | `store.all_rows() -> DBScope` | scope | The connection as a scope with no row policy, for a helper written for scopes and for `db.migrate`. |
 | `store.with_policy(policy: RowPolicy, user: String) -[DB]> DBScope` | scope | The scope a row policy narrows to `user`. |
-| `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
+| `store.table(name: String, key: fn(T) -[]> K, search: (fn(T) -[]> String)?{None}) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function; a pure `search` function gives the text its search index keeps. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) -[DB.Read, DB.Write]> DBError!` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
+| `table.search(words: String) -[DB.Read]> Query<T> DBError!` | query | The rows the caller may read whose search text holds every word of `words`, whole and caseless, in key order, as a `core.data` query. |
 | `table.guard(policy: fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T>` | table | The table judged by a row policy on every read and write. |
 | `pool(url: String, max: Int) -[DB]> DBPool DBError!` | pool | Create a bounded connection pool (`DBPool` → `DBLease`, `DBPoolReceipt`). |
 | `policy(table: String, expression: String) -[DB]> RowPolicy DBError!` | policy | Compile a checked row-access policy. |
@@ -7561,6 +7562,23 @@ same connection, so it sees the transaction's earlier writes. It runs before
 the write it judges, so a write cannot vouch for itself. An `app.live`
 binding runs as the caller that made it, whoever reads it, and two callers'
 bindings of one query never share a result.
+
+A table made with `search: Val(text_of)` keeps a search index: a side table
+`<name>__jet_search` holding each row's key columns and one `jet_word` row per
+word of `text_of(row)`, which every `add`, `put` and `delete` keeps current
+(a key field may not be named `jet_word`). The words of a text are, after
+case folding, its runs of ASCII letters and digits and of text beyond ASCII,
+each once, so a word in another script stays whole. `table.search(words)`
+gives the rows whose search text holds every word of `words`, whole and
+caseless: `ship` finds "Ship it" and `shi` does not, and no words find every
+row. It reads the index once for the keys of the rows that hold every word,
+then reads each of those rows, which the row policy judges as it judges a
+`query`, so a search never returns a row the caller may not read. A filter
+on the query it gives runs on the rows it found. An `app.live` binding that
+searches re-runs after any write to the table. `table.upgrade()` rebuilds
+every row's words. Searching a table made without `search` is
+`DBError.Failed`. The index is plain SQL on every engine; the Jet SQLite
+engine reads it without FTS5.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
 `SELECT` and applies the scope's policy before binding, so a refused query

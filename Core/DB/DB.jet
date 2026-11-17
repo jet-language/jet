@@ -921,9 +921,11 @@ Store: struct {
 
     // The typed table `name`: rows of type `T`, each found by the key that
     // the pure function `key` computes from it. It has no row policy until
-    // `guard` gives it one.
-    table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), policy: None}
+    // `guard` gives it one. With `search`, the table keeps a search index:
+    // the words of the text `search` gives for each row, which
+    // `Table.search` looks words up in.
+    table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K, search: &&(fn(T) -[]> String)?{None}) -> Table<K, T> Never! {
+        Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), search_of: search.move(), policy: None}
     }
 
     // An opened connection queries directly, meaning every row: `query`
@@ -1067,20 +1069,28 @@ Who: enum {
 // as the system and reads through a store on the same connection, so it
 // sees the transaction's earlier writes; it runs before the write it judges,
 // which it therefore cannot see.
+//
+// A table with a search function (`store.table(name, key:, search:)`) keeps
+// a search index beside it, the table `<name>__jet_search`: one row for
+// each word of each row's search text, under the row's encoded key. A write
+// of a row replaces its words and a delete removes them, in the same
+// transaction; `upgrade` indexes every stored row again, so rows written
+// before the table had a search function are found too.
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     priv state: Shared<DBState>,
     priv name: String,
     priv key_of: fn(T) -[]> K,
+    priv search_of: (fn(T) -[]> String)?,
     priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?,
 
     // This table judged by the row policy `policy`, in place of any it had.
     guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: Val(policy.move())}
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: Val(policy.move())}
     }
 
     // This table again, over the same store, for a query to read later.
     priv again: fn(self) -> Table<K, T> Never! {
-        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, policy: self.policy}
+        Table<K, T>{state: self.state.copy(), name: self.name.copy(), key_of: self.key_of, search_of: self.search_of, policy: self.policy}
     }
 
     // The row whose key is `key`, or None, also when the policy refuses to
@@ -1160,7 +1170,12 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         stored: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
         gone: table_texts(stored) ?? return Err(err)
         changed: __driver_execute(guard.value.driver, "DELETE FROM \"{self.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
-        if changed > 0 -> guard.value.wrote(self.name, Val(gone))
+        if changed > 0 {
+            if self.search_of == .Val(_) {
+                table_unindex(guard.value.driver, self.name, cells) ?? return Err(err)
+            }
+            guard.value.wrote(self.name, Val(gone))
+        }
         Ok()
     }
 
@@ -1175,18 +1190,33 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
         table: self.again()
         deferred: data.__query_narrowed<T>("table", fn(condition: String, values: [String]) {
             stored_rows: table_rows<K, T>(table, condition, table_bound(values), Val(values.copy())) ?? return Err(table_data_error(err))
-            keyed := [{key: K, row: T}]{}
-            loop stored in stored_rows {
-                row: table_decode<T>(stored) ?? return Err(table_data_error(err))
-                keyed.push({key: table.key_of(row.copy()), row: row})
-            }
-            keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
-            out := [T]{}
-            loop entry in keyed {
-                allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? return Err(table_data_error(err))
-                if allowed -> out.push(entry.row.copy())
-            }
-            Ok(out)
+            table_readable<K, T>(table, stored_rows, who)
+        })
+        Ok(deferred)
+    }
+
+    // The rows whose search text (the table's `search` function) holds
+    // every word of `words`, which the caller may read, in key order, as a
+    // data query. A word matches whole and caseless (`search_terms`), so
+    // `Ship` finds "ship it" and `shi` does not. No words match every row.
+    // It reads the table's search index once for the rows that hold every
+    // word, then each of those rows; the row policy judges each, as the
+    // caller this task acts for now. A live binding that searches re-runs
+    // after any write to the table. A table made without `search` has no
+    // index, and searching it is an error.
+    search: fn(self, words: String) -[DB.Read]> Query<T> DBError! {
+        if !sql_identifier(self.name.bytes()) -> return Err(table_name_error(self.name))
+        if self.search_of == .None {
+            return Err(db_error("table `{self.name}` has no search index: give `store.table` a `search` function"))
+        }
+        terms: search_terms(words)
+        who: table_who()
+        table: self.again()
+        // The filter of a `.filter` step after the search runs on each row
+        // the search gives, so the search does not narrow its read by it.
+        deferred: data.__query_narrowed<T>("search", fn(_: String, _: [String]) {
+            stored_rows: table_found<K, T>(table, terms.copy()) ?? return Err(table_data_error(err))
+            table_readable<K, T>(table, stored_rows, who)
         })
         Ok(deferred)
     }
@@ -1196,10 +1226,12 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
     // `migration` block is its table's history: every read already decodes
     // an older row through it, and this stores what that read gives, so the
     // block's steps are the table's steps. A row already in the current shape
-    // is left alone, so a second call rewrites none. Each row is its own
-    // write: a failure part way leaves every row readable, and calling again
-    // finishes. It is a schema step, so it runs as the system: the row policy
-    // judges none of it.
+    // is left alone, so a second call rewrites none. A table with a search
+    // function also indexes each row's search text again, so the rows
+    // written before it had one, or before the function changed, are found
+    // by their words. Each row is its own write: a failure part way leaves
+    // every row readable, and calling again finishes. It is a schema step, so
+    // it runs as the system: the row policy judges none of it.
     upgrade: fn(self) -[DB.Read, DB.Write]> Int DBError! {
         rows: table_rows<K, T>(self, "", [DBValue]{}, None) ?? return Err(err)
         rewritten := 0
@@ -1208,11 +1240,13 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
             row: table_decode<T>(stored) ?? return Err(err)
             cells: table_cells(self.name, self.key_of(row.copy()).encode()) ?? return Err(err)
             encoded: json.to_string(row.encode_stored()) ?? return Err(db_error("the row for table `{self.name}` does not encode: {err}"))
+            terms: if self.search_of == .Val(text_of) -> Val(search_terms(text_of(row.copy()))) else -> None
+            if encoded == text && terms == .None -> next
+            guard := self.state.guard_edit()
+            call: app.transactions.current() ?? 0
+            guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+            db_join(guard.value, self.state, call) ?? return Err(err)
             if encoded != text {
-                guard := self.state.guard_edit()
-                call: app.transactions.current() ?? 0
-                guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
-                db_join(guard.value, self.state, call) ?? return Err(err)
                 kept: table_columns(guard.value.driver, self.name, table_fields(row.encode_stored())) ?? return Err(err)
                 sets := [String]{"{TABLE_ROW_COLUMN} = ?"}
                 values := [DBValue]{.Text(encoded.copy())}
@@ -1222,8 +1256,12 @@ Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
                 }
                 loop value in table_values(cells) -> values.push(value)
                 _: __driver_execute(guard.value.driver, "UPDATE \"{self.name}\" SET {sets.join(", ")} WHERE {table_match(cells)}", values) ?? return Err(err)
-                guard.value.wrote(self.name, Val([String]{text, encoded}))
+                guard.value.wrote(self.name, Val([String]{text.copy(), encoded.copy()}))
                 rewritten += 1
+            }
+            if terms == .Val(words) {
+                indexed: table_index(guard.value.driver, self.name, cells, words) ?? return Err(err)
+                if indexed -> guard.value.wrote(self.name, Val([String]{encoded}))
             }
         }
         Ok(rewritten)
@@ -1320,6 +1358,150 @@ priv table_judge: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     Ok(allowed)
 }
 
+// The rows of `stored_rows` that the row policy lets `who` read, decoded and
+// in key order, as a table's `query` and `search` give them.
+priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]], who: Who) -[DB.Read]> [T] data.DataError! {
+    keyed := [{key: K, row: T}]{}
+    loop stored in stored_rows {
+        row: table_decode<T>(stored) ?? return Err(table_data_error(err))
+        keyed.push({key: table.key_of(row.copy()), row: row})
+    }
+    keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
+    out := [T]{}
+    loop entry in keyed {
+        allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? return Err(table_data_error(err))
+        if allowed -> out.push(entry.row.copy())
+    }
+    Ok(out)
+}
+
+// The column of a search index that holds one word of a row's search text,
+// beside the row's key columns.
+TABLE_WORD_COLUMN: "jet_word"
+
+// The search index of the table `name` (Table).
+priv table_index_name: fn(name: String) -> String Never! { "{name}__jet_search" }
+
+// The words a search index keeps of `text`, and a search looks for: after
+// case folding, each run of ASCII letters and digits and of text beyond
+// ASCII, each once. It splits by bytes, so core.db needs no Unicode word
+// tables: a word in another script stays whole, and punctuation beyond
+// ASCII stays part of the word it touches.
+priv search_terms: fn(text: String) -> [String] Never! {
+    raw: text.casefold().bytes()
+    terms := [String]{}
+    start := 0
+    loop at in 0..<(raw.len() + 1) {
+        if at < raw.len() && search_word_byte(Int{raw[at]}) -> next
+        if at > start {
+            word: String.from_bytes(raw.slice(start, at)) ?? panic("a run of whole UTF-8 sequences stays UTF-8")
+            if !terms.contains(word) -> terms.push(word)
+        }
+        start = at + 1
+    }
+    terms
+}
+
+// Whether a byte belongs to a word (`search_terms`): an ASCII letter or
+// digit, or any byte of a sequence beyond ASCII.
+priv search_word_byte: fn(byte: Int) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte >= 128
+}
+
+#Test("a search text's words are its caseless runs of letters and digits, each once") {
+    assert_eq(search_terms("Ship it, SHIP the build-2!"), [String]{"ship", "it", "the", "build", "2"})
+    assert_eq(search_terms("Café crème"), [String]{"café", "crème"})
+    assert_eq(search_terms(" ,. "), [String]{})
+}
+
+// Makes `terms` the words the search index of table `name` keeps for the row
+// under the key `cells`, creating the index on its first write, and answers
+// whether they changed.
+priv table_index: fn(driver: &DBDriver, name: String, cells: [{column: String, value: DBValue}], terms: [String]) -> Bool DBError! {
+    index: table_index_name(name)
+    columns := [String]{}
+    loop cell in cells -> columns.push("\"{cell.column}\"")
+    names: columns.join(", ")
+    _: __driver_execute(driver, "CREATE TABLE IF NOT EXISTS \"{index}\" ({names}, {TABLE_WORD_COLUMN} TEXT NOT NULL, PRIMARY KEY ({names}, {TABLE_WORD_COLUMN}))", [DBValue]{}) ?? return Err(err)
+    held: __driver_query(driver, "SELECT {TABLE_WORD_COLUMN} FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+    kept := [String]{}
+    loop stored in held {
+        word: row_text(stored, TABLE_WORD_COLUMN) ?? return Err(err)
+        kept.push(word)
+    }
+    same := kept.len() == terms.len()
+    loop word in kept {
+        if !terms.contains(word) -> same = false
+    }
+    if same -> return Ok(false)
+    _: __driver_execute(driver, "DELETE FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+    loop term in terms {
+        values := table_values(cells)
+        values.push(.Text(term.copy()))
+        marks := [String]{}
+        loop _ in 0..<values.len() -> marks.push("?")
+        _: __driver_execute(driver, "INSERT INTO \"{index}\" ({names}, {TABLE_WORD_COLUMN}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
+    }
+    Ok(true)
+}
+
+// Removes the words the search index of table `name` keeps for the row
+// under the key `cells`.
+priv table_unindex: fn(driver: &DBDriver, name: String, cells: [{column: String, value: DBValue}]) DBError! {
+    index: table_index_name(name)
+    if !table_exists(driver, index) -> return Ok()
+    _: __driver_execute(driver, "DELETE FROM \"{index}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+    Ok()
+}
+
+// The stored rows of `table` whose search index holds every one of `terms`,
+// read without the row policy: one read of the index for the keys that hold
+// them all, then each of those rows by its key. Every row when `terms` is
+// empty. The read joins a running live binding's read set as the whole
+// table, since a write of any row may change what a search finds.
+priv table_found: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, terms: [String]) -[DB.Read]> [[String:DBValue]] DBError! {
+    if terms.len() == 0 -> return table_rows<K, T>(table, "", [DBValue]{}, None)
+    guard := table.state.guard_edit()
+    call: app.transactions.current() ?? 0
+    guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
+    db_join(guard.value, table.state, call) ?? return Err(err)
+    if app.live_reads.running() {
+        db_live_watch(guard.value, table.state, table.name)
+        app.live_reads.record(live_source(table.name))
+    }
+    index: table_index_name(table.name)
+    if !table_exists(guard.value.driver, index) -> return Ok([[String:DBValue]]{})
+    known: __driver_query(guard.value.driver, "PRAGMA table_info(\"{index}\")", [DBValue]{}) ?? return Err(err)
+    keys := [String]{}
+    quoted := [String]{}
+    loop column in known {
+        name: row_text(column, "name") ?? return Err(err)
+        if name != TABLE_WORD_COLUMN {
+            quoted.push("\"{name}\"")
+            keys.push(name)
+        }
+    }
+    marks := [String]{}
+    values := [DBValue]{}
+    loop term in terms {
+        marks.push("?")
+        values.push(.Text(term.copy()))
+    }
+    values.push(.Int(terms.len()))
+    found: __driver_query(guard.value.driver, "SELECT {quoted.join(", ")} FROM \"{index}\" WHERE {TABLE_WORD_COLUMN} IN ({marks.join(", ")}) GROUP BY {quoted.join(", ")} HAVING COUNT(*) = ?", values) ?? return Err(err)
+    out := [[String:DBValue]]{}
+    loop held in found {
+        cells := [{column: String, value: DBValue}]{}
+        loop key in keys {
+            value: row_value(held, key) ?? return Err(err)
+            cells.push({column: key.copy(), value: value})
+        }
+        rows: __driver_query(guard.value.driver, "SELECT {TABLE_ROW_COLUMN} FROM \"{table.name}\" WHERE {table_match(cells)}", table_values(cells)) ?? return Err(err)
+        out.extend(rows)
+    }
+    Ok(out)
+}
+
 // `add` (replace false) and `put` (replace true): creates the table on its
 // first write, then inserts the row's storage encoding under its key columns,
 // with its field columns (`table_fields`).
@@ -1334,6 +1516,7 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     names: columns.join(", ")
     created := [String]{}
     loop field in fields -> created.push(", \"{field.column}\"")
+    terms: if table.search_of == .Val(text_of) -> Val(search_terms(text_of(row.copy()))) else -> None
     guard := table.state.guard_edit()
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
@@ -1356,6 +1539,9 @@ priv table_write: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table
     loop _ in 0..<values.len() -> marks.push("?")
     verb: if replace -> "INSERT OR REPLACE" else -> "INSERT"
     _: __driver_execute(guard.value.driver, "{verb} INTO \"{table.name}\" ({columns.join(", ")}) VALUES ({marks.join(", ")})", values) ?? return Err(err)
+    if terms == .Val(words) {
+        _: table_index(guard.value.driver, table.name, cells, words) ?? return Err(err)
+    }
     guard.value.wrote(table.name, Val(changed))
     Ok(row)
 }
@@ -1423,7 +1609,8 @@ priv table_columns: fn(driver: &DBDriver, name: String, fields: [{column: String
 }
 
 // The key columns and values of an encoded key: one per field of a record
-// key, else the one column `key`.
+// key, else the one column `key`. A key field can't take the name of the
+// row column, nor of a search index's word column.
 priv table_cells: fn(name: String, key: Dyn) -> [{column: String, value: DBValue}] DBError! {
     if !sql_identifier(name.bytes()) -> return Err(table_name_error(name))
     cells := [{column: String, value: DBValue}]{}
@@ -1432,7 +1619,7 @@ priv table_cells: fn(name: String, key: Dyn) -> [{column: String, value: DBValue
         return Ok(cells)
     }
     loop entry in stream.object_entries(key) {
-        if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN {
+        if !sql_identifier(entry.key.bytes()) || entry.key == TABLE_ROW_COLUMN || entry.key == TABLE_WORD_COLUMN {
             return Err(db_error("table `{name}` cannot have the key column `{entry.key}`"))
         }
         cells.push({column: entry.key.copy(), value: table_value(entry.value)})
