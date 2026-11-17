@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111375,
+    "rev": 111400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -109513,8 +109513,8 @@
       "title": "Hidden costs are visible: one fact per hidden-cost site, a tidy error for hidden copies in loops, and the per-line cost view (D-COSTLAW1=A)",
       "body": "Destination: D-COSTLAW1=A on the self-hosted toolchain. Every hidden-cost site (implicit copy, collection clone-on-write, packed-Int fallback, per-call outcome construction) has one sema or JetIR fact row; a hidden copy, clone or representation fallback inside a loop is a tidy error naming the repair (an advisory in the decision, a tidy error under D-NO-WARNINGS1=A); and `jet explain --cost` annotates each line with its hidden allocations, copies, fallbacks and Int boxing.\n\nWhy it matters: no construct may ship an invisible super-linear cost without a matching surface.\n\nThe cost producer port itself is #6652 c2.\n\nSource: Map card #6006 c23-c24; #6312 c10-c12 (G11 mashup).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -109575,8 +109575,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:55.861Z",
-      "updated": "2026-11-15T03:50:55.861Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:49:23.578Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0t5gnhs",
@@ -109584,8 +109584,8 @@
       "title": "jet fmt is safe: lossless, meaning- and template-preserving, its own fmt cases pass, and the repository is formatted once",
       "body": "Destination: `jet fmt` keeps every token and every meaning (field order, loop heads, shebang, comment placement, template text), produces the canonical forms (suffix types, arrow before result, `[K:V]` map types, the arrow-loop form, one blank line between functions), prints minimal diffs, and passes every tests/cases/fmt case. Then the whole repository is formatted in one mechanical commit and a guard keeps it formatted.\n\nWhy it matters: a formatter that drops tokens or reorders fields cannot be run over the corpus, so the repo stays unformatted and every agent edit fights layout.\n\nDecisions: D-FMTCOLLAPSE2=A (short blocks), D-NO-WARNINGS1=A (style is rewritten, never reported), D-DECL-COLON1=A (fixtures use `name: value` declarations). Greenfield: old spellings get no teaching diagnostic.\n\nThe tests/known-failing.tsv rows that name #6005 (12 fmt cases) belong to this card.\n\nSource: Map card #6005 (Formatter), batch G15 of the 2026-10-28 consolidation. Simplify rewrites are #6850.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -109777,7 +109777,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:54.075Z",
-      "updated": "2026-11-16T13:11:19.113Z",
+      "updated": "2026-11-17T01:49:25.130Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -109787,8 +109787,8 @@
       "title": "Docs are runnable and true: every doc code block and public Core function example runs in CI, and the spec claims only what builds",
       "body": "Destination: every runnable ```jet block in the README and user docs runs in CI; every public Core function has a runnable example on its doc page with its effect row and failure type; examples grant only the permissions they use; the spec and public claims describe only what builds, each with a resolving evidence link; and the first-hour journey runs end to end.\n\nWhy it matters: a user's first contact is the docs; a block that does not run, or a feature the spec claims but the compiler lacks, costs trust at once.\n\nDecisions: D-NO-WARNINGS1=A (the unused-grant check is a tidy error).\n\nSource: Map card #5982 (Docs and CI), batch DOC of the 2026-10-28 consolidation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -109938,7 +109938,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:55.122Z",
-      "updated": "2026-11-16T13:11:29.903Z",
+      "updated": "2026-11-17T01:49:26.699Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -109948,8 +109948,8 @@
       "title": "Guides: a design guide, architecture rows for every Core namespace, embedded systems, and API maturity",
       "body": "Destination: Docs/spec/guides/design.md teaches a method for hard problems, SOLID translated for Jet and the escape-hatch ladder, linking every cited decision; Docs/spec/architecture.md classifies every Core namespace; and the docs cover embedded systems and API maturity.\n\nWhy it matters: these are the pages a programmer reads before writing a large Jet program.\n\nSource: Map card #5982 c1, c2, c15 (from #4728, #4800, #155).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -109999,7 +109999,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:52:56.157Z",
-      "updated": "2026-11-16T13:11:33.058Z",
+      "updated": "2026-11-17T01:49:28.241Z",
       "updatedBy": "Main"
     },
     {
@@ -110008,8 +110008,8 @@
       "title": "LSP references and rename follow checked identity across files, versions and Unicode",
       "body": "Destination: definition, references, prepareRename, rename and document symbols in `jet self lsp` resolve by checked semantic identity, not by name text: they pick exactly the declaration meant across aliases, shadowing, same-name modules and qualified calls; return real absolute URIs and exact identifier spans; apply edits at the checked overlay positions of unsaved documents; refuse when the target or document version is not current; and handle UTF-8 and UTF-16 boundaries.\n\nWhy it matters: a rename that touches the wrong `letter` or edits stale positions breaks code silently.\n\nThe proofs are tests/cases/lsp/lsp_checked_identity_and_versioned_rename and lsp_document_symbol_returns_symbols_for_imported_package_module (known-failing on dev 6f82527b17, rows naming #6386).\n\nSource: #4917 c11, c37, c39-c46 (from #3183, #3184, #2370, #6164).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -110132,7 +110132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:50.327Z",
-      "updated": "2026-11-16T13:11:44.147Z",
+      "updated": "2026-11-17T01:49:29.816Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -110142,8 +110142,8 @@
       "title": "Editor assists from checked facts: completion with foreign-word rows, semantic tokens and inlay hints",
       "body": "Destination: completion, semantic tokens and inlay hints in `jet self lsp` read lexer tokens and checked facts. Completion maps foreign method words (append, length, size, push_back) to the Jet name through the same registered rows E0311 uses; semantic tokens follow current syntax; inlay hints show call marks (D-CALLSITE-MARK2=A), automatically passed-up failures and scattered-method breadcrumbs.\n\nWhy it matters: these are what an editor shows on every keystroke; a private scanner or a second table drifts from the compiler.\n\nSource: #4917 c10, c24-c27, c31, c49-c52 (from #6164, #4625, #662, #6014, #88).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -110266,7 +110266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:51.221Z",
-      "updated": "2026-11-16T13:11:53.961Z",
+      "updated": "2026-11-17T01:49:31.356Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -110276,8 +110276,8 @@
       "title": "The LSP stays current: cancellation, fresh verdicts, embedded Jet regions, workspaces and the VS Code, Zed and Neovim matrix",
       "body": "Destination: `jet self lsp` never publishes a stale or cancelled result: cancelled work returns -32800, the latest edit gets the fresh verdict, Jet regions inside host documents map edits and diagnostics through incremental edits, workspaces with inline metadata and multiple roots behave honestly, and VS Code, Zed and Neovim run the real server with correct visible results.\n\nWhy it matters: an editor that shows yesterday's error, or applies an edit to the wrong version, is worse than no editor support.\n\nDecisions: D-LSP1=C (editor engine architecture). No new scheduling policy, worker count or public cancellation semantics is chosen silently.\n\nSource: #4917 c57-c60, c67-c70 (from #3196, #3410-#3413, #3003).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -110418,7 +110418,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:52.158Z",
-      "updated": "2026-11-16T13:12:06.168Z",
+      "updated": "2026-11-17T01:49:32.906Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -110428,8 +110428,8 @@
       "title": "Editor refactors on checked facts: callable summary, signature-change preview, extract and inline, and marker moves",
       "body": "Destination: the editor offers refactors that are proven safe from checked facts: an opt-in callable summary (D-READ-LOCAL1=A), a signature-change preview with explicit caller values (D-BIG-SIGNATURE1=A), extract and inline transforms that keep evaluation order, capture, control flow, ownership and effects, and the D-MARKER-MOVE1=A code actions.\n\nWhy it matters: refactors that cannot prove safety should refuse, not guess.\n\nSource: #4917 c29, c53-c55 (from #3191, #3168, #3187, #3198).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -110534,7 +110534,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:55:53.089Z",
-      "updated": "2026-11-16T13:12:13.583Z",
+      "updated": "2026-11-17T01:49:34.470Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -110544,8 +110544,8 @@
       "title": "jet flash: watch, rebuild and flash a board, show flash and RAM budgets, and fail by name with no probe",
       "body": "Destination: for a supported board, `jet flash --watch` rebuilds on save, flashes and streams the board log; `jet build` for a board target prints flash and RAM use per section against the board budget; the programmer comes from canonical TargetMachine facts and every flash writes one typed receipt binding the image digest and the programmer invocation; a missing board or probe is a named error.\n\nWhy it matters: the embedded edit loop should be one command, and a budget overrun should fail the build, not the device.\n\nDecisions: D-HW-DECLARE1=A (boards are typed values), D-TARGET-SURFACE1.\n\nSource: #6386 c10-c12, c115 (from #6022, #2856).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -110605,7 +110605,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:24.270Z",
-      "updated": "2026-11-16T13:12:16.427Z",
+      "updated": "2026-11-17T01:49:36.019Z",
       "updatedBy": "Main"
     },
     {
@@ -110614,8 +110614,8 @@
       "title": "Jet embeds in a C host and as a wasm component from one export surface, with authority checked at load (D-EMBED1=E, D-EMBED2=C)",
       "body": "Destination: one typed export surface lowers to a native C-ABI libjet and a WASM component (D-EMBED1=E) from one capability contract (D-EMBED2=C): a C host links libjet, loads a Jet module, calls a function and gets its result; the component runs the same module in wasmtime with the same output; the embedding header is generated with a runnable C example; and the host passes an Authority value so a guest lacking a grant is refused at load, before any guest code runs.\n\nWhy it matters: embedding Jet in an existing C or C++ program is how many teams would first adopt it; load-time authority beats Lua's run-time global removal.\n\nSource: #6386 c16-c18, c20 (from #6023, the acceptance checks of #1915).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -110711,7 +110711,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:25.159Z",
-      "updated": "2026-11-16T13:12:23.006Z",
+      "updated": "2026-11-17T01:49:37.561Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -110721,8 +110721,8 @@
       "title": "One record index: canonical identity, build verify, safe capture by default in dev, and indexed replay (D-RECORD1=B)",
       "body": "Destination: D-RECORD1=B on the self-hosted toolchain. One index under .jet/records lists every ratified record artifact with one identity key (target inputSha256, tool, engine) and cross-links a proof to the replay it consumed and the receipt it produced; build verify resolves indexed inputs and compares rebuilt output; jet dev captures the safe replay (clock only) on every run within a retention budget; replay resolves indexed IDs and paths.\n\nWhy it matters: a failure seen once should be replayable by ID, and a build should be verifiable from its record.\n\nSource: #6386 c121-c124 (from #2506).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -110783,7 +110783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:26.047Z",
-      "updated": "2026-11-16T13:12:27.435Z",
+      "updated": "2026-11-17T01:49:39.169Z",
       "updatedBy": "Main"
     },
     {
@@ -110792,8 +110792,8 @@
       "title": "Canvas opens any project as one workspace: one resident session, a separate app listener, one project tree and last-good state",
       "body": "Destination: `jet dev <source> --canvas` opens any project, not only a web target, as one workbench. It builds one project graph from package and workspace files, sources and .jet/lock (D-CANVAS-WORKSPACE1=B) and shows it as one semantic project tree (D-CANVAS-WORKSPACE-NAV1=A). Multi-file edits are previewed, checked source transactions (D-CANVAS-WORKSPACE-AUTH1=A). The app server and the Canvas control host have separate listeners but share one resident session (D-CANVAS-SESSION1=A). The control host is Jet-owned, loopback-only, on an OS-chosen port (D-CANVAS-TARGET1=A). Panels receive typed, authorized #DevPanel feeds (D-DX-PLUGIN1=D). A failed rebuild or a disconnect keeps the last good state.\n\nWhy it matters: Canvas is meant to be the IDE for every kind of Jet project, and it must never take over the app's routes.\n\nScenario proof: `jet run --allow=Env,Exec,FS,IO,Net,Time Tools/canvas-test/Run.jet -- scenario --scenario <name> --port <P>`, run against a running `jet dev <fixture> --canvas`, prints PASS.\n\nSource: #6618 c15, c45-c50, c52-c54, c69 (from #352, #2169, #2170, #4265).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -110913,7 +110913,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:18.186Z",
-      "updated": "2026-11-16T13:12:30.522Z",
+      "updated": "2026-11-17T01:49:40.713Z",
       "updatedBy": "Main"
     },
     {
@@ -110922,8 +110922,8 @@
       "title": "Canvas debugs the running program: breakpoints, live values, paused locals and replay on the tier that is actually running",
       "body": "Destination: the Canvas debug overlay works through one seam whose backend is whatever is actually executing (D-CANVAS-DEBUG-UX1=D). Compiled runs use the native jet debug session; under jet dev, the O0 session is used (the old JIT and interpreter tiers are gone). Breakpoints and watches are local and anchored by file hash and source span, and stale anchors become invalid (D-CANVAS-DEBUGSTATE1=A). The overlay shows real values on pins and wires, the active node, the traversed wire, the call stack and the paused locals, and it never presents a cached value as live.\n\nWhy it matters: a visual debugger that shows stale or simulated values is worse than none.\n\nScenario proof: as on #6618.\n\nSource: #6618 c2, c5, c8-c11, c68 (from #273, #983, #984, #6573).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111019,7 +111019,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:19.063Z",
-      "updated": "2026-11-16T13:12:34.512Z",
+      "updated": "2026-11-17T01:49:42.203Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -111029,8 +111029,8 @@
       "title": "Canvas graph edits write ordinary Jet source: wiring, typed pins, conversions, collapse and extract, and exec-wire reorder",
       "body": "Destination: every Canvas gesture that changes the program writes ordinary Jet source through the one edit-transaction pipeline, with undo, formatter round-trip and reprojection without drift. There is no hidden semantic sidecar or graph asset. Gestures covered: wiring, palette insert, rename, inline edit, promote to binding, control rails, drag-off-pin menus filtered by expected type, visible conversion calls (D-CANVAS-CONVERT1=A), collapse as a view over a source span with extract-to-function (D-CANVAS-COLLAPSE1=A, D-CANVAS-MULTIEXEC1=E), exec-wire reorder and the Details editors.\n\nWhy it matters: Canvas is only trustworthy if every edit is plain Jet that a text user can read and diff.\n\nScenario proof: as on #6618.\n\nSource: #6618 c17, c19, c21, c33, c38-c40 (from #272, #277, #280, #374, #867).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111117,8 +111117,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:19.936Z",
-      "updated": "2026-11-15T04:03:19.936Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:49:43.695Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0qetodj",
@@ -111126,8 +111126,8 @@
       "title": "Canvas and the source never disagree: lossless round trips, atomic refusals, one transaction history and converging clients",
       "body": "Destination: source text is the single truth. The graph, edits, undo, diagnostics and saved text stay lossless and mutually consistent through repeated visual and text edits, stale revisions, conflicts and disconnects. Every surface shares one source transaction history (D-CANVAS-SCM1=A stale-edit guard), and two clients editing one file converge.\n\nWhy it matters: a projection that silently drifts from the source corrupts programs.\n\nScenario proof: as on #6618.\n\nSource: #6618 c6, c7, c32, c34-c37, c41, c42, c51, c67 (from #373, #489, #867-#878, #872, #983, #984, #1053-#1057, #2170, #4171).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111277,7 +111277,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:20.822Z",
-      "updated": "2026-11-16T13:12:39.797Z",
+      "updated": "2026-11-17T01:49:45.265Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -111287,8 +111287,8 @@
       "title": "Canvas projects every Jet form: a generated parity table that fails closed, rails, events, traits and tasks",
       "body": "Destination: every Jet language form has a Canvas projection status, generated from the AST forms; a new form without a status fails the test (D-CANVAS-PARITY1=C). Supported forms project to specific nodes with source spans, unsupported ones show a Canvas error with the reason. Rails show control, data, failure, task, effect and unsafe flow; events, traits and tasks project as views over ordinary Jet source. Core calls come from the typed Core action catalog (D-CANVAS-CORECATALOG1=C).\n\nWhy it matters: the Blueprint-class editor goal (owner directive 2026-07-02, #182) needs no 'drop to code' cliff.\n\nThe repo-wide syntax census on #6898 covers fmt, LSP and Canvas together; this card owns the Canvas rows.\n\nSource: #6618 c16, c18, c20, c23, c25, c26, c28, c29 (from #182, #274, #278, #285, #311, #316, #319, #364).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111366,7 +111366,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:21.687Z",
-      "updated": "2026-11-16T13:12:46.244Z",
+      "updated": "2026-11-17T01:49:46.828Z",
       "updatedBy": "Main"
     },
     {
@@ -111375,8 +111375,8 @@
       "title": "Canvas workbench UX: navigation, a versioned protocol, search and refactor, extension actions, docs on hover and persistent errors",
       "body": "Destination: the Canvas workbench feels like Blueprint. It has full keyboard and pointer navigation and a versioned graph and edit protocol. Search and refactor go through the LSP and SemIndex query engine. Packages can add extension actions that only return edits (D-CANVAS-EXT1=B, D-CANVAS-EXT2=B). The code lens is read-only until an explicit Edit Source mode (D-CANVAS-CODELENS1=C). Actions are intent cards with an expert drawer (D-CANVAS-ACTIONAUTH1=C). Doc comments show as tooltips, errors stay visible, and the Code Map view (D-CODEMAP-VIEW1=A) lives here. Browser tests use the dev-shell Chromium and its CDP driver (D-CANVASTEST1=A).\n\nWhy it matters: the visual editor is the product surface beginners meet first.\n\nScenario proof: as on #6618.\n\nSource: #6618 c1, c3, c4, c22, c24, c27, c30, c31, c70 (from #271, #276, #282, #284, #287, #318, #365, #372, #3868).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111505,7 +111505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:22.585Z",
-      "updated": "2026-11-16T13:12:50.551Z",
+      "updated": "2026-11-17T01:49:48.395Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -111515,8 +111515,8 @@
       "title": "Named previews in Canvas from ordinary core.ui values (D-DX-PREVIEW1=A)",
       "body": "Destination: a source file registers named preview scenarios through ordinary core.ui values and functions, with no new syntax (D-DX-PREVIEW1=A). Canvas renders each variant's normal UiNode tree, runs shared fixtures once, isolates variants, and keeps the last good preview when one breaks; a playground path runs the same checked source through Canvas and `jet dev`.\n\nWhy it matters: previewing UI states side by side is how UI work gets fast.\n\nSource: #6618 c58-c62 (from #2464).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -111594,7 +111594,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:23.494Z",
-      "updated": "2026-11-16T13:12:58.065Z",
+      "updated": "2026-11-17T01:49:49.936Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -111604,8 +111604,8 @@
       "title": "Stops show where they happened: compile-time stop trails, panic traces on every tier, and one division-by-zero and list-position stop",
       "body": "Destination: every stop names where it happened and how execution got there.\n- A compile-time stop points at its `panic` and lists every compile-time call, innermost first, in the same Trail format runtime failures print. In a derive or marker body it names both the body line and the use site.\n- A runtime panic prints its frames innermost first on O0, O1 and O2, as `backtrace: full|brief|off` selects.\n- A zero divisor for `/`, `/%` and `%` gives one shared E3010 stop.\n- Every list-position stop goes through one message owner.\n\nWhy it matters: learnability probes t04 and t06 found stops that point at the wrong place or print no path.\n\nState: tests/cases/runtime_stops/every_division_by_zero_stops_at_its_line passes on dev 104ee83c5a with gate-p141. It pins the shared stop and its line on all three tiers, and it asserts that no source line is quoted.\n\nSource: #3720 c31-c35, c41, c44 (from #6398, #6399, #4627).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -111725,7 +111725,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:30.758Z",
-      "updated": "2026-11-16T13:13:03.225Z",
+      "updated": "2026-11-17T01:49:51.462Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -111735,8 +111735,8 @@
       "title": "A handled Core error prints and names its type: ParseError is declared, and {err}, {err:Debug}, err.message and the E0915 and E0112 fixes all work",
       "body": "Destination: inside a `??` handler, a Core error value such as Int.parse's ParseError has a declaration a program can name. It prints with `{err}` and `{err:Debug}`, and `err.message` works, on O0, O1 and O2. The fixes E0915 and E0112 suggest for such values compile.\n\nWhy it matters: G5DevX-2 found on 2026-11-13 that `{err}` gives E0915, `{err:Debug}` gives E0112 and `err.message` gives E0302, so a learner cannot even print the error they caught.\n\nSource: #3720 c47, c49, c84 (from #3703).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -111787,7 +111787,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:31.841Z",
-      "updated": "2026-11-16T13:13:05.220Z",
+      "updated": "2026-11-17T01:49:52.980Z",
       "updatedBy": "Main"
     },
     {
@@ -111796,8 +111796,8 @@
       "title": "Progress and errors never tear: one bottom status region on a terminal, plain sequential output elsewhere",
       "body": "Destination: realization progress (jetpack env, jet build) renders in one bottom-anchored status region, and errors print atomically above it through one writer. Non-TTY, NO_COLOR and CI output is plain and sequential, with no cursor movement.\n\nWhy it matters: torn progress lines mid-error were seen in a real session. The Rust-era fix (#2215) went with the Rust code and is unproven on the self-hosted toolchain.\n\nSource: #3720 c68, c69 (from #2215).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -111839,7 +111839,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:32.867Z",
-      "updated": "2026-11-16T13:13:07.245Z",
+      "updated": "2026-11-17T01:49:54.517Z",
       "updatedBy": "Main"
     },
     {
@@ -111848,8 +111848,8 @@
       "title": "Debug info tells the truth: lldb, gdb and perf show Jet names, real values and inlined frames, and no local before its binding",
       "body": "Destination: the DWARF and symbol tables the native backend emits let any debugger show what the Jet program holds:\n- Jet function names.\n- Bignum Int, String, struct, list and Decimal locals by value.\n- No local before its binding runs: each location range starts at the binding.\n- Inlined frames and live locals in O2 builds.\n- O2 split debug files found through the debug link.\n\nWhy it matters: release a0_041's `jet debug Examples/Tooling/Debugging/Debug.jet` printed `a = 4262344   s = <unavailable>` at its first stop, which is uninitialized memory shown as a Jet value.\n\nG5DevX-2 found on 2026-11-13, with lldb on PATH: debug/ 13 PASS, 11 KF, 6 FAIL; the debugger stops, but locals read `<Unavailable>`.\n\nSource: #6730 c1, c2, c5, c6, c8, c9, c26, c27 (from #6738, #6739, #6742, #6745, #6271, Docs/audits/2026-11-14-debugging-profiling-review.md).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -111965,7 +111965,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:15.712Z",
-      "updated": "2026-11-16T13:13:17.340Z",
+      "updated": "2026-11-17T01:49:56.038Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -111975,8 +111975,8 @@
       "title": "jet debug steps backward: record and replay, watch-aware reverse navigation and checked fix-and-continue (D-TIMETRAVEL2)",
       "body": "Destination: `jet debug --record=r1 prog.jet` and then `jet debug --replay=r1` step backward and answer 'where was this value last set' (D-TIMETRAVEL2). Recorded histories keep per-sequence write transitions; replay navigates indexed retained events without re-executing; and a transactional fix checks its inputs, candidate and checkpoint before installation. Every route (native and DAP) refuses unsupported, stale, empty-history and invalid-watch requests with a source error.\n\nWhy it matters: pdb and the Node inspector cannot step back. Reverse debugging is a headline Jet tool.\n\nRelated: the record index is #6907.\n\nSource: #6730 c15-c19, c24 (from #2463, #4720 c10).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -112123,7 +112123,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-16T13:13:30.225Z",
+      "updated": "2026-11-17T01:49:57.698Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -112133,8 +112133,8 @@
       "title": "The Rust-era lint checks exist again under D-NO-WARNINGS1: each is a tidy error, a jet fmt rewrite or a jet lint report, with exact spans",
       "body": "Destination: every lint check that the Rust checker had and the Jet checker lacks exists again in the form D-NO-WARNINGS1=A gives it:\n- a tidy error (listed by jet check and jet build, never stopping jet run, jet dev or jet test);\n- a `jet fmt` rewrite; or\n- a `jet lint` report.\n\nEach comes with paired positive and negative fixtures and reports its construct's own span.\n\nWhy it matters: these checks caught real bugs, and their ui fixtures still expect them.\n\nRelated: #6858 (no L code stays active as a warning; it owns the form each code takes) and #6895 (new likely-bug checks).\n\nSource: #6425 c15-c23 (from #3919, #4111, #3920-#3922, #3716, #3734, #3554, #4207).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -112329,7 +112329,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:42.636Z",
-      "updated": "2026-11-16T13:13:36.494Z",
+      "updated": "2026-11-17T01:49:59.398Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -112339,8 +112339,8 @@
       "title": "Impact and hierarchy views agree with the checked graph: body-only versus signature edits, identity, scope and provenance",
       "body": "Destination: the impact, navigation and hierarchy views in the CLI and the LSP derive from the checked graph and agree with it. A body-only edit and a public signature change give separately checkable checker-work and dependency results. Definition identity, snapshot, build identity, target scope and provenance agree across views. Imported, generated and external nodes keep their origins. Unsupported modes say so instead of returning complete-looking empty results.\n\nWhy it matters: the retired Rust tests structure_fact_plane::three_module_projections_match_checked_facts and lsp::impact_and_hierarchy_match_checked_graph pinned this. Their Jet replacements do not exist yet.\n\nSource: #6630 c9-c16 (from #3191).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -112517,7 +112517,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:43.573Z",
-      "updated": "2026-11-16T13:13:50.707Z",
+      "updated": "2026-11-17T01:50:00.993Z",
       "updatedBy": "Main",
       "criteriaLastN": 17
     },
@@ -218019,6 +218019,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:50:00.994Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozqnbt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:59.398Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09hk13a",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:57.698Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lmp17",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:56.038Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rn7rnu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:54.518Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yhga63",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:52.981Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hicd7a",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:51.462Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlqnvv",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:49.936Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yljhgc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:48.395Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jk9aer",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:46.829Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04plfgh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:45.265Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qetodj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:43.696Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0brdtmy",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:42.203Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xbfhbt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:40.713Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0itl587",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:39.170Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bd75d8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:37.562Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wowe4m",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:36.019Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hzex6k",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:34.470Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01q17ls",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:32.906Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mbiq9g",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:31.356Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06tzcrf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:29.817Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s1vode",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:28.241Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rl2anf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:26.699Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aha21c",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:25.130Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t5gnhs",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:49:23.579Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i4ehbt",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:49:21.710Z",
       "by": "Main",
