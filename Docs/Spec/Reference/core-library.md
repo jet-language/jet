@@ -7476,6 +7476,7 @@ subquery from another table) is refused.
 | `store.query(sql: SQL) -[DB.Read]> [[String: DBValue]] DBError!` / `store.query_one(sql: SQL) -[DB.Read]> [String: DBValue]? DBError!` | rows | Read every row `sql` reads: an opened connection has no row policy, so a script may join tables or touch none. |
 | `store.execute(sql: SQL) -[DB.Write]> Int DBError!` | count | Write through the connection, with no row policy; schema and transaction-control SQL stay with `db.migrate` and `begin`. |
 | `store.all_rows() -> DBScope` | scope | The connection as a scope with no row policy, for a helper written for scopes and for `db.migrate`. |
+| `store.statements() -> Int` | count | How many statements the connection has run: each read and write, a row policy's included, and the catalog reads that come with them, but no begin, commit or rollback. Two counts around a call give its cost. |
 | `store.with_policy(policy: RowPolicy, user: String) -[DB]> DBScope` | scope | The scope a row policy narrows to `user`. |
 | `store.table(name: String, key: fn(T) -[]> K, search: (fn(T) -[]> String)?{None}) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function; a pure `search` function gives the text its search index keeps. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
@@ -7595,9 +7596,14 @@ the caller may read that row; when it may not, the `add` is `Denied`, as a
 refused write is, so a key a client chose tells it nothing of a row it
 can't see. The policy runs as the system and reads through a store on the
 same connection, so it sees the transaction's earlier writes. It runs before
-the write it judges, so a write cannot vouch for itself. An `app.live`
-binding runs as the caller that made it, whoever reads it, and two callers'
-bindings of one query never share a result.
+the write it judges, so a write cannot vouch for itself. The rows a policy
+reads by key (`get`) are read once and kept: outside a transaction for the
+one read whose rows it judges, or the one write; inside one until it ends.
+Any write to a table drops what was kept of it, so a policy never sees a
+row older than the transaction's own writes, and judging a project's tasks
+reads the caller's member row once, however many tasks there are. An
+`app.live` binding runs as the caller that made it, whoever reads it, and
+two callers' bindings of one query never share a result.
 
 A table made with `search: Val(text_of)` keeps a search index: a side table
 `<name>__jet_search` holding each row's key columns and one `jet_word` row per

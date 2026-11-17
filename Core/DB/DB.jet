@@ -828,6 +828,17 @@ priv DBState: struct {
     open: Int{0},
     began: Int{0},
     call: Int{0},
+    // The stored rows a row policy's key lookups read (`table_looked`), each
+    // under its table and key. `judging` counts the policies running on the
+    // connection and `batch` the reads whose rows they judge
+    // (`db_judging`). The rows are kept for the open transaction, and
+    // outside one while a judgment or a judged read lasts. A write drops its
+    // table's rows, and `writes` counts the writes, so a lookup that a write
+    // overtook keeps nothing.
+    looked: [DBLooked],
+    judging: Int{0},
+    batch: Int{0},
+    writes: Int{0},
 
     // A write that changed `table` marks the live bindings that read it for a
     // re-run once the write is committed: at once outside a transaction, and
@@ -837,6 +848,12 @@ priv DBState: struct {
     // the stored rows the write replaced, removed or added, or None when it
     // does not name them (DBWritten).
     priv wrote: fn(&self, table: String, rows: [String]?) Never! {
+        self.writes += 1
+        kept := [DBLooked]{}
+        loop looked in self.looked {
+            if looked.table != table -> kept.push(looked.copy())
+        }
+        self.looked = kept
         if self.open == 0 {
             db_live_wrote(self.driver, table, rows)
             db_live_bump(self, table)
@@ -862,6 +879,14 @@ priv DBState: struct {
 priv DBWritten: struct {
     table: String,
     rows: [String]?,
+}
+
+// The stored rows under one key of `table` that a row policy read
+// (DBState.looked). `key` is the key's cells as `table_looked_key` writes them.
+priv DBLooked: struct {
+    table: String,
+    key: String,
+    rows: [[String:DBValue]],
 }
 
 // The live bindings to re-run after a write to `table` (DBState.wrote): every
@@ -918,6 +943,14 @@ Store: struct {
     }
 
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
+
+    // How many statements the connection has run: each read and write, a row
+    // policy's included, and the catalog reads that come with them, but no
+    // begin, commit or rollback. Two counts around a call give its cost.
+    statements: fn(self) -> Int Never! {
+        guard: self.state.guard_read()
+        guard.value.driver.statements
+    }
 
     // The typed table `name`: rows of type `T`, each found by the key that
     // the pure function `key` computes from it. It has no row policy until
@@ -1298,10 +1331,66 @@ priv table_rows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table:
 
 // The stored row under the key `cells`, read without the row policy.
 priv table_stored: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [{column: String, value: DBValue}]) -[DB.Read]> T? DBError! {
-    rows: table_rows<K, T>(table, table_match(cells), table_values(cells), None) ?? return Err(err)
+    rows: table_looked<K, T>(table, cells) ?? return Err(err)
     if rows.len() == 0 -> return Ok(None)
     row: table_decode<T>(rows[0]) ?? return Err(err)
     Ok(Val(row))
+}
+
+// The stored rows under the key `cells`. While a row policy runs on the
+// connection, a key it has read already is not read again (DBState.looked):
+// the rows come from the first read.
+priv table_looked: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, cells: [{column: String, value: DBValue}]) -[DB.Read]> [[String:DBValue]] DBError! {
+    key: table_looked_key(cells)
+    seen: db_looked(table.state, table.name, key) ?? return table_rows<K, T>(table, table_match(cells), table_values(cells), None)
+    if seen.rows == .Val(kept) -> return Ok(kept)
+    rows: table_rows<K, T>(table, table_match(cells), table_values(cells), None) ?? return Err(err)
+    guard := table.state.guard_edit()
+    if guard.value.judging > 0 && guard.value.writes == seen.writes {
+        guard.value.looked.push(DBLooked{table: table.name.copy(), key: key, rows: rows.copy()})
+    }
+    Ok(rows)
+}
+
+// The rows a row policy read under `key` of `table`, or with None for them
+// the count of the connection's writes before they are read; None when no
+// policy runs. A statement that must wait for another call's transaction
+// (`db_free`) finds none, so it never sees that transaction's rows. A live
+// binding still records the table in its read set.
+priv db_looked: fn(state: Shared<DBState>, table: String, key: String) -> {rows: [[String:DBValue]]?, writes: Int}? Never! {
+    guard := state.guard_edit()
+    if guard.value.judging == 0 -> return None
+    call: app.transactions.current() ?? 0
+    if !db_free(guard.value, call) -> return Val({rows: None, writes: guard.value.writes})
+    loop looked in guard.value.looked {
+        if looked.table == table && looked.key == key {
+            if app.live_reads.running() {
+                app.live_reads.record(live_source(table))
+                db_live_watch(guard.value, state, table)
+            }
+            return Val({rows: Val(looked.rows.copy()), writes: guard.value.writes})
+        }
+    }
+    Val({rows: None, writes: guard.value.writes})
+}
+
+// The cells of a key as one text, each value tagged with its kind and length
+// so no two keys share it.
+priv table_looked_key: fn(cells: [{column: String, value: DBValue}]) -> String Never! {
+    parts := [String]{}
+    loop cell in cells {
+        kind: if cell.value == {
+            .Null -> "n"
+            .Int(_) -> "i"
+            .Float(_) -> "f"
+            .Text(_) -> "t"
+            .Bool(_) -> "b"
+            .Blob(_) -> "x"
+        }
+        text: render_value(cell.value)
+        parts.push("{cell.column}={kind}{text.count_bytes()}:{text}")
+    }
+    parts.join(",")
 }
 
 // The stored rows' `jet_row` texts.
@@ -1345,21 +1434,39 @@ priv table_allows: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(tabl
 // Whether the table's row policy lets `who` do `op` to `row`. A table with
 // no policy, or the system, allows every operation. The policy runs as the
 // system, so the tables it reads don't ask their own policies, and gets a
-// store on the same connection.
+// store on the same connection. A key the policy reads is read once for
+// as long as DBState.looked keeps it (`db_judging`).
 priv table_judge: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, row: T, op: Op, who: Who) -[DB.Read]> Bool DBError! {
     judge: table.policy ?? return Ok(true)
     if who == Who.System -> return Ok(true)
     app.callers.begin_system()
+    db_judging(table.state, 1, 0)
     allowed: judge(row, op, who, Store{state: table.state.copy()}) ?? {
+        db_judging(table.state, -1, 0)
         app.callers.end()
         return Err(err)
     }
+    db_judging(table.state, -1, 0)
     app.callers.end()
     Ok(allowed)
 }
 
+// Counts a row policy that starts (`judging` 1) or ends (-1) on the
+// connection, and a read whose rows the policy judges (`batch`). Outside a
+// transaction, the rows the policies read (DBState.looked) are dropped once
+// no judgment or judged read is left; inside one, at its end.
+priv db_judging: fn(state: Shared<DBState>, judging: Int, batch: Int) Never! {
+    guard := state.guard_edit()
+    guard.value.judging += judging
+    guard.value.batch += batch
+    if guard.value.open == 0 && guard.value.judging == 0 && guard.value.batch == 0 {
+        guard.value.looked = [DBLooked]{}
+    }
+}
+
 // The rows of `stored_rows` that the row policy lets `who` read, decoded and
-// in key order, as a table's `query` and `search` give them.
+// in key order, as a table's `query` and `search` give them. The policy reads
+// a key once for all of them (`db_judging`).
 priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(table: Table<K, T>, stored_rows: [[String:DBValue]], who: Who) -[DB.Read]> [T] data.DataError! {
     keyed := [{key: K, row: T}]{}
     loop stored in stored_rows {
@@ -1368,10 +1475,15 @@ priv table_readable: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(ta
     }
     keyed.sort_by(fn(left: {key: K, row: T}, right: {key: K, row: T}) { left.key <=> right.key })
     out := [T]{}
+    db_judging(table.state, 0, 1)
     loop entry in keyed {
-        allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? return Err(table_data_error(err))
+        allowed: table_judge<K, T>(table, entry.row.copy(), Op.Read, who) ?? {
+            db_judging(table.state, 0, -1)
+            return Err(table_data_error(err))
+        }
         if allowed -> out.push(entry.row.copy())
     }
+    db_judging(table.state, 0, -1)
     Ok(out)
 }
 
@@ -1706,7 +1818,7 @@ priv db_open: fn(path: String, failure: String) -> Store Never! {
         store = ":memory: {opened.value}"
     }
     jobs: path != ":memory:" && table_exists(driver, "__jet_jobs")
-    state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [DBWritten]{}, ended: Condition.new()}}
+    state: Shared{DBState{driver: driver.move(), path: path.copy(), store: store.copy(), written: [DBWritten]{}, looked: [DBLooked]{}, ended: Condition.new()}}
     if jobs -> app.jobs.store(db_outbox(state, store))
     if path != ":memory:" -> app.push.store(db_push_devices(state, store))
     if path != ":memory:" -> app.reply_cache.store(db_kept_replies(state, store))
@@ -1731,6 +1843,7 @@ priv db_begin: fn(state: Shared<DBState>, immediate: Bool) -> DBTransaction DBEr
         return Err(db_error("could not begin a transaction: one is already open, or the database is busy"))
     }
     guard.value.written = [DBWritten]{}
+    guard.value.looked = [DBLooked]{}
     guard.value.began += 1
     guard.value.open = guard.value.began
     Ok(DBTransaction{state: state.copy(), number: guard.value.open})
@@ -1764,6 +1877,7 @@ priv db_commit: fn(state: Shared<DBState>) DBError! {
     }
     if committed && guard.value.written.len() > 0 -> db_kept_written(guard.value)
     guard.value.written = [DBWritten]{}
+    guard.value.looked = [DBLooked]{}
     if !committed -> return Err(db_error("could not commit, so the transaction was rolled back"))
     Ok()
 }
@@ -1783,6 +1897,7 @@ priv db_rollback: fn(state: Shared<DBState>) DBError! {
         db_live_wrote(guard.value.driver, written.table, written.rows)
     }
     guard.value.written = [DBWritten]{}
+    guard.value.looked = [DBLooked]{}
     if !rolled -> return Err(db_error("could not roll back the transaction"))
     Ok()
 }
@@ -1825,6 +1940,7 @@ priv db_join: fn(held: &DBState, state: Shared<DBState>, call: Int) DBError! {
         return Err(db_error("the database is busy, so the call runs again"))
     }
     held.written = [DBWritten]{}
+    held.looked = [DBLooked]{}
     held.began += 1
     held.open = held.began
     held.call = call
@@ -2532,6 +2648,10 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
         guard.value.wrote(table, None)
+    } else if changed > 0 || sql_schema(scoped) {
+        // A write that names no one table drops every row a policy read.
+        guard.value.looked = [DBLooked]{}
+        guard.value.writes += 1
     }
     Ok(changed)
 }
@@ -2790,6 +2910,88 @@ priv live_test_team: fn(chores: Table<Int, LiveTestChore>, team: String, narrowe
     _: chores.add(LiveTestChore{id: 5, team: "jet"}) ?? panic("add 5")
     second.commit() ?? panic("commit 4 and 5")
     assert_eq(seen(), "[1,5] runs=4 [1,5] runs=7")
+}
+
+#Codable
+priv LookTestTask: struct {
+    id: Int,
+    project: Int,
+}
+
+#[Codable, Comparable]
+priv LookTestKey: struct {
+    project: Int,
+    account: String,
+}
+
+#Codable
+priv LookTestMember: struct {
+    project: Int,
+    account: String,
+}
+
+priv look_test_members: fn(store: Store) -> Table<LookTestKey, LookTestMember> Never! {
+    store.table("look_test_members", key: fn(row: LookTestMember) { LookTestKey{project: row.project, account: row.account} })
+}
+
+// A caller reads the tasks of the projects it is a member of.
+priv look_test_policy: fn(row: LookTestTask, _op: Op, who: Who, store: Store) -[DB.Read]> Bool DBError! {
+    account: if who == {
+        .Account(id) -> id.raw()
+        .System | .Anonymous -> {
+            return Ok(false)
+        }
+    }
+    if look_test_members(store).get(LookTestKey{project: row.project, account: account}) == {
+        .Ok(found) -> Ok(found != None)
+        .Err(failure) -> Err(failure)
+    }
+}
+
+// How many of `tasks`' rows mia reads, and how many statements the read runs.
+priv look_test_read: fn(store: Store, tasks: Table<Int, LookTestTask>) -[DB.Read]> {rows: Int, statements: Int} Never! {
+    before: store.statements()
+    held: tasks.again()
+    rows: app.as_caller(auth.AccountID.from_string("mia"), fn() { look_test_count(held) }) ?? panic("the tasks read: {err}")
+    {rows: rows, statements: store.statements() - before}
+}
+
+priv look_test_count: fn(tasks: Table<Int, LookTestTask>) -[DB.Read]> Int DBError! {
+    query: tasks.query() ?? return Err(err)
+    rows: query.collect() ?? return Err(db_error("the tasks collect: {err.reason}"))
+    Ok(rows.len())
+}
+
+#Test("a row policy reads a key once for all the rows of a read, and once in a transaction until it writes that key's table") {
+    store: open_memory()
+    members: look_test_members(store)
+    plain: store.table("look_test_tasks", key: fn(row: LookTestTask) { row.id })
+    tasks: plain.guard(look_test_policy)
+    _: members.add(LookTestMember{project: 1, account: "mia"}) ?? panic("add the member: {err}")
+    _: plain.add(LookTestTask{id: 1, project: 1}) ?? panic("add task 1: {err}")
+    unjudged: look_test_read(store, plain)
+    one: look_test_read(store, tasks)
+    assert_eq(one.rows, 1)
+    loop id in 2..<5 {
+        _: plain.add(LookTestTask{id: id, project: 1}) ?? panic("add task {id}: {err}")
+    }
+    four: look_test_read(store, tasks)
+    assert_eq(four.rows, 4)
+    assert_eq(four.statements, one.statements)
+    _: plain.add(LookTestTask{id: 5, project: 2}) ?? panic("add task 5: {err}")
+    two_keys: look_test_read(store, tasks)
+    assert_eq(two_keys.rows, 4)
+    assert_eq(two_keys.statements - one.statements, one.statements - unjudged.statements)
+    open_tx: store.begin() ?? panic("begin")
+    first: look_test_read(store, tasks)
+    assert_eq(first.statements, two_keys.statements)
+    again: look_test_read(store, tasks)
+    assert_eq(again.statements, unjudged.statements)
+    members.delete(LookTestKey{project: 1, account: "mia"}) ?? panic("remove the member: {err}")
+    after: look_test_read(store, tasks)
+    assert_eq(after.rows, 0)
+    assert_eq(after.statements, two_keys.statements)
+    open_tx.commit() ?? panic("commit")
 }
 
 // The titles `binding` holds.
@@ -3592,11 +3794,14 @@ CachedStatement: struct {
 // rusqlite 0.31.0: cache16,
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
 // The connection is the Jet engine's; `live` is false once it is shut down.
-// The fields are `priv`: only core.db opens, drives and closes a connection.
+// `statements` counts the statements prepared on it (`prepare`), cached or
+// not. The fields are `priv`: only core.db opens, drives and closes a
+// connection.
 priv DBDriver: struct {
     priv database: conn.Conn,
     priv cache: [CachedStatement],
     priv live: Bool,
+    priv statements: Int{0},
 
     impl Close {
         close: fn(&&self) {
@@ -3681,6 +3886,7 @@ __driver_reset: fn(driver: &DBDriver) -> Bool Never! {
 }
 
 prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
+    driver.statements += 1
     // An unchanged template hits without allocating a trimmed String. Only a
     // different spelling needs the canonical trimmed-key comparison below.
     loop index in 0..<driver.cache.len() {
