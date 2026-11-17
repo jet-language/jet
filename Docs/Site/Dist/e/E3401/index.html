@@ -36,17 +36,26 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the call from `{pure_fn}`, or drop the `-[]&gt;` bound from `{pure_fn}` so its effects are inferred; at compile time, compute the value at runtime instead.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3401</code>: <code>Tests/UI/Effects/pure_fn_with_core_effect_is_e3401.stderr</code>.</p>
-<pre class="diag">Error [jet.ImpureCallInPureContext]: `readit` calls the impure function `files.read`
-  --&gt; Tests/UI/Effects/pure_fn_with_core_effect_is_e3401.jet:3:47
+<p>First UI snapshot mentioning <code>E3401</code>: <code>Tests/UI/comptime_impure.stderr</code>.</p>
+<pre class="diag">Error [jet.ImpureCallInPureContext]: `print` is not allowed in comptime code
+  --&gt; Tests/UI/comptime_impure.jet:2:5
     |
-  3 | readit: fn(p: String) -[]&gt; String { return fs.read(p) ?? &quot;&quot; }
-    |                                               ^^^^
- Why: `files.read` is impure, but `readit` declares `-[]&gt;`
- Fix: Remove the call from `readit`, or drop the `-[]&gt;` bound from `readit` so its effects are inferred
- Denial: pure
- Call chain: readit → files.read
+  2 |     print(&quot;side effect&quot;)
+    |     ^^^^^
+ Why: Build calls `print`, which touches the outside world — comptime must give the same answer on every machine
+ Fix: Compute this at runtime instead; the exceptions are `embed_file(&quot;path&quot;)`, `embed_bytes(&quot;path&quot;)`, and `find(&quot;glob&quot;)`
+ Denial: comptime
+ Call chain: build → print
 More: jet-lang.dev/e/E3401
+
+Error [jet.UnknownName]: Nothing named `X` exists here
+  --&gt; Tests/UI/comptime_impure.jet:8:21
+    |
+  8 | run: fn() { print(&quot;{X}&quot;) }
+    |                     ^
+ Why: A name must be declared before it&#39;s used
+ Fix: Declare it first: `X: ...`
+More: jet-lang.dev/e/E0107
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

@@ -36,14 +36,41 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Make the pattern&#39;s shape and types match the value.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0305</code>: <code>Tests/UI/UnionArmNamesTwoMembers/stderr</code>.</p>
-<pre class="diag">Error [jet.PatternTypeMismatch]: Pattern `Point` names more than one member of `geo2.Point | map2.Point`
-  --&gt; Tests/UI/UnionArmNamesTwoMembers/run.jet:10:9
+<p>First UI snapshot mentioning <code>E0305</code>: <code>Tests/UI/enum_cases_no_unit_collapse.stderr</code>.</p>
+<pre class="diag">Error [jet.ReturnTypeMismatch]: This value is `Unit`, but `absent_as_unit` returns Int?
+  --&gt; Tests/UI/enum_cases_no_unit_collapse.jet:13:32
     |
- 10 |         .Point(_) -&gt; print(&quot;a point&quot;)
-    |         ^^^^^^^^^
- Why: The union holds 2 types named `Point`, and an arm names a member by its type&#39;s name alone
- Fix: Make each a named case of the union, as in `Point1(geo2.Point) | Point2(map2.Point)`, and match the case: `.Point1(p) -&gt; …`
+ 13 | absent_as_unit: fn() -&gt; Int? { () }
+    |                                ^^
+ Why: `absent_as_unit` declares Int? as its result, so the value it hands back must be Int?
+ Fix: Hand back a Int? value: convert this value to Int?, or return the value you meant
+More: jet-lang.dev/e/E0113
+
+Error [jet.UntypedNone]: Bare `None` needs a known optional type here
+  --&gt; Tests/UI/enum_cases_no_unit_collapse.jet:15:32
+    |
+ 15 | shut_as_absent: fn() -&gt; Gate { None }
+    |                                ^^^^
+ Why: `None` only fits where a `T?` is expected (S32)
+ Fix: Write the optional type on the value, `T?{None}`, or use `None` where a `T?` is already expected
+More: jet-lang.dev/e/E0308
+
+Error [jet.PatternTypeMismatch]: Pattern `None` doesn&#39;t belong to `Int | Unit`
+  --&gt; Tests/UI/enum_cases_no_unit_collapse.jet:19:9
+    |
+ 19 |         .None -&gt; &quot;nothing&quot;
+    |         ^^^^^
+ Why: Union pattern arms name one member type of the subject union
+ Fix: Use one of the subject union member types
+More: jet-lang.dev/e/E0305
+
+Error [jet.PatternTypeMismatch]: Pattern `Shut` doesn&#39;t match `Gate?`
+  --&gt; Tests/UI/enum_cases_no_unit_collapse.jet:24:51
+    |
+ 24 | absent_as_shut: fn(gate: Gate?) -&gt; Bool { gate == .Shut }
+    |                                                   ^^^^^
+ Why: Variant patterns only work on enum values
+ Fix: Match a value with a pattern for its type
 More: jet-lang.dev/e/E0305
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -36,16 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the offending work from the impl, or widen the bound on the trait method.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0742</code>: <code>Tests/UI/Effects/trait_impl_exceeding_bound_is_e0742.stderr</code>.</p>
-<pre class="diag">Error [jet.ImplEffectBoundExceeded]: This `hash` impl uses the effect `FS.Read`, which the trait doesn&#39;t allow
-  --&gt; Tests/UI/Effects/trait_impl_exceeding_bound_is_e0742.jet:11:9
+<p>First UI snapshot mentioning <code>E0742</code>: <code>Tests/UI/checked_text_check_without_row_refuses_io.stderr</code>.</p>
+<pre class="diag">Error [jet.ImplEffectBoundExceeded]: This `check` impl uses the effect `IO`, which the trait doesn&#39;t allow
+  --&gt; Tests/UI/checked_text_check_without_row_refuses_io.jet:11:5
     |
- 11 |         hash: fn(self) -&gt; Int {
-    |         ^^^^
- Why: `Hasher` bounds `hash` to `-[]&gt;`, so impls must be pure; `FS.Read` is outside that bound
- Fix: Remove the `FS.Read` work from this impl, or widen the bound on the trait method
+ 11 |     check: fn(text: String) TokenError! {
+    |     ^^^^^
+ Why: `CheckedText` bounds `check` to `-[]&gt;`, so impls must be pure; `IO` is outside that bound
+ Fix: Remove the `IO` work from this impl, or widen the bound on the trait method
  Denial: invocation
- Call chain: Doc.hash
+ Call chain: Token.check
 More: jet-lang.dev/e/E0742
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

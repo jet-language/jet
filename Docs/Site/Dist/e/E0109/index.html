@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a supported operand pair, call a named method, or implement the operator&#39;s hook trait on your own type for this pair</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0109</code>: <code>Tests/UI/E0109_literal_pieces.stderr</code>.</p>
-<pre class="diag">Error [jet.OperatorTypeMismatch]: Text isn&#39;t joined with `+`
-  --&gt; Tests/UI/E0109_literal_pieces.jet:1:20
+<p>First UI snapshot mentioning <code>E0109</code>: <code>Tests/UI/approx_nonnumeric.stderr</code>.</p>
+<pre class="diag">Error [jet.OperatorTypeMismatch]: `approx` needs a whole number, but this is String (text)
+  --&gt; Tests/UI/approx_nonnumeric.jet:1:23
     |
-  1 | run: fn() { print((&quot;a&quot; + 1)) }
-    |                    ^^^^^^^
- Why: There&#39;s one way to build text: interpolation (S8)
- Fix: Write the pieces inside one string: &quot;a{1}&quot;
+  1 | run: fn() { _: approx(&quot;not a number&quot;) }
+    |                       ^^^^^^^^^^^^^^
+ Why: `approx(value)` only opts one integer-to-float crossing out of its exactness check
+ Fix: Remove `approx`, or pass a whole number that is crossing into a decimal
 More: jet-lang.dev/e/E0109
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

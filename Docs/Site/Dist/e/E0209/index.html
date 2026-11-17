@@ -36,18 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Pass a copy with `.copy()`, reorder so the call is the name&#39;s last use, or write `x.move()` where a value with cleanup is handed over.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0209</code>: <code>Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.stderr</code>.</p>
-<pre class="diag">Error [jet.MoveWithoutMarker]: `eat` takes `v`, but `v` is used again later
-  --&gt; Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.jet:9:9
+<p>First UI snapshot mentioning <code>E0209</code>: <code>Tests/UI/arrow_batch_use_after_move.stderr</code>.</p>
+<pre class="diag">Error [jet.MoveWithoutMarker]: `core.data.arrow.import` takes `batch`, but `batch` is used again later
+  --&gt; Tests/UI/arrow_batch_use_after_move.jet:4:26
     |
-  9 |     eat(v)
-    |         ^
-  --&gt; Tests/UI/Hardening/user_struct_named_noclone_is_still_cloneable.jet:10:13
+  4 |     _moved: arrow.import(batch)
+    |                          ^^^^^
+  --&gt; Tests/UI/arrow_batch_use_after_move.jet:5:18
     |
- 10 |     print(v.n)
-    |             ^ `v` is used again here
- Why: `eat` takes ownership of this argument, and a call never copies on its own, so `v` has no value after this call
- Fix: Write `v.copy()` to pass a copy and keep `v`, or reorder so this call is the last use of `v`
+  5 |     arrow.import(batch)
+    |                  ^^^^^ `batch` is used again here
+ Why: `core.data.arrow.import` takes ownership of this argument, and a call never copies on its own, so `batch` has no value after this call
+ Fix: Write `batch.copy()` to pass a copy and keep `batch`, or reorder so this call is the last use of `batch`
 More: jet-lang.dev/e/E0209
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

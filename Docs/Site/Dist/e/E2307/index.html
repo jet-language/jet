@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, use a proven `View&lt;str&gt;` boundary, write `view.copy()` at the highlighted owning expression (the checker grades that edit), or remove `copies: .Explicit` for the default owning copy.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2307</code>: <code>Tests/UI/MemorySemantics/erased_memory_policy_and_bounds_facts_do_not_escape_2.stderr</code>.</p>
-<pre class="diag">Error [jet.StringViewOutlivesOwner]: `view` cannot be used directly here without an owning copy
-  --&gt; Tests/UI/MemorySemantics/erased_memory_policy_and_bounds_facts_do_not_escape_2.jet:6:39
+<p>First UI snapshot mentioning <code>E2307</code>: <code>Tests/UI/copies_explicit_view_field.stderr</code>.</p>
+<pre class="diag">Error [jet.StringViewOutlivesOwner]: `label` cannot be used directly here without an owning copy
+  --&gt; Tests/UI/copies_explicit_view_field.jet:12:22
     |
-  6 |     #Policy(copies: .Explicit) { need(view) }
-    |                                       ^^^^
- Why: `view` is a zero-copy view into `source` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
- Fix: Write `view.copy()` first, or remove `copies: .Explicit` to use the default owning copy
+ 12 |     user: User{name: label}
+    |                      ^^^^^
+ Why: `label` is a zero-copy view into `text` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `label.copy()` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

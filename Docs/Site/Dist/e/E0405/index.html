@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Make the fallback type match the return type and fallible value.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0405</code>: <code>Tests/UI/E0405_refutable_test_bind_route_must_diverge.stderr</code>.</p>
-<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; Tests/UI/E0405_refutable_test_bind_route_must_diverge.jet:1:20
+<p>First UI snapshot mentioning <code>E0405</code>: <code>Tests/UI/bare_return_needs_value.stderr</code>.</p>
+<pre class="diag">Error [jet.FallbackTypeMismatch]: `?? return` here needs a value
+  --&gt; Tests/UI/bare_return_needs_value.jet:2:24
     |
-  1 | parse_age: fn() -&gt; Int String! { return .Ok(42) }
-    |                    ^^^^^^^^^^^
- Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
-More: jet-lang.dev/e/E2417
-
-Error [jet.FallbackTypeMismatch]: `??` must diverge after a refutable binding
-  --&gt; Tests/UI/E0405_refutable_test_bind_route_must_diverge.jet:3:40
-    |
-  3 | run: fn() { parse_age() == .Ok(age) ?? 0 }
-    |                                        ^
- Why: A failed pattern match cannot continue without defining the captures
- Fix: Use `return`, `panic(...)`, `break`, or `next` as the fallback
+  2 |     x := xs.first() ?? return
+    |                        ^^^^^^
+ Why: A bare `return` needs a value here because the function returns Int
+ Fix: Give a fallback value: `?? return &lt;value&gt;`
 More: jet-lang.dev/e/E0405
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -36,14 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Transition the value into `{required}` first — call the transition that reaches it (e.g. `pay` to reach `Confirmed`).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0150</code>: <code>Tests/UI/Typestate/enum_arm_narrows_to_its_case.stderr</code>.</p>
-<pre class="diag">Error [jet.TypestateWrongState]: `open` needs `Door.Shut`, but `door` is `Door.Locked`
-  --&gt; Tests/UI/Typestate/enum_arm_narrows_to_its_case.jet:22:28
+<p>First UI snapshot mentioning <code>E0150</code>: <code>Tests/UI/protocol_out_of_order.stderr</code>.</p>
+<pre class="diag">Error [jet.ValueThrownAway]: This Payment.Client value is thrown away
+  --&gt; Tests/UI/protocol_out_of_order.jet:18:8
     |
- 22 |         .Locked(_) -&gt; door.open()
-    |                            ^^^^
- Why: Typestate: `open` takes only `Door.Shut`; calling it with `Door` in another state is the out-of-order bug the state list rules out
- Fix: Bring `door` to `Door.Shut` before calling `open`
+ 18 |     h1.Charge(500) ?? panic(&quot;charge failed&quot;)
+    |        ^^^^^^^^^^^^^^^^^^^^
+ Why: `run` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `run` should return it, write `-&gt; Payment.Client` after its parameter list; to discard it on purpose, write `.drop(&quot;reason&quot;)`
+More: jet-lang.dev/e/E0433
+
+Error [jet.TypestateWrongState]: `Charge` needs `Payment.Client.S2`, but `h1` is `Payment.Client.S1`
+  --&gt; Tests/UI/protocol_out_of_order.jet:18:8
+    |
+ 18 |     h1.Charge(500) ?? panic(&quot;charge failed&quot;)
+    |        ^^^^^^
+ Why: Typestate: `Charge` takes only `Payment.Client.S2`; calling it with `Payment.Client` in another state is the out-of-order bug the state list rules out
+ Fix: Moves from `Payment.Client.S1`: `recv_Ack`
 More: jet-lang.dev/e/E0150
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
