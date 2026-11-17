@@ -1,0 +1,48 @@
+// The Crew service: the one server every Crewboard app calls. Its marked
+// methods are endpoints; an app reaches them through an `app.Remote<Crew>`.
+use app
+
+Crew: struct {
+    projects: [Project],
+    tasks: [Task],
+
+    // The caller's projects, each with its count of tasks not done. A
+    // server refuses a call with no account before it runs; a Remote in the
+    // server's own process reaches here, so the method says so itself.
+    #App.SignedIn my_projects: fn(self) -> [ProjectCard] TaskError! {
+        account: app.maybe_caller() ?? return Err(TaskError.SignedOut)
+        who: "{account}"
+        cards := [ProjectCard]{}
+        loop project in self.projects {
+            if project.members.contains(who) {
+                cards.push(ProjectCard{id: project.id.copy(), name: project.name.copy(), open_tasks: self.open_tasks(project.id)})
+            }
+        }
+        Ok(cards)
+    }
+
+    // How many of the project's tasks are not done.
+    open_tasks: fn(self, project: String) -> Int Never! {
+        open := 0
+        loop task in self.tasks {
+            if task.project == project && task.status != Status.Done -> open += 1
+        }
+        open
+    }
+}
+
+// The crew a new server starts with: two projects, Ann in both.
+demo_crew: fn() -> Crew Never! {
+    Crew{
+        projects: [Project]{
+            Project{id: "p1", name: "Gate repair", members: [String]{"ann", "ben"}},
+            Project{id: "p2", name: "Spring fair", members: [String]{"ann"}},
+        },
+        tasks: [Task]{
+            Task{id: "t1", project: "p1", title: "Order hinges", status: Status.Done},
+            Task{id: "t2", project: "p1", title: "Fix the gate", status: Status.Doing},
+            Task{id: "t3", project: "p1", title: "Paint the gate", status: Status.Todo},
+            Task{id: "t4", project: "p2", title: "Book the hall", status: Status.Todo},
+        },
+    }
+}

@@ -1,0 +1,27 @@
+// Crewboard is a task tracker for small teams. The web, desktop and phone
+// apps share one graph (Screens/shell.jet) and call one server: the Crew
+// service (Logic/crew.jet). This entry is the server's half in one process.
+// It mounts the Crew on the shared graph and shows the projects screen to
+// each person, through the same Remote every app calls.
+use {
+    app
+    auth: core.auth
+    logic
+    screens
+}
+
+run: fn() -[DB.Read, IO, Net, Time]> {
+    _: screens.crewboard().mount(logic.demo_crew())
+    crew: app.remote(logic.demo_crew())
+    print("{app.url_of(logic.ProjectsView{})} signed out:")
+    print(screens.projects(crew, logic.ProjectsView{}))
+    loop who in ([String]{"ann", "ben", "cy"}) {
+        print("{app.url_of(logic.ProjectsView{})} as {who}:")
+        print(shown_to(crew.copy(), who))
+    }
+}
+
+// The projects screen as the account `who` sees it.
+shown_to: fn(crew: app.Remote<logic.Crew>, who: String) -[DB.Read, Net, Time]> String Never! {
+    app.as_caller(auth.AccountID.from_string(who), fn() { screens.projects(crew, logic.ProjectsView{}) })
+}

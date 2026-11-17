@@ -4,6 +4,10 @@ Interfaces, web apps, games and larger programs.
 
 Run a lesson from the repository root, for example `jet run Examples/Apps/<Lesson>.jet`. Each lesson's expected output sits beside it as `<Lesson>.out`.
 
+## Crewboard
+
+- [Crewboard](Crewboard/) — A task tracker for small teams. The web, desktop and phone apps share one app graph (`Screens/shell.jet`) and call one Crew service (`Logic/crew.jet`). `run.jet` shows the projects screen to each person through the Remote every app calls.
+
 ## Game
 
 - [CoreGameHeadless](Game/CoreGameHeadless.jet)
