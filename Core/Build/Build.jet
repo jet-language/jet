@@ -9,6 +9,8 @@ package: {
     }
 }
 
+use core.compiler.lang.[Effect]
+
 BUILD_MAX_TARGETS: 65536
 
 BUILD_MAX_ACTIONS: 262144
@@ -16,6 +18,26 @@ BUILD_MAX_ACTIONS: 262144
 BUILD_MAX_FILES: 524288
 
 BUILD_MAX_NODES: 524288
+
+/// One build step as a plain description: the command `run` runs, the files
+/// it reads (`inputs`) and makes (`outputs`), and the effects it may use
+/// (`allow`). `action(…)` makes one, and a `#On(build.link)` hook returns one,
+/// which `jet build` runs in its sandbox in place of Jet's own link. A
+/// description with no command is Jet's own link over `inputs`
+/// (`LinkInputs.default`).
+BuildAction: struct {
+    name: String,
+    run: [String],
+    inputs: [String],
+    outputs: [String],
+    allow: [Effect],
+}
+
+/// The step `name` that runs the command `run`, reading `inputs`, making
+/// `outputs` and using only the effects in `allow`.
+action: fn(name: String, run: [String], inputs: [String], outputs: [String], allow: [Effect]) -> BuildAction Never! {
+    BuildAction{name: name, run: run, inputs: inputs, outputs: outputs, allow: allow}
+}
 
 // core.build is the read-only boundary for checked BuildPlan facts.  The
 // compiler owns graph(plan); receipt_diff is also available to the source

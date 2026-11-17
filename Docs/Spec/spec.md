@@ -7052,6 +7052,13 @@ file there: before any step runs, the build copies it to
 package's file without reaching outside its own folder. Example:
 [`Tests/Cases/BuildEntry/run_steps_read_a_dependency_file.case`](../../Tests/Cases/BuildEntry/run_steps_read_a_dependency_file.case).
 
+A step is also a plain value. `build.action(name, run:, inputs:, outputs:,
+allow:)` of `core.build` makes a `BuildAction`: the command `run` runs, the
+files it reads and the files it makes, and the effects it may use, as cases
+of `core.compiler.lang`'s `Effect` (`allow: [.Exec]`). Making one runs
+nothing; a function returns one for Jet to run, as a link hook does (`link`
+in Output places, link inputs and targets).
+
 A step can also read a whole folder. `b.folder(path)` is the folder at `path`
 in the build's package (`.` is the package itself), `.folder(path)` on
 `b.dependency(name)` is one in that package, at `.jet/deps/<name>/<path>`,
