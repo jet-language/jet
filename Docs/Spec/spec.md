@@ -667,7 +667,9 @@ E0641 like any other, and E0307's fix names each missing member's arm. An arm
 spells a generic member's type arguments as type position does: over
 `Box<Int> | Box<String>` the arms are `.Box<Int>(b)` and `.Box<String>(s)`
 (`.geo.Box<Int>(b)` through a module), a table of both needs no `else`, and
-the bare `.Box(b)`, which names both, is E0305.
+the bare `.Box(b)`, which names both, is E0305. A member whose type has no
+arm spelling, a list, map or optional (`[Int]` in `Int | [Int]`), is reached
+by the table's `else`, which that member keeps free of E0641.
 
 A union member may be a named case, written exactly as inside an enum:
 `temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union, `Name(T)` is a

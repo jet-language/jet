@@ -19,7 +19,7 @@ use jet_foundation.[
     expr_span,
     measure_literal_value,
     type_name,
-    type_union_member_tag,
+    type_unqualified_nominals,
 ]
 
 SemaCoverageTable: struct {
@@ -533,7 +533,7 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
     // gives it (`.geo.Point`); one no name in this module reaches is left to
     // an `else`.
     fix := "add an arm for: {names}"
-    if sema_coverage_identity_missing(subject_ty, missing) {
+    if sema_coverage_spelled_missing(subject_ty, missing) {
         fix = "add `else -> {{ … }}` after the last arm: no name in this module reaches {names}"
         arms := [String]{}
         loop name in missing {
@@ -943,14 +943,14 @@ sema_coverage_case_slots: fn(name: String, arity: Int) -> String {
 }
 
 // The missing cases of `subject_ty` as a report lists them: a union member
-// tagged by its full identity (sema_coverage_identity_case) is listed by its
-// type, which the report shows with its module (`geo.Point`).
+// whose tag is not its spelling (sema_coverage_spelled_member) is listed by
+// its type, which the report shows with its module (`geo.Point`, `[Int]`).
 sema_coverage_shown_cases: fn(subject_ty: Type, missing: [String]) -> String Never! {
     members: if subject_ty == .Union(values) -> values else -> [Type]{}
     shown := ""
     loop (index, name) in missing {
         separator: if index == 0 -> "" else -> ", "
-        shown = if sema_coverage_identity_case(members, name) == {
+        shown = if sema_coverage_spelled_member(members, name) == {
             .Val(member) -> "{shown}{separator}{type_name(member)}"
             .None -> "{shown}{separator}{name}"
         }
@@ -958,24 +958,28 @@ sema_coverage_shown_cases: fn(subject_ty: Type, missing: [String]) -> String Nev
     shown
 }
 
-// The member of the union `members` whose tag `name` is when that tag is the
-// member's full identity, as two members of one name are tagged.
-sema_coverage_identity_case: fn(members: [Type], name: String) -> Type? {
+// The member of the union `members` whose tag `name` is when that tag is not
+// how the member reads without its module: a tag of its full identity, as
+// two members of one name are tagged, or a compound spelling sanitized into
+// an identifier (`[Int]` is `M__Int_`), which no arm writes.
+sema_coverage_spelled_member: fn(members: [Type], name: String) -> Type? {
     loop member in members {
+        if sema_pattern_union_tag(members, member) != name -> next
         plain: sema_pattern_unwrap_tags(member)
-        if sema_pattern_union_tag(members, member) == name && type_union_member_tag(plain) != name {
-            return Val(plain)
-        }
+        if plain == .Case(_, _) -> return None
+        if type_name(type_unqualified_nominals(plain)) == name -> return None
+        return Val(plain)
     }
     None
 }
 
-// Whether a case `missing` lists is a union member tagged by its full
-// identity (sema_coverage_identity_case), as two members of one name are.
-sema_coverage_identity_missing: fn(subject_ty: Type, missing: [String]) -> Bool Never! {
+// Whether a case `missing` lists is a union member whose tag is not its
+// spelling (sema_coverage_spelled_member): one of two members of one name,
+// or a member an arm may not name at all.
+sema_coverage_spelled_missing: fn(subject_ty: Type, missing: [String]) -> Bool Never! {
     if subject_ty == .Union(members) {
         loop name in missing {
-            if sema_coverage_identity_case(members, name) != None -> return true
+            if sema_coverage_spelled_member(members, name) != None -> return true
         }
     }
     false

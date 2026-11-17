@@ -1,0 +1,22 @@
+// A member whose type has no arm spelling (a list, a map) is reached by the
+// table's `else`, which stands for no member an arm could name.
+show: fn(value: Int | [Int]) {
+    if value == {
+        .Int(n) -> print("int {n}")
+        else -> print("a list")
+    }
+}
+
+size: fn(value: String | [String:Int]) -> Int {
+    if value == {
+        .String(s) -> s.len()
+        else -> -1
+    }
+}
+
+run: fn() {
+    show(3)
+    show([Int]{1, 2})
+    print(size("abc"))
+    print(size([String:Int]{"a": 1}))
+}

@@ -255,11 +255,16 @@ sema_pattern_union_instance_arm: fn(members: [Type], variant: String, env: SemaS
 // module: its bare name when that names it (`.Point`, `.Int`), else the name
 // type position gives its type, through the module the caller imports it by
 // (`.geo.Point`), with a generic member's arguments (`.boxes.Box<Int>`). None
-// when no name in the caller's scope reaches it.
+// when no name in the caller's scope reaches it, and for a member whose type
+// has no arm spelling (`[Int]`, `Int?`), which the table's `else` reaches.
 sema_pattern_member_arm: fn(members: [Type], index: Int, env: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     member: sema_pattern_unwrap_tags(members[index])
     if member == .Case(name, _) -> return Val(".{name}")
-    base: sema_pattern_base_name(member) ?? return Val(".{sema_pattern_union_tag(members, member)}")
+    base: sema_pattern_base_name(member) ?? {
+        tag: sema_pattern_union_tag(members, member)
+        if tag != type_name(member) -> return None
+        return Val(".{tag}")
+    }
     leaf: type_unqualified_name(base)
     found: sema_pattern_union_arm(members, leaf, env, program).indexes
     if found.len() == 1 && found[0] == index -> return Val(".{leaf}")
