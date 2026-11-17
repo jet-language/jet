@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111691,
+    "rev": 111698,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -44,7 +44,110 @@
         "radar:e16"
       ]
     },
-    "completionCursor": "2026-11-17T01:48:48.888Z"
+    "completionCursor": "2026-11-17T01:48:48.888Z",
+    "dayStart": {
+      "date": "2026-11-17",
+      "openCards": 359,
+      "openCriteria": 2446,
+      "epochs": {
+        "e18": {
+          "openCards": 15,
+          "openCriteria": 95
+        },
+        "e19": {
+          "openCards": 31,
+          "openCriteria": 142
+        },
+        "e20": {
+          "openCards": 59,
+          "openCriteria": 531
+        },
+        "e21": {
+          "openCards": 58,
+          "openCriteria": 487
+        },
+        "e22": {
+          "openCards": 38,
+          "openCriteria": 289
+        },
+        "e23": {
+          "openCards": 57,
+          "openCriteria": 405
+        },
+        "e24": {
+          "openCards": 78,
+          "openCriteria": 390
+        },
+        "e25": {
+          "openCards": 23,
+          "openCriteria": 107
+        },
+        "e2": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e3": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e4": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e5": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e6": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e7": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e8": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e9": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e10": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e11": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e12": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e13": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e14": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e15": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e16": {
+          "openCards": 0,
+          "openCriteria": 0
+        },
+        "e17": {
+          "openCards": 0,
+          "openCriteria": 0
+        }
+      }
+    }
   },
   "epochs": [
     {
@@ -50802,119 +50905,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c012s7jk",
-      "num": 4626,
-      "title": "Map literals never lose an entry silently when two keys are equal",
-      "body": "NEW card, host for ballot D-MAPLIT-DUP1. Builds on D-DATATREE-RULES1 (#4602, owner ruling 2026-10-05: duplicate object keys are a parse error with explicit opt-in) and the JSON reader law (core-library.md:2170-2174). Does not touch #4602's DataTree deliverable. Conflicts with nothing ratified: no existing decision states map-literal duplicate-key semantics (searched syntax-decisions S38/D-EMPTYLIT1, D-MAPSPACE1; card search 'map literal|duplicate key').\n\n## Actual\n\nObserved 2026-10-05 on the dev candidate jet ($JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet, built 14:16) and on the main checkout debug jet (HEAD 3e5349196):\n\n```jet\nrun: fn() {\n    level: 7\n    character: [String:Int]{\"level\": level, \"rank\": 2, \"level\": 99}\n    print(character.get(\"level\") ?? -1)   // prints 99; jet check: no problems\n}\n```\n\nA literal whose two variable keys are equal (`a: \"level\"; b: \"level\"; [String:Int]{a: 1, b: 2}`) prints length 1 and value 2. Neither `jet check` nor `jet run` reports anything.\n\n## Why it matters\n\nJet already refuses repeated names in data: JSON parse/decode/reader reject a repeated object name with path and position, with `_allow_duplicates` as the explicit opt-in (core-library.md:2170-2174), and the owner's 2026-10-05 DataTree ruling (#4602, D-DATATREE-RULES1) makes duplicate object keys a parse error. Jet's own source literal is the one place that still drops data silently. A 7-hour beginner Python course (youtube 4M87qBgpafk 05:54-05:56) demonstrates exactly this trap: a pasted second `level` entry silently replaces the parameter-backed value.\n\n## Owner choice\n\nD-MAPLIT-DUP1 decides runtime semantics for computed-key collisions. Implement the ratified outcome only.\n\n## Scope\n\nSema check for written-out (literal, enum-case, constant-folded) equal keys; runtime literal construction per the ratified option; same rule in the compile-time evaluator and every execution tier; registered report rows with UI snapshots; corpus and Core scan for literals relying on overwrite; spec sentence under S38.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All 6 criteria met: D-MAPLIT-DUP1=A is implemented (f0419c4198, 7ba59b0eb7, e6c242297f)."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
-        },
-        {
-          "at": "2026-10-05",
-          "by": "Pip",
-          "text": "Second course witness (v3-P2 PYB-79, 4M87qBgpafk 5:54-5:56): duplicate dictionary keys silently keep the last value, and the course turns removing them into an assignment."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-MAPLIT-DUP1 is ratified and this card implements only its outcome.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-MAPLIT-DUP1 is ratified, outcome A (tower decisions). The card implements only that outcome: f0419c4198, 7ba59b0eb7 and e6c242297f.",
-          "at": "2026-11-14T03:49:15.175Z",
-          "closure": "decision"
-        },
-        {
-          "n": 2,
-          "text": "A map literal with two written-out equal keys (text, integer and enum-case keys) is reported as the ratified outcome requires, with the second entry as the primary location and a note at the first; a registered report row and UI snapshot exist.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-4626-r8 (batch 29) plus G6Meta-4626c2 (light24, dev 2913c41a05..e6c242297f, adding the integer-key block). ui map_literal_duplicate_key 1/0: text, integer and enum-case (`Level.Low`) duplicates are each E0508 at the second entry, with a \"first written here\" note at the first and the explicit-replacement Fix.",
-          "at": "2026-11-14T03:46:39.632Z"
-        },
-        {
-          "n": 3,
-          "text": "A map literal whose computed keys collide behaves exactly as the ratified outcome states on O0, O1 and O2, and in compile-time evaluation; a test pins each tier.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-4626-r8 in batch 29 (Batch 29 landed on dev 8cacbb47f8..1c1bba4180; b29proofs on the batch-29 jet (gate-p35):) cases control_and_data/map_literal_computed_duplicate_key_stops_on_every_tier 1/0; the case pins O0, O1, O2 and compile time.",
-          "at": "2026-11-14T03:25:55.444Z"
-        },
-        {
-          "n": 4,
-          "text": "Explicit replacement after the literal (`stats[\"level\"] = 99`) is unaffected and is the fix text the report offers.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Batch 29 landed on dev 8cacbb47f8..1c1bba4180; b29proofs on the batch-29 jet (gate-p35): ui map_literal_duplicate_key 1/0. Each report's Fix is \"Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`\", and the computed-key case runs that replacement unaffected.",
-          "at": "2026-11-14T03:25:56.418Z"
-        },
-        {
-          "n": 5,
-          "text": "Runtime detection adds no extra hashing or pass: the existing slot lookup during construction reports the collision (cite the construction path in the log).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Construction path on origin/dev (landed f0419c4198), checked by Main: ir_map_literal (Compiler/JetIR/Source/BuildMaps.jet:1020-1062) inserts each entry with one map.add call (:1040). map.add is ir_map_add_body (:797-810): it runs the insertion`s own map.find slot lookup (:800), returns the found index when the key is present (:803-804), and otherwise places the new entry (ir_map_place_new, :807). The literal branches on that index (:1044-1052) and stops once, after the block (:1056-1060, ir_map_literal_stop). There is no second hash or extra pass. #run builds through the same IR; case map_literal_computed_duplicate_key_stops_on_every_tier pins O0, O1, O2 and comptime.",
-          "at": "2026-11-14T03:48:33.403Z"
-        },
-        {
-          "n": 6,
-          "text": "Examples, Core and tests contain no literal that depended on silent overwrite; Docs/spec/syntax-decisions.md S38 states the rule once.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Docs/spec/syntax-decisions.md S38 states the rule once, as D-MAPLIT-DUP1=A, at line 1887 on origin/dev (landed with f0419c4198 and 7ba59b0eb7): a map literal never loses an entry; equal written keys are E0508; colliding computed keys stop on every tier and in #run; replace with an assignment after the literal. Sweep: the census over 2551 targets (gate-p33) and the cases profile on the batch-29 jet (gate-p35) give 0 E0508 or MapLiteralDuplicateKey rows outside the dedicated tests, so no literal in Examples, Core or tests depended on silent overwrite.",
-          "at": "2026-11-14T03:39:41.877Z"
-        }
-      ],
-      "refs": [
-        "Docs/spec/syntax-decisions.md",
-        "Docs/spec/reference/core-library.md",
-        "Compiler/JetSema/Source/Sema/Expressions/Literals.jet",
-        "Examples/features/collections/map_surface.jet",
-        "#4602",
-        "D-DATATREE-RULES1"
-      ],
-      "tags": [
-        "learnability",
-        "collections",
-        "owner-choice",
-        "mine-2026-10-05",
-        "wayfinder:task"
-      ],
-      "parentId": "c0iuv3zr",
-      "needsAcceptance": false,
-      "created": "2026-10-05T21:07:49.267Z",
-      "updated": "2026-11-14T03:49:17.148Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-14T03:49:17.148Z"
-    },
-    {
       "id": "c0yvgmgj",
       "num": 4629,
       "title": "Constant ranges that can never run: one advisory lint and one written stride law (S19/S22)",
@@ -56203,11 +56193,11 @@
         {
           "n": 4,
           "text": "Running the whole program or another program while compiling, and code from strings (audit rows A20, B03, B06), need Meta expert leaves: Meta.Host for running programs at compile time, Meta.Code.Raw for code from text, Meta.Code.Rewrite for rewriting (D-JAI-EXPERT1=A). A dependency using one without the root grant is refused.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T01:28:48.235Z",
+          "evidence": "p243 batch compiler (dev 220ae562d7; feature 5a29fc351f): ui MetaExpertLeafRootOnly n=3 bad=0, ui meta_expert_leaf_root_only_meta_leaves_code_out n=1 bad=0, cases BuildEntry/rewrite_body_replaces_a_function_body and meta_events_rewrites_compose_in_order PASS.",
+          "at": "2026-11-17T04:07:23.577Z",
           "proof": {
             "profile": "ui",
             "filter": "meta_expert_leaf_root_only"
@@ -56242,98 +56232,9 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-17T01:40:57.028Z",
+      "updated": "2026-11-17T04:07:23.577Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
-    },
-    {
-      "id": "c0ygtwb9",
-      "num": 5024,
-      "title": "Per-call generic control (Jai #modify, #bake_constants, #bake_arguments, $$ auto-bake, duck typing)",
-      "body": "## Outcome\n\nDecision D-JAI-GENERIC1. Jai lets compile-time code run at every generic call to reject, default or compute type arguments, bakes specialized procedures, and checks generic bodies per instantiation. Jet checks bounds at the definition (D-GENERIC-TYPEFN1) and has const generics (D-CONSTGEN2). Audit rows: B15-B20, B24-B26.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "c7 met (0b110c09b5, 0e2f6ab241); all criteria met."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "D-JAI-GENERIC1 v3 (2026-11-10, after the owner rejected v2): The previous revision forced this into generics instead of following Jet's existing grammar. That missed your point.\n\nI now recommend F:\n\n```jet\n#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\n```\n\nPre names the promise; #run requires that expression's answer while building. Calls stay ordinary. Only facts read by that expression must be available early; the function body and unrelated arguments remain runtime code.\n\nThis is a general expression rule, not a Pre exception. The same #run works in user-marker predicates, Post expressions, bounds and alignment calculations. Missing early facts produce an error; it never silently falls back to runtime.\n\nThe alternative ## rule is now genuinely marker-wide and general, but adds another staging spelling beside #run. Number parameters remain useful when the value shapes a type, not mandatory merely to check an early predicate. None of this proposed marker integration is implemented by the probe compiler."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Ballot D-JAI-GENERIC1 (per-call generic control: Jai #modify, #bake_constants, #bake_arguments, $$ auto-bake, duck typing; audit rows B15-B20, B24-B26) is drafted with same-program alternatives and passes Tower readiness.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-JAI-GENERIC1 was drafted with same-program alternatives, passed readiness and was ratified F on 2026-11-11 (tower decision show D-JAI-GENERIC1).",
-          "at": "2026-11-11T12:35:21.820Z",
-          "closure": "decision"
-        },
-        {
-          "n": 3,
-          "text": "The D-JAI-GENERIC1=F `#run` marker-expression spelling has its Compiler/JetFoundation/Data/Syntax row and regenerated editor grammars in the same change (the syntax-decisions entry, c4, is met). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `--filter syntax_reconciliation` pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light3 (b38459deab..ed697d01d9, Lander5), proved on the batch-15/16 jet over the fit tree: 9bcacb1008 (G6Meta-5024c3-r2): all 6 proof lines rc 0, including the Data/Syntax row grep, the grammar regen with a clean git status, and SurfaceBudget --check.",
-          "at": "2026-11-14T01:25:00.422Z"
-        },
-        {
-          "n": 4,
-          "text": "syntax-decisions.md log entry",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G6Meta-37 eef4513c1e: syntax-decisions.md log entries for D-JAI-CODE1, D-PRE-COMPILE1 and D-JAI-GENERIC1. Reproved by Lander3 on dev 9ecdaf509e with batch compiler b4: tests/guards/syntax_reconciliation.jet, decisions.jet and truthfulness.jet all pass (3/3), after G6Meta-52 fixed the closed_lists base red.",
-          "at": "2026-11-11T20:31:39.172Z"
-        },
-        {
-          "n": 7,
-          "text": "D-JAI-GENERIC1=F is built (owner ratified 2026-11-11): `#run` on any marker expression (a #Pre or #Post predicate, a Post result expression, a bound, an alignment) evaluates it while building, after checked contract substitution, using the one existing required-evaluation mechanism. Ordinary arguments and markers are unchanged, with no new sigil, no per-call generic control and no auto-bake. An invalid or unavailable answer fails the build with a registered diagnostic and UI snapshot. A golden proves `#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")` on sum(4, [1,2,3,4]) prints 10 on O0, O1 and O2, and that sum(3, …) fails while building. The rest of the Jai rows (#modify, #bake_constants, #bake_arguments, $$, duck typing) are closed as not adopted.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "0b110c09b5 (batch 33) plus 0e2f6ab241 (light26, the re-blessed snapshots). On the gate-p39 jet: golden Contracts/RequiredPreDecidedWhileBuilding 3/0 (o0, o1, o2); ui contract_required_pre_false 1/0 and contract_required_post_false 1/0 (E0180 at the clause span); cases contract 59/1/9KF, where the FAIL is compiled_workload_release_gate, fixed after this batch by b2e3a2a037, and the ERROR is the base forms_table ICE.",
-          "at": "2026-11-14T03:49:21.927Z"
-        }
-      ],
-      "refs": [
-        "Docs/audits/jai-parity-2026-10-16.md",
-        "#5021"
-      ],
-      "tags": [
-        "mining-2026-10-16",
-        "jai-vs-jet",
-        "jai-parity",
-        "meta",
-        "syntax",
-        "needs-owner",
-        "wayfinder:decision"
-      ],
-      "parentId": "c02y3vkg",
-      "needsAcceptance": false,
-      "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-14T03:49:23.834Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 7,
-      "completedAt": "2026-11-14T03:49:23.834Z"
     },
     {
       "id": "c0dhc7rh",
@@ -100240,11 +100141,11 @@
         {
           "n": 1,
           "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place on Linux, through the camera portal (PipeWire) and GeoClue; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T01:40:48.614Z"
+          "evidence": "p243 batch compiler (dev 7238d48abc; feature 6a6fad6c04): jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant n=1 bad=0 (Linux portal steps and the web E-APP-TARGET-FEATURE step).",
+          "at": "2026-11-17T04:07:22.537Z"
         },
         {
           "n": 2,
@@ -100265,7 +100166,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-17T01:45:59.266Z",
+      "updated": "2026-11-17T04:07:22.537Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -100427,11 +100328,11 @@
         {
           "n": 2,
           "text": "native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and prompts only at first use; native.open_settings opens the app's settings page. On a web build, both calls are an E-APP-TARGET-FEATURE compile error, not a silent no-op, until the page runtime of #6556 brings the Permissions API. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target` on Linux, and the web build refusal case.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T01:40:47.662Z"
+          "evidence": "p243 batch compiler (dev c0d0eeb2ed; feature 012f77615c): jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target n=1 bad=0 (Linux portal grant steps and the web E-APP-TARGET-FEATURE step).",
+          "at": "2026-11-17T04:07:21.528Z"
         }
       ],
       "refs": [],
@@ -100439,7 +100340,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-17T01:46:17.672Z",
+      "updated": "2026-11-17T04:07:21.528Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -102581,68 +102482,6 @@
       "updated": "2026-11-17T01:47:10.043Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
-    },
-    {
-      "id": "c07ih9eh",
-      "num": 6828,
-      "title": "core.encoding.csv: formula-injection escaping by default",
-      "body": "Gap card N5 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 4.15; crewboard/Desktop/desktop.jet export_here). This build card waits on the D-WEBAPP-SHAPE1 ratification.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "c1 and c2 met by 3abe331755 (batch 33), under D-WEBAPP-SHAPE1=A."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "csv.to_string and the other writers prefix a text cell that starts with =, +, -, @, a tab or a carriage return with an apostrophe (OWASP CSV injection guidance); numeric cells are written unchanged; formulas: .Keep turns it off.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "3abe331755 (batch 33, dev 3e8dc52835..466022db93): core.encoding.csv escapes formula cells by default. On the gate-p39 jet: cases core/csv_ 2/0, cases csv 12/0/1KF, comptime_module_calls_match_runtime 37/0, encoding_hostile_short_writes 1/0, data_stream_limits 2/0, typed_csv_encode 1/0.",
-          "at": "2026-11-14T03:49:18.275Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "core/csv_writer_escapes_formula_cells"
-          }
-        },
-        {
-          "n": 2,
-          "text": "csv.decode does not strip the apostrophe it did not add, so a round trip of a cell starting with an apostrophe is exact.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "3abe331755 (batch 33): csv.decode keeps a leading apostrophe it did not add. cases core/csv_ 2/0 on the gate-p39 jet, including core/csv_round_trip_keeps_leading_apostrophe.",
-          "at": "2026-11-14T03:49:19.390Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "core/csv_round_trip_keeps_leading_apostrophe"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": "c0snkbac",
-      "needsAcceptance": false,
-      "created": "2026-11-13T17:08:25.833Z",
-      "updated": "2026-11-14T03:49:20.980Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-14T03:49:20.979Z"
     },
     {
       "id": "c0pwde2g",
@@ -106288,11 +106127,11 @@
         {
           "n": 5,
           "text": "D-EFFECT-ROOT-WORDS1=A keeps the short effect roots, and the one effect list in Docs/Spec documents what each root covers. Proof: `jet test Tests/Guards --filter effect_list_documents_every_root`. (was #4022 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:56.217Z"
+          "evidence": "dev 5faafa44f4: jet test Tests/Guards --filter effect_list_documents_every_root PASS (1 passed) on the p243 batch compiler; Docs/Spec/spec.md lists every declared effect root.",
+          "at": "2026-11-17T04:06:48.651Z"
         }
       ],
       "refs": [],
@@ -106304,7 +106143,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:10.153Z",
-      "updated": "2026-11-17T01:48:07.835Z",
+      "updated": "2026-11-17T04:06:48.651Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -106317,7 +106156,7 @@
       "track": "epoch",
       "epoch": "e18",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -106325,16 +106164,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on p243 (c1 c2) and p240 (c3)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A package block marker gets completion, semantic tokens and inlay hints through `#On(lsp.…)` stages, with no LSP code change.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:11.055Z",
+          "evidence": "p243 batch compiler (dev 220ae562d7): jet test Compiler --profile cases --filter lsp_package_marker_stages n=1 bad=0 (feature 8182df2b05, Loader fix 220ae562d7).",
+          "at": "2026-11-17T04:07:17.771Z",
           "proof": {
             "profile": "cases",
             "filter": "lsp_package_marker_stages"
@@ -106343,11 +106188,11 @@
         {
           "n": 2,
           "text": "`jet fmt` formats a `#SQL { … }` body through a package `#On(fmt.block)` hook and leaves the surrounding Jet code untouched.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:11.055Z",
+          "evidence": "p243 batch compiler (dev 220ae562d7): jet test Compiler --profile cases --filter fmt_block_package_hook n=1 bad=0 (feature 8182df2b05, Loader fix 220ae562d7).",
+          "at": "2026-11-17T04:07:18.754Z",
           "proof": {
             "profile": "cases",
             "filter": "fmt_block_package_hook"
@@ -106388,8 +106233,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:11.055Z",
-      "updated": "2026-11-17T02:58:37.363Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T04:07:20.491Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T04:07:20.491Z"
     },
     {
       "id": "c0ho9o8j",
@@ -149790,191 +149636,6 @@
       "ratifiedAt": "2026-10-05"
     },
     {
-      "id": "D-MAPLIT-DUP1",
-      "cardId": "c012s7jk",
-      "group": "core",
-      "title": "What a map literal does when two of its keys are equal",
-      "situation": "When one map literal writes the same key twice, Jet today keeps the later value and silently drops the earlier one. A beginner course shows the trap: a pasted second level entry quietly replaced the real level. Jet's own JSON reader already refuses a repeated name. You decide what a repeated key in a literal does; we recommend refusing it, at check time for written keys and at run time when computed keys collide.",
-      "gist": "When one map literal contains the same key twice, should Jet refuse it or keep one of the values?",
-      "lesson": "A map stores values under keys. A map literal writes all its pairs at once, so each key is meant to appear once. Today a repeated key keeps the later value and silently loses the earlier one. A refuses repeated keys: at check time when they are written out, and with a stop naming both entries when computed keys collide. B refuses only written-out repeats. C keeps today's rule and adds a warning.",
-      "explainer": "A map is a collection that stores each value under a key, like a word and its meaning. A map literal is the written form that builds one in a single expression. Each pair in it is an entry.\n\nToday Jet builds the literal one entry at a time. When a later entry has a key that an earlier entry already used, the later value replaces the earlier one. Nothing reports it. The map simply has fewer entries than the literal shows.\n\nKeys can be written out, such as the text \"level\", or computed, such as a variable. Written-out repeats can be found before the program runs. Computed keys are only known while it runs.\n\nA treats any repeat as a mistake. Written-out repeats are an error when you check the program. Computed keys that turn out equal stop the program with a report naming the key and both entries. When you really mean to replace a value, you write a separate assignment after the literal.\n\nB refuses written-out repeats but keeps the later value for computed keys, as Go does. C keeps today's rule and adds a warning for written-out repeats.",
-      "story": "Ana builds a player record whose level comes from a parameter. She pastes an old line that also sets level to 99. Every new player now starts at level 99, the program runs without complaint, and nothing points at the pasted line.",
-      "inWild": "// Go spec, Composite literals: https://go.dev/ref/spec#Composite_literals\n// \"It is an error to specify multiple elements with the same field selector or constant key value.\"\nm := map[string]int{\"level\": 7, \"level\": 99} // compile error\n\n// Swift, Dictionary.swift init(dictionaryLiteral:)\n// https://github.com/swiftlang/swift/blob/main/stdlib/public/core/Dictionary.swift\n_precondition(!found, \"Dictionary literal contains duplicate keys\")",
-      "detail": "Observed 2026-10-05 on the dev candidate jet (built 14:16 from dev 05ea86f65) and on the main checkout's debug jet. A literal with \"level\" twice prints the later value 99 and checks clean. A literal whose two variable keys are equal prints length 1 and keeps the later value. Probes: p02_dup_map_key.jet and p12_dynamic_dup_key.jet in the batch report.\n\nJet already refuses repeated names elsewhere. The JSON parse, decode and reader reject a repeated object name with its path and position; the allow_duplicates siblings are the explicit opt-in (Docs/spec/reference/core-library.md:2170-2174). The owner's 2026-10-05 DataTree ruling makes duplicate object keys a parse error with an explicit opt-in (card #4602, D-DATATREE-RULES1).\n\nSource evidence: a beginner Python course demonstrates repeated level keys in one dictionary literal silently keeping the last value (youtube 4M87qBgpafk, 05:54-05:56). Python's reference states clashes between duplicate keys are not detected and the rightmost value prevails.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Repeated keys are an error",
-          "detail": "Written-out keys that are equal are a check error. The report points at both entries and offers to delete one. Computed keys that turn out equal while running stop the program with a report naming the key and both entry positions. Intended replacement is written as an assignment after the literal, such as stats[\"level\"] = 99.",
-          "technical": "Sema compares literal, enum-case and constant-folded keys with the key type's equality and reports a registered error at the second entry with a note at the first. Runtime literal construction already locates each key's slot before inserting; a found slot raises a registered stop instead of overwriting. No extra hashing, no extra pass and no allocation are added. The same rule covers every tier and the comptime evaluator. Corpus migration: rewrite any intentional overwrite to an explicit assignment.",
-          "code": "stats :: [String:Int]{\"level\": level, \"rank\": 2, \"level\": 99}\n// error: key \"level\" appears twice (entries 1 and 3)\n\nstats := [String:Int]{\"level\": level, \"rank\": 2}\nstats[\"level\"] = 99   // replacement is written on purpose"
-        },
-        {
-          "key": "B",
-          "name": "Refuse written-out repeats only",
-          "detail": "Written-out keys that are equal are a check error, as in A. Computed keys that turn out equal keep the later value, as today. This matches Go.",
-          "technical": "Same check-time rule as A. Runtime construction keeps its current overwrite. A computed-key collision still loses an entry silently.",
-          "code": "stats :: [String:Int]{\"level\": level, \"level\": 99}\n// error: key \"level\" appears twice\n\npair :: [String:Int]{first: 1, second: 2}\n// first == second: the map has one entry, value 2"
-        },
-        {
-          "key": "C",
-          "name": "Keep the later value, warn on written-out repeats",
-          "detail": "Today's rule stays: the later entry wins everywhere. A new warning marks written-out repeats. Warnings show in check and in the editor, not on jet run.",
-          "technical": "Adds one advisory lint. Runtime behavior is unchanged.",
-          "code": "stats :: [String:Int]{\"level\": level, \"level\": 99}\n// warning: key \"level\" appears twice; the later value wins\nprint(stats[\"level\"])   // 99"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "A constant key written twice in a map literal is a compile error. Computed keys overwrite.",
-          "code": "// https://go.dev/ref/spec#Composite_literals\nm := map[string]int{\"level\": 7, \"level\": 99} // compile error"
-        },
-        {
-          "lang": "Swift",
-          "note": "The compiler warns on repeated literal keys, and any repeated key in a dictionary literal stops the program.",
-          "code": "// DiagnosticsSema.def: duplicated_literal_keys_in_dictionary_literal (warning)\n// Dictionary.swift: \"Dictionary literal contains duplicate keys\" (runtime stop)\nlet stats = [\"level\": 7, \"level\": 99]"
-        },
-        {
-          "lang": "Python",
-          "note": "Duplicate keys are not detected; the rightmost value prevails.",
-          "code": "# https://docs.python.org/3/reference/expressions.html#dictionary-displays\nstats = {\"level\": 7, \"level\": 99}   # {'level': 99}"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A literal states one value per key. Losing an entry silently is the kind of quiet data loss Jet's JSON reader already refuses. A catches written repeats before running and computed collisions at the exact literal, at no extra cost.",
-        "tradeoff": "A few programs that relied on a silent overwrite must write the replacement as its own line.",
-        "gains": [
-          "A written repeat is caught before the program runs.",
-          "A computed collision stops at the literal instead of losing data.",
-          "Map literals follow the same rule as Jet's JSON reader."
-        ],
-        "losses": [
-          {
-            "loss": "A literal with colliding computed keys now stops the program instead of continuing.",
-            "mitigation": "The stop names the key and both entries. Code that means to replace writes the replacement as an assignment after the literal, which never stops."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B still loses an entry silently when computed keys collide, which is the harder case to notice."
-          },
-          {
-            "key": "C",
-            "reason": "C keeps the silent loss. Its warning is hidden on jet run, where beginners spend most of their time."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "Check that a literal with two written-out equal keys is a check error with a note at the first entry, on text, integer and enum-case keys. Check that two equal computed keys stop with the registered report naming both entry positions, on every tier and in the compile-time evaluator.\n\nCheck that an explicit assignment after the literal still replaces the value. Scan the example corpus and Core for literals whose computed keys can collide and rewrite any intentional overwrite.",
-      "surface": {
-        "gist": "When one map literal contains the same key twice, should Jet refuse it or keep one of the values?",
-        "lesson": "A map literal writes all its pairs at once, so each key is meant to appear once. Today a repeated key silently keeps the later value. A refuses repeats: at check time when written out, and with a stop when computed keys collide. B refuses only written-out repeats. C keeps today's rule with a warning.",
-        "trio": {
-          "current": {
-            "note": "The earlier level is lost and nothing reports it.",
-            "code": "stats :: [String:Int]{\"level\": level, \"rank\": 2, \"level\": 99}\nprint(stats[\"level\"])   // 99, no message"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "A key written twice in a map literal is a compile error.",
-            "code": "m := map[string]int{\"level\": 7, \"level\": 99}\n// compile error (Go spec: same constant key value)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Repeated keys are an error",
-            "gist": "Written repeats fail the check; computed collisions stop at the literal.",
-            "gains": [
-              "A written repeat is caught before running.",
-              "No entry is ever lost silently."
-            ],
-            "losses": [
-              "Colliding computed keys stop the program."
-            ],
-            "proposed": {
-              "code": "stats :: [String:Int]{\"level\": level, \"level\": 99}\n// error: key \"level\" appears twice\n\nstats := [String:Int]{\"level\": level}\nstats[\"level\"] = 99   // replacement on purpose"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Written repeats only",
-            "gist": "Written repeats fail the check; computed collisions keep the later value.",
-            "gains": [
-              "A written repeat is caught before running."
-            ],
-            "losses": [
-              "Computed collisions still lose an entry silently."
-            ],
-            "proposed": {
-              "code": "stats :: [String:Int]{\"level\": level, \"level\": 99}\n// error: key \"level\" appears twice\n\npair :: [String:Int]{first: 1, second: 2}\n// equal keys: one entry, value 2"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Later wins, with a warning",
-            "gist": "Today's rule stays; written repeats get a warning.",
-            "gains": [
-              "No program changes behavior."
-            ],
-            "losses": [
-              "The silent loss remains.",
-              "The warning is hidden on jet run."
-            ],
-            "proposed": {
-              "code": "stats :: [String:Int]{\"level\": level, \"level\": 99}\n// warning: key \"level\" appears twice\nprint(stats[\"level\"])   // 99"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Each key in a literal means one value. A catches written repeats before running and computed collisions at the literal, matching how Jet's JSON reader treats repeated names.",
-          "gains": [
-            "No silent data loss in map literals.",
-            "One rule for literals and JSON."
-          ],
-          "losses": [
-            {
-              "loss": "Colliding computed keys stop the program.",
-              "mitigation": "The stop names the key and both entries; intended replacement is a separate assignment."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B still loses data when computed keys collide."
-            },
-            {
-              "key": "C",
-              "reason": "C keeps the silent loss, and its warning is hidden on jet run."
-            }
-          ],
-          "tradeoff": "Rare intentional overwrites move to their own line."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "A literal with colliding computed keys now stops the program instead of continuing.",
-          "attempts": [
-            "Return a failure result from every map literal instead of stopping. Rejected: every ordinary literal would need failure handling for a case that only computed keys can reach.",
-            "Prove distinct keys at check time. Kept for every written-out, enum-case and constant key, so the stop can only arise from keys computed while running."
-          ]
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-05T21:09:20.705Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-05"
-    },
-    {
       "id": "D-LAYOUT-SHOW1",
       "cardId": "c08idy63",
       "group": "tooling",
@@ -176176,192 +175837,6 @@
       "ratifiedAt": "2026-11-01"
     },
     {
-      "id": "D-PRE-COMPILE1",
-      "cardId": "c0ygtwb9",
-      "group": "jai",
-      "title": "`#Pre` is checked while compiling whenever the values it reads are known; no new mark",
-      "situation": "A function states a rule about its arguments with `#Pre(condition, \"message\")`, checked when the program runs. A call such as `simd_width(6, xs)` can never pass, yet it builds and stops later. The first draft added `##Pre`, a second mark that also made parameters compile-time without saying so. This revision adds nothing to learn. A `#Pre` is decided while compiling whenever the values it reads are known then, the rule you chose for `::` values.",
-      "gist": "How should a rule on a function's arguments be checked while compiling, when the call's values are fixed?",
-      "lesson": "`#Pre(lanes == 4, \"need 4 lanes\")` is a rule every call must keep. When a call passes fixed values, such as the number 6, the compiler can work out the answer itself. Under A it does, and a call that can never pass fails to build, on the caller's line, with the author's message.",
-      "explainer": "",
-      "story": "Ivo calls a library's `simd_width(6, readings)`. Today it builds and ships, then stops on a customer's machine with \"need 4 or 8 lanes\", a rule the library stated all along. Under A, his build fails on that line with the same message. The library author wrote nothing new.",
-      "inWild": "// Rust: a check that must fail at known values is a compile error\nlet a = [1, 2, 3];\nlet x = a[5];   // error: this operation will panic at runtime (unconditional_panic)",
-      "detail": "Why the draft was revised. `##Pre` added a second compile-time mark, although D-META-HASH1 A made `#` the one mark. It turned each parameter the rule reads into a compile-time one without a word at the parameter, so each distinct value built its own copy. A run-time value at a call then became an error. That is a hidden cost and behavior change (philosophy principle 8) and a new concept (principle 7).\n\nThe rule A uses already exists. D-COMPTIME-WORD1 A, which you ratified, computes every `::` value while compiling whenever it can and falls back to run time otherwise. `comptime` is the one word that requires it. A applies the same rule to `#Pre`: a pure condition over values known while compiling is worked out then. D-PREPOST1 already makes every `#Pre` pure.\n\nWhat A does at each call. If every value the rule reads is known while compiling, such as a literal, a `::` constant or a `comptime` parameter, the compiler decides the rule. False is a build error on the caller's line, with the message and the values. True means that call carries no run-time check, as a proved check is erased (D-PROVE-SEM1). Otherwise the check runs when the program runs, as today.\n\nIf working out the rule runs past the compile-time step budget, the check stays at run time, as a `::` value does; it is never dropped. `#Post` needs nothing new: when a whole call is computed while compiling under D-COMPTIME-WORD1, its `#Post` is checked then too.\n\nRequiring a fixed value. Some functions need the value fixed, for example to pick a vector width. The author writes `comptime lanes: Int`, the ratified spelling (D-COMPTIME-WORD1 A, D-CONSTGEN2 A). Every call then passes a fixed value, so every `#Pre` on it is decided while compiling. The first draft's option B is that case of A, not a separate rule.\n\nProbes on dev, in $JET_SCRATCH_ROOT/lanes/MemDesign-3/probes/pre, on o0, o1 and o2. pre.jet calls `width(6, …)` against `#Pre(lanes == 4, …)`: it builds, prints 6, then stops with E3001 on line 8. The first draft's internal compiler error no longer happens. In early.jet the same call sits in a file constant, `BAD :: width(6, …)`. `jet check` passes and the run stops at startup, so early `::` evaluation is not built yet either.\n\nMore probes. prepre.jet: `##Pre` is E0003. lead.jet: a `comptime` parameter is E0003, since it is ratified but not built. ctif2.jet: `comptime if` on a plain parameter is E0989. Census (probes/pre/census.mjs): 26 `#Pre` lines, 5 in Examples and 21 in tests; none in Core.\n\nOverlap. Jet has one contract form, `#Pre` and `#Post` (D-PREPOST1); `#Require` was a placeholder name and was archived. Markers, `comptime` and generic recipes (D-GENERIC-TYPEFN1) keep their meaning. A adds no syntax, no error code beyond the build-time form of the existing contract failure, and no rule for parameters.\n\nReview. Author: Claude (MemDesign-3 lane), revising the Main draft after the owner said he was not happy with it. No fresh adversarial pass has run on this revision.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`#Pre` is decided while compiling whenever it can be",
-          "detail": "At each call, if every value the rule reads is known while compiling, the compiler decides it. A call that can never pass is a build error on the caller's line, with the author's message. Other calls are checked when the program runs, as today. No new mark and no parameter changes.\n\nBehavior change: a call with fixed values that breaks a `#Pre` fails to build instead of stopping at run time. A call decided true carries no run-time check.",
-          "technical": "Sema, after argument substitution at each call: if the `#Pre` condition reads only literals, `::` constants and `comptime` parameters, evaluate it in the compile-time engine under the D-COMPTIME-WORD1 step budget. False: the contract-failure error at the call span, with message and values. True: drop that call's entry check, as D-PROVE-SEM1 erases proved checks. Budget exhausted or run-time inputs: keep the run-time check.",
-          "code": "use core.process as process\n\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8 lanes\")\nfn simd_width(lanes: Int, xs: [Int]) -> Int {\n    xs.len() + lanes\n}\n\nfn run() {\n    print(simd_width(8, [Int]{1, 2}))     // 10\n    print(simd_width(6, [Int]{1, 2}))     // can never pass\n    n :: process.argv().len()\n    print(simd_width(n, [Int]{1, 2}))     // known only when running\n}\n// A: the second call's values are fixed, so the rule is decided while compiling:\n// error: simd_width(6, …) breaks its #Pre: need 4 or 8 lanes (lanes is 6)\n//   --> line 10\n// The third call reads a run-time value, so its check runs when the program runs.\n\n// To require a fixed value, the existing word does it (D-COMPTIME-WORD1 A):\nfn simd_fixed(comptime lanes: Int, xs: [Int]) -> Int { … }"
-        },
-        {
-          "key": "B",
-          "name": "`##Pre` (the first draft)",
-          "detail": "A doubled mark, `##Pre`, runs the rule while compiling at each distinct call. Every parameter it reads becomes compile-time without a word at the parameter.\n\nA call passing a run-time value is an error, and each distinct value builds its own copy of the function.",
-          "technical": "Parser: `##Name(…)` before a declaration, a second marker form. Sema: the rule runs per distinct call, and the parameters it reads are specialized.",
-          "code": "use core.process as process\n\n##Pre(lanes == 4 || lanes == 8, \"need 4 or 8 lanes\")\nfn simd_width(lanes: Int, xs: [Int]) -> Int {\n    xs.len() + lanes\n}\n\nfn run() {\n    print(simd_width(8, [Int]{1, 2}))     // 10\n    print(simd_width(6, [Int]{1, 2}))     // can never pass\n    n :: process.argv().len()\n    print(simd_width(n, [Int]{1, 2}))     // known only when running\n}\n// B: ## runs the rule while compiling; lanes silently becomes compile-time.\n// error at line 10: need 4 or 8 lanes\n// error at line 12: lanes must be known while compiling, but n is a run-time value\n//   Fix: write #Pre instead of ##Pre"
-        },
-        {
-          "key": "C",
-          "name": "A check in the body",
-          "detail": "The body refuses a call while compiling with `comptime if` and `reject`, as Zig's `@compileError` does. The parameter must be `comptime`.\n\nHover and docs cannot show the rule, since it is code, not a declared condition.",
-          "technical": "Needs `comptime` parameters (ratified, not built: lead.jet is E0003) and `reject` callable from a function body.",
-          "code": "use core.process as process\n\nfn simd_width(comptime lanes: Int, xs: [Int]) -> Int {\n    comptime if lanes != 4 && lanes != 8 {\n        reject(\"need 4 or 8 lanes\")\n    }\n    xs.len() + lanes\n}\n// C: the rule lives in the body. Line 10 is a build error;\n// line 12 is a build error too, since lanes must be fixed."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "The deny-by-default unconditional_panic lint rejects an operation that must panic at known values. Source: doc.rust-lang.org/rustc/lints/listing/deny-by-default.html#unconditional-panic.",
-          "code": "let a = [1, 2, 3];\nlet x = a[5];   // error: this operation will panic at runtime"
-        },
-        {
-          "lang": "D",
-          "note": "Template constraints on the signature, checked at each use while compiling, for template parameters only. Source: dlang.org/spec/template.html#template_constraints.",
-          "code": "float simdSum(int lanes)(float[] xs) if (lanes == 4 || lanes == 8) { … }"
-        },
-        {
-          "lang": "Zig",
-          "note": "`@compileError` in a comptime branch of the body. Source: ziglang.org/documentation/master/#compileError.",
-          "code": "if (lanes != 4 and lanes != 8) @compileError(\"need 4 or 8 lanes\");"
-        },
-        {
-          "lang": "C++",
-          "note": "C++20 requires-clauses on template parameters. Source: en.cppreference.com/w/cpp/language/constraints.",
-          "code": "template<int L> requires (L == 4 || L == 8) int simd_width(...);"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A reuses the rule you chose for `::`: work it out while compiling whenever the values are known. Bad calls fail on the caller's line, and nobody learns a new mark or label.",
-        "gains": [
-          "No new syntax: `#Pre` keeps one spelling.",
-          "A call that can never pass fails to build.",
-          "A call decided true carries no run-time check."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B adds a second mark and silently makes parameters compile-time, building a copy per value."
-          },
-          {
-            "key": "C",
-            "reason": "C hides the rule in the body, where hover and docs cannot show it."
-          }
-        ],
-        "tradeoff": "A test that wants the run-time stop passes a value known only when running."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Use $JET_SCRATCH_ROOT/discovery/base/latest/jet with JET_TOOLCHAIN_ROOT=$JET_SCRATCH_ROOT/lanes/MemDesign-3/export, a git archive of dev 70b441a147. From $JET_SCRATCH_ROOT/lanes/MemDesign-3/probes, run `./tiers.sh pre`. On none, basic and full alike, pre.jet prints 6 and stops with E3001, and early.jet stops at startup. prepre.jet and lead.jet give E0003, and ctif2.jet gives E0989. `node pre/census.mjs` counts the `#Pre` lines.",
-      "surface": {
-        "gist": "How should a rule on a function's arguments be checked while compiling, when the call's values are fixed?",
-        "lesson": "`#Pre(lanes == 4, \"need 4 lanes\")` is a rule every call must keep. When a call passes fixed values, such as the number 6, the compiler can work out the answer itself. Under A it does, and a call that can never pass fails to build, on the caller's line, with the author's message.",
-        "trio": {
-          "current": {
-            "note": "A call that can never pass builds, and stops when it runs.",
-            "code": "use core.process as process\n\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8 lanes\")\nfn simd_width(lanes: Int, xs: [Int]) -> Int {\n    xs.len() + lanes\n}\n\nfn run() {\n    print(simd_width(8, [Int]{1, 2}))     // 10\n    print(simd_width(6, [Int]{1, 2}))     // can never pass\n    n :: process.argv().len()\n    print(simd_width(n, [Int]{1, 2}))     // known only when running\n}\n// Today (probes pre.jet and pre_compound.jet, o0, o1 and o2): it builds, prints 10, then\n// Stop [E3001]: `panic: need 4 or 8 lanes`   --> line 10, under simd_width"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "rustc rejects an operation that must panic at known values, with no annotation.",
-            "code": "let a = [1, 2, 3];\nlet x = a[5];   // error: this operation will panic at runtime"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`#Pre` is decided while compiling whenever it can be",
-            "gist": "A rule over fixed values is decided while compiling; no new mark or label.",
-            "gains": [
-              "Nothing new to learn: the `::` rule, applied to `#Pre`.",
-              "A call that can never pass fails on the caller's line.",
-              "A call decided true carries no run-time check."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "#Pre(lanes == 4 || lanes == 8, \"need 4 or 8 lanes\")\nfn simd_width(lanes: Int, xs: [Int]) -> Int { … }\nsimd_width(6, xs)   // build error: need 4 or 8 lanes"
-            }
-          },
-          {
-            "key": "B",
-            "name": "`##Pre` (the first draft)",
-            "gist": "A second mark that runs the rule while compiling and fixes its parameters.",
-            "gains": [
-              "The rule's timing shows in its own mark."
-            ],
-            "losses": [
-              "A second compile-time mark, and parameters silently become compile-time."
-            ],
-            "proposed": {
-              "code": "##Pre(lanes == 4 || lanes == 8, \"need 4 or 8 lanes\")\nfn simd_width(lanes: Int, xs: [Int]) -> Int { … }"
-            }
-          },
-          {
-            "key": "C",
-            "name": "A check in the body",
-            "gist": "As Zig: the body checks with `comptime if` and refuses the call.",
-            "gains": [
-              "Any logic fits in the check."
-            ],
-            "losses": [
-              "The rule hides in the body, and every checked value must be fixed."
-            ],
-            "proposed": {
-              "code": "fn simd_width(comptime lanes: Int, xs: [Int]) -> Int {\n    comptime if lanes != 4 && lanes != 8 { reject(\"need 4 or 8 lanes\") }\n    …\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A reuses the rule you chose for `::`: work it out while compiling whenever the values are known. Bad calls fail on the caller's line, and nobody learns a new mark or label.",
-          "gains": [
-            "No new syntax: `#Pre` keeps one spelling.",
-            "A call that can never pass fails to build.",
-            "A call decided true carries no run-time check."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B adds a second mark and silently makes parameters compile-time, building a copy per value."
-            },
-            {
-              "key": "C",
-              "reason": "C hides the rule in the body, where hover and docs cannot show it."
-            }
-          ],
-          "tradeoff": "A test that wants the run-time stop passes a value known only when running."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T01:19:48.639Z",
-      "designAway": [
-        {
-          "loss": "Tests that check the run-time contract stop would now fail to build.",
-          "attempts": [
-            "Keep fixed-value calls at run time: rejected, that is the late failure this ballot removes."
-          ],
-          "result": "Each such test passes a value known only when running, such as `process.argv().len()`, and the build-time error gets its own UI test. Examples are tests/ui/runtime_e3005.jet and line 19 of Examples/features/contracts/pre_compound.jet; the cutover build lists the rest."
-        },
-        {
-          "loss": "A slow rule could slow the build.",
-          "attempts": [
-            "Fail the build when a rule runs out of steps, as the first draft did: rejected, it turns a slow rule into an error."
-          ],
-          "result": "The rule shares the `::` step budget; past it, the check stays at run time and is never dropped."
-        }
-      ],
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
       "id": "D-SERVICE-WORKER1",
       "cardId": "c0mhdm27",
       "group": "service",
@@ -195733,250 +195208,6 @@
       "created": "2026-11-09T19:36:16.324Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-09"
-    },
-    {
-      "id": "D-JAI-GENERIC1",
-      "cardId": "c0ygtwb9",
-      "group": "syntax",
-      "title": "Require an early marker expression with Jet's existing #run, not a new sigil",
-      "situation": "A library sometimes needs a bad argument rejected before the program starts. An ordinary precondition can check a runtime input, so it does not require that early answer. The owner asked for a cohesive way to choose early checking without turning every argument into a generic parameter. Jet already has a request for required early evaluation: #run. Choose whether to reuse that request inside marker expressions or add a general marker-wide mode. We recommend #run on the expression whose answer must be known, with ordinary calls unchanged.",
-      "gist": "Should marker expressions use the same #run request as every other required early expression?",
-      "lesson": "#Pre says what must be true. #run says when its expression must have an answer: while building. Combining them keeps those meanings instead of inventing another hash. It does not run the whole function early.",
-      "explainer": "A required check fails the build when inputs are unavailable or evaluation cannot complete. A number parameter is a compile-time generic value. Distinct generic instances need not imply distinct emitted machine bodies if the compiler can share them safely.",
-      "story": "Ola requires a lane count of four or eight before accepting a call, while the list itself remains runtime data. Every option adds [1,2,3,4] to 10. The example tests a contract, not SIMD performance.",
-      "inWild": "Zig's comptime expressions and parameters make an early requirement explicit. C++ constant evaluation likewise differs from merely hoping an optimizer folds an expression. These are documented comparisons, not peer performance measurements.",
-      "detail": "Revision 3 answers q3ybwski, q8sdri5o and q1x848xv together. Required early call validation is the job, not duck typing or currying. F writes #Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\"). Parentheses belong to Pre; #run owns its braced expression. No new sigil, parameter grammar or build-error operation is needed.\n\nMarker application and code generation happen while building, but a Pre predicate describes each invocation's inputs. Post describes its result. Under F, required evaluation happens at that contract's normal instantiation point. For Pre, substitute checked caller argument facts first, then use the canonical required evaluator. Do not evaluate an unbound parameter once while reading the declaration.\n\nA false early Pre is a build error under D-PRE-COMPILE1=A. Unavailable inputs, invalid operations, refused effects and exhausted budgets are separate errors, never runtime fallback. Ordinary Pre retains its approved early-if-possible behavior. Unread arguments stay runtime values. Requiring a fact does not make the body parameter generic, permit type shaping, or execute the body early.\n\nF's reach is general expression staging. #Post(#run { result > 0 }, \"positive\") needs an actual permitted early result fact or fails. User-marker delayed predicates use the same #run at their documented instantiation point. #Memo(bound: #run compute_bound()) requires an early bound. #Layout(c, align(#run alignment())) requires an early alignment. Already early expressions gain no power by repeating #run.\n\nLegal sites, schemas and authority do not change. #Unsafe(#run reason()) computes a reason, not an unsafe action. Runtime allocators and callbacks cannot become build-time resources by wrapping them. Non-expression arguments cannot accept value regions. Every expression-bearing marker follows the same rule; other markers are unaffected. Verifying a Kernel or generating declarations does not run their target code.\n\nForwarding preserves checked requirements and their dependent argument facts. Known literals or pure early expressions discharge them at outer calls. Unknown runtime wrappers cannot hide them. Interfaces, methods, defaults and generic instances retain the same obligation. A plain callable or foreign callback cannot erase unresolved requirements: bind the arguments or preserve a contract-bearing callable type. Recursion keeps canonical budgets.\n\nBeginner path: ordinary #Pre, ordinary parameters and ordinary calls. Expert path: add #run only to the expression requiring an early answer. Use number parameters separately when a value must shape types. Tools show required caller facts on the signature; the body keeps ordinary parameter semantics.\n\nCompiler/JetFoundation/Data/Syntax/Spellings.jet:26-38 registers current comptime value regions, explicit comptime parameters and $ facts. MathLayout.jet:756-759 owns the requirement word. D-META-SPELL1=A ratifies #run for required regions; D-META-HASH2=A ratifies #build and related filled-in values. A build: fn entry orchestrates a build, not arbitrary early application execution. Facts describe values, not evaluation requests.\n\nIndependent t17a a0.0.43 probes, jet run -: comptime { 2 + 2 } prints 4; <comptime N: Int> sum<4> prints 10. #run's value block gets E0733; $build.profile gets E0003. Pre containing a comptime value block is refused, including E0391. Ordinary false Pre prints before, then stops E3005. These prove implementation gaps, not working F syntax.\n\nA is the owner's general ## alternative. It stages all dynamic expressions owned by a marker application, including user markers, at the documented checking point. Post needs early result proof. Runtime-resource or unknown obligations fail; already early markers gain nothing. This adds marker-wide grammar, unlike F's selective expression request. It is not restricted to Pre.\n\nB's early number parameter is sound and useful for type shaping. It changes call organization when only predicate knownness is needed. It is not recommended merely because generic machinery exists. All options share one bounded pure evaluator; no machine-body duplication per count is assumed.\n\nAdversarial verdict: F holds as a cohesive proposal, not current implementation. First try ordinary Pre: it cannot require knownness. Then reuse #run on the deferred expression that needs it. This removes a Pre-only switch. Forwarding and callable-erasure limits remain real and must appear in interfaces and diagnostics. No zero-cost or universal-proof claim is made. Breaking cutovers follow D-LANG-MIGRATE1=A's registered rewrites without retired-syntax teaching.",
-      "options": [
-        {
-          "key": "A",
-          "name": "General marker-wide ## mode",
-          "detail": "A double hash requires all dynamic expressions of that marker application to be decided while building. Applies to every marker, including user markers, at its documented checking point.",
-          "code": "// Proposed A; not implemented.\n##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; invalid or unavailable lane counts fail while building.",
-          "technical": "A general marker grammar amendment. Result-dependent, runtime-resource and unknown predicates fail unless the ordinary evaluator has permitted facts; no runtime fallback."
-        },
-        {
-          "key": "B",
-          "name": "Early number parameter",
-          "detail": "Require the argument through the existing number-parameter mechanism. Pre then checks validity. Useful when the value must shape types too.",
-          "code": "// Proposed program in ratified number-parameter spelling.\n#Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")\nsum: fn<lanes: Int>(xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum<4>([1,2,3,4])) }\n// 10; invalid or runtime generic counts fail while building.",
-          "technical": "Uses D-META-SPELL1=A's parameter spelling. Generic identity and type shaping are explicit; machine-body duplication is not assumed."
-        },
-        {
-          "key": "F",
-          "name": "Existing #run value expression",
-          "detail": "Put #run on the expression that needs an early answer. Keep ordinary arguments, ordinary markers and one required-evaluation mechanism.",
-          "code": "// Proposed F; not implemented.\n#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\nsum: fn(lanes: Int, xs: [Int]) -> Int {\n    total := 0\n    loop x in xs -> total += x\n    total\n}\nrun: fn() { print(sum(4, [1,2,3,4])) }\n// 10; invalid or unavailable lane counts fail while building.",
-          "technical": "Reuse required value evaluation after checked contract substitution. Same rule for every marker expression, including user predicates, Post result expressions, bounds and alignment. It stages no unrelated target code."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jai",
-          "note": "Community documentation describes #modify per resolved call and #bake_arguments currying. This is not a tested claim about the current private compiler.",
-          "code": "#modify { return do_something(T); }"
-        },
-        {
-          "lang": "Zig",
-          "note": "An explicit comptime parameter provides knownness; @compileError fails when analyzed. Pure body validation is a real alternative, not inherently invisible to tools. Illustration not executed.",
-          "code": "fn sum(comptime lanes: u32, xs: []const i32) i32"
-        },
-        {
-          "lang": "C++",
-          "note": "Requires-clauses validate template arguments during substitution; named concepts improve reusable constraints. This differs from arbitrary runtime-argument validation. Documentation checked, illustration not executed.",
-          "code": "template<int L> requires (L == 4 || L == 8 || L == 16) int sum();"
-        }
-      ],
-      "rec": "F",
-      "recommendation": {
-        "rec": "F",
-        "why": "Jet already says #run when an expression must be decided early. A marker's expression should use that same request, not a second sigil or forced generic parameter.",
-        "gains": [
-          "No new sigil or parameter grammar",
-          "Ordinary call organization",
-          "General expression rule across markers"
-        ],
-        "losses": [
-          {
-            "loss": "Required call facts must survive forwarding and callable conversion.",
-            "mitigation": "Preserve checked obligations; reject erasure or bind required arguments before making a plain callable."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "A",
-            "reason": "Coherent if genuinely general, but adds a second staging spelling beside #run and stages the whole marker at once."
-          },
-          {
-            "key": "B",
-            "reason": "Useful for type shaping, but generic call organization is unnecessary when only the predicate needs an early answer."
-          }
-        ],
-        "tradeoff": "Existing expression staging with explicit callable limits, rather than another marker mode."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-2. Read all three owner questions and the registry, ran early-value and parameter probes, and recommended general #run expression staging with explicit unimplemented contract and callable limits."
-      },
-      "checkInstructions": "Before delivery, prove Pre/Post/user-marker instantiation, selective expression staging, unavailable values, effect refusal, budgets, default expressions, wrappers, callable erasure, artifact interfaces and all applicable tiers. Neither ## nor #run-in-marker behavior has been executed successfully here.",
-      "surface": {
-        "gist": "Should marker expressions use the same #run request as every other required early expression?",
-        "lesson": "#Pre names the promise. #run requires its expression's answer while building. It does not run the whole function early. The same expression rule applies across markers, not just Pre.",
-        "trio": {
-          "current": {
-            "note": "Current comptime value regions work; proposed #run-in-marker checking is not implemented.",
-            "code": "n: comptime { 2 + 2 } // probe prints 4"
-          },
-          "wild": {
-            "lang": "Zig",
-            "note": "Required early expressions and parameters share the language's compile-time model.",
-            "code": "comptime expression"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Marker-wide ##",
-            "gist": "Require every dynamic expression of one marker early.",
-            "gains": [
-              "Short general marker mode"
-            ],
-            "losses": [
-              "Another staging spelling beside #run"
-            ],
-            "proposed": {
-              "code": "##Pre(lanes == 4 || lanes == 8, \"need 4 or 8\")"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Early parameter",
-            "gist": "Require a generic value and validate it with Pre.",
-            "gains": [
-              "Also supports type shaping"
-            ],
-            "losses": [
-              "Changes call organization"
-            ],
-            "proposed": {
-              "code": "sum<4>([1,2,3,4]) // 10"
-            }
-          },
-          {
-            "key": "F",
-            "name": "Existing #run expression",
-            "gist": "Require only the selected expression early.",
-            "gains": [
-              "No new sigil",
-              "Ordinary calls",
-              "Works across marker expressions"
-            ],
-            "losses": [
-              "Callable obligations cannot disappear."
-            ],
-            "proposed": {
-              "code": "#Pre(#run { lanes == 4 || lanes == 8 }, \"need 4 or 8\")\n// Also: #Post(#run { result > 0 }, \"positive\")\n// Post fails if no permitted early result fact exists."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "F",
-          "why": "Reuse Jet's required early expression request where the early answer is needed.",
-          "gains": [
-            "One staging request"
-          ],
-          "losses": [
-            {
-              "loss": "Forwarding must keep required facts.",
-              "mitigation": "Preserve checked contracts or bind arguments before erasing them."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "A",
-              "reason": "General but adds another staging spelling."
-            },
-            {
-              "key": "B",
-              "reason": "Makes the parameter generic unnecessarily."
-            }
-          ],
-          "tradeoff": "One expression mechanism, with honest callable limits."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-09T19:38:09.043Z",
-      "designAway": [
-        {
-          "option": "A",
-          "loss": "A wrapper cannot treat its runtime body as if inputs were constants.",
-          "attempts": [
-            "Propagate symbolic call obligations in checked interfaces.",
-            "Discharge them at outer calls; keep ordinary body staging unchanged."
-          ],
-          "result": "Required implementation, not proof from j01."
-        },
-        {
-          "option": "A",
-          "loss": "Runtime inputs need a dispatch or rejection policy.",
-          "attempts": [
-            "Manual literal-call match with an author-chosen fallback."
-          ],
-          "result": "No universal generated fix can invent application behavior."
-        },
-        {
-          "option": "A",
-          "loss": "Bare function values can erase requirements.",
-          "attempts": [
-            "Reject erased unresolved obligations; allow constant-binding ordinary wrappers."
-          ],
-          "result": "Higher-order restriction remains; bound B/D instances do not need wrappers."
-        },
-        {
-          "option": "B",
-          "loss": "Calls use angle-bracket value arguments.",
-          "attempts": [
-            "Share emitted code where semantics permit.",
-            "E relocates parameter spelling and inference to ordinary calls."
-          ],
-          "result": "Code duplication is not inherent; declaration/call organization still differs."
-        },
-        {
-          "option": "C",
-          "loss": "Some markers have no suitable early predicate.",
-          "attempts": [
-            "Infer applicability from the typed contract and reject unavailable result facts."
-          ],
-          "result": "Broader inference, not silent ##Post acceptance."
-        },
-        {
-          "option": "D",
-          "loss": "Authored validation is inside the body.",
-          "attempts": [
-            "Render validation summaries in hover and documentation."
-          ],
-          "result": "Tool visibility improves; the source signature still lacks the predicate."
-        },
-        {
-          "option": "E",
-          "loss": "Another parameter spelling is added.",
-          "attempts": [
-            "Lower both locations to the existing value-parameter contract, not parallel semantics."
-          ],
-          "result": "Syntax scope remains, while knownness is explicit at declaration."
-        }
-      ],
-      "reports": [
-        {
-          "title": "Zig: explicit compile-time expressions and parameters",
-          "url": "https://ziglang.org/documentation/master/#comptime"
-        }
-      ],
-      "outcome": "F",
-      "ratifiedAt": "2026-11-11"
     },
     {
       "id": "D-PRIM-BOOLSIZE1",
@@ -220598,19 +219829,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q3ybwski",
-      "cardId": "c0ygtwb9",
-      "decisionId": "D-JAI-GENERIC1",
-      "by": "owner",
-      "kind": "question",
-      "text": "This ballot and its meaning/purpose are unclear to me. I also don’t think the proposed jet is idiomatic and cohesive. Update to have idiomatic cohesive jet syntax and semantics and make the ballot more clear",
-      "status": "answered",
-      "answer": "# D-JAI-GENERIC1 — answer to q3ybwski\n\n**Question (owner):** \"This ballot and its meaning/purpose are unclear to me. I also don't think the proposed jet is idiomatic and cohesive. Update to have idiomatic cohesive jet syntax and semantics and make the ballot more clear.\"\n\n**Answer.** The old ballot bundled four unrelated Jai features (`#modify`, `#bake`, `$$`, duck typing) and invented four new forms for them (`#Check prep { }` with `fail()`, `bake()`, `prep?`, `#Open fn`). The revision states one problem and solves it with a marker Jet already has. All four invented forms are withdrawn.\n\n**The problem, in one paragraph.** A generic function's bounds say which types it accepts, as traits, and Jet already checks types and fixed-list sizes at each use. Some rules are neither, such as \"the lane count must be 4, 8 or 16\" or \"the type must not be Float\". Today such a rule has no place on the signature. A bad call compiles, then fails inside the library or while the program runs, and the user sees an error in code they didn't write:\n\n```jet\nfn simd_sum(comptime lanes: Int, xs: [F32]) -> F32 { … }   // approved generics form, not built yet\nsimd_sum(6, readings)   // accepted; stops while running, inside simd_sum\n```\n\nJai solves this with `#modify`, a block that runs for each new use and may refuse it with a message.\n\n**The idiomatic Jet answer (option A).** Jet already writes argument rules as contracts: `#Pre(condition, \"message\")`. One new timing rule: a `#Pre` whose condition reads only values known while compiling (compile-time parameters, literals, constants, `$build`/`$package`/type facts) is also checked while compiling, once per use. A false rule is a compile error on the caller's line with the author's message:\n\n```jet\n#Pre(lanes == 4 || lanes == 8 || lanes == 16, \"lanes must be 4, 8 or 16\")\nfn simd_sum(comptime lanes: Int, xs: [F32]) -> F32 { … }\n\nsimd_sum(6, readings)\n// error: lanes must be 4, 8 or 16 (lanes = 6)\n//   --> game.jet:12:5\n```\n\nNo new syntax, and the run-time contract is untouched (contract law D-PREPOST1/D-FAIL-TIER1 and `jet test`/`jet prove` evidence are unchanged). A only adds the earlier error. If the compiler cannot decide a condition (say it runs out of steps), nothing changes: it is checked at run time as today, and hover says why. A condition that reads a run-time argument stays a run-time contract; since `#Pre` may be repeated, an author splits a mixed rule into two lines. Jet has no overloading, so a failing `#Pre` never changes which function is picked. A use made inside another generic is decided when that generic is used, and the error shows the chain ending at the user's line.\n\nIt fits D-GENERIC-TYPEFN1=A: generics stay `comptime` parameters with trait bounds. Jai's other controls already map to ratified forms: computing a type is a `comptime fn` returning a type; one compiled copy per value is a `comptime` parameter.\n\n**Options.** **A** `#Pre` decided while compiling (recommended); **B** nothing new: a `comptime` check inside the body (the rule is hidden and the error points into the library); **C** A plus open generics (`comptime T: Type` with no trait checked per use, Zig-style duck typing), which reverses the ratified checked-against-bounds rule.\n\nNote: compile-time number parameters are ratified (D-CONSTGEN2) but not built yet (E0390 until card #3505); the ballot says so.\n\nRevised ballot: `D-JAI-GENERIC1.json` (full profile, syntax group; Tower gate passes; fresh beginner and adversarial passes run, findings repaired).",
-      "created": "2026-10-17T22:51:21.082Z",
-      "answeredAt": "2026-10-17",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q4tk0q5m",
       "cardId": "c06y0cef",
       "decisionId": "D-JAI-COMPTIME1",
@@ -220633,19 +219851,6 @@
       "status": "answered",
       "answer": "Done: D-META-HASH1 is revised so option A is your # family. #PascalCase is a marker, #snake_case is a value Jet supplies (#line, #file, #build.os, T.#fields, and #name/#target inside a marker body), and $ stays only as the template paste so a template value can never hide a Jet value. List sizes [T#4] and version pins pkg#1.4 keep working because there # sits between two names. B makes # paste too; C keeps $. Not re-reviewed (no subagents this round).",
       "created": "2026-10-20T10:20:25.053Z",
-      "answeredAt": "2026-10-20",
-      "answeredBy": "pip"
-    },
-    {
-      "id": "q8sdri5o",
-      "cardId": "c0ygtwb9",
-      "decisionId": "D-JAI-GENERIC1",
-      "by": "owner",
-      "kind": "question",
-      "text": "might be better served by some way to denote that a marker should run at comptime. maybe this would be a good place for ##? # typically indicates metaprogramming/comptime so maybe if a marker has two #, it runs at comptime? thoughts? this should be in combination with a, but probably in this case if the marker is marked with the comptime marker sigil, would not need to label the parameter comptime unlessneeded for another reason",
-      "status": "answered",
-      "answer": "Done: D-JAI-GENERIC1 is revised so option A is ##Pre: a ## marker runs while compiling, once per use, and every parameter it reads becomes compile-time without a comptime label (still allowed when needed for another reason). A call passing a run-time value is an error naming the ##Pre line; ##Post is an error because it reads the result. The old timing-by-inputs #Pre is now B; open generics is C. This fits the # family in D-META-HASH1 (## is no longer used for reads). Not re-reviewed (no subagents this round).",
-      "created": "2026-10-20T10:25:15.550Z",
       "answeredAt": "2026-10-20",
       "answeredBy": "pip"
     },
@@ -221478,19 +220683,6 @@
       "status": "answered",
       "answer": "A shared object stays alive while something owns it. If two objects own each other, neither may ever be freed. Weak links avoid that problem because they do not keep objects alive.\n\nThe vote is about the compiler's judgment, not whether leaks are acceptable. The tested compiler rejects a harmless child built by a helper, but accepts the same child built directly at the insertion.\n\nI recommend improving that judgment: accept helper-built trees when their owning links are proved safe. Keep real loops behind the existing explicit collection choice. Unknown cases must receive an honest explanation and a safe alternative, not unsafe acceptance.\n\nThe alternatives now say plainly what they sacrifice: stricter type rules reject even safe tree shapes; conservative write checks restrict helpers; automatic collection removes those restrictions but changes the approved opt-in rule. None promises free collection or universal proof.",
       "created": "2026-11-11T01:52:10.278Z",
-      "answeredAt": "2026-11-11",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q1x848xv",
-      "cardId": "c0ygtwb9",
-      "decisionId": "D-JAI-GENERIC1",
-      "by": "owner",
-      "kind": "question",
-      "text": "i dont like the idea of a double # for ONE marker. unless this becomes a much more general feature, i dont like the double ## and want a better clean cohesive, idiomatic solution",
-      "status": "answered",
-      "answer": "Agreed: a second hash just for Pre is not a clean design.\n\nI recommend B instead. An early number parameter says “the compiler must know this input.” Ordinary #Pre says “this input must be valid.” Those are different promises, expressed through mechanisms Jet already has approved.\n\nFor example, sum<4>(numbers) supplies the early count; #Pre accepts only 4 or 8. A runtime count is rejected rather than checked later. This does not require a separate copy of the machine code for every count.\n\nIf ordinary calls such as sum(4, numbers) matter more, E puts #run on that parameter and uses the same underlying mechanism. It adds grammar, not a second evaluator.\n\nThe doubled-marker alternative is now genuinely general, covering every eligible marker, including user markers. It remains more machinery than this particular job needs. These early forms still require implementation; the probe compiler does not establish that they work.",
-      "created": "2026-11-11T01:55:30.217Z",
       "answeredAt": "2026-11-11",
       "answeredBy": "Main"
     },
@@ -222841,6 +222033,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T04:07:23.577Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04pd50v",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T04:07:22.537Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c097myt8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T04:07:21.528Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02inyar",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T04:07:20.491Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00fktgk",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T04:07:18.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00fktgk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T04:07:17.772Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00fktgk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T04:06:48.651Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lidgow",
+      "note": "#5"
+    },
     {
       "at": "2026-11-17T03:46:29.581Z",
       "by": "Main",
