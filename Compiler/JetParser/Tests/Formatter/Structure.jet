@@ -287,3 +287,16 @@ structure_kept: fn(source: String, kept: String) {
 #Test("a module member keeps its package privacy") {
     structure_kept("text: module {{\n    priv(package) width: fn() -> Int {{ 8 }}\n\n    priv pad: fn() -> Int {{ 1 }}\n}}\n", "    priv(package) width: fn() -> Int {{ 8 }}\n")
 }
+
+#Test("a raw text keeps its written fence") {
+    structure_kept("SOURCE: ```one ``two`` three```\n", "SOURCE: ```one ``two`` three```\n")
+    structure_kept("PLAIN: ```plain text```\n", "PLAIN: ```plain text```\n")
+    structure_kept("ONE: `a ``b`` c`\n", "ONE: `a ``b`` c`\n")
+}
+
+#Test("a comment between items stays with its item when an import follows them") {
+    source: "// The head.\n\nA: 1\n\n// About B.\nB: 2\n\nuse {{\n    core.text\n}}\n"
+    structure_kept(source, "A: 1\n\n// About B.\nB: 2\n")
+    formatted: jet_format_source(source, false)
+    assert(formatted.text.starts_with("// The head.\n"), formatted.text)
+}

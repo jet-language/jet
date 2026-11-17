@@ -1034,9 +1034,10 @@ jfmt_emit_leading_declaration: fn(f: &JetFmt, pos: Int) Never! {
 }
 
 // Imports print before the items that precede them in source, so only the
-// pending top-level comments may lead the imports. A comment inside an earlier
-// item leaves the queue while the imports print (jfmt_return_item_comments
-// puts it back for that item's own body).
+// comments that lead the imports or head the file may print with them. A
+// comment inside an earlier item, or between two items before an import,
+// leaves the queue while the imports print (jfmt_return_item_comments puts it
+// back for that item).
 jfmt_hold_item_comments: fn(f: &JetFmt, items: [Item], imports: [ImportDecl]) -> [JetFmtComment] Never! {
     limit := 0
     loop import in imports {
@@ -1046,18 +1047,32 @@ jfmt_hold_item_comments: fn(f: &JetFmt, items: [Item], imports: [ImportDecl]) ->
     held := [JetFmtComment]{}
     loop index in f.comment_i..<f.comments.len() {
         comment: f.comments[index]
-        inside: if comment.span.start >= limit -> false else -> (loop item in items {
-            if jfmt_item_span_start(f, item) <= comment.span.start && comment.span.start < jfmt_item_span_end(item) {
-                break true
-            }
-        } ?? false)
-        if inside -> held.push(comment.copy()) else -> kept.push(comment.copy())
+        held_back: comment.span.start < limit && jfmt_comment_belongs_to_item(f, comment.span, items, imports)
+        if held_back -> held.push(comment.copy()) else -> kept.push(comment.copy())
     }
     if held.len() > 0 {
         loop f.comments.len() > f.comment_i -> _ := f.comments.pop()
         loop comment in kept -> f.comments.push(comment.copy())
     }
     held
+}
+
+// A comment belongs to an item when it sits inside one, or when an item comes
+// before it and the next thing after it is an item, not an import.
+jfmt_comment_belongs_to_item: fn(f: JetFmt, span: Span, items: [Item], imports: [ImportDecl]) -[]> Bool {
+    after_item := false
+    next_item := -1
+    loop item in items {
+        start: jfmt_item_span_start(f, item)
+        if start <= span.start && span.start < jfmt_item_span_end(item) -> return true
+        if start < span.start -> after_item = true
+        if start >= span.end && (next_item < 0 || start < next_item) -> next_item = start
+    }
+    if !after_item || next_item < 0 -> return false
+    loop import in imports {
+        if import.span.start >= span.end && import.span.start < next_item -> return false
+    }
+    true
 }
 
 // The held item comments rejoin the queue ahead of every comment the imports
