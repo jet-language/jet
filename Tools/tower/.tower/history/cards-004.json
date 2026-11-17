@@ -105122,6 +105122,180 @@
       "completedAt": "2026-11-11T19:44:02.334Z",
       "questions": [],
       "retiredAt": "2026-11-17T07:25:46.690Z"
+    },
+    {
+      "id": "c0meo2tr",
+      "num": 3452,
+      "title": "Call function values with an ordinary call, and give each function one call spelling",
+      "body": "Remaining scope after D-CALLSITE-MARK2=A (ratified 2026-11-06): memory marks live only in signatures and every call is plain, so the receiver and argument call-mark work this card was opened for (D-CAP-RECEIVER1=D, D-RECEIVER-MARK1=A) is superseded; that cutover, with its editor hints, jet audit writes and #Policy(writes: .Explicit), is on #6586.\n\nWhat remains is the ordinary call: a callable value (returned, local, grouped, method-returned or nested) is called with a plain postfix call, with no synthetic .call, and each function has one call spelling across Examples.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "1. Remove the synthetic `.call`: returned, local, grouped, method-returned and nested callable expressions are invoked with an ordinary postfix call; callee and arguments are evaluated exactly once.\n2. Migrate the syntax registry, callers, diagnostics and goldens (functions/returned_function_call, tests/ui/call_non_function) in one cutover. The retired `.call` gets no teaching diagnostic.\n3. Enforce one call spelling per function in Examples/ through fmt or a registered diagnostic.\n\nProof: the goldens above on o0, o1 and o2; the UI fixture matches its snapshot.",
+      "checkSteps": "Planned proof only. Rebuild before smoke tests; use scripts/agent/jet-env and the shared bounded target.\n\nRun the existing narrow integration cases after migrating them:\nscripts/agent/jet-env cargo test --test tir_io_and_ownership plain_parameter_modes_match_tir_and_aot -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods mut_self_method_body -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods trait_impl_method_call_no_mangle -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods static_constructor_and_self_getter -- --exact\n\nAdd focused receiver-capability witnesses only for uncertain boundaries: missing/extra marks, indexed place evaluated once, two-phase alias conflict, take invalidation, trait dispatch, and a temporary/chained receiver. Run the same Buffer append/seal source through AOT, default run, forced interpreter, and applicable web. Update affected registered UI snapshots and parser/formatter fixtures. No zero-test filter, skipped runtime, or generated-text assertion counts as behavior proof.\n\nAlso prove the selected form with a held write window, access after its last use, a mixed read/write/take chain, and receiver-marked calls nested inside ordinary read arguments. Under B, prove that ungrouped leading marks remain outer argument conventions and cannot silently mark the nested receiver. Prove both the named and fresh receiver cases exactly as D-CAP-RECEIVER1 specifies.",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Closed by Main: c13 met on dev 5e71dce38f; every criterion met."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: D-CALLSITE-MARK2=A (calls carry no & or ^) and D-MOVE-SIGIL1=A supersede D-CAP-RECEIVER1=D and D-RECEIVER-MARK1=A. The call-mark criteria are removed; their surviving requirements (plain calls, editor hints, jet audit writes, #Policy(writes: .Explicit), unchanged safety checks) are criteria on #6586. c12 (ordinary call for callable values) and c13 (one call spelling) stay here. Removed as superseded: c1 \"D-CAP-RECEIVER1 is owner-ratified, and its chosen receiver form is the sole registered syntax for write/take method calls. Read calls and or…\"; c2 \"User methods, trait dispatch, and builtin receivers check the written mark against the resolved convention in sema, with registered diagnost…\"; c3 \"Named, field, indexed, nested, window, fresh, and chained receivers obey the selected spelling while preserving evaluation order, one place …\"; c4 \"Every affected caller, example, test, formatter, editor grammar, diagnostic suggestion, and explanation uses the chosen form. No old write/t…\"; c5 \"The same append/seal workload and negative boundary witnesses have exact native AOT, default run, forced-interpreter, and applicable web evi…\"; c6 \"Syntax.rs entry updated\"; c7 \"syntax-decisions.md log entry\"; c8 \"jet devtools grammars regenerated\"; c9 \"snapshots re-blessed\"; c10 \"A line starting with &name or ^name parses as a new statement, a continued bitwise-and or power line with a space after the operator still c…\"; c11 \"[retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/receiver_mark_missing_e0224.jet, tests/ui/receiver_mark_missing_…\"; c14 \"D-RECEIVER-MARK1=A (supersedes D-CAP-RECEIVER1=D for receivers): a method that writes its receiver is called with no mark on a := value or &…\"."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 reballot: D-CALLSITE-MARK2 (marks in signatures only, calls carry none) and D-MOVE-SIGIL1 (&& for take) are ballot-ready on #6586. If D-CALLSITE-MARK2=A, this card's receiver-mark criteria are superseded by that cutover."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main 2026-11-06: c1-c4 were written for D-CAP-RECEIVER1=D (mark the receiver). D-RECEIVER-MARK1=A (2026-10-30) reversed that for write receivers; the compiler still requires &values.push (Checks.jet:4090-4110, E0224 snapshot receiver_mark_missing_write). Build to the new criterion; take receivers (^buf.seal()) keep D-CALLSITE-MARK1=A: no ^ needed at a whole local's last use."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3399, #4170; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Overnight proof 2026-09-29: FAIL. `selfhost_terminators jet_policy_matches_bounded_reference_and_downstream_parser` fails in its bootstrap slice (E0102 `diagnostic_from_registry`/`diagnostic_registry_with_edit*` missing, E0119 `MirDecisionRow`). That is harness drift, BLOCKED(build), not this card. Real gaps: no E0224 for a take on a field receiver, an ICE in the UI harness, Jet/Rust text parity, and missing named fixtures."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Overnight proof 2026-09-29: PARTIAL. Open: default-run Cranelift ICE and interpreter gap on receiver_marks.jet, grammar regeneration, and owner criteria (D-CAP-RECEIVER1 ratification etc.)."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Overnight proof 2026-09-29: PARTIAL. Open: default-run Cranelift ICE and interpreter gap on receiver_marks.jet, grammar regeneration, and owner criteria (D-CAP-RECEIVER1 ratification etc.)."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-sema."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (misc2b, Opus 5.5): A_DONE. D-CAP-RECEIVER1=D shipped 2026-09-28 in the Jet compiler, the Rust bootstrap, the registries and the docs. Place marks &buf.append / ^buf.seal are checked in sema with E0224/E0225/E0226, the line-start lexer rule exists, and examples and a test are present. Evidence: Compiler/JetAst/Source/AST/Expressions.jet:193; Compiler/JetLexer/Source/Lexer/Terminators.jet:398-401 (place_mark_starts_at); Compiler/JetParser/Source/Parser/Expressions.jet:399,941,1021; Compiler/JetSema/Source/Sema/Expressions.jet:2797; Compiler/JetSema/Source/Sema/Ownership/Checks.jet:109-117,1606-1609 (E0224 missing, E0225 extra, E0226 wrong); Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:3037,3053,3069; crates/jet-foundation/src/Syntax.rs:54; crates/jet-sema/src/Sema/ReceiverMarks.rs; Docs/spec/syntax-decisions.md:54,2367-2370 ('shipped 2026-09-28'); tests/receiver_place_marks.rs:19-37; Examples/features/memory/receiver_marks.jet:52; Examples/features/effects/method_receivers.jet:30 Proof owed: Tools/agent/jet-env cargo test --test receiver_place_marks (pass: all green); jet run Examples/features/memory/receiver_marks.jet and Examples/features/effects/method_receivers.jet match their goldens on AOT/default/interpreter; diagnostic snapshot tests for E0224/E0225/E0226 pass; jet devtools grammars regenerated with no diff."
+        },
+        {
+          "at": "2026-09-28",
+          "by": "Pip",
+          "text": "Owner 2026-09-28: syntax solidification comes first. Implementation dispatched to Opus 5.5 workers (TypeSuffix / CapReceiver / PrepKeyword+FenceTokens). Primary landing in the Jet compiler (Compiler/JetLexer, JetParser, JetSema, registries), with the minimal Rust bootstrap parser/formatter change needed because it still compiles Compiler/ and runs the corpus. Each worker delivers an idempotent migration tool; Pip applies the repo-wide migrations serially at integration, then rebuilds, re-blesses snapshots and runs the golden sweep."
+        },
+        {
+          "at": "2026-09-27",
+          "by": "Main",
+          "text": "Owner ratified D-CAP-RECEIVER1=D (\"Ratify D now please\"). D was added to the ballot as the owner-selected option: place marks on the written or taken value, fresh receivers unmarked, line-start &name/^name begins a statement, ~ grouping unchanged. Plan rewritten for D; the old argument-prefix-precedence rule is superseded. Build was not run: the working tree currently fails in jet-foundation build/MirImageCodec.rs:336."
+        },
+        {
+          "at": "2026-09-27",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-09-21",
+          "by": "Main",
+          "text": "Owner question answered with a third design. D-CAP-RECEIVER1 now adds C capability dots: `buf&.append(...)` for write and `buf^.seal()` for take. Fresh beginner and adversarial passes repaired the complete ballot. C is recommended for one-call visual scope and linear chains, not stronger safety. The decision remains open and unratified."
+        },
+        {
+          "at": "2026-09-16",
+          "by": "Main",
+          "text": "D-CAP-RECEIVER1 is saved open and non-draft after full-ballot validation. Fresh complete-ballot readers: ReceiverFinalBeginner (/rli5, OpenAI) and ReceiverFinalAdversarial (OpenAI), who consumed the beginner findings. Repairs define the ordinary fresh-argument exemption, show a held write window, specify grouping for nested prefix receiver calls, and expose A's permanent split-position cost. Pure ballotGaps validation returned no gaps; Tower --ready accepted the complete ballot. Recommendation A is not an owner outcome. All implementation criteria remain open; no compiler probe, implementation, or ratification ran."
+        },
+        {
+          "at": "2026-09-16",
+          "by": "Main",
+          "text": "Preparation review corrected an omitted law: D-SHAPE-PLACE1 already supplies expression-level write windows and bare-prefix receiver calls. Removed the proposed call-only reinterpretation of (&place). The ballot now compares dot-adjacent marks against the incumbent prefix design, shows mixed-chain and fresh-receiver costs, and preserves existing window lifetimes. Recommendation changed to dot-adjacent marks; no owner outcome or implementation is implied. First review evidence: ReceiverBeginner and ReceiverAdversarial. Fresh readers are checking the corrected full ballot."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 12,
+          "text": "[#3399] Returned, local, grouped, method-returned and nested callable expressions are invoked with an ordinary postfix call. The synthetic `.call` is removed. Callee and arguments are evaluated exactly once. Syntax registry, callers, diagnostics and goldens migrate (functions/returned_function_call, tests/ui/call_non_function).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/call_non_function.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:46:46.501Z"
+        },
+        {
+          "n": 13,
+          "text": "[#4170] One call spelling per function, except a #Root free function, which accepts both f(value) and value.f() by ratified D-CALLDUAL1=E, and fmt leaves either spelling alone. Every other function has exactly one spelling: a free function without #Root is called f(x), and a method is called x.f(). The other spelling is refused by a registered diagnostic with a UI snapshot, and every call in Examples/ uses the one spelling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 5e71dce38f (G5DevX2-fmt-root-call-spellings: the fmt case proves fmt keeps both #Root call spellings). Lander5 ran on the gate-p60 jet: its fmt case 1/0; ui call_spelling 2/0 (E0311 both ways); ui root_ 11/0; cases root_receiver_calls_share_the_direct_call_path 1/0 and an_imported_root_function_takes_the_receiver_first_spelling 1/0; golden Examples/ at o0 862 PASS, 19 FAIL (the usual Examples base reds), 18 KF, with 0 E0311 lines.",
+          "at": "2026-11-14T07:46:12.877Z"
+        }
+      ],
+      "refs": [
+        "D-MEM1",
+        "D-MEM-PARAM1",
+        "D-MEM-INDEXMUT1",
+        "D-APILABEL1",
+        "D-FFI-CAP1",
+        "#3143",
+        "#3321",
+        "examples/features/memory/parameter_modes.jet",
+        "crates/jet-parser/src/Parser/Expressions/postfix.rs",
+        "crates/jet-sema/src/Sema/CheckerItems.rs",
+        "crates/jet-sema/src/Sema/CheckerInfer/calls/builtin_methods.rs",
+        "crates/jet-foundation/src/Collections.rs",
+        "D-SHAPE-PLACE1",
+        "D-MEM-VIEWRET1",
+        "crates/jet-parser/src/Parser/Expressions/binary_unary.rs"
+      ],
+      "tags": [
+        "p0-proof",
+        "batch-jetc-sema",
+        "retargeted",
+        "wayfinder:task"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-09-16T01:42:57.695Z",
+      "updated": "2026-11-14T07:46:25.741Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-14T07:46:25.741Z",
+      "questions": [
+        {
+          "id": "qx6kzu61",
+          "cardId": "c0meo2tr",
+          "decisionId": "D-CAP-RECEIVER1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I really don't like either of these options. Any better ideas?",
+          "status": "answered",
+          "answer": "Yes. I added option C: capability dots. `buf&.append(...)` means one write call. `buf^.seal()` means one take call. Plain `.` stays a read call. This keeps receiver and method order, removes prefix grouping, and keeps fresh receivers and chains inline. Existing `&place` windows and ordinary `f(&value)` or `f(^value)` arguments do not change. C is not safer than A or B; it is clearer to read. Its cost is learning `&.` and `^.`. Ruby uses `&.` differently, while Jet keeps optional access on `?.`. The revised ballot recommends C and remains open for your decision.",
+          "created": "2026-09-21T01:19:26.052Z",
+          "answeredAt": "2026-09-21",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-17T07:54:14.914Z"
     }
   ]
 }

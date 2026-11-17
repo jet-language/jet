@@ -33288,6 +33288,426 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-10",
       "retiredAt": "2026-11-17T07:25:46.691Z"
+    },
+    {
+      "id": "D-CAP-RECEIVER1",
+      "cardId": "c0meo2tr",
+      "group": "syntax",
+      "title": "Where should write and take marks go on method calls?",
+      "gist": "Where should a method call show permission to change or take its receiver?",
+      "lesson": "A function performs an operation. A method is called through a value, its receiver. & permits temporary exclusive changes; ^ transfers ownership and ends later use of a named value. The permission must mark one exact call. Plain . keeps read calls unmarked. Existing &place windows keep their checked lifetimes.",
+      "explainer": "## Read the example\n`struct Buffer` defines a value with one named part, `text`. `impl Buffer` groups methods. `self` names the receiver inside a method.\n\n`buf := Buffer{text: \"hello\"}` creates a changeable value. `chunk: String` names incoming text. `=` replaces the field, while `{self.text}` and `{chunk}` insert their text inside the quoted result. `append` changes the Buffer. `seal` takes it and prints its text. Every option prints `hello world` once. The caller may use `buf` after `append`, but not after `seal`.\n\nOrdinary functions already use `edit(&values)` and `consume(^text)`. Their declarations use `fn edit(values: &[Int])` and `fn consume(text: ^String)`. Read calls stay unmarked. Static calls through a type have no value receiver and stay unmarked.\n\n## Existing law\nD-SHAPE-PLACE1=A defines `&place` as an exclusive write window. A place is a named value followed by fields, indexes, or ranges. A window may be bound and passed under its checked lifetime. This choice does not remove or reinterpret those windows.\n\nOption A writes `buf.&append(...)` and `buf.^seal()`. The mark sits after the ordinary dot and before the method name. It replaces prefix-window calls such as `&values[0..1].sort()` with `values[0..1].&sort()`.\n\nOption B writes `&buf.append(...)` and `^buf.seal()`. It keeps the current prefix-window call and extends that position to taking calls. Prefix scope makes nested calls and mixed chains need grouping. A fresh write receiver is not a place, so B must name it first.\n\nOption C writes `buf&.append(...)` and `buf^.seal()`. The adjacent `&.` or `^.` is one call separator. Plain `.` means a read call. `&.` means write through the receiver for that call. `^.` means take the receiver for that call.\n\nUnder C, the composite separators are valid only before a method name followed by call parentheses. They do not access fields, create a window, or move a value by themselves. `?.` keeps its existing optional-access meaning. Ordinary bitwise `&` and power `^` remain separate operators; only adjacent `&.` and `^.` form receiver-call separators.\n\n## Holding a write window\nAll options keep the window construction:\n```jet\nvalues := [2, 1, 3]\nwindow := &values[0..1] // Selects values 2 and 1.\n```\nA calls `window.&sort()`. B calls `&window.sort()`. C calls `window&.sort()`. Each call sorts the selected values and leaves `[1,2,3]`. A read such as `print(values[0])` is rejected before a later window use. After the sort is the window's final use, that read is accepted and prints `1`.\n\n## The same mixed chain\nAssume `duplicate` reads a Buffer and returns another Buffer. Assume `grow` changes its receiver and returns another Buffer. `seal` takes its receiver.\n\nA writes `buf.duplicate().&grow().^seal()`. B writes `next := buf.duplicate()` and then `^(&next.grow()).seal()`. The inner prefix permits `grow`; the outer prefix takes its returned Buffer into `seal`. C writes `buf.duplicate()&.grow()^.seal()`. Under C, each separator marks exactly the following method call.\n\n## Calls inside ordinary arguments\nA writes `inspect_buffer(buf.&grow())` and `print(buf.^finish())`. B needs `inspect_buffer((&buf.grow()))` and `print((^buf.finish()))`. C writes `inspect_buffer(buf&.grow())` and `print(buf^.finish())`.\n\nC does not change argument prefixes. `inspect_buffer(&buf.grow())` still marks the outer argument, not the nested receiver. The call-only separator removes that scope question for the marked receiver.\n\n## Exact boundary cases\nFor a changeable list of Buffer values, C writes `items[i]&.append(\"!\")`. The index is evaluated once. A uses `items[i].&append(\"!\")`; B uses `&items[i].append(\"!\")`.\n\nFor a read-only list parameter, every option rejects taking `items[0]`. A mark states requested permission; it never creates ownership the receiver does not have.\n\n`make_buffer()` creates `Buffer{text: \"hello\"}`. A fresh owned receiver may be taken under C with `make_buffer()^.seal()`. B writes `^(make_buffer()).seal()` because the computed receiver needs grouping.\n\nA fresh C write may use `make_buffer()&.append(\"!\")`; A supports its equivalent inline spelling. These two append examples only prove the permitted call form. `append` returns no value, so the changed temporary is then discarded. B needs a named place for a fresh write call.\n\nReceiver marks do not change access timing. Every user or trait method declared with `&self` reserves write access, evaluates allowed arguments, then activates exclusive access. C's `values&.push(values.len())` uses the same two-phase timing for the builtin `push`, so it reads the length before activation.\n\nSome helper-backed builtins require eager write access. The compiler's builtin registry names them; this ballot adds no source marker or user choice. List examples include `remove`, `sort_by`, `sort_desc`, `sort_by_desc`, `update_first`, and `edit_disjoint`. Therefore `values&.remove(values.len() - 1)` is rejected because the argument reads `values` after eager access begins. A and B preserve the same timing with their spellings.\n\nA newly created ordinary argument may omit ^ under current law. `consume(\"hello\")` is accepted for `fn consume(text: ^String)`. A named argument still needs `consume(^text)`. Receiver calls deliberately require the selected receiver mark, including on a fresh receiver.\n\nNo option clones a receiver, changes method lookup, changes evaluation order, creates a raw reference, or weakens use-after-take checks. Missing, extra, or mismatched marks are compile errors with a direct fix.\n\n## Trade-offs\nA scopes the mark to one method, but `.&name` and `.^name` make the method name look decorated. It also places receiver marks differently from argument and window marks.\n\nB keeps value prefixes, but the prefix can cover more syntax than the intended call. Nested calls and mixed chains need grouping. Fresh write receivers need temporary names.\n\nC scopes the mark to one method while keeping the receiver before the separator and the method after it. It adds two composite separators. Ruby uses `&.` for optional navigation, so Ruby users may first misread C. Jet already uses `?.` for optional access, which keeps Jet's own punctuation family distinct.\n\n## Delivery\nThe examples are source-derived design examples, not execution receipts. Ratification selects one canonical receiver-call form. Migrate every caller, example, test, formatter case, editor grammar, completion, diagnostic suggestion, and affected explanation. Keep no compatibility receiver spelling.\n\nSema checks the written separator against the resolved receiver convention for user methods, traits, and builtins. AOT, default run, forced interpreter, and applicable web execution must preserve one meaning. Generated Rust cannot discover a user error.",
+      "story": "Maya appends text to a buffer, then consumes it while printing the result. She wants every call to expose its write or take permission without breaking ordinary chains or changing existing write windows.",
+      "inWild": "Rust declares write receivers with &mut self and taking receivers with self, but ordinary dot calls hide those permissions. Ruby uses &. for optional navigation. Jet already uses ?. for optional access. Option C instead uses &. and ^. as explicit write and take method separators. These comparisons explain likely expectations; they do not prove adoption or implementation.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Mark after the dot",
+          "detail": "Write `buf.&append(...)` and `buf.^seal()`. Each call exposes its receiver permission beside the method. Fresh receivers and mixed chains stay inline. Existing &place windows keep their independent meaning.",
+          "technical": "Add receiver-call marks between the dot and method name. Keep method lookup, receiver evaluation, and borrow classification unchanged. Require a matching mark even when the receiver is an existing write window. Amend D-SHAPE-PLACE1 only where a bare-prefix window call previously supplied sufficient method permission. Migrate that form; do not remove or reinterpret write-window expressions.",
+          "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    buf.&append(\" world\")\n    buf.^seal()\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep value-prefix receiver marks",
+          "detail": "Write `&buf.append(...)` and `^buf.seal()`. Keep the current write-window receiver spelling and extend prefix marking to take receivers. Write receivers must be places, so name fresh values before calling write methods.",
+          "technical": "Preserve &place construction and maximal-place binding. Each write/take call must have its own receiver mark; a mark on an earlier chain step does not cover later steps. Add ^ in method-receiver position with explicit grouping for computed receivers. Do not add standalone ^value expressions. Preserve builtin two-phase timing for immediate write receivers and existing exclusive lifetimes for stored windows.\n\nInside an ordinary argument, preserve argument-prefix precedence. Use `inspect_buffer((&buf.grow()))` or `print((^buf.finish()))` to mark the nested receiver. Without that grouping, the leading mark belongs to the outer argument and the receiver remains unmarked.",
+          "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    &buf.append(\" world\")\n    ^buf.seal()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Use capability dots",
+          "detail": "Write `buf&.append(...)` and `buf^.seal()`. The separator states how the receiver enters exactly one method call. Plain `.` remains read. Existing `&place` windows and ordinary argument prefixes keep their current meaning.",
+          "technical": "Lex adjacent `&.` and `^.` as call-only postfix separators. They must be followed by a method name and call parentheses. Record Write or Move on the method receiver, then use the existing resolver and CallBinder path. Do not permit these separators for field access, static calls, or standalone expressions. Keep `?.` optional access, bitwise `&`, power `^`, argument conventions, lookup, evaluation order, and two-phase receiver timing unchanged.",
+          "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    buf&.append(\" world\")\n    buf^.seal()\n}"
+        },
+        {
+          "key": "D",
+          "name": "Mark the value, not the call",
+          "detail": "Write `&buf.append(...)` and `^buf.seal()`. The mark sits on the named value that changes or ends, just like `edit(&buf)`. New temporary values need no mark. Chains stay plain after the first named value.",
+          "technical": "A `&` or `^` mark binds the maximal place after it: one name plus fields, indexes, or ranges. It never binds a call result. Sema checks the mark against the one call that receives that place, as receiver or argument. A fresh receiver takes no mark, matching the existing fresh-argument rule. At line start, `&` or `^` directly followed by a name begins a new statement. A continued bitwise-and or power line keeps a space after its operator. Copy `~` grouping is unchanged. Existing `&place` windows and their checked lifetimes are unchanged.",
+          "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    &buf.append(\" world\")\n    ^buf.seal()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Official method-call reference, read 2026-09-16: https://doc.rust-lang.org/reference/expressions/method-call-expr.html#r-expr.method.autoref-deref . Rust inserts receiver borrows and documents lookup surprises. This demonstrates a design contrast, not popularity or performance evidence.",
+          "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&mut self, chunk: &str) { self.text.push_str(chunk); }\n    fn seal(self) { println!(\"{}\", self.text); }\n}\nfn main() {\n    let mut buf = Buffer { text: String::from(\"hello\") };\n    buf.append(\" world\");\n    buf.seal();\n}"
+        },
+        {
+          "lang": "Ruby 3.4",
+          "note": "Ruby uses `&.` as its safe-navigation operator. Jet already uses `?.` for optional access, so C deliberately assigns `&.` a different meaning. Official syntax: https://docs.ruby-lang.org/en/3.4/syntax/calling_methods_rdoc.html#label-Safe+Navigation+Operator",
+          "code": "user&.name  # Ruby: call only when user is not nil."
+        }
+      ],
+      "rec": "D",
+      "recommendation": {
+        "why": "D marks the named value that changes or ends, as arguments already do. Temporaries stay unmarked.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A adds a second mark position and decorates method names."
+          },
+          {
+            "key": "B",
+            "reason": "B marks temporaries and needs extra names and grouping."
+          },
+          {
+            "key": "C",
+            "reason": "C adds two separators and marks temporaries in chains."
+          }
+        ],
+        "tradeoff": "Choose one value-side mark position and a line-start rule over new call separators."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: ReceiverCapabilityBeginner. Skill: rli5. The beginner pass tested the complete ballot. It derived all options; the revision added interpolation, fresh-receiver, prefix-grouping, window, and receiver-timing explanations.",
+        "adversarial": "Author model family: OpenAI. Adversarial model family: OpenAI. Fresh agent: ReceiverAdversarial. The adversarial review attacked the recommendation. It removed a false prefix-safety claim, defined receiver timing, and found no missing final alternative."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Where should a method call show permission to change or take its receiver?",
+        "lesson": "A method call joins a receiver to an operation. Plain `.` reads. `&` permits temporary exclusive changes; `^` transfers ownership and ends later use of a named value. The mark must cover one exact call. Existing `&place` windows keep their checked lifetimes.",
+        "trio": {
+          "current": {
+            "note": "Source-derived, not executed. The current compiler accepts unmarked method calls even when declarations use `&self` or `^self`. The owner requires visible call permission. Ordinary functions already use `edit(&value)` and `consume(^value)`. An `&place` window gives checked exclusive write access and remains part of every option.",
+            "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    buf.append(\" world\")\n    buf.seal()\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust declares receiver permissions but normally inserts receiver borrowing during dot calls. Its reference documents lookup surprises.",
+            "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&mut self, chunk: &str) { self.text.push_str(chunk); }\n    fn seal(self) { println!(\"{}\", self.text); }\n}\nfn main() {\n    let mut buf = Buffer { text: String::from(\"hello\") };\n    buf.append(\" world\");\n    buf.seal();\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Mark after the dot",
+            "gist": "Require dot marks for calls; preserve &place windows elsewhere.",
+            "gains": [
+              "Mixed read/write/take chains stay linear.",
+              "Fresh write receivers stay inline."
+            ],
+            "losses": [
+              "Existing prefix calls need migration.",
+              "Receiver marks differ in position from argument and window marks."
+            ],
+            "proposed": {
+              "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    buf.&append(\" world\")\n    buf.^seal()\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep value-prefix receiver marks",
+            "gist": "Keep existing write prefixes; add take prefixes and group computed receivers.",
+            "gains": [
+              "Ordinary arguments and receiver calls both use value-prefix marks."
+            ],
+            "losses": [
+              "Fresh write receivers need named locals.",
+              "Nested arguments and mixed chains need extra grouping."
+            ],
+            "proposed": {
+              "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    &buf.append(\" world\")\n    ^buf.seal()\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Use capability dots",
+            "gist": "Let the call separator state read, write, or take permission.",
+            "gains": [
+              "Each separator marks exactly one method call.",
+              "Nested calls and mixed chains stay linear.",
+              "Fresh write receivers stay inline."
+            ],
+            "losses": [
+              "Adds `&.` and `^.` method separators.",
+              "Ruby gives `&.` a different meaning."
+            ],
+            "proposed": {
+              "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    buf&.append(\" world\")\n    buf^.seal()\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Mark the value, not the call",
+            "gist": "Put the mark on the named value that changes or ends.",
+            "gains": [
+              "Receivers, arguments, and windows share one mark position.",
+              "Chains and temporaries need no marks."
+            ],
+            "losses": [
+              "A line starting with `&name` or `^name` now starts a statement.",
+              "`~x.f()` copies the call result, while `&x.f()` marks `x`."
+            ],
+            "proposed": {
+              "code": "struct Buffer { text: String }\nimpl Buffer {\n    fn append(&self, chunk: String) {\n        self.text = \"{self.text}{chunk}\"\n    }\n    fn seal(^self) { print(self.text) }\n}\nfn run() {\n    buf := Buffer{text: \"hello\"}\n    &buf.append(\" world\")\n    ^buf.seal()\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "D",
+          "why": "D marks the named value that changes or ends, as arguments already do. Temporaries stay unmarked.",
+          "gains": [
+            "One mark position; every mark names a visible value."
+          ],
+          "losses": [
+            {
+              "loss": "A line starting with `&name` or `^name` now starts a statement.",
+              "mitigation": "A value-side mark must be able to begin a statement. Today such a line joins the previous line as an operator."
+            },
+            {
+              "loss": "`~x.f()` copies the call result, while `&x.f()` marks `x`.",
+              "mitigation": "This choice covers write and take marks only. Copy grouping stays under its own ratified law."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "A",
+              "reason": "A adds a second mark position and decorates method names."
+            },
+            {
+              "key": "B",
+              "reason": "B marks temporaries and needs extra names and grouping."
+            },
+            {
+              "key": "C",
+              "reason": "C adds two separators and marks temporaries in chains."
+            }
+          ],
+          "tradeoff": "Choose one value-side mark position and a line-start rule over new call separators."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-16T02:14:31.027Z",
+      "designAway": [
+        {
+          "loss": "A prefix mark can visually span a chain and force grouping around a later computed receiver.",
+          "attempts": [
+            "Keep a value prefix with explicit grouping.",
+            "Put the mark into a call-only separator."
+          ],
+          "outcome": "Reduced by C. Each separator sits at the following method boundary; B remains equally explicit about one-call permission."
+        },
+        {
+          "loss": "The method name looks decorated.",
+          "attempts": [
+            "Place the mark after the ordinary dot.",
+            "Make the separator itself carry the mark."
+          ],
+          "outcome": "Removed by C. The method name remains an ordinary identifier after the separator."
+        },
+        {
+          "loss": "Two composite method separators must be learned.",
+          "attempts": [
+            "Reuse plain dot.",
+            "Use receiver prefixes.",
+            "Mark inside the argument list."
+          ],
+          "outcome": "Retained. Plain dot hides permission, prefixes have scope problems, and argument-list marks do not visibly attach to the receiver."
+        },
+        {
+          "loss": "Ruby gives `&.` a different meaning.",
+          "attempts": [
+            "Use `.&` after the dot.",
+            "Use an argument-list marker."
+          ],
+          "outcome": "Retained. Those alternatives restore the visual or scope problems C removes; Jet already uses `?.` for optional access."
+        },
+        {
+          "loss": "A line starting with `&name` or `^name` now starts a statement.",
+          "attempts": [
+            "Move the mark after the receiver.",
+            "Move the mark into the argument list."
+          ],
+          "outcome": "Retained. Both moves split receiver marks from argument marks, which D exists to unify."
+        },
+        {
+          "loss": "`~x.f()` copies the call result, while `&x.f()` marks `x`.",
+          "attempts": [
+            "Make `~` bind the place too.",
+            "Require grouping for every marked call."
+          ],
+          "outcome": "Retained. Changing copy grouping is outside this ballot, and forced grouping restores the noise D removes."
+        }
+      ],
+      "outcome": "D",
+      "comment": "Owner selected D after analysis: marks sit on the named place that is written or taken, matching argument marks; fresh receivers need no mark; line-start &name/^name begins a statement; ~ grouping unchanged.",
+      "ratifiedAt": "2026-09-27",
+      "retiredAt": "2026-11-17T07:54:14.915Z"
+    },
+    {
+      "id": "D-RECEIVER-MARK1",
+      "cardId": "c0meo2tr",
+      "group": "receiver",
+      "title": "A method that changes its receiver is called as `c.bump()` on a changeable value; `grow(&c)` keeps its `&`",
+      "situation": "In Jet, `c.n += 1` changes a field with no mark, but `c.bump()`, a method that changes `c`, must be written `&c.bump()`. The compiler already knows `bump` changes `c` from its declaration, and `c` already says it can change, with `:=` or a `&` parameter. Swift and Rust mark changes at arguments but not before the dot. The vote decides whether the mark before the dot is required. We recommend leaving it to the compiler, as for fields.",
+      "gist": "Should calling a method that changes `c` need `&c.bump()`, or just `c.bump()`?",
+      "lesson": "A value made with `:=` can change. Calling `c.bump()` on it may change it, just as `c.n += 1` does, and the editor shows a faint `&` there. Passing `c` to another function that changes it still takes `&c`, so changes that leave the line stay visible.",
+      "explainer": "",
+      "story": "Jo's build file has `&runnable.push(member)` and `&entries.push(selected)` on every other line. Reviewers stop reading the marks, and the one that matters, `grow(&state)`, gets lost.",
+      "inWild": "// Swift: `mutating` methods need no mark at the call; inout arguments take `&`.\nc.bump()\ngrow(&c)",
+      "detail": "Provenance. Card c0meo2tr. This replaces the D-RECEIVER-INFER1 package; its option D, a rule only for locals, is dropped as a weaker A. Changes the method-call clause of D-CAP-RECEIVER1=D (Docs/spec/syntax-decisions.md:2847) and extends D-COPY-DEFAULT1=A (:2867-2887). Reuses D-MARK-SCOPE1=A (:2540) for `writes: .Explicit`.\n\nProbes, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/recv. today.jet: unmarked `c.bump()` is E0224 \"This call writes `c`, but `c` has no `&` mark\", in `run` and on a `&` parameter. `c.n += 1` passes in both. marked.jet: with `&` on every call it passes, and `&k.bump()` on a `::` value is E0202, which A keeps.\n\nData: a text count over 17,440 .jet files found about 26,400 marks before a method call and 3,500 before a field. Typical: Compiler/JetCli/Source/Cli/Entry.jet:1167-1169.\n\nReads with D-SHAPE-PLACE1=A: bare places read and `&place` writes in arguments, unchanged by A.\n\nOther ballots' samples, such as `&ps.push(…)` in D-ARRAY-COLUMNS1, use today's spelling. If A wins, `jet fix` drops the receiver `&` and those samples follow the outcome.",
+      "options": [
+        {
+          "key": "A",
+          "name": "No `&` before the dot",
+          "detail": "A method that changes its receiver may be called with no mark on a `:=` value or a `&` parameter. A `::` value still can't change, so `k.bump()` stays an error.\n\nThe editor shows the filled-in `&` as a hint. A team that wants it in text sets `writes: .Explicit`, beside the existing `copies: .Explicit`, and E0224 fires as today.",
+          "technical": "Stops E0224 for unmarked receiver calls (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3732). Follows the owner's rule for marks on D-COPY-DEFAULT1: \"Compiler chooses if unmarked, programmer can manually put sigils where desired for exact.\" `^` and `copies: .Explicit` already work this way (D-MARK-SCOPE1=A).",
+          "code": "// The beginner path\nstruct Counter {\n    n: Int\n}\n\nimpl Counter {\n    fn bump(self: &Counter) {\n        self.n += 1\n    }\n}\n\nfn run() {\n    c := Counter{n: 0}\n    c.bump()             // new\n    print(c.n)\n}\n\n// The expert path\nfn grow(c: &Counter) {\n    c.bump()             // new\n}"
+        },
+        {
+          "key": "B",
+          "name": "No `&` anywhere",
+          "detail": "As in Kotlin or Java, the callee's declaration alone says it changes the value.\n\nA reader can't tell from the call which arguments change.",
+          "technical": "Drops E0224 for both receivers and arguments; amends D-SHAPE-PLACE1=A.",
+          "code": "// The beginner path\nstruct Counter {\n    n: Int\n}\n\nimpl Counter {\n    fn bump(self: &Counter) {\n        self.n += 1\n    }\n}\n\nfn run() {\n    c := Counter{n: 0}\n    c.bump()             // new\n    print(c.n)\n}\n\n// The expert path\nfn grow(c: &Counter) {\n    c.bump()             // new\n}\n\nfn twice(c: &Counter) {\n    grow(c)              // new: no mark\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep `&c.bump()`",
+          "detail": "A changing method call is marked like a changing argument.\n\nField writes such as `c.n += 1` stay unmarked, so the two forms differ.",
+          "technical": "Today's D-CAP-RECEIVER1=D clause.",
+          "code": "// The beginner path\nstruct Counter {\n    n: Int\n}\n\nimpl Counter {\n    fn bump(self: &Counter) {\n        self.n += 1\n    }\n}\n\nfn run() {\n    c := Counter{n: 0}\n    &c.bump()\n    print(c.n)\n}\n\n// The expert path\nfn grow(c: &Counter) {\n    &c.bump()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Mutating methods are unmarked; inout arguments take `&`. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/methods/",
+          "code": "c.bump(); grow(&c)"
+        },
+        {
+          "lang": "Rust",
+          "note": "Receivers auto-borrow; arguments write `&mut`. Source: https://doc.rust-lang.org/reference/expressions/method-call-expr.html",
+          "code": "c.bump(); grow(&mut c);"
+        },
+        {
+          "lang": "Hylo",
+          "note": "Inout receivers and arguments are both marked with `&`. Source: https://docs.hylo-lang.org/language-tour/functions-and-methods",
+          "code": "&c.bump(); grow(&c)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A matches field writes, Swift and Rust. The value says it can change where it is made, and changes passed onward stay marked.",
+        "gains": [
+          "Fewer repeated marks.",
+          "One rule for fields and methods."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B hides changes passed into other functions."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps tens of thousands of marks that fields don't need."
+          }
+        ],
+        "tradeoff": "The receiver mark moves into the editor hint unless `writes: .Explicit` is set."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in probe/recv. `jet run today.jet` gives E0224 twice; `jet run marked.jet` gives E0202 only.",
+      "surface": {
+        "gist": "Should calling a method that changes `c` need `&c.bump()`, or just `c.bump()`?",
+        "lesson": "A value made with `:=` can change. Calling `c.bump()` on it may change it, just as `c.n += 1` does, and the editor shows a faint `&` there. Passing `c` to another function that changes it still takes `&c`, so changes that leave the line stay visible.",
+        "trio": {
+          "current": {
+            "note": "Today the method call needs `&`; the field write does not.",
+            "code": "c := Counter{n: 0}\nc.bump()        // E0224: \"This call writes `c`, but `c` has no `&` mark\"\nc.n += 1        // passes"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Method calls borrow the receiver mutably on their own; arguments write `&mut`. Source: https://doc.rust-lang.org/reference/expressions/method-call-expr.html",
+            "code": "c.bump();\ngrow(&mut c);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "No `&` before the dot",
+            "gist": "`c.bump()` works on a changeable value; arguments keep `&c`.",
+            "gains": [
+              "Reads like `c.n += 1`.",
+              "Arguments still show changes that leave the line.",
+              "A written `&c.bump()` stays valid and checked."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "c := Counter{n: 0}\nc.bump()        // new: the editor shows &c.bump()\ngrow(&c)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "No `&` anywhere",
+            "gist": "Calls and arguments both drop `&`; only declarations say what changes.",
+            "gains": [
+              "Fewest marks."
+            ],
+            "losses": [
+              "`grow(c)` changes `c` with nothing at the call.",
+              "Reverses D-SHAPE-PLACE1's `&place` writes."
+            ],
+            "proposed": {
+              "code": "c.bump()\ngrow(c)          // new: changes c, unmarked"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep `&c.bump()`",
+            "gist": "Keep today: every call that changes a value writes `&`.",
+            "gains": [
+              "Every change is marked in text.",
+              "Matches Hylo's inout marks."
+            ],
+            "losses": [
+              "About 26,400 marks before method calls in Jet's code.",
+              "Fields and methods differ."
+            ],
+            "proposed": {
+              "code": "&c.bump()\ngrow(&c)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A matches field writes, Swift and Rust. The value says it can change where it is made, and changes passed onward stay marked.",
+          "gains": [
+            "Fewer repeated marks.",
+            "One rule for fields and methods."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B hides changes passed into other functions."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps tens of thousands of marks that fields don't need."
+            }
+          ],
+          "tradeoff": "The receiver mark moves into the editor hint unless `writes: .Explicit` is set."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T01:13:01.870Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-17T07:54:14.915Z"
     }
   ]
 }
