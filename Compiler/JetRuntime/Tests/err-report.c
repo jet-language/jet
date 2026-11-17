@@ -12,8 +12,8 @@ typedef struct { Text *text, *file; W line; } Context;
 typedef struct { Text *source, *target; } Conversion;
 typedef struct { Text *name, *value; } Field;
 typedef struct { Text *variant; List fields; W has_span, start, end; } Details;
-typedef struct Err { Text *message, *code; struct Err *cause; Text *identity; List context, conversions; Details *details; } Err;
-_Static_assert(sizeof(Text)==32 && sizeof(Err)==88 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
+typedef struct Err { Text *message, *code; struct Err *cause; Text *identity; List context, conversions; Details *details; W *payload; } Err;
+_Static_assert(sizeof(Text)==32 && sizeof(Err)==96 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
 typedef struct { Text *function, *file; W line, column; Text *note; W count; Text *source; } Hop;
 typedef struct { Hop *origin; List hops; } Journey;
 _Static_assert(sizeof(Hop)==56 && sizeof(Journey)==32,"canonical native Journey ABI");
@@ -29,6 +29,7 @@ extern void jet_rt_native_journey_adopt(Journey *,Journey *);
 extern W jet_rt_journey_destructor(W,Journey *);
 extern Err *jet_rt_native_err_context_frame(Err *,Journey *,Text *,W,W,Text *,Text *,Text *);
 extern void *jet_rt_alloc(W,W);
+extern void jet_rt_free(void *,W,W);
 extern Text *jet_rt_string_from_static(const char *,W);
 extern void jet_rt_string_drop(Text *);
 extern Err *jet_rt_record_new_jet_err(Text *,Text **,Err *);
@@ -42,7 +43,7 @@ extern W jet_rt_record_get_jet_err_cause(Err *,Err **);
 extern Text *jet_rt_handle_display_jet_err(Err *);
 extern Text *jet_rt_handle_show_jet_err(Err *);
 extern Text *jet_rt_handle_debug_jet_err(Err *);
-extern Err *jet_err_apply_conversion(Err *,Text *,Text *);
+extern Err *jet_err_apply_conversion(Err *,Text *,Text *,W *);
 extern Text *jet_render_err(Err *);
 extern Text *jet_error_report_json(Err *,void *);
 extern void jet_rt_program_allocator_configure(W,W);
@@ -164,12 +165,42 @@ static void journey_ownership(void) {
     jet_rt_string_drop(note); jet_rt_string_drop(ignored); jet_rt_string_drop(source);
     assert(jet_rt_program_allocator_fact(2)==0);
 }
+// A payload node is counted like a function value's box (owners at 0, its
+// release helper at 16): clones share it, a later conversion's node is
+// released at once, and the last owner runs the helper.
+static W payload_releases;
+static void payload_release(W *node) { payload_releases++; jet_rt_free(node,40,8); }
+static W *payload_node(W value) {
+    W *node=jet_rt_alloc(40,8);
+    node[0]=1; node[1]=0; node[2]=(W)payload_release; node[3]=7; node[4]=value;
+    return node;
+}
+static void payload_sharing(void) {
+    Text *message=text("typed"), *source=text("Source"), *target=text("Err");
+    Err *error=jet_err_from_message(message);
+    W *node=payload_node(42);
+    Err *typed=jet_err_apply_conversion(error,source,target,node);
+    assert(!error->payload && typed->payload==node && node[0]==1);
+    jet_rt_handle_drop_jet_err(error);
+    Err *shared=jet_rt_handle_clone_jet_err(typed);
+    assert(shared->payload==node && node[0]==2);
+    Err *again=jet_err_apply_conversion(typed,source,target,payload_node(9));
+    assert(again->payload==node && node[0]==3 && payload_releases==1);
+    jet_rt_handle_drop_jet_err(typed);
+    jet_rt_handle_drop_jet_err(shared);
+    assert(node[0]==1 && node[4]==42 && payload_releases==1);
+    jet_rt_handle_drop_jet_err(again);
+    assert(payload_releases==2);
+    jet_rt_string_drop(message); jet_rt_string_drop(source); jet_rt_string_drop(target);
+    assert(jet_rt_program_allocator_fact(2)==0);
+}
 int main(void) {
     // Pack constructors initialize allocator/thread roots before measuring.
     W cap=jet_rt_program_allocator_fact(4), mode=jet_rt_program_allocator_fact(5);
     jet_rt_program_allocator_configure(1,0);
     journey_goldens();
     journey_ownership();
+    payload_sharing();
     Text *message=text("outer"), *code=text("E42"), *cause_message=text("inner");
     Err *cause=jet_err_from_message(cause_message);
     jet_rt_string_drop(cause_message);
@@ -179,7 +210,7 @@ int main(void) {
     assert(value->cause==cause && value->message==message && value->code==code && owners(message)==2 && owners(code)==2);
     jet_rt_string_drop(message); jet_rt_string_drop(code);
     Text *source=text("Source"), *target=text("Target");
-    Err *converted=jet_err_apply_conversion(value,source,target);
+    Err *converted=jet_err_apply_conversion(value,source,target,NULL);
     jet_rt_string_drop(source); jet_rt_string_drop(target); jet_rt_handle_drop_jet_err(value);
     Context *context=jet_rt_alloc(sizeof(*context),8);
     *context=(Context){text("note\n\t\"\\\177\302\200"),text("main.jet"),7};
@@ -227,6 +258,6 @@ int main(void) {
     jet_rt_handle_drop_jet_err(value);
     assert(jet_rt_program_allocator_fact(2)==0); // LIVE BYTES, not allocation history
     jet_rt_program_allocator_restore(mode,cap);
-    puts("Err88: taken cause, deep clone/projection/metadata, root+wire bytes, ledger zero");
+    puts("Err96: taken cause, deep clone/projection/metadata, shared payload node, root+wire bytes, ledger zero");
     return 0;
 }

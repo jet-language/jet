@@ -1,4 +1,4 @@
-// Canonical native Err88 ownership. Public three-field source shape is NEVER
+// Canonical native Err96 ownership. Public three-field source shape is NEVER
 // the native carrier. ErrLayout.jet is the shared ABI.
 err_zero: fn(value: I64, bytes: I64) {
     at := I64{0}
@@ -15,6 +15,20 @@ err_text_clone: fn(value: I64) -> I64 {
 err_text_eq: fn(left: I64, right: I64) -> Bool {
     if (left == I64{0} || right == I64{0}) { return left == right }
     rt_text_len(left) == rt_text_len(right) && rt_text_equal_bytes(rt_text_data(left), rt_text_data(right), rt_text_len(left))
+}
+
+// The payload node at ERR_PAYLOAD (0: none) is counted like a function
+// value's box: owners at 0, its release helper at 16, which drops the value
+// and frees the node (JetIR BuildTypes.jet ir_err_payload_node). Clones of
+// an Err share it.
+err_payload_retain: fn(node: I64) {
+    if (node != I64{0}) { jet_rt_native_closure_retain(node) }
+}
+
+err_payload_release: fn(node: I64) {
+    if (node != I64{0} && jet_rt_native_closure_unref(node)) {
+        coll_call1_unit(rt_text_word(wrapping(node + I64{16})), node)
+    }
 }
 
 // Inline List24 [len,capacity,data], rows contain two E4s then scalar words.
@@ -148,6 +162,9 @@ err_details_clone: fn(value: I64) -> I64 {
     err_rows_clone(wrapping(value + ERR_CONTEXT), wrapping(result + ERR_CONTEXT), ERR_CONTEXT_BYTES)
     err_rows_clone(wrapping(value + ERR_CONVERSIONS), wrapping(result + ERR_CONVERSIONS), ERR_CONVERSION_BYTES)
     rt_text_store(wrapping(result + ERR_DETAILS), err_details_clone(rt_text_word(wrapping(value + ERR_DETAILS))))
+    payload: rt_text_word(wrapping(value + ERR_PAYLOAD))
+    err_payload_retain(payload)
+    rt_text_store(wrapping(result + ERR_PAYLOAD), payload)
     result
 }
 
@@ -167,6 +184,7 @@ err_details_clone: fn(value: I64) -> I64 {
         err_rows_drop(wrapping(details + ERR_DETAILS_FIELDS), ERR_FIELD_BYTES)
         jet_rt_free(details, ERR_DETAILS_BYTES, I64{8})
     }
+    err_payload_release(rt_text_word(wrapping(value + ERR_PAYLOAD)))
     jet_rt_free(value, ERR_BYTES, I64{8})
 }
 
@@ -208,11 +226,17 @@ err_details_clone: fn(value: I64) -> I64 {
     jet_rt_record_get_jet_err_message(value)
 }
 
-#Export(c) jet_err_apply_conversion: fn(value: I64, source: I64, target: I64) -> I64 {
+// `value` with its `source -> target` step recorded: the first conversion
+// names its typed identity and leaves its payload node, `payload` (0: none),
+// which the call takes; a later conversion's node is released.
+#Export(c) jet_err_apply_conversion: fn(value: I64, source: I64, target: I64, payload: I64) -> I64 {
     result: jet_rt_handle_clone_jet_err(value)
     if (rt_text_word(wrapping(result + ERR_IDENTITY)) == I64{0}) {
         rt_text_store(wrapping(result + ERR_IDENTITY), jet_rt_string_clone(source))
     }
+    if (rt_text_word(wrapping(result + ERR_PAYLOAD)) == I64{0}) {
+        rt_text_store(wrapping(result + ERR_PAYLOAD), payload)
+    } else { err_payload_release(payload) }
     row: err_rows_append(wrapping(result + ERR_CONVERSIONS), ERR_CONVERSION_BYTES)
     rt_text_store(row, jet_rt_string_clone(source))
     rt_text_store(wrapping(row + I64{8}), jet_rt_string_clone(target))
