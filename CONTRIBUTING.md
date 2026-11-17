@@ -12,7 +12,7 @@ clone); the worker type-check lane is
 [`Tools/Agent/LaneCheck.jet`](Tools/Agent/LaneCheck.jet).
 
 [Tower](Docs/Spec/Contributing/issue-tracker.md) is the work ledger. Use the
-[vendored Tower skill](Tools/tower/skills/tower/SKILL.md) for board operations
+[vendored Tower skill](Tools/Tower/skills/tower/SKILL.md) for board operations
 and never hand-edit Tower state. Keep plans, criteria, decisions, and work
 state there rather than creating a second tracker in a document.
 

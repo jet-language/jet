@@ -853,8 +853,10 @@ JetCompilerServicesProgramInfo: enum {
 // ConstantInfo of each constant a module declares at module scope, in
 // module order. `complete` is `checked_complete`: whether every function
 // body checked, false when a build that keeps going checked a failed one
-// as a trap of its declared signature.
-jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool) -> JetCompilerServicesProgramInfo {
+// as a trap of its declared signature. `stages` holds the moments the
+// compile reached, each its `core.compiler.Event`, which `meta.stages()`
+// reads.
+jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource], *, checked_complete: Bool, stages: &&[TComptimeValue]) -> JetCompilerServicesProgramInfo {
     if !registration.complete -> return .Missing{fact: "the registration graph is incomplete"}
     if !graph.complete -> return .Missing{fact: "the checked graph is incomplete"}
     index: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
@@ -985,6 +987,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
         {name: "root_types", value: TComptimeValue.List{values: type_names.root}},
         {name: "scope_types", value: TComptimeValue.List{values: type_names.scope}},
+        {name: "stages", value: TComptimeValue.List{values: stages.move()}},
     }
     if index.value == .Struct(_, index_fields) {
         loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
@@ -1081,7 +1084,7 @@ jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
     loop name in
-        ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
+        ([String]{"types", "functions", "traits", "constants", "packages", "foreign", "root_calls", "root_types", "scope_types", "stages", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     fields.push(TComptimeField{name: "complete", value: TComptimeValue.Bool{value: false}})

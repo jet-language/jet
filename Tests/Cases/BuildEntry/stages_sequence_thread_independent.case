@@ -1,0 +1,21 @@
+# `meta.stages()` on the root's `Compiler` value lists the moments the
+# checked program reached, as `compiler.Event` values, in one order whatever
+# the thread count: each file parsed and each imported module, by file path,
+# then each declaration by module and declaration order with the
+# declarations it calls, then the checked program and the round that settled
+# it. The build stops on the list so the stderr shows it; a build checked on
+# one thread and one checked on sixteen show the same list.
+fixture: StagesSequenceThreadIndependent.fixture
+env: NO_COLOR=1
+step serial: jet build main.jet --threads 1
+env: JET_STORE_DIR={work}/store-serial
+exit: nonzero
+stderr: ~ "imported shapes" # the imported module, after every file parsed
+stderr: ~ "declared twice calls [area]" # a declaration and what it calls
+stderr: ~ "declared perimeter calls []" # one that calls nothing
+stderr: ~ "checked 5; settled 1 new 5" # the checked program, then its round
+stderr: !~ "unexpected" # no moment after the build runs
+step: jet build main.jet --threads 16
+env: JET_STORE_DIR={work}/store-parallel
+exit: nonzero
+stderr: == serial

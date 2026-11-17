@@ -2,10 +2,10 @@
 
 Tower is Jet's durable work ledger. This page records the repository's card
 vocabulary and the commands that address it. The executable command reference
-is [`Tools/tower/skills/tower/SKILL.md`](../../../Tools/tower/skills/tower/SKILL.md);
-the board policy is [`Tools/tower/AGENTS.md`](../../../Tools/tower/AGENTS.md).
+is [`Tools/Tower/skills/tower/SKILL.md`](../../../Tools/Tower/skills/tower/SKILL.md);
+the board policy is [`Tools/Tower/AGENTS.md`](../../../Tools/Tower/AGENTS.md).
 Use the non-serve CLI for card operations. Never edit
-`Tools/tower/.tower/*.json` by hand. Card text uses the
+`Tools/Tower/.tower/*.json` by hand. Card text uses the
 [Jet vocabulary](../vocabulary.md) for language terms.
 
 ## Start with the CLI
@@ -13,7 +13,7 @@ Use the non-serve CLI for card operations. Never edit
 From the repository root, use the vendored command:
 
 ```sh
-alias tower='node Tools/tower/tower.mjs'
+alias tower='node Tools/Tower/tower.mjs'
 tower help
 ```
 

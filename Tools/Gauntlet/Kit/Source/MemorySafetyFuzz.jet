@@ -544,7 +544,7 @@ receipt_tree: fn(receipt: FindingReceipt) -> Dyn {
     tracking := Dyn.object()
     tracking["status"] = "pending"
     tracking["transport"] = "tower-cli"
-    tracking["command"] = ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"]
+    tracking["command"] = ["node", "Tools/Tower/tower.mjs", "card", "add", "--file", "-"]
     tracking["dedup_key"] = dyn_at(receipt.payload, "hardeningDedupKey")
     tracking["payload"] = receipt.payload
     out := Dyn.object()
@@ -971,7 +971,7 @@ assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
     assert_eq(texts_at(receipt, "rails"), ["test-rail"])
     assert_eq(items_at(receipt, "occurrences").len(), 1)
     assert(text_at(receipt, "occurrences/0/classification") == Val("wrong-output") && is_true(receipt, "occurrences/0/correctness_finding") && !is_true(receipt, "occurrences/0/performance_exclusion"))
-    assert_eq(texts_at(receipt, "tower_tracking/command"), ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"])
+    assert_eq(texts_at(receipt, "tower_tracking/command"), ["node", "Tools/Tower/tower.mjs", "card", "add", "--file", "-"])
     assert(text_at(receipt, "tower_tracking/status") == Val("pending") && text_at(receipt, "tower_tracking/transport") == Val("tower-cli"))
     assert(found_at(receipt, "tower_tracking/dedup_key") == found_at(receipt, "tower_tracking/payload/hardeningDedupKey"))
     assert(text_at(receipt, "tower_tracking/payload/classification") == Val("wrong-output") && is_true(receipt, "tower_tracking/payload/correctness_finding") && !is_true(receipt, "tower_tracking/payload/performance_exclusion"))

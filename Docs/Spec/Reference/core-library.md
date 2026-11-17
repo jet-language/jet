@@ -567,6 +567,15 @@ the rest. In `jet build --json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
 A build whose compile fails prints only its `diagnostics` status.
+A build reads the same moments as `Event` values with `meta.stages()` on its
+`Compiler` value: the program's moments up to `compiler.settled`, in one
+order whatever the thread count (Metaprogramming reference).
+
+A function hooks a moment with `#On(moment)`, such as
+`#On(compiler.settled) settled: fn(round: compiler.Round) { … }`. The
+compiler checks the hook against the moment's row: an unknown moment, or a
+hook that does not take exactly the moment's payload, is E0930. Running moment
+hooks during a compile or build is not built yet.
 
 ### `core.meta` — module and package metadata
 
@@ -5691,8 +5700,10 @@ tasks never read or change the process registry. The module source is
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
+| `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
-| `item(label: String, run: fn() Notice!) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, a separator line, and the item that quits the app. |
+| `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and greyed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
+| `menu(title: String, items: [MenuItem]) -> Menu` / `edit_menu() -> Menu` / `window_menu() -> Menu` | menu | A menu bar's menu titled `title` holding `items`; the Edit menu (Cut, Copy, Paste); and the Window menu (Minimize, Close). |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
@@ -5702,6 +5713,7 @@ tasks never read or change the process registry. The module source is
 | `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
 | `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window. See below. |
+| `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6271,6 +6283,31 @@ item runs its `run`, and a run that fails adds its `Notice` to
 with no tray host (no `org.kde.StatusNotifierWatcher`), or a session bus
 that goes away, adds a notice, and the app runs on without a tray.
 
+`graph.menu_bar(menus)` gives the app's window a menu bar from
+`graph.launch()` on: the menus `menus` makes, in order, each an
+`app.menu(title, items)`. `app.edit_menu()` and `app.window_menu()` are the
+menus every window has, whose items the window runs itself: Cut and Copy
+put the focused text input's text on the clipboard (Cut then empties it),
+Paste types the clipboard's text into it, Minimize minimizes the window and
+Close closes it, which ends the process with status 0. An item's `key:`
+names its key equivalent: modifiers and a key joined by `+`, such as
+`"Cmd+N"` or `"Cmd+Shift+E"`. `Cmd` is Control on Linux; `Ctrl`, `Alt`,
+`Shift` and `Super` name the others. A key the window reads pressed with
+exactly an item's modifiers runs that item, before the screen's tree sees
+it, and an item not `enabled` does not run. On Linux the menus are a
+dbusmenu (`com.canonical.dbusmenu`) on the session bus, and the window
+tells the compositor where it is (`org_kde_kwin_appmenu`), so a desktop
+with a global menu shows it in its menu bar or the window's title bar,
+with each item's keys. Like the tray's, the menu bar asks `menus` again
+every quarter second and after each call the desktop makes, so menus made
+from a live binding follow it. When `menus` fails, the menu bar keeps its
+last menus under a first entry with the notice's text, which can't be
+chosen. Choosing an item runs its `run`, and a run that fails adds its
+`Notice` to `app.notices()`. A session bus that goes away adds a notice.
+A desktop with no session bus or no global menu shows no menu, and the
+key equivalents still work. A key that names no key, or a modifier that
+isn't one of these, panics.
+
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the
 graph's title. When the launch was given no link, it opens the address `/`.
@@ -6415,6 +6452,21 @@ browser's own file handles, which the page runtime can't hand to the app
 yet, so `app.drop_files` in code whose target is the web output is a
 compile error, E-APP-TARGET-FEATURE.
 
+`app.context_menu(body, items)` gives `body` back with a context menu
+holding `items`, made as a menu bar's are (`app.item`, `app.separator()`,
+`app.quit_item()`). On Linux the app's window (`graph.window`) opens it
+where the person right-clicks on `body`, over the screen, at the pointer
+and moved only as far as it must be to fit in the window. A click on an
+item runs it as the menu bar runs it, and closes the menu; a click
+elsewhere or Escape closes it too, and that click or key reaches nothing
+else. A right-click opens the menu of the body under the pointer, if it has
+one. A separator, or an item not `enabled`, can't be chosen. An item's run
+that fails adds its `Notice` to `app.notices()`. The other native targets
+keep a notice saying their context menu is not built yet and give `body`
+back as it is. The page runtime can't open the app's menu in place of the
+browser's yet, so `app.context_menu` in code whose target is the web output
+is a compile error, E-APP-TARGET-FEATURE.
+
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
 that was there whole. It is true once the file is written. The dialog
@@ -6536,7 +6588,10 @@ write refused after its screen closed, joins the app's notice list, which
 `app.notices()` reads. The list keeps each notice, in order, until it is
 dismissed. It lives where the write queue does: the device store on a
 native target, which keeps it across restarts, or the World's own cell
-inside a deterministic world.
+inside a deterministic world. On Linux the app's window shows the newest
+notice in the list on a dark red bar across its bottom, from the frame
+after the notice is kept, on every screen; a click on the bar dismisses
+that notice.
 A served App exports a server span for each endpoint call and webhook
 delivery when the OpenTelemetry SDK variables name a collector:
 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, or `OTEL_EXPORTER_OTLP_ENDPOINT` with

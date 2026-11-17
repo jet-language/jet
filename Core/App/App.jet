@@ -34,6 +34,8 @@ use {
     dbus: __core_ui_dbus
     url: core.net.url
     files: core.files
+    core.term.[Key]
+    core.ui.host.[UIShortcut, UIShortcutModifiers]
     sys: core.sys
     process: core.process
     net: core.net
@@ -460,7 +462,8 @@ priv device_cell_replace: fn(store: String, cell: Shared<LiveCell>, expected: [U
     true
 }
 
-// Adds `notice` to the end of the app's notice list.
+// Adds `notice` to the end of the app's notice list, which the app's
+// window then shows (`app_window_noticed`).
 __keep_notice: fn(notice: Notice) {
     loop {
         seen: notice_cell_load()
@@ -468,6 +471,7 @@ __keep_notice: fn(notice: Notice) {
         live_put(kept, notice.text)
         live_put(kept, if notice.retry -> "1" else -> "0")
         if notice_cell_replace(seen, kept) {
+            app_window_noticed()
             return
         }
     }
@@ -2386,6 +2390,24 @@ App: struct {
         self.copy()
     }
 
+    // Gives the app's window (`.window`) a menu bar: the menus `menus`
+    // makes (`menu`, `edit_menu`, `window_menu`). On a Linux desktop with
+    // a global menu (KDE Plasma's) the window names its menu, a dbusmenu
+    // on the session bus, through org_kde_kwin_appmenu, and the desktop
+    // shows it as the window's menu bar, each item with its key
+    // equivalent. The bar asks `menus` again every quarter second and
+    // after each call the desktop makes, as the tray does; when `menus`
+    // fails, it keeps its last menus under a first entry, which can't be
+    // chosen, with the notice's text. On any desktop, a key pressed in the
+    // window with exactly an enabled item's key equivalent chooses the
+    // item. Choosing an item runs it (`item`, `quit_item`); the Edit and
+    // Window menus' items act on the window. Gives back the graph.
+    menu_bar: fn(self, menus: &&fn() -> [Menu] Notice!) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.menu_bar = Val(Shared{AppMenuBar{menus: menus.move()}})
+        self.copy()
+    }
+
     // Shows the app in a window `width` x `height` logical pixels on a Linux
     // desktop from `launch` on, titled the app's title. The window shows the
     // current screen (`go`, `open_link`): the node tree its view gives, as
@@ -2722,7 +2744,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -3216,8 +3238,8 @@ AppInstall: struct {
 // the live bindings its view read, the link schemes and web domains whose
 // links open its screens (`.url_scheme`, `.app_links`), the activation
 // tokens of the later launches that handed it their links (`.launch`), its
-// background work (`.background`), its tray (`.tray`) and its window
-// (`.window`).
+// background work (`.background`), its tray (`.tray`), its window
+// (`.window`) and the window's menu bar (`.menu_bar`).
 priv AppGraph: struct {
     title: String,
     apis: [String:AppAPI],
@@ -3233,9 +3255,10 @@ priv AppGraph: struct {
     backgrounds: [AppBackground],
     tray: AppTray?,
     window: AppWindow?,
+    menu_bar: Shared<AppMenuBar>?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
@@ -3266,13 +3289,31 @@ priv AppWindow: struct {
     height: Int,
 }
 
-// One entry of a menu the app shows, its tray's (`App.tray`): an item the
-// person chooses to run it, a separator line, the item that quits the
-// app, or a notice that shows but can't be chosen. `item`, `separator` and
-// `quit_item` make them.
+// A graph's menu bar (`App.menu_bar`): what makes its menus.
+priv AppMenuBar: struct {
+    menus: fn() -> [Menu] Notice!,
+}
+
+// A menu of the app window's menu bar (`App.menu_bar`): its title and its
+// items. `menu` makes one; `edit_menu` and `window_menu` make the usual
+// ones.
+Menu: struct {
+    title: String,
+    items: [MenuItem],
+}
+
+// One entry of a menu the app shows, its tray's (`App.tray`) or its menu
+// bar's (`App.menu_bar`): an item the person chooses to run it, a
+// separator line, the item that quits the app, a notice that shows but
+// can't be chosen, or an item of the Edit or Window menu, which acts on
+// the window. `key` is its key equivalent, "" for none (`item`), and an
+// item that is not `enabled` shows but can't be chosen. `item`,
+// `separator`, `quit_item`, `edit_menu` and `window_menu` make them.
 MenuItem: struct {
     label: String,
     kind: MenuItemKind,
+    key: String,
+    enabled: Bool,
     priv run: Shared<AppMenuRun>,
 }
 
@@ -3281,26 +3322,92 @@ MenuItemKind: enum {
     Separator,
     Quit,
     Notice,
+    Cut,
+    Copy,
+    Paste,
+    Minimize,
 }
 
 priv AppMenuRun: struct {
     run: fn() Notice!,
 }
 
-// An item labelled `label` that runs `run` when the person chooses it. A
-// run that fails puts its notice in the app's notice list (`notices`).
-item: fn(label: String, run: &&fn() Notice!) -> MenuItem Never! {
-    MenuItem{label: label, kind: .Item, run: Shared{AppMenuRun{run: run.move()}}}
+// An item labelled `label` that runs `run` when the person chooses it. Its
+// key equivalent `key` is modifiers among Cmd, Ctrl, Alt, Shift and Super
+// and then a key, joined by `+` (`Cmd+Shift+E`); Cmd is the platform's
+// command key, Control on Linux. An item that is not `enabled` shows but
+// can't be chosen. A run that fails puts its notice in the app's notice
+// list (`notices`). Panics on a key equivalent it can't read.
+item: fn(label: String, run: &&fn() Notice!, key: String{""}, enabled: Bool{true}) -> MenuItem Never! {
+    _: app_menu_shortcut(key)
+    MenuItem{label: label, kind: .Item, key: key, enabled: enabled, run: Shared{AppMenuRun{run: run.move()}}}
 }
 
 // A separator line between items.
-separator: fn() -> MenuItem Never! {
-    MenuItem{label: "", kind: .Separator, run: Shared{AppMenuRun{run: app_menu_nothing}}}
+separator: fn() -> MenuItem Never! { app_menu_entry("", .Separator, "") }
+
+// The item that quits the app (Cmd+Q).
+quit_item: fn() -> MenuItem Never! { app_menu_entry("Quit", .Quit, "Cmd+Q") }
+
+// The menu titled `title` with the items `items`.
+menu: fn(title: String, items: [MenuItem]) -> Menu Never! { Menu{title: title, items: items} }
+
+// The Edit menu: Cut (Cmd+X), Copy (Cmd+C) and Paste (Cmd+V), on the text
+// input the window's focus is on, through the clipboard. Cut and Copy take
+// its whole text.
+edit_menu: fn() -> Menu Never! {
+    Menu{title: "Edit", items: [MenuItem]{app_menu_entry("Cut", .Cut, "Cmd+X"), app_menu_entry("Copy", .Copy, "Cmd+C"), app_menu_entry("Paste", .Paste, "Cmd+V")}}
 }
 
-// The item that quits the app.
-quit_item: fn() -> MenuItem Never! {
-    MenuItem{label: "Quit", kind: .Quit, run: Shared{AppMenuRun{run: app_menu_nothing}}}
+// The Window menu: Minimize (Cmd+M), and Close (Cmd+W), which ends the app
+// as closing the window does.
+window_menu: fn() -> Menu Never! {
+    Menu{title: "Window", items: [MenuItem]{app_menu_entry("Minimize", .Minimize, "Cmd+M"), app_menu_entry("Close", .Quit, "Cmd+W")}}
+}
+
+// An enabled entry of the kind `kind` with nothing of its own to run.
+priv app_menu_entry: fn(label: String, kind: MenuItemKind, key: String) -> MenuItem Never! {
+    MenuItem{label: label, kind: kind, key: key, enabled: true, run: Shared{AppMenuRun{run: app_menu_nothing}}}
+}
+
+// The shortcut the key equivalent `key` names (`item`), None for "".
+// Panics on one it can't read.
+priv app_menu_shortcut: fn(key: String) -> UIShortcut? Never! {
+    if key == "" -> return None
+    parts: key.split("+").to_list()
+    last: parts.len() - 1
+    name: parts[last].to_ascii_lower()
+    if name == "" {
+        panic("a menu item's key equivalent ends with a key, like Cmd+Shift+E, not {key}")
+    }
+    bits := 0
+    loop at in 0..<last {
+        part: parts[at]
+        bit: if part == {
+            "Cmd" -> 16
+            "Ctrl" -> 1
+            "Alt" -> 2
+            "Shift" -> 4
+            "Super" -> 8
+            else -> panic("a menu item's key equivalent has modifiers among Cmd, Ctrl, Alt, Shift and Super, not {part} in {key}")
+        }
+        if bits & bit == 0 -> bits += bit
+    }
+    Val(UIShortcut{key: name, modifiers: UIShortcutModifiers{bits: bits}})
+}
+
+// The keys of the key equivalent `key` as dbusmenu names them: Control,
+// Alt, Shift and Super, then the key; Cmd is Control.
+priv app_menu_key_names: fn(key: String) -> [String] Never! {
+    shortcut: app_menu_shortcut(key) ?? return [String]{}
+    bits: shortcut.modifiers.bits
+    names := [String]{}
+    if bits & 17 != 0 -> names.push("Control")
+    if bits & 2 != 0 -> names.push("Alt")
+    if bits & 4 != 0 -> names.push("Shift")
+    if bits & 8 != 0 -> names.push("Super")
+    names.push(shortcut.key)
+    names
 }
 
 // The most bytes one call's body to the service `service` (its key) may
@@ -4157,6 +4264,151 @@ priv app_drop_once: fn(run: fn([PickedFile]) Notice!, dropped: [PickedFile]) Nev
     if run(dropped) == .Err(notice) -> __keep_notice(notice)
 }
 
+// `body` with the context menu `items`, which opens where the person
+// right-clicks on `body`: choosing an item runs it as a menu bar's item
+// runs (`item`, `edit_menu`, `window_menu`), and an item's run that fails
+// adds its notice to the app's notice list (`notices`), which the window
+// shows. On Linux the app's window (`App.window`) opens it over the
+// screen (`app_window_run`); the other native targets keep a notice that
+// says their context menu is not built yet and give `body` back as it is.
+// The page runtime can't open one yet, so a call in code whose target is
+// the web output is a compile error.
+context_menu: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
+    #if #build.target.os == {
+        .Linux -> { return app_context_target(body, items) }
+        .MacOS -> { return app_no_context_menu(body) }
+        .Windows -> { return app_no_context_menu(body) }
+        .Web -> { return app_no_context_menu(body) }
+        .Wasm -> { return app_no_context_menu(body) }
+        .Freestanding -> { return app_no_context_menu(body) }
+    }
+}
+
+// The context menus of the bodies in the tree the window shows, each
+// one's id one past its index (`app_window_tree` starts them over).
+priv APP_CONTEXT_MENUS: Shared{[AppContextMenu]{}}
+
+priv AppContextMenu: struct {
+    items: [MenuItem],
+}
+
+// A context menu open in the window, in window pixels: its top left
+// corner, its width, the height of one of its rows, and its items.
+priv AppOpenMenu: struct {
+    x: Int,
+    y: Int,
+    width: Int,
+    row: Int,
+    items: [MenuItem],
+}
+
+// One row of a context menu, and the width of each character of a label
+// beside the padding before it, in units (`ui.Frame` pixels at scale 1).
+priv APP_MENU_ROW: 24
+
+priv APP_MENU_CHAR: 9
+
+priv APP_MENU_PAD: 8
+
+// `body` as one whose context menu the window opens with `items`.
+priv app_context_target: fn(body: UINode, items: [MenuItem]) -> UINode Never! {
+    held: APP_CONTEXT_MENUS.guard_edit()
+    held.value.push(AppContextMenu{items: items.copy()})
+    body.__with_menu(held.value.len())
+}
+
+// Keeps the notice that this target opens no context menu; gives `body`.
+priv app_no_context_menu: fn(body: UINode) -> UINode Never! {
+    __keep_notice(Notice{text: "Couldn't add a context menu: this system's context menu is not built yet"})
+    body.copy()
+}
+
+// Starts the window's context menus over, for a tree opened anew.
+priv app_context_menus_clear: fn() Never! {
+    held: APP_CONTEXT_MENUS.guard_edit()
+    held.value.clear()
+}
+
+// The context menu whose id is `id`, opened at the pointer of `frame`,
+// moved left and up as far as it must be to fit in the window; None when
+// the shown tree has no such menu, or it has no items.
+priv app_context_open: fn(frame: ui.Frame, id: Int) -> AppOpenMenu? Never! {
+    held: APP_CONTEXT_MENUS.guard_read()
+    if id < 1 || id > held.value.len() -> return None
+    items: held.value[id - 1].items.copy()
+    if items.len() == 0 -> return None
+    widest := 0
+    loop item in items {
+        length: item.label.chars().len()
+        if length > widest -> widest = length
+    }
+    width: frame.__pixels(widest * APP_MENU_CHAR + 2 * APP_MENU_PAD)
+    row: frame.__pixels(APP_MENU_ROW)
+    x: app_menu_fit(frame.get_mouse_x(), width, frame.width)
+    y: app_menu_fit(frame.get_mouse_y(), row * items.len(), frame.height)
+    Val(AppOpenMenu{x: x, y: y, width: width, row: row, items: items})
+}
+
+// Where a span `size` long that starts at `at` starts so it ends in
+// `room`, as near `at` as it can.
+priv app_menu_fit: fn(at: Int, size: Int, room: Int) -> Int Never! {
+    if at + size <= room -> return at
+    if size >= room -> return 0
+    room - size
+}
+
+// The item of the open menu `open` under the pointer of `frame`, if it
+// is one the person can choose.
+priv app_context_chosen: fn(frame: ui.Frame, open: AppOpenMenu?) -> MenuItem? Never! {
+    menu: open ?? return None
+    x: frame.get_mouse_x()
+    y: frame.get_mouse_y()
+    if x < menu.x || x >= menu.x + menu.width || y < menu.y || menu.row < 1 -> return None
+    index: (y - menu.y) /% menu.row
+    if index >= menu.items.len() -> return None
+    item: menu.items[index]
+    if !item.enabled || item.kind == .Separator || item.kind == .Notice -> return None
+    Val(item.copy())
+}
+
+// Draws the open menu `menu` into `frame`, over the screen
+// (`Frame.__draw_menu`): a separator is a row with no label, and an item
+// that can't be chosen shows in gray.
+priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
+    labels := [String]{}
+    enabled := [Bool]{}
+    loop item in menu.items {
+        labels.push(if item.kind == .Separator -> "" else -> item.label.copy())
+        enabled.push(item.enabled && item.kind != .Separator && item.kind != .Notice)
+    }
+    frame.__draw_menu(menu.x, menu.y, menu.width, menu.row, labels, enabled)
+}
+
+// The height of the bar the window shows the app's newest notice in, at
+// its bottom (`Frame.__draw_notice`), in units.
+priv APP_NOTICE_BAR: 24
+
+// Draws the app's newest notice (`notices`) into `frame`, on a bar over
+// the bottom of the screen, which a click dismisses
+// (`app_notice_dismissed`). Nothing when there is none.
+priv app_notice_draw: fn(frame: ui.Frame) Never! {
+    listed: notices()
+    if listed.len() == 0 {
+        return
+    }
+    frame.__draw_notice(listed[listed.len() - 1].text, frame.__pixels(APP_NOTICE_BAR))
+}
+
+// Whether the pointer of `frame` is on the bar the window shows the
+// newest notice in; if it is, the notice is dismissed (`__dismiss`).
+priv app_notice_dismissed: fn(frame: ui.Frame) -> Bool Never! {
+    listed: notices()
+    if listed.len() == 0 -> return false
+    if frame.get_mouse_y() < frame.height - frame.__pixels(APP_NOTICE_BAR) -> return false
+    __dismiss(listed.len() - 1)
+    true
+}
+
 // Whether the file named `name` is of a kind in `types`, as a file
 // dialog matches it (`app_file_filter`): its name ends as one of the
 // kind's patterns, in any case.
@@ -4574,10 +4826,8 @@ priv app_tray_run: fn(title: String, icon: String, menu: Shared<AppTrayMenu>) -[
             .Err(notice) -> notice.text.copy()
         }
         shown = loaded.copy()
-        if failed == .Val(text) {
-            shown.insert(0, MenuItem{label: text.copy(), kind: .Notice, run: Shared{AppMenuRun{run: app_menu_nothing}}})
-        }
-        dbus.tray_show(bus, tray, app_tray_entries(shown)) ?? return app_tray_lost("{err}")
+        if failed == .Val(text) -> shown.insert(0, app_menu_entry(text, .Notice, ""))
+        dbus.menu_show(bus, tray.menu, app_menu_entries(shown, false)) ?? return app_tray_lost("{err}")
         asked: if dbus.next_call(bus, TRAY_TICK_NS) == {
             .Err(err) -> {
                 return app_tray_lost("{err}")
@@ -4596,11 +4846,13 @@ priv app_tray_run: fn(title: String, icon: String, menu: Shared<AppTrayMenu>) -[
     }
 }
 
-// The tray's entries for `items`: a notice shows but can't be chosen.
-priv app_tray_entries: fn(items: [MenuItem]) -> [dbus.TrayEntry] Never! {
-    entries := [dbus.TrayEntry]{}
+// The menu entries for `items`: a notice, or an item that is not enabled,
+// shows but can't be chosen. `keys` shows each item's key equivalent.
+priv app_menu_entries: fn(items: [MenuItem], keys: Bool) -> [dbus.MenuEntry] Never! {
+    entries := [dbus.MenuEntry]{}
     loop item in items {
-        entries.push(dbus.TrayEntry{label: item.label.copy(), enabled: item.kind != .Notice, separator: item.kind == .Separator})
+        shortcut: if keys -> app_menu_key_names(item.key) else -> [String]{}
+        entries.push(dbus.MenuEntry{label: item.label.copy(), enabled: item.enabled && item.kind != .Notice, separator: item.kind == .Separator, shortcut: shortcut, children: [dbus.MenuEntry]{}})
     }
     entries
 }
@@ -4641,47 +4893,236 @@ priv app_graph_window: fn() -> AppWindow? Never! {
 // keeps its focus until then; a drop on a body that takes dropped files
 // (`drop_files`) gives them to its handler (`app_window_drop`). The tree is
 // opened again too when a live binding the screen read changes with no
-// input (`app_window_wake`), which wakes the frames. A frame draws the tree
-// when nothing is drawn yet, the tree is new or an event changed it, or the
-// window took another size. A display that is missing or fails leaves a
-// notice.
+// input (`app_window_wake`), which wakes the frames. With a menu bar
+// (`App.menu_bar`) the window names its menu (`app_menu_bar_start`), a key
+// with an item's key equivalent chooses the item instead of going to the
+// tree (`app_menu_bar_keyed`), and the items of the Edit and Window menus
+// chosen from the bar wake the frames to act (`app_window_act`). A frame
+// draws the tree when nothing is drawn yet, the tree is new or an event
+// changed it, or the window took another size. A display that is missing
+// or fails leaves a notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
     // Taken before the frames: a frame's wait holds the window.
     app_window_watch(window.__waker())
+    bar: app_graph_menu_bar()
+    if bar == .Val(menus) -> app_menu_bar_start(window, menus)
     tree := ui.box([UINode]{})
     focused := -1
     drawn := false
     shown := AppCurrent?{None}
+    open := AppOpenMenu?{None}
     loop frame in window.frames() {
         stale := !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
             if event == .Drop(x, y, items) -> app_window_drop(tree.__files_at(frame, x, y), items)
+            if event == .PointerDown(.Right) {
+                open = app_context_open(frame, tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y()))
+                stale = true
+                next
+            }
+            if open == .Val(_) {
+                // An open context menu takes the next click and Escape.
+                if event == .PointerDown(.Left) {
+                    chosen: app_context_chosen(frame, open)
+                    open = None
+                    stale = true
+                    if chosen == .Val(item) {
+                        _: app_window_choose(window, frame, tree, focused, item)
+                    }
+                    next
+                }
+                if event == .KeyDown(.Escape) {
+                    open = None
+                    stale = true
+                    next
+                }
+            }
+            if event == .PointerDown(.Left) && app_notice_dismissed(frame) {
+                stale = true
+                next
+            }
+            if event == .KeyDown(key) {
+                if app_menu_bar_keyed(frame, key) == .Val(chosen) {
+                    if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
+                    next
+                }
+            }
             if tree.__input(frame, event, focused) -> stale = true
         }
+        woken: app_window_take()
+        loop chosen in woken.acts {
+            if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
+        }
+        if woken.noticed -> stale = true
         now: app_graph_current()
-        changed: app_window_take_stale()
-        if now != shown || changed {
-            if now != shown -> focused = -1
+        if now != shown || woken.stale {
+            if now != shown {
+                focused = -1
+                open = None
+            }
             tree = app_window_tree(now)
             shown = now
             stale = true
         }
         if !stale -> next
         tree.__draw(frame)
+        if open == .Val(menu) -> app_context_draw(frame, menu)
+        app_notice_draw(frame)
         drawn = true
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
     process.exit(0)
 }
 
+// Runs the menu item `chosen` in the window: Cut, Copy and Paste on the
+// text input `focused` of `tree` (`edit_menu`), Minimize on the window,
+// and any other item as the tray runs it (`app_menu_choose`). Whether the
+// tree changed.
+priv app_window_choose: fn(window: ui.Window, frame: ui.Frame, tree: &UINode, focused: &Int, chosen: MenuItem) -[Env, Exec.Exit, Net, Time]> Bool Never! {
+    if chosen.kind == {
+        .Cut -> {
+            text: tree.__focused_text(focused) ?? return false
+            window.set_clipboard_text(text) ?? return false
+            tree.__set_focused_text(focused, "")
+        }
+        .Copy -> {
+            text: tree.__focused_text(focused) ?? return false
+            window.set_clipboard_text(text) ?? return false
+            false
+        }
+        .Paste -> {
+            if tree.__focused_text(focused) == None -> return false
+            text: window.clipboard_text() ?? return false
+            tree.__input(frame, ui.UIEvent.Text(text), focused)
+        }
+        .Minimize -> {
+            window.minimize()
+            false
+        }
+        .Item | .Quit | .Separator | .Notice -> {
+            app_menu_choose(chosen)
+            false
+        }
+    }
+}
+
+priv app_graph_menu_bar: fn() -> Shared<AppMenuBar>? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.menu_bar.copy()
+}
+
+// Serves the window's menu bar in a task that keeps its session bus
+// connection while the app runs (`app_menu_bar_run`), and names the bus
+// address the task gives it on the window. A desktop without a session
+// bus, or whose display server shows no global menu, has the key
+// equivalents alone.
+priv app_menu_bar_start: fn(window: ui.Window, menus: Shared<AppMenuBar>) -[Env, Exec.Exit, Net, Time]> Never! {
+    pair: tasks.__channel_new<String>()
+    serving: task { app_menu_bar_run(pair.sender, menus) }
+    serving.detach()
+    name: pair.receiver.receive() ?? return
+    _: window.__menu_address(name, dbus.MENU_PATH)
+}
+
+// Serves the window's menu bar on the session bus, first giving the bus
+// name it serves under through `named`, and keeps it current: it asks
+// `menus` again every TRAY_TICK_NS and after each call the desktop makes,
+// and the desktop hears when the menus change. When `menus` fails the bar
+// keeps its last menus under a first entry, which can't be chosen, with
+// the notice's text. Choosing an item from an Edit or Window menu acts on
+// the window (`app_window_act`); any other runs as the tray runs it
+// (`app_menu_choose`). Without a session bus it ends at once, and a bus
+// that goes away leaves a notice.
+priv app_menu_bar_run: fn(named: Sender<String>, menus: Shared<AppMenuBar>) -[Env, Exec.Exit, Net, Time]> Never! {
+    connection := dbus.session(TRAY_WAIT_NS) ?? return
+    bar := dbus.menu_start(connection)
+    named.send(connection.name.copy()) ?? return
+    loaded := [Menu]{}
+    loop {
+        held: menus.guard_read()
+        failed: if app_menu_bar_make(held.value.menus) == {
+            .Ok(made) -> {
+                loaded = made.copy()
+                String?{None}
+            }
+            .Err(notice) -> notice.text.copy()
+        }
+        shown: app_menu_bar_shown(loaded, failed)
+        dbus.menu_show(connection, bar, shown.entries) ?? return app_menu_bar_lost("{err}")
+        asked: if dbus.next_call(connection, TRAY_TICK_NS) == {
+            .Err(err) -> {
+                return app_menu_bar_lost("{err}")
+            }
+            .Ok(got) -> got
+        }
+        call: asked ?? next
+        chosen: if dbus.menu_answer(connection, bar, call) == {
+            .Err(err) -> {
+                return app_menu_bar_lost("{err}")
+            }
+            .Ok(got) -> got
+        }
+        index: chosen ?? next
+        item: shown.items[index]
+        if item.kind == .Cut || item.kind == .Copy || item.kind == .Paste || item.kind == .Minimize {
+            app_window_act(item)
+        } else { app_menu_choose(item) }
+    }
+}
+
+// The menu bar's entries for `menus`, each a submenu of its items, under
+// a first entry with the text `failed`, which can't be chosen, when the
+// menus failed; and the items in the order the bar numbers its entries
+// (`dbus.menu_entries`), a menu standing for its own entry.
+priv app_menu_bar_shown: fn(menus: [Menu], failed: String?) -> {entries: [dbus.MenuEntry], items: [MenuItem]} Never! {
+    entries := [dbus.MenuEntry]{}
+    items := [MenuItem]{}
+    if failed == .Val(text) {
+        entries.push(dbus.MenuEntry{label: text.copy(), enabled: false, separator: false, shortcut: [String]{}, children: [dbus.MenuEntry]{}})
+        items.push(app_menu_entry(text, .Notice, ""))
+    }
+    loop menu in menus {
+        entries.push(dbus.MenuEntry{label: menu.title.copy(), enabled: true, separator: false, shortcut: [String]{}, children: app_menu_entries(menu.items, true)})
+        items.push(app_menu_entry(menu.title, .Notice, ""))
+        loop item in menu.items -> items.push(item.copy())
+    }
+    {entries: entries, items: items}
+}
+
+// The enabled item of the menu bar whose key equivalent `key` is, pressed
+// in `frame` with the modifiers it holds; None without a menu bar or when
+// its menus fail.
+priv app_menu_bar_keyed: fn(frame: ui.Frame, key: Key) -> MenuItem? Never! {
+    bar: app_graph_menu_bar() ?? return None
+    held: bar.guard_read()
+    menus: app_menu_bar_make(held.value.menus) ?? return None
+    loop menu in menus {
+        loop item in menu.items {
+            if !item.enabled || item.kind == .Separator || item.kind == .Notice -> next
+            shortcut: app_menu_shortcut(item.key) ?? next
+            if frame.__pressed(shortcut, key) -> return Val(item.copy())
+        }
+    }
+    None
+}
+
+priv app_menu_bar_make: fn(menus: fn() -> [Menu] Notice!) -> [Menu] Notice! { menus() }
+
+// Keeps a notice that the menu bar couldn't be kept, and why.
+priv app_menu_bar_lost: fn(why: String) Never! {
+    __keep_notice(Notice{text: "Couldn't keep the app's menu bar: {why}"})
+}
+
 // The tree the window shows for the screen `now`, opened as `go` opens it,
 // so the bindings its view reads are the screen's route data: an empty box
-// before a screen opens and for the not-found state. The drop targets of
-// the tree shown before (`drop_files`) go with it.
+// before a screen opens and for the not-found state. The drop targets and
+// context menus of the tree shown before (`drop_files`, `context_menu`) go
+// with it.
 priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
     app_drops_clear()
+    app_context_menus_clear()
     current: now ?? return ui.box([UINode]{})
     screen: app_screen(current.state) ?? return ui.box([UINode]{})
     me: tasks.current_task()
@@ -4696,14 +5137,20 @@ priv app_window_lost: fn(why: String) Never! {
     __keep_notice(Notice{text: "Couldn't show the app's window: {why}"})
 }
 
-// The window's wake (`app_window_watch`) while it shows, and whether a live
-// binding of the screen it shows changed since it last opened the screen.
+// The window's wake (`app_window_watch`) while it shows; whether a live
+// binding of the screen it shows changed since it last opened the screen,
+// whether the app kept a notice since its last frame, and the menu bar's
+// items chosen for it to act on since that frame (`app_window_take`); and
+// whether a wake waits for that frame.
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
+    noticed: Bool,
+    acts: [MenuItem],
+    woken: Bool,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, woken: false}}
 
 // Wakes the window's frames through `waker` (`Window.__waker`) each time a
 // change to the data its screen shows comes (`app_window_wake`): the code
@@ -4728,30 +5175,70 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
     }
 }
 
-// Whether a live binding of the screen the window shows changed since the
-// last call; the window then opens the screen again.
-priv app_window_take_stale: fn() -> Bool Never! {
+// What woke the window since the last call: whether a live binding of the
+// screen it shows changed, so it opens the screen again, whether the app
+// kept a notice, so it draws the frame again, and the menu bar's items
+// chosen for it to act on, in order.
+priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem]} Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
+    noticed: held.value.noticed
+    acts: held.value.acts.copy()
     held.value.stale = false
-    stale
+    held.value.noticed = false
+    held.value.acts = [MenuItem]{}
+    held.value.woken = false
+    {stale: stale, noticed: noticed, acts: acts}
+}
+
+// Wakes the window's frames to draw the notice the app just kept
+// (`__keep_notice`) without opening the screen again, which may keep
+// the notice anew. Without a window it does nothing.
+priv app_window_noticed: fn() Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 {
+        return
+    }
+    held.value.noticed = true
+    app_window_rouse(held.value)
 }
 
 // Wakes the window's frames when one of the bindings `ids`, just
 // invalidated or given a new value, is route data of the screen it shows
 // (app_graph_route_data): its next frame opens the screen again, which
-// reads them anew. One wake waits at most: a change while one does joins
-// it. Without a window it does nothing.
+// reads them anew. Without a window it does nothing.
 priv app_window_wake: fn(ids: [Int]) Never! {
     if !app_graph_shows(ids) {
         return
     }
     held := APP_WINDOW_WAKE.guard_edit()
-    if held.value.wakes.len() == 0 || held.value.stale {
+    if held.value.wakes.len() == 0 {
         return
     }
     held.value.stale = true
-    app_window_send(held.value.wakes[0]).drop("the window's relay holds the channel's other end while the app runs")
+    app_window_rouse(held.value)
+}
+
+// Wakes the window's frames to act on `chosen`, an item of its Edit or
+// Window menu the person chose from the menu bar. Without a window it
+// does nothing.
+priv app_window_act: fn(chosen: MenuItem) Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 {
+        return
+    }
+    held.value.acts.push(chosen.copy())
+    app_window_rouse(held.value)
+}
+
+// Sends the window's relay (`app_window_relay`) a wake, unless one waits
+// for the next frame already: what comes meanwhile joins it.
+priv app_window_rouse: fn(wake: &AppWindowWake) Never! {
+    if wake.woken {
+        return
+    }
+    wake.woken = true
+    app_window_send(wake.wakes[0]).drop("the window's relay holds the channel's other end while the app runs")
 }
 
 // Sends a wake to the window's relay (`app_window_relay`).
@@ -4767,8 +5254,8 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
 }
 
 #Test("a tray shows its items, a notice can't be chosen, and an item's failed run joins the notices") {
-    items: [MenuItem]{item("Gate repair", fn() Notice! { Err(Notice{text: "The board is offline"}) }), separator(), MenuItem{label: "Can't load", kind: .Notice, run: Shared{AppMenuRun{run: app_menu_nothing}}}, quit_item()}
-    entries: app_tray_entries(items)
+    items: [MenuItem]{item("Gate repair", fn() Notice! { Err(Notice{text: "The board is offline"}) }), separator(), app_menu_entry("Can't load", .Notice, ""), quit_item()}
+    entries: app_menu_entries(items, false)
     assert_eq(entries.len(), 4)
     assert_eq(entries[0].label, "Gate repair")
     assert(entries[0].enabled && !entries[0].separator)
@@ -4780,6 +5267,31 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "The board is offline")
+}
+
+#Test("a menu bar's menus hold their items with their keys, and a key equivalent names its keys") {
+    file: menu("File", [MenuItem]{item("New Task", app_menu_nothing, key: "Cmd+N"), item("Export", app_menu_nothing, key: "Cmd+Shift+E", enabled: false), separator(), quit_item()})
+    shown: app_menu_bar_shown([Menu]{file, edit_menu(), window_menu()}, String?{None})
+    assert_eq(shown.entries.len(), 3)
+    assert_eq(shown.entries[0].label, "File")
+    assert_eq(shown.entries[0].children[0].shortcut, [String]{"Control", "n"})
+    assert_eq(shown.entries[0].children[1].shortcut, [String]{"Control", "Shift", "e"})
+    assert(!shown.entries[0].children[1].enabled)
+    assert(shown.entries[0].children[2].separator)
+    labels := [String]{}
+    loop entry in dbus.menu_entries(shown.entries) -> labels.push(entry.label.copy())
+    assert_eq(labels.join("|"), "File|New Task|Export||Quit|Edit|Cut|Copy|Paste|Window|Minimize|Close")
+    kinds := [String]{}
+    loop chosen in shown.items -> kinds.push(chosen.label.copy())
+    assert_eq(kinds.join("|"), labels.join("|"))
+    assert_eq(shown.items[10].kind, MenuItemKind.Minimize)
+    failed: app_menu_bar_shown([Menu]{edit_menu()}, Val("The board is offline"))
+    assert_eq(failed.entries[0].label, "The board is offline")
+    assert(!failed.entries[0].enabled)
+    assert_eq(failed.items[2].kind, MenuItemKind.Cut)
+    assert_eq(app_menu_key_names("Ctrl+Alt+Super+F5"), [String]{"Control", "Alt", "Super", "f5"})
+    assert_eq(app_menu_shortcut("Cmd+Shift+E"), Val(UIShortcut{key: "e", modifiers: UIShortcutModifiers{bits: 20}}))
+    assert_eq(app_menu_shortcut(""), UIShortcut?{None})
 }
 
 #Test("a picked file has its name, size and media, and reads whole, as text and a part at a time") {

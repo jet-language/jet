@@ -137,8 +137,8 @@ run: fn() {
             // TOWER_DATA pins the lookup to this tree's board; left to itself,
             // the board reader follows a linked worktree to the main checkout's
             // live board. JET is the jet under test (the case sets it).
-            jet: audit_sys.get("JET") ?? panic("JET names the jet that runs Tools/tower/Board.jet")
-            output: audit_process.cmd([String]{jet, "Tools/tower/Board.jet", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")
+            jet: audit_sys.get("JET") ?? panic("JET names the jet that runs Tools/Tower/Board.jet")
+            output: audit_process.cmd([String]{jet, "Tools/Tower/Board.jet", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/Tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")
             assert(output.success, "accessibility finding {row[0]} names missing Tower card {card}:\n{output.errors}")
             report: audit_json.parse(output.output.trim()) ?? panic("Tower lookup for {row[0]} returned invalid JSON: {output.output}")
             value: audit_json.pointer(report, "/num") ?? panic("Tower card JSON must contain a numeric num")

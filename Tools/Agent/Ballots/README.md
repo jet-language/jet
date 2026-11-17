@@ -3,7 +3,7 @@
 [ELI5-STANDARD.md](ELI5-STANDARD.md) defines the owner's plain-language ballot
 standard. `Validate.jet` checks ballot payload files against the rules Tower
 applies when a ballot is posted (`ballotGaps` and `addDecision` in
-`Tools/tower/app/store.mjs`, ballot process 5). It reads only the payloads: no
+`Tools/Tower/App/store.mjs`, ballot process 5). It reads only the payloads: no
 Tower store, board or state root, and it writes nothing, so it runs from a
 fresh clone with only `jet`.
 

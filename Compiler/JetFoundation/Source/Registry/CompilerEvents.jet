@@ -151,13 +151,19 @@ COMPILER_EVENT_PAYLOADS: [CompilerEventPayload]{
     },
 }
 
-// One moment as a compile met it: its row name and its payload as one JSON
-// object whose keys are the payload row's fields, in row order. The
+// The Core enum every moment is a variant of, `core.compiler.Event`; each
+// payload is the core.compiler struct its row names.
+COMPILER_EVENT_TYPE: "<corelib>/core.compiler::Event"
+
+// One moment as a compile met it: its row name and its payload, a value of
+// the payload row's struct whose fields are the row's, in row order. The
 // compile result carries them in the order `stages()` and `jet build
-// --json` give them.
+// --json` give them: `stages()` hands each to Jet code as its `Event`
+// (compiler_event_stage), and `jet build --json` writes each as JSON
+// (compiler_event_json).
 CompilerEventRecord: struct {
     name: String,
-    data: String,
+    data: TComptimeValue,
 }
 
 // The payload struct the moment `name` carries; "" for a name no row has.
@@ -168,28 +174,66 @@ compiler_event_payload_name: fn(name: String) -> String Never! {
     ""
 }
 
-// The JSON object of payload struct `payload`: each of its row's fields,
-// in row order, with the JSON value at the same position of `values`.
-compiler_event_object: fn(payload: String, values: [String]) -> String Never! {
-    members := [String]{}
-    loop row in COMPILER_EVENT_PAYLOADS {
-        if row.name != payload -> next
-        loop (index, field) in row.fields {
-            value: if index < values.len() -> values[index] else -> "null"
-            members.push("{foundation_json_quote(field.name)}:{value}")
+// The value of payload struct `payload`: its row's fields, in row order,
+// holding the values of `values` in turn.
+compiler_event_payload: fn(payload: String, values: &&[TComptimeValue]) -> TComptimeValue Never! {
+    at := -1
+    loop (index, row) in COMPILER_EVENT_PAYLOADS {
+        if row.name == payload -> at = index
+    }
+    fields := [TComptimeField]{}
+    if at >= 0 {
+        loop value in values.move() {
+            if fields.len() >= COMPILER_EVENT_PAYLOADS[at].fields.len() -> break
+            fields.push(TComptimeField{name: COMPILER_EVENT_PAYLOADS[at].fields[fields.len()].name, value: value})
         }
     }
-    "{{{members.join(",")}}}"
+    TComptimeValue.Struct{type_name: "<corelib>/core.compiler::{payload}", fields: fields}
 }
 
-// The record of the moment `name`, its payload's field values given as
-// JSON in the payload row's field order.
-compiler_event_record: fn(name: String, values: [String]) -> CompilerEventRecord Never! {
-    CompilerEventRecord{name: name, data: compiler_event_object(compiler_event_payload_name(name), values)}
+// The record of the moment `name`, its payload's field values given in the
+// payload row's field order.
+compiler_event_record: fn(name: String, values: &&[TComptimeValue]) -> CompilerEventRecord Never! {
+    CompilerEventRecord{name: name, data: compiler_event_payload(compiler_event_payload_name(name), values.move())}
+}
+
+// The `core.compiler.Event` of the moment `name` with payload `data`: the
+// variant its row names, carrying `data` as its one field.
+compiler_event_stage: fn(name: String, data: &&TComptimeValue) -> TComptimeValue Never! {
+    variant := ""
+    loop row in COMPILER_EVENTS {
+        if row.name == name -> variant = row.variant
+    }
+    TComptimeValue.Enum{type_name: COMPILER_EVENT_TYPE, variant: variant, args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: data.move()}}}
 }
 
 // The JSON object of `record` that `jet build --json` lists and the session
-// wire sends: `{"event":<name>,"data":<payload object>}`.
+// wire sends: `{"event":<name>,"data":<payload object>}`, the payload's
+// fields in row order.
 compiler_event_json: fn(record: CompilerEventRecord) -> String Never! {
-    "{{\"event\":{foundation_json_quote(record.name)},\"data\":{record.data}}}"
+    "{{\"event\":{foundation_json_quote(record.name)},\"data\":{compiler_event_value_json(record.data)}}}"
+}
+
+// The JSON of one payload value: a String, Int or Bool field as a JSON
+// string, integer or boolean, a list as an array and a payload struct as an
+// object of its fields. A payload holds nothing else; anything else is null.
+compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
+    if value == {
+        .String(text) -> foundation_json_quote(text)
+        .Int(number) -> "{number}"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .List(values) -> {
+            items := [String]{}
+            loop item in values -> items.push(compiler_event_value_json(item))
+            "[{items.join(",")}]"
+        }
+        .Struct(_, fields) -> {
+            members := [String]{}
+            loop field in fields {
+                members.push("{foundation_json_quote(field.name)}:{compiler_event_value_json(field.value)}")
+            }
+            "{{{members.join(",")}}}"
+        }
+        .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> "null"
+    }
 }

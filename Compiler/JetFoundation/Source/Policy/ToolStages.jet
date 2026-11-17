@@ -27,25 +27,31 @@ TOOL_STAGES: [ToolStage]{
     ToolStage{name: TOOL_STAGE_LSP_INLAY_HINTS, answer: "[compiler.InlayHint]"},
 }
 
-// A function's `#On(stage, Marker)`: the stage it joins and the marker whose
-// blocks it reads, each as written (`lsp.completion`, `Query`).
-ToolStageHook: struct {
+// A function's `#On`: the stage it joins and, for a tool stage, the marker
+// whose blocks it reads, each as written (`lsp.completion`, `Query`). A hook
+// of a compiler or build moment (`#On(compiler.settled)`, a row of
+// COMPILER_EVENTS) names no marker: `marker` is "".
+StageHook: struct {
     stage: String,
     marker: String,
 }
 
 // The stage and marker `marker` names, when it is an `#On` written as
-// `#On(stage, Marker)` with a dotted stage path and a marker name. Whether
-// the stage is in TOOL_STAGES is the caller's question.
-tool_stage_hook: fn(marker: Marker) -> ToolStageHook? Never! {
-    if marker.name != MARKER_ON || marker.negated || marker.args.len() != 2 -> return None
+// `#On(moment)` or `#On(stage, Marker)` with a dotted stage path and a marker
+// name. Whether the stage is a moment or in TOOL_STAGES is the caller's
+// question.
+stage_hook: fn(marker: Marker) -> StageHook? Never! {
+    if marker.name != MARKER_ON || marker.negated || marker.args.len() < 1 || marker.args.len() > 2 {
+        return None
+    }
     loop label in marker.arg_labels {
         if label != None -> return None
     }
     stage: tool_stage_path(marker.args[0]) ?? return None
-    key: tool_stage_path(marker.args[1]) ?? return None
     if !stage.contains(".") -> return None
-    Val(ToolStageHook{stage: stage, marker: key})
+    if marker.args.len() == 1 -> return Val(StageHook{stage: stage, marker: ""})
+    key: tool_stage_path(marker.args[1]) ?? return None
+    Val(StageHook{stage: stage, marker: key})
 }
 
 // The dotted name an argument writes (`lsp.completion`, `Query`), or None for

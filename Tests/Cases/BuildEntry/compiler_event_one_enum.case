@@ -1,0 +1,29 @@
+# Claim: one `compiler.Event` enum names every public moment, and each surface reads it through the same registry rows. A function's `#On(moment)` names a row, such as `compiler.settled` or `build.link`, and takes the payload that the row's variant carries. A moment no row names, or a hook that takes another payload, is E0930. `jet build --json` names the settled moment `compiler.settled` with its `Round` fields, and `meta.stages()` gives the same moment as `compiler.Event.Settled`.
+# Hand-derived: each program is one module with no errors, so its compile settles in one round, round 1.
+fixture: CompilerEventOneEnum.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+cwd: hooked
+exit: 0 # a settled hook and a link hook, each taking its moment's payload
+step: jet check main.jet
+cwd: misspelled
+exit: nonzero
+stderr: ~ "compiler.setled" # the misspelled moment
+stderr: ~ "is not a compiler or build moment"
+stderr: ~ "jet-lang.dev/e/E0930"
+step: jet check main.jet
+cwd: wrong_payload
+exit: nonzero
+stderr: ~ "hook takes one" # the settled moment carries a Round
+stderr: ~ "compiler.Round"
+stderr: ~ "jet-lang.dev/e/E0930"
+step: jet build main.jet --json
+cwd: hooked
+exit: 0
+json: stdout doc $.events[?event="compiler.settled"] #= 1 # the same name as the hook's
+json: stdout doc $.events[?event="compiler.settled"][0].data.round = 1
+step: jet build main.jet
+cwd: staged
+exit: nonzero
+stderr: ~ "settled: round 1" # the same moment as an Event value

@@ -1,0 +1,26 @@
+use {
+    compiler: core.compiler
+    "shapes"
+}
+
+twice: fn(n: Int) -> Int { shapes.area(n, 1) + shapes.area(n, 1) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    seen := [String]{}
+    loop stage in meta.stages() {
+        line: if stage == {
+            .Parsed(file) -> "parsed {file.module}"
+            .Imported(loaded) -> "imported {loaded.name}"
+            .Declared(declaration) -> "declared {declaration.name} calls [{declaration.calls.join(" ")}] in {declaration.module}"
+            .Checked(program) -> "checked {program.declarations.len()}"
+            .Settled(round) -> "settled {round.round} new {round.new_items.len()}"
+            .Emitted(_) | .Finished(_) | .Planned(_) | .Asset(_) | .Link(_) | .BeforeWrite(_) | .AfterWrite(_) -> "unexpected"
+        }
+        seen.push(line)
+    }
+    panic("stages: {seen.join("; ")}")
+}
+
+run: fn() { print(twice(3)) }

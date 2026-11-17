@@ -1,0 +1,72 @@
+// Crewboard in a Linux window with a menu bar: a File menu whose New Task
+// (Cmd+N) adds a task, then the Edit and Window menus. The board's panel
+// shows how many tasks New Task added: blue for none, green for one, red
+// for two. The desktop chooses New Task from the window's menu, then the
+// person presses Ctrl+N in the window, then Ctrl+W, which closes the
+// window and ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Board: struct {
+    added: Int,
+}
+
+BOARD: Shared{Board{added: 0}}
+
+tasks_added: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.added)
+}
+
+add_task: fn() {
+    held := BOARD.guard_edit()
+    held.value.added += 1
+}
+
+// New Task: one more task, which the board shows.
+new_task: fn() app.Notice! {
+    add_task()
+    app.invalidate(tasks_added)
+    Ok()
+}
+
+menus: fn() -> [app.Menu] app.Notice! {
+    file: app.menu("File", [app.MenuItem]{app.item("New Task", fn() app.Notice! { new_task() }, key: "Cmd+N"), app.separator(), app.quit_item()})
+    Ok([app.Menu]{file, app.edit_menu(), app.window_menu()})
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    added: if app.state(app.live(tasks_added)) == {
+        .Loaded(added) -> added
+        .Failed(_) | .Idle | .Loading -> 0
+    }
+    color: if added == 0 -> Color{r: 51, g: 102, b: 255, a: 255} else if added == 1 -> Color{r: 51, g: 153, b: 51, a: 255} else -> Color{r: 204, g: 51, b: 51, a: 255}
+    ui.box([ui.node_color("", 200.0, 30.0, color)])
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100).menu_bar(menus)
+    if !graph.launch() {
+        return
+    }
+    // Ctrl+W ends the app; the desktop and the compositor wait up to a
+    // minute for it.
+    loop _ in 0..<6000 {
+        if app.notices().len() > 0 -> break
+        tasks.sleep(10)
+    }
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}

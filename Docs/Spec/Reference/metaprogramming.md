@@ -1135,6 +1135,16 @@ only reads, so it needs no Meta effect, and the build refuses a value whose
 build has returned. A handler that rewrites a heard function `f` uses
 `Meta.Code.Rewrite` like any other caller; `f.package` is the identity of the
 package that declares it.
+`meta.stages()` lists the moments the build's checked program reached before
+its build ran, each a `compiler.Event` (so the program writes `use
+compiler: core.compiler`; without it the call is E0119): each file
+`.Parsed`, then each module other than the entry `.Imported`, both by file
+path; each declaration `.Declared`, by module path and declaration order,
+with the declarations it calls; then `.Checked` with the whole program and
+`.Settled` with its one round. The order is the same whatever the thread
+count the compile ran on, and `jet build --json` lists the same moments in
+its `events`. It only reads, so it needs no Meta effect, and the build
+refuses a value whose build has returned.
 A handler runs inside the build's own call, so it spends the build's
 compile-time step budget, the one every compile-time call has: the build and
 all its handlers share it. A build that runs out stops there with E0952, and

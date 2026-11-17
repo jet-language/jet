@@ -376,7 +376,7 @@ when it ends. Use checkout-owned external targets (see the orchestration
 resource reference). Never overwrite another
 task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
-hand-edit `Tools/tower/.tower/`.
+hand-edit `Tools/Tower/.tower/`.
 
 Scratch feeds work into `dev`; it is not an archive. Before removing anything,
 save the work it holds: commit it on `dev`, or record on its Tower card exactly
@@ -390,7 +390,7 @@ on disk; git history and Tower are the record. Audits and final reports under
 `Docs/` stay owner-only deletions (see Documentation).
 
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
-use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
+use the non-serve Tower CLI (`node Tools/Tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
 personal notes or scratch files.
 
@@ -527,7 +527,7 @@ cost of monitoring, unblocking, and verifying.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
-under `.agents/skills` and `Tools/tower/skills`.
+under `.agents/skills` and `Tools/Tower/skills`.
 
 ## Find every issue at once
 
@@ -685,7 +685,7 @@ Read this file first, then load only what the task needs:
 | Compiler or language semantics | The relevant code, examples, and tests; `Docs/Spec/syntax-decisions.md` for decision rationale |
 | Diagnostics or snapshots | `Compiler/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/Spec/diagnostics.md` |
 | Examples or golden paths | `Docs/Spec/Contributing/examples.md` and `Examples/README.md` |
-| Tower cards, questions, tags, or board operations | `Docs/Spec/Contributing/issue-tracker.md`, `Docs/Spec/Contributing/triage-labels.md`, and `Tools/tower/skills/tower/SKILL.md` |
+| Tower cards, questions, tags, or board operations | `Docs/Spec/Contributing/issue-tracker.md`, `Docs/Spec/Contributing/triage-labels.md`, and `Tools/Tower/skills/tower/SKILL.md` |
 | Domain vocabulary or decisions | `Docs/Spec/vocabulary.md`, `Docs/Spec/syntax-decisions.md`, and `Docs/Spec/Contributing/domain.md` |
 | Security closure | `Docs/Spec/Contributing/security-closure.md` |
 | Technical traps | `Docs/Spec/Contributing/agent-engineering.md` |

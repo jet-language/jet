@@ -5,7 +5,7 @@
 // Without --go: dry run printing the changes.
 //
 // The Jet twin of tower-spec-apply.mjs (gauntlet tool entry tower-spec-apply):
-// cards are read with `node Tools/tower/tower.mjs` in $TOWER_SPEC_REPO (this
+// cards are read with `node Tools/Tower/tower.mjs` in $TOWER_SPEC_REPO (this
 // checkout unless set) and written through Main's Tower writer,
 // $TOWER_SPEC_WRITER ($JET_STATE_ROOT/scratch/Main/tower-dev.mjs unless set),
 // which takes the card patches from $TOWER_SPEC_PATCHES
@@ -47,7 +47,7 @@ node: fn(repo: String, command: Sh) -> String Err! {
 }
 
 card: fn(repo: String, num: String) -> Dyn Err! {
-    j: json.parse(node(repo, Sh{"node Tools/tower/tower.mjs card show {num} --json"}) ?? return Err(err)) ?? return Err("{err}")
+    j: json.parse(node(repo, Sh{"node Tools/Tower/tower.mjs card show {num} --json"}) ?? return Err(err)) ?? return Err("{err}")
     Ok(if j.get("card") == .Val(.Object(_)) -> j.get("card") ?? j else -> j)
 }
 

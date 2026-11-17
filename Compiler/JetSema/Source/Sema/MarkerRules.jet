@@ -29,16 +29,17 @@ use jet_foundation.[
     TextEdit,
     Type,
     UnOp,
+    COMPILER_EVENTS,
     TOOL_STAGES,
     diagnostic_from_registry,
     diagnostic_with_edit,
     diagnostic_with_label,
     expr_span,
     marker_hook_of_declaration,
+    stage_hook,
     symbol_find,
     symbol_key_text,
     symbol_table_key,
-    tool_stage_hook,
     type_name,
     module_text,
 ]
@@ -1091,27 +1092,30 @@ sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: Sema
 }
 
 // A function's markers through sema_marker_rules_check_rule_signature, except
-// its `#On`: at the function site `#On(stage, Marker)` joins a tool stage
-// (ToolStages.jet), so the stage and the hook's shape are checked, not the
-// statement site's `build` condition. True when all of them bind.
+// its `#On`: at the function site `#On(moment)` hooks a compiler or build
+// moment and `#On(stage, Marker)` joins a tool stage (ToolStages.jet), so the
+// stage and the hook's shape are checked, not the statement site's `build`
+// condition. True when all of them bind.
 sema_marker_rules_check_function_markers: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop marker in func.markers {
-        bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_tool_stage(func, marker, diagnostics) else -> sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics)
+        bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_stage_hook(func, marker, diagnostics) else -> sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics)
         if !bound -> valid = false
     }
     valid
 }
 
-// A tool-stage hook names a stage of TOOL_STAGES and the marker whose blocks
-// it reads, takes the one `compiler.MarkerBlock` the tool hands it, and
-// answers with the stage's type (E0930).
-sema_marker_rules_check_tool_stage: fn(func: Func, marker: Marker, diagnostics: &[Diagnostic]) -> Bool {
-    stages: (loop row in TOOL_STAGES -> "`{row.name}`").join(", ")
-    hook: tool_stage_hook(marker) ?? {
-        diagnostics.push(sema_error("E0930", marker.span, "`#On` on a function names a tool stage and a marker", "a function joins a tool stage with `#On(stage, Marker)`; the stages are {stages}", "write the stage and the marker whose blocks the function reads, such as `#On(fmt.block, SQL)`"))
+// A function's `#On` names a moment of COMPILER_EVENTS, or a stage of
+// TOOL_STAGES and the marker whose blocks it reads (E0930).
+sema_marker_rules_check_stage_hook: fn(func: Func, marker: Marker, diagnostics: &[Diagnostic]) -> Bool {
+    hook: stage_hook(marker) ?? {
+        diagnostics.push(sema_error("E0930", marker.span, "`#On` on a function names a moment, or a tool stage and a marker", "a function hooks a compiler or build moment with `#On(moment)` and joins a tool stage with `#On(stage, Marker)`", "write a moment, such as `#On(compiler.settled)`, or a tool stage and the marker whose blocks the function reads, such as `#On(fmt.block, SQL)`"))
         return false
     }
+    if hook.marker == "" {
+        return sema_marker_rules_check_moment_hook(func, marker, hook.stage, diagnostics)
+    }
+    stages: (loop row in TOOL_STAGES -> "`{row.name}`").join(", ")
     known := -1
     loop (index, row) in TOOL_STAGES {
         if row.name == hook.stage -> known = index
@@ -1126,6 +1130,26 @@ sema_marker_rules_check_tool_stage: fn(func: Func, marker: Marker, diagnostics: 
     returned: if func.return_type == .Val(ty) -> sema_marker_rules_unqualified_type(type_name(ty)) else -> ""
     if !takes_block || returned != sema_marker_rules_unqualified_type(answer) {
         diagnostics.push(sema_error("E0930", func.name_span, "a `{hook.stage}` hook takes one `compiler.MarkerBlock` and answers `{answer}`", "the tool calls the function with each `#{hook.marker}` block it reads and reads the stage's answer", "declare {shape}"))
+        return false
+    }
+    true
+}
+
+// A moment hook names a row of COMPILER_EVENTS (`compiler.settled`) and takes
+// the one payload that row's `compiler.Event` variant carries (E0930).
+sema_marker_rules_check_moment_hook: fn(func: Func, marker: Marker, moment: String, diagnostics: &[Diagnostic]) -> Bool {
+    payload := ""
+    loop row in COMPILER_EVENTS {
+        if row.name == moment -> payload = row.payload
+    }
+    if payload == "" {
+        moments: (loop row in COMPILER_EVENTS -> "`{row.name}`").join(", ")
+        diagnostics.push(sema_error("E0930", marker.span, "`{moment}` is not a compiler or build moment", "a function hooks a moment of `compiler.Event` with `#On(moment)`; the moments are {moments}", "name one of the moments"))
+        return false
+    }
+    takes_payload: func.params.len() == 1 && func.type_params.len() == 0 && sema_marker_rules_unqualified_type(type_name(func.params[0].ty)) == payload
+    if !takes_payload {
+        diagnostics.push(sema_error("E0930", func.name_span, "a `{moment}` hook takes one `compiler.{payload}`", "the compiler calls the function with the payload of the moment's `compiler.Event` variant", "declare `{func.name}: fn(value: compiler.{payload})`"))
         return false
     }
     true

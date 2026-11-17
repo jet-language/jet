@@ -219,7 +219,7 @@ or `Conflicts with current plan`.
 4. Cite exact card and decision IDs.
 5. Make no Tower writes. Do not draft cards or ballots.
 
-Read `Tools/tower/skills/tower/SKILL.md` only for this late read-only pass.
+Read `Tools/Tower/skills/tower/SKILL.md` only for this late read-only pass.
 Separate measured evidence from Jet-specific inference. Protect memory safety,
 type safety, clear diagnostics, and expert control. Shorter syntax does not win
 when explicit syntax buys those properties.

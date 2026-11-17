@@ -1743,7 +1743,7 @@ notification_end: fn(c: &DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]>
     Ok(None)
 }
 
-// ---- the tray
+// ---- the tray and the menus it and a window's menu bar serve
 
 WATCHER: "org.kde.StatusNotifierWatcher"
 
@@ -1762,27 +1762,38 @@ INVALID_ARGS: "org.freedesktop.DBus.Error.InvalidArgs"
 // The dbusmenu version this menu speaks.
 MENU_VERSION: 3
 
-// One entry of a tray's menu: a label the person can choose, one shown
-// but not `enabled`, or a separator line.
-TrayEntry: struct {
+// One entry of a menu this connection serves (dbusmenu): a label the person
+// can choose, one shown but not `enabled`, a separator line, or a submenu
+// of `children`. `shortcut` names the keys that choose it as dbusmenu
+// names them (`["Control", "n"]`), empty for none.
+MenuEntry: struct {
     label: String,
     enabled: Bool,
     separator: Bool,
+    shortcut: [String],
+    children: [MenuEntry],
 }
 
-// A tray icon this connection serves: its title, its icon (a name in the
-// desktop's icon theme), its menu's entries, and the revision of the
-// menu's layout, which grows each time the entries change (`tray_show`).
-// The menu's root is item 0 and entry `i` is item `i + 1`.
-Tray: struct {
-    title: String,
-    icon: String,
-    entries: [TrayEntry],
+// A menu this connection serves at MENU_PATH: its entries, and the
+// revision of its layout, which grows each time the entries change
+// (`menu_show`). The root is item 0 and the items after it are numbered
+// depth first, each entry before its children: item `i` is entry `i - 1`
+// of `menu_entries`.
+ServedMenu: struct {
+    entries: [MenuEntry],
     revision: Int,
 }
 
+// A tray icon this connection serves: its title, its icon (a name in the
+// desktop's icon theme) and its menu.
+Tray: struct {
+    title: String,
+    icon: String,
+    menu: ServedMenu,
+}
+
 // Puts the icon `icon` titled `title` in the desktop's tray as the item of
-// the process `pid`, with an empty menu until `tray_show`, waiting at most
+// the process `pid`, with an empty menu until `menu_show`, waiting at most
 // `timeout_ns`. It takes the item's well-known name, serves the item and
 // its menu, and registers the item with the desktop's
 // StatusNotifierWatcher; a desktop with no tray has none, and that call
@@ -1795,33 +1806,35 @@ tray_start: fn(c: &DbusConnection, title: String, icon: String, pid: Int, timeou
         return Err(DbusError.Failed{name: "org.freedesktop.DBus.Error.AddressInUse", message: "another connection owns {name}"})
     }
     serve(c, ITEM_PATH)
-    serve(c, MENU_PATH)
+    menu: menu_start(c)
     _: call_until(c, WATCHER, WATCHER_PATH, WATCHER, "RegisterStatusNotifierItem", [DbusValue]{DbusValue.Text(name)}, deadline) ?? return Err(err)
-    Ok(Tray{title: title, icon: icon, entries: [TrayEntry]{}, revision: 1})
+    Ok(Tray{title: title, icon: icon, menu: menu})
 }
 
-// Makes `entries` the tray's menu. When they differ from the menu it has,
+// Serves a menu at MENU_PATH, empty until `menu_show`: a tray's, or a
+// window's menu bar, which the window names by this connection's unique
+// name and the path. `menu_answer` answers what the desktop then asks.
+menu_start: fn(c: &DbusConnection) -> ServedMenu {
+    serve(c, MENU_PATH)
+    ServedMenu{entries: [MenuEntry]{}, revision: 1}
+}
+
+// Makes `entries` the menu's. When they differ from the entries it has,
 // the layout's revision grows and the desktop hears LayoutUpdated, so it
 // reads the menu again.
-tray_show: fn(c: &DbusConnection, tray: &Tray, entries: [TrayEntry]) -[Net, Time]> DbusError! {
-    if entries == tray.entries -> return Ok()
-    tray.entries = entries
-    tray.revision += 1
-    emit(c, MENU_PATH, MENU, "LayoutUpdated", [DbusValue]{DbusValue.Uint32(tray.revision), DbusValue.Int32(0)})
+menu_show: fn(c: &DbusConnection, menu: &ServedMenu, entries: [MenuEntry]) -[Net, Time]> DbusError! {
+    if entries == menu.entries -> return Ok()
+    menu.entries = entries
+    menu.revision += 1
+    emit(c, MENU_PATH, MENU, "LayoutUpdated", [DbusValue]{DbusValue.Uint32(menu.revision), DbusValue.Int32(0)})
 }
 
 // Answers `m`, a call the desktop made to the tray's item or its menu, and
-// gives the index of the entry the person chose when `m` says they clicked
-// one that is enabled.
+// gives the index in `menu_entries` of the entry the person chose when `m`
+// says they clicked one they can choose.
 tray_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
-    if m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
-        found: if m.path == ITEM_PATH -> tray_item_properties(tray) else -> tray_menu_properties()
-        if m.member == "GetAll" {
-            answer(c, m, [DbusValue]{options_of(found)}) ?? return Err(err)
-            return Ok(None)
-        }
-        name: string_of(m.body[1])
-        answer_property(c, m, found, name, "no property {name} here") ?? return Err(err)
+    if m.path == ITEM_PATH && m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
+        answer_properties(c, m, tray_item_properties(tray)) ?? return Err(err)
         return Ok(None)
     }
     // A click, a middle click, a right click or a scroll on the icon: the
@@ -1831,21 +1844,40 @@ tray_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> In
         answer(c, m, [DbusValue]{}) ?? return Err(err)
         return Ok(None)
     }
-    if m.path == MENU_PATH && on(m, MENU) -> return tray_menu_answer(c, tray, m)
+    menu_answer(c, tray.menu, m)
+}
+
+// Answers `m`, a call the desktop made to the menu, and gives the index in
+// `menu_entries` of the entry the person chose when `m` says they clicked
+// one they can choose: enabled, and no separator or submenu.
+menu_answer: fn(c: &DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+    if m.path == MENU_PATH && m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
+        answer_properties(c, m, menu_properties()) ?? return Err(err)
+        return Ok(None)
+    }
+    if m.path == MENU_PATH && on(m, MENU) -> return menu_call(c, menu, m)
     refuse(c, m, UNKNOWN_METHOD, "no method {m.interface}.{m.member} here") ?? return Err(err)
     Ok(None)
 }
 
-// Answers a dbusmenu call; see `tray_answer`.
-tray_menu_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+// Answers a Properties GetAll or Get call with `props` (`a{sv}` entries).
+answer_properties: fn(c: &DbusConnection, m: DbusMessage, props: [DbusValue]) -[Net, Time]> DbusError! {
+    if m.member == "GetAll" -> return answer(c, m, [DbusValue]{options_of(props)})
+    name: string_of(m.body[1])
+    answer_property(c, m, props, name, "no property {name} here")
+}
+
+// Answers a dbusmenu call; see `menu_answer`.
+menu_call: fn(c: &DbusConnection, menu: ServedMenu, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+    flat: menu_entries(menu.entries)
     if m.member == "GetLayout" && m.body.len() == 3 {
         parent: int_of(m.body[0]) ?? -1
         depth: int_of(m.body[1]) ?? -1
-        if parent < 0 || parent > tray.entries.len() {
+        if parent < 0 || parent > flat.len() {
             refuse(c, m, INVALID_ARGS, "no menu item {parent} here") ?? return Err(err)
             return Ok(None)
         }
-        answer(c, m, [DbusValue]{DbusValue.Uint32(tray.revision), tray_layout(tray, parent, depth)}) ?? return Err(err)
+        answer(c, m, [DbusValue]{DbusValue.Uint32(menu.revision), menu_layout(menu, flat, parent, depth)}) ?? return Err(err)
         return Ok(None)
     }
     if m.member == "GetGroupProperties" && m.body.len() == 2 {
@@ -1854,12 +1886,12 @@ tray_menu_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time
             loop item in items -> ids.push(int_of(item) ?? -1)
         }
         if ids.len() == 0 {
-            loop i in 0..<(tray.entries.len() + 1) -> ids.push(i)
+            loop i in 0..<(flat.len() + 1) -> ids.push(i)
         }
         found := [DbusValue]{}
         loop id in ids {
-            if id < 0 || id > tray.entries.len() -> next
-            found.push(DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(tray_item_props(tray, id))}))
+            if id < 0 || id > flat.len() -> next
+            found.push(DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(menu_item_props(flat, id))}))
         }
         answer(c, m, [DbusValue]{DbusValue.Array{signature: "(ia{ascii(123)}sv{ascii(125)})", items: found}}) ?? return Err(err)
         return Ok(None)
@@ -1867,13 +1899,13 @@ tray_menu_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time
     if m.member == "GetProperty" && m.body.len() == 2 {
         id: int_of(m.body[0]) ?? -1
         name: string_of(m.body[1])
-        props: if id >= 0 && id <= tray.entries.len() -> tray_item_props(tray, id) else -> [DbusValue]{}
+        props: if id >= 0 && id <= flat.len() -> menu_item_props(flat, id) else -> [DbusValue]{}
         answer_property(c, m, props, name, "menu item {id} has no property {name}") ?? return Err(err)
         return Ok(None)
     }
     if m.member == "Event" && m.body.len() == 4 {
         answer(c, m, [DbusValue]{}) ?? return Err(err)
-        return Ok(tray_chosen(tray, m.body[0], m.body[1]))
+        return Ok(menu_chosen(flat, m.body[0], m.body[1]))
     }
     if m.member == "EventGroup" && m.body.len() == 1 {
         chosen := Int?{None}
@@ -1881,15 +1913,15 @@ tray_menu_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time
             loop event in events {
                 if chosen != None -> break
                 if event == .Struct(fields) {
-                    if fields.len() == 4 -> chosen = tray_chosen(tray, fields[0], fields[1])
+                    if fields.len() == 4 -> chosen = menu_chosen(flat, fields[0], fields[1])
                 }
             }
         }
         answer(c, m, [DbusValue]{DbusValue.Array{signature: "i", items: [DbusValue]{}}}) ?? return Err(err)
         return Ok(chosen)
     }
-    // The menu is current before it opens: the tray says LayoutUpdated
-    // whenever its entries change.
+    // The menu is current before it opens: it says LayoutUpdated whenever
+    // its entries change.
     if m.member == "AboutToShow" && m.body.len() == 1 {
         answer(c, m, [DbusValue]{DbusValue.Bool(false)}) ?? return Err(err)
         return Ok(None)
@@ -1921,38 +1953,80 @@ int_of: fn(value: DbusValue) -> Int? {
     None
 }
 
-// The entry index an Event with the item `id` and the event `event` chose:
-// a click on an enabled entry that is no separator.
-tray_chosen: fn(tray: Tray, id: DbusValue, event: DbusValue) -> Int? {
+// The entries of `entries` depth first, each before its children: entry
+// `i` is the menu's item `i + 1`.
+menu_entries: fn(entries: [MenuEntry]) -> [MenuEntry] {
+    out := [MenuEntry]{}
+    loop entry in entries {
+        out.push(entry.copy())
+        loop inner in menu_entries(entry.children) -> out.push(inner)
+    }
+    out
+}
+
+// How many items `entry` and the entries under it are.
+menu_size: fn(entry: MenuEntry) -> Int {
+    size := 1
+    loop child in entry.children -> size += menu_size(child)
+    size
+}
+
+// The index in `flat` (`menu_entries`) an Event with the item `id` and the
+// event `event` chose: a click on an enabled entry that is no separator and
+// opens no submenu.
+menu_chosen: fn(flat: [MenuEntry], id: DbusValue, event: DbusValue) -> Int? {
     if event != DbusValue.Text("clicked") -> return None
     index: (int_of(id) ?? 0) - 1
-    if index < 0 || index >= tray.entries.len() -> return None
-    entry: tray.entries[index]
-    if entry.separator || !entry.enabled -> return None
+    if index < 0 || index >= flat.len() -> return None
+    entry: flat[index]
+    if entry.separator || !entry.enabled || entry.children.len() > 0 -> return None
     Val(index)
 }
 
 // The `(ia{sv}av)` layout of the item `id` (0, the root, holds the entries)
 // with its children `depth` levels down (-1: all).
-tray_layout: fn(tray: Tray, id: Int, depth: Int) -> DbusValue {
-    children := [DbusValue]{}
-    if id == 0 && depth != 0 {
-        loop i in 1..<(tray.entries.len() + 1) {
-            children.push(DbusValue.Variant(tray_layout(tray, i, 0)))
-        }
-    }
-    DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(tray_item_props(tray, id)), DbusValue.Array{signature: "v", items: children}})
+menu_layout: fn(menu: ServedMenu, flat: [MenuEntry], id: Int, depth: Int) -> DbusValue {
+    if id == 0 -> return menu_node(0, menu_item_props(flat, 0), menu.entries, depth)
+    menu_node(id, menu_item_props(flat, id), flat[id - 1].children, depth)
 }
 
-// The properties of the menu item `id`: the root opens a submenu, a
-// separator says so, and an entry has its label (`_` doubled, since a
-// single one marks an access key) and says when it is not enabled.
-tray_item_props: fn(tray: Tray, id: Int) -> [DbusValue] {
+// The layout of the item `id` with the properties `props`, whose children
+// are `children`, numbered from `id + 1` on, `depth` levels down.
+menu_node: fn(id: Int, props: [DbusValue], children: [MenuEntry], depth: Int) -> DbusValue {
+    items := [DbusValue]{}
+    if depth != 0 {
+        child := id + 1
+        loop entry in children {
+            items.push(DbusValue.Variant(menu_node(child, menu_entry_props(entry), entry.children, depth - 1)))
+            child += menu_size(entry)
+        }
+    }
+    DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(props), DbusValue.Array{signature: "v", items: items}})
+}
+
+// The properties of the menu item `id` of `flat` (`menu_entries`): the
+// root opens a submenu.
+menu_item_props: fn(flat: [MenuEntry], id: Int) -> [DbusValue] {
     if id == 0 -> return [DbusValue]{entry_of("children-display", DbusValue.Text("submenu"))}
-    entry: tray.entries[id - 1]
+    menu_entry_props(flat[id - 1])
+}
+
+// The properties of `entry`'s item: a separator says so, and an entry has
+// its label (`_` doubled, since a single one marks an access key), says
+// when it is not enabled, names its shortcut's keys, and says when it
+// opens a submenu.
+menu_entry_props: fn(entry: MenuEntry) -> [DbusValue] {
     if entry.separator -> return [DbusValue]{entry_of("type", DbusValue.Text("separator"))}
     props := [DbusValue]{entry_of("label", DbusValue.Text(entry.label.replace("_", "__")))}
     if !entry.enabled -> props.push(entry_of("enabled", DbusValue.Bool(false)))
+    if entry.shortcut.len() > 0 {
+        keys := [DbusValue]{}
+        loop key in entry.shortcut -> keys.push(DbusValue.Text(key))
+        props.push(entry_of("shortcut", DbusValue.Array{signature: "as", items: [DbusValue]{DbusValue.Array{signature: "s", items: keys}}}))
+    }
+    if entry.children.len() > 0 {
+        props.push(entry_of("children-display", DbusValue.Text("submenu")))
+    }
     props
 }
 
@@ -1973,7 +2047,7 @@ tray_item_properties: fn(tray: Tray) -> [DbusValue] {
 }
 
 // The dbusmenu object's properties.
-tray_menu_properties: fn() -> [DbusValue] {
+menu_properties: fn() -> [DbusValue] {
     [DbusValue]{
         entry_of("Version", DbusValue.Uint32(MENU_VERSION)),
         entry_of("TextDirection", DbusValue.Text("ltr")),
@@ -2703,10 +2777,10 @@ repeat: fn(text: String, times: Int) -> String {
     bus_says(bus.server, script)
     c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     tray := tray_start(c, "Crewboard", "crewboard", 42, 1000000000) ?? panic("tray: {err}")
-    quit: TrayEntry{label: "Quit", enabled: true, separator: false}
-    line: TrayEntry{label: "", enabled: true, separator: true}
-    first: [TrayEntry]{TrayEntry{label: "Gate repair", enabled: true, separator: false}, TrayEntry{label: "Spring_fair", enabled: true, separator: false}, line.copy(), quit.copy()}
-    tray_show(c, tray, first.copy()) ?? panic("show: {err}")
+    quit: menu_item("Quit", [String]{})
+    line: MenuEntry{label: "", enabled: true, separator: true, shortcut: [String]{}, children: [MenuEntry]{}}
+    first: [MenuEntry]{menu_item("Gate repair", [String]{}), menu_item("Spring_fair", [String]{}), line.copy(), quit.copy()}
+    menu_show(c, tray.menu, first.copy()) ?? panic("show: {err}")
     chosen := [String]{}
     loop _ in 0..<4 {
         m: found_call(next_call(c, 1000000000)) ?? panic("no call came")
@@ -2716,9 +2790,11 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(chosen.join(" "), "- - 1 -")
     assert_eq(found_call(next_call(c, 0)), DbusMessage?{None})
     // The same entries again change nothing; a new one is a new revision.
-    tray_show(c, tray, first.copy()) ?? panic("show: {err}")
-    tray_show(c, tray, [TrayEntry]{TrayEntry{label: "Launch", enabled: false, separator: false}, quit.copy()}) ?? panic("show: {err}")
-    assert_eq(tray.revision, 3)
+    menu_show(c, tray.menu, first.copy()) ?? panic("show: {err}")
+    launch := menu_item("Launch", [String]{})
+    launch.enabled = false
+    menu_show(c, tray.menu, [MenuEntry]{launch, quit.copy()}) ?? panic("show: {err}")
+    assert_eq(tray.menu.revision, 3)
     heard: messages_heard(bus.server)
     said := [String]{}
     loop m in heard {
@@ -2739,7 +2815,52 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(option_value(item, "ItemIsMenu"), Val(DbusValue.Bool(true)))
     assert_eq(option_value(item, "Menu"), Val(DbusValue.Path(MENU_PATH)))
     assert_eq(heard[6].body[0], DbusValue.Uint32(2))
-    assert_eq(layout_labels(heard[6].body[1]), [String]{"Gate repair", "Spring__fair", "separator", "Quit"})
+    assert_eq(layout_tree(heard[6].body[1]), "Gate repair | Spring__fair | separator | Quit")
+}
+
+#Test("a menu bar serves its menus with their items' shortcuts and hears which item the person chose") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    bus := test_bus("menubar")
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
+    // The desktop reads the whole menu, then the Edit menu alone; the
+    // person clicks New Task, the File menu itself and Copy. The
+    // connection serves no tray item, so a call to one is refused.
+    append(script, wire(desktop_call(MENU_PATH, MENU, "GetLayout", [DbusValue]{DbusValue.Int32(0), DbusValue.Int32(-1), texts([String]{})}), 2))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "GetLayout", [DbusValue]{DbusValue.Int32(4), DbusValue.Int32(1), texts([String]{})}), 3))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "Event", menu_click(2)), 4))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "Event", menu_click(1)), 5))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "Event", menu_click(5)), 6))
+    append(script, wire(desktop_call(ITEM_PATH, PROPERTIES, "GetAll", [DbusValue]{DbusValue.Text(ITEM)}), 7))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    menu := menu_start(c)
+    file := menu_item("File", [String]{})
+    file.children = [MenuEntry]{menu_item("New Task", [String]{"Control", "n"}), MenuEntry{label: "", enabled: true, separator: true, shortcut: [String]{}, children: [MenuEntry]{}}}
+    edit := menu_item("Edit", [String]{})
+    edit.children = [MenuEntry]{menu_item("Copy", [String]{"Control", "c"})}
+    menu_show(c, menu, [MenuEntry]{file, edit}) ?? panic("show: {err}")
+    chosen := [String]{}
+    loop _ in 0..<5 {
+        m: found_call(next_call(c, 1000000000)) ?? panic("no call came")
+        got: found_choice(menu_answer(c, menu, m))
+        chosen.push(if got == .Val(index) -> "{index}" else -> "-")
+    }
+    assert_eq(chosen.join(" "), "- - 1 - 4")
+    heard: messages_heard(bus.server)
+    said := [String]{}
+    loop m in heard {
+        said.push(if m.kind == .Return -> "return {m.reply_serial}" else if m.kind == .Error -> "error {m.reply_serial} {m.error_name}" else -> m.member.copy())
+    }
+    assert_eq(said.join("\n"), "Hello\nLayoutUpdated\nerror 7 {UNKNOWN_METHOD}\nreturn 2\nreturn 3\nreturn 4\nreturn 5\nreturn 6")
+    assert_eq(layout_tree(heard[3].body[1]), "File(New Task[Control+n] | separator) | Edit(Copy[Control+c])")
+    assert_eq(layout_tree(heard[4].body[1]), "Copy[Control+c]")
+}
+
+// An entry labelled `label` the person can choose, with the shortcut keys
+// `shortcut`.
+menu_item: fn(label: String, shortcut: [String]) -> MenuEntry {
+    MenuEntry{label: label, enabled: true, separator: false, shortcut: shortcut, children: [MenuEntry]{}}
 }
 
 // A method call the desktop makes to the app's connection.
@@ -2759,9 +2880,10 @@ menu_click: fn(id: Int) -> [DbusValue] {
     [DbusValue]{DbusValue.Int32(id), DbusValue.Text("clicked"), DbusValue.Variant(DbusValue.Int32(0)), DbusValue.Uint32(0)}
 }
 
-// The label of each child of a GetLayout answer's root, or its type when
-// it has no label.
-layout_labels: fn(layout: DbusValue) -> [String] {
+// The children of a GetLayout answer's item: each one's label, or its type
+// when it has no label, then its shortcut's keys in brackets and its own
+// children in parentheses, separated by ` | `.
+layout_tree: fn(layout: DbusValue) -> String {
     out := [String]{}
     if layout == .Struct(fields) {
         if fields[2] == .Array(_, children) {
@@ -2769,13 +2891,26 @@ layout_labels: fn(layout: DbusValue) -> [String] {
                 if child == .Variant(inner) {
                     if inner == .Struct(parts) {
                         found: option_value(parts[1], "label") ?? option_value(parts[1], "type") ?? DbusValue.Text("?")
-                        out.push(string_of(found))
+                        text := string_of(found)
+                        shortcut: option_value(parts[1], "shortcut") ?? DbusValue.Text("")
+                        if shortcut == .Array(_, chords) {
+                            loop chord in chords {
+                                if chord == .Array(_, keys) {
+                                    names := [String]{}
+                                    loop key in keys -> names.push(string_of(key))
+                                    text = "{text}[{names.join("+")}]"
+                                }
+                            }
+                        }
+                        below: layout_tree(inner)
+                        if below != "" -> text = "{text}({below})"
+                        out.push(text)
                     }
                 }
             }
         }
     }
-    out
+    out.join(" | ")
 }
 
 // The call a read gave, or the test fails with its error.

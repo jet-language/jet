@@ -3,7 +3,7 @@
 This directory explains Jet's durable contracts and the reasons behind them.
 It does not prove behavior: code, registries, tests, and executable examples
 do. It does not track work either: plans, decisions, and status live in
-[Tower](../Tools/tower/skills/tower/SKILL.md). [AGENTS.md](../AGENTS.md#documentation-boundaries)
+[Tower](../Tools/Tower/skills/tower/SKILL.md). [AGENTS.md](../AGENTS.md#documentation-boundaries)
 sets the documentation rules, and [philosophy](Spec/philosophy.md) is the one
 strategic guidance document.
 

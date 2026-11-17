@@ -1017,9 +1017,9 @@ policy_compares_parameter_pair: fn(function: Func) -> Bool {
 }
 
 policy_named_tower_truthiness: fn(path: String, name: String) -> Bool {
-    // Tower moved from dogfood/tower to Tools/tower; the Rust final still named
+    // Tower moved from dogfood/tower to Tools/Tower; the Rust final still named
     // the retired path, so its own `javascript_truthy` assertion could not hold.
-    if path != "Tools/tower/run.jet" -> return false
+    if path != "Tools/Tower/run.jet" -> return false
     name == "javascript_truthy" || name == "javascript_truthy_null" || name == "javascript_truthy_bool" || name == "javascript_truthy_int" || name == "javascript_truthy_float" || name == "javascript_truthy_text" || name == "javascript_truthy_array" || name == "javascript_truthy_object"
 }
 
@@ -2255,8 +2255,8 @@ policy_ast_test_migration_shapes: fn() PolicyError! {
             PolicyShapeCase{path: "Tools/Gauntlet/Entries/Bulkrename/Jet/run.jet", source: "run: fn() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
             PolicyShapeCase{path: "Docs/Site/generate.jet", source: "run: fn() {{ files.create_dir(\"dist\") }}", rule: "dogfood-directory-setup", present: true},
             PolicyShapeCase{path: "Docs/Site/generate.jet", source: "run: fn() {{ files.create_dir_all(\"dist\") }}", rule: "dogfood-directory-setup", present: false},
-            PolicyShapeCase{path: "Tools/tower/run.jet", source: "duplicate_equal: fn(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
-            PolicyShapeCase{path: "Tools/tower/run.jet", source: "javascript_truthy: fn(value: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: false},
+            PolicyShapeCase{path: "Tools/Tower/run.jet", source: "duplicate_equal: fn(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
+            PolicyShapeCase{path: "Tools/Tower/run.jet", source: "javascript_truthy: fn(value: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: false},
             PolicyShapeCase{path: "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", source: "run: fn() {{ value: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }}", rule: "dogfood-ascii", present: false},
             PolicyShapeCase{path: "Tools/Gauntlet/Entries/Bulkrename/Jet/run.jet", source: "pattern: fn() {{ value: Regex{{\"^x$\"}} }}\nrun: fn(value: String) {{\n    matched: re.match(Regex{{\"x\"}}, value)\n    print(matched.group(1) ?? \"\")\n}}", rule: "regex-capture-recipe", present: true},
             PolicyShapeCase{path: "Docs/Spec/Guides/first-hour.md", source: "```jet\n#CLI\nArgs: struct {{ name: String }}\n```\n```bash\njet build\n```", rule: "first-hour-doc-recipe", present: true},
@@ -2308,8 +2308,8 @@ policy_ast_test_dogfood_and_workload_shapes: fn() PolicyError! {
             PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ message: \"write `{{name}}: module {{{{ members: find(\\\"./packages\\\") }}}}` in `{{file}}`\" }}", rule: "dogfood-json", present: false},
             PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ script: \"[ \\\"$code\\\" = 0 ] || {{{{ echo \\\"{{kind}}\\\"; }}}}\" }}", rule: "dogfood-json", present: false},
             PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "run: fn() {{ arg: \"arg{{index}} ? \\\"true\\\" : \\\"false\\\"\" }}", rule: "dogfood-json", present: false},
-            PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
-            PolicyShapeCase{path: "Tools/tower/run.jet", source: "run: fn() {{ fields: url.query() }}", rule: "dogfood-url-query", present: false},
+            PolicyShapeCase{path: "Tools/Tower/run.jet", source: "run: fn() {{ fields: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
+            PolicyShapeCase{path: "Tools/Tower/run.jet", source: "run: fn() {{ fields: url.query() }}", rule: "dogfood-url-query", present: false},
             PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "run: fn() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},
             PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "run: fn() {{ left == right }}", rule: "dogfood-list-equality", present: false},
         },
