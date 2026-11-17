@@ -1,0 +1,30 @@
+// A field app attaches a photo to a task and tags the task with where it
+// was done.
+use app
+
+said: fn(grant: app.Grant) -> String {
+    if grant == {
+        .Granted -> "granted"
+        .Denied -> "denied"
+        .Restricted -> "restricted"
+    }
+}
+
+run: fn() -[Env, Exec, FS, IO, Net, Time]> {
+    _ := app.new("Crew Board")
+    if app.take_photo() == {
+        .Val(photo) -> {
+            bytes: photo.read() ?? panic("read the photo: {err}")
+            kind: if photo.media == .Val(.Image) -> "an image" else -> "not an image"
+            print("photo: {photo.name}, {photo.bytes} bytes, {kind}, first byte {Int{bytes[0]}}")
+        }
+        None -> print("photo: none")
+    }
+    if app.location() == {
+        .Val(place) -> {
+            print("place: {place.latitude} {place.longitude} within {place.accuracy_m} m")
+        }
+        None -> print("place: none")
+    }
+    print("asked: camera {said(app.ask(.Camera))}, location {said(app.ask(.Location))}")
+}

@@ -1,0 +1,39 @@
+# After the person allows the camera, `app.take_photo` gives the photo as a
+# PickedFile: a name, a size in bytes, a media type and its bytes, never a
+# path. On Linux the camera portal asks, and the photo comes from the
+# camera through PipeWire: GStreamer's pipewiresrc, which a stand-in on
+# PATH plays here. After the person allows the location, `app.location`
+# gives a Place: the first location the portal's location session reports.
+# The fake session bus here allows both, and those answers are the asks'
+# answers, so `app.ask` prompts nobody again. With no session bus neither
+# device is there, and the photo and the place are none. The web output
+# has neither call, so the same app built for it is an E-APP-TARGET-FEATURE
+# compile error at each call.
+fixture: CameraAndLocationGiveTypedValuesAfterAGrant.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+chmod: bin/gst-launch-1.0 0755
+spawn portal: jet run portal/fake_portal.jet
+stdout: file portal.stdout
+stderr: file portal.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+stdout: = "photo: photo-1.jpg, 4 bytes, an image, first byte 255\nplace: 52.52 13.405 within 20.0 m\nasked: camera granted, location granted\n"
+file: gst.args ~ "pipewiresrc num-buffers=15 ! videoconvert ! jpegenc ! multifilesink location=" # the camera through PipeWire
+wait: portal timeout 60s
+exit: 0
+file: heard.txt = "connections: 2\ncamera asks: 1\nlocation sessions: 1\n" # one camera request and one location session, and no second prompt
+step no_bus: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+stdout: = "photo: none\nplace: none\nasked: camera restricted, location restricted\n"
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.take_photo` needs target `native`, but the resolved target is `Web`." # not answered for the browser
+stderr: ~ "main.jet:15:" # at the photo call
+stderr: ~ "App feature `.location` needs target `native`, but the resolved target is `Web`."
+stderr: ~ "main.jet:23:" # at the location call

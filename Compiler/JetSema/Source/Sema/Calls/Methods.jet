@@ -1558,17 +1558,34 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
     ""
 }
 
-// The App checks of a device call, `app.ask` and `app.open_settings`: the
-// web output has neither (sema_call_app_device_target), and `app.ask` needs
-// the purposes of the permissions it may ask for
-// (sema_call_app_permission_purpose).
+// The App checks of a device call (`app.ask`, `app.open_settings`,
+// `app.take_photo`, `app.location`): the web output has none of them
+// (sema_call_app_device_target), and a call that may ask for a permission
+// needs its purpose (sema_call_app_permission_purpose): `ask` the ones its
+// argument names, `take_photo` the camera's and `location` the location's.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
-    if module_name != SEMA_APP_MARKER_MODULE || (member != "ask" && member != "open_settings") {
+    if module_name != SEMA_APP_MARKER_MODULE {
         return
     }
-    sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
-    if member == "ask" && args.len() == 1 {
-        sema_call_app_permission_purpose(member, alias, args, program, diagnostics)
+    if member == {
+        "ask" -> {
+            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
+            if args.len() == 1 {
+                sema_call_app_permission_purpose(member, alias, sema_app_permission_case(args[0].expr), expr_span(args[0].expr), program, diagnostics)
+            }
+        }
+        "take_photo" -> {
+            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
+            sema_call_app_permission_purpose(member, alias, Val("Camera"), span, program, diagnostics)
+        }
+        "location" -> {
+            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
+            sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
+        }
+        "open_settings" -> {
+            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
+        }
+        else -> {}
     }
 }
 
@@ -1591,16 +1608,16 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
     }
 }
 
-// `app.ask` needs the device permission its argument names, and every one
-// when the argument is not a literal `Permission` case. The system shows a
-// permission's purpose when it asks for it, so each one the call needs that
-// the package's `purposes:` doesn't name fails the build at the argument,
-// naming the call and the missing keys.
-sema_call_app_permission_purpose: fn(member: String, alias: String, args: [CallArg], program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+// A device call needs the purpose of each device permission it may ask
+// for: `named`, or every one when it is None (an `app.ask` whose argument
+// is not a literal `Permission` case). The system shows a permission's
+// purpose when it asks for it, so each one the call needs that the
+// package's `purposes:` doesn't name fails the build at `span`, naming the
+// call and the missing keys.
+sema_call_app_permission_purpose: fn(member: String, alias: String, named: String?, span: Span, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
         variants: core_enum_cases("Permission") ?? return
-        named: sema_app_permission_case(args[0].expr)
         missing := [String]{}
         loop variant in variants {
             if named == .Val(only) && only != variant -> next
@@ -1619,7 +1636,7 @@ sema_call_app_permission_purpose: fn(member: String, alias: String, args: [CallA
         lines: loop key in missing -> "{key}: \"…\""
         entry: diagnostic_registry_row("E-APP-PERMISSION-PURPOSE") ?? panic("E-APP-PERMISSION-PURPOSE must have a registry row")
         what: entry.what.replace("{{call}}", "{alias}.{member}").replace("{{permissions}}", "the {listed} {noun}")
-        diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", expr_span(args[0].expr), what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
+        diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", span, what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
     }
 }
 
