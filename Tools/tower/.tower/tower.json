@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111300,
+    "rev": 111325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21554,13 +21554,18 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nEstablish the stable public trust-root address and client format, and prove that the client pins its local key and refuses substitutes. This card creates no production key material and performs no ceremony.\n\n## Current state\n- Criterion 1 is verified: `Docs/site/dist/keys/README.md:9-22` fixes `https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`, the one-line `key-id:base64-public-key` format, validity via `issued_unix`/`expires_unix`, and the pin path `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`. `trust-manifest.json` is `awaiting-key-ceremony`.\n- Rotation is written up in `README.md:45-48` and `Docs/spec/packaging/trust-root.md` (criterion 4).\n- Client refusals already exist in `crates/jetpack/src/NixIndex.rs`: test-key rejection `:32,3563-3598` and `nix_index_refuses_a_server_signature_from_a_substituted_key` `:3832`.\n- Publication tests exist in `tests/jetpack_trust_root.rs`: `trust_publication_contract_is_owned_pending_and_has_no_fake_root` :21 and `trust_publication_exporter_rejects_the_test_index_key` :50. The exporter file names are at `TrustRoot.rs:1527-1529`.\n- Missing: a test that stages a key with `Tools/jetpack-infra/stage-trust-root.sh` and has the existing client read that exact file and verify a signed index (criterion 2).\n- The Jet `NixIndexClient` referenced at `Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:265` is undefined; its port is #3622 and is not required here. #2157 is done.\n\n## Changes\n1. `tests/jetpack_trust_root.rs`: add `staged_index_key_file_is_read_by_the_pinned_client`. Generate an ephemeral Ed25519 key under `~/.cache/jet-test-scratch`, stage it with `stage-trust-root.sh --index-key`, copy the staged `nix-index-v1.ed25519.pub` to the pin path, then have `IndexClient::from_roots_with_mode` verify a fixture-signed manifest. A host-served different key must be refused.\n2. Keep the test key rejected, and do not promote `jet-test-index-v1`.\n3. After the DNS, TLS and hosting gates, publish the static files (criterion 6, owner-gated).\n\n## Proof\n- `Tools/agent/jet-env cargo test --test jetpack_trust_root`: all pass, including the new staged-key test (criteria 2, 3, 5).\n- `Tools/agent/jet-env cargo test -p jetpack --lib -- nix_index_refuses_a_server_signature_from_a_substituted_key nix_index_never_accepts_the_test_key_as_an_official_root`: both pass.\n\n## Batch\nbatch-host-cli: the proof runs on the shipped Rust jetpack host and its publication tooling.\n\n## Dependencies\nNone open. Criterion 6 waits on external DNS/TLS/hosting, not a card.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -21786,7 +21791,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-08-25T19:59:25.500Z",
-      "updated": "2026-11-17T01:47:20.363Z",
+      "updated": "2026-11-17T01:47:58.034Z",
       "updatedBy": "Main",
       "workOrder": 1,
       "probe": null,
@@ -21794,7 +21799,8 @@
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 26
+      "criteriaLastN": 26,
+      "completedAt": "2026-11-17T01:47:58.034Z"
     },
     {
       "id": "c0wa0sjv",
@@ -28636,7 +28642,7 @@
       "track": "epoch",
       "epoch": "e22",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nProve task outcomes and structured cancellation (groups, all/race/any, timers/select, sibling drain, cooperative wait cancellation) with explicit task-failure versus domain-failure identity. Reconcile the two `TaskFailure` meanings into one owner, and stop ordinary `Err` from being flattened into a panic.\n\n## Current state\n- There are two meanings. Core has `pub struct TaskFailure { message: String, raised: Bool }` (`Core/tasks/tasks.jet:35-38`). The host and sema use an enum: `JetTaskFailure::{Cancelled, DeadlineBlown, Panicked(String)}` (`crates/jet-codegen/src/Prelude/TaskGroup.rs:40-83`) and `Type.Result(ok, Type.Named(\"TaskFailure\"))` (`Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:339-341`). `TaskFailure` is a registered error leaf in `Compiler/JetSema/Source/Sema/FailureLaw.jet:22`.\n- Err flattening: `jet_task_flatten_result` maps an ordinary body `Err(e)` to `jet_task_failure_from_code(\"TASK_BODY_FAILED\", …)`, which falls through to `Panicked(reason)` (TaskGroup.rs:44, :52-62). A domain error is therefore reported as a panic, which violates criterion 3 and the research warning.\n- Witnesses with goldens: `Examples/features/concurrency/{task_group,task_all,all_failfast(.err),select_channel,completion_order,release_join_failure,race_cancel,cancel_cleanup,task_panic(.err)}.jet`. The race_cancel and cancel_cleanup goldens now exist.\n- The finding is at `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f012`.\n\n## Changes\n1. One owner: make `Core/tasks/tasks.jet` declare `TaskFailure` as the enum `Cancelled | DeadlineBlown | Panicked(message: String)` that sema and host already use, and delete the `{message, raised}` struct and `exception()`. Migrate callers.\n2. Domain errors: a task body typed `T E!` joins to `(E | TaskFailure)!`, so the domain `E` stays itself and is not rewrapped. Change `jet_task_flatten_result(s)` and the JIT and interpreter equivalents to propagate `E`. Add sema typing for the joined union in `TaskGroups.jet`.\n3. Add `Examples/features/concurrency/task_domain_error.jet` with a golden. A group child returns `Err(ParseError…)`; the parent matches it as `ParseError`, not `Panicked`; siblings are drained, which is observed through a cleanup print.\n\n## Proof\n- `JET_GOLDEN_FILTER=concurrency/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n- `for f in task_group task_all select_channel completion_order release_join_failure race_cancel cancel_cleanup task_domain_error; do Tools/agent/jet-env jet run Examples/features/concurrency/$f.jet | diff - Examples/features/expected/concurrency/$f.out; done` gives empty diffs, and the same holds with `--interpret`.\n- `Tools/agent/jet-env cargo test --test task_control_tiers` and `--test taskgroup_parameter_tiers` pass.\n\n## Batch\nbatch-core-tasks: the tasks family Core source, sema and host flatten, retested with the concurrency goldens.\n\n## Dependencies\nNone.",
       "checkSteps": "1. Match captured combinator semantics rather than names from other languages.\n2. verify sibling drain/cleanup and cooperative wait cancellation.\n3. investigate ordinary Err flattening without presuming it is a panic.\n4. retain one TaskFailure owner.",
@@ -28645,6 +28651,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -29208,13 +29219,14 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-17T01:47:24.361Z",
+      "updated": "2026-11-17T01:48:00.549Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 85
+      "criteriaLastN": 85,
+      "completedAt": "2026-11-17T01:48:00.549Z"
     },
     {
       "id": "c0ym70o1",
@@ -29493,7 +29505,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "**Goal**\nClose the core.text/core.regex/codec contract on scalar boundaries, case and normalization, regex complexity and invalid encoding, with exercised witnesses. Fix the one real gap: case folding beyond Latin-1.\n\n**Current state**\n- Core/text/text.jet:14-19: UTF-8 decode, Hangul NFD/NFC, UAX #29 graphemes and words, and width are Jet. Case mapping is Latin-1 only, and full case-fold tables map to identity. :73-78 `lower`/`upper`/`casefold` → `map_case` (:467). `casefold` is just `lower`, so `casefold(\"Straße\")` stays `straße`.\n- :82-88 `nfc`/`nfd`/`nfkc`/`nfkd`/`graphemes`/`words` exist.\n- Core/regex/regex.jet:15-18 is a bounded backtracking NFA over UTF-8 bytes with ASCII-only `ignore_case`. :488-498 `budget_limit` is (nodes+1)×(min(bytes,4096)+1)×32, clamped to [4096, 1,000,000]. :458-461 caps quantifiers at 4096.\n- Examples/features/text/unicode_text.jet, unicode_17.jet and regex.jet have goldens. Related open cards: #1471 (regex gaps, building), #3370 (producers), #3107 (index boundaries).\n\n**Changes**\n1. Core/text/text.jet: generate full Unicode simple and full case mapping plus C+F folding tables into Jet data, the same way the existing normalization tables are generated. Route `map_case` and `casefold` through them. Casefold is locale-neutral; Turkish dotted I is not special-cased. Update the header comment at :14-19.\n2. Regex: keep the byte NFA and budget. Document in regex.jet that budget exhaustion is a typed failure, and add a witness that proves it. `ignore_case` stays ASCII, stated explicitly; Unicode case-insensitive regex belongs to #1471.\n3. Invalid encoding: `String.from_bytes` → None and codec `EncodingError` are the policy. Add a witness for lossy vs strict where core.text exposes it.\n4. Add Examples/features/text/unicode_contracts.jet plus its golden. Record unsupported cells as printed lines.\n5. Owned vs view costs: measure only the rows exercised above, through the existing text perf cell. Make no claim without a receipt.\n\n**Proof**\n- `jet test Compiler --profile golden text/unicode_contracts`: passes.\n- `jet test Compiler --profile golden text/unicode_text` and `JET_GOLDEN_FILTER=text/regex …`: still pass. Existing goldens change only where casefold output was wrong.\n- `jet test Compiler --profile golden text/unicode_contracts` passes on O0, O1 and O2.\n\n**Batch**\nbatch-core-text: Core/text and Core/regex Jet only, proved by text goldens.\n\n**Dependencies**\nNone. New parser or control APIs (for example, a Unicode regex mode) need their own ballot (criterion 3).",
       "checkSteps": "1. Account normalization/case/grapheme versus byte/scalar jobs, regex complexity/limits and invalid encoding policy.\n2. measure owned/view costs only where exercised.\n3. new parser/control APIs require independent gates.",
@@ -29502,6 +29514,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -29807,13 +29824,14 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-17T01:47:27.657Z",
+      "updated": "2026-11-17T01:48:02.974Z",
       "updatedBy": "Main",
       "workOrder": 218,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 33
+      "criteriaLastN": 33,
+      "completedAt": "2026-11-17T01:48:02.974Z"
     },
     {
       "id": "c0t54oz7",
@@ -29824,7 +29842,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nRecord what full versus selective JSON decoding actually does: validation scope, failure timing, and repeated scans and allocations. Ordinary decode must never silently weaken validation, and any lazy expert API goes to a ballot.\n\n## Current state\n- Core/encoding/json.jet:93-95: `reader(text)` is a pull parser whose first call validates and materializes the whole value, after which it walks events. There is no demanded-prefix extraction.\n- The shipped bounded event reader is the host `jet_enc_json_reader(input: FileReader, limits)` (crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:534; dispatcher crates/jet-codegen/src/Prelude/Core.jet:749), with a golden at Examples/features/serde/encoding_json_stream.jet.\n- Typed `json.decode<T>` is compiler lowering through `jet_std_json_decode_lenient` (Core.jet:731).\n- Examples/features/serde/shape_projection.jet depends on argv, the environment and a DB (:6, :30-31, :35), so it cannot be a golden. It is a Shape-projection witness, not a selective-decoding one.\n\n## Changes\n1. New Examples/features/serde/json_selective.jet with its .out. It runs one document through three paths: (a) `json.parse` in full, (b) `json.decode<Small>` projecting 1 of 20 fields, and (c) `json.reader(^file)` events, stopping after the first key. The inputs are: valid; malformed inside a skipped subtree; trailing garbage after the root; a duplicate key in a skipped subtree; and an invalid UTF-8 escape in a skipped string. It prints, for each path, whether and where it fails.\n2. Expected law: (a) and (b) validate the whole document and fail identically. (c) fails when it reaches the bad bytes, or at `finish`, and the failure timing is printed. If (b) accepts malformed skipped data or trailing garbage, fix the lenient typed decoder at its owner so that typed decode stays strict (D-ENC-DYN1).\n3. Measurement: `Tools/agent/jet-env jet perf run` on a scratch program over a 1 MB document records wall time and allocations for (a), (b) and (c), plus repeated `parse` calls, and the numbers go on the card.\n4. Record the cell `demanded-prefix or lazy extraction: unsupported`. Any expert lazy or borrowed API is a ballot (criterion 4), not a change to ordinary decode.\n\n## Proof\n- `JET_GOLDEN_FILTER=serde/json_selective cargo test --test golden examples_compile_and_run` passes.\n- `Tools/agent/jet-env jet run --interpret Examples/features/serde/json_selective.jet | diff - Examples/features/expected/serde/json_selective.out` prints nothing.\n- `JET_GOLDEN_FILTER=serde/encoding_json_stream cargo test --test golden examples_compile_and_run` still passes.\n\n## Batch\nbatch-core-encoding: a JSON witness plus at most one decoder fix.\n\n## Dependencies\nNone.",
       "checkSteps": "1. Distinguish full-document validation from demanded-prefix extraction.\n2. account malformed skipped/trailing data, borrowed lifetimes and failure timing.\n3. measure repeated scans/materialization/allocations.\n4. gate new expert APIs rather than silently weakening ordinary decode.",
@@ -29833,6 +29851,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -30412,13 +30435,14 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-17T01:47:28.973Z",
+      "updated": "2026-11-17T01:48:06.289Z",
       "updatedBy": "Main",
       "workOrder": 79,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 59
+      "criteriaLastN": 59,
+      "completedAt": "2026-11-17T01:48:06.289Z"
     },
     {
       "id": "c0k9g7u2",
@@ -30524,7 +30548,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nCarry verified iterator capability facts through the existing Iterable/Iterator protocol, adapters and storage representations, without a public iterator hierarchy or mandatory dynamic allocation. Build the three ratified slices now:\n- **D-ITER-SIZE1=A:** one runtime `size_hint()` pair; equal bounds convey exactness. There is no ExactRemaining hierarchy, no `remaining_len()` sibling and no runtime `@remaining`.\n- **D-ITER-FUSED1=A:** a checked `fused` capability fact plus `fuse()`, which latches the first true end.\n- **D-ITER-BORROW1=A:** `by_ref()` borrowed driving that reuses View/ViewMut provenance and sema overlap checks.\n\nThe open ballots D-ITER-BACK1 (reverse and mixed-end reads) and D-ITER-REPLAY1 each gate only their own slice.\n\n## Current state\n- The public `Iter` has no `size_hint`, `fuse` or `by_ref`: there are no rows in `Compiler/JetFoundation/Source/Collections.jet`.\n- The host uses `size_hint` only internally (`crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:453`).\n- `JetIter` boxes a forward iterator. `ViewIter` and the user `Iterator` hooks (`Examples/features/collections/iter_hook.jet`) exist.\n- Merged from #3336: a fused iterator never yields after its first end. Type erasure, `map` and driver loops never tag a source as fused. Async not-ready and channel `Empty` stay distinct from end (coordinate #3343), and nothing fuses silently.\n- Canonical handoff (#3398): use #3325's checked operation facts, and keep the exact-size, double-ended, fused and remainder guarantees separate.\n\n## Changes\n1. Jet compiler:\n   - `Collections.jet`: add `size_hint() -> (lower: Int, upper: Int?)` (non-advancing), `fuse() -> Iter<T>` and `by_ref()`. Adapters propagate conservative bounds (`map` keeps them; `filter` sets lower to 0; `take(n)` clamps; overflow sets upper to `None`) and the `fused` fact.\n   - `Compiler/JetSema/Source/Sema/Ownership`: `by_ref` creates a loan on the source owner. Overlapping mutation is rejected with the existing overlap code, and the remainder stays usable after the loan ends.\n   - Add ops in `TIR.jet`, with routes in `BuiltinMethods.jet`.\n2. Host mirror:\n   - `crates/jet-foundation/src/Collections.rs` and the TIR lowering.\n   - Prelude `JetIter` exposes `size_hint`, a `JetFuse` wrapper (one wrapper for non-fused sources) and `by_ref` over `&mut`.\n   - The JIT rows and the MIREval arms.\n3. Docs: `Docs/spec/reference/core-library.md` and a disposition row per stable Rust inventory entry (criterion 1). BACK1 and REPLAY1 rows follow the ratified D-ITER-BACK1=A and D-ITER-REPLAY1=A.\n\n## Proof\n- New `Examples/features/collections/iter_capabilities.jet` covers exact, bounded and unknown hints; a non-advancing query; a dishonest user hint that stays safe; overflow; a `fuse()` over a source that resumes after an empty poll; and `by_ref().take(2)` followed by reading the remainder.\n  - `JET_GOLDEN_FILTER=collections/iter_capabilities.jet Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n  - `JET_1216_STEM=collections/iter_capabilities Tools/agent/jet-env cargo test --test dev_tier_parity collections_memory_and_streams_match_interpreter_jit_and_aot` passes.\n- `JET_UI_FILTER=tests/ui/iter_by_ref_overlap.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` shows the mutation-while-borrowed rejection.\n\n## Batch\n`batch-host-runtime` (iter cluster, with sema loan checks).\n\n## Dependencies\nNone for the three ratified slices. The reverse/mixed-end slice waits on D-ITER-BACK1 (recommended A) and replay on D-ITER-REPLAY1. No speed claim.",
       "checkSteps": "1. Each stable Rust inventory row has a semantic Jet disposition, including positive and negative capability bounds.\n2. Mixed front/back consumption never duplicates an item and preserves the remaining range.\n3. Exact-size operations are unavailable or explicitly fallible when only bounds are known; overflow cannot produce a false exact length.\n4. A permanently exhausted wrapper remains exhausted, while a source that can resume after an empty poll is not mislabeled fused.\n5. The representation and lowering preserve these facts without a separate public iterator hierarchy or mandatory dynamic allocation.",
@@ -30533,6 +30557,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -31066,13 +31095,14 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-17T01:47:31.060Z",
+      "updated": "2026-11-17T01:48:08.776Z",
       "updatedBy": "Main",
       "workOrder": 37,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 47
+      "criteriaLastN": 47,
+      "completedAt": "2026-11-17T01:48:08.776Z"
     },
     {
       "id": "c0l0ygs4",
@@ -41686,8 +41716,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w9b `jet check p/r3720_t10.jet` -> \"E0047 `?.` needs an optional on the left, but this is `OriginInfo`\" (single backticks); w11 UI snapshots tests/ui/opt_chain_method (\"but this is `Slot`\") and opt_chain_non_optional PASS",
-          "at": "2026-10-31T19:52:08.984Z"
+          "evidence": "p238 batch compiler (dev 5bea729463), full suite: UI opt_chain_method and opt_chain_non_optional PASS.",
+          "at": "2026-11-17T01:47:42.774Z"
         },
         {
           "n": 25,
@@ -41733,8 +41763,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): all 5 tests/ui snapshots with E0083 in the w9b tree PASS in ui-w9b-wave.txt (unclosed_brace_block, unclosed_bracket_list, unclosed_paren_call, prep_value_unclosed, modules/env_role_module_field_without_call_commas_reports_once); unclosed_brace_block.jet (unclosed, indentation consistent) reports \"Error [E0083]: `{` opened on line 1 is never closed\" naming the outermost opener",
-          "at": "2026-10-31T16:18:05.846Z"
+          "evidence": "p238 batch compiler (dev 5bea729463), full suite: UI unclosed_brace_block, unclosed_bracket_list, unclosed_paren_call, prep_value_unclosed and Modules/env_role_module_field_without_call_commas_reports_once PASS.",
+          "at": "2026-11-17T01:47:43.986Z"
         },
         {
           "n": 31,
@@ -42209,7 +42239,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-17T01:39:38.090Z",
+      "updated": "2026-11-17T01:47:43.986Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -47306,8 +47336,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w12 tree: Core/Encoding/Cbor.jet:29 `fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError!`. The stream examples use it: Examples/features/serde/encoding_cbor_stream.jet:14 `cbor.writer(^output, encoding.EncodingLimits.safe())` and json_number_events.jet:32 `cbor.writer(^output)`. w12 golden-wave: serde/encoding_cbor_stream passed, serde/json_number_events passed. cases-w12-wave: PASS for corelib/cbor_stream_{drop_and_codec_heap_ceiling_are_enforced, hostile_inputs_and_replacement_limits_are_exact, io_errors_latch_in_aot_and_default_dev, is_incremental_bounded_deterministic_and_terminal, workspace_growth_is_prospective_and_terminal}",
-          "at": "2026-10-31T19:52:22.713Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: CardClose-1 verdict 2026-10-31: w12 tree: Core/Encoding/Cbor.jet:29 `fn writer(output: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError!`. The stream examples use it: Examples/features/serde/encoding_cbor_stream.jet:14 `cbor.writer(^output, encoding.Encodin",
+          "at": "2026-11-17T01:47:45.058Z"
         },
         {
           "n": 4,
@@ -47335,8 +47365,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): Examples/features/serde/encoding_xml_stream.jet:25 calls `xml.writer(^output, encoding.EncodingLimits.safe())` and omits the `xml: XMLRenderOptions{XMLRenderOptions.safe()}` default (Core/Encoding/Xml.jet:312); w11 golden-wave.json \"passed serde/encoding_xml_stream\" (compiles and output matches; no E0107)",
-          "at": "2026-10-31T17:25:56.110Z"
+          "evidence": "p238 batch compiler (dev 5bea729463), full suite: golden Examples/Data/Formats/EncodingXMLStream PASS on o0, o1 and o2.",
+          "at": "2026-11-17T01:47:47.034Z"
         },
         {
           "n": 7,
@@ -47397,7 +47427,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-03T11:17:39.038Z",
-      "updated": "2026-11-17T01:39:55.327Z",
+      "updated": "2026-11-17T01:47:47.034Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -60179,8 +60209,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w12 jet (on PATH as sc/sb5949/bin/jet). sc/sb5949/sa.jet (`#!/usr/bin/env -S jet -A`, reads tmp/data5949/a.txt): `./sa.jet` prints \"data-a\" exit 0 and `jet run sa.jet` prints \"data-a\" exit 0. plain.jet (no #! line) under `jet run -A plain.jet` prints \"data-a\" exit 0. None of them prompts. Control: `jet run plain.jet` gives \"E1803 Application authority is undecided for `FS.Read`\" exit 1",
-          "at": "2026-10-31T18:01:35.774Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: CardClose-1 2026-10-31 (wave 9b tree): w12 jet (on PATH as sc/sb5949/bin/jet). sc/sb5949/sa.jet (`#!/usr/bin/env -S jet -A`, reads tmp/data5949/a.txt): `./sa.jet` prints \"data-a\" exit 0 and `jet run sa.jet` prints \"data-a\" exit 0. plain.jet (no #! line) under `jet run -A plain.jet` prints \"data-a\" e",
+          "at": "2026-11-17T01:47:48.132Z"
         },
         {
           "n": 4,
@@ -60303,9 +60333,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Owner decision 2026-11-08: Jet must not rely on incremental compilation or caching to win startup (liveness and correctness risk); the target is the no-cache floor, one exec plus a compile of the user code only. The edited-run bar now lives in #6328 c20 and c21 (an edited run costs what any run costs) with no per-declaration incremental state; Main 2026-11-08.",
-          "at": "2026-11-08T11:18:00.066Z",
-          "closure": "obsolete"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: Owner decision 2026-11-08: Jet must not rely on incremental compilation or caching to win startup (liveness and correctness risk); the target is the no-cache floor, one exec plus a compile of the user code only. The edited-run bar now lives in #6328 c20 and c21 (an edited run costs what any run cost",
+          "at": "2026-11-17T01:47:49.191Z"
         },
         {
           "n": 18,
@@ -60388,7 +60417,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-17T01:41:16.950Z",
+      "updated": "2026-11-17T01:47:49.191Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -72303,8 +72332,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Ballots $JET_SCRATCH_ROOT/lanes/MemDesign/ballot/D-PERF-MEMORY1.json and $JET_SCRATCH_ROOT/lanes/MemDesign/ballot/D-CACHE-CONTROL2.json; node $JET_SCRATCH_ROOT/lanes/Main/q/ballot/plaincheck-file.mjs <json> -> PLAIN OK for both; same keys as D-EXTEND-ARCH1.v2.json; A/B/C same-program code, beginner and expert paths, edge cases, amended decisions, recommendation A.",
-          "at": "2026-10-30T14:38:41.993Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: Ballots $JET_SCRATCH_ROOT/lanes/MemDesign/ballot/D-PERF-MEMORY1.json and $JET_SCRATCH_ROOT/lanes/MemDesign/ballot/D-CACHE-CONTROL2.json; node $JET_SCRATCH_ROOT/lanes/Main/q/ballot/plaincheck-file.mjs <json> -> PLAIN OK for both; same keys as D-EXTEND-ARCH1.v2.json; A/B/C same-program code, beginner ",
+          "at": "2026-11-17T01:47:50.979Z"
         },
         {
           "n": 3,
@@ -72424,7 +72453,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-17T01:42:10.302Z",
+      "updated": "2026-11-17T01:47:50.979Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -72791,8 +72820,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Docs/research/2026-10-30-terminal-control-api.md (SurfaceDesign-docs.patch): Core/Term and Core/Tui with file:line, runtime mode primitive RouteTerm.jet:252/282, capability map vs crossterm, termion, ncurses, notcurses, tcell/bubbletea, blessed/prompt_toolkit with every gap; probes m6315 (PTY t01/t03 OK o0/o1/o2), m6315b/t05 (variadic enum commands OK), m6315r (#Live leaves icanon/echo on)",
-          "at": "2026-10-30T15:46:57.875Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: Docs/research/2026-10-30-terminal-control-api.md (SurfaceDesign-docs.patch): Core/Term and Core/Tui with file:line, runtime mode primitive RouteTerm.jet:252/282, capability map vs crossterm, termion, ncurses, notcurses, tcell/bubbletea, blessed/prompt_toolkit with every gap; probes m6315 (PTY t01/t0",
+          "at": "2026-11-17T01:47:52.009Z"
         },
         {
           "n": 2,
@@ -72800,8 +72829,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Ballot $JET_SCRATCH_ROOT/lanes/SurfaceDesign/ballot/D-TERM-COMMANDS1.json: plaincheck-file.mjs PLAIN OK, readycheck.mjs READY; A term.execute(...Command) one write + restore ledger on exit/panic/signals/SIGTSTP/faults, B screen guard, C ANSI text + set_raw; composes with D-TUI-ANSI1 (ANSI moves to core.term, cursor/clear/alt/mouse helpers become Command cases) and D-TERM-INCREMENTAL1 (term.events)",
-          "at": "2026-10-30T15:46:59.798Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: Ballot $JET_SCRATCH_ROOT/lanes/SurfaceDesign/ballot/D-TERM-COMMANDS1.json: plaincheck-file.mjs PLAIN OK, readycheck.mjs READY; A term.execute(...Command) one write + restore ledger on exit/panic/signals/SIGTSTP/faults, B screen guard, C ANSI text + set_raw; composes with D-TUI-ANSI1 (ANSI moves to c",
+          "at": "2026-11-17T01:47:53.018Z"
         },
         {
           "n": 3,
@@ -72902,7 +72931,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-17T01:42:15.037Z",
+      "updated": "2026-11-17T01:47:53.018Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -74285,8 +74314,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Docs/audits/2026-10-30-hello-size.md: hello 437,416 B, identical at default/o0/o1/o2/--release; all 111 runtime functions over 1 KB listed, each with its size, held bytes and root path (startup, init_array, _start/EH, print, exit); no data object reaches 1 KB; liveness recomputed over jet_runtime.pack.o matches the binary (749 sections)",
-          "at": "2026-10-30T16:33:03.245Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: Docs/audits/2026-10-30-hello-size.md: hello 437,416 B, identical at default/o0/o1/o2/--release; all 111 runtime functions over 1 KB listed, each with its size, held bytes and root path (startup, init_array, _start/EH, print, exit); no data object reaches 1 KB; liveness recomputed over jet_runtime.pa",
+          "at": "2026-11-17T01:47:54.710Z"
         },
         {
           "n": 2,
@@ -74684,7 +74713,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-17T01:42:24.270Z",
+      "updated": "2026-11-17T01:47:54.710Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -76666,8 +76695,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: With CardClose-8 (wave/14/in) applied, Tools/gauntlet/matrix.json strict_performance_policy v3 carries a `ceiling` block with stages peer_floor (initial) and machine_ceiling (final, meet \"<=1\", metrics cycles and bytes). It also has peer_win_closes_cell=false and missing_reference \"uncovered\", which is listed in failure_statuses. run.mjs reports peer_verdict and ceiling_verdict per cell. The new test \"a peer win never closes a cell whose machine ceiling is unmet\" asserts blockers of the form \"fixture.cell/machine-ceiling/runtime_wall_seconds: metric uncovered (no hand-written machine-code reference names this cell)\". Manifest and status tests pass 32/32 on rebase12; lane-check CHECK OK.",
-          "at": "2026-10-31T21:20:04.873Z"
+          "evidence": "Bookkeeping (owner order 2026-11-16): the work was proved and recorded earlier, before the evidence rule required a commit; cited at dev 5bea729463. Original evidence: CardClose-1 verdict 2026-10-31: With CardClose-8 (wave/14/in) applied, Tools/gauntlet/matrix.json strict_performance_policy v3 carries a `ceiling` block with stages peer_floor (initial) and machine_ceiling (final, meet \"<=1\", metrics cycles and bytes). It also has peer_win_closes_cell=false and miss",
+          "at": "2026-11-17T01:47:55.709Z"
         },
         {
           "n": 37,
@@ -76867,7 +76896,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:42:30.494Z",
+      "updated": "2026-11-17T01:47:55.709Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -102173,8 +102202,8 @@
       "title": "Known-failing ledger: the remaining failing cases and their three open criteria",
       "body": "Successor of #5454, which closed with 90 of 93 criteria met because it had grown too large to read. This card owns every row in tests/known-failing.tsv that names it (163 rows moved from #5454), and the three criteria #5454 left open, copied unchanged with their history.\n\nState on gate-p131 (dev 8d83659ef3), 2026-11-14: pure has 2 rows needing the unbuilt `jet profile` command; comptime_core_pure_parity has 9 rows (Tally<enum> refused as not hashable, ID<String> without ==, weekday off by one at comptime, Measurement +); authority has about 20 rows needing the unbuilt core.process.workspace/run surface; taskgroup_params has 1 row (E1110 missing its second count).",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -102233,7 +102262,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T23:11:25.962Z",
-      "updated": "2026-11-16T13:06:35.675Z",
+      "updated": "2026-11-17T01:47:41.726Z",
       "updatedBy": "Main"
     },
     {
@@ -102242,8 +102271,8 @@
       "title": "Owner-held leftovers from the ballot map (#5983): address after G11",
       "body": "Twelve open items moved from #5983 (Map: Owner ballots and rulings) on 2026-11-14 at the owner's direction. The owner addresses this card after G11 is done. It belongs to no goal, and no agent works it until the owner picks it up.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -102366,11 +102395,13 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G11"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T01:47:10.535Z",
-      "updated": "2026-11-15T01:47:22.503Z",
+      "updated": "2026-11-17T01:47:46.013Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -102620,8 +102651,8 @@
       "title": "Generated code: the Compiler value, Meta effects, generation rounds and rollback",
       "body": "Destination: a program that generates or rewrites code does it through one passed, root-created `Compiler` value whose actions are Meta effects checked like any effect, and generation is deterministic, provenanced and all-or-nothing. Why: generated code must be as trustworthy and debuggable as hand-written code, and nothing above marker expansion may happen by import alone.\n\nGoverning decisions: D-META-LADDER1=A (Meta effects follow the rule of every effect; compiler control is one passed value; macros stay out), D-META-OPTIN2=A (a checked package opt-in suffices for above-level-five operations), D-HOOK-STAGES1=A, D-ADDSTRUCT-TYPE1=A (meta.add_struct names a field's type with a TypeId). Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried decisions: the org policy file accepts the same `authority: { deny: [...] }` record as package.jet (D-EFFBUDGET1), applied as an outer rung that only narrows (Main 2026-11-11). `#build`, `#program`, `#package` and `#phase` are spelled with `#` and cannot be shadowed (D-META-HASH2=A, landed 00a2b37a42..53805444ba). Sizing (owner 2026-11-11): each Compiler-value slice is at most one hour of code and one hour of tests. Background: the Compiler value needs a build session alive through application checking and closures called on each checked-function event; see the G6Decl notes in $JET_SCRATCH_ROOT/lanes/G6Decl/BLOCKED.md.\n\nCarried from #3526, #3520 and #4276 (closed 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -102763,7 +102794,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:41.959Z",
-      "updated": "2026-11-16T13:06:37.586Z",
+      "updated": "2026-11-17T01:47:50.031Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -102990,8 +103021,8 @@
       "title": "One fact registry: typed rows, one query, uniform flow joins and one gate ledger",
       "body": "Destination: every compiler fact a user can see (marker rules, knowledge planes, rights, build facts, gates, send-safety, failure attribution) lives in one registry of typed rows, read through one public query, so tools and libraries see the same facts the compiler uses. Why: today facts live in several tables with several readers, so tools drift from the compiler.\n\nGoverning decisions: D-META-REG1=A (one registry substrate, told apart by attachment), D-META-REG2=A (one public `compiler.query`, ratified 2026-11-11), D-LEDGER1=D (three lifetime-separated stores behind one typed query), D-FACT-FLOW1=A, D-FACT-GATE1=A, D-FACT-HOME1=A, D-FACT-OWN1=A. How a fact is declared is D-DECL-TYPES1=A (field-less structs implementing Fact), built on the declarations card. Spec: Docs/spec/reference/metaprogramming.md.\n\nCarried from #4276 (closed 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -103088,7 +103119,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:43.897Z",
-      "updated": "2026-11-16T13:06:41.751Z",
+      "updated": "2026-11-17T01:47:53.811Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -103245,8 +103276,8 @@
       "title": "jet fmt --simplify: guard clauses, single-use temporaries and one corpus migration",
       "body": "Destination: `jet fmt --simplify` rewrites code to the ratified simplest forms, the repository is migrated once with it, and style points are rewritten, never reported. Plain `jet fmt` keeps its one default style. Why: style should cost nobody attention; Jet has no warnings (owner, 2026-11-09 language review), so anything a tool can fix it fixes.\n\nGoverning decisions: D-FMT-SIMPLIFY1=A (plain jet fmt unchanged; the rewriter runs only with `--simplify`; teams canonicalize a repo in one deliberate run). Spec: Docs/spec/reference/cli.md (jet fmt), Docs/spec/spec.md (formatter).\n\nCarried from #4276 and #6637 (2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -103315,7 +103346,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:45.678Z",
-      "updated": "2026-11-16T13:06:42.715Z",
+      "updated": "2026-11-17T01:47:56.969Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -103325,8 +103356,8 @@
       "title": "Core gets no privilege a package lacks: host-leaf gates, per-domain call checks, Core-only constructs, #Unsafe and lexing",
       "body": "Destination: Core is ordinary Jet that uses only mechanisms any package can use (Docs/spec/philosophy.md, pillar 5). Today sema lets Core do things a package cannot: it gates host leaves on the caller's module name, keeps a hand-written checker per Core domain, accepts constructs only in Core files, exempts Core from the #Unsafe secret rules, and lexes and parses Core with its own rules.\n\nWhy it matters: a third-party library must be able to do what Core does, and every privilege is a second rule that tools copy and drift on.\n\nSources: findings F02, F03, F07, F08 and F14 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f). Split from #6151, which keeps the Core-declaration and twin-table work. D-HOST-LEAF1=E (runtime is an ordinary library, #6615). Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4).\n\nBallot: package-private `__` helpers (the lexing criteria) are on Main's ballot list (2026-11-15).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -103561,7 +103592,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:07.534Z",
-      "updated": "2026-11-16T13:06:48.279Z",
+      "updated": "2026-11-17T01:47:59.635Z",
       "updatedBy": "Main",
       "criteriaLastN": 21
     },
@@ -103571,8 +103602,8 @@
       "title": "Copy, resource, typestate, effect, sink and layout facts come from declarations, not Core names",
       "body": "Destination: the checker reads copy, resource, typestate, effect and sink facts, and IR reads runtime-handle layout, from the declaration of a type or function. No compiler file keeps a list of Core type or module names to decide them.\n\nWhy it matters: a package type declared the same way as a Core type must get the same facts, and every name list drifts from Core (census F1 found Core/Jobs/Jobs.jet `queue() -[DB, Env, FS, Time]>` reduced to Effect.DB).\n\nSources: findings F06, F11 and F12 of Docs/audits/2026-10-29-language-is-a-library-census.md (line numbers at dev 25f9dee58f); D-CORE-LOWER1=A (lowering). Split from #6151.\n\nStarting point for the taint criteria: an unlanded, unreviewed rework saved from lane TlsLead-3-6151 (on 73739ba7c3) at $JET_SCRATCH_ROOT/lanes/Main/tls-unlanded/TlsLead-3-6151.patch (35 files: Sema/Taint.jet, ProveReplay.jet, CoreSourceRows.jet; deletes JetFoundation/Data/Syntax/Sinks.jet).\n\nBallots: the declaration-facts criteria and the layout criterion are on Main's ballot list (2026-11-15).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -103706,7 +103737,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-16T21:35:50.864Z",
+      "updated": "2026-11-17T01:48:02.129Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -103716,8 +103747,8 @@
       "title": "Open vocabularies: the compiler reads Core members as trait impls, never by name (D-EXTEND-ARCH1)",
       "body": "Destination: every compiler list that holds a Core member becomes a Core trait that any package implements with `impl Member.Trait` and trait constants (for example `impl TOML.Format { name: \"TOML\" }`). Core impls are pre-generated (D-OPENTABLE1); package impls are read once per build, only when imported. No compiler file recognizes a Core member by name.\n\nWhy it matters: a third-party database head, file format, unit or protocol must get the same powers as Core's without a compiler release.\n\nDecision: D-EXTEND-ARCH1=A. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 6.1-6.3 (rules, the per-layer table, the checked-text worked example) and section 8 (the closed-list guard, landed as tests/guards/closed_lists.jet in 912fae1170). Each vocabulary that moves shrinks tests/guards/closed_lists/baseline.tsv.\n\nDone so far: Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls and TypedHeadKind is gone (549b47e704); CheckedText keeps holes as typed values with Hole and build (9afa7da76b, D-TEXTHEAD-HOLES1).\n\nBallot: growing public enums (a marker requiring an `else` arm) are on Main's ballot list (2026-11-15).\n\nSplit from #6202 (the research card).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -103829,7 +103860,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:09.261Z",
-      "updated": "2026-11-16T13:55:49.961Z",
+      "updated": "2026-11-17T01:48:04.982Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -103839,8 +103870,8 @@
       "title": "Taint kinds, effect roots, devices and schedulers come from declared rows and providers",
       "body": "Destination: policy, taint, accelerator devices and schedulers read declared rows and providers, so a package adds a taint kind, an effect root, a device or a scheduler with no compiler or policy-code edit.\n\nWhy it matters: these four vocabularies are closed lists in the compiler today (TaintKind in Core/Compiler/Lang.jet with three copies of the taint tags; the policy key and gate lists in Policy/; the device names in Registry/CoreValueSignatures.jet; the scheduler choice). The four built-in tags themselves become Prelude structs on #6849 c6.\n\nDecisions: D-EXTEND-ARCH1=A, D-HOST-CAPS1 (package hardware kinds), D-ACCEL-LIB1 (device interface), D-CORE-PROVIDER1 (provider traits). Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.9, 4.28, 4.31 and 6.2.\n\nSplit from #6202.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -103910,7 +103941,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:10.153Z",
-      "updated": "2026-11-16T13:06:56.217Z",
+      "updated": "2026-11-17T01:48:07.835Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -217916,6 +217947,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-17T01:48:08.776Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m83e3n",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:07.835Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lidgow",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:06.289Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t54oz7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:04.982Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06r6neu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:02.974Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:02.129Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:00.549Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:47:59.635Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0e6znz4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:47:58.034Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nctuf1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:47:56.969Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gokkbf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:47:55.709Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-17T01:47:54.710Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T01:47:53.811Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n7zpy3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:47:53.018Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:47:52.009Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T01:47:50.979Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:47:50.031Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0r6d7ja",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:47:49.191Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-17T01:47:48.132Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:47:47.034Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T01:47:46.013Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ct5o6i",
+      "note": "track,epoch,goals"
+    },
+    {
+      "at": "2026-11-17T01:47:45.058Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jd9jl3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T01:47:43.986Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-17T01:47:42.775Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-17T01:47:41.726Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0in2dft",
+      "note": "track,epoch"
+    },
+    {
       "at": "2026-11-17T01:47:40.483Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -221267,713 +221473,6 @@
       "action": "card.criteria-meet",
       "ref": "c0uwol3w",
       "note": "#100"
-    },
-    {
-      "at": "2026-11-17T01:35:47.465Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#99"
-    },
-    {
-      "at": "2026-11-17T01:35:46.314Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#98"
-    },
-    {
-      "at": "2026-11-17T01:35:45.171Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#97"
-    },
-    {
-      "at": "2026-11-17T01:35:43.943Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#96"
-    },
-    {
-      "at": "2026-11-17T01:35:42.756Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#91"
-    },
-    {
-      "at": "2026-11-17T01:35:41.181Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#90"
-    },
-    {
-      "at": "2026-11-17T01:35:40.030Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#89"
-    },
-    {
-      "at": "2026-11-17T01:35:38.890Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#88"
-    },
-    {
-      "at": "2026-11-17T01:35:37.725Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#87"
-    },
-    {
-      "at": "2026-11-17T01:35:36.561Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#86"
-    },
-    {
-      "at": "2026-11-17T01:35:35.379Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#85"
-    },
-    {
-      "at": "2026-11-17T01:35:34.213Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#84"
-    },
-    {
-      "at": "2026-11-17T01:35:33.043Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-17T01:35:31.869Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#79"
-    },
-    {
-      "at": "2026-11-17T01:35:30.647Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#78"
-    },
-    {
-      "at": "2026-11-17T01:35:29.458Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#77"
-    },
-    {
-      "at": "2026-11-17T01:35:28.239Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#76"
-    },
-    {
-      "at": "2026-11-17T01:35:27.100Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#75"
-    },
-    {
-      "at": "2026-11-17T01:35:25.940Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#74"
-    },
-    {
-      "at": "2026-11-17T01:35:24.773Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-17T01:35:23.607Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#72"
-    },
-    {
-      "at": "2026-11-17T01:35:22.434Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-17T01:35:20.918Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-17T01:35:19.758Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-17T01:35:18.620Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-17T01:35:17.447Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-17T01:35:16.240Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-17T01:35:15.065Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#61"
-    },
-    {
-      "at": "2026-11-17T01:35:13.903Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-17T01:35:12.746Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-17T01:35:11.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-17T01:35:10.398Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-17T01:35:09.232Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-17T01:35:08.094Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-17T01:35:06.947Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-17T01:35:05.794Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-17T01:35:04.639Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-17T01:35:03.470Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-17T01:35:02.299Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-17T01:35:01.110Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-17T01:34:59.949Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-17T01:34:58.760Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-17T01:34:57.586Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-17T01:34:56.405Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-17T01:34:55.244Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-17T01:34:54.072Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-17T01:34:52.916Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-17T01:34:51.454Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-17T01:34:50.289Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-17T01:34:49.116Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-17T01:34:47.915Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-17T01:34:46.743Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-17T01:34:45.541Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-17T01:34:44.307Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-17T01:34:43.146Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-17T01:34:41.942Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:34:40.782Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:34:39.519Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-17T01:34:38.318Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#18"
-    },
-    {
-      "at": "2026-11-17T01:34:37.144Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-17T01:34:35.974Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-17T01:34:34.816Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-17T01:34:33.656Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-17T01:34:32.505Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-17T01:34:31.338Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-17T01:34:30.159Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T01:34:28.965Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:34:27.808Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:34:26.650Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-17T01:34:25.455Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-17T01:34:24.223Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-17T01:34:23.058Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#61"
-    },
-    {
-      "at": "2026-11-17T01:34:21.523Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-17T01:34:20.367Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-17T01:34:19.212Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#58"
-    },
-    {
-      "at": "2026-11-17T01:34:18.031Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#57"
-    },
-    {
-      "at": "2026-11-17T01:34:16.855Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#56"
-    },
-    {
-      "at": "2026-11-17T01:34:15.659Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#54"
-    },
-    {
-      "at": "2026-11-17T01:34:14.478Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#53"
-    },
-    {
-      "at": "2026-11-17T01:34:13.205Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-17T01:34:12.044Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#51"
-    },
-    {
-      "at": "2026-11-17T01:34:10.875Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-17T01:34:09.676Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-17T01:34:08.480Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-17T01:34:07.297Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-17T01:34:06.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-17T01:34:04.916Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-17T01:34:03.706Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-17T01:34:02.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-17T01:34:01.368Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-17T01:34:00.201Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-17T01:33:59.011Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-17T01:33:57.671Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-17T01:33:56.192Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-17T01:33:54.837Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-17T01:33:53.590Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#15"
-    },
-    {
-      "at": "2026-11-17T01:33:52.403Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-17T01:33:50.776Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-17T01:33:49.820Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dphagz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:33:48.746Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-17T01:33:47.523Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#8"
     }
   ],
   "nextNum": 368,
