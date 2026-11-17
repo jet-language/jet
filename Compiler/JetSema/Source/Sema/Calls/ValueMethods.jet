@@ -9,7 +9,6 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
-    BuiltinMethodLowering,
     BuiltinMethodReceiver,
     BuiltinMethodRow,
     CallArg,
@@ -136,7 +135,7 @@ sema_value_method_kind: fn(row: BuiltinMethodRow, method: String, receiver_value
         .Arithmetic(operation) -> TExprKind.Binary{op: operation, overflow: false, line: line, lhs: receiver_value, rhs: typed[0]}
         .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem else -> TNumericOp.EuclideanDiv, argument: typed[0]}
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
-        .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
+        .Atomic(operation) -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{operation: operation}, args: typed}
         // sema_call_try_value_method checks these rows as their source call.
         .CoreSource(owner, member) -> panic("the CoreSource row `{owner}.{member}` is checked as its source call")
     }
@@ -336,7 +335,7 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     if precise.handled -> return precise
     row: builtin_method_row(receiver_value.ty, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     owner := sema_value_method_owner(receiver_value.ty)
-    if row.lowering == BuiltinMethodLowering.Atomic && scopes.transaction_wall_depth > 0 {
+    if row.lowering == .Atomic(_) && scopes.transaction_wall_depth > 0 {
         loop argument in args {
             _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         }

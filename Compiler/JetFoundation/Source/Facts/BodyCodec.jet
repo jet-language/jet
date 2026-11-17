@@ -5649,7 +5649,7 @@ body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Ne
     if position == {
         0 -> {
             f0: body_codec_get_string(bytes, input)
-            TBuiltinOp.AtomicMethod{method: f0}
+            TBuiltinOp.AtomicMethod{operation: f0}
         }
         2 -> TBuiltinOp.LenList
         3 -> TBuiltinOp.IsEmpty
@@ -5662,7 +5662,7 @@ body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Ne
         10 -> TBuiltinOp.TryStringPush
         11 -> {
             f0: body_codec_get_string(bytes, input)
-            TBuiltinOp.StringEdit{method: f0}
+            TBuiltinOp.StringEdit{symbol: f0}
         }
         12 -> TBuiltinOp.Pop
         13 -> TBuiltinOp.PriorityQueuePop
@@ -5889,12 +5889,12 @@ body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Ne
         186 -> TBuiltinOp.ByteBufferFrom
         187 -> {
             f0: body_codec_get_string(bytes, input)
-            TBuiltinOp.ByteBufferWrite{method: f0}
+            TBuiltinOp.ByteBufferWrite{symbol: f0}
         }
         188 -> TBuiltinOp.ByteBufferToBytes
         189 -> {
             f0: body_codec_get_string(bytes, input)
-            TBuiltinOp.ByteBufferMethod{method: f0}
+            TBuiltinOp.ByteBufferMethod{symbol: f0}
         }
         190 -> TBuiltinOp.ByteBufferWithCapacity
         191 -> TBuiltinOp.BagAdd
@@ -7281,7 +7281,7 @@ body_codec_get_bodyhandleop: fn(bytes: [U8], input: &BodyCodecIn) -> BodyHandleO
         150 -> BodyHandleOp.ProcessStderrRead
         151 -> {
             f0: body_codec_get_string(bytes, input)
-            BodyHandleOp.ReflectValueRead{method: f0}
+            BodyHandleOp.ReflectValueRead{symbol: f0}
         }
         152 -> BodyHandleOp.ReflectValueFields
         153 -> BodyHandleOp.ReflectFieldName

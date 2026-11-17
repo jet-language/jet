@@ -3,7 +3,6 @@
 use jet_foundation.[
     BodyHandleOp,
     Type,
-    type_name,
 ]
 
 // A checked handle operation's runtime export and the borrow mask of its
@@ -26,16 +25,11 @@ ir_handle_type_without_tags: fn(ty: Type) -> Type Never! {
     }
 }
 
-ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_count: Int) -> IRHandleRoute? {
+ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandleRoute? {
     if operation == {
-        .MathMethod(type_name, method) -> {
-            // Sema (Calls/Geometry.jet sema_call_try_geometry) checked the
-            // Transform method's name and arity; the receiver is the one
-            // borrowed argument.
-            mask := [Bool]{true}
-            loop _ in 0..<argument_count -> mask.push(false)
-            return Val(ir_handle_h("jet_math_{type_name}_{method}", mask))
-        }
+        // ir_handle_method stops a Transform method as a dedicated
+        // operation before it asks for a route.
+        .MathMethod(_, _) -> return None
         .DurationNew(unit, is_float) -> {
             symbol := if is_float -> "jet_duration_from_float" else -> "jet_duration_from_int"
             return Val(ir_handle_h(symbol, [Bool]{false, false}))
@@ -198,7 +192,7 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
         .CursorOver -> return Val(ir_handle_h("jet_cursor_over", [Bool]{true}))
         .CursorTakeUntil -> return Val(ir_handle_h("jet_cursor_take_until", [Bool]{true, true}))
         .CursorSkipWs -> return Val(ir_handle_h("jet_cursor_skip_ws", [Bool]{true}))
-        .ReflectValueRead(method) -> return Val(ir_handle_h("jet_jit_reflect_{method}", [Bool]{true}))
+        .ReflectValueRead(symbol) -> return Val(ir_handle_h(symbol, [Bool]{true}))
         .ReflectValueFields -> return Val(ir_handle_h("jet_jit_reflect_fields", [Bool]{true}))
         .ReflectFieldName -> return Val(ir_handle_h("jet_jit_reflect_field_name", [Bool]{true}))
         .ReflectFieldValue -> return Val(ir_handle_h("jet_jit_reflect_field_value", [Bool]{true}))

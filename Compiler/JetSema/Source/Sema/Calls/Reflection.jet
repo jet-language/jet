@@ -878,12 +878,12 @@ sema_call_reflection_handle_operation: fn(owner: String, method: String) -> THan
         // (`jet_jit_reflect_{method}`); `fields` builds a list instead.
         if method == "fields" -> return Val(THandleOp.ReflectValueFields)
         if method == "type_name" || method == "path" || method == "display" || method == "int" || method == "float" || method == "bool" || method == "char" || method == "string" || method == "case" {
-            return Val(THandleOp.ReflectValueRead{method: "{method}"})
+            return Val(THandleOp.ReflectValueRead{symbol: "jet_jit_reflect_{method}"})
         }
     }
     // A Case read is named the same way, as `jet_jit_reflect_case_{method}`.
     if owner == "Case" && (method == "name" || method == "path" || method == "fields") {
-        return Val(THandleOp.ReflectValueRead{method: "case_{method}"})
+        return Val(THandleOp.ReflectValueRead{symbol: "jet_jit_reflect_case_{method}"})
     }
     if owner == "Field" {
         if method == "name" -> return Val(THandleOp.ReflectFieldName)

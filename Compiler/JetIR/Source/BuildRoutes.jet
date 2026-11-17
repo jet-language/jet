@@ -914,11 +914,11 @@ ir_string_try_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
 
 // `s.insert(at, text)`, `s.remove(from, to)`, `s.truncate(n)` and
 // `s.reserve(n)` on the String write place `s`: the place's owner goes to
-// jet_rt_string_<method> with the native positions and the call's location
-// (for a position stop), and the edited text it returns is stored back. A
-// sole owner is edited in its own buffer. The arguments come first, then
-// the place (as ir_string_try_push).
-ir_string_edit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
+// the runtime symbol the method's row declares, with the native positions
+// and the call's location (for a position stop), and the edited text it
+// returns is stored back. A sole owner is edited in its own buffer. The
+// arguments come first, then the place (as ir_string_try_push).
+ir_string_edit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, symbol: String, args: [Int], span: Span) -> Int Never! {
     operands := [Int]{}
     texts := [Int]{}
     loop arg in args {
@@ -941,7 +941,7 @@ ir_string_edit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, met
     call := [Int]{ir_load_at(m, b, address, 0, string_row)}
     loop operand in operands -> call.push(operand)
     loop value in ir_location(m, b, b.line) -> call.push(value)
-    edited: ir_runtime(m, b, "jet_rt_string_{method}", call, string_row)
+    edited: ir_runtime(m, b, symbol, call, string_row)
     if ir_failed(b) -> return -1
     ir_emit(b.f, IROp.Store, -1, address, 0, edited, b.line)
     b.fresh[edited] = false
@@ -1218,8 +1218,8 @@ ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
         return ir_zip(m, p, b, ty, receiver, args, mode, fields, flatten, input_count, fill_mode, concrete, span)
     }
     if operation == .Unzip -> return ir_unzip(m, p, b, ty, receiver, span)
-    if operation == .AtomicMethod(method) {
-        return ir_atomic_method(m, p, b, ty, receiver, method, args, span)
+    if operation == .AtomicMethod(atomic) {
+        return ir_atomic_method(m, p, b, ty, receiver, atomic, args, span)
     }
     // `to_string()` on a non-numeric receiver (String, Bool, ...) is its
     // Display rendering, as numeric `to_string` and interpolation build it.
@@ -1229,8 +1229,8 @@ ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
         return ir_render_value(m, p, b, receiver_ty, value, IRRender.Display, span)
     }
     if operation == .TryStringPush -> return ir_string_try_push(m, p, b, ty, receiver, args, span)
-    if operation == .StringEdit(method) {
-        return ir_string_edit(m, p, b, receiver, method, args, span)
+    if operation == .StringEdit(symbol) {
+        return ir_string_edit(m, p, b, receiver, symbol, args, span)
     }
     if operation == .StringWithCapacity -> return ir_string_with_capacity(m, p, b, receiver, span)
     if ir_lazy_fused(m, p, b, ty, receiver, operation, args, span) == .Val(fused) -> return fused
@@ -2364,29 +2364,29 @@ ir_atomic_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, lane:
     ir_own(m, p, b, value)
 }
 
-// An Atomic method: the borrowed receiver is the word's own storage address,
-// never a copy; each operand moves into the runtime, and a load or the OLD
-// value of an add returns a fresh owner.
-ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
+// An Atomic method, by the runtime operation its row declares: the borrowed
+// receiver is the word's own storage address, never a copy; each operand
+// moves into the runtime, and a load or the OLD value of an add returns a
+// fresh owner.
+ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
-    scalar: ir_atomic_scalar(receiver_ty) ?? return ir_fail_slot(b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
-    lane: ir_atomic_lane(scalar) ?? return ir_fail_slot(b, span, "Atomic method {method} on {ir_type_name(receiver_ty)}")
-    operation: if method == "observe" -> "load" else if method == "publish" -> "store" else -> method
+    scalar: ir_atomic_scalar(receiver_ty) ?? return ir_fail_slot(b, span, "Atomic {operation} on {ir_type_name(receiver_ty)}")
+    lane: ir_atomic_lane(scalar) ?? return ir_fail_slot(b, span, "Atomic {operation} on {ir_type_name(receiver_ty)}")
     arity: if operation == "load" -> 0 else if operation == "compare_exchange" -> 2 else -> 1
     known: operation == "load" || operation == "store" || operation == "compare_exchange" || (operation == "add" && lane != "bool")
     if !known || args.len() != arity {
-        return ir_fail_slot(b, span, "Atomic method {method} with {args.len()} operands on {ir_type_name(receiver_ty)}")
+        return ir_fail_slot(b, span, "Atomic {operation} with {args.len()} operands on {ir_type_name(receiver_ty)}")
     }
     address: ir_expr(m, p, b, receiver)
     if ir_failed(b) -> return -1
     if address < 0 || ir_kind_of(m, b, address) != .Aggregate {
-        return ir_fail_slot(b, span, "Atomic method {method} receiver")
+        return ir_fail_slot(b, span, "Atomic {operation} receiver")
     }
     operands := [Int]{address}
     loop arg in args {
         value: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return -1
-        if value < 0 -> return ir_fail_slot(b, span, "Atomic method {method} on a Unit operand")
+        if value < 0 -> return ir_fail_slot(b, span, "Atomic {operation} on a Unit operand")
         operands.push(ir_atomic_taken(m, p, b, value, lane))
     }
     result_row := -1
