@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6994,
-    "rev": 111884,
+    "nextNum": 6995,
+    "rev": 111900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65602,6 +65602,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 spelling conflict: D-CONFIG-EXPORT1=A spells 'jet config export app.jet --format yaml', but top-level 'jet config' is refused today as moved under 'jet os' (jetos settings). The choices are (a) a top-level 'config' group with export, which splits 'config' between two meanings, or (b) 'jet eval FILE NAME --format json|yaml|toml'. This is a command-surface ballot on Main's list. Meanwhile the export mechanism is built behind an internal entry point, and only the CLI binding waits."
+        },
+        {
           "at": "2026-10-28",
           "text": "All decisions ratified; advanced out of deciding."
         }
@@ -65655,7 +65660,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:45.413Z",
-      "updated": "2026-11-17T01:41:34.206Z",
+      "updated": "2026-11-17T16:40:00.596Z",
       "updatedBy": "Main"
     },
     {
@@ -66341,6 +66346,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:42:19.156Z"
+        },
+        {
+          "n": 4,
+          "text": "Generic code that runs a task.group child calling a function value is memory-safe on every tier (found while building core.actor on p270, dev eba6f39612). Three failures: (1) a group child calling plan.handler(...), a function-valued field of a && struct parameter, corrupts the struct's other fields once it joins, so a match on an enum field hits the 'no else arm' ICE (exit 101); (2) a group child calling a function-valued && parameter or local segfaults at address 0 on the loop's second turn; (3) a panic inside task.any { handler(current, message) } segfaults at an address equal to the Int state's value. Proof: a case in Tests/Cases/Concurrency with the three reductions passes on O0, O1 and O2, and core.actor runs each supervised turn in a group child.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T17:40:24.285Z"
         }
       ],
       "refs": [],
@@ -66351,9 +66365,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T01:41:38.842Z",
+      "updated": "2026-11-17T17:40:24.285Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0fvnyiq",
@@ -68218,6 +68232,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c4 depends on #5201 and #6418: 3 of the 5 freestanding witnesses need backends that don't exist yet. jet build --target=wasm.no-os, board.sensor_v1 and wasm.wasi report E2104 'no backend writes a no-OS image', and --target=hosted waits on #6418. c1 is submitted (SUB DeclTypes-6-1-6144-c1-no-heap-proof, cycle p272)."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "Ballot answered by D-CORE-TARGET1=A (ratified 2026-11-14); c1 now states the build."
@@ -68267,7 +68286,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-17T01:41:59.171Z",
+      "updated": "2026-11-17T16:49:06.481Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -73047,7 +73066,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -73056,6 +73075,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c29 was the last open criterion (5 clean cases runs, p266-p270)."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -73354,11 +73378,11 @@
         {
           "n": 29,
           "text": "The cases suite never fails a C case on a racing musl sysroot build. Each run, one random C case fails: p197 fiber_liveness/a_foreign_call_that_blocks_its_carrier, p199 meta_suite J33 FFI.jet, p200 authority/ffi_library_grant_covers_its_own_library_only. Each case's engine builds musl itself, under run_all at cpu_count inside the 14G cases scope, and a clang dies with empty stderr ('Building musl ... failed: '). Fix: build the Hangar musl sysroot once per suite, shared and locked. Also, Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet stops dropping the build receipt's signal and exit code. Proof: three full cases runs with no musl failure; a forced clang kill shows its signal in the error.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T03:01:47.488Z"
+          "evidence": "dev 7f7d5ee831 (p264): the C toolchain pack builds musl once per pack digest and target, shared and locked; the test kit hands the cases suite the run's pack root; and a failed musl compile names its signal, timeout or exit code. Five full cases runs since then show no musl failure: p266, p267, p268, p269 and p270 each give 0 lines for 'building musl|toolchain pack is unavailable' in suite-pNNN/cases.out, with no C, FFI or fiber-liveness row failing on it. Forced-kill half: Jetpack/Provider/Tests/CcToolchain.jet drives a stub clang killed by SIGKILL and checks that the error names signal 9 and nothing is published. That test is worker-run with the SUB and landed through the p264 census's Jetpack area checks.",
+          "at": "2026-11-17T16:24:20.755Z"
         }
       ],
       "refs": [],
@@ -73366,9 +73390,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T14:11:07.271Z",
-      "updated": "2026-11-17T14:09:41.523Z",
+      "updated": "2026-11-17T16:24:22.924Z",
       "updatedBy": "Main",
-      "criteriaLastN": 29
+      "criteriaLastN": 29,
+      "completedAt": "2026-11-17T16:24:22.924Z"
     },
     {
       "id": "c0g5cadm",
@@ -82666,6 +82691,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "D-DEPRECATE-INLINE1=A ratified. c9 SUB IfHole-6-1-6516-c9-deprecated-inline is queued for p273."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c9 needs a spelling no decision gives (how a #Deprecated function names its inlinable replacement). Ballot to post: D-DEPRECATE-INLINE1. Option A: #Deprecated field inline: Bool{false} beside since/use/removed_in; the function's own one-expression body is the replacement, jet fix substitutes each argument subtree for its parameter when the parameter is used once or the argument is a name or literal, inline excludes use, otherwise L2001 edit-by-hand as today (precedent Go 1.24 //go:fix inline). Option B: use: takes a call template string (use: \"scaled(a, 2)\"), rejected in spirit by NEW-D-LINT-DECL1 option C (string DSL). c9 waits on that ballot; c4, c8, c7, c5 proceed."
         },
         {
@@ -82770,8 +82800,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-17T13:29:07.693Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-17T17:23:33.879Z",
+      "updatedBy": "Main",
       "criteriaLastN": 9
     },
     {
@@ -83190,7 +83220,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 needs two rulings before code: (1) how manifest bare names (optimize: O2, panic: abort, entry: mem) resolve as typed Jet values, as enum cases of the field's type or by some other spelling, which is user-visible syntax and goes on Main's ballot list; (2) loader order: package.jet is read before sema and JetEval exist for it, so prep-evaluating it adds a sema+eval pass on package.jet to every compile. Build, Output and Authority are not Core types yet (D-BUILD-CORE1 unbuilt). Scope once ruled: 67 pkg_parse_ scanners and about 6k lines of EnvModel/ModuleEval go. DeclTypes, 11:45."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -83210,7 +83246,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:01.141Z",
-      "updated": "2026-11-17T01:43:12.488Z",
+      "updated": "2026-11-17T16:51:03.269Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -97486,6 +97522,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "c2 depends on #6447/#6821: ui.saved needs screen-local state (ui.local/ui.saved over a ui.Node identity), which isn't built yet; screens render as String today. The web halves of c1, c3 and c4 wait on #6556 c9, which IfHole now owns starting with the page-runtime promise wait. c4's native half and its module-event seed are queued for p273 and p274."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c3 Linux half landed: b5a27a16a4 (p266). Case NativeApp/resume_resubscribes_and_drains_the_queue_on_linux passes on batch compiler p266. The web half waits on #6556 c9."
         },
         {
@@ -97540,6 +97581,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T21:54:50.686Z"
+        },
+        {
+          "n": 4,
+          "text": "D-LIFECYCLE-PHASE1=A is built: app.phase() -> Phase? (None without an initialized app; Phase carries instance identity, observation sequence, visibility Visible/Hidden/Unknown and execution Running/Suspending/Unknown, aggregated over app-owned windows natively and over the document on the web) and app.LIFECYCLE as Event<LifecycleEvent>. Proof: a NativeApp case and a WebBuild case print the phase sequence across hide, show and suspend.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T17:23:30.992Z"
         }
       ],
       "refs": [],
@@ -97547,9 +97597,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-17T14:09:39.825Z",
+      "updated": "2026-11-17T18:02:31.253Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0s5hn28",
@@ -98747,6 +98797,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "D-SQL-SCRIPT1=A ratified: keep the direct Store methods (query/query_one need DB.Read, execute needs DB.Write, through the all_rows Driver path) as trusted owning-code convenience. with_policy returns another scope and doesn't narrow the Store. DBScope is not a security boundary today; c7 tracks that gap. c6 is built to this outcome."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c6 code landed in dev 136c4759d9 (Store implements Driver: query/query_one need DB.Read and execute needs DB.Write, with no row policy; a policy scope allows select 1). Both proof cases PASS on the p252 batch compiler. c6 is NOT met: its text names the no-policy default as ballot D-SQL-SCRIPT1, which is not posted or ratified. The landed behavior is option A of that ballot, and the owner may keep it or revert 136c4759d9. On Main's morning ballot list."
         },
         {
@@ -98829,11 +98884,11 @@
         {
           "n": 6,
           "text": "A script can run `db.open(\"notes.db\").query(SQL{\"select …\"})` with no row policy, joining tables or touching none, with `query` needing DB.Read and `execute` DB.Write so the #5949 prompt shows read-only versus writing, while a row policy stays available through `with_policy`; and a policy scope no longer refuses a query outside its one table such as `select 1`. Today `c.query(...)` is E0102 and a script needs `db.policy`, `with_policy` and `migrate` first (Core/DB/DB.jet:697-727). The default without a policy is the ballot D-SQL-SCRIPT1, on Main's ballot list (2026-11-15). Proof: `jet test Compiler --profile cases --filter DB/script_query_without_policy` and `--filter db/policy_scope_select_1`. (was #6277 c12)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:05:54.666Z"
+          "evidence": "Holds on dev eba6f39612 (136c4759d9) and matches the ratified D-SQL-SCRIPT1=A: DB.jet query/query_one are -[DB.Read]> and execute -[DB.Write]>, and with_policy returns a policy scope. On batch compiler p270: cases DB/script_query_without_policy PASS (a script queries db.open(...) with no row policy) and DB/policy_scope_select_1 PASS. The card's second filter, db/policy_scope_select_1, matches nothing because filters are case-sensitive; DB/ is the right spelling.",
+          "at": "2026-11-17T17:33:55.950Z"
         },
         {
           "n": 7,
@@ -98850,8 +98905,8 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-17T13:29:07.693Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-17T17:33:55.950Z",
+      "updatedBy": "Main",
       "criteriaLastN": 7
     },
     {
@@ -102731,6 +102786,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "D-HOST-CALLBACK1=A and D-COMPTIME-HOST1=A ratified: checked managed-provider imports (#Import(jet.runtime, symbol:) through the extended checked foreign-provider carrier) and phase-checked provider declarations (#Import(jet.compiler, symbol:) and jet.build), where provider policy decides phases. This unblocks c7 (host-leaf declarations) and c10 (core.build on the public compiler library)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c7/c10 spellings needed (DeclTypes): (1) RouteBuiltin String/Bytes/List/iter rows need a way for Core to declare methods on the built-in String, [T] and Bytes types; (2) RouteHandle event rows need Core declarations for the generic Event/Hook handle types plus host leaves that take closures; (3) c10 needs a declared host-leaf spelling for compile-time compiler services (only #Import(c) exists) so Build/BuildPlan methods bind by declared symbol. The c7 precise-math slice is being submitted. The FileReader/FileWriter intercept removal is feasible, moves no baseline row, and is kept as a pending c7 slice."
         },
         {
@@ -102875,8 +102935,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-17T13:29:07.693Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-17T17:23:32.918Z",
+      "updatedBy": "Main",
       "criteriaLastN": 11
     },
     {
@@ -108825,7 +108885,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 has no engine: guests are translated into the host image at build time (ir_plugin_guest, JetPlugin link step), and Docs/Proposals/plugin-wasm-engine-2026-10-29.md section 1 scopes run-time translation out. D-CORE-PLUGINPATH1=A doesn't say how a run-time path gets compiled, whether by JetPlugin+JetIR+x64 in the runtime or by another engine. That's on Main's ballot list. c2 (Limits) goes ahead on the build-time guests (DeclTypes)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -108859,7 +108925,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-17T01:49:17.079Z",
+      "updated": "2026-11-17T16:52:15.100Z",
       "updatedBy": "Main"
     },
     {
@@ -119921,6 +119987,55 @@
       "updated": "2026-11-17T01:56:01.115Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0yk1mno",
+      "num": 6994,
+      "title": "Build D-AMERICAN-IDENT1=C: American spelling for source identifiers and Jet-owned machine tokens",
+      "body": "The owner ratified D-AMERICAN-IDENT1=C: rename every British-spelled source identifier (B's exact inventory), then migrate the serialized wire and storage tokens Jet owns with a versioned, deterministic offline converter. Foreign protocol keys, historical text, public paths and CLI flags stay as they are. The old format remains only as converter input. Follows #6734, which made user-visible text American.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e20",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every British-spelled identifier in Compiler, Core, Jetpack, Tools, Examples and Tests is renamed to its American spelling in one cutover, with every caller migrated. Proof: the American-spelling guard (Tests/Guards) scans identifiers as well as text and reports 0 hits, and the census and full suite stay green.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T17:23:29.058Z"
+        },
+        {
+          "n": 2,
+          "text": "Jet-owned serialized tokens (receipts, rows, wire and storage schemas) whose spelling is British are inventoried with their producers and consumers and moved to a new format version. A deterministic offline converter turns the old format into the new and verifies the migration, and no reader keeps the old spelling live. Proof: the converter's round-trip case passes and git grep finds no British token in any live reader.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T17:23:30.033Z"
+        }
+      ],
+      "refs": [
+        "6734"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-17T17:23:18.313Z",
+      "updated": "2026-11-17T17:23:30.033Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -215641,6 +215756,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T18:02:31.253Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c051j6ab",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T17:40:24.285Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mhdm27",
+      "note": "#4 Generic code that runs a task.group child calling a function"
+    },
+    {
+      "at": "2026-11-17T17:33:55.950Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0429qak",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T17:23:33.879Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fymc7l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T17:23:32.918Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T17:23:31.967Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0429qak",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T17:23:30.992Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#4 D-LIFECYCLE-PHASE1=A is built: app.phase() -> Phase? (None w"
+    },
+    {
+      "at": "2026-11-17T17:23:30.033Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yk1mno",
+      "note": "#2 Jet-owned serialized tokens (receipts, rows, wire and storag"
+    },
+    {
+      "at": "2026-11-17T17:23:29.058Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yk1mno",
+      "note": "#1 Every British-spelled identifier in Compiler, Core, Jetpack,"
+    },
+    {
+      "at": "2026-11-17T17:23:18.313Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0yk1mno",
+      "note": "Build D-AMERICAN-IDENT1=C: American spelling for source identifiers and Jet-owned machine tokens"
+    },
+    {
+      "at": "2026-11-17T16:52:15.100Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yuouhx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T16:51:03.269Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0itgqr6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T16:49:06.481Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q31aks",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T16:40:00.596Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c098yuyt",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T16:24:22.924Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0heplig",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T16:24:20.755Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0heplig",
+      "note": "#29"
+    },
     {
       "at": "2026-11-17T16:05:46.463Z",
       "by": "Main",
