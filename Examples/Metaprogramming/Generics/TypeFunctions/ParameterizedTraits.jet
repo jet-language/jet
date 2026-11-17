@@ -1,0 +1,43 @@
+// A trait takes type parameters as a struct does: `Holds: trait<T>`. Each use
+// names its arguments, so `Holds<Int>` and `Holds<String>` are two traits,
+// each reading T as its argument. A type implements the one it fits, and a
+// bound asks for exactly that one.
+
+Holds: trait<T> {
+    first: fn(self) -> T
+    size: fn(self) -> Int
+}
+
+Scores: struct {
+    values: [Int]
+
+    impl Holds<Int> {
+        first: fn(self) -> Int { self.values[0] }
+
+        size: fn(self) -> Int { self.values.len() }
+    }
+}
+
+Names: struct {
+    values: [String]
+
+    impl Holds<String> {
+        first: fn(self) -> String { self.values[0] }
+
+        size: fn(self) -> Int { self.values.len() }
+    }
+}
+
+doubled_first: fn<S: Holds<Int>>(store: S) -> Int { store.first() * 2 }
+
+greeting: fn<S: Holds<String>>(store: S) -> String {
+    "hello, {store.first()} and {store.size() - 1} more"
+}
+
+run: fn() {
+    scores: Scores{values: [Int]{21, 5, 9}}
+    names: Names{values: [String]{"Ada", "Grace"}}
+    print(doubled_first(scores))
+    print(greeting(names))
+    print(scores.size() + names.size())
+}

@@ -66,8 +66,10 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [ScalarGenerics](Generics/ScalarGenerics.jet)
 - [TypedAST](Generics/TypedAST.jet) — Typed expression AST: the evaluator's result type follows the node type.
 - [TypeTables](Generics/TypeTables.jet) — A generic function branches on its type parameter with an ordinary `if` table.
+- [TypeFunctions/ParameterizedTraits](Generics/TypeFunctions/ParameterizedTraits.jet) — A trait takes type parameters, `Holds: trait<T>`, and each use such as `Holds<Int>` names the trait made with that type.
 - [TypeFunctions/StaticSelf](Generics/TypeFunctions/StaticSelf.jet) — Through a bound, `T.zero()` calls a trait's static method returning `Self` on whichever type the build fills `T` with.
 - [TypeFunctions/TypeParameters](Generics/TypeFunctions/TypeParameters.jet) — A type parameter makes a declaration a recipe built once per type it is used at.
+- [TypeFunctions/TypeRecipes](Generics/TypeFunctions/TypeRecipes.jet) — A type recipe, `Storage<T, N: Int>: Store #run { … }`, picks the type each use gets from the types and numbers it is given.
 
 ## Reflection
 

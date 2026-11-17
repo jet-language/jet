@@ -1,6 +1,6 @@
 use {
     jet_foundation.[MARKER_SOURCE_SITES, Marker, MarkerDecl, Span, TextEdit, expr_span]
-    jet_parser.[jet_format_source, jfmt_check_parse_accepts, parse_source_layout, parser_marker_placement_edits]
+    jet_parser.[jet_format_source, jfmt_check_parse_accepts, parse_source_layout, parse_type_text, parser_marker_placement_edits]
 }
 
 marker_test_decl: fn(source: String) -> MarkerDecl {
@@ -617,6 +617,69 @@ run: fn() {}
     formatted: jet_format_source(source, false)
     assert(formatted.ok)
     assert_eq(formatted.text, source)
+}
+
+#Test("a_trait_takes_type_parameters_and_each_use_names_its_arguments") {
+    source: `Holds: trait<T, U> {
+    first: fn(self) -> T
+}
+
+Scores: struct {
+    values: [Int]
+
+    impl Holds<Int, [String]> {
+        first: fn(self) -> Int { self.values[0] }
+    }
+}
+
+impl Names.Holds<String, Int> {
+    first: fn(self) -> String { self.values[0] }
+}
+
+impl Pair<T: Priced>.Describe {
+    describe: fn(self) -> String { "pair" }
+}
+
+doubled: fn<S: Holds<Int, [String]>>(store: S) -> Int { store.first() * 2 }
+
+either: fn<S: [Holds<String, Int>, Printable]>(store: S) -> String { store.first() }
+`
+    program: parser_test_program(source)
+    program.items[0] == .Trait(holds) ?? panic("trait")
+    assert_eq(holds.name, "Holds")
+    assert_eq(holds.type_params.len(), 2)
+    assert_eq(holds.type_params[1].name, "U")
+    program.items[1] == .Struct(scores) ?? panic("struct")
+    assert_eq(scores.trait_impls[0].trait_name, "Holds<Int, [String]>")
+    program.items[2] == .Impl(names) ?? panic("impl")
+    assert_eq(names.type_name, "Names")
+    assert_eq(names.trait_name, Val("Holds<String, Int>"))
+    program.items[3] == .Impl(pair) ?? panic("conditional impl")
+    assert_eq(pair.type_name, "Pair")
+    assert_eq(pair.trait_name, Val("Describe"))
+    assert_eq(pair.type_params[0].bounds, [String]{"Priced"})
+    program.items[4] == .Func(doubled) ?? panic("doubled")
+    assert_eq(doubled.type_params[0].bounds, [String]{"Holds<Int, [String]>"})
+    program.items[5] == .Func(either) ?? panic("either")
+    assert_eq(either.type_params[0].bounds, [String]{"Holds<String, Int>", "Printable"})
+    parsed_type: parse_type_text("Holds<Int, [String]>") ?? panic("type text")
+    parsed_type == .Apply(applied, arguments) ?? panic("applied type")
+    assert_eq(applied, "Holds")
+    assert_eq(arguments.len(), 2)
+    assert(parse_type_text("Int\n    other: Int") == None)
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert_eq(formatted.text, source)
+}
+
+#Test("a_trait_type_parameter_takes_no_bound") {
+    diagnostics: parser_test_errors(
+        `Holds: trait<T: Printable> {
+    first: fn(self) -> T
+}
+`,
+    )
+    assert(diagnostics[0].what.contains("takes no bound"))
 }
 
 // Each marker as `name(args)`, its arguments as written in `source`.

@@ -23,6 +23,7 @@ use {
         RuleSite,
         Span,
         Stmt,
+        Type,
         UserPolicyDecl,
         WebBucket,
         ast_program,
@@ -108,6 +109,33 @@ use {
 
 parse_source: fn(source: [U8]) -> ParseResult {
     parser_join_effect_impls(parse_source_layout(source))
+}
+
+// `text` as exactly one type: read as the type of a struct's one field, it
+// parses with no diagnostic, the struct is the only item and has that one
+// field and nothing else, and the field's type spans the whole text, so
+// nothing in it ends the struct, adds a field or gives a default. None for
+// any other text.
+parse_type_text: fn(text: String) -> Type? Never! {
+    lead: "Probe: struct {{\n    probe: "
+    parsed: parse_source("{lead}{text}\n}}\n".bytes())
+    if parsed.diagnostics.len() != 0 || parsed.program.imports.len() != 0 || parsed.program.items.len() != 1 {
+        return None
+    }
+    if parsed.program.items[0] == .Struct(definition) {
+        if definition.fields.len() != 1 || definition.methods.len() != 0 || definition.trait_impls.len() != 0 || definition.state == .Val(_) {
+            return None
+        }
+        field: definition.fields[0]
+        if field.default == .Val(_) || field.computed == .Val(_) || field.serde_markers.len() != 0 {
+            return None
+        }
+        if field.name != "probe" || field.ty_span.start != lead.len() || field.ty_span.end != lead.len() + text.len() {
+            return None
+        }
+        return Val(field.ty)
+    }
+    None
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell

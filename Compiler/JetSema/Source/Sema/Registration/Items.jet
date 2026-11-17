@@ -5265,6 +5265,9 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // owner's plain type before any module registers; the function keeps
     // the states for the typestate checks.
     sema_state_types_rewrite_inputs(prepared_inputs)
+    // A use of a parameterized trait, `Store<Int>`, becomes the ordinary
+    // trait it names before any module registers.
+    sema_trait_instances_rewrite_inputs(prepared_inputs, diagnostics)
     // Rust CheckInner `bind_marker_applications`: a directly used imported
     // marker binds to its declaring module before any module registers.
     // Each program binds in place; its bindings read every input in place.

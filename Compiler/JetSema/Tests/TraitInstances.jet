@@ -1,0 +1,98 @@
+// A trait's type parameters: each use names its arguments and checks as the
+// trait those arguments make.
+trait_instance_errors: fn(source: String) -> [String] {
+    rows := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> rows.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    rows
+}
+
+// `Holds<T>` with one implementation at Int and one at String, then `rest`.
+trait_instance_holds: fn(rest: String) -> String {
+    holds: `Holds: trait<T> {
+    first: fn(self) -> T
+}
+
+Scores: struct {
+    values: [Int]
+
+    impl Holds<Int> {
+        first: fn(self) -> Int { self.values[0] }
+    }
+}
+
+Names: struct {
+    values: [String]
+
+    impl Holds<String> {
+        first: fn(self) -> String { self.values[0] }
+    }
+}
+`
+    "{holds}\n{rest}"
+}
+
+#Test("each use of a parameterized trait is the trait its arguments make") {
+    accepted: trait_instance_holds(
+        `doubled: fn<S: Holds<Int>>(store: S) -> Int { store.first() * 2 }
+
+first_name: fn<S: Holds<String>>(store: S) -> String { store.first() }
+
+run: fn() {
+    total: doubled(Scores{values: [Int]{21}})
+    name: first_name(Names{values: [String]{"Ada"}})
+}
+`,
+    )
+    assert_eq(trait_instance_errors(accepted).join("; "), "")
+    wrong_instance: trait_instance_holds(
+        `doubled: fn<S: Holds<Int>>(store: S) -> Int { store.first() * 2 }
+
+run: fn() {
+    total: doubled(Names{values: [String]{"Ada"}})
+}
+`,
+    )
+    assert(trait_instance_errors(wrong_instance).len() > 0, "Names implements Holds<String>, not Holds<Int>")
+    wrong_result: `Holds: trait<T> {
+    first: fn(self) -> T
+}
+
+Scores: struct {
+    values: [Int]
+
+    impl Holds<String> {
+        first: fn(self) -> Int { self.values[0] }
+    }
+}
+`
+    assert(trait_instance_errors(wrong_result).len() > 0, "Holds<String> reads T as String")
+}
+
+#Test("a parameterized trait use names concrete arguments, one per parameter") {
+    bare: `Holds: trait<T> {
+    first: fn(self) -> T
+}
+
+doubled: fn<S: Holds>(store: S) -> Int { 2 }
+`
+    bare_rows: trait_instance_errors(bare).join("; ")
+    assert(bare_rows.contains("E0104: Trait `Holds` needs its type arguments"), bare_rows)
+    counted: `Holds: trait<T> {
+    first: fn(self) -> T
+}
+
+doubled: fn<S: Holds<Int, String>>(store: S) -> Int { 2 }
+`
+    counted_rows: trait_instance_errors(counted).join("; ")
+    assert(counted_rows.contains("E0104: Trait `Holds<Int, String>` has the wrong number of type arguments"), counted_rows)
+    parameter: `Holds: trait<T> {
+    first: fn(self) -> T
+}
+
+first_of: fn<T, S: Holds<T>>(store: S) -> T { store.first() }
+`
+    parameter_rows: trait_instance_errors(parameter).join("; ")
+    assert(parameter_rows.contains("E0104: Trait `Holds<T>` names the type parameter `T`"), parameter_rows)
+}
