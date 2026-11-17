@@ -69,6 +69,7 @@ Inspect Commands:
   jet inspect memory [TARGET] [--live PID]                     Show worst-case stack per entry point
   jet inspect choices [TARGET] [--live PID]                    Show automatic compiler choices and their reasons
   jet inspect target [MACHINE] [--json]                        List target machines or show the dossier of one
+  jet inspect events --schema                                  Print the JSON Schema of compiler events
   jet inspect graph <file.jet>                                 Show the build graph
   jet inspect query build <file.jet>                           Search code and build information
   jet inspect explain-build <target|action|file> <file.jet>    Explain why a target, action, or file is rebuilt
@@ -309,6 +310,8 @@ Flags:
   --os                         With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web, wasm or freestanding
   --min-os                     With build/run/dev/test/inspect: The oldest OS version the image runs on ("" is none)
   --action-timeout             With build/run/dev/test/inspect: How long one build step may run, such as 10min
+  --link                       With build/run/dev/test/inspect: The link step of each executable: default, or a link hook such as tools.relink
+  --post-link                  With build/run/dev/test/inspect: The hooks run on each linked executable, in order, such as tools.sign
   --set                        With build/run/dev/jobs/test/check: Set one declared package setting as key=value
   --threads                    With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads
   --keep-going                 With build/run/check/test/emit: Go on past the first failure through every phase, and report every failure
@@ -329,6 +332,7 @@ Flags:
   --max                        With lint --complexity: Fail when a function exceeds this score
   --scope                      With inspect: Choose a ledger or trust scope
   --core                       With inspect structure: Show the canonical core module export facts
+  --schema                     With inspect events: Print the JSON Schema of the events jet build --json lists
   --show-default               With run/build/dev/test: Use and report the stock default
   --browser                    With test: Select browser engines for tests or serve a loopback database inspector
   --browser-scaffold           With test: Create an isolated browser-test project as --browser-scaffold=<name>

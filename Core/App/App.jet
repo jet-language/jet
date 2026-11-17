@@ -4169,6 +4169,55 @@ priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
     None
 }
 
+// Puts `text` on the clipboard, for the app and every other program to
+// paste (`paste_text`) until another copy replaces it. On Linux the app's
+// window (`App.window`) puts it there before its next frame, since the
+// display server takes a copy only from a window: a copy while the app
+// has no window, or one the display server refuses, adds a notice to
+// `notices()` and copies nothing. The other native targets keep a notice
+// that says their clipboard is not built yet. The page runtime can't reach
+// the browser's clipboard yet, so a call in code whose target is the web
+// output is a compile error.
+copy_text: fn(text: String) Never! {
+    #if #build.target.os == {
+        .Linux -> { app_window_copy(text) }
+        .MacOS -> { app_no_clipboard() }
+        .Windows -> { app_no_clipboard() }
+        .Web -> { app_no_clipboard() }
+        .Wasm -> { app_no_clipboard() }
+        .Freestanding -> { app_no_clipboard() }
+    }
+}
+
+// The clipboard's text, which the app or another program copied; None
+// when the clipboard holds no text. On Linux the app's window reads it,
+// waiting up to 2 s for another program's copy: a read while the app has
+// no window, or one that fails, adds a notice to `notices()` and gives
+// None. The other native targets keep a notice that says their clipboard
+// is not built yet and give None. A call in code whose target is the web
+// output is a compile error, as `copy_text`'s is.
+paste_text: fn() -[Env, Net, Time]> String? Never! {
+    #if #build.target.os == {
+        .Linux -> { return app_window_paste() }
+        .MacOS -> { return app_no_paste() }
+        .Windows -> { return app_no_paste() }
+        .Web -> { return app_no_paste() }
+        .Wasm -> { return app_no_paste() }
+        .Freestanding -> { return app_no_paste() }
+    }
+}
+
+// Keeps the notice that this target has no clipboard yet.
+priv app_no_clipboard: fn() Never! {
+    __keep_notice(Notice{text: "Couldn't reach the clipboard: this system's clipboard is not built yet"})
+}
+
+// Keeps the notice that this target has no clipboard yet; gives None.
+priv app_no_paste: fn() -> String? Never! {
+    app_no_clipboard()
+    None
+}
+
 // `body`, taking the files a person drops on it: each one of a kind in
 // `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
 // with shows beside `body`, as a button's does. A native target delivers
@@ -4905,6 +4954,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
     // Taken before the frames: a frame's wait holds the window.
     app_window_watch(window.__waker())
+    app_window_keep(window)
     bar: app_graph_menu_bar()
     if bar == .Val(menus) -> app_menu_bar_start(window, menus)
     tree := ui.box([UINode]{})
@@ -4955,6 +5005,8 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         loop chosen in woken.acts {
             if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
         }
+        if woken.copied == .Val(text) -> _: app_window_put_copy(window, text)
+        loop asked in woken.pastes { asked.send(app_window_clipboard(window)) ?? next }
         if woken.noticed -> stale = true
         now: app_graph_current()
         if now != shown || woken.stale {
@@ -5139,18 +5191,33 @@ priv app_window_lost: fn(why: String) Never! {
 
 // The window's wake (`app_window_watch`) while it shows; whether a live
 // binding of the screen it shows changed since it last opened the screen,
-// whether the app kept a notice since its last frame, and the menu bar's
-// items chosen for it to act on since that frame (`app_window_take`); and
-// whether a wake waits for that frame.
+// whether the app kept a notice since its last frame, the menu bar's items
+// chosen for it to act on since that frame, the newest text the app copied
+// since then (`copy_text`), and the pastes other tasks wait on
+// (`paste_text`), all taken by `app_window_take`; whether a wake waits for
+// that frame; and the window itself and the task its frames run in
+// (`app_window_keep`).
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
     noticed: Bool,
     acts: [MenuItem],
+    copied: String?,
+    pastes: [Sender<String?>],
     woken: Bool,
+    window: ui.Window?,
+    task: TaskID?,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, woken: false}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, pastes: [Sender<String?>]{}, woken: false, window: None, task: None}}
+
+// Keeps `window`, whose frames run in this task, for the clipboard
+// (`copy_text`, `paste_text`).
+priv app_window_keep: fn(window: ui.Window) Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    held.value.window = Val(window.copy())
+    held.value.task = Val(tasks.current_task())
+}
 
 // Wakes the window's frames through `waker` (`Window.__waker`) each time a
 // change to the data its screen shows comes (`app_window_wake`): the code
@@ -5177,18 +5244,23 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
 
 // What woke the window since the last call: whether a live binding of the
 // screen it shows changed, so it opens the screen again, whether the app
-// kept a notice, so it draws the frame again, and the menu bar's items
-// chosen for it to act on, in order.
-priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem]} Never! {
+// kept a notice, so it draws the frame again, the menu bar's items chosen
+// for it to act on, in order, the newest text the app copied, and the
+// pastes other tasks wait on.
+priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, pastes: [Sender<String?>]} Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
     noticed: held.value.noticed
     acts: held.value.acts.copy()
+    copied: held.value.copied.copy()
+    pastes: held.value.pastes.copy()
     held.value.stale = false
     held.value.noticed = false
     held.value.acts = [MenuItem]{}
+    held.value.copied = None
+    held.value.pastes = [Sender<String?>]{}
     held.value.woken = false
-    {stale: stale, noticed: noticed, acts: acts}
+    {stale: stale, noticed: noticed, acts: acts, copied: copied, pastes: pastes}
 }
 
 // Wakes the window's frames to draw the notice the app just kept
@@ -5201,6 +5273,78 @@ priv app_window_noticed: fn() Never! {
     }
     held.value.noticed = true
     app_window_rouse(held.value)
+}
+
+// `copy_text` on Linux: wakes the window's frames to put `text` on the
+// clipboard, replacing a copy that waits for them. Without a window it
+// keeps a notice.
+priv app_window_copy: fn(text: String) Never! {
+    if !app_window_copied(text) {
+        __keep_notice(Notice{text: "Couldn't copy: the app has no window open"})
+    }
+}
+
+// Whether the window takes `text` to copy; false without one.
+priv app_window_copied: fn(text: String) -> Bool Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 -> return false
+    held.value.copied = Val(text.copy())
+    app_window_rouse(held.value)
+    true
+}
+
+// Puts `text` on the clipboard through `window`; whether it did. A copy the
+// display server refuses keeps a notice.
+priv app_window_put_copy: fn(window: ui.Window, text: String) -[Net, Time]> Bool Never! {
+    window.set_clipboard_text(text) ?? {
+        __keep_notice(Notice{text: "Couldn't copy: {err}"})
+        return false
+    }
+    true
+}
+
+// `paste_text` on Linux: the window's frames read the clipboard. In the
+// window's own task, between its frames, that is now; another task asks
+// them and waits for the answer. Without a window it keeps a notice and
+// gives None.
+priv app_window_paste: fn() -[Env, Net, Time]> String? Never! {
+    shown: app_window_shown()
+    if shown.window == .Val(window) && shown.mine -> return app_window_clipboard(window)
+    answer: app_window_ask_paste() ?? {
+        __keep_notice(Notice{text: "Couldn't paste: the app has no window open"})
+        return None
+    }
+    answer.receive() ?? return None
+}
+
+// The window, and whether this task is the one its frames run in.
+priv app_window_shown: fn() -> {window: ui.Window?, mine: Bool} Never! {
+    held: APP_WINDOW_WAKE.guard_read()
+    current: tasks.current_task()
+    mine: if held.value.task == .Val(task) -> task == current else -> false
+    {window: held.value.window.copy(), mine: mine}
+}
+
+// Asks the window's frames for the clipboard's text; where it comes. None
+// without a window.
+priv app_window_ask_paste: fn() -> Receiver<String?>? Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 -> return None
+    pair: tasks.__channel_new<String?>()
+    held.value.pastes.push(pair.sender)
+    app_window_rouse(held.value)
+    Val(pair.receiver)
+}
+
+// The clipboard's text through `window`; None when it holds none. A read
+// that fails keeps a notice and gives None.
+priv app_window_clipboard: fn(window: ui.Window) -[Env, Net, Time]> String? Never! {
+    text: window.clipboard_text() ?? {
+        __keep_notice(Notice{text: "Couldn't paste: {err}"})
+        return None
+    }
+    if text == "" -> return None
+    Val(text)
 }
 
 // Wakes the window's frames when one of the bindings `ids`, just

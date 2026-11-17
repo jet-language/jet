@@ -11,6 +11,14 @@ COMPILER_EVENT_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/CompilerEvents
 
 COMPILER_EVENT_CORE_PATH: "Core/Compiler/Compiler.jet"
 
+// The packages that record and print the moments. They name a moment only
+// through its COMPILER_EVENT_ constant, never by writing its text.
+COMPILER_EVENT_NAMING_ROOTS: [String]{"Compiler/JetCLI/Source", "Compiler/JetDriver/Source"}
+
+// A dotted `compiler.` or `build.` word not preceded by a name or a dot; the
+// second group is the word.
+COMPILER_EVENT_SPELLING: Regex{"(^|[^A-Za-z0-9_.])((compiler|build)[.][a-z_]+)"}
+
 // The text between `open` and the next `close` after it in `line`, or "".
 compiler_event_between: fn(line: String, open: String, close: String) -> String {
     after: (line.split_once(open) ?? return "").after
@@ -44,16 +52,20 @@ compiler_event_payload_rows: fn(text: String) -> [String] {
     fields := [String]{}
     loop line in text.lines() {
         word: line.trim()
-        if word.starts_with("CompilerEventPayload{{") {
-            if current != "" -> rows.push("{current}: {fields.join(", ")}")
-            current = ""
-            opened = true
-            fields = [String]{}
-        } else if opened && word.starts_with("name: \"") {
-            current = compiler_event_between(word, "name: \"", "\"")
-            opened = false
-        } else if word.starts_with("CompilerEventField{{name: ") {
-            fields.push("{compiler_event_between(word, "name: \"", "\"")} {compiler_event_between(word, "ty: \"", "\"")}")
+        if {
+            word.starts_with("CompilerEventPayload{{") -> {
+                if current != "" -> rows.push("{current}: {fields.join(", ")}")
+                current = ""
+                opened = true
+                fields = [String]{}
+            }
+            opened && word.starts_with("name: \"") -> {
+                current = compiler_event_between(word, "name: \"", "\"")
+                opened = false
+            }
+            word.starts_with("CompilerEventField{{name: ") -> {
+                fields.push("{compiler_event_between(word, "name: \"", "\"")} {compiler_event_between(word, "ty: \"", "\"")}")
+            }
         }
     }
     if current != "" -> rows.push("{current}: {fields.join(", ")}")
@@ -76,6 +88,38 @@ compiler_event_block: fn(text: String, head: String) -> [String] {
         members.push(word.removesuffix(","))
     }
     members
+}
+
+// Every Jet source under `directory`, in directory order.
+compiler_event_sources_under: fn(directory: String) -> [String] {
+    found := [String]{}
+    entries: compiler_event_files.list_dir(directory) ?? panic("read {directory}: {err}")
+    loop entry in entries {
+        if entry.name.starts_with(".") -> next
+        if {
+            entry.is_dir -> {
+                loop path in compiler_event_sources_under(entry.path) -> found.push(path)
+            }
+            entry.name.ends_with(".jet") -> found.push(entry.path)
+        }
+    }
+    found
+}
+
+// Each place in `text` (read from `path`) outside a comment line that writes
+// one of the moment `names` itself, as `path:line: name`.
+compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [String] {
+    found := [String]{}
+    number := 0
+    loop line in text.lines() {
+        number += 1
+        if line.trim().starts_with("//") -> next
+        loop spelled in COMPILER_EVENT_SPELLING.matches(line) {
+            word: spelled.group(2) ?? ""
+            if names.contains(word) -> found.push("{path}:{number}: {word}")
+        }
+    }
+    found
 }
 
 #Test("compiler event rows and core.compiler.Event declare the same moments and payloads") {
@@ -125,4 +169,27 @@ compiler_event_block: fn(text: String, head: String) -> [String] {
         }
     }
     assert(problems.len() == 0, "the compiler event rows and core.compiler disagree:\n{problems.join("\n")}")
+}
+
+#Test("JetCLI and JetDriver name a compiler event only through its row constant") {
+    guards_enter_root()
+    rows_text: compiler_event_files.read(COMPILER_EVENT_ROWS_PATH) ?? panic("read {COMPILER_EVENT_ROWS_PATH}: {err}")
+    names := [String]{}
+    loop row in compiler_event_rows(rows_text) {
+        names.push((row.split_once(" ") ?? next).before.copy())
+    }
+    found := [String]{}
+    loop root in COMPILER_EVENT_NAMING_ROOTS {
+        loop path in compiler_event_sources_under(root) {
+            text: compiler_event_files.read(path) ?? panic("read {path}: {err}")
+            loop place in compiler_event_spelled(path, text, names) -> found.push(place)
+        }
+    }
+    assert(found.len() == 0, "these lines write a compiler event's name by hand; use its COMPILER_EVENT_ constant from {COMPILER_EVENT_ROWS_PATH}:\n{found.join("\n")}")
+}
+
+#Test("a hand-written compiler event name is found in code and strings, not in comments or longer names") {
+    names: [String]{"compiler.settled", "build.link"}
+    text: "// compiler.settled is a comment\nname: \"compiler.settled\"\nlabel: \"{{x}} build.link\"\ncore: core.compiler.settled\nlonger: \"build.linker\"\n"
+    assert_eq(compiler_event_spelled("a.jet", text, names).join("|"), "a.jet:2: compiler.settled|a.jet:3: build.link")
 }

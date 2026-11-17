@@ -1,0 +1,45 @@
+# The link hook rows. `link` is `default` or a hook path and `post_link` a
+# list of hook paths, written unquoted in a profile, as flags (one
+# `--post-link` per step) and in `build: fn`. A value that is no hook path is
+# refused, and since no command runs a link hook yet, every command refuses
+# a hook in either row with E2104 and names where it was written.
+fixture: Fixtures/LinkHooks
+artifact: app
+env: NO_COLOR=1
+step: jet build --link=default app.jet
+cwd: open
+exit: 0
+file: open/.jet/build/app exists # `default` is Jet's own link
+step: {work}/open/.jet/build/app
+exit: 0
+stdout: = "linked\n"
+step: jet build --link=tools.relink app.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [jet.InvalidCommandInput]" # no command runs a link hook yet
+stderr: ~ "`--link=tools.relink` names a link hook, and `jet build` links every image itself" # the flag is named
+step: jet run --link=relink app.jet
+cwd: open
+exit: 2
+stderr: ~ "`--link=relink` isn't a value of `link`" # a hook path names its module
+stderr: ~ "default or a hook path such as tools.relink" # the fix names the shape
+step: jet build --post-link=tools.sign --post-link=tools.notarize app.jet
+cwd: open
+exit: 2
+stderr: ~ "`--post-link=tools.sign --post-link=tools.notarize` names steps to run on each linked executable" # each flag is one more step
+step: jet run --profile=relinked app.jet
+cwd: open
+exit: 2
+stderr: ~ "`link: tools.relink` in profile `relinked` of package.jet names a link hook, and `jet run` links every image itself" # the profile field is the site
+step: jet build --profile=signed app.jet
+cwd: open
+exit: 2
+stderr: ~ "`post_link: [tools.sign]` in profile `signed` of package.jet names steps" # a profile lists its steps unquoted
+step: jet build --profile=bare app.jet
+cwd: refused_profile
+exit: 2
+stderr: ~ "`link: relink` in profile `bare` of package.jet isn't a value of `link`" # a profile's value is checked as a flag's is
+step: jet build
+cwd: code
+exit: 2
+stderr: ~ "`b.link(tools.relink)` at build.jet:2 names a link hook" # fn build writes the hook as a path

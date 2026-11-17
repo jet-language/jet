@@ -16,7 +16,7 @@ use {
         BUILD_PANIC_UNWIND,
         BUILD_PROFILE_RELEASE,
     ]
-    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_refusal, build_option_row]
+    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_listed, build_option_profile_hint, build_option_refusal, build_option_row]
 }
 
 // The `optimize:` level of a profile: O0, O1 or O2.
@@ -319,17 +319,20 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
 }
 
 // A build-option profile field's value as the row holds it: the word or
-// string, or for a List row the strings of `["a", "b"]` joined by newlines
-// (build_option_list_value); None when a List row's field is no such list.
+// string, or for a List row the strings of `["a", "b"]` and for a Hooks row
+// the hook paths of `[tools.sign]`, joined by newlines
+// (build_option_list_value); None when a List or Hooks row's field is no
+// such list.
 pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
-    if row.kind != BuildOptionKind.List -> return Val(pkg_unquote(written))
+    if !build_option_listed(row) -> return Val(pkg_unquote(written))
+    hooks: row.kind == BuildOptionKind.Hooks
     body: pkg_strip_wrapped(written.trim(), "[", "]") ?? return None
     items := [String]{}
     loop piece in pkg_top_level_commas(body) {
         item: piece.trim()
         if item == "" -> next
-        if !item.starts_with("\"") -> return None
-        items.push(pkg_unquote(item))
+        if item.starts_with("\"") == hooks -> return None
+        items.push(if hooks -> item else -> pkg_unquote(item))
     }
     Val(build_option_list_value(items))
 }

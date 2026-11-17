@@ -27,11 +27,13 @@ use {
     ]
     jet_foundation.[
         AppAuthorizedDirectory,
+        BuildOptionKind,
         Diagnostic,
         DIAGNOSTIC_ERROR,
         Program,
         Span,
         build_option_list_value,
+        build_option_row,
         diagnostic_from_registry,
     ]
     jet_lexer.[
@@ -318,9 +320,10 @@ jet_cli_outputs: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int)
 
 // `build: { release: Build{ optimize: O2, debug_info: true }, fast: Build{...} }`:
 // the profiles and their plain fields (`name: word`, `name: "text"`,
-// `name: ["a", "b"]`). A policy field (`build: { allow: Exec }`) or another
-// nested value (`settings: { ... }`) is skipped; PackageModel reads and checks
-// the whole block when the compile loads it.
+// `name: ["a", "b"]`, and for a hook row `link: tools.relink` or
+// `post_link: [tools.sign]`). A policy field (`build: { allow: Exec }`) or
+// another nested value (`settings: { ... }`) is skipped; PackageModel reads
+// and checks the whole block when the compile loads it.
 jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, close: Int) -> [JetCLIBuildProfile] Never! {
     profiles := [JetCLIBuildProfile]{}
     index := open + 1
@@ -346,15 +349,35 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
                 if list_close < 0 || list_close > body_close -> break
                 items := [String]{}
                 strings := true
+                paths := true
                 at := field + 3
                 loop at < list_close {
-                    if jet_cli_is_manifest_string(tokens[at].kind) {
-                        items.push(token_decoded(tables, tokens[at]))
-                    } else if tokens[at].kind != TOKEN_COMMA { strings = false }
+                    kind: tokens[at].kind
+                    if {
+                        jet_cli_is_manifest_string(kind) -> {
+                            items.push(token_decoded(tables, tokens[at]))
+                            paths = false
+                        }
+                        kind == TOKEN_IDENT -> {
+                            path: jet_cli_manifest_path(tokens, tables, at, list_close)
+                            items.push(path.text)
+                            strings = false
+                            at = path.end
+                            next
+                        }
+                        // Only commas stand between the items.
+                        else -> {
+                            strings = strings && kind == TOKEN_COMMA
+                            paths = paths && kind == TOKEN_COMMA
+                        }
+                    }
                     at += 1
                 }
-                if strings {
-                    fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: build_option_list_value(items), list: true})
+                field_name: token_decoded(tables, tokens[field])
+                // A Hooks row's list holds hook paths, any other row's strings.
+                hooks: jet_cli_hooks_field(field_name)
+                if (strings && !hooks) || (paths && hooks) {
+                    fields.push(JetCLIProfileField{name: field_name, value: build_option_list_value(items), list: true})
                 }
                 field = list_close + 1
                 next
@@ -367,15 +390,22 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
             }
             if tokens[field].kind == TOKEN_IDENT && field + 2 < body_close && tokens[field + 1].kind == TOKEN_COLON && (tokens[field + 2].kind == TOKEN_IDENT || tokens[field + 2].kind == TOKEN_TRUE || tokens[field + 2].kind == TOKEN_FALSE || tokens[field + 2].kind == TOKEN_UNIT_NUMBER || jet_cli_is_manifest_string(tokens[field + 2].kind)) {
                 kind: tokens[field + 2].kind
+                end := field + 3
                 value: if {
                     kind == TOKEN_TRUE -> "true"
                     kind == TOKEN_FALSE -> "false"
                     // A Duration field: `action_timeout: 10min`.
                     kind == TOKEN_UNIT_NUMBER -> "{token_decoded(tables, tokens[field + 2])}{token_suffix(tables, tokens[field + 2])}"
+                    // A word, or a Hook field's path: `link: tools.relink`.
+                    kind == TOKEN_IDENT -> {
+                        path: jet_cli_manifest_path(tokens, tables, field + 2, body_close)
+                        end = path.end
+                        path.text
+                    }
                     else -> token_decoded(tables, tokens[field + 2])
                 }
                 fields.push(JetCLIProfileField{name: token_decoded(tables, tokens[field]), value: value, list: false})
-                field += 3
+                field = end
                 next
             }
             field += 1
@@ -384,6 +414,25 @@ jet_cli_build_profiles: fn(tokens: [Token], tables: TokenTables, open: Int, clos
         index = body_close + 1
     }
     profiles
+}
+
+// The dotted name that starts at the word `at` (`tools.relink`, or one
+// word), before `close`: its text and the index past it.
+jet_cli_manifest_path: fn(tokens: [Token], tables: TokenTables, at: Int, close: Int) -> {text: String, end: Int} Never! {
+    text := token_decoded(tables, tokens[at])
+    end := at + 1
+    loop end + 1 < close && tokens[end].kind == TOKEN_DOT && tokens[end + 1].kind == TOKEN_IDENT {
+        text = "{text}.{token_decoded(tables, tokens[end + 1])}"
+        end += 2
+    }
+    {text: text, end: end}
+}
+
+// Whether profile field `name` is a Hooks build option, whose list holds
+// hook paths rather than strings.
+jet_cli_hooks_field: fn(name: String) -> Bool Never! {
+    row: build_option_row(name) ?? return false
+    row.kind == BuildOptionKind.Hooks
 }
 
 // The top-level `package.jet` fields entry resolution reads. A field the

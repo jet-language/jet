@@ -643,6 +643,11 @@ none is E2102 too, never ignored: a switch takes no `=value`
   a named output; `--small` favors a smaller binary; `--checked-alloc` on
   `build`, `run` and `test` links the checked memory allocator, which stops at
   a bad free or a write after free.
+- `--link=<hook>` names the link step of each executable `build` writes
+  (`default` is Jet's own link), and each `--post-link=<hook>` adds one step
+  run on the linked executable; a hook is a module path and a function name,
+  such as `tools.relink`. No command runs a hook yet, so either flag with a
+  hook is refused with E2104.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
 - `--watch`, `--docs`, `--coverage`, `--where`, and `--capture`
   control test or development execution; `--browser` selects browser engines;
@@ -1747,6 +1752,13 @@ sources, `entropy`, `scheduler`, `byte_sink`, `startup`), `provider_facts`,
 `hardware`, `programmers`, `execution` (`aot`, `dev`) and `audit`. A machine
 whose audit policy has no dossier lens has no dossier, and an unknown name is
 refused with the list of declared machines.
+
+`jet inspect events --schema` prints the JSON Schema (draft 2020-12) of one
+item of the `events` list in the `build.effects` status of `jet build --json`.
+It renders the schema from the toolchain's compiler event rows, so it reads no
+project: each moment is an object of its `event` name and its `data` payload,
+and each payload a closed object of its fields. Without `--schema`, or with a
+file, `--live` or `--replay` scope, it is refused (E2104).
 
 Build graph inspection (`inspect build`, `inspect graph`, and `inspect query
 build`) shares the driver's checked plan projection. Its `files` and

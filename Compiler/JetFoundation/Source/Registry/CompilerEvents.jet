@@ -1,10 +1,11 @@
 // The public moments of a compile and a build: the one list of their names,
 // their `core.compiler.Event` variants and their payloads. `#On` hooks, the
 // ordered `stages()` view, the driver's event sink and `jet build --json`
-// name a moment only through these rows, and the `--json` schema is generated
-// from them; Core/Compiler/Compiler.jet declares the same enum and payload
-// structs for Jet code. A new moment is a new row, a new variant and, when its
-// payload is new, a new payload row: a versioned public change.
+// name a moment only through these rows, and `jet inspect events --schema`
+// prints the `--json` schema rendered from them (compiler_event_schema);
+// Core/Compiler/Compiler.jet declares the same enum and payload structs for
+// Jet code. A new moment is a new row, a new variant and, when its payload is
+// new, a new payload row: a versioned public change.
 
 // One moment: its dotted name (`compiler.settled`), its `Event` variant and
 // the payload struct the variant carries.
@@ -236,4 +237,51 @@ compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
         }
         .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> "null"
     }
+}
+
+// The JSON Schema (draft 2020-12) of the object `compiler_event_json`
+// writes, rendered from the rows: one of the moments, each `{"event":
+// <name>, "data": <its payload>}`, and each payload a closed object of its
+// row's fields. A field of type String, Int or Bool is a JSON string,
+// integer or boolean, `[T]` an array of T, and any other type the payload
+// of that name. `jet inspect events --schema` prints it.
+compiler_event_schema: fn() -> String Never! {
+    refs := [String]{}
+    defs := [String]{}
+    loop row in COMPILER_EVENTS {
+        refs.push("    {{\"$ref\": {foundation_json_quote("#/$defs/{row.name}")}}}")
+        properties: "        \"event\": {{\"const\": {foundation_json_quote(row.name)}}},\n        \"data\": {{\"$ref\": {foundation_json_quote("#/$defs/{row.payload}")}}}"
+        defs.push(compiler_event_schema_object(row.name, properties, [String]{"\"event\"", "\"data\""}))
+    }
+    loop payload in COMPILER_EVENT_PAYLOADS {
+        properties := [String]{}
+        required := [String]{}
+        loop field in payload.fields {
+            properties.push("        {foundation_json_quote(field.name)}: {compiler_event_schema_type(field.ty)}")
+            required.push(foundation_json_quote(field.name))
+        }
+        defs.push(compiler_event_schema_object(payload.name, properties.join(",\n"), required))
+    }
+    head: "{{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"title\": \"compiler event\",\n  \"description\": \"One moment of a compile or a build: an item of the events array in the build.effects status of jet build --json.\",\n"
+    "{head}  \"oneOf\": [\n{refs.join(",\n")}\n  ],\n  \"$defs\": {{\n{defs.join(",\n")}\n  }}\n}}\n"
+}
+
+// The `$defs` member `name`: a closed object with the rendered `properties`
+// members, each of the `required` names (already JSON strings) present.
+compiler_event_schema_object: fn(name: String, properties: String, required: [String]) -> String Never! {
+    "    {foundation_json_quote(name)}: {{\n      \"type\": \"object\",\n      \"properties\": {{\n{properties}\n      }},\n      \"required\": [{required.join(", ")}],\n      \"additionalProperties\": false\n    }}"
+}
+
+// The JSON Schema of a payload field of row type `ty`.
+compiler_event_schema_type: fn(ty: String) -> String Never! {
+    if ty == {
+        "String" -> return "{{\"type\": \"string\"}}"
+        "Int" -> return "{{\"type\": \"integer\"}}"
+        "Bool" -> return "{{\"type\": \"boolean\"}}"
+        else -> {}
+    }
+    if ty.starts_with("[") && ty.ends_with("]") {
+        return "{{\"type\": \"array\", \"items\": {compiler_event_schema_type(ty.removeprefix("[").removesuffix("]"))}}}"
+    }
+    "{{\"$ref\": {foundation_json_quote("#/$defs/{ty}")}}}"
 }

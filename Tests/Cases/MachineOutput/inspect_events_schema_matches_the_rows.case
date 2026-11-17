@@ -1,0 +1,9 @@
+# Claim: `jet inspect events --schema` prints the JSON Schema of one item of `jet build --json`'s `events`, rendered from the compiler event rows. It lists each moment in row order with its event name and payload, and nothing past them. Each payload is a closed object that requires its row's fields, with their types.
+# The checker reads the rows from the checkout and runs the compiler under test, so the check needs the built jet; a guard runs on the seed, which can predate the `events` plane.
+fixture: InspectEventsSchemaMatchesRows.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET={jet}
+step: jet check.jet {root}
+exit: 0
+stdout: ~ "The schema matches the " # every row, and nothing past them
