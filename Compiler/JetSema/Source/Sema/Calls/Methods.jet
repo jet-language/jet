@@ -1561,20 +1561,19 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
     ""
 }
 
-// The App checks of a device call (`app.ask`, `app.open_settings`, the
-// photo, the location, the sensor streams, the open dialogs, a kept folder,
-// a drop target and a notification on this device): the web output has
-// none of them (sema_call_app_device_target), and one that may ask for a
-// permission needs its purpose (sema_call_app_permission_purpose): `ask`
-// those its argument names, the photo the camera's, the location's calls
-// its, a notification its own.
+// The App checks of a device call (`app.ask`, the photo, the location, the
+// sensor streams, the open dialogs, a kept folder, a drop target and a
+// notification on this device): the web output has none of them but `ask`
+// and `open_settings`, which a page answers (sema_call_app_device_target),
+// and one that may ask for a permission needs its purpose
+// (sema_call_app_permission_purpose): `ask` those its argument names, the
+// photo the camera's, the location's calls its, a notification its own.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
     }
     if member == {
         "ask" -> {
-            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             if args.len() == 1 {
                 sema_call_app_permission_purpose(member, alias, sema_app_permission_case(args[0].expr), expr_span(args[0].expr), program, diagnostics)
             }
@@ -1587,7 +1586,7 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "open_settings" | "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "copy_text" | "paste_text" | "share" | "draggable" | "drop_zone" -> {
+        "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "copy_text" | "paste_text" | "share" | "draggable" | "drop_zone" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         "notify" -> {
@@ -1602,13 +1601,12 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
 }
 
 // A browser asks for a device permission itself, when a page first uses
-// the device, and keeps no settings page of the app's; it shows a page's
-// notification only while the page is open; its file chooser answers after
-// the page's code has returned; a page's drop gives its own file handles;
-// and the page runtime carries no drag of the app's and reaches no
-// clipboard or share sheet yet. So a device call on an app whose resolved
-// target is the web output is refused, never dropped or answered for the
-// browser.
+// the device; it shows a page's notification only while the page is open;
+// its file chooser answers after the page's code has returned; a page's
+// drop gives its own file handles; and the page runtime carries no drag of
+// the app's and reaches no clipboard or share sheet yet. So a device call
+// on an app whose resolved target is the web output is refused, never
+// dropped or answered for the browser.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1618,7 +1616,7 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         }
         entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
         what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
-        why := "A browser asks for a device permission itself, when a page first uses the device, and keeps no settings page of the app's, so the web output has no `{alias}.{member}` to run; answering for the browser would make the answer up."
+        why := "A browser asks for a device permission itself, when a page first uses the device, and the page runtime can't hand the device's values to the app yet, so the web output has no `{alias}.{member}` to run; answering for the browser would make the answer up."
         fix := "On the web, use the device the browser's way: it asks the person when a page first uses it, and the person changes the answer in the browser's site settings. Keep `{alias}.{member}` for a native build."
         if member == "notify" {
             why = "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."

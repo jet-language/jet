@@ -67,8 +67,12 @@ has promise integration (`WebAssembly.Suspending` and
 wait's deadline, and the page goes on meanwhile: its timers, its rendering
 and its other scripts run. The program's run, each click and each drop is
 one entry, and entries take turns: a click or drop that arrives while one
-is suspended runs once that one has ended. Without promise integration the
-wait holds the thread until its deadline, as a native thread's does.
+is suspended runs once that one has ended. A device request the browser
+answers later (`app.ask`, through the page's UI provider) suspends the
+program the same way until the browser's promise settles. Without promise
+integration the wait holds the thread until its deadline, as a native
+thread's does, and such a request has no answer (`app.ask` is
+`.Restricted`).
 
 When the page has a `document`, the host shows what the program's `core.ui`
 backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)

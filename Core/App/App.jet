@@ -4485,10 +4485,13 @@ priv ASKED: Shared{[AppAsked]{}}
 // once: a later call gives the first answer. On Linux the desktop portal
 // asks (org.freedesktop.portal.Camera, org.freedesktop.portal.Location) and
 // remembers the person's choice across runs; notifications need no
-// permission there, so they are `.Granted`. A request the person dismisses,
-// or leaves unanswered for five minutes, is `.Denied`. Without a session
-// bus or a portal, and on the other native targets, the answer is
-// `.Restricted`.
+// permission there, so they are `.Granted`. In a page the browser answers,
+// through its Permissions API and, for a permission it would still ask
+// for, its own request; the program waits for the answer while the page
+// goes on. A request the person dismisses, or leaves unanswered for five
+// minutes, is `.Denied`. Without a session bus or a portal, with no page to
+// ask in or a browser without the device, and on the other native targets,
+// the answer is `.Restricted`.
 ask: fn(permission: Permission) -[Env, Net, Time]> Grant {
     if app_asked(permission) == .Val(known) -> return known
     grant: app_ask_system(permission)
@@ -4519,7 +4522,9 @@ priv app_ask_system: fn(permission: Permission) -[Env, Net, Time]> Grant Never! 
         }
         .MacOS -> { return Grant.Restricted }
         .Windows -> { return Grant.Restricted }
-        .Web -> { return Grant.Restricted }
+        .Web -> {
+            return app_grant_web(ui_rt.device(WEB_DEVICE_ASK, app_permission_key(permission)))
+        }
         .Wasm -> { return Grant.Restricted }
         .Freestanding -> { return Grant.Restricted }
     }
@@ -4540,11 +4545,38 @@ priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
     }
 }
 
-#Test("ask asks once per process and reads the portal's answer as a grant") {
+// The page provider's kind of device request `ask` makes (Host.jet
+// askPermission).
+priv WEB_DEVICE_ASK: 0
+
+// The name `permission` has as a `purposes:` key, and in a page's request.
+priv app_permission_key: fn(permission: Permission) -> String Never! {
+    if permission == {
+        .Camera -> "camera"
+        .Location -> "location"
+        .Notifications -> "notifications"
+    }
+}
+
+// The grant a page's answer gives: none when there is no page to ask in, or
+// its entry can't wait for the browser.
+priv app_grant_web: fn(said: String?) -> Grant Never! {
+    answer: said ?? return Grant.Restricted
+    if answer == "granted" -> return Grant.Granted
+    if answer == "denied" -> return Grant.Denied
+    Grant.Restricted
+}
+
+#Test("ask asks once per process and reads the portal's or the page's answer as a grant") {
     assert_eq(app_grant(dbus.PortalAnswer.Allowed), Grant.Granted)
     assert_eq(app_grant(dbus.PortalAnswer.Refused), Grant.Denied)
     assert_eq(app_grant(dbus.PortalAnswer.Ended), Grant.Denied)
     assert_eq(app_grant(dbus.PortalAnswer.Absent), Grant.Restricted)
+    assert_eq(app_grant_web(Val("granted")), Grant.Granted)
+    assert_eq(app_grant_web(Val("denied")), Grant.Denied)
+    assert_eq(app_grant_web(Val("restricted")), Grant.Restricted)
+    assert_eq(app_grant_web(None), Grant.Restricted)
+    assert_eq(app_permission_key(Permission.Notifications), "notifications")
     app_remember(Permission.Location, Grant.Denied)
     assert_eq(ask(Permission.Location), Grant.Denied)
 }
@@ -4555,7 +4587,9 @@ priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
 // (`gnome-control-center applications {id}`, `id` made from the graph's
 // title as `app_desktop_id` makes it), started apart from the app so it
 // stays open when the app exits. It is `false` when that program does not
-// start, and on the other native targets.
+// start, on the other native targets, and in a page: a browser keeps no
+// settings page of an app's, and the person changes a site's permissions in
+// the browser's own site settings.
 open_settings: fn() -[Env, Exec]> Bool {
     #if #build.target.os == {
         .Linux -> {

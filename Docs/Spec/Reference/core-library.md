@@ -5483,6 +5483,10 @@ available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. File dialogs and font shaping are absent there.
+The provider also answers the app's device requests (`app.ask`); one whose
+answer the browser gives later, a promise, is waited for where the
+program's entry can wait ([web-backend-wasm.md](web-backend-wasm.md)), and
+is no answer elsewhere.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the
@@ -6441,9 +6445,15 @@ the first answer. On Linux the desktop portal asks
 `org.freedesktop.portal.Location`, through a location session it closes
 after the answer) and remembers the person's choice across runs. A request
 the person dismisses, or leaves unanswered for five minutes, is `.Denied`.
-Notifications need no permission there and are `.Granted`. Without a
-session bus or a portal, and on the other native targets, the answer is
-`.Restricted`.
+Notifications need no permission there and are `.Granted`. In a page the
+browser answers: its Permissions API first, and for a permission it would
+still ask the person for, its own request (the camera through
+`getUserMedia`, whose stream stops at once, the location through the
+Geolocation API, notifications through `Notification.requestPermission`).
+The program waits for the answer while the page goes on
+([web-backend-wasm.md](web-backend-wasm.md)). Without a session bus or a
+portal, with no page to ask in (node runs the build) or a browser without
+the device, and on the other native targets, the answer is `.Restricted`.
 
 The system shows the person why the app wants a permission when it asks,
 so the package says why in its `purposes:` field, one line for each
@@ -6469,8 +6479,10 @@ the person changes an answer they gave `app.ask`, and is true when one
 opened. On Linux it starts GNOME Settings on its Apps page for the app's
 desktop id (`gnome-control-center applications crew-board` for an app
 titled "Crew Board"), apart from the app, so the page stays open when the
-app exits. It is false when that program does not start, and on the other
-native targets.
+app exits. It is false when that program does not start, on the other
+native targets, and in a page: a browser keeps no settings page of an
+app's, and the person changes a site's permissions in the browser's own
+site settings.
 
 `app.take_photo()` takes a photo with the device's camera and gives it as a
 `PickedFile`: its `name` (`photo-1.jpg` for the process's first), its size
@@ -6638,10 +6650,10 @@ with a notice. macOS and Windows keep that notice too: their save dialogs
 are not built yet.
 
 A browser asks for a device permission itself, when a page first uses the
-device, and keeps no settings page of the app's, so `app.ask`,
-`app.open_settings`, `app.take_photo`, `app.location` and the three streams
-in code whose target is the web output are a compile error,
-E-APP-TARGET-FEATURE, never a made-up answer.
+device, and the page runtime can't hand the device's values to the app
+yet, so `app.take_photo`, `app.location` and the three streams in code
+whose target is the web output are a compile error, E-APP-TARGET-FEATURE,
+never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
