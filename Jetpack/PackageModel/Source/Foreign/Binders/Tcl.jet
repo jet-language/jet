@@ -1,7 +1,10 @@
 // In-process Tcl binding generator ported from
 // jet_pkg_model::TclBind. A session owns one thread-affine interpreter seeded
 // with the bound source; results cross with width checks and bounded strings.
-use files: core.files
+use {
+    files: core.files
+    jetpack_foundation.[TCL_MODULE_ROOT]
+}
 
 // A Tcl binding names the directory holding the embeddable runtime.
 TclBindResult: struct {
@@ -35,7 +38,7 @@ pkg_tcl_bind: fn(source: String, lib: String, cache: String) -[FS, Env, Exec, Ti
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest: pkg_binder_identity_digest([String]{"jet-tcl-bind-v1", source, root})
-    descriptor: pkg_binder_descriptor_for(ForeignLanguage.Tcl, "Tcl")
+    descriptor: pkg_binder_descriptor_for(TCL_MODULE_ROOT, "Tcl")
     archive_digest: pkg_bridge_sha_file(archive)
     target: pkg_bridge_foreign_host_target()
     provenance := "schema=jet-tcl-bind-v1\nsha256={digest}\n"

@@ -8,7 +8,6 @@ use {
         BuildStamp,
         ComptimeInput,
         DependencyProvenance,
-        ForeignLanguage,
         LockEnvelope,
         LockError,
         LockSource,
@@ -532,7 +531,7 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     first := pkg_lock_test_pkg("base64", None)
     first.version = "0.22.1"
     first.content_hash = Val("sha256-cargo-checksum")
-    first.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    first.source = LockSource.Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"}
     first.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key", [LockedPackage]{first}) ?? panic("record bridge")
     lock: pkg_lock_load(scratch.path) ?? panic("reload")
@@ -543,13 +542,13 @@ pkg_lock_test_validation_error: fn(source: LockSource, closure: NixClosureRecord
     assert_eq(records.len(), 1)
     assert_eq(records[0].version, "0.22.1")
     assert_eq(records[0].content_hash, Val("sha256-cargo-checksum"))
-    assert_eq(records[0].source, LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
+    assert_eq(records[0].source, LockSource.Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"})
 
     // A later bridge build replaces the earlier projection instead of
     // stacking a second record for the same crate.
     second := first
     second.version = "0.22.2"
-    second.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.2", output: "sha256-bridge-2"}
+    second.source = LockSource.Foreign{language: "rust", reference: "base64@0.22.2", output: "sha256-bridge-2"}
     second.provenance = Val(DependencyProvenance{transparency: None, publisher: None, build: Val("{PKG_RUST_BRIDGE_PROVENANCE_PREFIX}bridge-key-2")})
     pkg_lock_record_rust_bridge(scratch.path, "bridge-key-2", [LockedPackage]{second}) ?? panic("record second bridge")
     relock: pkg_lock_load(scratch.path) ?? panic("reload")

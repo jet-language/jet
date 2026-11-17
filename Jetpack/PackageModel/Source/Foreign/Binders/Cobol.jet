@@ -7,7 +7,7 @@
 // the callable bridge uses scaled minor units because Decimal is not a C ABI
 // scalar.
 use {
-    jetpack_foundation.[foundation_is_reserved_generated_name]
+    jetpack_foundation.[COBOL_MODULE_ROOT, foundation_is_reserved_generated_name]
     files: core.files
 }
 
@@ -351,7 +351,7 @@ pkg_cobol_render_provenance: fn(source_path: String, foreign_source: String, gen
     identity.field("runtime", runtime_dir.bytes())
     archive_bytes: pkg_binder_read_bytes(archive, "could not read the COBOL archive for provenance")
     provenance := "schema={COBOL_BIND_SCHEMA}\nidentity={identity.finish()}\ndescriptor={descriptor}\nabi=C\nprogram={program}\nprogram_symbol={program_symbol}\nsource_path={source_path}\nsource_sha256={pkg_sha256_hex(foreign_source.bytes())}\ngenerated_sha256={pkg_sha256_hex(generated_source.bytes())}\ncopybook_path={copybook_path}\ncopybook_sha256={pkg_sha256_hex(copybook.bytes())}\nrecord={layout.name}\nrecord_width={layout.width}\nfields={layout_facts}\nruntime={runtime_dir}\narchive_sha256={pkg_sha256_hex(archive_bytes)}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Cobol, "COBOL", lib, source_path, archive, "cobc/cc/ar")
+    pkg_binder_append_artifact_boundary(provenance, COBOL_MODULE_ROOT, "COBOL", lib, source_path, archive, "cobc/cc/ar")
     Ok(provenance)
 }
 
@@ -535,6 +535,6 @@ pkg_cobol_upper_camel: fn(name: String) -> String Never! {
 }
 
 pkg_cobol_descriptor_stamp: fn() -> String Never! {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Cobol) ?? panic("COBOL binder descriptor")
+    descriptor: pkg_binder_descriptor(COBOL_MODULE_ROOT) ?? panic("COBOL binder descriptor")
     descriptor.stamp()
 }

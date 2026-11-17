@@ -2,14 +2,16 @@
 // response renderers, ported from jet_pkg_model::Bindgen. The canonical
 // foreign binder table (`pkg_foreign_binders`) stays the support denominator;
 // this registry owns only each renderer's probe and response protocol.
-use jet_pkg_model.[
-    BinderDescriptor,
-    BinderRuntime,
-    BinderStatus,
-    BindingStubKind,
-    ForeignLanguage,
-    pkg_foreign_binders,
-]
+use {
+    jetpack_foundation.[LUA_MODULE_ROOT, OCTAVE_MODULE_ROOT, PERL_MODULE_ROOT, PHP_MODULE_ROOT, PWSH_MODULE_ROOT, RUBY_MODULE_ROOT, R_MODULE_ROOT]
+    jet_pkg_model.[
+        BinderDescriptor,
+        BinderRuntime,
+        BinderStatus,
+        BindingStubKind,
+        pkg_foreign_binders,
+    ]
+}
 
 // Shared response protocol used by generated worker bindings: a
 // machine-readable response plus a human-readable explanation for the CLI.
@@ -68,10 +70,11 @@ pkg_render_lua_decode_status: fn(error: String) -> String Never! {
     "{lines.join("\n")}\n\n"
 }
 
-// One active generated response binder: its canonical descriptor key, its
-// response protocol, and the probe that renders a representative binding.
+// One active generated response binder: its canonical descriptor key (the
+// language's mount root and stub kind), its response protocol, and the probe
+// that renders a representative binding.
 RendererDescriptor: struct {
-    language: ForeignLanguage,
+    language: String,
     runtime: BinderRuntime,
     stub_kind: BindingStubKind,
     protocol: DecoderProtocol,
@@ -82,13 +85,13 @@ RendererDescriptor: struct {
 // table: its rows hold function values, which no comptime value can carry.
 pkg_generator_registry: fn() -> [RendererDescriptor] Never! {
     [RendererDescriptor]{
-        {language: ForeignLanguage.Lua, runtime: BinderRuntime.EmbeddedLua, stub_kind: BindingStubKind.LuaScript, protocol: DecoderProtocol.LuaRawJSON, render_probe: pkg_lua_render_probe},
-        {language: ForeignLanguage.PowerShell, runtime: BinderRuntime.SupervisedPowerShell, stub_kind: BindingStubKind.PowerShellScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_powershell_render_probe},
-        {language: ForeignLanguage.Perl, runtime: BinderRuntime.SupervisedPerl, stub_kind: BindingStubKind.PerlScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_perl_render_probe},
-        {language: ForeignLanguage.Ruby, runtime: BinderRuntime.SupervisedRuby, stub_kind: BindingStubKind.RubyScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_ruby_render_probe},
-        {language: ForeignLanguage.Php, runtime: BinderRuntime.SupervisedPhpPool, stub_kind: BindingStubKind.PhpScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_php_render_probe},
-        {language: ForeignLanguage.R, runtime: BinderRuntime.SupervisedR, stub_kind: BindingStubKind.RScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_r_render_probe},
-        {language: ForeignLanguage.Octave, runtime: BinderRuntime.SupervisedOctave, stub_kind: BindingStubKind.OctaveScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_octave_render_probe},
+        {language: LUA_MODULE_ROOT, runtime: BinderRuntime.EmbeddedLua, stub_kind: BindingStubKind.LuaScript, protocol: DecoderProtocol.LuaRawJSON, render_probe: pkg_lua_render_probe},
+        {language: PWSH_MODULE_ROOT, runtime: BinderRuntime.SupervisedPowerShell, stub_kind: BindingStubKind.PowerShellScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_powershell_render_probe},
+        {language: PERL_MODULE_ROOT, runtime: BinderRuntime.SupervisedPerl, stub_kind: BindingStubKind.PerlScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_perl_render_probe},
+        {language: RUBY_MODULE_ROOT, runtime: BinderRuntime.SupervisedRuby, stub_kind: BindingStubKind.RubyScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_ruby_render_probe},
+        {language: PHP_MODULE_ROOT, runtime: BinderRuntime.SupervisedPhpPool, stub_kind: BindingStubKind.PhpScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_php_render_probe},
+        {language: R_MODULE_ROOT, runtime: BinderRuntime.SupervisedR, stub_kind: BindingStubKind.RScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_r_render_probe},
+        {language: OCTAVE_MODULE_ROOT, runtime: BinderRuntime.SupervisedOctave, stub_kind: BindingStubKind.OctaveScript, protocol: DecoderProtocol.StandardEnvelope, render_probe: pkg_octave_render_probe},
     }
 }
 
@@ -98,7 +101,7 @@ pkg_generator_registry: fn() -> [RendererDescriptor] Never! {
 pkg_renderer_for: fn(descriptor: BinderDescriptor) -> RendererDescriptor? Never! {
     if descriptor.status != BinderStatus.Active -> return None
     loop renderer in pkg_generator_registry() {
-        if renderer.language == descriptor.language && renderer.stub_kind == descriptor.stub_kind {
+        if renderer.language == descriptor.root && renderer.stub_kind == descriptor.stub_kind {
             return Val(renderer)
         }
     }
@@ -110,7 +113,7 @@ pkg_renderer_for: fn(descriptor: BinderDescriptor) -> RendererDescriptor? Never!
 pkg_renderer_canonical_for: fn(renderer: RendererDescriptor) -> BinderDescriptor? Never! {
     found := [BinderDescriptor]{}
     loop descriptor in pkg_foreign_binders() {
-        if descriptor.status == BinderStatus.Active && descriptor.language == renderer.language && descriptor.stub_kind == renderer.stub_kind {
+        if descriptor.status == BinderStatus.Active && descriptor.root == renderer.language && descriptor.stub_kind == renderer.stub_kind {
             found.push(descriptor)
         }
     }

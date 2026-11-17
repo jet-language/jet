@@ -3,7 +3,10 @@
 // with `Convention => C`; constrained subtypes become range checks in the
 // generated Jet wrapper, and a pthread-once C bridge elaborates the GNAT
 // runtime before the first call.
-use files: core.files
+use {
+    files: core.files
+    jetpack_foundation.[ADA_MODULE_ROOT]
+}
 
 ADA_BIND_SCHEMA: "jet-ada-bind-v1"
 
@@ -127,7 +130,7 @@ pkg_ada_bind: fn(spec_path: String, spec: String, lib: String, cache: String) -[
     }
     pkg_binder_remove_tree_quiet(build)
     provenance := "schema={ADA_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nsource={spec_path}\nbody={body_path}\nruntime={runtime_dir}\nabi=C\nexports={bound.join(",")}\nconstraints={constraints.join(",")}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Ada, "Ada", lib, spec_path, archive, "gnatmake/gnatbind/cc/ar")
+    pkg_binder_append_artifact_boundary(provenance, ADA_MODULE_ROOT, "Ada", lib, spec_path, archive, "gnatmake/gnatbind/cc/ar")
     Ok(AdaBindResult{source: source, bound: bound, archive: archive, runtime_dir: runtime_dir, provenance: provenance})
 }
 

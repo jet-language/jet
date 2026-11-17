@@ -1,7 +1,6 @@
 use {
     jet_pkg_model.[
         CBindResult,
-        ForeignLanguage,
         HandleOverlay,
         pkg_binder_descriptor,
         pkg_cbind_bind_files,
@@ -72,7 +71,7 @@ pkg_test_cbind_source_parses: fn(source: String) -> Bool Never! {
 }
 
 #Test("C binder descriptor change rewrites the stub identity") {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? panic("C binder descriptor is registered")
+    descriptor: pkg_binder_descriptor("c") ?? panic("C binder descriptor is registered")
     base: pkg_test_cbind("int ping(int value);", "identity")
     assert_eq(base.descriptor_stamp, descriptor.stamp())
     assert(base.source.contains("jet-ffi-descriptor={descriptor.stamp()}"))

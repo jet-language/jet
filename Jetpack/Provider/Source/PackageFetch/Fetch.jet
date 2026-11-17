@@ -204,7 +204,7 @@ pkg_fetch_locked_install: fn(name: String, package: LockedPackage, expected: Str
     Ok(path)
 }
 
-pkg_fetch_locked_foreign: fn(roots: HangarRoots, root: String, package: LockedPackage, language: ForeignLanguage, reference: String) -[FS, Env]> String PackageFetchError! {
+pkg_fetch_locked_foreign: fn(roots: HangarRoots, root: String, package: LockedPackage, language: String, reference: String) -[FS, Env]> String PackageFetchError! {
     output := ""
     if package.source == .Foreign(actual_language, actual_reference, path) {
         if actual_language != language || actual_reference != reference {
@@ -220,7 +220,7 @@ pkg_fetch_locked_foreign: fn(roots: HangarRoots, root: String, package: LockedPa
     if envelope.output_hash == "" || actual != envelope.output_hash {
         return Err(pkg_fetch_locked_error(package.name, "locked foreign output hash disagrees with its envelope"))
     }
-    relative: files.join(files.join(SOURCE_ROOT_DIR, language.bindings_subdir()), "{package.name}.{FILE_EXT}")
+    relative: files.join(files.join(SOURCE_ROOT_DIR, pkg_foreign_bindings_subdir(language)), "{package.name}.{FILE_EXT}")
     stored: foundation_read_file_nofollow_at_root(output, relative, MAX_TREE_FILE_BYTES) ?? return Err(pkg_fetch_locked_error(package.name, "locked generated binding unavailable: {err}"))
     cached: foundation_read_file_nofollow_at_root(root, relative, MAX_TREE_FILE_BYTES) ?? return Err(pkg_fetch_locked_error(package.name, "project binding cache unavailable: {err}"))
     if stored != cached {

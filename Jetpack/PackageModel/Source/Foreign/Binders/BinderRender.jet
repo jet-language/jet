@@ -113,15 +113,16 @@ BinderHostOS: enum {
     }
 }
 
-// The registered descriptor for `language`; `label` names it in the error.
-pkg_binder_descriptor_for: fn(language: ForeignLanguage, label: String) -> BinderDescriptor ForeignBindError! {
-    descriptor: pkg_binder_descriptor(language) ?? return Err(ForeignBindError.Source("{label} binder descriptor is not registered"))
+// The registered descriptor for the language rooted at `root`; `label`
+// names it in the error.
+pkg_binder_descriptor_for: fn(root: String, label: String) -> BinderDescriptor ForeignBindError! {
+    descriptor: pkg_binder_descriptor(root) ?? return Err(ForeignBindError.Source("{label} binder descriptor is not registered"))
     Ok(descriptor)
 }
 
 // Append the standard boundary record for one built archive.
-pkg_binder_append_artifact_boundary: fn(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBindError! {
-    descriptor: pkg_binder_descriptor_for(language, label)
+pkg_binder_append_artifact_boundary: fn(provenance: &String, root: String, label: String, lib: String, source: String, archive: String, toolchain: String) -[FS, Env, Exec, Time.Wait]> ForeignBindError! {
+    descriptor: pkg_binder_descriptor_for(root, label)
     if pkg_bridge_append_boundary_for_artifact(provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(pkg_binder_bridge_error(error))

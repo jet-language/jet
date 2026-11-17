@@ -4,14 +4,13 @@
 // provenance, and a local native archive must export every bound symbol.
 // Symbol inventories come from the pinned `nm` tool.
 use {
-    jetpack_foundation.[SOURCE_ROOT_DIR]
+    jetpack_foundation.[COM_MODULE_ROOT, CPP_MODULE_ROOT, C_MODULE_ROOT, JAVA_MODULE_ROOT, JS_MODULE_ROOT, PY_MODULE_ROOT, SOURCE_ROOT_DIR]
     files: core.files
     process: core.process
     jet_pkg_model.[
         ArchiveInput,
         COverlayOverride,
         ForeignBridgeError,
-        ForeignLanguage,
         ForeignProvenance,
         pkg_bridge_error,
         pkg_bridge_local_archive_inputs,
@@ -20,6 +19,8 @@ use {
         pkg_bridge_spawn_error,
         pkg_bridge_text_lines,
         pkg_com_validate_provenance,
+        pkg_foreign_bindings_subdir,
+        pkg_foreign_bridge_prefix,
         pkg_sha256_hex,
     ]
 }
@@ -27,25 +28,25 @@ use {
 // Validate the artifacts behind one directly linked library.
 pkg_cffi_validate_link_inputs: fn(lib: String, project_root: String, target: String, flags: LinkFlags, overlay_overrides: [COverlayOverride], entry: String?) -[FS, Env, Exec, Time.Wait]> CFFIError! {
     bindings_root: files.join(project_root, SOURCE_ROOT_DIR)
-    cpp_prefix: (ForeignLanguage.Cpp).bridge_prefix()
+    cpp_prefix: pkg_foreign_bridge_prefix(CPP_MODULE_ROOT)
     if lib.starts_with(cpp_prefix) {
         actual: lib.removeprefix(cpp_prefix)
-        directory: files.join(bindings_root, (ForeignLanguage.Cpp).bindings_subdir())
+        directory: files.join(bindings_root, pkg_foreign_bindings_subdir(CPP_MODULE_ROOT))
         archive: files.join(directory, "lib{lib}.a")
         pkg_cffi_validate_generated_artifact(files.join(directory, "{actual}.provenance"), archive, lib)
         return pkg_cffi_validate_cpp_symbols(actual, lib, archive, target, flags)
     }
-    generated: [ForeignLanguage]{ForeignLanguage.Java, ForeignLanguage.JS, ForeignLanguage.Py}
-    loop language in generated {
-        prefix: language.bridge_prefix()
+    generated: [String]{JAVA_MODULE_ROOT, JS_MODULE_ROOT, PY_MODULE_ROOT}
+    loop root in generated {
+        prefix: pkg_foreign_bridge_prefix(root)
         if !lib.starts_with(prefix) -> next
         actual: lib.removeprefix(prefix)
-        directory: files.join(bindings_root, language.bindings_subdir())
+        directory: files.join(bindings_root, pkg_foreign_bindings_subdir(root))
         return pkg_cffi_validate_generated_artifact(files.join(directory, "{actual}.provenance"), files.join(directory, "lib{lib}.a"), lib)
     }
-    com_prefix: (ForeignLanguage.Com).bridge_prefix()
+    com_prefix: pkg_foreign_bridge_prefix(COM_MODULE_ROOT)
     if lib.starts_with(com_prefix) {
-        directory: files.join(bindings_root, (ForeignLanguage.Com).bindings_subdir())
+        directory: files.join(bindings_root, pkg_foreign_bindings_subdir(COM_MODULE_ROOT))
         return pkg_cffi_validate_com_binding(lib.removeprefix(com_prefix), directory, files.join(directory, "lib{lib}.a"))
     }
     pkg_cffi_validate_c_binding(lib, project_root, overlay_overrides, entry)
@@ -125,7 +126,7 @@ pkg_cffi_validate_provenance_archive_inputs: fn(provenance: ForeignProvenance, p
 // provenance recorded, and a declared local archive must export every
 // symbol the cache binds (after overlay replacements).
 pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overrides: [COverlayOverride], entry: String?) -[FS, Env, Exec, Time.Wait]> CFFIError! {
-    cache: pkg_cffi_binding_cache_file(project_root, ForeignLanguage.C, lib)
+    cache: pkg_cffi_binding_cache_file(project_root, C_MODULE_ROOT, lib)
     if !files.is_file(cache) {
         return
     }
@@ -203,7 +204,7 @@ pkg_cffi_binding_symbols: fn(source: String) -> [String] Never! {
 // A generated C++ archive may only need symbols the local archives of its
 // declared libraries export (C++ runtime and standard-library symbols aside).
 pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive: String, target: String, flags: LinkFlags) -[FS, Env, Exec, Time.Wait]> CFFIError! {
-    generated_name: "{(ForeignLanguage.Cpp).bridge_prefix()}{actual}"
+    generated_name: "{pkg_foreign_bridge_prefix(CPP_MODULE_ROOT)}{actual}"
     libraries := [String]{}
     loop name in flags.link_names {
         bare := name

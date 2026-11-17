@@ -2,7 +2,10 @@
 // jet_pkg_model::CppBind: the C-ABI shim that owns C++ objects in bounded
 // handle slots and catches every exception at the boundary, and the Jet
 // projection that checks the shim's error slot after each call.
-use jet_pkg_model.[ForeignLanguage, pkg_binder_descriptor]
+use {
+    jetpack_foundation.[CPP_MODULE_ROOT]
+    jet_pkg_model.[pkg_binder_descriptor]
+}
 
 pkg_cpp_render_jet: fn(lib: String, surface: CppSurface) -> String Never! {
     abi: "jet_cpp_{lib}"
@@ -38,7 +41,7 @@ pkg_cpp_render_jet: fn(lib: String, surface: CppSurface) -> String Never! {
 }
 
 pkg_cpp_descriptor_stamp: fn() -> String Never! {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Cpp) ?? panic("C++ binder descriptor is not registered")
+    descriptor: pkg_binder_descriptor(CPP_MODULE_ROOT) ?? panic("C++ binder descriptor is not registered")
     descriptor.stamp()
 }
 

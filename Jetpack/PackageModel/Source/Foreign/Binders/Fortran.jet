@@ -6,7 +6,10 @@
 // Fortran's column-major order become binding facts, and generated wrappers
 // reject a wrong flat-list length before entering foreign code. Unsupported
 // declarations fail binding instead of guessing an ABI (I3).
-use files: core.files
+use {
+    files: core.files
+    jetpack_foundation.[FORTRAN_MODULE_ROOT]
+}
 
 FORTRAN_BIND_SCHEMA: "jet-fortran-bind-v1"
 
@@ -156,7 +159,7 @@ pkg_fortran_bind: fn(source_path: String, source: String, lib: String, cache_dir
         }
     }
     provenance := "schema={FORTRAN_BIND_SCHEMA}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Fortran, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
+    pkg_binder_append_artifact_boundary(provenance, FORTRAN_MODULE_ROOT, "Fortran", lib, source_path, archive, "gfortran=-c;-fPIC;-ffree-line-length-none/ar")
     Ok(FortranBindResult{source: generated, bound: bound, archive: archive, layouts: layouts, provenance: provenance})
 }
 

@@ -3,7 +3,10 @@
 // routines split into plain scalar calls and one class handle group
 // (`<group>_new`, pointer-first methods, `<group>_free`/`_close`); a C bridge
 // keeps the raw pointers in generation-checked slots.
-use files: core.files
+use {
+    files: core.files
+    jetpack_foundation.[PASCAL_MODULE_ROOT]
+}
 
 // A Pascal binding also names the shared runtime FreePascal produced.
 PascalBindResult: struct {
@@ -112,7 +115,7 @@ pkg_pascal_bind: fn(path: String, source: String, lib: String, cache: String) -[
     bound.sort()
     source_identity: files.canonicalize(path) ?? path
     provenance := "schema=jet-pascal-bind-v1\nsource={source_identity}\nlibrary={lib}\nabi=cdecl\nint64=Jet.Int\ndouble=Jet.Float\nhandles=opaque-int64-generation\ncompiler={compiler}\nexports={bound.join(",")}\nsha256={digest}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Pascal, "Pascal", lib, path, archive, "fpc={compiler};cc={c_compiler};ar={archiver}")
+    pkg_binder_append_artifact_boundary(provenance, PASCAL_MODULE_ROOT, "Pascal", lib, path, archive, "fpc={compiler};cc={c_compiler};ar={archiver}")
     generated: pkg_pascal_render_jet(lib, surface)
     pkg_binder_remove_tree_quiet(build)
     Ok(PascalBindResult{source: generated, bound: bound, archive: archive, runtime: runtime, provenance: provenance})

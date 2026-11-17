@@ -3,12 +3,11 @@
 // typed table call, and a sanitized SVG plot call.
 use {
     jet_foundation.[JET_TYPE_NAMES]
-    jetpack_foundation.[JET_KEYWORD_LIST]
+    jetpack_foundation.[JET_KEYWORD_LIST, R_MODULE_ROOT]
     files: core.files
     jet_pkg_model.[
         ForeignBindError,
         ForeignBindResult,
-        ForeignLanguage,
         pkg_binder_append_artifact_boundary,
         pkg_binder_canonicalize,
         pkg_binder_cc_ar_identity,
@@ -37,7 +36,7 @@ PKG_R_PLOT_TEMP_PREFIX: "/tmp/jet-r-plot-"
 
 // Bind the top-level one-argument functions of the R script at `path`.
 pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: ForeignLanguage.R
+    language: R_MODULE_ROOT
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     rscript: pkg_binder_resolved_tool_path("Rscript") ?? return Err(ForeignBindError.ToolMissing("Rscript"))
@@ -62,7 +61,7 @@ pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, E
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write R process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-r-bind-v1", source, script, rscript, worker_source})
     provenance := "schema=jet-r-bind-v1\nsha256={digest}\nrscript={rscript}\nscript={script}\nworker={worker}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.R, "R", lib, script, archive, "Rscript={rscript};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, language, "R", lib, script, archive, "Rscript={rscript};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_r_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)

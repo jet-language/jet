@@ -5,7 +5,7 @@ use {
         pkg_perl_render_jet,
         pkg_perl_render_worker,
     ]
-    jet_pkg_model.[ForeignLanguage, pkg_worker_require_supported_host]
+    jet_pkg_model.[pkg_worker_require_supported_host]
 }
 
 #Test("projects perl names to jet casing without changing foreign lookup") {
@@ -38,7 +38,7 @@ use {
 }
 
 #Test("perl non posix hosts fail instead of emitting a posix facade") {
-    failed: if pkg_worker_require_supported_host(ForeignLanguage.Perl, false) == {
+    failed: if pkg_worker_require_supported_host("perl", false) == {
         .Ok(_) -> false
         .Err(_) -> true
     }

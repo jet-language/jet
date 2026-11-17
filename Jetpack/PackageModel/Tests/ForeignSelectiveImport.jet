@@ -1,17 +1,16 @@
 // Claims: every active namespace binder root takes the ordinary selective-import and single-alias
 // forms, and the import names its foreign library and local alias.
 use {
-    jet_pkg_model.[BinderStatus, BinderSurface, ForeignLanguage, pkg_foreign_binders]
+    jet_pkg_model.[BinderStatus, BinderSurface, pkg_foreign_binders, pkg_foreign_language]
     jet_parser.[parse_source]
 }
 
-pkg_test_selective_import: fn(language: ForeignLanguage) {
-    root: language.root()
+pkg_test_selective_import: fn(root: String) {
     list: parse_source("use {root}.[lib1, lib2]\nrun: fn() {{ }}\n".bytes())
     assert(list.diagnostics.is_empty(), "{root}: {list.diagnostics:Debug}")
     list.program.imports[0].kind == .Unqualified(module_alias, _, items, _, _) ?? panic("{root} list took a foreign-only parser branch")
     assert_eq(module_alias, root)
-    assert(ForeignLanguage.from_root(module_alias) == Val((language)), root)
+    assert(pkg_foreign_language(module_alias) == Val((root)), root)
     assert_eq(items.len(), 2)
     assert_eq(items[0].original, "lib1")
     assert(items[0].alias == None, root)
@@ -30,7 +29,7 @@ pkg_test_selective_import: fn(language: ForeignLanguage) {
     checked := 0
     loop binder in pkg_foreign_binders() {
         if binder.status == BinderStatus.Active && binder.surface == BinderSurface.Namespace {
-            pkg_test_selective_import(binder.language)
+            pkg_test_selective_import(binder.root)
             checked += 1
         }
     }

@@ -5,6 +5,7 @@
 // binder; that path emits no invented C++ facade.
 use {
     files: core.files
+    jetpack_foundation.[CPP_MODULE_ROOT]
     jet_pkg_model.[
         BinderToolOutput,
         BindingPlan,
@@ -16,7 +17,6 @@ use {
         ForeignBoundaryContract,
         ForeignBoundaryIdentity,
         ForeignIdentityBuilder,
-        ForeignLanguage,
         pkg_binder_copy,
         pkg_binder_create_dir_all,
         pkg_binder_descriptor,
@@ -126,7 +126,7 @@ pkg_cpp_bind_with_overlay: fn(header: String, cache: String, options: CppBindOpt
     clang_version: pkg_cpp_tool_version(resolved.clang, "clang++")
     archiver_version: pkg_cpp_tool_version(resolved.archiver, "ar")
     digest: pkg_cpp_binding_identity(canonical, header_bytes, ast_identity, clang_version, archiver_version, shim, jet_without_boundary, resolved, resolved.target, overlay)
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Cpp) ?? return Err(ForeignBindError.Source("C++ binder descriptor is not registered"))
+    descriptor: pkg_binder_descriptor(CPP_MODULE_ROOT) ?? return Err(ForeignBindError.Source("C++ binder descriptor is not registered"))
     boundary_identity: ForeignBoundaryIdentity.new(
         "header:{canonical}:sha256-{pkg_sha256_hex(header_bytes)}",
         overlay.stable_identity(),

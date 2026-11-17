@@ -27,7 +27,7 @@ use {
         evidence_report_add_record_with_derivation,
         evidence_report_new,
     ]
-    jet_pkg_model.[JET_VERSION, ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity, ForeignIdentityBuilder, ForeignLanguage, pkg_source_import_boundary]
+    jet_pkg_model.[JET_VERSION, ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity, ForeignIdentityBuilder, pkg_source_import_boundary]
 }
 
 JetCLIImportMode: enum {
@@ -116,18 +116,13 @@ jet_cli_import_canonical_language: fn(language: String) -> String Never! {
     }
 }
 
-// Rust `foreign_language`: the package model's one foreign vocabulary.
-jet_cli_import_foreign_language: fn(language: String) -> ForeignLanguage? Never! {
+// Rust `foreign_language`: the mount root of the binder an import language
+// names in the package model's one foreign vocabulary.
+jet_cli_import_foreign_language: fn(language: String) -> String? Never! {
     if language == {
-        "py" -> Val(ForeignLanguage.Py)
-        "c" -> Val(ForeignLanguage.C)
-        "cpp" -> Val(ForeignLanguage.Cpp)
-        "pascal" -> Val(ForeignLanguage.Pascal)
-        "ada" -> Val(ForeignLanguage.Ada)
-        "java" -> Val(ForeignLanguage.Java)
-        "csharp" -> Val(ForeignLanguage.DotNet)
-        "ts" | "js" -> Val(ForeignLanguage.JS)
-        "go" -> Val(ForeignLanguage.Go)
+        "py" | "c" | "cpp" | "pascal" | "ada" | "java" | "js" | "go" -> Val(language)
+        "csharp" -> Val("cs")
+        "ts" -> Val("js")
         else -> None
     }
 }

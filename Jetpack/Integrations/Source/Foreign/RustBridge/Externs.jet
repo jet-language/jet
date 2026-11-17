@@ -33,16 +33,18 @@ use {
         inline_assembly_target_supported,
         measure_expression,
     ]
-    jetpack_foundation.[GENERATED_NAME_PREFIX]
+    jetpack_foundation.[COM_MODULE_ROOT, CPP_MODULE_ROOT, C_MODULE_ROOT, GENERATED_NAME_PREFIX, KW_RUST]
     jet_parser.[parser_guest_import_symbol]
     jet_pkg_model.[
         CFFI,
         FFIHandleFact,
         FFILinkClosure,
         ForeignBridgeError,
-        ForeignLanguage,
         pkg_ascii_lower,
         pkg_binder_descriptor,
+        pkg_foreign_bridge_prefix,
+        pkg_foreign_language_name,
+        pkg_foreign_language_roots,
     ]
 }
 
@@ -660,28 +662,29 @@ pkg_ffi_asm_output_problem: fn(asm: ExternEntry, output: InlineAsmOutput, target
     }
 }
 
-// Map one hidden-bridge entry to the descriptor that owns its ABI contract.
-// Rust declarations and inline C/C++ bodies share the bridge implementation,
-// but their descriptor stamps stay distinct in the cache identity.
-pkg_ffi_foreign_language_for_entry: fn(entry: ExternEntry) -> ForeignLanguage? Never! {
+// Map one hidden-bridge entry to the root of the descriptor that owns its ABI
+// contract. Rust declarations and inline C/C++ bodies share the bridge
+// implementation, but their descriptor stamps stay distinct in the cache
+// identity.
+pkg_ffi_foreign_language_for_entry: fn(entry: ExternEntry) -> String? Never! {
     if entry.c_abi {
         // COM type-library binders use the reserved bridge prefix on every
         // generated symbol; the descriptor survives the shared C bridge.
-        if entry.rust_path.starts_with((ForeignLanguage.Com).bridge_prefix()) {
-            return Val(ForeignLanguage.Com)
+        if entry.rust_path.starts_with(pkg_foreign_bridge_prefix(COM_MODULE_ROOT)) {
+            return Val(COM_MODULE_ROOT)
         }
-        return Val(ForeignLanguage.C)
+        return Val(C_MODULE_ROOT)
     }
-    lang: entry.inline_lang() ?? return Val(ForeignLanguage.Rust)
+    lang: entry.inline_lang() ?? return Val(KW_RUST)
     if lang == {
-        "cpp" -> Val(ForeignLanguage.Cpp)
-        "c" -> Val(ForeignLanguage.C)
+        "cpp" -> Val(CPP_MODULE_ROOT)
+        "c" -> Val(C_MODULE_ROOT)
         else -> None
     }
 }
 
-pkg_ffi_foreign_descriptor_stamp: fn(language: ForeignLanguage) -> String Never! {
-    descriptor: pkg_binder_descriptor(language) ?? panic("missing canonical foreign binder descriptor for {language.debug_name()}")
+pkg_ffi_foreign_descriptor_stamp: fn(language: String) -> String Never! {
+    descriptor: pkg_binder_descriptor(language) ?? panic("missing canonical foreign binder descriptor for {pkg_foreign_language_name(language)}")
     descriptor.stamp()
 }
 
@@ -697,10 +700,11 @@ pkg_ffi_foreign_descriptor_stamps: fn(entries: [ExternEntry]) -> [String] Never!
     stamps
 }
 
-// The entries' languages in declaration order (the Rust `BTreeSet` order).
-pkg_ffi_entry_languages: fn(entries: [ExternEntry]) -> [ForeignLanguage] Never! {
-    languages := [ForeignLanguage]{}
-    loop language in ForeignLanguage.all() {
+// The entries' language roots in declaration order (the Rust `BTreeSet`
+// order).
+pkg_ffi_entry_languages: fn(entries: [ExternEntry]) -> [String] Never! {
+    languages := [String]{}
+    loop language in pkg_foreign_language_roots() {
         loop entry in entries {
             if pkg_ffi_foreign_language_for_entry(entry) == .Val(entry_language) {
                 if entry_language == language {

@@ -1,7 +1,7 @@
 // Full-byte regressions pin all fixed whitespace; digest expectations reuse the
 // actual Lock writer + SHA.
 use {
-    jet_pkg_model.[ForeignLanguage, LockFile, LockSource, LockedPackage, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_hex]
+    jet_pkg_model.[LockFile, LockSource, LockedPackage, pkg_json_render_pretty, pkg_lock_write, pkg_sha256_hex]
     jetpack_publication.[
         publication_emit_cyclonedx,
         publication_emit_spdx,
@@ -99,7 +99,7 @@ publication_sbom_test_cdx: fn(digest: String, root_name: String, root_version: S
     digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     package := publication_sbom_test_package("base64", "0.22.1", "sha256-aabb")
     package.content_hash = Val("sha256-{digest}")
-    package.source = LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-bridge"}
+    package.source = LockSource.Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"}
     lock: publication_sbom_test_lock([LockedPackage]{package})
     spdx: publication_emit_spdx(lock, "myapp", "0.1.0")
     assert(spdx.contains("PackageName: base64"))

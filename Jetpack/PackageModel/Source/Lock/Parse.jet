@@ -1010,7 +1010,7 @@ pkg_lock_parse_source: fn(input: String) -> LockSource LockError! {
     }
     if pkg_lock_kv_field(inline, "foreign") == {
         .Val(root) -> {
-            language: ForeignLanguage.from_root(root) ?? return Err(LockError.Invalid("unknown foreign language `{root}`"))
+            language: pkg_foreign_language(root) ?? return Err(LockError.Invalid("unknown foreign language `{root}`"))
             reference: pkg_lock_kv_field(inline, "reference") ?? return Err(LockError.Invalid("foreign source is missing `reference`"))
             output: pkg_lock_kv_field(inline, "output") ?? return Err(LockError.Invalid("foreign source is missing `output`"))
             return Ok(LockSource.Foreign{language: language, reference: pkg_canonical_locked_ref(reference), output: output})
