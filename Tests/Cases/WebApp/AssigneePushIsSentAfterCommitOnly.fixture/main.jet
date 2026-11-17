@@ -182,8 +182,8 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     seen: Shared{[String]{}}
     service: task { push_service(pushes, seen.copy()) }
     service.detach()
-    // The server starts its push services as it binds: here it reads
-    // `VAPID_KEY`, and without it the program stops before it listens.
+    // The server starts the push services `.push` read `VAPID_KEY` for as
+    // it binds, and without it the program stops before it listens.
     server: web.app().mount("/api", Crew{store: store.copy()}).bind("127.0.0.1:0") ?? panic("bind crewboard")
     addr: server.local_addr() ?? panic("crewboard's address")
     serving: task { server.serve() ?? panic("serve crewboard") }
