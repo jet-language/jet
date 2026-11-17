@@ -1,7 +1,8 @@
 // Two browser cases, each run on every engine browser-tests.conf names, in a
-// fresh browser and context per attempt. `greeting` passes; `banner` waits
-// for an element the page never shows, so each engine fails it twice. Each
-// banner attempt first checks that the failed attempt's cookie is gone.
+// fresh browser and context per attempt. `greeting` passes, reading back the
+// local storage it wrote; `banner` waits for an element the page never shows,
+// so each engine fails it twice. Each banner attempt first checks that the
+// failed attempt's cookie is gone.
 use browser: core.browser
 
 #Test("browser cases run on every engine") {
@@ -13,6 +14,10 @@ use browser: core.browser
     greeting: browser.run_case(config, "greeting", fn(page: BrowserPage) -[Env, Net, Time, Time.Wait]> BrowserError! {
         page.goto(url)
         page.get_by_css("#greeting").wait(browser.timeout(10000))
+        page.storage_set("local", "visited", "yes")
+        if page.storage_get("local", "visited") != Val("yes") {
+            return Err(BrowserError{kind: "protocol"})
+        }
     })
     report = browser.report_add_case(report, greeting)
     banner: browser.run_case(config, "banner", fn(page: BrowserPage) -[Env, Net, Time, Time.Wait]> BrowserError! {

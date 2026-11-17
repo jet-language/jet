@@ -1,0 +1,39 @@
+// A type recipe is a type computed while building from the types and numbers
+// it is given. `Storage<T, N: Int>` makes an `Inline<T, N>`, kept in place,
+// while `N <= 4`, and a `Heap<T>` past that. Both choices implement the
+// recipe's bound, `Store`, so every value it makes is used through it.
+
+Store: trait {
+    count: fn(self) -> Int
+    describe: fn(self) -> String
+}
+
+Inline: struct<T, N: Int> {
+    items: [T#N]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+
+        describe: fn(self) -> String { "inline of {self.items.len()}" }
+    }
+}
+
+Heap: struct<T> {
+    items: [T]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+
+        describe: fn(self) -> String { "heap of {self.items.len()}" }
+    }
+}
+
+Storage<T, N: Int>: Store #run { if N <= 4 -> Inline<T, N> else -> Heap<T> }
+
+run: fn() {
+    small: Storage<String, 2>{items: [String#2]{"a", "b"}}
+    big: Storage<Int, 100>{items: [1, 2, 3]}
+    print(small.describe())
+    print(big.describe())
+    print(small.count() + big.count())
+}

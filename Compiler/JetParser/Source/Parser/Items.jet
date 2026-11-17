@@ -90,6 +90,7 @@ use {
         target_os_gates,
         target_os_key,
         target_os_named,
+        type_name,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -136,6 +137,7 @@ use {
         TOKEN_RPAREN,
         TOKEN_SELF,
         TOKEN_SEMI,
+        TOKEN_SHR,
         TOKEN_SLASH,
         TOKEN_STAR,
         TOKEN_STRING,
@@ -2427,6 +2429,12 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
         trait_text = "{trait_text}.{parser_value(state, segment)}"
         trait_end = segment.span
     }
+    // `impl Store<Int> {`: the arguments of a parameterized trait join its
+    // name.
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) {
+        trait_text = "{trait_text}{parser_parse_trait_args(state)}"
+        trait_end = Span{start: trait_end.start, end: parser_prev_token_end(state)}
+    }
     trait_span: parser_cover(trait_name.span, trait_end)
     operator_rhs: parser_parse_operator_rhs(state, Val(trait_text.copy()), None, None)
     if operator_rhs == None && owned_trait_conversion(trait_text) {
@@ -2771,6 +2779,7 @@ parser_apply_type_markers: fn(state: &JetParserState, value: &StructDef, markers
 parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> TraitDef {
     parser_bump(state)
     name: parser_expect_name(state, "after `trait`")
+    type_params: parser_parse_trait_type_params(state)
     // `Name: trait: [A, B] {{ … }}` lists the traits it
     // builds on with the ordinary bound spelling.
     supertraits := [String]{}
@@ -2873,7 +2882,57 @@ parser_parse_trait: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
         scoped.scope = "trait"
         cap = Val(scoped)
     }
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap, laws: laws}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: trait_name, name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods, markers: markers, cap: cap, laws: laws, type_params: type_params}
+}
+
+// `Store: trait<T>`: a parameterized trait takes type parameters only. A
+// bound or a number parameter on one is refused, since each use names its
+// arguments and the trait it makes is checked as written.
+parser_parse_trait_type_params: fn(state: &JetParserState) -> [TypeParam] {
+    params: parser_parse_type_params(state)
+    loop param in params {
+        if param.prep != None || param.bounds.len() > 0 {
+            parser_add_error(state, param.name_span, "a trait's type parameter `{param.name}` takes no bound", "a parameterized trait takes plain type parameters; each use such as `Store<Int>` names the trait made with that type", "write `trait<{param.name}>` and bound the functions that use the trait")
+        }
+    }
+    params
+}
+
+// `<Int, String>` after a trait's name where it is used: the canonical text
+// of its type arguments, which joins the name, `Store<Int, String>`. That
+// text names the trait made from the parameterized one; sema reads the
+// arguments back from it (parse_type_text).
+parser_parse_trait_args: fn(state: &JetParserState) -> String {
+    parser_bump(state)
+    written := [String]{}
+    loop {
+        parsed: parser_parse_type(state, 0)
+        written.push(type_name(parsed.ty))
+        if parser_current_kind(state) != TOKEN_COMMA -> break
+        parser_bump(state)
+    }
+    if parser_type_close_here(state) -> parser_take_type_close(state) else {
+        parser_expect(state, TOKEN_GT, "`>` after the trait's type arguments")
+    }
+    "<{written.join(", ")}>"
+}
+
+// Whether the `<` here opens a trait's type arguments in an impl head,
+// `impl Scores.Store<Int> {`, rather than the type's parameter list of a
+// conditional impl, `impl Pair<T: Priced>.Describe`, which a `.` follows.
+parser_impl_trait_args_ahead: fn(state: &JetParserState) -> Bool Never! {
+    depth := 0
+    offset := 0
+    loop offset < 256 {
+        kind: parser_kind_at(state, offset)
+        if kind == TOKEN_EOF || kind == TOKEN_LBRACE || kind == TOKEN_SEMI -> return false
+        if kind == TOKEN_LT -> depth += 1
+        if kind == TOKEN_GT -> depth -= 1
+        if kind == TOKEN_SHR -> depth -= 2
+        offset += 1
+        if depth <= 0 -> return parser_kind_at(state, offset) != TOKEN_DOT
+    }
+    false
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
@@ -2886,7 +2945,7 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         parser_bump(state)
         if parser_current_kind(state) != TOKEN_RBRACKET {
             loop {
-                bounds.push(parser_parse_bound_path(state, list_context))
+                bounds.push(parser_parse_bound(state, list_context))
                 if parser_current_kind(state) == TOKEN_RBRACKET -> break
                 if parser_current_kind(state) != TOKEN_COMMA -> break
                 parser_bump(state)
@@ -2896,14 +2955,21 @@ parser_parse_trait_bounds: fn(state: &JetParserState, list_context: String, clos
         return bounds
     }
     loop {
-        bound_name: parser_parse_bound_path(state, single_context)
-        if bound_name == "Quantity" && parser_current_kind(state) == TOKEN_LT {
-            bounds.push(parser_parse_quantity_bound(state))
-        } else { bounds.push(bound_name) }
+        bounds.push(parser_parse_bound(state, single_context))
         if parser_current_kind(state) != TOKEN_PIPE -> break
         parser_bump(state)
     }
     bounds
+}
+
+// One bound: a trait name with its module path, then the canonical text of
+// its arguments when it is a quantity bound or a parameterized trait
+// (`Store<Int>`).
+parser_parse_bound: fn(state: &JetParserState, context: String) -> String {
+    bound_name: parser_parse_bound_path(state, context)
+    if parser_current_kind(state) != TOKEN_LT -> return bound_name
+    if bound_name == "Quantity" -> return parser_parse_quantity_bound(state)
+    "{bound_name}{parser_parse_trait_args(state)}"
 }
 
 // One bound name, with the module path of a dotted bound (`mem.Allocator`).
@@ -2994,7 +3060,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // impl, `impl Pair<T: Priced>.Describe`, which applies only where `T`
     // meets its bounds; sema checks the list names the type's parameters.
     type_params := [TypeParam]{}
-    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) {
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && !(parts.len() >= 2 && parser_impl_trait_args_ahead(state)) {
         open: parser_current(state).span
         params: parser_parse_type_params(state)
         bounded: loop param in params {
@@ -3014,6 +3080,12 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             parser_bump(state)
             parts.push(parser_expect_name(state, "after `.` in `impl`"))
         }
+    }
+    // `impl Scores.Store<Int> {`: the arguments of a parameterized trait
+    // join the trait's name.
+    trait_args := ""
+    if parser_current_kind(state) == TOKEN_LT && !parser_aborting(state) && parts.len() >= 2 {
+        trait_args = parser_parse_trait_args(state)
     }
     first: parts[0]
     count: parts.len()
@@ -3044,6 +3116,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         loop index in (owner_count + 1)..<count {
             trait_text = "{trait_text}.{parser_value(state, parts[index])}"
         }
+        trait_text = "{trait_text}{trait_args}"
         trait_name = Val(trait_text)
         trait_span = Val(parser_cover(parts[owner_count].span, parts[count - 1].span))
     }

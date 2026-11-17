@@ -663,6 +663,11 @@ TraitDef: struct {
     // `jet test` runs each one as a property of every type in the package
     // under test that implements the trait, with `Self` that type.
     laws: [TestDef]{[TestDef]{}}
+    // `Store: trait<T> { … }`: the type parameters of a parameterized
+    // trait. Each use writes its arguments, `Store<Int>`, and names one
+    // ordinary trait made from this one with `T` replaced
+    // (sema_trait_instances_rewrite_inputs). Empty for a plain trait.
+    type_params: [TypeParam]{[TypeParam]{}}
 }
 
 // One trait constant requirement. `ty` is written in the trait's module;

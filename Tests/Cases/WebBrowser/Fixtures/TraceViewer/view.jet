@@ -1,0 +1,43 @@
+// Opens the run's report.html viewer in the locked chromium and prints what
+// it shows: the summary and test tree with the selected test's details, the
+// viewer reloading itself while it watches, and the tree once the filter
+// matches nothing. A watching viewer reloads every second, and a command a
+// reload interrupts fails, so each step runs again, up to five times.
+use {
+    browser: core.browser
+    files: core.files
+}
+
+run: fn() {
+    root: files.pwd() ?? panic("the project folder: {err}")
+    b: browser.launch("chromium") ?? panic("launch: {err}")
+    context: b.context() ?? panic("context: {err}")
+    page: context.page() ?? panic("page: {err}")
+    page.goto("file://{root}/.jet/browser-tests/report.html") ?? panic("open the viewer: {err}")
+    details := ""
+    loop _ in 0..<5 {
+        page.get_by_css("#tree button").wait(browser.timeout(10000)) ?? next
+        page.get_by_css("#tree button").click() ?? next
+        shown: page.text() ?? next
+        if shown.contains("Timeline") {
+            details = shown
+            break
+        }
+    }
+    print("== details\n{details}")
+    loop _ in 0..<5 {
+        if page.get_by_text("Timeline").wait_gone(browser.timeout(3000)) == .Ok(_) {
+            print("== watch: the viewer reloaded")
+            break
+        }
+    }
+    loop _ in 0..<5 {
+        page.get_by_css("#filter").fill("no such test") ?? next
+        shown: page.text() ?? next
+        if !shown.contains("PASS notes") {
+            print("== filtered: the tree is empty")
+            break
+        }
+    }
+    b.close() ?? ()
+}

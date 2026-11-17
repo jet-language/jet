@@ -28,9 +28,9 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 
 | Spelling | Meaning |
 | --- | --- |
-| `:` | immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {…}`, `name: module {…}` |
+| `:` | immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {…}`, `name: module {…}`; `run: fn() {…}` declares a program's one entry, and a program is either that entry or its entry file's top-level statements, never both, anywhere in its load graph, package or project (E0621) |
 | `:=` | mutable binding |
-| `name := value` | mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use |
+| `name := value` | mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use; any function that sees it reads and writes it directly, the main task owns it, and a task whose work touches it is a build error naming the variable and the call path |
 | `use { … } / use alias: path` | import block: one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
@@ -79,7 +79,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `compiler.query(source, kind, at:, limit:)` | the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows |
 | `fn(…) { … }` | lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) { n > 2 })`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int { n * n }`); the body is always braced and its last value is the result |
 | `value.method` | bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) { value.method(a) }` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `&self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both |
-| `-[…]` | effect row on a callable |
+| `-[…]` | effect row on a callable; a signature has, after its parameters, nothing or exactly one arrow, `->` or `-[Effects]>`, then its optional result type, then its optional error contract (`load: fn(p: Path) -[FS.Read]> String IOError!`); a unit function that can fail writes the arrow and its contract alone (`save: fn(p: Path) -[FS.Write]> IOError!`), and a contract written before the arrow is not Jet syntax |
 | `!` | error-contract mark after its error type (`E!`, `(A \| B)!`); deny-only root in an effect row |
 | `?` | optional type mark after its type (`T?`) |
 | `??` | fallback |
@@ -91,12 +91,12 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
-| `{ … }` | typed anonymous value |
+| `{ … }` | record, the unnamed struct: `{x: 1, y: 2}` as a value, `{min: Int, max: Int}` as a type, `{min, max}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{x}` is a block, `{x, y}` and `{x: x}` are records and `{}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax |
 | `loop x in xs -> item / Head{loop x in xs -> item}` | yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
 | `\u{H}` | Unicode scalar escape in quoted text and character literals, beside `\n`, `\r`, `\t`, `\"` and `\\`: one to six hexadecimal digits up to 10FFFF, never a surrogate (D800-DFFF); byte literals have none and write `\xNN` |
-| `,` | separator with optional trailing item in every comma list |
+| `,` | separator with optional trailing item in every comma list; in braces it separates data members (struct fields, enum cases, record entries, collection elements, map entries) and a trait's bodiless function requirements, while a member declared with a body ends at its closing brace without one; fmt writes the trailing comma of a multiline list and drops it from a one-line list |
 | `Type{field: pattern, ..}` | named struct pattern; fields bind or test nested shapes |
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest |
@@ -104,7 +104,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `if n % <> == 0 { 3 -> … else -> … }` | hole table: the one `<>` in an `if` header is filled by each arm's candidate in turn; the header runs once per arm tried and calls nothing with an effect, `(a \| b)` tries a group, a table used as a value ends in `else`, and pattern and range arms belong in a plain `if subject == {` table |
 | `T: trait { name: Type } / name: Type{default} / impl X.T { name: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes |
-| `;` | retired explicit statement terminator |
+| `;` | retired explicit statement terminator; only a `jet eval` one-liner separates the statements on its one line with it |
 | `_name` | ordinary identifier |
 | `café / नमस्ते / v₀` | a name in any script: a letter or `_`, then letters, combining marks and digits (Unicode's default identifier rule); invisible characters are never part of a name, while math subscripts, superscripts and `∂`, `∇`, `∞` are; a name is stored in one normal form (NFC), so both typings of `é` are one name, and two names in one package that only look alike warn |
 | `__core_intrinsic` | compiler-only namespace |
@@ -197,6 +197,23 @@ teaching layer is disabled; retired spellings get ordinary syntax errors, and
 stale teaching fixtures are deleted. **D-CAP10**: one definition per name
 (E0105); no overloading — capability disambiguation is call-site sigils on a
 single definition.
+
+**D-LANG-MIGRATE1=A — every breaking change lands with its rewrite**
+*(ratified 2026-11-10, card #6281)*: each breaking language change lands with
+one rewrite in Compiler/Migrations, in the codemod plan format, named by the
+change and the toolchain that first refuses the old spelling, and listed in
+`LANGUAGE_REWRITES` (Compiler/JetFoundation/Data/Syntax/Spellings.jet). `jet
+fix` applies, in order, every rewrite between the toolchain a project's
+`.jet/lock` names and the running one; `--since` gives the starting toolchain
+for a file with no lock. A rewrite that cannot be automatic is marked manual
+and reported, never applied. Errors never teach a retired spelling (S14); when
+a check fails and the lock is older than the running `jet`, it adds one line
+naming the two toolchains. Each rewrite has an old-spelling fixture that
+Tests/Cases/Migrations replays. Built today: the registered rewrites
+(`lambda-shape1`, `codable-options1`, `sig-arrow1`, `bit-sigils1`,
+`paren-tuple1`) run one at a time through `jet run
+Compiler/Migrations/Migrate.jet -- <plan> --write PATH...`; `jet fix` reading
+the lock is not yet built.
 
 **D-S14 teaching diagnostics** *(diagnostic-only; no new Jet syntax)*: the
 shared foreign-word table recognizes common declaration words (`fun`, `func`,
@@ -376,8 +393,25 @@ load: fn(path: String) -[FS]> String {
 ```
 
 A returned block uses its final value. `return` remains the explicit early-exit
-form. A unit-returning callable with no explicit effect ceiling needs no arrow.
-`->` is not a general operator.
+form. A unit-returning callable with no explicit effect ceiling and no error
+contract needs no arrow. `->` is not a general operator.
+
+**D-SIG-ARROW1=A — the arrow comes first after the parameters** *(ratified
+2026-11-10, card #6281)*: after its parameters a signature has either nothing
+or exactly one arrow, `->` or `-[Effects]>`; after the arrow come the optional
+result type and then the optional error contract, in that order. A unit
+function that can fail writes the arrow and then the contract alone. Function
+types, trait methods, extern declarations and generic signatures share the
+order, so a signature copied into a type annotation needs no edit; lambdas keep
+their rule (the arrow starts the body). A contract written before the effect
+row, or a contract with no arrow at all, is not Jet; each gets the generic
+parse error, and the `sig-arrow1` rewrite (D-LANG-MIGRATE1) moves the effect
+row before the contract. Built today: every signature with an effect row is
+arrow first, as in `save: fn(p: Path) -[FS.Write]> IOError!` and
+`load: fn(p: Path) -[FS.Read]> String IOError!`. Not yet built: the pure unit
+form, a plain arrow followed by the contract alone, which E0003 refuses today,
+so such a function still writes its contract straight after the parameters;
+and D-ERR-CONTRACT1's spaced `!` respelling.
 
 **D-VOID1=A — one no-information result spelling** *(ratified 2026-08-04,
 card #1411)*: user-facing no-information results use `()`. The compiler keeps
@@ -388,20 +422,22 @@ public only in callable success-return slots.
 
 **D-NEVER2=B — named non-returning contract** *(ratified 2026-09-02, card
 #2437)*: the existing `Never` failure-domain name may also occupy a callable
-success-return slot: `usage: fn() Never`, `serve: fn(addr: String) Never
-!NetError`, and `fn() Never`. `Never` remains uninhabited in ordinary value
+success-return slot: `usage: fn() -> Never`, `serve: fn(addr: String) -> Never
+NetError!`, and `fn() -> Never`. `Never` remains uninhabited in ordinary value
 positions, including parameters, fields, stored values, and generic arguments
 (the generic case is out of scope and needs its own decision). A declared
 `Never` function must have no normal path: falling off the end, bare `return`,
-and `return value` are diagnostics; `return Err(e)` is valid in `Never !E`.
+and `return value` are diagnostics; `return Err(e)` is valid in `Never E!`.
 Inference remains for unannotated functions, and public always-diverging
-functions receive an advisory lint. For `Never !E`, `f() ?? x` has the type
+functions receive an advisory lint. For `Never E!`, `f() ?? x` has the type
 of `x` because the success route cannot produce a value. This is a semantic
 return-position use, not a new token.
 
 **S12 — Entry point** *(amended by D-FAIL-EXIT1/D-FAIL-UNIT1)*: `run: fn()`;
-no `pub` required; it is fallible by default. An expert may pin
-`run: fn() !E`. **D-CLIFLAG1** (implemented, c7cliflag): a
+no `pub` required; it is fallible by default. An expert may pin its error
+type, today written straight after the parameters (D-SIG-ARROW1 moves the
+contract behind an arrow).
+**D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `run: fn(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/field-level `#Doc("...")` markers, bracket form matching `#Codable`).
@@ -439,7 +475,8 @@ top-level loop and captured by a lambda in the body; the file's functions take
 the locals they use as parameters (D-SCRIPT-HELPERS1). ALL_CAPS constants, `#Persist`
 and comptime bindings stay module declarations. A file with `run: fn` keeps the
 module rules above; a file with neither is a library (E0101 on `jet run`).
-`jet run FILE`, `jet -e` and `jet run -` share this meaning on every tier.
+`jet run FILE`, `jet eval` (D-CLI-EVAL1 below) and `jet run -` share this
+meaning on every tier.
 
 **One program entry form** *(owner order 2026-11-11, #6857 c8; amends
 D-ENTRY-STATEMENTS1)*: a program is either script style, its entry file's
@@ -455,6 +492,17 @@ retired into it. A Core module's `run`, such as `core.game.run`, is a library
 function, not an entry, and so is the `run: fn` of another entry file of the
 package (an entry its `outputs` name, or a `run.jet` home): that file is a
 program of its own.
+
+**D-CLI-EVAL1=A — `jet eval 'code'` is the one one-liner** *(ratified
+2026-11-10, card #6281)*: `jet eval 'code'` runs `code` as a run body;
+semicolons may separate its statements on the one line, and its final value of
+any kind prints (nothing for a unit value, a list one item per line, a string
+without quotes). Core modules resolve by their full name (`core.files`), and
+`input` reads the named files or stdin. It takes `jet run`'s authority flags,
+`--pure` refuses every effect and `--json` prints the value as JSON. `jet -e`
+and `jet run -e` are retired; `jet run -` stays. Built today: `jet eval`
+evaluates pure Jet and prints its value; the run-body form, the authority
+flags and the retirement of `jet -e` are not yet built.
 
 **D-SCRIPT-HELPERS1=A — a script's functions use the script's locals** *(amends
 D-ENTRY-STATEMENTS1)*: a function declared in a file of top-level statements
@@ -496,6 +544,17 @@ the global's first use, from the value computed while building. An
 initializer that can't be computed while building is E0643, as for
 `name: value`; E0622 stays for a `#Persist` global, whose initializer is a
 tier-stable scalar literal.
+
+**D-MODULE-VAR1=A — module variables belong to the main task** *(ratified
+2026-11-10, card #6281)*: a file-scope `name := value` in a file with `run:
+fn` or in a library is a module variable that any function reads and writes
+directly. The compiler infers which module variables each function touches,
+through its calls. The main task owns every module variable: a task whose work
+touches one is a build error naming the variable and the call path, with two
+fixes, pass it in or hold it in a `Shared` cell. A written effect ceiling may
+deny the touch with `!State` (deny-only; it adds nothing to infer). Each test
+gets its own copy of every module variable. A script's top-level bindings stay
+locals of its entry (D-ENTRY-STATEMENTS1, D-SCRIPT-HELPERS1).
 
 **D-CLI-POS1=A — positional by default, `#Arg(flag_only: true)` to opt out**
 *(ratified 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -1535,7 +1594,8 @@ does not alter the method's declared generic signature.
 **S73 — Tuples**: named members only — `p: {x: 1, y: 2}`, `p.x`, type
 position `{min: Int, max: Int}`. No positional tuples, no `.0`. A record is
 always written in braces: the paren spelling `(x: 1, y: 2)` is not Jet and
-gets the generic parse error, and `jet migrate` rewrites old sources.
+gets the generic parse error (D-RECORD-BRACE1 below), and the `paren-tuple1`
+rewrite moves old sources to braces.
 **D-RECORD-ORDER1=A**: member order is part of a record's type. `{x: Int,
 y: Int}` and `{y: Int, x: Int}` are two types, and the written order is the
 one comparison (`<`, `<=>`, `sort`, `sort_desc`, `min`, `max`, Map keys),
@@ -1547,6 +1607,26 @@ two records whose members are in different orders is refused (E0109) until one
 side names its target type. Synthesized Core signatures keep the order they
 declare. To order by another member first, use `sort_by` (example:
 collections/tuple_order).
+
+**D-RECORD-BRACE1=A — a record is written in braces** *(ratified 2026-11-06,
+card #6251)*: braces after a signature, a control head or a block marker hold
+code, and braces after `struct`, `enum`, `trait`, `module` or `impl` hold
+members. Anywhere else braces hold a record, the unnamed struct, when every
+entry is a field or a pun and at least one colon or comma appears: `{x}` is a
+block, `{x, y}` a record of two puns, `{x: x}` a one-member record, and `{}` an
+empty block. A paren tuple is not Jet syntax. Destructuring is a brace pattern
+followed by `:` or `:=` (`{min, max}: bounds`). The `paren-tuple1` rewrite
+(D-LANG-MIGRATE1) moves paren records, types, patterns and destructures to
+braces.
+
+**D-BRACE-LAYOUT1=A — commas separate data members** *(ratified 2026-11-06,
+card #6251)*: commas separate the data members of a braced list: struct
+fields, enum cases, record entries, typed collection elements and map
+entries. The trailing comma is optional; `jet fmt` writes it on a multiline
+list and drops it on a one-line list. A member declared with a body, such as
+a method, takes no comma; a trait's bodiless function requirement takes one.
+Not yet built for struct fields and enum cases, which today sit one per line
+without commas; their cutover lands with its rewrite.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal

@@ -400,6 +400,39 @@ s2_syntax_lexical_ledger_is_rendered_from_syntax: fn() {
     s2_syntax_lexical_ledger_is_rendered_from_syntax()
 }
 
+// The `name: "…", toolchain: "…"` rows of the list that opens at the line
+// starting with `head`, as `name toolchain`, up to the list's closing brace.
+s2_syntax_rewrite_rows: fn(path: String, head: String) -> [String] {
+    source: s2_syntax_files_api.read(path) ?? panic("read {path}")
+    rows := [String]{}
+    inside := false
+    loop line in source.lines() {
+        if line.starts_with(head) {
+            inside = true
+            next
+        }
+        if !inside -> next
+        if line.trim() == "}}" -> break
+        if line.contains("name: \"") && line.contains("toolchain: \"") {
+            parts: line.split("\"").to_list()
+            rows.push("{parts[1]} {parts[3]}")
+        }
+    }
+    rows
+}
+
+s2_syntax_language_rewrites_are_the_registered_plans: fn() {
+    registry: s2_syntax_rewrite_rows("Compiler/JetFoundation/Data/Syntax/Spellings.jet", "LANGUAGE_REWRITES:")
+    plans: s2_syntax_rewrite_rows("Compiler/Migrations/Migrate.jet", "migration_plans: fn()")
+    assert(!registry.is_empty(), "the syntax registry lists no language rewrites")
+    assert(registry.join("\n") == plans.join("\n"), "LANGUAGE_REWRITES lists {registry.join(", ")} but Compiler/Migrations/Migrate.jet runs {plans.join(", ")}")
+}
+
+#Test("language_rewrites_are_the_registered_plans") {
+    guards_enter_root()
+    s2_syntax_language_rewrites_are_the_registered_plans()
+}
+
 s2_syntax_marker_plane_matrix_covers_current_marker_families: fn() {
     decisions: s2_syntax_files_api.read("Docs/Spec/syntax-decisions.md") ?? panic("read syntax decisions")
     assert(decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,") && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"))

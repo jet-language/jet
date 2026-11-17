@@ -113,3 +113,31 @@ run: fn() {}
     }
     assert_eq(shape.join(", "), "marker 3, fact 2, parent Log")
 }
+
+// A `group:` setting ends at its line end or its comma like the other
+// settings, so a template and a stray method after it keep their own checks.
+#Test("a group setting ends at its line or its comma") {
+    sources: [String]{
+        `Traced: struct {
+    impl Marker {
+        group: #[Inline, Scalar]
+        expand: fn(self, target: Target) {}
+        render: fn(self) {}
+    }
+}
+`,
+        `Traced: struct {
+    impl Marker {
+        group: #[Inline, Scalar],
+        expand: fn(self, target: Target) {}
+        render: fn(self) {}
+    }
+}
+`,
+    }
+    loop source in sources {
+        codes := [String]{}
+        loop diagnostic in parser_test_errors(source) -> codes.push(diagnostic.code)
+        assert_eq(codes, [String]{"E0907", "E0999"})
+    }
+}

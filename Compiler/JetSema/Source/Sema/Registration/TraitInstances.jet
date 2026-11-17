@@ -1,0 +1,207 @@
+// Parameterized traits. `Store: trait<T> { get: fn(self, at: Int) -> T }`
+// declares a family of traits, and each use names one member by its
+// arguments: a bound `S: Store<Int>`, an impl `impl Store<Int> { … }` or
+// `impl Scores.Store<Int> { … }`, or a supertrait. The parser keeps such a use
+// as the canonical text `Store<Int>`. Before any module registers, each
+// distinct use in the declaring module becomes one ordinary trait named by
+// that text, made from the declaration with every parameter replaced by its
+// argument (sema_inline_rewrite_trait), so registration, bounds, impls and
+// method calls treat it as any other trait. The declaration itself is not a
+// trait: a bare `Store` is refused, as is an argument that names a type
+// parameter, since a trait made at a use names concrete types.
+use {
+    jet_foundation.[
+        Diagnostic,
+        Func,
+        Item,
+        Span,
+        TraitDef,
+        TraitImplBlock,
+        Type,
+        TypeParam,
+    ]
+    jet_parser.[parse_type_text]
+}
+
+SemaTraitInstances: struct {
+    // The parameterized traits the module declares, by name.
+    templates: [String:TraitDef]
+    // The traits made so far, by the name of the trait they are made from,
+    // in the order of their first use.
+    made: [String:[TraitDef]]
+    // The canonical text of every use already made or refused.
+    seen: [String:Bool]
+}
+
+// Rewrites every module input that declares a parameterized trait in place.
+sema_trait_instances_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput], diagnostics: &[Diagnostic]) Never! {
+    loop index in 0..<inputs.len() {
+        if !sema_trait_instances_declares_template(inputs[index].program.items) -> next
+        inputs[index].program.items = sema_trait_instances_rewrite_items(inputs[index].program.items.move(), diagnostics)
+    }
+}
+
+sema_trait_instances_declares_template: fn(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == .Trait(definition) {
+            if definition.type_params.len() > 0 -> return true
+        }
+    }
+    false
+}
+
+// Each parameterized trait in `items` is replaced by the traits its uses
+// make, in the place it is declared.
+sema_trait_instances_rewrite_items: fn(items: &&[Item], diagnostics: &[Diagnostic]) -> [Item] Never! {
+    instances := SemaTraitInstances{templates: [String:TraitDef]{}, made: [String:[TraitDef]]{}, seen: [String:Bool]{}}
+    owners := [String:[String]]{}
+    loop item in items {
+        if item == {
+            .Trait(definition) -> {
+                if definition.type_params.len() > 0 {
+                    instances.templates[definition.name] = definition
+                }
+            }
+            .Struct(definition) -> {
+                owners[definition.name] = sema_trait_instances_param_names(definition.type_params)
+            }
+            .Enum(definition) -> {
+                owners[definition.name] = sema_trait_instances_param_names(definition.type_params)
+            }
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                sema_trait_instances_function(instances, function, [String]{}, diagnostics)
+            }
+            .Struct(definition) -> {
+                scope: sema_trait_instances_param_names(definition.type_params)
+                sema_trait_instances_params(instances, definition.type_params, scope, diagnostics)
+                loop method in definition.methods {
+                    sema_trait_instances_function(instances, method, scope, diagnostics)
+                }
+                sema_trait_instances_blocks(instances, definition.trait_impls, scope, diagnostics)
+            }
+            .Enum(definition) -> {
+                scope: sema_trait_instances_param_names(definition.type_params)
+                sema_trait_instances_params(instances, definition.type_params, scope, diagnostics)
+                loop method in definition.methods {
+                    sema_trait_instances_function(instances, method, scope, diagnostics)
+                }
+                sema_trait_instances_blocks(instances, definition.trait_impls, scope, diagnostics)
+            }
+            .Trait(definition) -> {
+                scope: sema_trait_instances_param_names(definition.type_params)
+                loop supertrait in definition.supertraits {
+                    sema_trait_instances_note(instances, supertrait, definition.name_span, scope, diagnostics)
+                }
+                loop method in definition.methods {
+                    method_scope := scope
+                    method_scope.extend(sema_trait_instances_param_names(method.type_params))
+                    sema_trait_instances_params(instances, method.type_params, method_scope, diagnostics)
+                }
+            }
+            .Impl(definition) -> {
+                scope := owners.get(definition.type_name) ?? [String]{}
+                scope.extend(sema_trait_instances_param_names(definition.type_params))
+                sema_trait_instances_params(instances, definition.type_params, scope, diagnostics)
+                if definition.trait_name == .Val(written) {
+                    sema_trait_instances_note(instances, written, definition.trait_span ?? definition.type_span, scope, diagnostics)
+                }
+                loop method in definition.methods {
+                    sema_trait_instances_function(instances, method, scope, diagnostics)
+                }
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    out := [Item]{}
+    loop item in items.move() {
+        if item == .Trait(definition) {
+            made: instances.made.get(definition.name) ?? [TraitDef]{}
+            if definition.type_params.len() > 0 {
+                loop trait_made in made -> out.push(Item.Trait{value: trait_made})
+                next
+            }
+        }
+        out.push(item)
+    }
+    out
+}
+
+sema_trait_instances_param_names: fn(params: [TypeParam]) -> [String] Never! {
+    loop param in params -> param.name
+}
+
+sema_trait_instances_function: fn(instances: &SemaTraitInstances, function: Func, outer: [String], diagnostics: &[Diagnostic]) Never! {
+    scope := outer
+    scope.extend(sema_trait_instances_param_names(function.type_params))
+    sema_trait_instances_params(instances, function.type_params, scope, diagnostics)
+}
+
+sema_trait_instances_params: fn(instances: &SemaTraitInstances, params: [TypeParam], scope: [String], diagnostics: &[Diagnostic]) Never! {
+    loop param in params {
+        loop bound in param.bounds {
+            sema_trait_instances_note(instances, bound, param.name_span, scope, diagnostics)
+        }
+    }
+}
+
+sema_trait_instances_blocks: fn(instances: &SemaTraitInstances, blocks: [TraitImplBlock], scope: [String], diagnostics: &[Diagnostic]) Never! {
+    loop block in blocks {
+        sema_trait_instances_note(instances, block.trait_name, block.trait_span, scope, diagnostics)
+        loop method in block.methods {
+            sema_trait_instances_function(instances, method, scope, diagnostics)
+        }
+    }
+}
+
+// One use of a trait, `written` as the parser keeps it. A use of a
+// parameterized trait the module declares makes its trait the first time;
+// any other name is left to registration.
+sema_trait_instances_note: fn(instances: &SemaTraitInstances, written: String, span: Span, scope: [String], diagnostics: &[Diagnostic]) Never! {
+    parts: written.partition("<")
+    template: instances.templates.get(parts.head) ?? return
+    parameters: sema_trait_instances_param_names(template.type_params).join(", ")
+    if parts.sep == "" {
+        diagnostics.push(sema_error("E0104", span, "trait `{written}` needs its type arguments", "`{written}<{parameters}>` is a parameterized trait: each use names its arguments, and each set of arguments is its own trait", "write the types it is used at, as in `{written}<Int>`"))
+        return
+    }
+    if instances.seen.get(written) != None {
+        return
+    }
+    instances.seen[written] = true
+    arguments := [Type]{}
+    if parse_type_text(written) == .Val(.Apply(_, values)) -> arguments = values
+    if arguments.len() != template.type_params.len() {
+        diagnostics.push(sema_error("E0104", span, "trait `{written}` has the wrong number of type arguments", "`{parts.head}<{parameters}>` takes {template.type_params.len()} type arguments", "write one type for each of `{parameters}`"))
+        return
+    }
+    named: sema_trait_instances_names_parameter(written, scope) ?? ""
+    if named != "" {
+        diagnostics.push(sema_error("E0104", span, "trait `{written}` names the type parameter `{named}`", "a use of a parameterized trait makes one trait for concrete types, so its arguments cannot be type parameters", "write the concrete type, as in `{parts.head}<Int>`"))
+        return
+    }
+    rewrite := sema_inline_rewrite_empty()
+    loop (index, param) in template.type_params -> rewrite.types[param.name] = arguments[index]
+    made := sema_inline_rewrite_trait(rewrite, template)
+    made.name = written
+    made.type_params = [TypeParam]{}
+    if !instances.made.has_key(parts.head) -> instances.made[parts.head] = [TraitDef]{}
+    instances.made[parts.head].push(made)
+}
+
+// The first name in `written`'s arguments that is one of `scope`'s type
+// parameters: the arguments with every type mark read as a space.
+sema_trait_instances_names_parameter: fn(written: String, scope: [String]) -> String? Never! {
+    if scope.len() == 0 -> return None
+    text := written.partition("<").tail
+    marks: [String]{"<", ">", ",", "[", "]", "(", ")", "{", "}", "?", "!", ":", "#", "|"}
+    loop mark in marks -> text = text.replace(mark, " ")
+    loop word in text.split(" ") {
+        if scope.contains(word) -> return Val(word)
+    }
+    None
+}

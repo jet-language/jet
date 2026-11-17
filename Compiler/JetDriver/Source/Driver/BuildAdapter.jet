@@ -7,7 +7,7 @@ use {
     build_input_crypto: core.crypto
     build_input_url: core.net.url
     jet_eval.[jet_eval_build_failed_value]
-    jet_parser.[jfmt_escape_str_lit, parse_source]
+    jet_parser.[jfmt_escape_str_lit, parse_type_text]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
     jet_sema.[sema_comptime_reflection_type_id_of, sema_comptime_reflection_type_id_record]
     jet_build_session.[
@@ -275,7 +275,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         text: if args[1] == .String(written) -> written.copy() else -> {
             return jet_driver_build_host_failure(session, span, "`{member}` lost its text")
         }
-        spelled: jet_driver_meta_type_text(text) ?? return jet_driver_meta_type_absent()
+        spelled: parse_type_text(text) ?? return jet_driver_meta_type_absent()
         identities := jet_driver_meta_type_rows(program, "root_types", "name", "identity") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
         loop made in build_session_made_structs(session, held) {
             identities[made.name.copy()] = made.identity.copy()
@@ -322,7 +322,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
             identity: if jet_eval_build_field(field_type, "identity") == .Val(.String(text)) -> text.copy() else -> {
                 return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
             }
-            ty: jet_driver_meta_type_text(identity) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+            ty: parse_type_text(identity) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
             heads := [String]{}
             jet_driver_meta_type_heads(ty, heads)
             // A name with no module names no declared type (a builtin).
@@ -462,9 +462,7 @@ jet_driver_code_pasted: fn(session: BuildSession, args: [TComptimeValue], span: 
         text: if args[at + 2] == .String(written) -> written.copy() else -> {
             return jet_driver_build_host_failure(session, span, "`#{{{name}}}` lost its text")
         }
-        if jet_driver_meta_type_text(text) == None {
-            return jet_driver_code_paste_refusal(span, name, text)
-        }
+        if parse_type_text(text) == None -> return jet_driver_code_paste_refusal(span, name, text)
         source = source.replace("{marker}", text)
     }
     JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{TComptimeField{name: "source", value: TComptimeValue.String{value: source}}}}}
@@ -548,33 +546,6 @@ jet_driver_meta_type_refusal: fn(span: Span, field: String, spelled: String) -> 
             },
         ),
     }
-}
-
-// `text` as exactly one type: read as the type of a struct's one field, it
-// parses with no diagnostic, the struct is the only item and has that one
-// field and nothing else, and the field's type spans the whole text, so
-// nothing in it ends the struct, adds a field or gives a default. None for
-// any other text.
-jet_driver_meta_type_text: fn(text: String) -> Type? Never! {
-    lead: "Probe: struct {{\n    probe: "
-    parsed: parse_source("{lead}{text}\n}}\n".bytes())
-    if parsed.diagnostics.len() != 0 || parsed.program.imports.len() != 0 || parsed.program.items.len() != 1 {
-        return None
-    }
-    if parsed.program.items[0] == .Struct(definition) {
-        if definition.fields.len() != 1 || definition.methods.len() != 0 || definition.trait_impls.len() != 0 || definition.state == .Val(_) {
-            return None
-        }
-        field: definition.fields[0]
-        if field.default == .Val(_) || field.computed == .Val(_) || field.serde_markers.len() != 0 {
-            return None
-        }
-        if field.name != "probe" || field.ty_span.start != lead.len() || field.ty_span.end != lead.len() + text.len() {
-            return None
-        }
-        return Val(field.ty.copy())
-    }
-    None
 }
 
 // `meta.find_type`'s None: no `TypeId`.

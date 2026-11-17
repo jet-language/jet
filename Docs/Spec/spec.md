@@ -979,6 +979,17 @@ fixed list or option is `Printable` when its element is.
 `#Codable` requests both codec directions; `#Codable(only: .Encode)` and `#Codable(only: .Decode)` request one
 (D-AUTODERIVE1=E, D-AUTODERIVE-SYNTAX1=D).
 
+A trait takes type parameters as a struct does: `Holds: trait<T> { first:
+fn(self) -> T }`. Each use names its arguments, and each set of arguments is
+its own trait: `Holds<Int>` reads `T` as `Int`. A bound (`S: Holds<Int>`), an
+impl (`impl Holds<Int> { … }` in a type body, `impl Scores.Holds<Int> { … }`
+outside it) and a supertrait name one this way; the uses in the declaring
+module make the traits. A bare `Holds`, an argument count that differs from
+the declaration, and an argument naming a type parameter in scope are E0104:
+each use names concrete types. A trait parameter takes no bound. Core's
+operator traits keep their own form, `impl Mul(Float)`, which names the
+right operand.
+
 Float and F32 are Comparable by IEEE 754 totalOrder (-NaN < -inf < ... <
 -0.0 < +0.0 < ... < +inf < NaN): `<=>`, `.compare`, sorting, a list's `max` and
 `min`, and a derived `compare` over a Float field all use it. The operators

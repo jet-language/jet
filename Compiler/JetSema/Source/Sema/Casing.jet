@@ -271,7 +271,9 @@ sema_casing_item: fn(tables: ASTTables, item: Item, diagnostics: &[Diagnostic]) 
             }
         }
         .Trait(definition) -> {
-            sema_casing_pascal(definition.name, definition.name_span, "trait", diagnostics)
+            // A trait made from a parameterized one is named by its use,
+            // `Store<Int>`; the declared name is the part before `<`.
+            sema_casing_pascal(definition.name.partition("<").head, definition.name_span, "trait", diagnostics)
             loop associated in definition.assoc_types {
                 sema_casing_pascal(associated.name, associated.span, "associated type", diagnostics)
             }

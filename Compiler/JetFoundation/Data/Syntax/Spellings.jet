@@ -8,9 +8,9 @@ LexicalEntry: struct {
 }
 
 LEXICAL_LEDGER: [LexicalEntry]{
-    { spelling: ":", meaning: "immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {{…}}`, `name: module {{…}}`" },
+    { spelling: ":", meaning: "immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {{…}}`, `name: module {{…}}`; `run: fn() {{…}}` declares a program's one entry, and a program is either that entry or its entry file's top-level statements, never both, anywhere in its load graph, package or project (E0621)" },
     { spelling: ":=", meaning: "mutable binding" },
-    { spelling: "name := value", meaning: "mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use" },
+    { spelling: "name := value", meaning: "mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use; any function that sees it reads and writes it directly, the main task owns it, and a task whose work touches it is a build error naming the variable and the call path" },
     { spelling: "use {{ … }} / use alias: path", meaning: "import block: one row per line, each a module path, `alias: path`, a \"file\" path or `alias: \"file\"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row" },
     { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value" },
     { spelling: "name: T -> expr", meaning: "computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field" },
@@ -59,7 +59,7 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "compiler.query(source, kind, at:, limit:)", meaning: "the one typed fact query of `core.compiler`: the `[Fact]` rows of one `FactKind` in an explicit immutable `FactSource` (`.Schema`, `.Program` or `.Run`), or a `MetadataError`, never a partial or empty stand-in; `jet inspect facts --store=… --kind=…` renders the same rows" },
     { spelling: "fn(…) {{ … }}", meaning: "lambda: a function binding's value without its name; a passed lambda leaves out the parameter types, effect row and result its expected callable type fixes (`xs.filter(fn(n) {{ n > 2 }})`), a stored one writes them as a named function does (`square: fn(n: Int) -> Int {{ n * n }}`); the body is always braced and its last value is the result" },
     { spelling: "value.method", meaning: "bound method value: where a function type or an optional one is expected (an argument, a struct field, a list element, a return value), a method read without parentheses is the method with its receiver bound, the lambda `fn(a) {{ value.method(a) }}` checked against that type; the receiver is evaluated once and kept as a closure keeps a capture, so a `&self` method over a copied receiver is refused; anywhere else, a union included, the read is a forgotten call, and a type with both a field and a method of the name makes it an error naming both" },
-    { spelling: "-[…]", meaning: "effect row on a callable" },
+    { spelling: "-[…]", meaning: "effect row on a callable; a signature has, after its parameters, nothing or exactly one arrow, `->` or `-[Effects]>`, then its optional result type, then its optional error contract (`load: fn(p: Path) -[FS.Read]> String IOError!`); a unit function that can fail writes the arrow and its contract alone (`save: fn(p: Path) -[FS.Write]> IOError!`), and a contract written before the arrow is not Jet syntax" },
     { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row" },
     { spelling: "?", meaning: "optional type mark after its type (`T?`)" },
     { spelling: "??", meaning: "fallback" },
@@ -71,12 +71,12 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`" },
     { spelling: "T{{expr}}", meaning: "field default" },
     { spelling: "Name{{\"…\"}}", meaning: "checked text head" },
-    { spelling: "{{ … }}", meaning: "typed anonymous value" },
+    { spelling: "{{ … }}", meaning: "record, the unnamed struct: `{{x: 1, y: 2}}` as a value, `{{min: Int, max: Int}}` as a type, `{{min, max}}: bounds` as a destructure; braces hold a record when every entry is a field or a pun and a colon or comma appears, so `{{x}}` is a block, `{{x, y}}` and `{{x: x}}` are records and `{{}}` is a block; where a struct type is expected the same braces build it; braces after a signature, a control head or a block marker hold code, and a paren tuple `(x: 1)` is not Jet syntax" },
     { spelling: "loop x in xs -> item / Head{{loop x in xs -> item}}", meaning: "yielding loop: in value position a finite loop yields one item per accepted pass, in loop order; a bare one builds a List and ignores the expected type; a typed set or map head holding one loop in place of its items builds that collection, a map loop yielding `key: value` where a later key replaces an earlier one; items beside a loop in one head are a build error" },
     { spelling: "`", meaning: "raw ordinary String fence" },
     { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)" },
     { spelling: "\\u{{H}}", meaning: "Unicode scalar escape in quoted text and character literals, beside `\\n`, `\\r`, `\\t`, `\\\"` and `\\\\`: one to six hexadecimal digits up to 10FFFF, never a surrogate (D800-DFFF); byte literals have none and write `\\xNN`" },
-    { spelling: ",", meaning: "separator with optional trailing item in every comma list" },
+    { spelling: ",", meaning: "separator with optional trailing item in every comma list; in braces it separates data members (struct fields, enum cases, record entries, collection elements, map entries) and a trait's bodiless function requirements, while a member declared with a body ends at its closing brace without one; fmt writes the trailing comma of a multiline list and drops it from a one-line list" },
     { spelling: "Type{{field: pattern, ..}}", meaning: "named struct pattern; fields bind or test nested shapes" },
     { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker" },
     { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest" },
@@ -84,13 +84,31 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "if n % <> == 0 {{ 3 -> … else -> … }}", meaning: "hole table: the one `<>` in an `if` header is filled by each arm's candidate in turn; the header runs once per arm tried and calls nothing with an effect, `(a | b)` tries a group, a table used as a value ends in `else`, and pattern and range arms belong in a plain `if subject == {{` table" },
     { spelling: "T: trait {{ name: Type }} / name: Type{{default}} / impl X.T {{ name: value }} / T.name", meaning: "trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type" },
     { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes" },
-    { spelling: ";", meaning: "retired explicit statement terminator" },
+    { spelling: ";", meaning: "retired explicit statement terminator; only a `jet eval` one-liner separates the statements on its one line with it" },
     { spelling: "_name", meaning: "ordinary identifier" },
     { spelling: "café / नमस्ते / v₀", meaning: "a name in any script: a letter or `_`, then letters, combining marks and digits (Unicode's default identifier rule); invisible characters are never part of a name, while math subscripts, superscripts and `∂`, `∇`, `∞` are; a name is stored in one normal form (NFC), so both typings of `é` are one name, and two names in one package that only look alike warn" },
     { spelling: "__core_intrinsic", meaning: "compiler-only namespace" },
     { spelling: "<:", meaning: "open a lock-step statement-expansion fence" },
     { spelling: ":>", meaning: "close a lock-step statement-expansion fence" },
     { spelling: "@[ … ]@", meaning: "retired fence spelling; the fence is `<: … :>`" },
+}
+
+// The registered language rewrites, oldest first. Each breaking spelling
+// change lands with one rewrite, named by the change, beside the toolchain
+// that first refuses the old spelling. Compiler/Migrations holds each
+// rewrite and its fixture, and its Migrate.jet runs the same rows by name,
+// which Tests/Guards/syntax_reconciliation.jet holds equal to these.
+LanguageRewrite: struct {
+    name: String
+    toolchain: String
+}
+
+LANGUAGE_REWRITES: [LanguageRewrite]{
+    { name: "lambda-shape1", toolchain: "a0.0.45" },
+    { name: "codable-options1", toolchain: "a0.0.45" },
+    { name: "sig-arrow1", toolchain: "a0.0.45" },
+    { name: "bit-sigils1", toolchain: "a0.0.45" },
+    { name: "paren-tuple1", toolchain: "a0.0.45" },
 }
 
 /// Checked compiler metadata queries that has not yet given a `$` root.

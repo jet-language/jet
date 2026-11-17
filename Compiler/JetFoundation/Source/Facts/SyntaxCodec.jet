@@ -6317,6 +6317,7 @@ body_codec_put_traitdef: fn(out: &BodyCodecOut, value: TraitDef) Never! {
     body_codec_put_list_marker(out, value.markers)
     body_codec_put_opt_modulecap(out, value.cap)
     body_codec_put_list_testdef(out, value.laws)
+    body_codec_put_list_typeparam(out, value.type_params)
 }
 
 body_codec_get_traitdef: fn(bytes: [U8], input: &BodyCodecIn) -> TraitDef Never! {
@@ -6332,7 +6333,8 @@ body_codec_get_traitdef: fn(bytes: [U8], input: &BodyCodecIn) -> TraitDef Never!
     f9: body_codec_get_list_marker(bytes, input)
     f10: body_codec_get_opt_modulecap(bytes, input)
     f11: body_codec_get_list_testdef(bytes, input)
-    TraitDef{span: f0, is_pub: f1, is_package_pub: f2, name: f3, name_span: f4, supertraits: f5, assoc_types: f6, constants: f7, methods: f8, markers: f9, cap: f10, laws: f11}
+    f12: body_codec_get_list_typeparam(bytes, input)
+    TraitDef{span: f0, is_pub: f1, is_package_pub: f2, name: f3, name_span: f4, supertraits: f5, assoc_types: f6, constants: f7, methods: f8, markers: f9, cap: f10, laws: f11, type_params: f12}
 }
 
 body_codec_put_traitconstdecl: fn(out: &BodyCodecOut, value: TraitConstDecl) Never! {

@@ -1270,6 +1270,8 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
     jfmt_fmt_written_privacy(f, t.is_pub, t.name_span.start)
     jfmt_write(f, t.name)
     jfmt_write(f, ": trait")
+    trait_type_source: jfmt_source_list_span_after(f, t.name_span.end, JFMT_DELIM_ANGLE)
+    jfmt_fmt_type_params(f, t.type_params, trait_type_source)
     // One supertrait stays bare, several use the list.
     if t.supertraits.len() == 1 {
         jfmt_write(f, ": ")

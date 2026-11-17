@@ -1933,12 +1933,12 @@ thread that opened them (**E1102**).
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
 | `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture BrowserError!` / `BrowserContext` / `BrowserPage` | Open a named test fixture (the locked engine at `JET_BROWSER_<ENGINE>_ENDPOINT` or `JET_BROWSER_ENDPOINT`, else launched from its lock; isolated context, page, event subscriptions) and read its context and page. |
-| `run_case(config, test, body)` | `BrowserTestCase` | Run one browser test on every configured engine, in engine order (chromium, firefox, webkit). Each attempt opens a fresh fixture, runs `body(page)` and closes the page, context and browser; a failed attempt runs again up to `retries` more times on that engine. Every attempt records the call's source position. A test the filter doesn't select runs nothing. |
+| `run_case(config, test, body)` | `BrowserTestCase` | Run one browser test on every configured engine, in engine order (chromium, firefox, webkit). Each attempt opens a fresh fixture, runs `body(page)` and closes the page, context and browser; a failed attempt runs again up to `retries` more times on that engine. Every attempt records the call's source position. A test the filter doesn't select runs nothing. A retried attempt records its trace (see below); every attempt does under `JET_TEST_TRACE=1` and in UI mode. |
 | `fixture_source(name, body)` / `generate_source(name, body, base_url)` | `String BrowserError!` | Generate bounded fixture source with escaped base-URL data. |
 | `selected(config, name)` | `Bool` | Apply the configured test filter to a test name. |
 | `report_new(config)` / `report_add_case(report, case)` | `BrowserTestReport` | Build an ordered browser test report. |
 | `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or the self-contained HTML viewer. |
-| `report_exit_code(report)` / `report_failures(report)` / `write_report(report, path)` | `Int` / `[String]` / `BrowserError!` | Produce the test exit code (1 when a selected case ran no attempt or any engine's last attempt failed), one ``path:line:column: `test` failed on <engine> after <n> attempts: <error>`` line per failing engine (for `assert_eq(report.failures(), [String]{})`), or write the configured report (plus the HTML viewer for `ui` runs). |
+| `report_exit_code(report)` / `report_failures(report)` / `write_report(report, path)` | `Int` / `[String]` / `BrowserError!` | Produce the test exit code (1 when a selected case ran no attempt or any engine's last attempt failed), one ``path:line:column: `test` failed on <engine> after <n> attempts: <error>`` line per failing engine (for `assert_eq(report.failures(), [String]{})`), or write the configured report (plus the HTML viewer for `ui` runs, HTML reports, and runs that recorded a trace). |
 | `server_start(config)` / `server_stop(server)` / `server_url(server)` / `server_logs(server)` | `BrowserTestServer BrowserError!` / – / `String` / `String` | Start the configured test server and wait until it accepts connections; stop it and keep its bounded logs. |
 | `watch_changed(path, last_modified_ms)` | `Bool BrowserError!` | Report whether the watched path changed since the given modification time. |
 
@@ -1946,6 +1946,21 @@ The source generator rejects empty names and values over its fixed source
 limits; HTML/JSON report renderers escape their output contexts. Provider
 connection, headless, protocol, timeout, closed-state, and cleanup failures
 are `BrowserError` values.
+
+A recorded attempt keeps, read after `body` and before its page closes, the
+browser's bounded trace (hashed facts only), its commands as a timeline
+(`actions`: sequence, protocol method, and `ok`, `error`, or `sent` when no
+reply came), the console and network events queued for it (`events`: ids and
+URLs as hashes, no message text), and a DOM and a screenshot snapshot of the
+page as its last action left it. A snapshot keeps the payload's hash and size
+only. Page payloads are left out unless asked for: in UI mode
+(`JET_TEST_BROWSER_UI=1`) or with `JET_TEST_TRACE_PAYLOADS=1`, the DOM and the
+screenshot are written to `<artifacts>/<test>-<engine>-<attempt>.html` and
+`.png`, and the attempt attaches them. `JET_TEST_TRACE_ON_RETRY=0` turns
+recording on retry off. The HTML viewer shows the test tree, a filter, and
+each attempt's error, timeline, snapshots, source, console entries, network
+requests, and attachments. With `JET_TEST_WATCH=1` it reloads itself every
+second, so it shows the latest run.
 
 ### `core.browser.host` — events and values in the page
 
