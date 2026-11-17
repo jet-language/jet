@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111723,
+    "rev": 111725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34588,188 +34588,6 @@
       "created": "2026-09-16T19:41:19.102Z",
       "updated": "2026-09-16T19:41:19.102Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0tsbf3w",
-      "num": 3505,
-      "title": "Const generics: a compile-time Int as a type parameter",
-      "body": "Owner gate from the Jai-vs-Jet interview (comptime ladder rung R4, owner chose \"R0-R4 now\"). Today a known constant can size an array (`[U8#64]`, `[Float#(@lanes * 2)]`) but a number cannot be a type parameter, so `Packet<64>` and a generic SOA count cannot be written; S26 says comptime does not parameterize a type. The proposal is a narrow amendment: a compile-time `Int` may parameterize an existing type constructor, spelled `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-COMPTIME-WORD1=A), used as `Packet<64>` or `Packet<lanes>`. Monomorphized like `<T>`. Not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, no dispatch on comptime results. `Meta.Const` is named alongside (see D-META-GATE1).\n\n## Exit criteria (after ratification)\n1. Parser and sema accept `<comptime N: Int>` declarations and literal / comptime-constant arguments; a runtime value in that slot is a teaching diagnostic.\n2. Example: firmware-style `Packet<N>` with `[U8#N]` field runs on O0, O1 and O2 (I9).\n3. Spec entry amends S26 narrowly and cites D-META-CONST1.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nFinish D-CONSTGEN1 without treating const generics as first-class type factories. Implement compile-time Int parameters, substitution, instance identity, constraints and target layout through the existing generic mechanism. Reconcile the latest metadata naming direction with immutable decision history through the contract card; ordinary prepared values do not require repeated @ references outside declared parameter syntax.\n\n## Owned paths and integration\n\n- crates/jet-foundation/src/AST\n- crates/jet-parser/src/Parser/Types.rs\n- crates/jet-sema/src/Sema/Bundle/GenericModules\n- crates/jet-codegen/src/Codegen/TIR\n- tests/generics.rs\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nAdd the `Packet: struct<comptime N: Int>` witness with literal and prepared arguments, distinct sizes and nested use. Exercise O0, O1 and O2. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": "## Goal\nFinish D-CONSTGEN1, with the spelling now fixed by D-CONSTGEN2=A: a compile-time `Int` may be a type parameter of an existing type constructor. The declaration is `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-DECL-COLON1=A, D-COMPTIME-WORD1=A), and uses write the plain value, as in `Packet<64>` or `Packet<lanes>` after `lanes: comptime { 64 }`. It is monomorphized like `<T>`.\n\nThis is not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, and no dispatch on comptime results. It is comptime ladder rung R4; the owner chose \"R0-R4 now\".\n\n## Current state\n- The grammar and AST have shipped (#3662, logged 2026-09-28 in `Docs/spec/syntax-decisions.md:7455`; syntax row at `:34`).\n  - Jet: `TypeParam.prep: PrepParam?` in `Compiler/JetAst/Source/AST/Items.jet:447-464`, with the parser at `Compiler/JetParser/Source/Parser/Items.jet:531`.\n  - Rust: `crates/jet-parser/src/Parser/Types.rs:473`.\n  - This supersedes the card's older `<@N: Int>` spelling.\n- Every `prep` parameter is rejected with E0390 until this card lands:\n  - Jet sema: `Compiler/JetSema/Source/Sema/Registration/Items.jet:438-441`;\n  - Rust sema: `crates/jet-sema/src/Sema/Casing.rs:120-128`;\n  - UI fixture: `tests/ui/prep_number_param_unsupported.jet`.\n- There is no substitution, instance identity or layout for number parameters in `Compiler/JetSema` or `Compiler/JetCodegen/Source/Codegen/TypeInstances.jet`.\n- Criteria 1-4 and 9-12 (Syntax entry, log entry, grammars, snapshots) are met for the declaration grammar by #3662. Only the E0390 snapshot changes here.\n\n## Changes\n1. JetSema (`Registration/Items.jet` plus generic substitution):\n   - Replace the E0390 rejection with number-parameter binding. `N` is in scope as a value inside the declaration, including array sizes such as `[U8#N]`.\n   - A use-site argument must be an Int literal or a comptime constant. A runtime value in that slot gets a new registered diagnostic with a UI snapshot.\n   - Instance identity includes the value, so `Packet<64>` and `Packet<32>` are different types.\n2. JetCodegen (`TypeInstances.jet`, `Types.jet`): monomorphize and lay out each instance, with deterministic naming that includes the number.\n3. Mirror the change in the shipped Rust sema, TIR and MIR so the goldens run on the shipped binary. Delete the E0390 path in both compilers and retire the row, or keep E0390 only for a non-Int number type.\n4. Add `Examples/features/generics/const_packet.jet`: a firmware-style `Packet: struct<comptime N: Int>` with literal and comptime arguments, two distinct sizes and a nested use, printing sizes and bytes.\n5. Update `Docs/spec/reference/metaprogramming.md`: S26 is amended narrowly, citing D-CONSTGEN1 and D-CONSTGEN2.\n\n## Proof\n- `jet test Compiler --profile golden generics/const_packet`: identical on O0, O1 and O2.\n- `jet test Compiler --profile ui prep_number_param`: the old E0390 fixture is replaced by a runtime-argument rejection fixture.\n- `jet test Compiler --profile cases generics/`: passes.\n\n## Batch\nbatch-jetc-sema: substitution and identity are the core. Codegen layout lands in the same build.\n\n## Dependencies\nNone real. #3520's naming reconciliation was settled by D-CONSTGEN2=A (#3662 shipped).\n",
-      "checkSteps": "\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nAdd the Packet<@N: Int> witness with literal and prepared arguments, distinct sizes and nested use. Exercise AOT, run and interpreter. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.\n\nExact witness: struct Packet<@N: Int> { data: [U8#N] }; lanes :: prep { 64 }; instantiate Packet<64> and Packet<lanes>. Verify equal intended specialization and reject obsolete ordinary-value @ references outside metadata queries or template holes.",
-      "probe": "jet run examples/features/collections/fixed_arrays.jet",
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (c18, c20 and c24 by 194d343898 and c2182c976a; c19 04ce9799d2; c1 obsolete, covered by c9)."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Correction to the BallotFix-2 entry above. D-GENERIC-TYPEFN1 was retired and archived on 2026-10-29, as this card already recorded. D-ALIAS-GENERIC1=A (alias parameters on the name, Grid<T>: [[T]]) does not spell a computed bounded alias, so c18 needs a new owner ballot, NEW-D-COMPUTED-ALIAS1. G6Decl found it, with the candidates (A) a bounded alias with a #run body checked per branch, (B) a #run fn returning a Type in type position, and (C) retiring c18 with TYPEFN1. Its authoring is queued for the next reviewer slot. c18 is skipped meanwhile."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "BallotFix-2 review 2026-11-10: c18 needs no ballot. D-GENERIC-TYPEFN1=A ratifies computed type recipes with bounded results, checked per branch at the definition, with declared-type identity kept, and D-META-SPELL1=A gives the #run and <N: Int> spellings. Build it on the canonical type identity and bound checker, with no prep revival and no alias-only evaluator. Routed to G6Decl."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c18 [#4164] has no live ruling to build to: D-GENERIC-TYPEFN1 (outcome A, Zig-style recipes) was retired and archived on 2026-10-29, so the bounded computed alias form needs a new owner ballot before anyone builds it. c17 is staged as G6Lead-3505c17 (golden Examples/Types/generics/const_packet passes on O0/O1/O2)."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Lane paused by owner (4-lead cap). Const-generics WIP is in unlanded MetaLead-2-9: parser number type args, comptime params as generic params, E0390 re-scoped to misuse, constant folding in type args, NodeKind.GenericValue. Next: E0390 text/snapshot, golden generics/const_packet at O0/O1/O2 (c17), inference from fixed-list length, c9-c12/c15/c16 docs and grammar. c18 not started."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-COMPTIME-WORD1=A; I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #4164; their criteria are carried here as [#n] rows."
-        },
-        {
-          "at": "2026-10-02",
-          "by": "pip-mine-20261001",
-          "text": "Mining run 2026-10-01: Zig probe Z1 confirmed memoized type identity for comptime type functions (`List(i32) == List(i32)`). Live probe J5: `struct Packet<prep N: Int>` parses but `Packet<4>` fails with E0003 \"Expected a type name, found a number\". Ballot D-GENERIC-TYPEFN1 (#4164) asks whether computed types join this mechanism; D-LANES1 (#4167) and the tile work (#3215) depend on this card."
-        },
-        {
-          "at": "2026-10-01",
-          "by": "TowerCloser",
-          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
-        },
-        {
-          "at": "2026-10-01",
-          "by": "TowerCloser",
-          "text": "Split into 5 session-sized children (#4106 #4107 #4108 #4109 #4110) on 2026-10-01: 17 open specific criteria (~10.25 sessions) in one card; split into 5 session-sized children of ~4 criteria each. This card stays open as their umbrella; meet its criteria from the children's evidence."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-sema."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0 triage 2026-09-28 (core1a, Opus 5.5): C_RETARGET. D-CONSTGEN1=A is ratified but not built. The owned paths are archived Rust (jet-parser, jet-sema GenericModules, jet-codegen TIR), the self-hosted parser has no compile-time Int type parameter, and the card waits on #3520. Evidence: Card owned paths crates/jet-parser/src/Parser/Types.rs, crates/jet-sema/src/Sema/Bundle/GenericModules, crates/jet-codegen/src/Codegen/TIR; no const-generic handling in Compiler/JetParser or Compiler/JetAst (grep); blockedBy #3520 (building)."
-        },
-        {
-          "at": "2026-09-19",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Syntax.rs entry updated",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Obsolete: Syntax.rs no longer exists. The registry is Compiler/JetFoundation/Data/Syntax, and c9 (met with commits) covers its row, the syntax-decisions entry and the grammars for struct<comptime N: Int>.",
-          "at": "2026-11-14T06:09:56.521Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 9,
-          "text": "The syntax registry row, a Docs/spec/syntax-decisions.md log entry, the jet devtools grammars and the UI snapshots all show struct<comptime N: Int> as the one form (was c9-c12).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G6Lead-4276c83. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). `<comptime N: Int>` is the one registered form.",
-          "at": "2026-11-10T10:26:12.028Z"
-        },
-        {
-          "n": 17,
-          "text": "Proof with the admitted jet (stage-2 output of jet build Compiler): jet test Compiler --profile golden generics/const_packet passes (Packet: struct<comptime N: Int> with literal and comptime arguments, distinct sizes, nested use), E0390 no longer fires for Int number parameters, values, layout and identity agree on O0, O1 and O2, and the parser, sema, codegen, formatter and jet explain use the one form; UI fixtures match their snapshots (was c13-c16).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-3505c17. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). golden Types/Generics/ConstPacket PASS on O0/O1/O2.",
-          "at": "2026-11-10T16:29:11.689Z"
-        },
-        {
-          "n": 18,
-          "text": "[#4164] Bounded computed type aliases from prep. A golden selects a type from a prep condition, and a UI snapshot covers a failing bound.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): the ComputedAlias golden selects a type from a compile-time condition (6/0 at none, basic and full), and ui computed_alias 4/0 covers a failing bound.",
-          "at": "2026-11-14T06:09:06.631Z"
-        },
-        {
-          "n": 19,
-          "text": "Prerequisite found by the D-COMPUTED-ALIAS1 review (Review1, 2026-11-11): a method call on a generic Inline<N>.Store value is E0102, and using N directly is E0107. That is a sema defect in generic impl lookup. Method lookup through a generic type argument resolves at O0/O1/O2 with a regression case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "04ce9799d2 (on dev): method lookup through a generic type argument resolves (Inline<N>.Store methods and N directly). Regression case generics/number_param_type_methods_resolve_on_every_tier passes on the gate-p47 jet; its run steps match the .out at each tier it names (none and full checked by G6Meta-4).",
-          "at": "2026-11-14T04:34:27.013Z"
-        },
-        {
-          "n": 20,
-          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (D-COMPUTED-ALIAS1 bounded computed aliases). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): c2182c976a adds the Spellings row and the syntax-decisions ledger entry; `jet self devtools grammars` rc 0 with `git status --short Tools/editors` empty; `jet test tests/guards --filter grammar` 13/0 and `--filter syntax_reconciliation` 15/0; LexicalLedger --check and SurfaceBudget --check rc 0.",
-          "at": "2026-11-14T06:09:07.633Z"
-        },
-        {
-          "n": 24,
-          "text": "D-COMPUTED-ALIAS1=A is built (owner ratified 2026-11-11): a bounded alias body chooses a type while building, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch must satisfy the bound (Store), and the chosen types keep their identities. The ballot program prints 2 then 3, and a branch that fails the bound is refused with a UI snapshot. Owner: G6Meta. Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): golden Generics/ComputedAlias and ComputedAliasKeepsChosenTypes at --optimize=none, basic and full 6/0 (the ballot program prints 2 then 3, and the chosen types keep their identities); ui --filter computed_alias 4/0, including the branch that fails the Store bound; ui type_alias 7/0.",
-          "at": "2026-11-14T06:09:05.604Z"
-        }
-      ],
-      "refs": [
-        "D-META-CONST1",
-        "D-METADEPTH1",
-        "D-GENERIC-CALL1",
-        "examples/features/collections/fixed_arrays.jet",
-        "examples/features/comptime/computed_constants.jet",
-        "examples/features/types/generic_types.jet",
-        "docs/research/jai-vs-jet-fable-brief-2026-09-16.md",
-        "#3509",
-        "crates/jet-foundation/src/AST",
-        "crates/jet-parser/src/Parser/Types.rs",
-        "crates/jet-sema/src/Sema/Bundle/GenericModules",
-        "crates/jet-codegen/src/Codegen/TIR",
-        "tests/generics.rs"
-      ],
-      "tags": [
-        "jai-vs-jet",
-        "syntax",
-        "types",
-        "comptime",
-        "meta-suite",
-        "retargeted",
-        "batch-jetc-sema",
-        "wayfinder:task"
-      ],
-      "parentId": "c0yfcz0w",
-      "needsAcceptance": false,
-      "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-14T06:09:58.298Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 24,
-      "completedAt": "2026-11-14T06:09:58.298Z"
     },
     {
       "id": "c0yfcz0w",
@@ -84082,6 +83900,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c9 needs a spelling no decision gives (how a #Deprecated function names its inlinable replacement). Ballot to post: D-DEPRECATE-INLINE1. Option A: #Deprecated field inline: Bool{false} beside since/use/removed_in; the function's own one-expression body is the replacement, jet fix substitutes each argument subtree for its parameter when the parameter is used once or the argument is a name or literal, inline excludes use, otherwise L2001 edit-by-hand as today (precedent Go 1.24 //go:fix inline). Option B: use: takes a call template string (use: \"scaled(a, 2)\"), rejected in spirit by NEW-D-LINT-DECL1 option C (string DSL). c9 waits on that ballot; c4, c8, c7, c5 proceed."
+        },
+        {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
           "text": "2026-11-14 TowerKeeper-1: c3 (NEW-D-LINT-DECL1) split into #6516 c4-#6516 c7; #6202's package diagnostic, lint and deprecation items joined as #6516 c8, #6516 c7 and #6516 c9."
@@ -84183,7 +84006,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-17T01:43:03.292Z",
+      "updated": "2026-11-17T06:09:27.667Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -99318,6 +99141,15 @@
             "profile": "cases",
             "filter": "NativeApp/context_menu_opens_on_linux_and_the_web_and_reports_errors"
           }
+        },
+        {
+          "n": 4,
+          "text": "The Linux native app host: an app's native.app opens a Wayland window that renders its ui.Node screens through core.ui layout and drawing, and routes pointer, key, text and drop input to the views' handlers, so menu_bar, context_menu, clipboard, drop zones and lifecycle events have a window to attach to. Proof: jet test Compiler --profile cases --filter NativeApp/app_window_renders_its_screen_on_linux (a fake compositor reads the drawn frame and drives a click that changes the screen).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T06:11:43.006Z"
         }
       ],
       "refs": [],
@@ -99325,9 +99157,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-17T05:55:25.022Z",
+      "updated": "2026-11-17T06:11:43.006Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0f4o904",
@@ -129360,233 +129192,6 @@
       "outcome": "D",
       "comment": "Owner selected D after analysis: marks sit on the named place that is written or taken, matching argument marks; fresh receivers need no mark; line-start &name/^name begins a statement; ~ grouping unchanged.",
       "ratifiedAt": "2026-09-27"
-    },
-    {
-      "id": "D-CONSTGEN1",
-      "cardId": "c0tsbf3w",
-      "group": "syntax",
-      "title": "Const generics: a compile-time Int as a type parameter",
-      "gist": "May a compile-time number be a type parameter, and how is it spelled?",
-      "lesson": "A generic type takes a type parameter: `Pair<T>`. Some types need a number: a 64-byte packet, a 3x3 matrix. Today a constant can size an array field, but `Packet<64>` cannot be written, so each size is a separate struct. A slice does not help: the size must live in the type so a 64-byte frame cannot pass as a 32-byte one. This ballot asks whether a compile-time `Int` may be a type parameter (option D: no) and how to spell it. Running code never builds a type.",
-      "explainer": "",
-      "story": "Omar writes firmware. His radio frames come in 32, 64, and 128 bytes. He wants one `Packet` type and one `checksum` function. Today he copies the struct three times. With `Packet<@N: Int>` he writes it once, and passing a `Packet<64>` where a `Packet<32>` is expected is a compile error at the call.",
-      "inWild": "// Rust const generics: a keyword marks the value parameter.\nstruct Packet<const N: usize> { data: [u8; N] }\n// Zig: types are values, so the size is a comptime parameter to a function that returns a type.\nfn Packet(comptime n: usize) type { return struct { data: [n]u8 }; }",
-      "detail": "",
-      "options": [
-        {
-          "key": "A",
-          "name": "Compile-time sigil: struct Packet<@N: Int>",
-          "detail": "A value parameter is written with the `@` that S57 gives compile-time names: `struct Packet<@N: Int> { data: [U8#@N] }`, used as `Packet<64>` or `Packet<@lanes>`. Type parameters like `T` are also compile-time, so here `@` marks 'value, not type'; that widens the sigil's meaning. It cannot be misread as a trait bound (`<T: Add>`, which constrains T to implement Add). Inside the body `@N` shadows any outer `@N` constant.\n\nOnly `Int` for now; the `: Int` is written so later kinds (`Bool`, `U32`) fit the same slot. Any Int is legal; a negative or zero size fails only where it sizes an array, as `[U8#0]` does today. A bare argument is a literal or `@name`; anything else takes parentheses, `Packet<(@lanes * 16)>`, like `[Float#(@lanes * 2)]`. Inside a generic body arguments are a bare `@N` or fully closed; `Packet<(@N * 2)>` is rejected, so type equality never needs algebra.\n\n`Packet<64>` and `Packet<(@lanes * 16)>` are the same type. One compiled copy per distinct value, like `<T>`. At a call site the value is inferred from the argument, or written explicitly (D-GENERIC-CALL1=A). Value and type parameters mix in declaration order with optional defaults: `Matrix<T, @R: Int, @C: Int = @R>`. `impl<@N: Int> Wire for Packet<@N>` and `impl Wire for Packet<64>` overlap; the existing coherence rule rejects that.\n\nNarrow amendment to S26: a compile-time Int may parameterize an existing type constructor. `Meta.Const` (D-META-GATE1) governs declaring `<@N: Int>`; instantiating a dependency's `Packet<64>` is always allowed.",
-          "technical": "Generic parameter list accepts `@name: Int`. Arguments: literal, `@const`, or a parenthesized comptime Int expression; a bound value parameter may appear only bare. Sema instantiates per distinct value; `[T#@N]` sizes resolve after instantiation and reject non-positive sizes there. A runtime value in the slot is a teaching diagnostic.",
-          "code": "@lanes :: 4\nstruct Packet<@N: Int> {\n    data: [U8#@N]                       // [T#n]: an array of n values of T\n    fn len(self) -> Int { @N }\n}\nstruct Matrix<T, @R: Int, @C: Int = @R> { cells: [T#(@R * @C)] }\np :: Packet<64>{data: [U8#64]{}}\nq :: Packet<(@lanes * 2)>{data: [U8#8]{}}   // Packet<8>: equal by value\nfn checksum<@N: Int>(pkt: Packet<@N>) -> U8 { ... }\nchecksum(p)                              // @N inferred from the argument\nchecksum<64>(p)                          // explicit argument also allowed\nfn send32(pkt: Packet<32>) { ... }\nsend32(p)                                // error: expected Packet<32>, found Packet<64>"
-        },
-        {
-          "key": "B",
-          "name": "Plain name: struct Packet<N: Int>",
-          "detail": "Rust and Swift shape without a keyword; uniform with the unsigiled `T`. `<N: Int>` looks exactly like a trait bound `<T: Add>` until the reader knows `Int` is not a trait, and the body writes `N`, unlike every other compile-time constant in Jet. The parser cannot tell the kind without name resolution, which Jet's parser does not do today.",
-          "technical": "Disambiguate by resolving the bound: if it names a type rather than a trait, the parameter is a value. Requires name resolution before the parameter kind is known.",
-          "code": "struct Packet<N: Int> { data: [U8#N] }     // reads like a trait bound <T: Add>\np :: Packet<64>{data: [U8#64]{}}"
-        },
-        {
-          "key": "C",
-          "name": "Keyword: struct Packet<const N: Int>",
-          "detail": "Rust's spelling, recognized at once by Rust readers, and the body stays unsigiled like `T`. It reserves `const` for one position (I7 has no contextual keywords) when `@` already carries the meaning.",
-          "technical": "Reserve `const` (I7). Parameter kind is known at the parser without name resolution.",
-          "code": "struct Packet<const N: Int> { data: [U8#N] }   // new reserved word\np :: Packet<64>{data: [U8#64]{}}"
-        },
-        {
-          "key": "D",
-          "name": "No const generics: keep per-size types",
-          "detail": "Keep S26 as written. Sizes stay array facts (`[U8#64]`); one struct per size by hand, or a generated sibling file per size from `fn build`. Zero grammar change and no monomorphization by value. Cost: `checksum` is written once per size, and a shared field or method cannot be generic over the count.",
-          "technical": "Status quo. Alternatives considered and refused here. A trait with an associated constant (`struct Packet<S: Size>`, typenum style) needs one marker type per size and cannot infer from a literal. A `#N` size parameter reuses the array-size marker but keys the whole feature to arrays.",
-          "code": "struct Packet32 { data: [U8#32] }\nstruct Packet64 { data: [U8#64] }\nfn checksum32(pkt: Packet32) -> U8 { ... }\nfn checksum64(pkt: Packet64) -> U8 { ... }"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "A keyword marks a value parameter; only integers, bool, char today.",
-          "code": "struct Packet<const N: usize> { data: [u8; N] }"
-        },
-        {
-          "lang": "Zig",
-          "note": "Types are values; a function takes a comptime size and returns a struct type. Jet refuses this route.",
-          "code": "fn Packet(comptime n: usize) type { return struct { data: [n]u8 }; }"
-        },
-        {
-          "lang": "C++",
-          "note": "Non-type template parameters have existed since the start; the type is written before the name.",
-          "code": "template <std::size_t N> struct Packet { std::array<uint8_t, N> data; };"
-        },
-        {
-          "lang": "Swift",
-          "note": "Value generics use a plain `let N: Int` marker; only Int today.",
-          "code": "struct Packet<let N: Int> { }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "`@` already marks a compile-time name in Jet, so `<@N: Int>` needs no new word and cannot be read as a trait bound; the sigil's meaning widens to 'value, not type'. Inside the body `@N` looks like every other constant. The amendment to S26 stays narrow: a number parameterizes an existing type, no type is computed, and arithmetic over bound parameters is refused so equality stays by value.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It reads as a trait bound until the reader knows Int is not a trait, and the parser needs name resolution to know the parameter kind."
-          },
-          {
-            "key": "C",
-            "reason": "Familiar to Rust readers, but it reserves a word for one position when `@` already carries the meaning."
-          },
-          {
-            "key": "D",
-            "reason": "One function per size forever; generated sibling files hide the count in a build step instead of the type."
-          }
-        ],
-        "tradeoff": "Jet takes on monomorphization by value and a second kind of generic parameter. Only Int is allowed, which covers sizes and counts and keeps the type checker away from arbitrary values.",
-        "losses": [
-          {
-            "loss": "A second kind of generic parameter to learn.",
-            "mitigation": "A number and a type cannot share one parameter kind without types-as-values."
-          },
-          {
-            "loss": "Only Int values for now.",
-            "mitigation": "A scope choice: sizes and counts are the shipped need; `Bool` or `U32` can follow in the same slot."
-          },
-          {
-            "loss": "No arithmetic over a bound parameter in a type argument.",
-            "mitigation": "Deciding `Packet<(@N * 2)>` equals `Packet<(2 * @N)>` needs symbolic algebra."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": {
-        "beginner": "Fresh agent: completion-beginner-constgen1. Skill: rli5. A stateless fresh reader flagged the unexplained `[U8#@N]`, the trait-bound comparison, and call-site inference; all repaired in option A.",
-        "adversarial": "Author model family: Anthropic. Adversarial model family: Anthropic. Fresh agent: completion-adversarial-constgen1. Verdict 'recommendation holds', with material gaps: no status-quo option, arithmetic over bound parameters, parse ambiguity of bare expressions, negative and zero sizes, and `@` shadowing. Repaired by adding option D (with the associated-constant and `#N` alternatives refused there), a bare-or-parenthesized argument rule, closed-or-bare arguments in generic bodies, size checks at the array, and the shadowing rule."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "May a compile-time number be a type parameter, and how is it spelled?",
-        "lesson": "Generic types take a type parameter today. A packet of 64 bytes needs a number in its type, so each size is a separate struct. This ballot asks whether a compile-time Int may be a type parameter and how it is spelled, without letting code compute a type.",
-        "trio": {
-          "current": {
-            "note": "A constant sizes an array field, but a number cannot be a type parameter.",
-            "code": "// Today: a constant may size an array, but a number cannot be a type parameter.\n@lanes :: 4\nstruct Frame { values: [Float#(@lanes * 2)] }\nstruct Packet64 { data: [U8#64] }      // one struct per size, by hand\nstruct Packet128 { data: [U8#128] }"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "A keyword marks the value parameter; only integers and a few scalars.",
-            "code": "struct Packet<const N: usize> { data: [u8; N] }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Compile-time sigil: Packet<@N: Int>",
-            "gist": "@ already means compile-time; body writes [U8#@N]; use Packet<64>.",
-            "gains": [
-              "Cannot be misread as a trait bound.",
-              "No new reserved word.",
-              "Body reads like every other compile-time constant."
-            ],
-            "losses": [
-              "A second kind of generic parameter; `@` widens to mean 'value'.",
-              "Only Int values for now."
-            ],
-            "proposed": {
-              "code": "@lanes :: 4\nstruct Packet<@N: Int> {\n    data: [U8#@N]                       // [T#n]: an array of n values of T\n    fn len(self) -> Int { @N }\n}\nstruct Matrix<T, @R: Int, @C: Int = @R> { cells: [T#(@R * @C)] }\np :: Packet<64>{data: [U8#64]{}}\nq :: Packet<(@lanes * 2)>{data: [U8#8]{}}   // Packet<8>: equal by value\nfn checksum<@N: Int>(pkt: Packet<@N>) -> U8 { ... }\nchecksum(p)                              // @N inferred from the argument\nchecksum<64>(p)                          // explicit argument also allowed\nfn send32(pkt: Packet<32>) { ... }\nsend32(p)                                // error: expected Packet<32>, found Packet<64>"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Plain name: Packet<N: Int>",
-            "gist": "Rust shape without the keyword.",
-            "gains": [
-              "Uniform with the unsigiled `T`; Rust and Swift shape."
-            ],
-            "losses": [
-              "Reads as a trait bound until Int is known not to be a trait.",
-              "Parser needs name resolution to know the kind."
-            ],
-            "proposed": {
-              "code": "struct Packet<N: Int> { data: [U8#N] }     // reads like a trait bound <T: Add>\np :: Packet<64>{data: [U8#64]{}}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keyword: Packet<const N: Int>",
-            "gist": "Rust's exact spelling.",
-            "gains": [
-              "Parameter kind is obvious at the parser.",
-              "Rust readers recognize it at once."
-            ],
-            "losses": [
-              "Reserves a word for one position.",
-              "Duplicates what @ already means."
-            ],
-            "proposed": {
-              "code": "struct Packet<const N: Int> { data: [U8#N] }   // new reserved word\np :: Packet<64>{data: [U8#64]{}}"
-            }
-          },
-          {
-            "key": "D",
-            "name": "No const generics",
-            "gist": "Keep S26; one struct per size by hand or generated.",
-            "gains": [
-              "Zero grammar change; no monomorphization by value."
-            ],
-            "losses": [
-              "One function per size forever."
-            ],
-            "proposed": {
-              "code": "struct Packet32 { data: [U8#32] }\nstruct Packet64 { data: [U8#64] }\nfn checksum32(pkt: Packet32) -> U8 { ... }\nfn checksum64(pkt: Packet64) -> U8 { ... }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "`@` already means compile-time in Jet, so no new word is needed and the parameter cannot be read as a trait bound. The S26 amendment stays narrow.",
-          "gains": [
-            "Firmware buffers and fixed matrices written once.",
-            "No types-as-values."
-          ],
-          "losses": [
-            {
-              "loss": "A second kind of generic parameter to learn.",
-              "mitigation": "A number and a type cannot share one parameter kind without types-as-values."
-            },
-            {
-              "loss": "Only Int values for now.",
-              "mitigation": "A scope choice; other kinds can follow in the same slot."
-            },
-            {
-              "loss": "No arithmetic over a bound parameter in a type argument.",
-              "mitigation": "Equality would need symbolic algebra."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "It reads as a trait bound."
-            },
-            {
-              "key": "C",
-              "reason": "It reserves a word @ already covers."
-            },
-            {
-              "key": "D",
-              "reason": "One function per size forever."
-            }
-          ],
-          "tradeoff": "Monomorphization by value, limited to Int, in exchange for one Packet type."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-09-16T20:03:12.976Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-09-19"
     },
     {
       "id": "D-META-PUBLISH2",
@@ -204147,144 +203752,6 @@
       "ratifiedAt": "2026-11-11"
     },
     {
-      "id": "D-COMPUTED-ALIAS1",
-      "cardId": "c0tsbf3w",
-      "group": "syntax",
-      "title": "Should a reusable type choice be an alias body or an ordinary type-returning function?",
-      "situation": "Should a reusable type choice be an alias body or an ordinary type-returning function? A library wants small storage inline and larger storage in a growing list. Mia uses both and prints their counts, 2 then 3. An ordinary alias names one shape but does not express this checked choice. We recommend extending aliases with the existing required early evaluator and trait bounds, without creating a wrapper type.",
-      "gist": "Should a reusable type choice be an alias body or an ordinary type-returning function?",
-      "lesson": "An alias is another name for an existing type. A bound requires that chosen type to implement a trait. The choice happens while building; the resulting value has no runtime selection wrapper.",
-      "explainer": "",
-      "story": "Mia stores two numbers inline and three in a growing list. Both recipes hide that storage choice and print 2, then 3.",
-      "inWild": "Illustrative early type-returning function, the broader alternative here.",
-      "detail": "origin/dev:Compiler/JetParser/Source/Parser/Declarations/Types.jet:51-85 classifies transparent generic aliases. origin/dev:Compiler/JetFoundation/Data/Syntax/Spellings.jet:27-32 supplies early evaluation and number parameters. Both options reuse those generic identities and the ordinary trait checker.\n\nD-ALIAS-GENERIC1=A authorizes generic aliases; D-META-SPELL1=A supplies #run for required early work. D-GENERIC-TYPEFN1 is archived; the later alias decision preserves angle-bracket generics and does not approve either computed form. A proposes `Name<parameters>: Bound #run { type-expression }`. B proposes `#run name: fn(parameters) -> Type<Bound>` and constant calls in type positions. Both run the same canonical early evaluator, never an alias-specific interpreter.\n\nThe shared Inline and Heap implementations below are deliberately retained. A generic-implementation failure in the shared baseline must not be hidden by changing the workload. The proposed result retains exact Inline<2> identity: passing it where that type is required needs no conversion. B preserves the same identity through its type-valued result. No fresh nominal identity, allocation or emitted runtime branch is authorized.\n\nBeginners use the recipe as an ordinary type. Experts supply bounds and explicit value parameters. Check every reachable return type against Store, including an unused choice; generic branches need sufficient declared constraints rather than an invented universal proof. Refuse non-types, runtime conditions, invalid capacities and cycles with their declaration path. Conditions may use permitted pure early constants, not ambient host state. Keep ordinary evaluation budgets and diagnostics.\n\nA keeps the new capability at aliases. B is a real stronger option: reusable type values and type-returning functions beyond alias selection. It is not intrinsically a second evaluator, slower or less safe. Both introduce public syntax and therefore remain an owner gate. Explicit concrete constructors remain available under either choice; removing the already requested recipe is not a same-capability alternative.\n\nFresh review, 2026-11-11. Kept the full shared workload and its generic-implementation failure; corrected archived authority and retained general type functions as a fair stronger alternative.\n\nprobes/computed-shared.jet: check exited 1 with E0102.\n\nprobes/alias.jet: run exited 0; output: \"5\".\n\nprobes/computed-alias.jet: check exited 1 with E0003.\n\nprobes/D-COMPUTED-ALIAS1-A.jet: check exited 1 with E0003. This result is not proof of the proposed semantics.\n\nprobes/D-COMPUTED-ALIAS1-B.jet: check exited 1 with E0335. This result is not proof of the proposed semantics.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Bounded alias body",
-          "detail": "Proposed bounded alias grammar. Both branches must satisfy Store; chosen types retain their identities. Intended output: 2 then 3.",
-          "code": "Store: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nStorage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }\nrun: fn() {\n    small: Storage<2>{items: [1,2]}\n    big: Storage<100>{items: [1,2,3]}\n    print(small.count())\n    print(big.count())\n}",
-          "technical": "origin/dev:Compiler/JetParser/Source/Parser/Declarations/Types.jet:51-85 classifies transparent generic aliases. origin/dev:Compiler/JetFoundation/Data/Syntax/Spellings.jet:27-32 supplies early evaluation and number parameters. Both options reuse those generic identities and the ordinary trait checker."
-        },
-        {
-          "key": "B",
-          "name": "Type-returning function",
-          "detail": "Proposed Type<Bound> and type-position constant-call grammar. This explicitly authorizes a broader type-value surface, rather than relying on archived generic-recipe authority. Intended output: 2 then 3.",
-          "code": "Store: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\n#run storage: fn(n: Int) -> Type<Store> { if n <= 16 -> Inline<n> else -> Heap }\nrun: fn() {\n    small: storage(2){items: [1,2]}\n    big: storage(100){items: [1,2,3]}\n    print(small.count())\n    print(big.count())\n}",
-          "technical": "origin/dev:Compiler/JetParser/Source/Parser/Declarations/Types.jet:51-85 classifies transparent generic aliases. origin/dev:Compiler/JetFoundation/Data/Syntax/Spellings.jet:27-32 supplies early evaluation and number parameters. Both options reuse those generic identities and the ordinary trait checker."
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Extend the requested alias job using the existing evaluator and type identity. A general type-value API is useful but not necessary here.",
-        "gains": [
-          "Ordinary type-name use",
-          "No public type-value return API"
-        ],
-        "losses": [
-          {
-            "loss": "Library authors learn one computed alias form.",
-            "mitigation": "Keep ordinary aliases unchanged and show the selected concrete type in tools."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A strong broader feature, but adds type-valued returns and calls where an alias body is sufficient."
-          }
-        ],
-        "tradeoff": "A narrower alias extension versus a more general early type-value surface; no speed advantage is claimed."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-3. Kept the full shared workload and its generic-implementation failure; corrected archived authority and retained general type functions as a fair stronger alternative. Ran seed-t22 probes and recorded their exact outcomes in detail; proposal success is not claimed."
-      },
-      "checkInstructions": "Probes used seed-t22 under a MemoryMax=16G systemd scope. Run the complete shared program, exact identity passing, unused bad branches, generic bounds, non-types, runtime inputs, capacities, cycles and imports on every applicable tier. Unsupported proposal syntax is not a passing behavior test.",
-      "surface": {
-        "gist": "Should a reusable type choice be an alias body or an ordinary type-returning function?",
-        "lesson": "An alias is another name for an existing type. A bound requires that chosen type to implement a trait. The choice happens while building; the resulting value has no runtime selection wrapper.",
-        "trio": {
-          "current": {
-            "note": "This explicit-storage baseline uses the same Inline and Heap types; a computed type recipe remains proposed. check exited 1 with E0102.",
-            "code": "Store: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nrun: fn() {\n    small: Inline<2>{items: [1,2]}\n    big: Heap{items: [1,2,3]}\n    print(small.count())\n    print(big.count())\n}"
-          },
-          "wild": {
-            "lang": "Zig documentation",
-            "note": "Illustrative early type-returning function, the broader alternative here.",
-            "code": "fn Storage(comptime n: usize) type {\n    return if (n <= 16) [n]i64 else []i64;\n}"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Bounded alias body",
-            "gist": "Keep a checked type choice on the alias declaration.",
-            "gains": [
-              "Ordinary type-name use",
-              "No public type-value return API"
-            ],
-            "losses": [
-              "Libraries learn a computed alias body"
-            ],
-            "proposed": {
-              "code": "Store: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nStorage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }\nrun: fn() {\n    small: Storage<2>{items: [1,2]}\n    big: Storage<100>{items: [1,2,3]}\n    print(small.count())\n    print(big.count())\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Type-returning function",
-            "gist": "Use ordinary functions and early type values.",
-            "gains": [
-              "General reusable type computations"
-            ],
-            "losses": [
-              "Adds type-valued returns and calls in type position"
-            ],
-            "proposed": {
-              "code": "Store: trait { count: fn(self) -> Int }\nInline: struct<N: Int> {\n    items: [Int#N]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\nHeap: struct {\n    items: [Int]\n    impl Store { count: fn(self) -> Int { self.items.len() } } }\n#run storage: fn(n: Int) -> Type<Store> { if n <= 16 -> Inline<n> else -> Heap }\nrun: fn() {\n    small: storage(2){items: [1,2]}\n    big: storage(100){items: [1,2,3]}\n    print(small.count())\n    print(big.count())\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Extend the requested alias job using the existing evaluator and type identity. A general type-value API is useful but not necessary here.",
-          "gains": [
-            "Ordinary type-name use",
-            "No public type-value return API"
-          ],
-          "losses": [
-            {
-              "loss": "Library authors learn one computed alias form.",
-              "mitigation": "Keep ordinary aliases unchanged and show the selected concrete type in tools."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A strong broader feature, but adds type-valued returns and calls where an alias body is sufficient."
-            }
-          ],
-          "tradeoff": "A narrower alias extension versus a more general early type-value surface; no speed advantage is claimed."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-11T05:11:05.845Z",
-      "reports": [
-        {
-          "title": "Zig type-returning functions",
-          "url": "https://ziglang.org/documentation/master/#comptime"
-        }
-      ],
-      "outcome": "A",
-      "ratifiedAt": "2026-11-11"
-    },
-    {
       "id": "D-PRINTSTYLE1",
       "cardId": "c0dhc7rh",
       "group": "core",
@@ -219241,19 +218708,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "qdir9eck",
-      "cardId": "c0tsbf3w",
-      "decisionId": "D-COMPUTED-ALIAS1",
-      "by": "owner",
-      "kind": "question",
-      "text": "i dont really understand what this question is asking and why it is relevant in context. rewrite in plain english",
-      "status": "answered",
-      "answer": "Sorry this sat unanswered. The ballot was rewritten in plain English at 11:39, after this question, and you ratified A at 12:40. In plain terms: sometimes the right type depends on a number known while building. A container of at most 16 items should live inline, and a bigger one on the heap. A asks you to write that choice as the body of a type alias, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch is checked when you write it, and the built program has no run-time switch. The alternative was a separate kind of function that returns a type. It mattered because #3505 c18 (computed generic types) had no live ruling to build to after the old type-function decision was retired. The build criterion is #3505 c24.",
-      "created": "2026-11-11T10:50:17.291Z",
-      "answeredAt": "2026-11-12",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q0adwkpu",
       "cardId": "c0dhc7rh",
       "decisionId": "D-CONTEXT-EFFECT1",
@@ -220444,6 +219898,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T06:11:43.006Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0prey1k",
+      "note": "#4 The Linux native app host: an app's native.app opens a Wayla"
+    },
+    {
+      "at": "2026-11-17T06:09:27.667Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fymc7l",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-17T06:02:20.664Z",
       "by": "Main",

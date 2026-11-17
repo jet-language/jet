@@ -104228,6 +104228,204 @@
       "completedAt": "2026-11-14T05:08:06.590Z",
       "questions": [],
       "retiredAt": "2026-11-17T05:18:28.964Z"
+    },
+    {
+      "id": "c0tsbf3w",
+      "num": 3505,
+      "title": "Const generics: a compile-time Int as a type parameter",
+      "body": "Owner gate from the Jai-vs-Jet interview (comptime ladder rung R4, owner chose \"R0-R4 now\"). Today a known constant can size an array (`[U8#64]`, `[Float#(@lanes * 2)]`) but a number cannot be a type parameter, so `Packet<64>` and a generic SOA count cannot be written; S26 says comptime does not parameterize a type. The proposal is a narrow amendment: a compile-time `Int` may parameterize an existing type constructor, spelled `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-COMPTIME-WORD1=A), used as `Packet<64>` or `Packet<lanes>`. Monomorphized like `<T>`. Not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, no dispatch on comptime results. `Meta.Const` is named alongside (see D-META-GATE1).\n\n## Exit criteria (after ratification)\n1. Parser and sema accept `<comptime N: Int>` declarations and literal / comptime-constant arguments; a runtime value in that slot is a teaching diagnostic.\n2. Example: firmware-style `Packet<N>` with `[U8#N]` field runs on O0, O1 and O2 (I9).\n3. Spec entry amends S26 narrowly and cites D-META-CONST1.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nFinish D-CONSTGEN1 without treating const generics as first-class type factories. Implement compile-time Int parameters, substitution, instance identity, constraints and target layout through the existing generic mechanism. Reconcile the latest metadata naming direction with immutable decision history through the contract card; ordinary prepared values do not require repeated @ references outside declared parameter syntax.\n\n## Owned paths and integration\n\n- crates/jet-foundation/src/AST\n- crates/jet-parser/src/Parser/Types.rs\n- crates/jet-sema/src/Sema/Bundle/GenericModules\n- crates/jet-codegen/src/Codegen/TIR\n- tests/generics.rs\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nAdd the `Packet: struct<comptime N: Int>` witness with literal and prepared arguments, distinct sizes and nested use. Exercise O0, O1 and O2. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nFinish D-CONSTGEN1, with the spelling now fixed by D-CONSTGEN2=A: a compile-time `Int` may be a type parameter of an existing type constructor. The declaration is `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-DECL-COLON1=A, D-COMPTIME-WORD1=A), and uses write the plain value, as in `Packet<64>` or `Packet<lanes>` after `lanes: comptime { 64 }`. It is monomorphized like `<T>`.\n\nThis is not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, and no dispatch on comptime results. It is comptime ladder rung R4; the owner chose \"R0-R4 now\".\n\n## Current state\n- The grammar and AST have shipped (#3662, logged 2026-09-28 in `Docs/spec/syntax-decisions.md:7455`; syntax row at `:34`).\n  - Jet: `TypeParam.prep: PrepParam?` in `Compiler/JetAst/Source/AST/Items.jet:447-464`, with the parser at `Compiler/JetParser/Source/Parser/Items.jet:531`.\n  - Rust: `crates/jet-parser/src/Parser/Types.rs:473`.\n  - This supersedes the card's older `<@N: Int>` spelling.\n- Every `prep` parameter is rejected with E0390 until this card lands:\n  - Jet sema: `Compiler/JetSema/Source/Sema/Registration/Items.jet:438-441`;\n  - Rust sema: `crates/jet-sema/src/Sema/Casing.rs:120-128`;\n  - UI fixture: `tests/ui/prep_number_param_unsupported.jet`.\n- There is no substitution, instance identity or layout for number parameters in `Compiler/JetSema` or `Compiler/JetCodegen/Source/Codegen/TypeInstances.jet`.\n- Criteria 1-4 and 9-12 (Syntax entry, log entry, grammars, snapshots) are met for the declaration grammar by #3662. Only the E0390 snapshot changes here.\n\n## Changes\n1. JetSema (`Registration/Items.jet` plus generic substitution):\n   - Replace the E0390 rejection with number-parameter binding. `N` is in scope as a value inside the declaration, including array sizes such as `[U8#N]`.\n   - A use-site argument must be an Int literal or a comptime constant. A runtime value in that slot gets a new registered diagnostic with a UI snapshot.\n   - Instance identity includes the value, so `Packet<64>` and `Packet<32>` are different types.\n2. JetCodegen (`TypeInstances.jet`, `Types.jet`): monomorphize and lay out each instance, with deterministic naming that includes the number.\n3. Mirror the change in the shipped Rust sema, TIR and MIR so the goldens run on the shipped binary. Delete the E0390 path in both compilers and retire the row, or keep E0390 only for a non-Int number type.\n4. Add `Examples/features/generics/const_packet.jet`: a firmware-style `Packet: struct<comptime N: Int>` with literal and comptime arguments, two distinct sizes and a nested use, printing sizes and bytes.\n5. Update `Docs/spec/reference/metaprogramming.md`: S26 is amended narrowly, citing D-CONSTGEN1 and D-CONSTGEN2.\n\n## Proof\n- `jet test Compiler --profile golden generics/const_packet`: identical on O0, O1 and O2.\n- `jet test Compiler --profile ui prep_number_param`: the old E0390 fixture is replaced by a runtime-argument rejection fixture.\n- `jet test Compiler --profile cases generics/`: passes.\n\n## Batch\nbatch-jetc-sema: substitution and identity are the core. Codegen layout lands in the same build.\n\n## Dependencies\nNone real. #3520's naming reconciliation was settled by D-CONSTGEN2=A (#3662 shipped).\n",
+      "checkSteps": "\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nAdd the Packet<@N: Int> witness with literal and prepared arguments, distinct sizes and nested use. Exercise AOT, run and interpreter. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.\n\nExact witness: struct Packet<@N: Int> { data: [U8#N] }; lanes :: prep { 64 }; instantiate Packet<64> and Packet<lanes>. Verify equal intended specialization and reject obsolete ordinary-value @ references outside metadata queries or template holes.",
+      "probe": "jet run examples/features/collections/fixed_arrays.jet",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met (c18, c20 and c24 by 194d343898 and c2182c976a; c19 04ce9799d2; c1 obsolete, covered by c9)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Correction to the BallotFix-2 entry above. D-GENERIC-TYPEFN1 was retired and archived on 2026-10-29, as this card already recorded. D-ALIAS-GENERIC1=A (alias parameters on the name, Grid<T>: [[T]]) does not spell a computed bounded alias, so c18 needs a new owner ballot, NEW-D-COMPUTED-ALIAS1. G6Decl found it, with the candidates (A) a bounded alias with a #run body checked per branch, (B) a #run fn returning a Type in type position, and (C) retiring c18 with TYPEFN1. Its authoring is queued for the next reviewer slot. c18 is skipped meanwhile."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "BallotFix-2 review 2026-11-10: c18 needs no ballot. D-GENERIC-TYPEFN1=A ratifies computed type recipes with bounded results, checked per branch at the definition, with declared-type identity kept, and D-META-SPELL1=A gives the #run and <N: Int> spellings. Build it on the canonical type identity and bound checker, with no prep revival and no alias-only evaluator. Routed to G6Decl."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c18 [#4164] has no live ruling to build to: D-GENERIC-TYPEFN1 (outcome A, Zig-style recipes) was retired and archived on 2026-10-29, so the bounded computed alias form needs a new owner ballot before anyone builds it. c17 is staged as G6Lead-3505c17 (golden Examples/Types/generics/const_packet passes on O0/O1/O2)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Lane paused by owner (4-lead cap). Const-generics WIP is in unlanded MetaLead-2-9: parser number type args, comptime params as generic params, E0390 re-scoped to misuse, constant folding in type args, NodeKind.GenericValue. Next: E0390 text/snapshot, golden generics/const_packet at O0/O1/O2 (c17), inference from fixed-list length, c9-c12/c15/c16 docs and grammar. c18 not started."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-COMPTIME-WORD1=A; I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #4164; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "pip-mine-20261001",
+          "text": "Mining run 2026-10-01: Zig probe Z1 confirmed memoized type identity for comptime type functions (`List(i32) == List(i32)`). Live probe J5: `struct Packet<prep N: Int>` parses but `Packet<4>` fails with E0003 \"Expected a type name, found a number\". Ballot D-GENERIC-TYPEFN1 (#4164) asks whether computed types join this mechanism; D-LANES1 (#4167) and the tile work (#3215) depend on this card."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Split into 5 session-sized children (#4106 #4107 #4108 #4109 #4110) on 2026-10-01: 17 open specific criteria (~10.25 sessions) in one card; split into 5 session-sized children of ~4 criteria each. This card stays open as their umbrella; meet its criteria from the children's evidence."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-sema."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (core1a, Opus 5.5): C_RETARGET. D-CONSTGEN1=A is ratified but not built. The owned paths are archived Rust (jet-parser, jet-sema GenericModules, jet-codegen TIR), the self-hosted parser has no compile-time Int type parameter, and the card waits on #3520. Evidence: Card owned paths crates/jet-parser/src/Parser/Types.rs, crates/jet-sema/src/Sema/Bundle/GenericModules, crates/jet-codegen/src/Codegen/TIR; no const-generic handling in Compiler/JetParser or Compiler/JetAst (grep); blockedBy #3520 (building)."
+        },
+        {
+          "at": "2026-09-19",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete: Syntax.rs no longer exists. The registry is Compiler/JetFoundation/Data/Syntax, and c9 (met with commits) covers its row, the syntax-decisions entry and the grammars for struct<comptime N: Int>.",
+          "at": "2026-11-14T06:09:56.521Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "The syntax registry row, a Docs/spec/syntax-decisions.md log entry, the jet devtools grammars and the UI snapshots all show struct<comptime N: Int> as the one form (was c9-c12).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G6Lead-4276c83. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). `<comptime N: Int>` is the one registered form.",
+          "at": "2026-11-10T10:26:12.028Z"
+        },
+        {
+          "n": 17,
+          "text": "Proof with the admitted jet (stage-2 output of jet build Compiler): jet test Compiler --profile golden generics/const_packet passes (Packet: struct<comptime N: Int> with literal and comptime arguments, distinct sizes, nested use), E0390 no longer fires for Int number parameters, values, layout and identity agree on O0, O1 and O2, and the parser, sema, codegen, formatter and jet explain use the one form; UI fixtures match their snapshots (was c13-c16).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-3505c17. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). golden Types/Generics/ConstPacket PASS on O0/O1/O2.",
+          "at": "2026-11-10T16:29:11.689Z"
+        },
+        {
+          "n": 18,
+          "text": "[#4164] Bounded computed type aliases from prep. A golden selects a type from a prep condition, and a UI snapshot covers a failing bound.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): the ComputedAlias golden selects a type from a compile-time condition (6/0 at none, basic and full), and ui computed_alias 4/0 covers a failing bound.",
+          "at": "2026-11-14T06:09:06.631Z"
+        },
+        {
+          "n": 19,
+          "text": "Prerequisite found by the D-COMPUTED-ALIAS1 review (Review1, 2026-11-11): a method call on a generic Inline<N>.Store value is E0102, and using N directly is E0107. That is a sema defect in generic impl lookup. Method lookup through a generic type argument resolves at O0/O1/O2 with a regression case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "04ce9799d2 (on dev): method lookup through a generic type argument resolves (Inline<N>.Store methods and N directly). Regression case generics/number_param_type_methods_resolve_on_every_tier passes on the gate-p47 jet; its run steps match the .out at each tier it names (none and full checked by G6Meta-4).",
+          "at": "2026-11-14T04:34:27.013Z"
+        },
+        {
+          "n": 20,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (D-COMPUTED-ALIAS1 bounded computed aliases). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): c2182c976a adds the Spellings row and the syntax-decisions ledger entry; `jet self devtools grammars` rc 0 with `git status --short Tools/editors` empty; `jet test tests/guards --filter grammar` 13/0 and `--filter syntax_reconciliation` 15/0; LexicalLedger --check and SurfaceBudget --check rc 0.",
+          "at": "2026-11-14T06:09:07.633Z"
+        },
+        {
+          "n": 24,
+          "text": "D-COMPUTED-ALIAS1=A is built (owner ratified 2026-11-11): a bounded alias body chooses a type while building, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch must satisfy the bound (Store), and the chosen types keep their identities. The ballot program prints 2 then 3, and a branch that fails the bound is refused with a UI snapshot. Owner: G6Meta. Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): golden Generics/ComputedAlias and ComputedAliasKeepsChosenTypes at --optimize=none, basic and full 6/0 (the ballot program prints 2 then 3, and the chosen types keep their identities); ui --filter computed_alias 4/0, including the branch that fails the Store bound; ui type_alias 7/0.",
+          "at": "2026-11-14T06:09:05.604Z"
+        }
+      ],
+      "refs": [
+        "D-META-CONST1",
+        "D-METADEPTH1",
+        "D-GENERIC-CALL1",
+        "examples/features/collections/fixed_arrays.jet",
+        "examples/features/comptime/computed_constants.jet",
+        "examples/features/types/generic_types.jet",
+        "docs/research/jai-vs-jet-fable-brief-2026-09-16.md",
+        "#3509",
+        "crates/jet-foundation/src/AST",
+        "crates/jet-parser/src/Parser/Types.rs",
+        "crates/jet-sema/src/Sema/Bundle/GenericModules",
+        "crates/jet-codegen/src/Codegen/TIR",
+        "tests/generics.rs"
+      ],
+      "tags": [
+        "jai-vs-jet",
+        "syntax",
+        "types",
+        "comptime",
+        "meta-suite",
+        "retargeted",
+        "batch-jetc-sema",
+        "wayfinder:task"
+      ],
+      "parentId": "c0yfcz0w",
+      "needsAcceptance": false,
+      "created": "2026-09-16T19:41:29.526Z",
+      "updated": "2026-11-14T06:09:58.298Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 24,
+      "completedAt": "2026-11-14T06:09:58.298Z",
+      "questions": [
+        {
+          "id": "qdir9eck",
+          "cardId": "c0tsbf3w",
+          "decisionId": "D-COMPUTED-ALIAS1",
+          "by": "owner",
+          "kind": "question",
+          "text": "i dont really understand what this question is asking and why it is relevant in context. rewrite in plain english",
+          "status": "answered",
+          "answer": "Sorry this sat unanswered. The ballot was rewritten in plain English at 11:39, after this question, and you ratified A at 12:40. In plain terms: sometimes the right type depends on a number known while building. A container of at most 16 items should live inline, and a bigger one on the heap. A asks you to write that choice as the body of a type alias, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch is checked when you write it, and the built program has no run-time switch. The alternative was a separate kind of function that returns a type. It mattered because #3505 c18 (computed generic types) had no live ruling to build to after the old type-function decision was retired. The build criterion is #3505 c24.",
+          "created": "2026-11-11T10:50:17.291Z",
+          "answeredAt": "2026-11-12",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-17T06:11:43.165Z"
     }
   ]
 }
