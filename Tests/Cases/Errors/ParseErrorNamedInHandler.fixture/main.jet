@@ -1,0 +1,22 @@
+// Int.parse, Float.parse and String's `to_int` fail with Core's ParseError, a
+// declared type: a `??` handler hands the failure to functions that name it,
+// as a parameter, a return and a list element.
+describe: fn(err: ParseError) -> String { "rejected: {err.message}" }
+
+keep: fn(err: ParseError) -> ParseError { err }
+
+run: fn() {
+    whole: Int.parse("x") ?? {
+        print(describe(err))
+        0
+    }
+    real: Float.parse("1.5.2") ?? {
+        print(describe(keep(err)))
+        0.0
+    }
+    seen := [ParseError]{}
+    count: "12a".to_int() ?? {
+        seen.push(err) - 1
+    }
+    print("{whole} {count} {seen.len()} {real == 0.0}")
+}

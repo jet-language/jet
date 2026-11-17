@@ -44,7 +44,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
+    jet_foundation.[BUILTIN_METHOD_ROWS, BUILTIN_STATIC_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, CompilerThreads, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, ParseResult, Span, TraitImplBlock, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_index, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec, sema_casing_marker_qualifier]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
     jet_lexer.[
         Lexed,
@@ -1302,8 +1302,14 @@ jet_driver_reach_core_demands: fn(reach: &JetDriverReach, unit: Int, demand: Jet
     if demand.option_or_err {
         reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "or_err"), dotted: false, module_name: "core.prelude", bare: false, open: true, followed: false})
     }
-    if demand.channel_send {
+    if demand.prelude_failure {
         reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "send"), dotted: true, module_name: "core.prelude", bare: false, open: false, followed: false})
+        loop at in JET_DRIVER_PRELUDE_FAILURE_METHODS {
+            reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, BUILTIN_METHOD_ROWS[at].name), dotted: true, module_name: "core.prelude", bare: false, open: false, followed: false})
+        }
+        loop at in JET_DRIVER_PRELUDE_FAILURE_STATICS {
+            reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, BUILTIN_STATIC_ROWS[at].method), dotted: true, module_name: "core.prelude", bare: false, open: false, followed: false})
+        }
     }
     loop at in 0..<path_words.len() {
         reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, path_words[at]), dotted: true, module_name: path_modules[at].copy(), bare: false, open: false, followed: false})

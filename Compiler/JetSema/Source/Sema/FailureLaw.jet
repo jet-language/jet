@@ -12,7 +12,6 @@ use {
         BodyNode,
         Call,
         CallArg,
-        BUILTIN_METHOD_ROWS,
         CORE_ERROR_TYPES,
         CORE_RECORD_LITERAL_ROWS,
         DIAGNOSTIC_ERROR,
@@ -95,10 +94,9 @@ sema_core_error_family_names: fn(source: String) -> [String] Never! {
 // build and comptime host values BuildError, CompilerError and
 // CompilerPackageError (ir_host_value_name); the runtime handles Closed,
 // FieldError, IOError, RangeError, TextError and UTF8Error
-// (IR_RUNTIME_HANDLES); the `Expired` record (CORE_RECORD_LITERAL_ROWS); and
-// the ParseError that the builtin `parse`, `to_int` and `to_float` return
-// (BUILTIN_METHOD_ROWS). A Core error type is in Core.rows's `error_types`
-// (CORE_ERROR_TYPES) instead.
+// (IR_RUNTIME_HANDLES); and the `Expired` record (CORE_RECORD_LITERAL_ROWS).
+// A Core error type is in Core.rows's `error_types` (CORE_ERROR_TYPES)
+// instead.
 SEMA_COMPILER_ERROR_TYPES: [String]{
     "BuildError",
     "Closed",
@@ -107,7 +105,6 @@ SEMA_COMPILER_ERROR_TYPES: [String]{
     "Expired",
     "FieldError",
     "IOError",
-    "ParseError",
     "RangeError",
     "TextError",
     "UTF8Error",
@@ -116,26 +113,23 @@ SEMA_COMPILER_ERROR_TYPES: [String]{
 SEMA_COMPILER_ERROR_TYPES_CHECKED: #run sema_compiler_error_types_checked(SEMA_COMPILER_ERROR_TYPES)
 
 // The number of names in `owned` (SEMA_COMPILER_ERROR_TYPES), once each is a
-// host value, a runtime handle, a record or a builtin method's error and none
-// is a Core error type; else the build stops naming the first stray.
+// host value, a runtime handle or a record and none is a Core error type;
+// else the build stops naming the first stray.
 sema_compiler_error_types_checked: fn(owned: [String]) -> Int {
     loop name in owned {
         if CORE_ERROR_TYPES.contains(name) {
             panic("SEMA_COMPILER_ERROR_TYPES names {name}, which Core.rows error_types already lists")
         }
-        if !ir_host_value_name(name) && ir_runtime_handle_row(name) == None && !sema_compiler_error_record_or_result(name) {
-            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle, record or builtin method error is")
+        if !ir_host_value_name(name) && ir_runtime_handle_row(name) == None && !sema_compiler_error_record(name) {
+            panic("SEMA_COMPILER_ERROR_TYPES names {name}, which no host value, runtime handle or record is")
         }
     }
     owned.len()
 }
 
-sema_compiler_error_record_or_result: fn(name: String) -> Bool {
+sema_compiler_error_record: fn(name: String) -> Bool {
     loop row in CORE_RECORD_LITERAL_ROWS {
         if row.owner == name -> return true
-    }
-    loop row in BUILTIN_METHOD_ROWS {
-        if row.result == .Result(_, .Named(err_name)) && err_name == name -> return true
     }
     false
 }

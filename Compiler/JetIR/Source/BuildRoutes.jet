@@ -5666,6 +5666,20 @@ ir_route_store_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int,
         ir_emit(b.f, IROp.Store, -1, base, offset, handle, b.line)
         return
     }
+    // A failure the runtime writes as its text, typed as a Core error whose
+    // one stored member is that text (ParseError's `message`): the text
+    // becomes the member.
+    if carrier == .Text && m.types[row].kind == .Aggregate {
+        members: ir_inline_members(m, p, row) ?? return ir_fail(b, span, "runtime route Text payload as {payload}")
+        string_row: ir_string_row(m)
+        if members.len() != 1 || members[0].ty != string_row {
+            return ir_fail(b, span, "runtime route Text payload as {payload}")
+        }
+        text: ir_temp(m, b, string_row)
+        ir_emit(b.f, IROp.Load, text, out, 0, -1, b.line)
+        ir_emit(b.f, IROp.Store, -1, base, offset + members[0].offset, text, b.line)
+        return
+    }
     value: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Load, value, out, 0, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, base, offset, value, b.line)

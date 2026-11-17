@@ -162,6 +162,21 @@ TaskFailure: enum {
     Panicked(String),
 }
 
+// Why a text did not parse as a number: `Int.parse`, `Float.parse`,
+// `Int.from_radix` and `String.to_int` fail with it, its message the reason
+// ("cannot parse `x` as an integer"). It lives in the prelude because a
+// program reaches it without naming it, yet may name it: a `??` handler can
+// pass `err` on to a `fn(err: ParseError)`, show it with `{err}` or
+// `{err:Debug}`, or read `err.message`.
+#Error
+ParseError: struct {
+    message: String,
+
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+}
+
 // The phase of the compiled copy an expression runs in: `#phase` is
 // `.Preparation` in preparation and compile-time code and in a function's
 // compile-time copy, `.Build` in the copy a package's `fn build` runs, and

@@ -467,9 +467,6 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         if ir_handle_row(m, p, ty, name) == .Val(handle) -> return Val(handle)
     }
     row: ir_type_def(p, name) ?? {
-        // The compiler-owned `ParseError` (of Int.parse, String.to_int, ...) is an
-        // alias of String.
-        if name == "ParseError" -> return ir_type_row(m, Type.String)
         if args.len() == 0 && ir_host_value_name(name) {
             return Val(ir_intern_type(m, "host:{name}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, false, 64, "")))
         }
