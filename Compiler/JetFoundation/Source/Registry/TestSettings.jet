@@ -121,12 +121,15 @@ JET_TEST_SETTINGS: #run { [TestSettingRow]{
     {name: "corpus", kind: TestSettingKind.Path, ported: false, help: "Generated-grade corpus directory (default: .jet/fuzz/<test>)"},
     {name: "watch", kind: TestSettingKind.Switch, ported: false, help: "Re-run on dependency changes"},
     {name: "record", kind: TestSettingKind.Text, ported: true, help: "Record a named replay", typed: "operand"},
-    {name: "browser", kind: TestSettingKind.Text, ported: false, help: "Select browser engines for tests"},
-    {name: "browser_retries", kind: TestSettingKind.Count, ported: false, help: "Retry each browser attempt up to five times"},
-    {name: "browser_reporter", kind: TestSettingKind.Text, ported: false, help: "Browser report format: text, json, or html"},
-    {name: "browser_ui", kind: TestSettingKind.Switch, ported: false, help: "Write/open the local browser report viewer"},
+    // core.browser's test config reads these from the test process's
+    // JET_TEST_BROWSERS, JET_TEST_RETRIES, JET_TEST_REPORTER,
+    // JET_TEST_BROWSER_UI and JET_TEST_TRACE, over browser-tests.conf.
+    {name: "browser", kind: TestSettingKind.Text, ported: true, help: "Select browser engines for tests"},
+    {name: "browser_retries", kind: TestSettingKind.Count, ported: true, help: "Retry each browser attempt up to five times"},
+    {name: "browser_reporter", kind: TestSettingKind.Text, ported: true, help: "Browser report format: text, json, or html"},
+    {name: "browser_ui", kind: TestSettingKind.Switch, ported: true, help: "Write/open the local browser report viewer"},
     {name: "browser_visual", kind: TestSettingKind.Switch, ported: false, help: "Capture screenshots for passing browser attempts"},
-    {name: "browser_trace", kind: TestSettingKind.Switch, ported: false, help: "Keep redacted BiDi trace entries for every browser attempt"},
+    {name: "browser_trace", kind: TestSettingKind.Switch, ported: true, help: "Keep redacted BiDi trace entries for every browser attempt"},
 } }
 
 test_setting_row: fn(name: String) -> TestSettingRow? {

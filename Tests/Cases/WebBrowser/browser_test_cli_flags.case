@@ -1,0 +1,38 @@
+# `jet test`'s browser flags reach the test process and override
+# browser-tests.conf (one retry, the json reporter). The TraceViewer test fails
+# its first attempt and would pass on retry. `--browser-retries=0` leaves it
+# one attempt, so the run fails. `--browser` names the engines,
+# `--browser-reporter=text` writes the text report, `--browser-trace` records
+# that first attempt's timeline, and `--browser-ui` writes its payloads and
+# the viewer.
+env: NO_COLOR=1
+copy: {root}/Tests/Cases/WebBrowser/Fixtures/TraceViewer {work}/flags
+when probe chromium --version
+when probe chromedriver --version
+spawn app: jet run {work}/flags/run.jet
+env: JET_APP_PORT={free-port:app}
+stdout: null
+poll ready: jet run {root}/Tests/Cases/WebBrowser/Fixtures/http-ready.jet 127.0.0.1:{free-port:app} / - write until stdout: ^= "HTTP/1.1 200" timeout 60s every 50ms # the app serves its root page
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}/flags
+env: JET_PROJECT_ROOT={work}/flags
+exit: 0
+step: jet test --browser=chromium --browser-retries=0 --browser-reporter=text --browser-trace --browser-ui
+cwd: {work}/flags
+env: JET_PROJECT_ROOT={work}/flags
+env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
+env: JET_TEST_REPORT={work}/flags/report.txt
+exit: 1
+stdout+stderr: !~ "is not built yet" # every browser flag is taken
+stdout+stderr: ~ "trace_test.jet:17:20: `notes` failed on chromium after 1 attempt: browser operation timed out" # no retry: --browser-retries=0
+file: flags/report.txt ~ "Browser tests: 0 passed, 1 failed, 0 skipped" # the text reporter: --browser-reporter=text
+file: flags/report.txt ~ "FAIL notes [chromium] attempt=0" # the one attempt, on the one engine --browser names
+file: flags/report.txt !~ "attempt=1" # and no retry
+file: flags/report.txt ~ "  action 1: browser.createUserContext ok" # the first attempt records its timeline: --browser-trace
+file: flags/report.html ~ "\"ui\": true" # the viewer, in UI mode: --browser-ui
+file: flags/.jet/browser-tests/artifacts/notes-chromium-0.html ~ "<h1 id=\"title\">Notes</h1>" # UI mode writes the attempt's DOM
+signal app: KILL
+wait: app
+exit: any # the server is killed
+end when
+end when
