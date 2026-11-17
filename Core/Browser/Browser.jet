@@ -1015,25 +1015,27 @@ priv verify_driver: fn(entry: BrowserLocked) -[FS]> BrowserError! {
 // Start the engine pinned by `locked(engine)` headless on a throwaway profile
 // and connect over WebDriver BiDi. Firefox serves BiDi itself; Chromium goes
 // through the chromedriver the lock pins beside it and refuses with
-// "missing driver" when none is pinned. The session's last owner, or close,
-// stops the engine and removes the profile.
+// "missing driver" when none is pinned. The profile directory's one owner is
+// the engine: it outlives this call (the engine keeps its storage there), and
+// the session's last owner, or close, stops the engine and removes it.
 launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser BrowserError! {
     pin: locked(engine)
     p: profile(pin.protocol)
     if pin.engine == "chromium" -> return launch_chromium(pin, p)
     if pin.engine != "firefox" -> return Err(BrowserError{kind: "missing driver"})
-    dir: files.temp_dir("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
+    dir: files.mkdtemp("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
     // Port 0 picks a free port, which Firefox records in the profile. The
     // session bus stays off: a desktop D-Bus can stall Firefox's startup
     // after its BiDi server listens and before it answers.
-    spec: process.cmd([String]{pin.binary, "--headless", "--no-remote", "--profile", dir.path, "--remote-debugging-port=0", "about:blank"})
+    spec: process.cmd([String]{pin.binary, "--headless", "--no-remote", "--profile", dir, "--remote-debugging-port=0", "about:blank"})
         .env("DBUS_SESSION_BUS_ADDRESS", "disabled:").stdout(.Capture).stderr(.Capture)
     child: spec.spawn() ?? {
-        files.remove_all(dir.path).drop("a failed launch leaves no profile")
+        files.remove_all(dir).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
-    port: launched_bidi_port(held, "{dir.path}/WebDriverBiDiServer.json", 60000)
+    port_file: "{dir}/WebDriverBiDiServer.json"
+    held := BrowserEngine{child: child, profile: dir, session_url: ""}
+    port: launched_bidi_port(held, port_file, 60000)
     browser: connect_profile("ws://127.0.0.1:{port}/session", p, BrowserTimeout{milliseconds: 30000})
     browser_own_engine(browser, held)
     Ok(browser)
@@ -1047,12 +1049,12 @@ launch: fn(engine: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Browser Browse
 // `goog:cdp.*`, so `protocol("cdp")` is available.
 priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net, Time, Time.Wait]> Browser BrowserError! {
     if pin.driver == "" -> return Err(BrowserError{kind: "missing driver"})
-    dir: files.temp_dir("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
+    dir: files.mkdtemp("jet-browser-") ?? return Err(BrowserError{kind: "transport"})
     child: process.cmd([String]{pin.driver, "--port=0"}).stdout(.Capture).stderr(.Capture).spawn() ?? {
-        files.remove_all(dir.path).drop("a failed launch leaves no profile")
+        files.remove_all(dir).drop("a failed launch leaves no profile")
         return Err(BrowserError{kind: "transport"})
     }
-    held := BrowserEngine{child: child, profile: dir.path.copy(), session_url: ""}
+    held := BrowserEngine{child: child, profile: dir, session_url: ""}
     port := 0
     loop line in held.child.stdout.lines() {
         pair: parse.split_once(line, "started successfully on port ")
@@ -1063,7 +1065,7 @@ priv launch_chromium: fn(pin: BrowserLocked, p: BrowserProfile) -[Exec, FS, Net,
     }
     if port <= 0 || port > 65535 -> return Err(BrowserError{kind: "transport"})
     driver_url: "http://127.0.0.1:{port}"
-    args: Dyn.Array([Dyn]{Dyn.Text("--headless=new"), Dyn.Text("--no-first-run"), Dyn.Text("--user-data-dir={dir.path}")})
+    args: Dyn.Array([Dyn]{Dyn.Text("--headless=new"), Dyn.Text("--no-first-run"), Dyn.Text("--user-data-dir={held.profile}")})
     options: obj([{key: "binary", value: Dyn.Text(pin.binary.copy())}, {key: "args", value: args}])
     always: obj([{key: "browserName", value: Dyn.Text("chrome")}, {key: "webSocketUrl", value: Dyn.Bool(true)}, {key: "goog:chromeOptions", value: options}])
     request: json.dumps(obj([{key: "capabilities", value: obj([{key: "alwaysMatch", value: always}])}])) ?? return Err(BrowserError{kind: "protocol"})
