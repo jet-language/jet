@@ -99,13 +99,17 @@ The board's open questions and decisions stay attached to their cards.
 Epochs are the board's one planning axis. They are worked in `order`; each
 epoch's `exitCriteria` say what finishing it means. Show an epoch as `E18` or
 `E18 <name>`; the stored id stays `e18`. Milestones are targets inside an
-epoch; linked cards determine their progress.
+epoch, worked in `order`; linked cards determine their progress. A milestone
+is `open`, `met` or `retired`.
 
 ```sh
 tower epoch list [--json]                 # in order, with exit criteria
 tower epoch add e19 --name "…" --order 2 --exit-criteria "…" --exit-criteria "…" --by <agent>
 tower epoch update e19 [--order N] [--exit-criteria "…" …] [--file plan.json] --by <agent>
 tower epoch remove e19 --by <agent>      # refused while any card or milestone points at it
+tower milestone add --epoch e19 --title "…" [--order N] [--exit-criteria "…" …] --by <agent>
+tower milestone update <id> [--order N] [--epoch e20] --by <agent>   # --epoch moves its live cards too
+tower milestone retire <id> --reason "…" --by <agent>                # kept for the record, out of lists
 ```
 
 The owner's decisions are the only allowed bottleneck. Raise a ballot for an

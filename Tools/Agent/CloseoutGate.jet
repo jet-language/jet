@@ -5,9 +5,10 @@
 //   jet Tools/Agent/CloseoutGate.jet check [MILESTONE]
 // `check` pins the head to the commit of an inherited ../source.manifest.json
 // (checked by Tools/Agent/ProofSource.jet), or else to HEAD of a tree whose
-// only changes are Tower state writes. It then needs exactly one milestone,
-// or the one named (else $JET_CLOSEOUT_MILESTONE), that is review-ready or met
-// with a closeout token for that head, and prints
+// only changes are Tower state writes. It then needs exactly one live
+// milestone, or the one named (else $JET_CLOSEOUT_MILESTONE), whose linked
+// cards are all done (open or met, not retired) with a closeout token for
+// that head, and prints
 // `CLOSEOUT TOKEN OK <milestone> <head>`. The orchestrator records the token
 // with `tower milestone closeout MILESTONE --commit HEAD --by AGENT`; this
 // gate only reads the board, through Tools/tower/Board.jet. Any refusal prints
@@ -66,7 +67,7 @@ board: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> S
 
 check: fn(repo: String, requested: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
     head: pinned_head(repo) ?? frozen_head(repo)
-    listed: json.parse(board(repo, [String]{"milestone", "list", "--archived", "--json"})) ?? return refuse("tower milestone list is not JSON: {err}")
+    listed: json.parse(board(repo, [String]{"milestone", "list", "--json"})) ?? return refuse("tower milestone list is not JSON: {err}")
     milestones: if listed == .Array(items) -> items.copy() else -> [Dyn]{}
     picked: select_closeout(milestones, head, requested)
     if picked.problem != "" -> return refuse(picked.problem)
@@ -130,7 +131,7 @@ select_closeout: fn(milestones: [Dyn], head: String, requested: String) -> {id: 
 
 eligible: fn(milestone: Dyn, head: String) -> Bool Never! {
     status: text_field(milestone, "status")
-    text_field(field(milestone, "closeout"), "sourceCommit") == head && field(field(milestone, "progress"), "reviewReady") == .Bool(true) && (status == "review-ready" || status == "met")
+    text_field(field(milestone, "closeout"), "sourceCommit") == head && field(field(milestone, "progress"), "reviewReady") == .Bool(true) && (status == "open" || status == "met")
 }
 
 field: fn(tree: Dyn, name: String) -> Dyn Never! {
@@ -153,7 +154,7 @@ fixture_milestone: fn(id: String, commit: String) -> Dyn Never! {
     Dyn.Object(
         [String:Dyn]{
             "id": Dyn.Text(id.copy()),
-            "status": Dyn.Text("review-ready"),
+            "status": Dyn.Text("open"),
             "progress": Dyn.Object([String:Dyn]{"reviewReady": Dyn.Bool(true)}),
             "closeout": Dyn.Object([String:Dyn]{"sourceCommit": Dyn.Text(commit.copy())}),
         },
@@ -169,6 +170,19 @@ fixture_milestone: fn(id: String, commit: String) -> Dyn Never! {
     head: "a".repeat(40)
     picked: select_closeout([Dyn]{fixture_milestone("stale", "b".repeat(40)), fixture_milestone("ready", head)}, head, "")
     assert_eq(picked.id, "ready")
+}
+
+#Test("the closeout gate passes over a retired milestone") {
+    head: "a".repeat(40)
+    retired: Dyn.Object(
+        [String:Dyn]{
+            "id": Dyn.Text("gone"),
+            "status": Dyn.Text("retired"),
+            "progress": Dyn.Object([String:Dyn]{"reviewReady": Dyn.Bool(true)}),
+            "closeout": Dyn.Object([String:Dyn]{"sourceCommit": Dyn.Text(head.copy())}),
+        },
+    )
+    assert_eq(select_closeout([Dyn]{retired, fixture_milestone("ready", head)}, head, "").id, "ready")
 }
 
 #Test("the closeout gate rejects missing, ambiguous and explicitly stale tokens") {

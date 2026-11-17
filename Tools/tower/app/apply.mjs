@@ -11,7 +11,7 @@ const pick = (op, keys) => Object.fromEntries(keys.filter(k => Object.hasOwn(op,
 
 const CARD_UPDATE_FIELDS = [...db.CARD_FIELDS.filter(k => k !== 'needsAcceptance'), 'addTags', 'removeTags', 'logEntry'];
 const EPOCH_FIELDS = ['name', 'goal', 'status', 'order', 'exitCriteria'];
-const MILESTONE_FIELDS = ['title', 'goal', 'criteria', 'archived'];
+const MILESTONE_FIELDS = ['title', 'goal', 'order', 'exitCriteria', 'epochId'];
 
 // op → the keys it needs, the keys it may carry, what it names, and its write.
 export const APPLY_OPS = {
@@ -56,14 +56,19 @@ export const APPLY_OPS = {
     run: (s, o) => db.updateEpoch(s, o.id, pick(o, EPOCH_FIELDS)),
   },
   'milestone.add': {
-    needs: ['epochId', 'title'], may: ['id', 'goal', 'criteria'],
+    needs: ['epochId', 'title'], may: ['id', 'goal', 'order', 'exitCriteria'],
     ref: o => o.id || o.title,
-    run: (s, o, by) => db.addMilestone(s, { ...pick(o, ['id', 'epochId', 'title', 'goal', 'criteria']), by }),
+    run: (s, o, by) => db.addMilestone(s, { ...pick(o, ['id', 'epochId', 'title', 'goal', 'order', 'exitCriteria']), by }),
   },
   'milestone.update': {
     needs: ['id'], may: MILESTONE_FIELDS, change: true,
     ref: o => o.id,
     run: (s, o, by) => db.updateMilestone(s, o.id, pick(o, MILESTONE_FIELDS), by),
+  },
+  'milestone.retire': {
+    needs: ['id', 'reason'], may: [],
+    ref: o => o.id,
+    run: (s, o, by) => db.retireMilestone(s, o.id, { reason: o.reason, by }),
   },
 };
 

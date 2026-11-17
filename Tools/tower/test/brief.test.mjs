@@ -51,10 +51,10 @@ const ballot = (extra = {}) => ({
 
 // ---- 1. card fields, epoch/milestone -----------------------------------------
 
-test('packet.card carries epoch name/goal and milestone title/goal/criteria when set', () => {
+test('packet.card carries epoch name/goal and milestone title/goal/exit criteria when set', () => {
   const st = fresh();
   st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'Epoch One', goal: 'ship it' }));
-  const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', goal: 'usable v1', criteria: '9/9 features' })).result;
+  const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', goal: 'usable v1', exitCriteria: '9/9 features' })).result;
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', body: 'do the thing', plan: '1. x 2. y', epoch: 'e1', milestoneId: m.id, priority: 'P1' }, cfg));
   const s = st.load();
   const p = buildBrief(s, '#1');
@@ -66,8 +66,18 @@ test('packet.card carries epoch name/goal and milestone title/goal/criteria when
   assert.deepEqual(p.card.epoch, { id: 'e1', label: 'E1 Epoch One', name: 'Epoch One', goal: 'ship it', role: 'active' });
   assert.deepEqual(p.card.milestone, {
     id: m.id, title: 'MVP', goal: 'usable v1', status: 'open',
-    criteria: m.criteria, verification: null,
+    exitCriteria: m.exitCriteria, verification: null,
   });
+});
+
+test('packet.card leaves out a retired milestone; the card keeps its link', () => {
+  const st = fresh();
+  const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A', epoch: 'e1', milestoneId: m.id }, cfg));
+  st.mutate((s) => db.retireMilestone(s, m.id, { reason: 'folded into the next epoch', by: 'owner' }));
+  const s = st.load();
+  assert.equal(buildBrief(s, '#1').card.milestone, null);
+  assert.equal(s.cards[0].milestoneId, m.id);
 });
 
 test('packet.card inherits the born-with epoch; milestone is null when unset', () => {

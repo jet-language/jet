@@ -28,9 +28,9 @@ import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { checkBoard, commitBoard, pushBoardVerified } from './board-git.mjs';
-import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
+import { migrateMilestones, migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
 import { checkProof, migrateCriterionProof, proofInput } from './proof.mjs';
-import { chainRank, criteriaCounts, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { chainRank, criteriaCounts, epochChain, epochLabel, proofCommand, sortEpochs, sortMilestones } from './ui/board-state.js';
 import { machinePersonalInfo, personalInfoAdded, redactBoard, tallyValue } from './personal-info.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -472,7 +472,9 @@ export function openStore(dataDir) {
 export const emptyHistory = () => ({ version: 1, decisions: [], cards: [], events: [] });
 
 const CRITERION_STATUSES = new Set(['open', 'met', 'verified']);
-const MILESTONE_STATUSES = new Set(['open', 'review-ready', 'met']);
+// A milestone is open until its review signs it off as met; a retired one is
+// kept for the record and hidden from lists, next, briefings and the radar.
+const MILESTONE_STATUSES = new Set(['open', 'met', 'retired']);
 const EPOCH_STATUSES = new Set(['active', 'arrived', 'planned', 'done', 'open']);
 // A rejected ballot is a draft its reviewer sent back; it never reaches the owner.
 const DECISION_STATUSES = new Set(['open', 'ratified', 'rejected']);
@@ -560,14 +562,14 @@ function validateStoredCriterion(item, index, source) {
       fail('E_INVALID', `${label}.${key} must be '#M', '#M cK' or a decision id`);
 }
 
-function validateStoredCriteria(criteria, source) {
+function validateStoredCriteria(criteria, source, field = 'criteria') {
   if (criteria === undefined) return;
-  if (!Array.isArray(criteria)) fail('E_INVALID', `${source}.criteria must be an array`);
+  if (!Array.isArray(criteria)) fail('E_INVALID', `${source}.${field} must be an array`);
   const seen = new Set();
   criteria.forEach((item, index) => {
     validateStoredCriterion(item, index, source);
     if (item.n !== undefined) {
-      if (seen.has(item.n)) fail('E_INVALID', `${source}.criteria has duplicate n ${item.n}`);
+      if (seen.has(item.n)) fail('E_INVALID', `${source}.${field} has duplicate n ${item.n}`);
       seen.add(item.n);
     }
   });
@@ -596,9 +598,16 @@ function validateStoredMilestone(milestone, index, source) {
   validateStoredString(milestone.epochId, `${label}.epochId`, { nullable: false, nonEmpty: true });
   validateStoredString(milestone.title, `${label}.title`, { nullable: false });
   validateStoredString(milestone.goal, `${label}.goal`, { nullable: false });
+  validateStoredNumber(milestone.order, `${label}.order`, { integer: true, min: 0 });
   if (milestone.status !== undefined && !MILESTONE_STATUSES.has(milestone.status))
     fail('E_INVALID', `${label}.status is not a canonical milestone status`);
-  validateStoredCriteria(milestone.criteria, label);
+  validateStoredCriteria(milestone.exitCriteria, label, 'exitCriteria');
+  if (milestone.retired !== undefined) {
+    if (!plainObject(milestone.retired)) fail('E_INVALID', `${label}.retired must be an object`);
+    validateStoredString(milestone.retired.reason, `${label}.retired.reason`, { nullable: false, nonEmpty: true });
+    validateStoredString(milestone.retired.by, `${label}.retired.by`, { nullable: false, nonEmpty: true });
+    validateStoredString(milestone.retired.at, `${label}.retired.at`);
+  }
   if (milestone.closeout !== undefined) {
     if (!plainObject(milestone.closeout)) fail('E_INVALID', `${label}.closeout must be an object`);
     validateStoredString(milestone.closeout.sourceCommit, `${label}.closeout.sourceCommit`, { nullable: false, nonEmpty: true });
@@ -676,6 +685,7 @@ export function validateStoredState(state, source = 'live store') {
   const seenNums = new Set();
   const seenIds = new Set();
   (state.epochs || []).forEach((epoch, index) => validateStoredEpoch(epoch, index, source));
+  migrateMilestones(state);
   (state.milestones || []).forEach((milestone, index) => validateStoredMilestone(milestone, index, source));
   (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
   (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
@@ -910,16 +920,16 @@ export function normalize(s, historyCards = null, sync = true) {
   }
   if (historyCards != null) validateStoredHistory({ cards: historyCards }, 'history store');
   for (const m of s.milestones) {
-    m.criteria = normalizeMilestoneCriteria(m.criteria);
+    m.exitCriteria ??= [];
     if (m.closeout != null && (
       typeof m.closeout !== 'object'
       || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(String(m.closeout.sourceCommit || ''))
       || !m.closeout.by
       || !m.closeout.at
     )) delete m.closeout;
-    if (!['open', 'review-ready', 'met'].includes(m.status)) m.status = 'open';
+    if (!MILESTONE_STATUSES.has(m.status)) m.status = 'open';
     if (m.status === 'met' && !m.verification) {
-      m.status = 'review-ready';
+      m.status = 'open';
       delete m.metAt;
     }
   }
@@ -1046,32 +1056,29 @@ export function milestoneProgress(m, cards, historyCards = [], index = undefined
 }
 
 function clearMilestoneVerification(m, { keepCloseout = false } = {}) {
+  if (m.status === 'retired') return;
   delete m.verification;
   delete m.metAt;
   if (!keepCloseout) delete m.closeout;
-  if (m.status === 'met') m.status = 'review-ready';
+  m.status = 'open';
 }
 
+// A milestone's status follows its cards: it is open until `verifyMilestone`
+// signs it off as met, and falls back to open when a linked card reopens or
+// leaves. A retired milestone keeps its record as it was retired.
 function syncMilestone(s, id, historyCards = [], index = undefined) {
   const m = s.milestones.find(x => x.id === id);
-  if (!m) return;
+  if (!m || m.status === 'retired') return;
   const linked = milestoneCards(id, s.cards, historyCards, index);
-  if (!linked.length) {
+  if (!linked.length || !linked.every(c => c.phase === 'done')) {
     clearMilestoneVerification(m);
-    m.status = 'open';
-    return;
-  }
-  if (!linked.every(c => c.phase === 'done')) {
-    clearMilestoneVerification(m);
-    m.status = 'open';
     return;
   }
   if (m.status === 'met' && m.verification) return;
-  // Card completion only opens the milestone review. `verifyMilestone` is the
-  // sole operation that may create the met signoff. A closeout token survives
-  // evidence recording while every linked card remains closed.
+  // Card completion only opens the milestone review (`progress.reviewReady`).
+  // A closeout token survives evidence recording while every linked card
+  // remains closed.
   clearMilestoneVerification(m, { keepCloseout: true });
-  m.status = 'review-ready';
 }
 
 function syncMilestones(s, ids = s.milestones.map(m => m.id), historyCards = []) {
@@ -1144,9 +1151,9 @@ export function radarData(s, historyCards = []) {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
     const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
     const done = all.filter(c => c.phase === 'done');
-    const milestones = s.milestones.filter(m => m.epochId === e.id && !m.archived).map(m => {
+    const milestones = sortMilestones(s.milestones.filter(m => m.epochId === e.id && m.status !== 'retired')).map(m => {
       const progress = milestoneProgress(m, s.cards, historyCards, byMilestone);
-      return { id: m.id, title: m.title, goal: m.goal, status: m.status, met: progress.met,
+      return { id: m.id, title: m.title, goal: m.goal, status: m.status, order: m.order, met: progress.met,
         ...progress, stalledDays: milestoneStallDays(m, s.cards, s.events) };
     });
     const milestonesMet = milestones.filter(m => m.met).length;
@@ -1184,11 +1191,11 @@ function projectCardRecord(c, decisions, cards, questions, groups = null) {
 // Board index milestones: navigation and progress only. Criteria evidence,
 // verification, and closeout records stay in the store and CLI.
 function projectMilestoneSummary(m, progress) {
-  const criteria = m.criteria || [];
+  const criteria = m.exitCriteria || [];
   return {
-    id: m.id, epochId: m.epochId, title: m.title, goal: m.goal, status: m.status,
-    archived: m.archived, created: m.created, metAt: m.metAt, progress,
-    criteriaCount: { total: criteria.length, settled: criteria.filter(i => i.status === 'met' || i.status === 'verified').length },
+    id: m.id, epochId: m.epochId, title: m.title, goal: m.goal, status: m.status, order: m.order,
+    retired: m.retired, created: m.created, metAt: m.metAt, progress,
+    exitCriteriaCount: { total: criteria.length, settled: criteria.filter(i => i.status === 'met' || i.status === 'verified').length },
   };
 }
 
@@ -1493,10 +1500,14 @@ const checkCardHome = ({ track, epoch }) => {
     fail('E_INVALID', 'a card must live in an epoch or be a sidequest (frozen cards too) — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
 };
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
-function checkCardMilestone(s, { epoch, track, milestoneId }) {
+// A card's milestone belongs to the card's epoch. A retired milestone keeps
+// the cards already linked to it but takes no new ones.
+function checkCardMilestone(s, { epoch, track, milestoneId, linking = true }) {
   if (milestoneId == null) return;
   const milestone = s.milestones.find(m => m.id === milestoneId);
   if (track === 'sidequest') fail('E_INVALID', 'sidequest cards cannot link to milestones');
+  if (linking && milestone.status === 'retired')
+    fail('E_INVALID', `milestone ${milestone.id} is retired (${milestone.retired?.reason || 'no reason given'}); link the card to a live milestone`);
   if (milestone.epochId !== epoch)
     fail('E_INVALID', `milestone ${milestone.id} belongs to epoch ${milestone.epochId}, not ${epoch || 'no epoch'}`);
 }
@@ -1563,28 +1574,11 @@ function assertCriterionText(raw) {
   }
 }
 
-function normalizeMilestoneCriterion(it, i) {
-  const source = typeof it === 'string' ? { text: it } : (it || {});
-  const n = source.n ?? (i + 1);
-  const status = source.status ?? 'open';
-  validateStoredNumber(n, `milestone criterion ${i + 1}.n`, { integer: true, min: 1 });
-  if (!CRITERION_STATUSES.has(status)) fail('E_INVALID', `milestone criterion ${i + 1}.status must be open, met, or verified`);
-  return {
-    n,
-    text: String(source.text || '').trim(),
-    status,
-    metBy: source.metBy ?? null,
-    verifiedBy: source.verifiedBy ?? null,
-    evidence: source.evidence || '',
-    at: source.at || now(),
-  };
-}
-
-function normalizeMilestoneCriteria(raw) {
-  if (Array.isArray(raw)) return raw.map(normalizeMilestoneCriterion);
-  if (raw && typeof raw === 'object' && Array.isArray(raw.items)) return raw.items.map(normalizeMilestoneCriterion);
-  if (raw == null || raw === '') return [];
-  return [normalizeMilestoneCriterion(raw, 0)];
+// A milestone's exit criteria take a card criterion's shape: text, an
+// optional proof, and the open → met → verified lifecycle.
+function normalizeExitCriteria(raw) {
+  const list = Array.isArray(raw) ? raw : raw == null || raw === '' ? [] : [raw];
+  return list.map((it, i) => normalizeCriterion(it, i));
 }
 
 function touchCard(card, by) {
@@ -1972,6 +1966,7 @@ export function updateCard(s, ref, patch, config) {
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
     track: 'track' in patch ? patch.track : c.track,
     milestoneId: 'milestoneId' in patch ? patch.milestoneId : c.milestoneId,
+    linking: 'milestoneId' in patch && patch.milestoneId !== c.milestoneId,
   });
   if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy, { rejectUnknown: true });
   if ('refs' in patch) checkRefs(patch.refs);
@@ -2152,8 +2147,8 @@ export function unblockCriterion(s, ref, n, { reason, by } = {}) {
 
 // Criterion numbers are never reused: a removed row's number stays retired, so
 // evidence, logs and briefs that cite `cN` keep pointing at one criterion.
-function nextCriterionNumber(holder) {
-  const highest = Math.max(0, holder.criteriaLastN || 0, ...(holder.criteria || []).map(i => i.n));
+function nextCriterionNumber(holder, list = holder.criteria) {
+  const highest = Math.max(0, holder.criteriaLastN || 0, ...(list || []).map(i => i.n));
   holder.criteriaLastN = highest + 1;
   return highest + 1;
 }
@@ -3527,11 +3522,12 @@ export function promoteIdea(s, ideaId, extra = {}, config) {
 // ---- mutations: epochs + milestones ----------------------------------------
 
 // Epochs are the board's one planning axis, worked in `order`; an epoch's
-// `exitCriteria` say what finishing it means.
-function epochOrder(raw) {
+// `exitCriteria` say what finishing it means. Milestones are worked in their
+// own `order` within an epoch.
+function planOrder(raw, what = 'epoch') {
   const order = typeof raw === 'string' && raw.trim() ? Number(raw) : raw;
   if (!Number.isSafeInteger(order) || order < 0)
-    fail('E_INVALID', `epoch order must be a whole number 0 or above (got ${JSON.stringify(raw)})`);
+    fail('E_INVALID', `${what} order must be a whole number 0 or above (got ${JSON.stringify(raw)})`);
   return order;
 }
 function epochExitCriteria(raw) {
@@ -3546,7 +3542,7 @@ export function addEpoch(s, p) {
   if (!p.id || !String(p.id).trim()) fail('E_INVALID', 'epoch needs an id (e.g. e1)');
   if (s.epochs.find(e => e.id === p.id)) fail('E_INVALID', `epoch ${p.id} already exists`);
   const e = { id: p.id, name: p.name || p.id, goal: p.goal || '', status: p.status || 'open' };
-  if (p.order != null) e.order = epochOrder(p.order);
+  if (p.order != null) e.order = planOrder(p.order);
   if (p.exitCriteria != null) e.exitCriteria = epochExitCriteria(p.exitCriteria);
   s.epochs.push(e);
   logEvent(s, { by: p.by, action: 'epoch.add', ref: e.id, note: e.name });
@@ -3561,7 +3557,7 @@ export function updateEpoch(s, id, patch) {
     if (other) fail('E_INVALID', `${other.id} is already active — set it to arrived/planned before activating ${id}`);
   }
   const next = {};
-  if ('order' in patch) next.order = epochOrder(patch.order);
+  if ('order' in patch) next.order = planOrder(patch.order);
   if ('exitCriteria' in patch) next.exitCriteria = epochExitCriteria(patch.exitCriteria);
   for (const k of ['name', 'goal', 'status']) if (k in patch) next[k] = patch[k];
   Object.assign(e, next);
@@ -3599,9 +3595,10 @@ export function setCurrentEpoch(s, id) {
 export function addMilestone(s, p) {
   checkEpoch(s, p.epochId || fail('E_INVALID', 'milestone needs --epoch <id>'));
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'milestone needs a title');
-  assertCriterionText(p.criteria);
-  const m = { id: p.id || newId('m'), epochId: p.epochId, title: String(p.title).trim(),
-    goal: p.goal || '', criteria: normalizeMilestoneCriteria(p.criteria), status: 'open', created: now() };
+  assertCriterionText(p.exitCriteria);
+  const m = { id: p.id || newId('m'), epochId: p.epochId, title: String(p.title).trim(), goal: p.goal || '' };
+  if (p.order != null) m.order = planOrder(p.order, 'milestone');
+  Object.assign(m, { exitCriteria: normalizeExitCriteria(p.exitCriteria), status: 'open', created: now() });
   s.milestones.push(m);
   logEvent(s, { by: p.by, action: 'milestone.add', ref: m.id, note: m.title });
   return m;
@@ -3611,50 +3608,91 @@ function mustMilestone(s, id) {
   return s.milestones.find(x => x.id === id) || fail('E_NOT_FOUND', `no milestone ${id}`);
 }
 
+// A retired milestone is kept as it was retired: its criteria and review are
+// closed to writes.
+function mustLiveMilestone(s, id) {
+  const m = mustMilestone(s, id);
+  if (m.status === 'retired') fail('E_INVALID', `milestone ${m.id} is retired (${m.retired?.reason || 'no reason given'})`);
+  return m;
+}
+
 function mustMilestoneCriterion(m, n) {
-  const item = (m.criteria || []).find(i => i.n === Number(n));
+  const item = (m.exitCriteria || []).find(i => i.n === Number(n));
   if (!item) fail('E_NOT_FOUND', `no criterion #${n} on milestone ${m.id}`);
   return item;
 }
 
+// Moving a milestone to another epoch takes its live cards along, so every
+// card's milestone stays in the card's epoch.
 export function updateMilestone(s, id, patch, by) {
   const m = mustMilestone(s, id);
-  if ('epochId' in patch && patch.epochId !== m.epochId)
-    fail('E_INVALID', 'milestone epoch is fixed after creation — create a new milestone and relink cards');
   if ('status' in patch)
-    fail('E_MILESTONE_VERIFY', 'milestone ' + m.id + ' status is derived — use `tower milestone verify ' + m.id + ' --evidence "..." --by <reviewer>`');
-  if ('criteria' in patch) {
-    assertCriterionText(patch.criteria);
-    m.criteria = normalizeMilestoneCriteria(patch.criteria);
+    fail('E_MILESTONE_VERIFY', `milestone ${m.id} status is derived — \`tower milestone verify ${m.id} --evidence "..." --by <reviewer>\` signs it off as met, \`tower milestone retire ${m.id} --reason "..."\` retires it`);
+  const notes = [];
+  if ('exitCriteria' in patch) {
+    assertCriterionText(patch.exitCriteria);
+    m.exitCriteria = normalizeExitCriteria(patch.exitCriteria);
     clearMilestoneVerification(m);
   }
-  for (const k of ['title', 'goal', 'epochId']) if (k in patch) m[k] = patch[k];
-  if ('archived' in patch) m.archived = !!patch.archived;
+  if ('order' in patch) m.order = planOrder(patch.order, 'milestone');
+  for (const k of ['title', 'goal']) if (k in patch) m[k] = patch[k];
+  if ('epochId' in patch && patch.epochId !== m.epochId) {
+    checkEpoch(s, patch.epochId || fail('E_INVALID', 'milestone needs --epoch <id>'));
+    const moved = s.cards.filter(c => c.milestoneId === m.id);
+    for (const c of moved) {
+      c.epoch = patch.epochId;
+      touchCard(c, by);
+    }
+    notes.push(`moved from ${m.epochId} to ${patch.epochId}${moved.length ? ` with ${moved.length} linked card${moved.length === 1 ? '' : 's'}` : ''}`);
+    m.epochId = patch.epochId;
+  }
   syncMilestone(s, m.id);
-  logEvent(s, { by, action: 'milestone.update', ref: m.id });
+  logEvent(s, { by, action: 'milestone.update', ref: m.id, note: notes.join('; ') });
+  return m;
+}
+
+// Retiring keeps a milestone for the record: its cards keep their link, and it
+// leaves milestone lists, briefs and the radar.
+export function retireMilestone(s, id, { reason, by } = {}) {
+  const m = mustMilestone(s, id);
+  if (!by) fail('E_INVALID', 'milestone retire needs --by <agent>');
+  const why = needsReason('milestone retire', reason);
+  if (m.status === 'retired') fail('E_INVALID', `milestone ${m.id} is already retired (${m.retired?.reason || 'no reason given'})`);
+  m.status = 'retired';
+  m.retired = { reason: why, by, at: now() };
+  logEvent(s, { by, action: 'milestone.retire', ref: m.id, note: why });
   return m;
 }
 
 export function addMilestoneCriterion(s, id, text, by) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
-  m.criteria ||= [];
-  const n = nextCriterionNumber(m);
-  const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
-  m.criteria.push(item);
+  const n = nextCriterionNumber(m, m.exitCriteria);
+  const item = normalizeCriterion({ n, text }, n - 1);
+  m.exitCriteria.push(item);
   clearMilestoneVerification(m);
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.criteria-add', ref: m.id, note: `#${n} ${item.text.slice(0, 60)}` });
   return { ...item, milestoneId: m.id };
 }
 
-export function meetMilestoneCriterion(s, id, n, { evidence, by } = {}) {
-  const m = mustMilestone(s, id);
+// Exit-criterion evidence passes the same gate as a card criterion's
+// (`criterionDurabilityIssue`).
+function assertExitCriterionDurable(s, m, n, kind, evidence, by, config, history) {
+  if (by === 'owner') return;
+  const issue = criterionDurabilityIssue(s, { num: null }, kind, evidence, config, history ?? {});
+  if (issue) fail('E_EVIDENCE', `milestone ${m.id} criterion #${n}: ${issue}`);
+}
+
+export function meetMilestoneCriterion(s, id, n, { evidence, by, kind = 'code' } = {}, config = {}, history = null) {
+  const m = mustLiveMilestone(s, id);
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'meet needs --by <agent>');
+  assertExitCriterionDurable(s, m, item.n, kind, evidence ?? item.evidence, by, config, history);
   item.status = 'met';
   item.metBy = by;
   if (evidence != null) item.evidence = evidence;
+  setClosureKind(item, kind);
   item.at = now();
   clearMilestoneVerification(m, { keepCloseout: true });
   syncMilestone(s, m.id);
@@ -3662,15 +3700,18 @@ export function meetMilestoneCriterion(s, id, n, { evidence, by } = {}) {
   return { ...item, milestoneId: m.id };
 }
 
-export function verifyMilestoneCriterion(s, id, n, { evidence, by } = {}) {
-  const m = mustMilestone(s, id);
+export function verifyMilestoneCriterion(s, id, n, { evidence, by, kind } = {}, config = {}, history = null) {
+  const m = mustLiveMilestone(s, id);
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'verify needs --by <reviewer>');
   if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
   if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must differ from the agent that marked it met (${by})`);
+  const closure = kind ?? item.closure ?? 'code';
+  assertExitCriterionDurable(s, m, item.n, closure, evidence ?? item.evidence, by, config, history);
   item.status = 'verified';
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
+  setClosureKind(item, closure);
   item.at = now();
   clearMilestoneVerification(m, { keepCloseout: true });
   syncMilestone(s, m.id);
@@ -3679,7 +3720,7 @@ export function verifyMilestoneCriterion(s, id, n, { evidence, by } = {}) {
 }
 
 export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'reopen needs --by <agent>');
   if (!reason || !String(reason).trim()) fail('E_INVALID', 'reopen needs --reason <text>');
@@ -3688,6 +3729,7 @@ export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
   item.metBy = null;
   item.verifiedBy = null;
   item.evidence = '';
+  delete item.closure;
   item.at = now();
   clearMilestoneVerification(m);
   syncMilestone(s, m.id);
@@ -3696,7 +3738,7 @@ export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
 }
 
 export function editMilestoneCriterion(s, id, n, { text, reason, by } = {}) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'edit needs --by <agent>');
   const why = needsReason('edit', reason);
@@ -3708,12 +3750,12 @@ export function editMilestoneCriterion(s, id, n, { text, reason, by } = {}) {
 }
 
 export function removeMilestoneCriterion(s, id, n, { reason, by } = {}) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'remove needs --by <agent>');
   const why = needsReason('remove', reason);
-  m.criteriaLastN = Math.max(m.criteriaLastN || 0, ...m.criteria.map(i => i.n));
-  m.criteria = m.criteria.filter(i => i !== item);
+  m.criteriaLastN = Math.max(m.criteriaLastN || 0, ...m.exitCriteria.map(i => i.n));
+  m.exitCriteria = m.exitCriteria.filter(i => i !== item);
   clearMilestoneVerification(m);
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.criteria-remove', ref: m.id, note: `#${item.n}: ${why}; was [${item.status}]: ${item.text.slice(0, 200)}` });
@@ -3721,32 +3763,31 @@ export function removeMilestoneCriterion(s, id, n, { reason, by } = {}) {
 }
 
 export function beginMilestoneCloseout(s, id, { sourceCommit, by } = {}, historyCards = []) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   if (!by) fail('E_INVALID', 'milestone closeout needs --by <agent>');
   if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(String(sourceCommit || '')))
     fail('E_INVALID', 'milestone closeout needs --commit <40-or-64-character lowercase Git object id>');
   const linked = milestoneCards(m.id, s.cards, historyCards);
   if (!linked.length || !linked.every(c => c.phase === 'done'))
-    fail('E_MILESTONE', `milestone ${m.id} is not review-ready — every linked card must be done`);
-  m.status = 'review-ready';
+    fail('E_MILESTONE', `milestone ${m.id} is not ready for review — every linked card must be done`);
   m.closeout = { sourceCommit: String(sourceCommit), by, at: now() };
   logEvent(s, { by, action: 'milestone.closeout', ref: m.id, note: m.closeout.sourceCommit });
   return m;
 }
 
 export function verifyMilestone(s, id, { evidence, by } = {}, historyCards = []) {
-  const m = mustMilestone(s, id);
+  const m = mustLiveMilestone(s, id);
   if (!by) fail('E_INVALID', 'milestone verify needs --by <reviewer>');
   if (!evidence || !String(evidence).trim()) fail('E_INVALID', 'milestone verify needs --evidence <text>');
   const linked = milestoneCards(m.id, s.cards, historyCards);
   if (!linked.length || !linked.every(c => c.phase === 'done'))
-    fail('E_MILESTONE', `milestone ${m.id} is not review-ready — every linked card must be done`);
-  const unfinished = (m.criteria || []).filter(i => i.status !== 'verified');
+    fail('E_MILESTONE', `milestone ${m.id} is not ready for review — every linked card must be done`);
+  const unfinished = m.exitCriteria.filter(i => i.status !== 'verified');
   if (unfinished.length)
     fail('E_MILESTONE', `milestone ${m.id} has unverified criteria (${unfinished.map(i => i.n).join(',')})`);
   if (!m.closeout)
     fail('E_MILESTONE', `milestone ${m.id} has no closeout token — run \`tower milestone closeout ${m.id} --commit <frozen source commit> --by <agent>\` before broad proof or review`);
-  const builders = new Set((m.criteria || []).map(i => i.metBy).filter(Boolean));
+  const builders = new Set(m.exitCriteria.map(i => i.metBy).filter(Boolean));
   if (builders.has(by)) fail('E_CRITERIA_SELF', `milestone reviewer must differ from an agent that marked its criteria met (${by})`);
   m.status = 'met';
   m.verification = { by, evidence: String(evidence).trim(), at: now() };
@@ -3869,7 +3910,8 @@ function blockerState(s, id) {
 export function buildBrief(s, ref) {
   const card = mustCard(s, ref);
   const epoch = card.epoch ? s.epochs.find(e => e.id === card.epoch) : null;
-  const milestone = card.milestoneId ? s.milestones.find(m => m.id === card.milestoneId) : null;
+  // A retired milestone stays out of briefs; the card keeps its link.
+  const milestone = card.milestoneId ? s.milestones.find(m => m.id === card.milestoneId && m.status !== 'retired') : null;
   const explicitRefs = Array.isArray(card.refs) ? card.refs : [];
   const harvested = [...harvestRefs(card.body), ...harvestRefs(card.plan)];
   return {
@@ -3883,7 +3925,7 @@ export function buildBrief(s, ref) {
         id: card.epoch, label: epochLabel(epoch || { id: card.epoch }), name: epoch?.name ?? null, goal: epoch?.goal ?? null,
         role: epochChain(s.epochs).find(e => e.id === card.epoch)?.role ?? null,
       } : null,
-      milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, status: milestone.status, criteria: milestone.criteria, verification: milestone.verification || null } : null,
+      milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, status: milestone.status, exitCriteria: milestone.exitCriteria, verification: milestone.verification || null } : null,
     },
     blockers: (card.blockedBy || []).map(id => blockerState(s, id)),
     criteria: { items: card.criteria || [], needsAcceptance: !!card.needsAcceptance },

@@ -1287,6 +1287,8 @@ function radarEpochSection(r, needle, cardsMode) {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
       if (r.milestones.length) body.appendChild(radarMilestones(r.milestones));
+      const retired = retiredMilestones(r.id);
+      if (retired) body.appendChild(retired);
 
       const ledgerLine = el(`<p class="epoch__goal" style="opacity:.6">ledger: ${r.done} done live</p>`);
       body.appendChild(ledgerLine);
@@ -1340,6 +1342,21 @@ function radarMilestones(ms) {
       </button>`);
     row.addEventListener('click', () => setMilestoneFilter(m.id));
     wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+// Retired milestones stay on record, folded under their epoch.
+function retiredMilestones(epochId) {
+  const ms = (S.milestones || []).filter(m => m.epochId === epochId && m.status === 'retired');
+  if (!ms.length) return null;
+  const wrap = el(`<details class="miles miles--retired"><summary class="miles__h">Retired (${ms.length})</summary></details>`);
+  for (const m of ms) {
+    wrap.appendChild(el(`<div class="mile mile--retired" title="${esc(m.goal || m.title)}">
+        <span class="mile__dot">×</span>
+        <span class="mile__t">${esc(m.title)}</span>
+        <span class="mile__n">${esc(m.retired?.reason || 'retired')}</span>
+      </div>`));
   }
   return wrap;
 }
@@ -1512,7 +1529,7 @@ function renderDetail(c) {
         <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${esc(p.id)}" ${p.id === phase ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Track</div>${sel('track', CFG().tracks || ['epoch', 'sidequest'], c.track)}</div>
         <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${esc(e.id)}" ${e.id === c.epoch ? 'selected' : ''}>${esc(epochLabel(e))}</option>`).join('')}</select></div>
-        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${esc(x.id)}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (x.status !== 'retired' || x.id === c.milestoneId)).map(x => `<option value="${esc(x.id)}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}${x.status === 'retired' ? ' (retired)' : ''}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
         <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" data-keep="fld:workOrder" data-base="${esc(c.workOrder ?? '')}" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—"></div>

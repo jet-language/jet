@@ -256,12 +256,12 @@ test('milestones: cards drive progress and review readiness; delete unlinks', ()
   st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'owner' }, cfg));
   proj = project(st.load());
   assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 2, reviewReady: true, met: false });
-  assert.equal(st.load().milestones[0].status, 'review-ready');
+  assert.equal(st.load().milestones[0].status, 'open', 'ready for review is progress, not a status');
   st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'building', by: 'agent-1' }, cfg));
   assert.equal(st.load().milestones[0].status, 'open');
   st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'owner' }, cfg));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { milestoneId: null, by: 'agent-1' }, cfg));
-  assert.equal(st.load().milestones[0].status, 'review-ready', 'remaining linked card is done');
+  assert.equal(project(st.load()).milestones[0].progress.reviewReady, true, 'remaining linked card is done');
   st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
   assert.equal(st.load().milestones[0].status, 'open', 'empty milestone reopens');
   assert.deepEqual(project(st.load()).milestones[0].progress, { total: 0, done: 0, reviewReady: false, met: false });
@@ -301,10 +301,20 @@ test('milestones: cards cannot cross epochs and sidequests stay unlinked', () =>
     () => st.mutate((s, cfg) => db.updateCard(s, '#1', { epoch: 'e2', by: 'agent-1' }, cfg)),
     /belongs to epoch e1/,
   );
-  assert.throws(
-    () => st.mutate((s) => db.updateMilestone(s, m.id, { epochId: 'e2' }, 'owner')),
-    /milestone epoch is fixed/,
-  );
+});
+
+test('milestones: moving a milestone to another epoch takes its linked cards along', () => {
+  const st = fresh();
+  st.mutate((s) => db.addEpoch(s, { id: 'e2', name: 'Two' }));
+  const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Scoped', epoch: 'e1', milestoneId: m.id }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Unlinked', epoch: 'e1' }, cfg));
+  st.mutate((s) => db.updateMilestone(s, m.id, { epochId: 'e2' }, 'owner'));
+  const s = st.load();
+  assert.equal(s.milestones[0].epochId, 'e2');
+  assert.deepEqual(s.cards.map(c => [c.num, c.epoch]), [[1, 'e2'], [2, 'e1']]);
+  assert.equal(s.events.find(e => e.action === 'milestone.update').note, 'moved from e1 to e2 with 1 linked card');
+  assert.throws(() => st.mutate((s) => db.updateMilestone(s, m.id, { epochId: 'e9' }, 'owner')), /e9/);
 });
 
 test('nextCards ordering: review > building > implement > plan, then workOrder', () => {

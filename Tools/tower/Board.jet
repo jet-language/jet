@@ -7,7 +7,7 @@
 //   jet Tools/tower/Board.jet card list --json [--data DIR|FILE]
 //   jet Tools/tower/Board.jet decision show ID [--json] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet decision list --json [--open] [--drafts] [--card REF] [--data DIR|FILE]
-//   jet Tools/tower/Board.jet milestone list --json [--archived] [--epoch ID] [--data DIR|FILE]
+//   jet Tools/tower/Board.jet milestone list --json [--retired] [--epoch ID] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json] [--data DIR|FILE]
 // The board is --data, else TOWER_DATA (a data directory or a tower.json),
 // else the nearest `.tower/tower.json` above the working directory, else this
@@ -42,7 +42,7 @@ HISTORY_LAYOUT: "tower.history-shards/v1"
 
 HISTORY_KINDS: [String]{"decisions", "cards", "events"}
 
-BOOLEAN_FLAGS: [String]{"json", "archived", "open", "drafts", "docs"}
+BOOLEAN_FLAGS: [String]{"json", "retired", "open", "drafts", "docs"}
 
 VALUE_FLAGS: [String]{"data", "card", "epoch", "docs-root"}
 
@@ -512,9 +512,7 @@ load_live: fn(place: Place) -[FS]> Live Failure! {
     loop decision in decisions {
         if decision.invalid != "" -> return Err(fail("E_INVALID", decision.invalid))
     }
-    milestones := [Dyn]{}
-    listed: board.milestones ?? [Dyn]{}
-    loop milestone in listed -> milestones.push(normalize_milestone(milestone) ?? return Err(err))
+    milestones: (board.milestones ?? [Dyn]{}).map(normalize_milestone)
     tier1: decisions.any(fn(decision) { decision.id == "D-ONCE-TIER1" })
     Ok(Live{cards: cards, decisions: decisions, questions: board.questions ?? [QuestionRow]{}, milestones: milestones, events: board.events ?? [EventRow]{}, tier1: tier1})
 }
@@ -751,43 +749,6 @@ normalize_decision: fn(decision: Dyn) -> Dyn Failure! {
     Ok(out)
 }
 
-CRITERION_STATUSES: [String]{"open", "met", "verified"}
-
-milestone_criterion: fn(item: Dyn, at: Int) -> Dyn Failure! {
-    source: if item == .Text(value) -> object([{key: String, value: Dyn}]{{key: "text", value: Dyn.Text(value.copy())}}) else -> item.copy()
-    n: if is_null(field(source, "n")) -> Dyn.Int(at + 1) else -> field(source, "n")
-    status: if is_null(field(source, "status")) -> Dyn.Text("open") else -> field(source, "status")
-    if !CRITERION_STATUSES.contains(text(status)) {
-        return Err(fail("E_INVALID", "milestone criterion {at + 1}.status must be open, met, or verified"))
-    }
-    evidence: if truthy(field(source, "evidence")) -> field(source, "evidence") else -> Dyn.Text("")
-    Ok(
-        object(
-            [{key: String, value: Dyn}]{
-                {key: "n", value: n},
-                {key: "text", value: Dyn.Text(text(field(source, "text")).trim())},
-                {key: "status", value: status},
-                {key: "metBy", value: field(source, "metBy")},
-                {key: "verifiedBy", value: field(source, "verifiedBy")},
-                {key: "evidence", value: evidence},
-                {key: "at", value: field(source, "at")},
-            },
-        ),
-    )
-}
-
-milestone_criteria: fn(raw: Dyn) -> Dyn Failure! {
-    list := [Dyn]{}
-    if raw == .Array(_) -> list = items(raw) else if has(raw, "items") && field(raw, "items") == .Array(_) {
-        list = items(field(raw, "items"))
-    } else if is_null(raw) || is_text(raw, "") { return Ok(Dyn.Array([Dyn]{})) } else {
-        list.push(raw.copy())
-    }
-    shaped := [Dyn]{}
-    loop (at, item) in list -> shaped.push(milestone_criterion(item, at) ?? return Err(err))
-    Ok(Dyn.Array(shaped))
-}
-
 hex_commit: fn(value: String) -> Bool Never! {
     if value.count_bytes() != 40 && value.count_bytes() != 64 -> return false
     loop b in value.bytes() {
@@ -796,9 +757,33 @@ hex_commit: fn(value: String) -> Bool Never! {
     true
 }
 
-normalize_milestone: fn(milestone: Dyn) -> Dyn Failure! {
-    criteria: milestone_criteria(field(milestone, "criteria")) ?? return Err(err)
-    out := with(milestone, "criteria", criteria)
+// migrate.mjs migrateMilestones and store.mjs normalize: a milestone is open,
+// met or retired; an archived one is retired; its checklist is `exitCriteria`.
+normalize_milestone: fn(milestone: Dyn) -> Dyn Never! {
+    out := milestone.copy()
+    if has(out, "archived") {
+        if field(out, "archived") == .Bool(true) && !is_text(field(out, "status"), "retired") {
+            out = with(out, "status", Dyn.Text("retired"))
+            created: field(out, "created")
+            out = with(
+                out,
+                "retired",
+                object(
+                    [{key: String, value: Dyn}]{
+                        {key: "reason", value: Dyn.Text("archived")},
+                        {key: "by", value: Dyn.Text("tower")},
+                        {key: "at", value: created},
+                    },
+                ),
+            )
+        }
+        out = without(out, "archived")
+    }
+    if has(out, "criteria") {
+        if !has(out, "exitCriteria") -> out = with(out, "exitCriteria", field(out, "criteria"))
+        out = without(out, "criteria")
+    }
+    if !(field(out, "exitCriteria") == .Array(_)) -> out = with(out, "exitCriteria", Dyn.Array([Dyn]{}))
     closeout: field(out, "closeout")
     if !is_null(closeout) {
         if !(closeout == .Object(_)) || !hex_commit(text(field(closeout, "sourceCommit"))) || !truthy(field(closeout, "by")) || !truthy(field(closeout, "at")) {
@@ -806,14 +791,14 @@ normalize_milestone: fn(milestone: Dyn) -> Dyn Failure! {
         }
     }
     status: text(field(out, "status"))
-    if !(status == "open" || status == "review-ready" || status == "met") {
+    if !(status == "open" || status == "met" || status == "retired") {
         out = with(out, "status", Dyn.Text("open"))
     }
     if is_text(field(out, "status"), "met") && !truthy(field(out, "verification")) {
-        out = with(out, "status", Dyn.Text("review-ready"))
+        out = with(out, "status", Dyn.Text("open"))
         out = without(out, "metAt")
     }
-    Ok(out)
+    out
 }
 
 // A card linked to a milestone: all its progress reads.
@@ -843,8 +828,10 @@ link_cards: fn(index: &[String:[Linked]], cards: [CardRow]) Never! {
     }
 }
 
-// store.mjs syncMilestone: linked cards all done open the review.
+// store.mjs syncMilestone: a retired milestone stays as it is; linked cards
+// all done open the review (`progress.reviewReady`) and leave the status open.
 sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
+    if is_text(field(milestone, "status"), "retired") -> return milestone.copy()
     if linked.len() == 0 || !linked.all(fn(card) { card.phase == "done" }) {
         cleared: without(without(without(milestone, "verification"), "metAt"), "closeout")
         return with(cleared, "status", Dyn.Text("open"))
@@ -852,7 +839,7 @@ sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
     if is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification")) {
         return milestone.copy()
     }
-    with(without(without(milestone, "verification"), "metAt"), "status", Dyn.Text("review-ready"))
+    with(without(without(milestone, "verification"), "metAt"), "status", Dyn.Text("open"))
 }
 
 milestone_progress: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
@@ -1093,7 +1080,7 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
         loop milestone in live.milestones {
             linked: index.get(text(field(milestone, "id"))) ?? [Linked]{}
             synced: sync_milestone(milestone, linked)
-            if !request.flags.has_key("archived") && truthy(field(synced, "archived")) -> next
+            if !request.flags.has_key("retired") && is_text(field(synced, "status"), "retired") -> next
             if request.flags.get("epoch") == .Val(epoch) {
                 if !is_text(field(synced, "epochId"), epoch) -> next
             }
@@ -1334,7 +1321,8 @@ fixture_live: fn() -> String Never! {
         "{{\"id\":\"D-DONE\",\"cardId\":\"c_a\",\"status\":\"ratified\",\"outcome\":\"A\"}}],",
         "\"questions\":[{{\"id\":\"q1\",\"cardId\":\"c_a\",\"kind\":\"question\",\"status\":\"open\"}}],",
         "\"milestones\":[",
-        "{{\"id\":\"m1\",\"epochId\":\"e1\",\"title\":\"one\",\"status\":\"met\",\"criteria\":[\"ship\"],\"closeout\":{{\"sourceCommit\":\"nothex\",\"by\":\"x\",\"at\":\"t\"}}}},",
+        "{{\"id\":\"m1\",\"epochId\":\"e1\",\"title\":\"one\",\"status\":\"met\",\"criteria\":[{{\"n\":1,\"text\":\"ship\",\"status\":\"open\"}}],\"closeout\":{{\"sourceCommit\":\"nothex\",\"by\":\"x\",\"at\":\"t\"}}}},",
+        "{{\"id\":\"m3\",\"epochId\":\"e1\",\"title\":\"three\",\"status\":\"review-ready\"}},",
         "{{\"id\":\"m2\",\"epochId\":\"e1\",\"title\":\"two\",\"status\":\"open\",\"archived\":true,\"closeout\":{{\"sourceCommit\":\"0123456789abcdef0123456789abcdef01234567\",\"by\":\"x\",\"at\":\"t\"}}}}]}}",
     }.join("")
 }
@@ -1431,15 +1419,20 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(field(old, "archived") == .Bool(true), true)
     assert_eq(refusal(place, [String]{"decision", "show", "D-NONE"}), "E_NOT_FOUND: no decision D-NONE")
     open: items(ask(place, [String]{"milestone", "list", "--json"}))
-    assert_eq(open.len(), 1)
+    assert_eq(open.map(fn(milestone) { text(field(milestone, "id")) }), [String]{"m1", "m3"})
     one: open[0]
     assert_eq(text(field(one, "status")), "open")
     assert_eq(has(one, "closeout"), false)
+    assert_eq(has(one, "criteria"), false)
     assert_eq(json.to_string(field(one, "progress")) ?? "", "{{\"total\":2,\"done\":1,\"reviewReady\":false,\"met\":false}}")
-    assert_eq(json.to_string(items(field(one, "criteria"))[0]) ?? "", "{{\"n\":1,\"text\":\"ship\",\"status\":\"open\",\"metBy\":null,\"verifiedBy\":null,\"evidence\":\"\",\"at\":null}}")
-    every: items(ask(place, [String]{"milestone", "list", "--archived", "--json"}))
-    two: every[1]
-    assert_eq(text(field(two, "status")), "review-ready")
+    assert_eq(json.to_string(items(field(one, "exitCriteria"))[0]) ?? "", "{{\"n\":1,\"text\":\"ship\",\"status\":\"open\"}}")
+    assert_eq(text(field(open[1], "status")), "open")
+    assert_eq(json.to_string(field(open[1], "exitCriteria")) ?? "", "[]")
+    every: items(ask(place, [String]{"milestone", "list", "--retired", "--json"}))
+    two: every[2]
+    assert_eq(text(field(two, "status")), "retired")
+    assert_eq(has(two, "archived"), false)
+    assert_eq(json.to_string(field(two, "retired")) ?? "", "{{\"reason\":\"archived\",\"by\":\"tower\",\"at\":null}}")
     assert_eq(field(field(two, "progress"), "reviewReady") == .Bool(true), true)
     assert_eq(text(field(field(two, "closeout"), "sourceCommit")), "0123456789abcdef0123456789abcdef01234567")
     files.remove_all(place.dir) ?? ()

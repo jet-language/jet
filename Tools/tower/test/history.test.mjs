@@ -370,7 +370,7 @@ test('archived cards still drive milestone review readiness', () => {
   assert.equal(st.load().milestones[0].status, 'open', 'live work keeps milestone open');
 
   st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
-  assert.equal(st.load().milestones[0].status, 'review-ready', 'archived done work makes the milestone review-ready');
+  assert.equal(st.load().milestones[0].status, 'open', 'ready for review is progress, not a status');
   assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, reviewReady: true, met: false });
 });
 

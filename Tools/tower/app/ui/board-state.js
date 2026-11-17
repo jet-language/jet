@@ -126,6 +126,11 @@ export function compareEpochs(a, b) {
 
 export const sortEpochs = (epochs = []) => [...epochs].sort(compareEpochs);
 
+// Milestones are worked in `order` within their epoch; those without one
+// follow in the order they were added (the sort is stable).
+export const sortMilestones = (milestones = []) =>
+  [...milestones].sort((a, b) => ((a.order ?? Infinity) - (b.order ?? Infinity)) || 0);
+
 // The `jet test` command a criterion's proof runs (app/proof.mjs): a Compiler
 // profile with a filter, or the arguments of another `jet test` run.
 export const proofCommand = (proof) => proof.profile === 'cmd'
@@ -211,7 +216,7 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
     const frozen = linked.some(c => c.phase === 'frozen');
     if (!frozen && !(showClosed && done)) return [];
     const active = linked.filter(c => !['done', 'frozen'].includes(c.phase)).length;
-    const epochMilestones = milestones.filter(m => m.epochId === epoch.id && !m.archived);
+    const epochMilestones = sortMilestones(milestones.filter(m => m.epochId === epoch.id && m.status !== 'retired'));
     const milestonesMet = epochMilestones.filter(m => m.progress?.met === true).length;
     const milestoneTotal = epochMilestones.length;
     return [{

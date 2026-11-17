@@ -69,8 +69,10 @@ Set the order and the exit criteria with `tower epoch add|update e18 --order N
 pass `{"order": N, "exitCriteria": ["…"]}` through `--file`/`--stdin`. An empty
 list clears them. `tower epoch remove e18 --by <agent>` is refused while any
 live or archived card, or any milestone, still points at the epoch; the refusal
-names the counts. Milestones group targets inside an epoch and derive progress
-from linked cards.
+names the counts. Milestones group targets inside an epoch, worked in `order`,
+and derive progress from linked cards. `tower milestone update <id> --epoch E`
+moves a milestone with its live cards; `tower milestone retire <id> --reason
+"…" --by <agent>` keeps it for the record but takes it out of lists and briefs.
 
 A card needs a non-empty criteria checklist. Each row moves from `open` to
 `met` to `verified`. Integrated focused proof supplies `met`; a different
@@ -81,7 +83,8 @@ an explicit owner acceptance or closeout follow-up.
 
 Change a checklist with `tower card criteria '#N' --add "…"`, `--edit n --text
 "…" --reason "…"` or `--remove n --reason "…"` (`tower milestone criteria`
-takes the same flags). Rewording a met or verified row reopens it, because its
+takes the same flags for a milestone's `exitCriteria`, and its meets pass the
+same evidence gate). Rewording a met or verified row reopens it, because its
 evidence proved the old wording. Removed numbers are never reused, and the event
 log keeps the old text and the reason.
 

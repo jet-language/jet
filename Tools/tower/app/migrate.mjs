@@ -56,6 +56,30 @@ export function migrateRetiredPlanning(store) {
   return changed;
 }
 
+// Owner order (2026-11-16): a milestone is open, met or retired. Whether every
+// linked card is done is the derived `progress.reviewReady`, no longer a
+// `review-ready` status; an archived milestone is a retired one; and the
+// milestone checklist is `exitCriteria`, shaped like a card's criteria. Runs
+// on every load before the board is validated; normal Tower writes persist
+// the canonical form.
+export function migrateMilestones(store) {
+  for (const m of Array.isArray(store.milestones) ? store.milestones : []) {
+    if (!m || typeof m !== 'object' || Array.isArray(m)) continue;
+    if (m.status === 'review-ready') m.status = 'open';
+    if (Object.hasOwn(m, 'archived')) {
+      if (m.archived === true && m.status !== 'retired') {
+        m.status = 'retired';
+        m.retired = { reason: 'archived', by: 'tower', at: m.created ?? null };
+      }
+      delete m.archived;
+    }
+    if (Object.hasOwn(m, 'criteria')) {
+      if (!Object.hasOwn(m, 'exitCriteria')) m.exitCriteria = m.criteria;
+      delete m.criteria;
+    }
+  }
+}
+
 export function migrate(old, { project = 'Project' } = {}) {
   const src = old && typeof old === 'object' ? old : {};
   const meta = src.meta || {};

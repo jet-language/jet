@@ -321,9 +321,28 @@ cards that have criteria by open rows, fewest first, then blocked rows, then
 chain order; a card with no open or blocked rows left reads `ready`. The UI's
 Closest view shows the same list with the chain above it.
 
+### Milestones
+
+A milestone is `open`, `met` or `retired`. Milestones are worked in `order`
+within their epoch (`milestone add|update --order N`; unordered ones come
+last), and `milestone list` shows them in epoch order, then milestone order.
+Their checklist is `exitCriteria` (`--exit-criteria "…"`, repeatable), shaped
+like a card's criteria: `tower milestone criteria <id>` takes the card flags
+(`--add`, `--edit`, `--remove`, `--meet`, `--verify` with `--kind`,
+`--reopen`), and a met or verified row passes the same durable-evidence gate
+as a card row.
+
+`tower milestone update <id> --epoch E` moves the milestone and its live
+linked cards to epoch E. `tower milestone retire <id> --reason "…" --by X`
+keeps the milestone for the record: its cards keep their link, but it leaves
+`milestone list` (`--retired` shows it), the radar and briefs, takes no new
+card links or criterion writes, and the board folds it under its epoch as
+**Retired (N)**.
+
 ### Milestone review
 
-All linked cards done makes a milestone `review-ready`. Commit the frozen
+All linked cards done makes a milestone ready for review
+(`progress.reviewReady`); its status stays `open`. Commit the frozen
 source, then record the closeout token and check it before broad proof:
 
 ```
@@ -336,7 +355,7 @@ tower milestone verify <id> --evidence "milestone review complete" --by reviewer
 
 `milestone closeout` records the frozen Git object ID. Broad proof scripts
 check that the source tree still matches it. Milestone verify requires every
-linked card `done`, every milestone criterion `verified`, and the token.
+linked card `done`, every exit criterion `verified`, and the token.
 Reopening a linked card or milestone criterion clears the token and signoff.
 
 Ballot-ready decisions carry: `situation` (the headline summary every ballot
@@ -546,8 +565,9 @@ CLI verb:
 | `move` | `card`, `n`, `to` | `reason` |
 | `card.update` | `card` and a field | stored card fields (`phase`, `epoch`, `milestoneId`, `tags`, `blockedBy`, …), `addTags`, `removeTags`, `logEntry` |
 | `epoch.update` | `id` and a field | `name`, `goal`, `status`, `order`, `exitCriteria` |
-| `milestone.add` | `epochId`, `title` | `id`, `goal`, `criteria` |
-| `milestone.update` | `id` and a field | `title`, `goal`, `criteria`, `archived` |
+| `milestone.add` | `epochId`, `title` | `id`, `goal`, `order`, `exitCriteria` |
+| `milestone.update` | `id` and a field | `title`, `goal`, `order`, `exitCriteria`, `epochId` (moves its live cards too) |
+| `milestone.retire` | `id`, `reason` | — |
 
 ## Gauntlet standings (#6834)
 
@@ -645,7 +665,7 @@ POST /api/message/done {id}                    (owner-only)
 POST /api/done/clear                           (owner-only; clears completed cards, not messages)
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current|remove      (add/update: {order, exitCriteria})
-POST /api/milestone/add|update|criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen|verify|delete
+POST /api/milestone/add|update|retire|criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen|verify|delete
 ```
 
 POST bodies are JSON; include `by`, optionally `expectRev`. Errors are

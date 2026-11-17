@@ -64,10 +64,13 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   stays `e18`. `epoch remove` is refused while any card (live in any phase, or
   archived) or milestone still points at the epoch, and the refusal names the
   counts.
-- **Milestones** — targets within an epoch. Linked cards move a milestone to
-  `review-ready` when all are done. `milestone closeout` records the frozen
-  source commit that authorizes broad proof. Only `milestone verify` can make
-  the tokened milestone `met`.
+- **Milestones** — targets within an epoch, worked in `order`, each `open`,
+  `met` or `retired`, with card-shaped `exitCriteria`. All linked cards done
+  makes a milestone ready for review (`progress.reviewReady`).
+  `milestone closeout` records the frozen source commit that authorizes broad
+  proof. Only `milestone verify` can make the tokened milestone `met`.
+  `milestone update --epoch E` moves it with its live cards; `milestone retire
+  --reason "…"` keeps it for the record but out of lists, briefs and new links.
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   review → done (+ frozen). A fresh card lands in `planning` — no owner
   greenlight step. Tower picks review, building, implement, then plan cards.
@@ -121,12 +124,12 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   Ratification and `tower verdict --supersedes D-ID` refuse a draft with
   `E_DRAFT`. A card with an open posted decision surfaces as **Decide** no
   matter its stage.
-- **Milestone review** — milestone criteria use the same `open` → `met` →
+- **Milestone review** — milestone exit criteria use the same `open` → `met` →
   `verified` flow. After all cards close, freeze the source commit and record
   its token with `tower milestone closeout <id> --commit SHA --by X`, then
   `jet Tools/Agent/CloseoutGate.jet check <id>`; broad proof is refused
   before that. `tower milestone verify <id> --evidence "…" --by X` works only
-  when every linked card is done, every milestone criterion is verified, and
+  when every linked card is done, every exit criterion is verified, and
   the token exists. Reopening a linked card or milestone criterion clears the
   token and signoff.
 - **Questions** — owner ⇄ agent threads on a card.
@@ -167,7 +170,7 @@ tower question  list|ask|answer|delete
 tower message   list|add|done
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|remove|current
-tower milestone list|add|update|criteria|closeout|verify|delete
+tower milestone list|add|update|retire|criteria|closeout|verify|delete
 tower archive   status | show <id> | restore <id>
 tower apply --file plan.json [--dry-run] | publish --title "…" --file report.md
 tower init | serve | import
