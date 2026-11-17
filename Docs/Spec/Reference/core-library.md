@@ -4257,7 +4257,10 @@ native date-time carrier.
 `core.encoding` converts complete values to and from `Dyn`. Objects retain
 arrival order: the `Object` payload is the ordered pair list
 `[{key: String, value: Dyn}]` (D-DATATREE-ORDER1), and a repeated name is a
-`Syntax` error except under `json.parse_allow_duplicates`. Integers and
+`Syntax` error at the repeat whose reason names the key and the line and
+column of its first appearance, except under `json`, `yaml` or
+`toml.parse_allow_duplicates`, which keeps the later value at the first key's
+position. Integers and
 floating-point numbers remain distinct, and
 malformed input returns a typed `EncodingError`. The whole-value codecs are
 pure; readers and writers expose the same boundaries incrementally. The
@@ -4343,7 +4346,8 @@ syntax is rejected. Typed `decode<T>` checks numbers when projecting into `T`;
 quoted numbers stay text. Compact output retains insertion order, pretty output
 uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
 order. `parse`, `decode`, and `reader` reject a repeated object name with its
-path and position; `parse_allow_duplicates` is the explicit opt-in.
+path and position, the reason naming where the name first appears;
+`parse_allow_duplicates` is the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 JSON text written in source reads best as backtick raw text, which has no
@@ -4431,14 +4435,18 @@ rows stream one at a time.
 
 `core.encoding.toml` supports the common TOML 1.0 document forms: comments,
 dotted keys, tables, array tables, strings, integers, floats, booleans,
-inline tables, and arrays. Numeric spellings remain `Dyn.Number`; duplicate
-keys (including inline tables) are errors. Offset datetimes become `Dyn.DateTime`;
+inline tables, and arrays. Numeric spellings remain `Dyn.Number`. A key
+defined again (in a table, an inline table, or through a dotted key) is a
+`Syntax` error at the repeat whose path is the dotted key and whose reason
+names where it was first defined; `parse_allow_duplicates` keeps the later
+value instead. Offset datetimes become `Dyn.DateTime`;
 local dates and times remain text. Unsupported syntax fails closed, and output
 is minimal rather than comment-preserving.
 
 | Function | Returns | Description |
 | --- | --- | --- |
 | `toml.parse(text)` / `decode(text)` / `loads(text)` / `load(text)` | `Dyn EncodingError!` | Parse a TOML document or a compatibility alias. |
+| `toml.parse_allow_duplicates(text)` | `Dyn EncodingError!` | Parse like `parse`, but keep the later value of a key defined again, at the first definition's position. |
 | `toml.to_string(value)` | `String` | Emit a minimal TOML document. |
 
 ### `core.encoding.yaml` — bounded YAML input
@@ -4447,12 +4455,16 @@ is minimal rather than comment-preserving.
 lists, comments, `|` or `>` block scalars, a leading `---` document marker,
 and JSON flow collections (`[1, 2]`, `{"a": 1}`) as values. Unknown or
 unsupported syntax fails closed: anchors and aliases (`&name`, `*name`) and a
-flow collection that is not JSON are `Unsupported` errors that name them. This
+flow collection that is not JSON are `Unsupported` errors that name them. A
+key repeated in one map is a `Syntax` error at the repeat whose reason names
+where the key first appears; `parse_allow_duplicates` keeps the later value
+at the first key's position instead. This
 module is an input parser and does not expose a YAML serializer.
 
 | Function | Returns | Description |
 | --- | --- | --- |
 | `yaml.parse(text)` / `decode(text)` | `Dyn EncodingError!` | Parse supported YAML input. |
+| `yaml.parse_allow_duplicates(text)` | `Dyn EncodingError!` | Parse like `parse`, but keep the later value of a repeated map key, at the first key's position. |
 
 ### `core.encoding.xml` — bounded XML trees
 

@@ -1,0 +1,29 @@
+// A key repeated in one YAML map is a parse error at the repeat that names
+// the key and where it first appears: at the top, in a nested map, in a list
+// item's map, and in a JSON document after a `---` marker, whose positions
+// are the YAML source's. `parse_allow_duplicates` keeps the later value at
+// the first key's position. The same key in two maps is no repeat.
+use {
+    json: core.encoding.json
+    yaml: core.encoding.yaml
+}
+
+show: fn(name: String, text: String) {
+    tree: yaml.parse(text) ?? {
+        line: err.line ?? 0
+        column: err.column ?? 0
+        print("{name} parse: `{err.path}` line {line} column {column}: {err.reason}")
+        later: yaml.parse_allow_duplicates(text) ?? panic("allowed parse")
+        print("{name} allow: {json.to_string(later) ?? panic("render")}")
+        return
+    }
+    print("{name} parse: {json.to_string(tree) ?? panic("render")}")
+}
+
+run: fn() {
+    show("top", "a: 1\nb: 2\na: 3\n")
+    show("nested", "name: a\nb:\n  c: 1\n  c: 2\n")
+    show("item", "list:\n  - id: 1\n    id: 2\n")
+    show("json", "---\n{{\"a\": 1, \"a\": 2}}\n")
+    show("distinct", "a: 1\nb:\n  a: 2\n")
+}

@@ -5,6 +5,11 @@
 // booleans, inline tables/arrays, and offset DateTime values. Local dates
 // and times stay Text. Unsupported constructs fail closed with EncodingError.
 //
+// A key defined twice is a Syntax error at the repeat that names the key and
+// the line and column where it was first defined (a key, a table header, or
+// the value holding it). `parse_allow_duplicates` keeps the later value in
+// the first key's position instead.
+//
 // `to_string` emits a minimal table document; it does not preserve comments.
 use {
     core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
@@ -26,14 +31,18 @@ syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, pa
     }
 }
 
-parse: fn(text: String) -> Dyn EncodingError! { parse_toml(text) }
+parse: fn(text: String) -> Dyn EncodingError! { parse_toml(text, false) }
 
-decode: fn(text: String) -> Dyn EncodingError! { parse_toml(text) }
+/// TOML → `Dyn`, except that a key defined again keeps the later value at the
+/// first definition's position.
+parse_allow_duplicates: fn(text: String) -> Dyn EncodingError! { parse_toml(text, true) }
+
+decode: fn(text: String) -> Dyn EncodingError! { parse_toml(text, false) }
 
 // Compiler-private typed entry for `toml.decode<T>(text)`: the document's
 // tree decodes into the target, a parse failure as one root FieldError.
 __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
-    tree: parse_toml(text) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid TOML: {err.reason}"}})
+    tree: parse_toml(text, false) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid TOML: {err.reason}"}})
     value: tree.decode<Target>() ?? return Err(err)
     Ok(value)
 }
@@ -44,8 +53,17 @@ load: fn(text: String) -> Dyn EncodingError! { parse(text) }
 
 to_string: fn<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
-parse_toml: fn(text: String) -> Dyn EncodingError! {
-    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object(), depth: 0}
+priv parse_toml: fn(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
+    p := TOMLParser{
+        bytes: text.bytes(),
+        index: 0,
+        line: 1,
+        column: 1,
+        root: Dyn.object(),
+        depth: 0,
+        allow_duplicates: allow_duplicates,
+        defined: [String:{line: Int, column: Int}]{},
+    }
     _: p.document() ?? return Err(err)
     Ok(p.root)
 }
@@ -59,6 +77,10 @@ TOMLParser: struct {
     // Open arrays and inline tables, bounded by `EncodingLimits.safe().max_depth`
     // so hostile nesting cannot run the process out of stack.
     depth: Int,
+    allow_duplicates: Bool,
+    // Where each key and table header was first defined, by its resolved
+    // path (`defined_key`), for a repeat's report.
+    defined: [String:{line: Int, column: Int}],
 
     eof: fn(self) -> Bool Never! { self.index >= self.bytes.len() }
 
@@ -153,17 +175,27 @@ TOMLParser: struct {
             if self.eof() -> return true
             b: self.peek() ?? return true
             if b == (U8{91}) {
+                line: self.line
+                column: self.column
                 header: self.parse_header()
+                self.__record(header, line, column)
                 current = header
                 next
             }
+            at: self.index
+            line: self.line
+            column: self.column
             keys: self.parse_dotted_key()
+            path := [String]{}
+            loop k in current -> path.push(k.copy())
+            loop k in keys -> path.push(k.copy())
+            self.__define(path, at, line, column) ?? return Err(err)
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             got: self.bump() ?? return Err(self.fail("expected '=' after a key"))
             if got != (U8{61}) -> return Err(self.fail("expected '=' after a key"))
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             value: self.parse_value()
-            _: self.assign(current, keys, value) ?? return Err(self.fail("TOML assignment failed"))
+            _: self.assign(current, keys, value) ?? return Err(err)
             self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         }
         true
@@ -341,8 +373,10 @@ TOMLParser: struct {
     parse_inline_table: fn(&self) -> Dyn EncodingError! {
         _: self.bump()
         enter_nesting(self) ?? return Err(err)
-        // Dyn objects retain insertion order and reject repeated inline keys.
+        // Dyn objects retain insertion order; `names` holds where each key
+        // is first defined, for a repeat's report.
         entries := Dyn.object()
+        names := [String:{line: Int, column: Int}]{}
         loop {
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
@@ -351,8 +385,15 @@ TOMLParser: struct {
                 self.depth -= 1
                 return Ok(entries)
             }
+            at: self.index
+            line: self.line
+            column: self.column
             key: self.parse_key()
-            if entries.has(key) -> return Err(self.fail("duplicate key in TOML inline table"))
+            if names.get(key) == .Val(first) {
+                if !self.allow_duplicates {
+                    return Err(self.__repeated(key, at, line, column, first))
+                }
+            } else { names[key.copy()] = {line: line, column: column} }
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             eq: self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
@@ -435,11 +476,46 @@ TOMLParser: struct {
         self.root = ensure_array_path(self.root, keys, 0)
     }
 
+    // Where `path` is first defined, and that of each table it implies that
+    // is not defined yet.
+    __record: fn(&self, path: [String], line: Int, column: Int) Never! {
+        loop count in 1..path.len() {
+            name: defined_key(self.root, path, count, 0)
+            if self.defined.get(name) == None -> self.defined[name] = {line: line, column: column}
+        }
+    }
+
+    // A key about to be defined at `path`: a repeat of a defined key is an
+    // error unless duplicates are allowed. The first definition is the key's
+    // own, else that of the nearest table or value holding it.
+    __define: fn(&self, path: [String], at: Int, line: Int, column: Int) EncodingError! {
+        if !has_path(self.root, path, 0) {
+            self.__record(path, line, column)
+            return
+        }
+        if self.allow_duplicates {
+            return
+        }
+        count := path.len()
+        loop count > 0 {
+            if self.defined.get(defined_key(self.root, path, count, 0)) == .Val(first) {
+                return Err(self.__repeated(path.join("."), at, line, column, first))
+            }
+            count -= 1
+        }
+        Err(syntax_error(EncodingFormat.TOML, at, line, column, path.join("."), "duplicate key `{path.join(".")}`"))
+    }
+
+    // The error of a key defined again at `at`, `line` and `column`, naming
+    // it and where it was first defined.
+    __repeated: fn(self, name: String, at: Int, line: Int, column: Int, first: {line: Int, column: Int}) -> EncodingError Never! {
+        syntax_error(EncodingFormat.TOML, at, line, column, name, "duplicate key `{name}` (first at line {first.line}, column {first.column})")
+    }
+
     assign: fn(&self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
         path := [String]{}
         loop k in table -> path.push(k.copy())
         loop k in key -> path.push(k.copy())
-        if has_path(self.root, path, 0) -> return Err(self.fail("duplicate TOML key"))
         self.root = put_path(self.root, path, 0, value)
         true
     }
@@ -655,6 +731,27 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
     out
 }
 
+// The name `TOMLParser.defined` files `path[i..<count]` under, from the
+// table `entries`: each key with its byte length, and through an array of
+// tables the index of its last table, so each table of the array keeps its
+// own keys.
+priv defined_key: fn(entries: Dyn, path: [String], count: Int, i: Int) -> String Never! {
+    if i >= count -> return ""
+    key: path[i]
+    here: "{key.count_bytes()}:{key}"
+    if i == count - 1 -> return here
+    child: entries.get(key) ?? Dyn.Null
+    if child == {
+        .Array(items) -> {
+            if items.len() == 0 -> return "{here}/{defined_key(Dyn.Null, path, count, i + 1)}"
+            return "{here}#{items.len() - 1}/{defined_key(items[items.len() - 1], path, count, i + 1)}"
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+            return "{here}/{defined_key(child, path, count, i + 1)}"
+        }
+    }
+}
+
 has_path: fn(entries: Dyn, path: [String], i: Int) -> Bool Never! {
     if i >= path.len() -> return false
     key: path[i]
@@ -825,6 +922,35 @@ toml_leaf: fn(value: Dyn) -> String Never! {
         .Err(_) -> {}
         .Ok(_) -> panic("duplicate dotted key accepted")
     }
+}
+
+#Test("TOML names a repeated key, where it repeats and where it first appears") {
+    if parse("[server]\nport = 1\nhost = \"a\"\nport = 2\n") == {
+        .Ok(_) -> { panic("a repeated key must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate key `server.port` (first at line 2, column 1)")
+            assert(error.line == Val(4) && error.column == Val(1))
+            assert_eq(error.path, "server.port")
+        }
+    }
+    if parse("point = {{ x = 1, y = 2, x = 3 }}") == {
+        .Ok(_) -> { panic("a repeated inline key must fail") }
+        .Err(error) -> assert_eq(error.reason, "duplicate key `x` (first at line 1, column 11)")
+    }
+    if parse("a = {{ b = 1 }}\na.b = 2") == {
+        .Ok(_) -> { panic("a key of an inline table defined again must fail") }
+        .Err(error) -> assert_eq(error.reason, "duplicate key `a.b` (first at line 1, column 1)")
+    }
+    if parse("[[item]]\nname = \"a\"\n[[item]]\nname = \"b\"\nname = \"c\"") == {
+        .Ok(_) -> { panic("a key repeated in one table of an array must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate key `item.name` (first at line 4, column 1)")
+        }
+    }
+    tree: parse_allow_duplicates("port = 1\nname = \"a\"\nport = 2\nt = {{ k = 1, k = 2 }}") ?? panic("allowed TOML")
+    assert_eq(tree.keys(), [String]{"port", "name", "t"})
+    assert((tree.get("port") ?? panic("port")) == stream.typed_number("2"))
+    assert_eq(toml_leaf(tree.get("t") ?? panic("inline table")), "{{ k = 2 }}")
 }
 
 // A float keeps its own spelling when it is a JSON number token (`+` dropped),
