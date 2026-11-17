@@ -12455,6 +12455,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     walk_inputs: sema_finalize_walk_inputs(taint_catalog, diagnostics, threads, taint_reports)
     effect_threads: compiler_threads_beside(threads, walk_inputs.workers)
     walked := SemaFinalizeWalked{found: [[Diagnostic]]{}, masked: [[Span]]{}, fixed: [[String]]{}}
+    // On a machine with no heap, nothing the entries of a program whose
+    // bodies check reach may allocate (sema_effect_check_heap_free); their
+    // keys are read before the effect pass borrows the symbol table.
+    heap_free: if complete && sema_target_heap_free(final_graph) -> final_graph.target_machine.name else -> ""
+    heap_entries: if heap_free == "" -> [String]{} else -> sema_target_entry_keys(modules, final_graph)
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`. It borrows the run's symbol table and hands
     // it back; the walk's graph holds an empty one meanwhile.
@@ -12462,7 +12467,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     task.group sema_finalize_effect_walks {
         walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries)
         if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
         walked = walking.join() ?? panic(compiler_threads_failure_text(err))
     }

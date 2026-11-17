@@ -6,6 +6,8 @@
 //
 // Only core-level APIs are used: no file I/O, no network, no threads.
 // The named target profile admits only APIs supported by its typed providers.
+// The board has no heap, so nothing here allocates: the results are checked
+// with assertions and reported as literal text, never an interpolated string.
 use math: core.math
 
 clamp: fn(x: Int, lo: Int, hi: Int) -> Int {
@@ -18,5 +20,7 @@ run: fn() {
     a: clamp(15, 0, 10)
     b: clamp(-3, 0, 10)
     root: math.sqrt(Float{16.0})
-    print("freestanding: clamp(15,0,10)={a}, clamp(-3,0,10)={b}, sqrt(16)={root}")
+    assert(a == 10 && b == 0, "clamp keeps a value inside its bounds")
+    assert(root > 3.999 && root < 4.001, "sqrt(16) is 4")
+    print("freestanding: clamp(15,0,10)=10, clamp(-3,0,10)=0, sqrt(16)=4.0")
 }
