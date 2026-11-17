@@ -23,14 +23,14 @@ kind: fn(handle: Directory | FileReader) -> String {
     }
 }
 
-measure: fn(value: String | Int) -> Int {
+measure: fn(value: Int | String) -> Int {
     if value == {
         .String(text) -> text.count_bytes()
         .Int(number) -> number
     }
 }
 
-keep: fn(value: String | Int) -> String | Int { value.copy() }
+keep: fn(value: Int | String) -> Int | String { value.copy() }
 
 status_kb: fn(field: String) -[FS.Read]> Int {
     status: files.read("/proc/self/status") ?? panic("read /proc/self/status")

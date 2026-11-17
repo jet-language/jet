@@ -37,7 +37,7 @@ deliver: fn(addr: String, project: String, key: String, body: String) -> String 
     Ok("{answer.status} {answer.text()}")
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     secret: "It's a Secret to Everybody"
     served: web.app().mount(Hooks{secret: secret})
     listener: net.tcp_listen("127.0.0.1:0")

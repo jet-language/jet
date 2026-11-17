@@ -311,7 +311,7 @@ typed_set: fn(form: &WebFormTyped, name: String, value: String) WebFormError! {
     set(form.form, name, value)
 }
 
-typed_set_async_validator: fn<E>(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (WebFormError | E)! {
+typed_set_async_validator: fn<E>(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String) E!) (E | WebFormError)! {
     _: timing.copy()
     _: delay_ms
     if name.len() == 0 -> return Err(WebFormError.Missing)

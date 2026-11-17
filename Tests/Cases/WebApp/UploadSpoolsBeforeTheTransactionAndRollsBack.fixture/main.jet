@@ -54,7 +54,7 @@ held: fn(path: String) -> Int {
     found.len()
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     files.create_dir_all(".jet/uploads") ?? panic("the staging directory is made")
     files.write(".jet/uploads/left-by-a-crash", "half a fi") ?? panic("a stopped server's staged file")
     served: web.app().mount("/api", Drafts{shelf: app.blobs("drafts")})

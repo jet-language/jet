@@ -3,10 +3,10 @@
 // an assignment and a list element. Each member keeps its payload, and the
 // source value stays usable.
 Slot: struct {
-    value: Int | String | Bool,
+    value: Bool | Int | String,
 }
 
-store: fn(cell: Int | String | Bool) -> String {
+store: fn(cell: Bool | Int | String) -> String {
     if cell == {
         .Int(n) -> "int {n}"
         .String(s) -> "text {s}"
@@ -21,11 +21,11 @@ small: fn(text: Bool) -> Int | String {
     7
 }
 
-flag: fn() -> Int | String | Bool { true }
+flag: fn() -> Bool | Int | String { true }
 
-taken: fn(cell: Int | String | Bool) -> Int | String | Bool { cell.copy() }
+taken: fn(cell: Bool | Int | String) -> Bool | Int | String { cell.copy() }
 
-lift: fn(cell: Int | String) -> Int | String | Bool { cell.copy() }
+lift: fn(cell: Int | String) -> Bool | Int | String { cell.copy() }
 
 run: fn() {
     word: small(true)
@@ -40,7 +40,7 @@ run: fn() {
     print(store(slot))
     slot = word.copy()
     print(store(slot))
-    row: [Int | String | Bool]{number.copy(), word.copy(), false}
+    row: [Bool | Int | String]{number.copy(), word.copy(), false}
     loop item in row -> print(store(item))
     print(keep(word))
 }

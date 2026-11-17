@@ -30,7 +30,7 @@ shown: fn(response: HTTPResponse) -> String {
     "{response.status} | cache-control: {response.header("cache-control") ?? "none"} | etag: {etag}"
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     _: app.new("Board").cache<LandingView>(.Public{max_age: 10min})
     served: web.app().mount("/api", Board{name: "crew"})
     listener: net.tcp_listen("127.0.0.1:0")

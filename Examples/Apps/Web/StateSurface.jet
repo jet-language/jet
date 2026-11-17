@@ -110,7 +110,7 @@ router_surface: fn() WebRouterError! {
     _aborted: router.abort(named)
 }
 
-query_surface: fn() (WebQueryError | StateError)! {
+query_surface: fn() (StateError | WebQueryError)! {
     loaded: query.load("rows", "rows", "initial", fetch_rows)
     seed: query.WebQuerySeed{data: loaded.data, generation: loaded.generation, subscribers: loaded.subscribers}
     created := query.new("rows", seed)
@@ -351,7 +351,7 @@ support_surface: fn() {
     session.remove("surface")
 }
 
-run: fn() (Err | WebRouterError | WebQueryError | StateError | WebFormActionError | WebFormError | WebTableError)! {
+run: fn() (Err | StateError | WebFormActionError | WebFormError | WebQueryError | WebRouterError | WebTableError)! {
     app_surface()
     router_surface()
     query_surface()

@@ -11,7 +11,7 @@ use {
     net: core.net
 }
 
-loopback_bound: fn() -> Bool (http.HTTPError | net.NetError | TaskFailure)! {
+loopback_bound: fn() -> Bool (TaskFailure | http.HTTPError | net.NetError)! {
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     return Ok("{addr}".starts_with("127.0.0.1:"))

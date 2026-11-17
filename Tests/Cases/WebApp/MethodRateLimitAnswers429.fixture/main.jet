@@ -42,7 +42,7 @@ lookup: fn(crew: app.Remote<Crew>, id: Int) -> String Never! {
     "{found}"
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     served: web.app().mount("/api", Crew{name: "crew"})
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()

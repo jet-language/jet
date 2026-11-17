@@ -418,25 +418,25 @@ scope: fn(authority: Authority) -[FS]> FileScope Never! { {authority: authority}
 
 /// Open `path` for reading. `links: .Refuse` refuses a
 /// path that ends in a symbolic link. Every handle is close-on-exec.
-open: fn(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
+open: fn(path: Path | String, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
     core.files.__open_reader(-1, path_text(path), link_code(links))
 }
 
 /// Open `path` for writing from empty. `if_exists:
 /// .Refuse` creates exclusively; `mode` sets a new file's permission bits
 /// before the process umask and leaves an existing file's bits alone.
-create: fn(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+create: fn(path: Path | String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
     core.files.__open_writer(-1, path_text(path), false, create_code(if_exists), mode ?? -1, link_code(links))
 }
 
 /// Open `path` for appending, creating it when missing.
-append: fn(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+append: fn(path: Path | String, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
     core.files.__open_writer(-1, path_text(path), true, 0, mode ?? -1, link_code(links))
 }
 
 /// Path parameters take text or a `Path`, the same shape as every other
 /// `core.files` path operation.
-path_text: fn(path: String | Path) -> String Never! {
+path_text: fn(path: Path | String) -> String Never! {
     if path == {
         .String(text) -> text.copy()
         .Path(held) -> held.to_string()
@@ -709,7 +709,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
 // spec already keeps is IOError.InvalidInput, and a failed duplication is
 // IOError.Other. A kept FileLock's duplicate shares its lock, so the lock
 // stays held while the child (or anything it starts) keeps the descriptor.
-__spec_keep_open: fn(spec: ProcessSpec, handle: &&FileReader | FileWriter | FileLock | Directory, at: Int?{None}) -[FS]> ProcessSpec Never! {
+__spec_keep_open: fn(spec: ProcessSpec, handle: &&Directory | FileLock | FileReader | FileWriter, at: Int?{None}) -[FS]> ProcessSpec Never! {
     fd: if handle == {
         .FileReader(reader) -> core.files.__reader_fd(reader) ?? -1
         .FileWriter(writer) -> core.files.__writer_fd(writer) ?? -1
@@ -993,14 +993,14 @@ file_writer_refusal: fn(path: String) -[FS.Write]> IOError! {
     Ok()
 }
 
-read_bytes: fn(path: String | Path) -[FS.Read]> [U8] IOError! {
+read_bytes: fn(path: Path | String) -[FS.Read]> [U8] IOError! {
     source: path_text(path)
     file_fault("FS.Read", .Read, source)
     core.files.__read_bytes_os(source)
 }
 
 // The file is read once into a buffer that, as valid UTF-8, becomes the text.
-read: fn(path: String | Path) -[FS.Read]> String IOError! {
+read: fn(path: Path | String) -[FS.Read]> String IOError! {
     source: path_text(path)
     file_fault("FS.Read", .Read, source)
     rt.read_text_os(source)
@@ -1009,37 +1009,37 @@ read: fn(path: String | Path) -[FS.Read]> String IOError! {
 /// The text of the file at `path`, or `fallback` when it cannot be read
 /// (missing, unreadable or not UTF-8): `files.read_or(path, "")` is a
 /// script's `cat path 2>/dev/null`, its fallback stated in the call.
-read_or: fn(path: String | Path, fallback: String) -[FS.Read]> String Never! {
+read_or: fn(path: Path | String, fallback: String) -[FS.Read]> String Never! {
     read(path) ?? fallback
 }
 
-map: fn(path: String | Path) -[FS.Read]> MappedFile IOError! {
+map: fn(path: Path | String) -[FS.Read]> MappedFile IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     core.files.__map_raw(text)
 }
 
-write: fn(path: String | Path, text: String) -[FS.Write]> IOError! {
+write: fn(path: Path | String, text: String) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, text.bytes())
 }
 
-write_bytes: fn(path: String | Path, bytes: [U8]) -[FS.Write]> IOError! {
+write_bytes: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
     target: path_text(path)
     file_writer_refusal(target)
     file_fault("FS.Write", .Write, target)
     core.files.__write_bytes_os(target, bytes)
 }
 
-append_all: fn(path: String | Path, text: String) -[FS.Write]> IOError! {
+append_all: fn(path: Path | String, text: String) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__append_bytes_os(target, text.bytes())
 }
 
 // `Path.write_atomic(bytes)` calls this with its receiver (one atomic writer).
-write_atomic: fn(path: String | Path, bytes: [U8]) -[FS.Write]> IOError! {
+write_atomic: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
     destination: path_text(path)
     file_writer_refusal(destination)
     file_fault("FS.Write", .Write, destination)
@@ -1099,20 +1099,20 @@ write_atomic: fn(path: String | Path, bytes: [U8]) -[FS.Write]> IOError! {
     )
 }
 
-read_at: fn(path: String | Path, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+read_at: fn(path: Path | String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
     source: path_text(path)
     file_fault("FS.Read", .Read, source)
     core.files.__read_at_os(source, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
 }
 
-write_at: fn(path: String | Path, offset: Int, bytes: [U8]) -[FS.Write]> IOError! {
+write_at: fn(path: Path | String, offset: Int, bytes: [U8]) -[FS.Write]> IOError! {
     target: path_text(path)
     file_writer_refusal(target)
     file_fault("FS.Write", .Write, target)
     core.files.__write_at_os(target, if offset < 0 -> 0 else -> offset, bytes)
 }
 
-fsync: fn(path: String | Path) -[FS.Write]> IOError! {
+fsync: fn(path: Path | String) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__fsync_raw(text)
@@ -1121,14 +1121,14 @@ fsync: fn(path: String | Path) -[FS.Write]> IOError! {
 /// Flush every dirty file and directory on the filesystem holding `path` in
 /// one `syncfs`. Write a whole tree, sync once, then publish it with a rename
 /// instead of syncing file by file.
-sync_filesystem: fn(path: String | Path) -[FS.Write]> IOError! {
+sync_filesystem: fn(path: Path | String) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Flush, text)
     core.files.__syncfs_raw(text)
 }
 
 /// The room on the file system holding `path` (statvfs).
-space: fn(path: String | Path) -[FS.Read]> DiskSpace IOError! {
+space: fn(path: Path | String) -[FS.Read]> DiskSpace IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     row: core.files.__space(text)
@@ -1140,20 +1140,20 @@ space: fn(path: String | Path) -[FS.Read]> DiskSpace IOError! {
 /// path, or one that cannot be checked, is false, never an error. The answer
 /// can change before the next call, so a program that must read the file
 /// opens it and handles that error instead.
-can_read: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 4) }
+can_read: fn(path: Path | String) -[FS.Read]> Bool Never! { access_check(path, 4) }
 
 /// Whether this program may write `path` now; `can_read` explains the check.
-can_write: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 2) }
+can_write: fn(path: Path | String) -[FS.Read]> Bool Never! { access_check(path, 2) }
 
 /// Whether this program may execute `path` now (search it, for a directory);
 /// `can_read` explains the check.
-can_execute: fn(path: String | Path) -[FS.Read]> Bool Never! { access_check(path, 1) }
+can_execute: fn(path: Path | String) -[FS.Read]> Bool Never! { access_check(path, 1) }
 
 // The access check and advice numbers behind can_read, advise and
 // map.advise: not part of the files surface.
 priv access_codes: module {
     // faccessat's mode bits: R_OK 4, W_OK 2, X_OK 1.
-    access_check: fn(path: String | Path, mode: Int) -> Bool Never! {
+    access_check: fn(path: Path | String, mode: Int) -> Bool Never! {
         if read_probe_fault() -> return false
         if core.files.__access_raw(path_text(path), mode) == {
             .Ok(_) -> true
@@ -1191,12 +1191,12 @@ exists_impl: fn(path: String) -> Bool Never! {
 /// Whether something exists at `path`. A final symbolic link is followed, so a
 /// broken link is false (`lexists` sees the link itself), and a path that
 /// cannot be inspected is false too, never an error.
-exists: fn(path: String | Path) -[FS]> Bool Never! {
+exists: fn(path: Path | String) -[FS]> Bool Never! {
     if read_probe_fault() -> return false
     exists_impl(path_text(path))
 }
 
-is_dir: fn(path: String | Path) -[FS.Read]> Bool Never! {
+is_dir: fn(path: Path | String) -[FS.Read]> Bool Never! {
     if read_probe_fault() -> return false
     text: path_text(path)
     core.files.__metadata_directory(text) ?? false
@@ -1205,7 +1205,7 @@ is_dir: fn(path: String | Path) -[FS.Read]> Bool Never! {
 /// Describe `path`. By default a final symbolic link is described itself;
 /// `links: .Follow` describes what it points to, and `links: .Refuse`
 /// reports `IOError.InvalidInput` when the path ends in a link.
-stat: fn(path: String | Path, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError! {
+stat: fn(path: Path | String, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError! {
     text: path_text(path)
     file_fault("FS.Read", .Read, text)
     follow: links == .Val(.Follow)
@@ -1217,9 +1217,9 @@ stat: fn(path: String | Path, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError
 }
 
 /// The same description as `stat`; neither follows a final link.
-lstat: fn(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
+lstat: fn(path: Path | String) -[FS.Read]> Stat IOError! { stat(path) }
 
-set_mode: fn(path: String | Path, mode: Int) -[FS.Write]> IOError! {
+set_mode: fn(path: Path | String, mode: Int) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     if rt.os_family() == "unix" {
@@ -1232,7 +1232,7 @@ set_mode: fn(path: String | Path, mode: Int) -[FS.Write]> IOError! {
     core.files.__set_mode_raw(text, mode)
 }
 
-chown: fn(path: String | Path, owner: Int, group: Int) -[FS.Write]> IOError! {
+chown: fn(path: Path | String, owner: Int, group: Int) -[FS.Write]> IOError! {
     text: path_text(path)
     if rt.os_family() != "unix" {
         return Err(files8_other(.Write, None, "chown is unavailable on this platform"))
@@ -1251,7 +1251,7 @@ chown: fn(path: String | Path, owner: Int, group: Int) -[FS.Write]> IOError! {
     core.files.__chown_raw(text, owner, group)
 }
 
-is_fifo: fn(path: String | Path) -[FS.Read]> Bool IOError! {
+is_fifo: fn(path: Path | String) -[FS.Read]> Bool IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode: core.files.__stat_mode_raw(text)
@@ -1451,7 +1451,7 @@ resolve: fn(path: String) -[FS, Env]> String IOError! {
     Ok(if whole != "/" && whole.ends_with("/") -> whole.removesuffix("/") else -> whole)
 }
 
-absolute: fn(path: String | Path) -[FS, Env]> String IOError! {
+absolute: fn(path: Path | String) -[FS, Env]> String IOError! {
     text: path_text(path)
     if __host_path_is_absolute(text.copy()) -> return Ok(text)
     cwd: sys.current_dir()
@@ -1486,7 +1486,7 @@ mktemp: fn(prefix: String) -[FS, Env, Time]> String Never! {
 /// resolved; every part must exist. `missing_last: true` lets the last part
 /// be missing, as `readlink -f` does: its parent is resolved and the last
 /// name joined to it.
-canonicalize: fn(path: String | Path, missing_last: Bool{false}) -[FS.Read]> String IOError! {
+canonicalize: fn(path: Path | String, missing_last: Bool{false}) -[FS.Read]> String IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     whole: core.files.__canonicalize_raw(text) ?? {
@@ -1502,7 +1502,7 @@ canonicalize: fn(path: String | Path, missing_last: Bool{false}) -[FS.Read]> Str
 /// The entries of directory `path` in name order. With `matching`, only those
 /// whose name matches that shell pattern, where `*` is any run of bytes and
 /// `?` is one byte: `files.list_dir(dir, matching: "*.files")` is `dir/*.files`.
-list_dir: fn(path: String | Path, matching: String?{None}) -[FS.Read]> [DirEntry] IOError! {
+list_dir: fn(path: Path | String, matching: String?{None}) -[FS.Read]> [DirEntry] IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     entries: core.files.__list_dir_raw(text)
@@ -1517,7 +1517,7 @@ list_dir: fn(path: String | Path, matching: String?{None}) -[FS.Read]> [DirEntry
 /// The entries of directory `path` as `list_dir` gives them, or `fallback`
 /// when it cannot be listed: `files.list_dir_or(dir, [])` is a script's
 /// `ls dir 2>/dev/null`, its fallback stated in the call.
-list_dir_or: fn(path: String | Path, fallback: [DirEntry], matching: String?{None}) -[FS.Read]> [DirEntry] Never! {
+list_dir_or: fn(path: Path | String, fallback: [DirEntry], matching: String?{None}) -[FS.Read]> [DirEntry] Never! {
     list_dir(path, matching: matching) ?? fallback
 }
 
@@ -1544,32 +1544,32 @@ dirname_impl: fn(path: String) -> String Never! {
 dirname: fn(path: String) -> String Never! { dirname_impl(path) }
 
 /// Create `path` and any missing parents; an existing directory is success.
-create_dir_all: fn(path: String | Path) -[FS.Write]> IOError! {
+create_dir_all: fn(path: Path | String) -[FS.Write]> IOError! {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__create_dirs_os(target)
 }
 
-remove: fn(path: String | Path) -[FS.Write]> IOError! {
+remove: fn(path: Path | String) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_raw(text)
 }
 
-remove_dir: fn(path: String | Path) -[FS.Write]> IOError! {
+remove_dir: fn(path: Path | String) -[FS.Write]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     core.files.__remove_dir_raw(text)
 }
 
-remove_all: fn(path: String | Path) -[FS]> IOError! {
+remove_all: fn(path: Path | String) -[FS]> IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     directory: core.files.__metadata_directory(text) ?? false
     core.files.__remove_all_raw(text, directory)
 }
 
-copy: fn(from: String | Path, to: String | Path) -[FS]> IOError! {
+copy: fn(from: Path | String, to: Path | String) -[FS]> IOError! {
     source: path_text(from)
     target: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1584,7 +1584,7 @@ copy_file_impl: fn(from: String, to: String) -[FS]> IOError! {
     write_bytes(to.copy(), bytes)
 }
 
-copy_dir: fn(from: String | Path, to: String | Path) -[FS]> IOError! {
+copy_dir: fn(from: Path | String, to: Path | String) -[FS]> IOError! {
     source: path_text(from)
     destination: path_text(to)
     files8_preflight("FS.Read", .Read, source)
@@ -1628,7 +1628,7 @@ entries_copy_tree: fn(context: Int, directory: Int, resource: String) -[FS]> IOE
 /// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
 /// and `.Swap` exchanges the two names in one step (both must exist).
 /// Follow with `fsync(dirname(to))` to make the rename durable.
-rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
+rename: fn(from: Path | String, to: Path | String, if_exists: RenameIfExists{.Replace}) -[FS.Write]> IOError! {
     core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
 }
 
@@ -1638,7 +1638,7 @@ rename: fn(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Re
 /// `canonicalize` results instead. `replace: true` first removes a link or
 /// file already at `link`, so a link to a directory is replaced, not
 /// followed, as `ln -sfn` does; a real directory there is an error.
-symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) -[FS.Write]> IOError! {
+symlink: fn(original: Path | String, link: Path | String, replace: Bool{false}) -[FS.Write]> IOError! {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
@@ -1665,33 +1665,33 @@ symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) 
 BestEffort: struct {
     failures: [IOError],
 
-    copy_file: fn(&self, from: String | Path, to: String | Path) -[FS]> Never! {
+    copy_file: fn(&self, from: Path | String, to: Path | String) -[FS]> Never! {
         if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
     }
 
-    copy_dir: fn(&self, from: String | Path, to: String | Path) -[FS]> Never! {
+    copy_dir: fn(&self, from: Path | String, to: Path | String) -[FS]> Never! {
         if core.files.copy_dir(from, to) == .Err(failure) -> self.failures.push(failure)
     }
 
     /// `rm -f`: a path that is already gone is no failure.
-    remove: fn(&self, path: String | Path) -[FS.Write]> Never! {
+    remove: fn(&self, path: Path | String) -[FS.Write]> Never! {
         if core.files.remove(path) == .Err(failure) && !(failure == .NotFound(_)) {
             self.failures.push(failure)
         }
     }
 
     /// `rm -rf`: a path that is already gone is no failure.
-    remove_all: fn(&self, path: String | Path) -[FS]> Never! {
+    remove_all: fn(&self, path: Path | String) -[FS]> Never! {
         if core.files.remove_all(path) == .Err(failure) && !(failure == .NotFound(_)) {
             self.failures.push(failure)
         }
     }
 
-    create_dir_all: fn(&self, path: String | Path) -[FS.Write]> Never! {
+    create_dir_all: fn(&self, path: Path | String) -[FS.Write]> Never! {
         if core.files.create_dir_all(path) == .Err(failure) -> self.failures.push(failure)
     }
 
-    symlink: fn(&self, original: String | Path, link: String | Path, replace: Bool{false}) -[FS.Write]> Never! {
+    symlink: fn(&self, original: Path | String, link: Path | String, replace: Bool{false}) -[FS.Write]> Never! {
         if core.files.symlink(original, link, replace: replace) == .Err(failure) {
             self.failures.push(failure)
         }
@@ -1699,7 +1699,7 @@ BestEffort: struct {
 
     /// The resolved path, or `path` itself when it cannot be resolved (as
     /// `readlink -f path || echo path`), the failure recorded.
-    canonicalize: fn(&self, path: String | Path, missing_last: Bool{false}) -[FS.Read]> String Never! {
+    canonicalize: fn(&self, path: Path | String, missing_last: Bool{false}) -[FS.Read]> String Never! {
         core.files.canonicalize(path, missing_last: missing_last) ?? {
             self.failures.push(err)
             path_text(path)
@@ -1720,21 +1720,21 @@ BestEffort: struct {
 /// A new, empty best-effort record: `done := files.best_effort()`.
 best_effort: fn() -> BestEffort Never! { {failures: [IOError]{}} }
 
-hard_link: fn(original: String | Path, link: String | Path) -[FS.Write]> IOError! {
+hard_link: fn(original: Path | String, link: Path | String) -[FS.Write]> IOError! {
     source: path_text(original)
     target: path_text(link)
     files8_preflight("FS.Write", .Write, target)
     core.files.__hard_link_raw(source, target)
 }
 
-is_socket: fn(path: String | Path) -[FS.Read]> Bool IOError! {
+is_socket: fn(path: Path | String) -[FS.Read]> Bool IOError! {
     text: path_text(path)
     files8_preflight("FS.Read", .Read, text)
     mode: core.files.__stat_mode_raw(text)
     Ok((mode & 61440) == 49152)
 }
 
-read_link: fn(path: String | Path) -[FS.Read]> String IOError! {
+read_link: fn(path: Path | String) -[FS.Read]> String IOError! {
     source: path_text(path)
     file_fault("FS.Read", .Read, source)
     core.files.__read_link_os(source)
@@ -2131,11 +2131,11 @@ priv walk_finish: fn(cursor: &WalkCursor) -[FS]> {
 /// order (see `Walk`); the call keeps the FS authority every walk needs. An
 /// entry whose name is in `skip` is neither yielded nor entered, as
 /// `find root -name NAME -prune` leaves it out.
-walk: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+walk: fn(root: Path | String, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
     Walk{root: path_text(root), ignore: ignore, files_only: false, skip: skip}
 }
 
-walk_files: fn(root: String | Path, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
+walk_files: fn(root: Path | String, ignore: String?{None}, skip: [String]{[String]{}}) -[FS]> Walk {
     Walk{root: path_text(root), ignore: ignore, files_only: true, skip: skip}
 }
 
@@ -2206,7 +2206,7 @@ entries_glob_tree: fn(context: Int, directory: Int, resource: String, output: &[
     Ok()
 }
 
-glob: fn(pattern: String | Path) -[FS]> [String] IOError! {
+glob: fn(pattern: Path | String) -[FS]> [String] IOError! {
     resource: path_text(pattern)
     files8_preflight("FS.Read", .Read, resource)
     separator: if rt.os_family() == "windows" -> U8{92} else -> U8{47}
@@ -2254,7 +2254,7 @@ temp_file: fn(prefix: String) -[FS]> TempFile IOError! {
 /// lock file is created owner-only; a final symbolic link is refused. Closing
 /// the returned owner releases the lock but never removes the lock file.
 /// `timeout` bounds acquisition; omitting it waits without limit.
-lock: fn(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOError! {
+lock: fn(path: Path | String, timeout: Duration?{None}) -[FS, Env]> FileLock IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)
@@ -2276,7 +2276,7 @@ lock: fn(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOE
 
 /// Return None only when another owner holds the exclusive system lock.
 /// Missing paths are created as with `lock`; other failures remain errors.
-try_lock: fn(path: String | Path) -[FS, Env]> FileLock? IOError! {
+try_lock: fn(path: Path | String) -[FS, Env]> FileLock? IOError! {
     text: path_text(path)
     files8_preflight("FS.Write", .Write, text)
     lock_path(text)

@@ -53,7 +53,7 @@ fetch: fn(addr: String, path: String, name: String, value: String) HTTPError! {
     print(head.replace(addr, "HOST"))
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     auth.register_user("ann", "ann's password hash") ?? panic("ann registers")
     session: auth.password_login("ann", "ann's password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("ann signs in")
     _: app.new("Crew")
