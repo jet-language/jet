@@ -22,7 +22,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LANGUAGE_SOURCE_DIRS, LOSS_OWNER_CATEGORY_BY_METRIC } from "./run.mjs";
+import { LANGUAGE_SOURCE_DIRS, LOSS_OWNER_CATEGORY_BY_METRIC, loadEntries } from "./run.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const MINIMUM_PROGRAMS = 30;
@@ -33,14 +33,18 @@ const SCRIPTBENCH_METRICS = Object.freeze({ wall: "runtime_wall_seconds", rss: M
 
 // The corpus under `repo`: one row per program with its matched peers, the
 // directory holding each peer's twin (run.mjs's: LuaJIT runs the Lua twin),
-// and its loss owners.
+// and its loss owners. A corpus entry is named by its entry.json name and
+// found in whichever entry folder declares it.
 async function loadCorpus(repo = repoDir) {
   const manifest = JSON.parse(await fs.readFile(path.join(repo, "Tools/Gauntlet/measurement-manifest.json"), "utf8"));
   const bench = JSON.parse(await fs.readFile(path.join(repo, "Tools/Perf/Scriptbench/manifest.json"), "utf8"));
+  const { loaded, tools } = await loadEntries(path.join(repo, "Tools/Gauntlet/Entries"), null);
+  const entries = new Map([...loaded, ...tools].map((item) => [item.entry.name, item]));
   const programs = [];
   for (const name of manifest.corpus?.entry_names ?? []) {
-    const dir = path.join(repo, "Tools/Gauntlet/Entries", name);
-    const entry = JSON.parse(await fs.readFile(path.join(dir, "entry.json"), "utf8"));
+    const found = entries.get(name);
+    if (!found) throw new Error(`the coverage corpus names no entry: ${name}`);
+    const { dir, entry } = found;
     const peers = (entry.languages ?? []).filter((language) => language !== "jet" && language !== "jet-expert" && !entry.non_applicable?.[language]);
     programs.push({
       source: "gauntlet",

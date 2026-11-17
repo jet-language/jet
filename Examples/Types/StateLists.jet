@@ -49,7 +49,7 @@ Order: struct {
 // Parameters name a state, a set, or a group.
 receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }
 
-edit: fn(order: Order.Draft | Order.Confirmed) -> String { "edit {order.id}" }
+edit: fn(order: Order.Confirmed | Order.Draft) -> String { "edit {order.id}" }
 
 remind: fn(order: Order.Open) -> String { "order {order.id} is open" }
 
@@ -70,7 +70,7 @@ Door: enum {
     lock: fn(self: Door.Shut, code: Int) -> Door.Locked { .Locked(code: code) }
 
     // Staying in `Locked` is not a move, so only `Locked -> Shut` is checked.
-    unlock: fn(self: Door.Locked, key: Int) -> Door.Shut | Door.Locked {
+    unlock: fn(self: Door.Locked, key: Int) -> Door.Locked | Door.Shut {
         if self == {
             .Locked(code) -> {
                 if code == key -> return .Shut

@@ -78,7 +78,7 @@ Board: struct {
 // How many runs recorded what they read.
 seen_count: fn(seen: Shared<[String]>) -> Int { seen.guard_read().value.len() }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     store: db.open_memory()
     _: plain_notes(store).put(Note{name: "welcome", text: "hello crew"}) ?? panic("the note writes")
     print("no one read: {read_welcome(store)}")

@@ -119,14 +119,26 @@ shown: fn(value: Dyn) -> String {
 // A language without its `-expert` suffix.
 base_language: fn(language: String) -> String { language.removesuffix("-expert") }
 
-// The entry directory holding a language's program (the twin of run.mjs's
-// LANGUAGE_SOURCE_DIRS): LuaJIT runs the Lua program, Bun the Node program
-// and Vite bundles the web (js) program; every other language has its own.
+// The entry folder holding a language's program (the twin of run.mjs's
+// LANGUAGE_SOURCE_DIRS). Folders are TitleCase; LuaJIT runs the Lua program,
+// Bun the Node program and Vite bundles the web (JS) program.
 language_source_dir: fn(language: String) -> String {
-    if base_language(language) == {
-        "luajit" -> "lua"
-        "bun" -> "node"
-        "vite" -> "js"
+    if language == {
+        "jet" -> "Jet"
+        "jet-expert" -> "JetExpert"
+        "rust" -> "Rust"
+        "rust-expert" -> "RustExpert"
+        "c" -> "C"
+        "c-expert" -> "CExpert"
+        "zig" -> "Zig"
+        "go" -> "Go"
+        "python" -> "Python"
+        "node" -> "Node"
+        "bun" -> "Node"
+        "lua" -> "Lua"
+        "luajit" -> "Lua"
+        "js" -> "JS"
+        "vite" -> "JS"
         else -> language.copy()
     }
 }
@@ -260,7 +272,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
 // What is wrong with the machine-ceiling references (an asm-parity
 // cells.json, read): each needs a unique name, the matrix cells it bounds in
 // `gauntlet` ([] for a microbenchmark that bounds none) and its hand-written
-// reference beside the cells.json in `repo`.
+// reference in its `dir` beside the cells.json in `repo`.
 ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> [String] {
     if !(references == .Array(_)) {
         return ["{CEILING_REFERENCES}: machine-ceiling references are missing"]
@@ -288,7 +300,8 @@ ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> 
                 issues.push("{name}: machine-ceiling reference names unknown matrix cell {shown(cell)}")
             }
         }
-        if !files.exists(files.join(files.join(reference_dir, name), CEILING_REFERENCE_SOURCE)) {
+        dir: text_at(reference, "dir") ?? ""
+        if dir == "" || !files.exists(files.join(files.join(reference_dir, dir), CEILING_REFERENCE_SOURCE)) {
             issues.push("{name}: machine-ceiling reference has no {CEILING_REFERENCE_SOURCE}")
         }
     }
@@ -413,8 +426,8 @@ ratio_verdict: fn(ratio: Float?) -> String? {
     assert_eq(ratio_verdict(None), None)
 }
 
-#Test("LuaJIT, Bun and Vite run another language's program; every other language has its own directory") {
-    assert_eq(["luajit", "bun", "vite", "lua", "rust-expert"].map(fn(language) { language_source_dir(language) }), ["lua", "node", "js", "lua", "rust-expert"])
+#Test("LuaJIT, Bun and Vite run another language's program; every other language has its own folder") {
+    assert_eq(["luajit", "bun", "vite", "lua", "rust-expert"].map(fn(language) { language_source_dir(language) }), ["Lua", "Node", "JS", "Lua", "RustExpert"])
 }
 
 #Test("a cell's peers are the rails and its incumbent, and the run rail joins a cell with a run tier") {

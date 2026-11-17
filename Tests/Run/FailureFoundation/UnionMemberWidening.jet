@@ -41,31 +41,31 @@ lookup: fn(name: String) -> String LookupError! {
 }
 
 // Implicit propagation: `lookup` fails with one member of the union.
-implicit: fn(name: String) -> Int (ParseError | LookupError)! {
+implicit: fn(name: String) -> Int (LookupError | ParseError)! {
     raw: lookup(name)
     parse(raw)
 }
 
 // Tail value: the member error is the function's last expression.
-tail: fn(flag: Bool) -> Int (ParseError | LookupError)! {
+tail: fn(flag: Bool) -> Int (LookupError | ParseError)! {
     if flag -> return Ok(1)
     Err(LookupError.Missing("tail"))
 }
 
 // Explicit `return Err(member)`.
-explicit: fn(flag: Bool) -> Int (ParseError | LookupError)! {
+explicit: fn(flag: Bool) -> Int (LookupError | ParseError)! {
     if flag -> return Err(ParseError.Bad("explicit"))
     Ok(2)
 }
 
 // A `?("note")` hop from a member, then a union-to-union hop.
-hop: fn(name: String) -> Int (ParseError | LookupError)! {
+hop: fn(name: String) -> Int (LookupError | ParseError)! {
     raw: lookup(name)?("hop lookup")
     n: implicit(raw)
     Ok(n)
 }
 
-describe: fn(result: Int (ParseError | LookupError)!) -> String {
+describe: fn(result: Int (LookupError | ParseError)!) -> String {
     if result == {
         .Ok(n) -> "ok {n}"
         .Err(.ParseError(.Bad(why))) -> "parse: {why}"

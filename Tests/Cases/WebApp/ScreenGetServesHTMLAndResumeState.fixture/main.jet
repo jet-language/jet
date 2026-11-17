@@ -31,7 +31,7 @@ fetch: fn(addr: String, path: String, whole: Bool) HTTPError! {
     if whole -> print(answer.text())
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     _: app.new("Crew").screen("/boards/:project", board).screen("/inbox/:box", inbox, signed_in: true)
     served: web.app()
     listener: net.tcp_listen("127.0.0.1:0")

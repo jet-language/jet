@@ -2,14 +2,19 @@
 # every build. `link: tools.relink` names the hook `#On(build.link)` marks;
 # `jet build` writes the compiler's object files and libraries under
 # `.jet/build/link/<name>/`, calls the hook on their paths, and runs the
-# `BuildAction` it returns in the build sandbox. Here the step writes, in
-# place of a linked image, a script naming the program object it read, and
-# a second build runs it again after the executable is gone.
+# `BuildAction` it returns in the build sandbox, which shows the step no
+# program of the host's but the one it runs. Here the step writes, in place
+# of a linked image, a script naming the program object it read, made
+# runnable by the `chmod` the package keeps in `bin/` as an input, and a
+# second build runs it again after the executable is gone.
 fixture: CustomLinkStep.fixture
 requires: tool:sh
 requires: tool:bwrap
+requires: tool:chmod
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
+step: sh -c 'mkdir -p bin && cp "$(readlink -f "$(command -v chmod)")" bin/chmod'
+exit: 0
 step: jet build --link=tools.relink --allow=Exec,FS app.jet
 exit: 0
 file: .jet/build/link/app/app.o exists # the program object is a link input

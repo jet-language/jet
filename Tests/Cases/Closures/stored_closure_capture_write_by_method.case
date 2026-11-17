@@ -1,0 +1,28 @@
+# A lambda that writes a captured `:=` local through a `&self` method call
+# never loses the write. Called only where it is bound, it borrows the local
+# and the write lands on it; stored (in a struct field or a list), it writes
+# its own copy, which each of its calls sees; stored over a write parameter,
+# it writes the caller's value. Using the local after a stored lambda took
+# its copy is refused, since that use would never see the lambda's writes.
+fixture: StoredClosureCaptureWriteByMethod.fixture
+env: NO_COLOR=1
+step check: jet check accepted.jet
+exit: 0
+step o0: jet run -O0 accepted.jet
+exit: 0
+stdout: = "10\n10\n110\n10\n"
+step o1: jet run -O1 accepted.jet
+exit: 0
+stdout: = "10\n10\n110\n10\n"
+step o2: jet run -O2 accepted.jet
+exit: 0
+stdout: = "10\n10\n110\n10\n"
+step refused: jet check refused.jet
+exit: 1
+stderr: ~ "jet.UseWhileWriteActive" # the later use is refused (E0204)
+stderr: ~ "refused.jet:15:11" # at the read of `tally` the field lambda changes
+stderr: ~ "refused.jet:22:11" # at the read of `kept` the list lambda changes
+stderr: ~ "is changed by a stored lambda that holds its own copy" # naming why
+step refused_run: jet run -O0 refused.jet
+exit: 1
+stderr: ~ "jet.UseWhileWriteActive" # the run stops at the same check

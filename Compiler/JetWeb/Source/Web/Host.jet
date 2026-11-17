@@ -450,6 +450,8 @@ class Host {
     this.lines = ["", "", ""];
     this.outcome = null;
     this.dom = false;
+    // The scene's open context menu (openMenu), null for none.
+    this.menu = null;
     crypto.getRandomValues(new Uint8Array(this.memory.buffer, AUX_RANDOM, 16));
   }
 
@@ -574,7 +576,9 @@ class Host {
   // the children of `#jet-app`: a button for a Button, an input for a
   // TextInput, a span for a Text and a div for any other leaf, each placed
   // at its frame. An element with a click slot runs its handler on click; one
-  // with a drop slot accepts drops and runs its handler on each dropped item.
+  // with a drop slot accepts drops and runs its handler on each dropped item;
+  // one with context menu entries opens them (openMenu) on contextmenu in
+  // place of the browser's own menu.
   paintScene() {
     if (!this.dom || this.rt.jet_ui_web_scene_take() === 0n) return;
     const doc = globalThis.document;
@@ -589,16 +593,30 @@ class Host {
     const at = Number(this.rt.jet_ui_web_scene_data());
     const bytes = this.u8().slice(at, at + Number(this.rt.jet_ui_web_scene_length()));
     let offset = 0;
-    while (offset < bytes.length) {
-      const fields = [];
-      while (fields.length < 9) {
+    // The next `count` tab-ended fields, then a label of `length` bytes and
+    // its newline.
+    const fields = (count) => {
+      const taken = [];
+      while (taken.length < count) {
         const end = bytes.indexOf(9, offset);
-        fields.push(decoder.decode(bytes.subarray(offset, end)));
+        taken.push(decoder.decode(bytes.subarray(offset, end)));
         offset = end + 1;
       }
-      const [kind, slot, dropSlot, x, y, width, height, color, length] = fields;
-      const label = decoder.decode(bytes.subarray(offset, offset + Number(length)));
+      return taken;
+    };
+    const label = (length) => {
+      const text = decoder.decode(bytes.subarray(offset, offset + Number(length)));
       offset += Number(length) + 1;
+      return text;
+    };
+    while (offset < bytes.length) {
+      const [kind, slot, dropSlot, entries, x, y, width, height, color, length] = fields(10);
+      const text = label(length);
+      const menu = [];
+      for (let index = 0; index < Number(entries); index += 1) {
+        const [entryKind, entrySlot, entryLength] = fields(3);
+        menu.push({ kind: entryKind, slot: Number(entrySlot), label: label(entryLength) });
+      }
       const tag = kind === "3" ? "button" : kind === "4" ? "input" : kind === "1" ? "span" : "div";
       const element = doc.createElement(tag);
       element.style.position = "absolute";
@@ -607,8 +625,8 @@ class Host {
       element.style.width = width + "px";
       element.style.height = height + "px";
       if (color !== "" && tag !== "span") element.style.background = color;
-      if (tag === "input") element.value = label;
-      else element.textContent = label;
+      if (tag === "input") element.value = text;
+      else element.textContent = text;
       const id = Number(slot);
       if (id !== 0) element.addEventListener("click", () => this.click(id));
       const dropId = Number(dropSlot);
@@ -619,8 +637,81 @@ class Host {
           this.drop(dropId, event.dataTransfer);
         });
       }
+      if (menu.length > 0) {
+        element.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          this.openMenu(menu, event.clientX, event.clientY);
+        });
+      }
       root.appendChild(element);
     }
+  }
+
+  // Opens a scene element's context menu (`app.context_menu`) at the
+  // viewport point (x, y), over the page, closing any open one: a menu item
+  // button for an entry the person chooses (kind 3), a disabled one for an
+  // entry that can't be chosen (kind 1) and a separator for any other.
+  // Choosing an entry closes the menu and runs its handler as a click on a
+  // scene element does; a click elsewhere or Escape closes it, and that
+  // click or key reaches nothing else.
+  openMenu(menu, x, y) {
+    this.closeMenu();
+    const doc = globalThis.document;
+    const box = doc.createElement("div");
+    box.setAttribute("role", "menu");
+    box.style.position = "fixed";
+    box.style.left = x + "px";
+    box.style.top = y + "px";
+    box.style.background = "#f5f5f5";
+    box.style.border = "1px solid #c8c8c8";
+    box.style.zIndex = "2147483647";
+    for (const entry of menu) {
+      if (entry.kind !== "3" && entry.kind !== "1") {
+        const line = doc.createElement("hr");
+        line.setAttribute("role", "separator");
+        box.appendChild(line);
+        continue;
+      }
+      const item = doc.createElement("button");
+      item.setAttribute("role", "menuitem");
+      item.style.display = "block";
+      item.style.width = "100%";
+      item.style.textAlign = "left";
+      item.textContent = entry.label;
+      if (entry.kind === "3" && entry.slot !== 0) {
+        item.addEventListener("click", () => {
+          this.closeMenu();
+          this.click(entry.slot);
+        });
+      } else item.disabled = true;
+      box.appendChild(item);
+    }
+    const away = (event) => {
+      if (box.contains(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeMenu();
+    };
+    const escape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeMenu();
+    };
+    doc.addEventListener("click", away, true);
+    doc.addEventListener("keydown", escape, true);
+    doc.body.appendChild(box);
+    this.menu = { box, away, escape };
+  }
+
+  // Closes the open context menu (openMenu), if there is one.
+  closeMenu() {
+    if (this.menu === null) return;
+    const doc = globalThis.document;
+    doc.removeEventListener("click", this.menu.away, true);
+    doc.removeEventListener("keydown", this.menu.escape, true);
+    this.menu.box.remove();
+    this.menu = null;
   }
 
   // A click on a scene element after the program's run returned 0: runs the

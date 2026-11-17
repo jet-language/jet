@@ -110,7 +110,7 @@ deliver_payment: fn(addr: String, key: String, id: String) -> String HTTPError! 
 // The status of an answer `post` gave.
 status: fn(answer: String) -> String { answer.split(" ").to_list()[0] }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     secret: "It's a Secret to Everybody"
     store: db.open_memory()
     served: web.app().mount(Hooks{store: store.copy(), secret: secret})

@@ -81,15 +81,15 @@ new: fn() -> WebRouter Never! {
     WebRouter{routes: [WebRoute]{}, current: "/", status: WebNavigationStatus.Idle, cache: [String]{}, cache_status: [WebRouterCacheStatus]{}}
 }
 
-route: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String E!) -> WebRouter (WebRouterError | E)! {
+route: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String E!) -> WebRouter (E | WebRouterError)! {
     add_route(router, pattern, fields, search, WebRouterSearchCodec.Query, handler, false)
 }
 
-route_with_search_codec: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String E!) -> WebRouter (WebRouterError | E)! {
+route_with_search_codec: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String E!) -> WebRouter (E | WebRouterError)! {
     add_route(router, pattern, fields, search, codec, handler, false)
 }
 
-not_found: fn<E>(router: WebRouter, handler: fn(String) -> String E!) -> WebRouter (WebRouterError | E)! {
+not_found: fn<E>(router: WebRouter, handler: fn(String) -> String E!) -> WebRouter (E | WebRouterError)! {
     loop existing in router.routes {
         if existing.pattern == "*" -> return Err(WebRouterError.Invalid)
     }
@@ -193,7 +193,7 @@ cache_state: fn(router: WebRouter, path: String) -> WebRouterCacheStatus Never! 
     router.cache_status[idx]
 }
 
-add_route: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String E!, fallback: Bool) -> WebRouter (WebRouterError | E)! {
+add_route: fn<E>(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String E!, fallback: Bool) -> WebRouter (E | WebRouterError)! {
     if pattern.len() == 0 || pattern.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(pattern) ?? false) {
         return Err(WebRouterError.Invalid)
     }

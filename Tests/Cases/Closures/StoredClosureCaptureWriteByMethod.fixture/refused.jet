@@ -1,0 +1,23 @@
+Score: struct {
+    count: Int,
+
+    bump: fn(&self) { self.count += 1 }
+}
+
+Stash: struct {
+    action: fn() -[]>,
+}
+
+run: fn() {
+    tally := Score{count: 0}
+    h: Stash{action: fn() { tally.bump() }}
+    loop _ in 0..<10 -> h.action()
+    print(tally.count)
+    kept := Score{count: 0}
+    list: [fn() -[]>]{fn() { kept.bump() }}
+    loop _ in 0..<10 {
+        act: list[0]
+        act()
+    }
+    print(kept.count)
+}

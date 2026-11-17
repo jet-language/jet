@@ -1,0 +1,63 @@
+// A lambda's `&self` method write lands where the lambda can reach it: one
+// only called where it is bound borrows the local and writes it; a stored
+// one (in a struct field or a list) writes its own copy, which each call
+// sees; and a stored one over a write parameter writes the caller's value.
+Counter: struct {
+    count: Int,
+
+    bump: fn(&self) { self.count += 1 }
+}
+
+Holder: struct {
+    action: fn() -[]> Int,
+}
+
+tallied: fn() -> Holder {
+    tally := Counter{count: 0}
+    Holder{
+        action: fn() {
+            tally.bump()
+            tally.count
+        },
+    }
+}
+
+tallies: fn() -> [fn() -[]> Int] {
+    tally := Counter{count: 100}
+    [fn() -[]> Int]{
+        fn() {
+            tally.bump()
+            tally.count
+        },
+    }
+}
+
+record: fn(tally: &Counter) {
+    h: Holder{
+        action: fn() {
+            tally.bump()
+            tally.count
+        },
+    }
+    loop _ in 0..<10 -> _ := h.action()
+}
+
+run: fn() {
+    tally := Counter{count: 0}
+    bump_it: fn() { tally.bump() }
+    loop _ in 0..<10 -> bump_it()
+    print(tally.count)
+    h: tallied()
+    last := 0
+    loop _ in 0..<10 -> last = h.action()
+    print(last)
+    list: tallies()
+    loop _ in 0..<10 {
+        act: list[0]
+        last = act()
+    }
+    print(last)
+    other := Counter{count: 0}
+    record(other)
+    print(other.count)
+}

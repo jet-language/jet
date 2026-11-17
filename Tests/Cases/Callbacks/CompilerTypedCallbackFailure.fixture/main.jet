@@ -37,17 +37,17 @@ doubled: fn(value: Int) -> Int KeyError! {
     Ok(value * 2)
 }
 
-routes: fn(pattern: String) -> Int (WebRouterError | KeyError)! {
+routes: fn(pattern: String) -> Int (KeyError | WebRouterError)! {
     routed: router.route(router.new(), pattern, [], [], page)
     routed.routes.len()
 }
 
-replays: fn(key: String) -> Int (WebQueryError | KeyError)! {
+replays: fn(key: String) -> Int (KeyError | WebQueryError)! {
     created := query.new(key, query.WebQuerySeed{data: "data", generation: 1, subscribers: 0})
     query.retry(created, replay)
 }
 
-validates: fn(value: String) -> String (WebFormError | KeyError)! {
+validates: fn(value: String) -> String (KeyError | WebFormError)! {
     field: WebFormFieldSpec{
         name: "name",
         value_type: .String,
@@ -65,7 +65,7 @@ validates: fn(value: String) -> String (WebFormError | KeyError)! {
     forms.typed_validation_render(chain)
 }
 
-updates: fn(key: String) -> Int (WebTableError | KeyError)! {
+updates: fn(key: String) -> Int (KeyError | WebTableError)! {
     rows := table.new("Rows", [Int]{0, 1, 2})
     table.update_row(rows, key, doubled)
     table.remove_row(rows, key)

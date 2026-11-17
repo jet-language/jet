@@ -614,14 +614,17 @@ ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     out
 }
 
-// `tree.decode<A | B>()`: the first member, in written order, whose own
-// decode succeeds, boxed as that member's variant; the last member's errors
-// when none does.
+// `tree.decode<A | B>()`: the first member, in the union's member order,
+// whose own decode succeeds, boxed as that member's variant; the last
+// member's errors when none does. Those errors move into the union's Result
+// as they are: its Ok side never runs, and a distinct member's success row
+// (its base's) names no variant to rebox into.
 ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
     err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
         return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(union_ty)} as {ir_type_name(ty)}")
     }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
     if members.len() == 0 {
         return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(union_ty)} without members")
     }
@@ -661,7 +664,12 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         ir_else(b.f, b.line)
         b.fresh[attempt] = attempt_fresh
         if index + 1 == members.len() {
-            failed: ir_result_rebox(m, p, b, attempt, result_row, span)
+            errors: ir_box_take(m, p, b, attempt, 8, err_row)
+            failed: ir_result_box(m, p, b, ty, false, errors)
+            if ir_failed(b) {
+                ir_scope_close(m, b)
+                return -1
+            }
             ir_emit(b.f, IROp.Copy, out, failed, -1, -1, b.line)
             b.fresh[failed] = false
         } else { ir_release(m, b, attempt) }

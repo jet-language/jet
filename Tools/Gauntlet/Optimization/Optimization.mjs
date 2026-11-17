@@ -12,6 +12,7 @@ import {
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LANGUAGE_SOURCE_DIRS } from "../Harness/run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../../..");
@@ -463,11 +464,13 @@ function prepareHarnessEntries(context, scratch) {
   for (const family of context.families) {
     for (const variant of family.variants) {
       const entryDir = join(entriesDir, `${family.id}--${variant.id}`);
-      mkdirSync(join(entryDir, "jet"), { recursive: true });
-      copyFileSync(variant.sourcePath, join(entryDir, "jet", "run.jet"));
+      const jetDir = join(entryDir, LANGUAGE_SOURCE_DIRS.jet);
+      mkdirSync(jetDir, { recursive: true });
+      copyFileSync(variant.sourcePath, join(jetDir, "run.jet"));
       for (const language of family.required_peers) {
-        mkdirSync(join(entryDir, language), { recursive: true });
-        copyFileSync(family.peerPaths[language], join(entryDir, language, peerFileName(language)));
+        const peerDir = join(entryDir, LANGUAGE_SOURCE_DIRS[language]);
+        mkdirSync(peerDir, { recursive: true });
+        copyFileSync(family.peerPaths[language], join(peerDir, peerFileName(language)));
       }
       copyFileSync(family.expectedPath, join(entryDir, "expected.out"));
       writeJson(join(entryDir, "entry.json"), harnessEntry(family, variant, entryDir));

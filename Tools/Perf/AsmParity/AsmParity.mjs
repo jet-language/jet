@@ -2,6 +2,8 @@
 // Jet against hand-written x86-64 assembly, in size and in cycles (cards
 // #6328 C6 and #6414). Each cell in cells.json is a Jet package and a ref.S
 // that does the same work with the same output, written as an expert would.
+// A cell's `dir` is the folder beside cells.json that holds its ref.S; its
+// `name` is the cell's identity in results.
 // A cell's `gauntlet` field names the gauntlet matrix cells whose machine
 // ceiling it is (AGENTS.md "Performance gate"): the gauntlet harness reads
 // this file and judges those cells Jet/ceiling <= 1.00 from results.json
@@ -142,7 +144,7 @@ function must(cmd, args, opts = {}) {
   return r;
 }
 
-const buildRef = (cell, dir) => assemble(join(HERE, cell.name, 'ref.S'), join(dir, 'ref'));
+const buildRef = (cell, dir) => assemble(join(HERE, cell.dir, 'ref.S'), join(dir, 'ref'));
 
 function buildJet(jet, cell, mode, dir, label = 'jet') {
   const src = join(dir, label === 'jet' ? `src-${mode}` : `src-${label}-${mode}`);
@@ -195,8 +197,8 @@ function code(side, object, root) {
 // build's at `exe`.
 function kernelCode(cell, dir, exe) {
   const object = join(dir, 'ref-lines.o');
-  must('as', ['-g', '-I', HERE, '-o', object, join(HERE, cell.name, 'ref.S')]);
-  return { ref: code(cell.kernel.ref, object, join(HERE, cell.name)), jet: code(cell.kernel.jet, `${exe}.debug`, resolve(HERE, cell.jet)) };
+  must('as', ['-g', '-I', HERE, '-o', object, join(HERE, cell.dir, 'ref.S')]);
+  return { ref: code(cell.kernel.ref, object, join(HERE, cell.dir)), jet: code(cell.kernel.jet, `${exe}.debug`, resolve(HERE, cell.jet)) };
 }
 
 // One run: the input prepared, then each step (an argument list) in order;
@@ -274,7 +276,7 @@ function startServer(cell) {
 // Every cell's `scriptbench` ids are manifest workloads, and a cell's server
 // is the one those workloads use.
 function scriptbenchIssues(all) {
-  const workloads = new Map(JSON.parse(readFileSync(join(HERE, '..', 'scriptbench', 'manifest.json'), 'utf8')).workloads.map((w) => [w.id, w]));
+  const workloads = new Map(JSON.parse(readFileSync(join(HERE, '..', 'Scriptbench', 'manifest.json'), 'utf8')).workloads.map((w) => [w.id, w]));
   const issues = [];
   for (const cell of all) {
     if (cell.scriptbench === undefined) continue;
@@ -392,7 +394,7 @@ function gains(all) {
     for (const cell of cells) {
       const { dir, cwd, plan, prepare, expect } = setup(cell);
       const variants = [];
-      if (existsSync(join(HERE, cell.name, 'ref.S'))) variants.push({ label: 'ceiling', exe: buildRef(cell, dir) });
+      if (existsSync(join(HERE, cell.dir, 'ref.S'))) variants.push({ label: 'ceiling', exe: buildRef(cell, dir) });
       for (const [label, jet] of compilers) variants.push({ label, exe: buildJet(jet, cell, mode, dir, label) });
       // The control is the base binary measured again as its own variant: its
       // change against base is the run's noise floor.

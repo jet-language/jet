@@ -3,6 +3,6 @@ Error [jet.ErrorNotPropagatable]: `total` fails with `ShopError`, which can't pr
     |
  22 |     count: total(names, fn(n) { n.len() })
     |            ^^^^^
- Why: `total` is defined at `generic_failure_union_reports_its_bound_failure.jet:14:1` with effective failure contract `explicit (ShopError | E)!`; the caller's `explicit KeyError!` contract has no route from `ShopError` to `KeyError`
+ Why: `total` is defined at `generic_failure_union_reports_its_bound_failure.jet:14:1` with effective failure contract `explicit (E | ShopError)!`; the caller's `explicit KeyError!` contract has no route from `ShopError` to `KeyError`
  Fix: Declare the caller with `ShopError` as its failure domain, or add `impl KeyError.From(ShopError) { … }`; otherwise handle `total` locally with `??`
 More: jet-lang.dev/e/E2404

@@ -10,7 +10,7 @@
 // depth under REACH RULES, and exits 1 when an entry cannot be measured
 // (one row saying why). It
 // also measures a gauntlet program entry (no "mode": "tool"): its
-// jet/run.jet against its python/main.py, the pair the c14 token bar
+// Jet/run.jet against its Python/main.py, the pair the c14 token bar
 // compares there.
 //
 // Cases run in `port_bars_judge_<pid>_<ns>` under the scratch root
@@ -2426,8 +2426,8 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
 // running a case.
 measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     entry := read_entry(repo, name)
-    jet_program: "{entry.dir}/jet/run.jet"
-    python_program: "{entry.dir}/python/main.py"
+    jet_program: "{entry.dir}/Jet/run.jet"
+    python_program: "{entry.dir}/Python/main.py"
     tool: !entry.problems.any(fn(problem) { problem.starts_with("it is not a tool entry") })
     if !tool && files.is_file(files.join(repo, jet_program)) && files.is_file(files.join(repo, python_program)) {
         entry.original = python_program.copy()
@@ -2886,11 +2886,11 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     if review != "" -> plant(dir, "{ENTRIES_ROOT}/{name}/{REVIEW_FILE}", review)
 }
 
-#Test("--measure gives a gauntlet program entry's rows: its jet/run.jet against its python/main.py") {
+#Test("--measure gives a gauntlet program entry's rows: its Jet/run.jet against its Python/main.py") {
     dir: work_dir("measured") ?? panic("a scratch directory cannot be made: {err}")
     plant(dir, "{ENTRIES_ROOT}/sum/entry.json", "{{\"name\": \"sum\", \"languages\": [\"jet\", \"python\"]}}\n")
-    plant(dir, "{ENTRIES_ROOT}/sum/python/main.py", "print(1 + 2)\n")
-    plant(dir, "{ENTRIES_ROOT}/sum/jet/run.jet", "run: fn() {{ print(1 + 2) }}\n")
+    plant(dir, "{ENTRIES_ROOT}/sum/Python/main.py", "print(1 + 2)\n")
+    plant(dir, "{ENTRIES_ROOT}/sum/Jet/run.jet", "run: fn() {{ print(1 + 2) }}\n")
     plant(dir, "{ENTRIES_ROOT}/lone/entry.json", "{{\"name\": \"lone\"}}\n")
     assert_eq(measure_lines(dir, "sum").map(fn(line) { line.split("\t").take(3).to_list().join(" ") }), ["sum original 6", "sum jet 13"])
     assert(measure_lines(dir, "lone")[0].contains("not a tool entry"))

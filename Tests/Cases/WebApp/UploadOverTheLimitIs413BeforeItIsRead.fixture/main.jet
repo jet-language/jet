@@ -79,7 +79,7 @@ staged_holding: fn(bytes: Int) -> [Int] {
     staged()
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     _: app.new("Notes").api<Notes>("/api", max_upload: 64)
     served: web.app().mount("/api", Notes{shelf: app.blobs("notes")})
     listener: net.tcp_listen("127.0.0.1:0")

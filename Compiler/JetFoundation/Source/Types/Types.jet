@@ -1368,25 +1368,32 @@ type_union_member_payload: fn(ty: Type) -> Type Never! {
 // binding rebuilds is put back in it (jet_sema sema_failure_union_canonical),
 // so two spellings of one union are one Type. Members sort by their spelling
 // read without module qualifiers, the full spelling breaking ties: resolving
-// a member to its declaration key (`<corelib>/core.http::HTTPError`) never
-// reorders the union.
+// a member to its declaration key (`net.NetError` to
+// `<corelib>/core.net::NetError`) never reorders the union. Each member's key
+// is built once per sort, not once per comparison.
 type_union_sort: fn(members: &[Type]) -[]> {
+    if members.len() < 2 {
+        return
+    }
+    keys := [String]{}
+    loop member in members -> keys.push(type_union_order_key(member))
     index := 1
     loop index < members.len() {
         current := members[index]
+        current_key := keys[index]
         insertion := index - 1
-        loop insertion >= 0 && type_union_member_after(members[insertion], current) {
+        loop insertion >= 0 && type_union_member_after(keys[insertion], members[insertion], current_key, current) {
             members[insertion + 1] = members[insertion]
+            keys[insertion + 1] = keys[insertion]
             insertion -= 1
         }
         members[insertion + 1] = current
+        keys[insertion + 1] = current_key
         index += 1
     }
 }
 
-type_union_member_after: fn(left: Type, right: Type) -[]> Bool {
-    left_key: type_union_order_key(left)
-    right_key: type_union_order_key(right)
+type_union_member_after: fn(left_key: String, left: Type, right_key: String, right: Type) -[]> Bool {
     if left_key != right_key -> return left_key > right_key
     type_name(left) > type_name(right)
 }
@@ -1406,10 +1413,14 @@ type_union_order_key: fn(ty: Type) -[]> String {
     type_name(ty)
 }
 
+// A nominal name's leaf: what follows its last `::` (a declaration key's
+// module) and then its last `.` (a written module alias, `net.NetError`).
 type_union_unqualified: fn(name: String) -[]> String {
     leaf := name
     loop part in name.split("::") -> leaf = part
-    leaf
+    unaliased := leaf
+    loop part in leaf.split(".") -> unaliased = part
+    unaliased
 }
 
 // Rust `union_member_tag`'s sanitizer over one written spelling.

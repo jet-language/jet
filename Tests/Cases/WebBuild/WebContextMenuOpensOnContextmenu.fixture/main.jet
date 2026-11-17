@@ -1,0 +1,49 @@
+#Target(Web)
+
+// Crewboard on a page, its board's panel with a context menu: Add Task adds
+// a task, then a separator, then Share, whose run fails, then Quit, which a
+// page can't act on. The panel shows how many tasks Add Task added, and the
+// Notices button prints the app's notices.
+use {
+    app
+    ui: core.ui
+    reactive: core.reactive
+    core.color.[Color]
+}
+
+// Share: the board can't be shared, so its run fails.
+share: fn() app.Notice! { Err(app.Notice{text: "Couldn't share the board"}) }
+
+run: fn() {
+    added: reactive.signal(0)
+    backend: ui.null_backend()
+    ui.reactive_render(
+        fn() {
+            count: added.get()
+            items: [app.MenuItem]{
+                app.item(
+                    "Add Task",
+                    fn() app.Notice! {
+                        added.set(added.get() + 1)
+                        Ok()
+                    },
+                ),
+                app.separator(),
+                app.item("Share", fn() app.Notice! { share() }),
+                app.quit_item(),
+            }
+            tree: ui.box(
+                [
+                    app.context_menu(ui.node_color("tasks: {count}", 160.0, 32.0, Color{r: 51, g: 102, b: 255, a: 255}), items),
+                    ui.button(
+                        "Notices",
+                        fn() {
+                            loop notice in app.notices() { print("notice: {notice.text}") }
+                        },
+                    ),
+                ],
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
+        },
+    )
+}

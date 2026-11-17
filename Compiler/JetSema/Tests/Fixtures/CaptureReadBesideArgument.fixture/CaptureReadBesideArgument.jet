@@ -1,0 +1,13 @@
+// A lambda that only reads a captured local borrows it: the same local may
+// be passed beside it as a read argument and used after the call.
+make: fn(name: String) -> String { "dir/{name}" }
+
+locked: fn(state: String, action: fn() -> Int) -> Int { action() + state.len() }
+
+measure: fn(path: String) -> Int { path.len() }
+
+run: fn() {
+    path: make("x")
+    print(locked(path, fn() { measure(path) }))
+    print(path)
+}

@@ -5,7 +5,7 @@
 //
 //   jet Tools/Gauntlet/TierParity.jet --out DIR [--jet PATH] [--plant ENTRY]
 //
-// Run it from the repository root. Each entry's jet/ package is copied to
+// Run it from the repository root. Each entry's Jet/ package is copied to
 // DIR/ENTRY, with its input written there by the entry's fixtures/gen.py (an
 // input that already exists is kept). Each level runs once: `jet run`
 // compiles the program and runs it, and the whole run is timed as
@@ -33,7 +33,20 @@ use {
     time: core.time
 }
 
-ENTRIES: [String]{"sieve", "wordfreq", "datasummary", "csvtransform", "concurrency-service"}
+// Each entry by its entry.json name and the folder under
+// Tools/Gauntlet/Entries it lives in.
+TierEntry: struct {
+    name: String,
+    folder: String,
+}
+
+ENTRIES: [TierEntry]{
+    TierEntry{name: "sieve", folder: "Sieve"},
+    TierEntry{name: "wordfreq", folder: "Wordfreq"},
+    TierEntry{name: "datasummary", folder: "Datasummary"},
+    TierEntry{name: "csvtransform", folder: "Csvtransform"},
+    TierEntry{name: "concurrency-service", folder: "ConcurrencyService"},
+}
 
 LEVELS: 3
 
@@ -99,8 +112,9 @@ items: fn(d: Dyn) -> [Dyn] {
 
 probe_of: fn(d: Dyn) -> Probe { Probe{send: text_of(d, "send"), expect: text_of(d, "expect")} }
 
-load: fn(root: String, name: String) -> Entry {
-    dir: "{root}/Tools/Gauntlet/Entries/{name}"
+load: fn(root: String, row: TierEntry) -> Entry {
+    name: row.name
+    dir: "{root}/Tools/Gauntlet/Entries/{row.folder}"
     tree: json.parse(fs.read("{dir}/entry.json") ?? fail("can't read {dir}/entry.json")) ?? fail("{dir}/entry.json is not JSON")
     spec: member(tree, "spec")
     args := [String]{}
@@ -131,13 +145,13 @@ load: fn(root: String, name: String) -> Entry {
     Entry{name: name.copy(), dir: dir, service: true, args: args, gen: gen, input: input, ready: ready, probes: probes, expected: answers}
 }
 
-// DIR/ENTRY: the entry's jet/ package and its input.
+// DIR/ENTRY: the entry's Jet/ package and its input.
 prepare: fn(opts: Options, e: Entry) -> String {
     work: "{opts.out}/{e.name}"
     fs.create_dir_all(work) ?? fail("mkdir {work}: {err}")
     loop file in ["package.jet", "run.jet"] {
         fs.remove_all("{work}/{file}").drop("a copy left by an earlier run may be absent")
-        fs.copy("{e.dir}/jet/{file}", "{work}/{file}") ?? fail("{e.name}: can't copy jet/{file}: {err}")
+        fs.copy("{e.dir}/Jet/{file}", "{work}/{file}") ?? fail("{e.name}: can't copy Jet/{file}: {err}")
     }
     if e.gen != "" && !fs.exists("{work}/{e.input}") {
         made: process.cmd([String]{"python3", e.gen.copy(), "{work}/{e.input}"}).output_limit(1048576).run() ?? fail("{e.name}: python3 could not start for {e.gen}: {err}")
@@ -279,10 +293,21 @@ options: fn() -> Options {
     if opts.out == "" || opts.jet == "" {
         fail("--out and a jet compiler (--jet or PATH) are required")
     }
-    if opts.plant != "" && !ENTRIES.contains(opts.plant) {
-        fail("--plant names one of {ENTRIES.join(", ")}")
+    if opts.plant != "" && picked_entries(opts.plant).len() == 0 {
+        fail("--plant names one of {ENTRIES.map(fn(row) { row.name.copy() }).join(", ")}")
     }
     opts
+}
+
+// The entries a run takes: all of them, or the one `plant` names.
+picked_entries: fn(plant: String) -> [TierEntry] {
+    picked := [TierEntry]{}
+    loop row in ENTRIES {
+        if plant == "" || row.name == plant {
+            picked.push(TierEntry{name: row.name.copy(), folder: row.folder.copy()})
+        }
+    }
+    picked
 }
 
 run: fn() {
@@ -290,12 +315,13 @@ run: fn() {
     root: sys.current_dir() ?? fail("no working directory")
     fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}: {err}")
     fs.remove_all("{opts.out}/cache").drop("a cache left by an earlier run may be absent")
-    names: if opts.plant != "" -> [String]{opts.plant.copy()} else -> ENTRIES.copy()
+    picked: picked_entries(opts.plant)
     rows := ["entry\tlevel\tstatus\trun_seconds"]
     failures := 0
     caught := 0
-    loop name in names {
-        e: load(root, name)
+    loop row in picked {
+        name: row.name
+        e: load(root, row)
         work: prepare(opts, e)
         expected: if opts.plant != "" -> planted(e.expected) else -> e.expected.copy()
         loop level in 0..<LEVELS {
@@ -322,7 +348,7 @@ run: fn() {
         print("tier-parity: the planted change in {opts.plant}'s expected output is caught on {caught} of {LEVELS} levels")
         process.exit(1)
     }
-    print("tier-parity: {names.len()} entries on O0, O1 and O2, {failures} failing; rows in {opts.out}/tiers.tsv")
+    print("tier-parity: {picked.len()} entries on O0, O1 and O2, {failures} failing; rows in {opts.out}/tiers.tsv")
     if failures > 0 -> process.exit(1)
 }
 

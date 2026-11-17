@@ -471,7 +471,7 @@ sql_output_value: fn(row: JetSQLResultRow, field: String) -> JetSQLValue? Never!
 
 // Rust execute_sql_rows:959–1041. String map lookup + one sorted key pass
 // reproduces BTreeMap lexical iteration in O(n log n), not a linear key table.
-execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> JetSQLValue? E!) -> [JetSQLResultRow] (Err | E)! {
+execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, cell: fn(U64, String) -> JetSQLValue? E!) -> [JetSQLResultRow] (E | Err)! {
     selected := [U64]{}
     index := U64{0}
     loop index < row_count {
@@ -932,7 +932,7 @@ priv internal: module {
 
     // Rust sql_group_key:777–792. Caller supplies a singleton slice without
     // allocating Rust's temporary one-element Vec for each row.
-    sql_group_key: fn<E>(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue? E!) -> String (Err | E)! {
+    sql_group_key: fn<E>(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cell: fn(U64, String) -> JetSQLValue? E!) -> String (E | Err)! {
         field: group_field(query, key) ?? return Err(err)
         value := JetSQLValue.Null
         if group.len() != 0 {

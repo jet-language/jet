@@ -1,0 +1,18 @@
+# An app's context menu in a web build opens on the page's `contextmenu`
+# event in place of the browser's own menu, at the pointer. Choosing Add
+# Task closes it and runs the item, whose repaint shows the new count. A
+# click elsewhere or Escape closes it, and that click or key reaches nothing
+# else. Quit, which a page can't act on, shows but can't be chosen. Share's
+# run fails, and its notice joins the app's notice list, which the Notices
+# button prints; the list is kept in the device store under XDG_DATA_HOME.
+requires: tool:node
+fixture: WebContextMenuOpensOnContextmenu.fixture
+env: NO_COLOR=1
+env: XDG_DATA_HOME={work}/data
+step: jet build --target web main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_context_menu_opens_on_contextmenu.stdout.expected

@@ -1663,8 +1663,11 @@ escape (**E0120**), and a lambda a function returns cannot write that
 function's write parameter (**E0120**): the caller lent it only until the call
 returns. A lambda that runs inside the call, or is stored and passed down to a
 callee, may write it. The old `take(...)` prefix is rejected with
-**E0057**. Self-recursion through the lambda's own binding is **E0804**;
-calling a non-function is **E0803** (S47).
+**E0057**. An escaping lambda that writes a captured local (by assignment or a
+`&self` method call) writes its own copy, so the scope that makes it can no
+longer use that local (**E0204**); a write parameter it captures is the
+caller's storage and is written in place. Self-recursion through the lambda's
+own binding is **E0804**; calling a non-function is **E0803** (S47).
 [`ClosureCaptureModes`](../../Examples/Basics/Functions/ClosureCaptureModes.jet)
 shows each capture mode with its output.
 

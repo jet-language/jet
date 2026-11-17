@@ -287,11 +287,27 @@ const LANGUAGE_FILES = {
   vite: "main.mjs",
   asm: "ref.S",
 };
-// LuaJIT runs the entry's Lua program, Bun the Node program and Vite bundles
-// the web (js) program; the asm ceiling's directory is its asm-parity
-// reference. Every other language has its own directory (coverage.mjs finds
-// each peer's twin the same way).
-export const LANGUAGE_SOURCE_DIRS = Object.freeze({ luajit: "lua", bun: "node", vite: "js" });
+// The entry folder holding each language's program: LuaJIT runs the Lua
+// program, Bun the Node program and Vite bundles the web (JS) program, and an
+// expert rail has its own folder; the asm ceiling's directory is its
+// asm-parity reference (Coverage.mjs finds each peer's twin the same way).
+export const LANGUAGE_SOURCE_DIRS = Object.freeze({
+  jet: "Jet",
+  "jet-expert": "JetExpert",
+  rust: "Rust",
+  "rust-expert": "RustExpert",
+  c: "C",
+  "c-expert": "CExpert",
+  zig: "Zig",
+  go: "Go",
+  python: "Python",
+  node: "Node",
+  bun: "Node",
+  lua: "Lua",
+  luajit: "Lua",
+  js: "JS",
+  vite: "JS",
+});
 
 function baseLanguage(language) {
   return language.endsWith("-expert") ? language.slice(0, -"-expert".length) : language;
@@ -961,7 +977,8 @@ function requiredPolicyCells(policy, matrixIds) {
 
 // The machine-ceiling references (CEILING_POLICY.references): every asm-parity
 // cell names the matrix cells it bounds in `gauntlet` ([] for a microbenchmark
-// that bounds none) and ships its hand-written reference beside cells.json.
+// that bounds none) and ships its hand-written reference in its `dir` beside
+// cells.json.
 async function ceilingReferenceIssues(matrix, references) {
   if (!Array.isArray(references)) return [`${CEILING_POLICY.references}: machine-ceiling references are missing`];
   const matrixIds = new Set((Array.isArray(matrix?.cells) ? matrix.cells : []).map((cell) => cell.id));
@@ -983,7 +1000,7 @@ async function ceilingReferenceIssues(matrix, references) {
         if (!matrixIds.has(cell)) issues.push(`${name}: machine-ceiling reference names unknown matrix cell ${cell}`);
       }
     }
-    if (!await exists(path.join(referenceDir, name, CEILING_POLICY.reference_source))) {
+    if (typeof reference.dir !== "string" || reference.dir.length === 0 || !await exists(path.join(referenceDir, reference.dir, CEILING_POLICY.reference_source))) {
       issues.push(`${name}: machine-ceiling reference has no ${CEILING_POLICY.reference_source}`);
     }
   }
@@ -1331,10 +1348,13 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
       throw new Error("measurement manifest allows an unknown uncovered matrix cell");
     }
   }
+  const { loaded, tools } = await loadEntries(entriesDir, null);
+  const entryDirs = new Map([...loaded, ...tools].map((item) => [item.entry.name, item.dir]));
   const entries = [];
   for (const row of manifest.entries) {
     if (typeof row.name !== "string" || !Object.hasOwn(row, "python") || typeof row.jet !== "string") throw new Error("measurement manifest row is incomplete");
-    const entryDir = manifestSource(entriesDir, row.name);
+    const entryDir = entryDirs.get(row.name);
+    if (!entryDir) throw new Error(`measurement manifest names no entry: ${row.name}`);
     const jet = await manifestSourceMetrics(entryDir, row.jet);
     const python = row.python === null ? null : await manifestSourceMetrics(entryDir, row.python);
     const comparison = python ? {
@@ -1390,7 +1410,7 @@ function validateEntryShape(item, matrix) {
   const issues = [];
   validateHttpServiceProbes(entry, issues);
   if (!item.nameDeclared) issues.push(`${item.directoryName}: entry.json must declare name`);
-  if (entry.name !== item.directoryName) issues.push(`${item.directoryName}: entry.name is ${JSON.stringify(entry.name)}`);
+  if (typeof entry.name !== "string" || entry.name.length === 0) issues.push(`${item.directoryName}: entry.name is ${JSON.stringify(entry.name)}`);
   if (!ENTRY_MODES.includes(entry.mode)) issues.push(`${entry.name}: unsupported mode ${entry.mode ?? "missing"}`);
   if (!Array.isArray(entry.languages) || entry.languages.length === 0) {
     issues.push(`${entry.name}: languages must be a non-empty array`);
@@ -1474,13 +1494,18 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
   }
   const items = loaded.map((item) => ({ ...item, directoryName: path.basename(item.dir) }));
   for (const item of items) issues.push(...validateEntryShape(item, matrix));
+  const directoriesByName = new Map();
+  for (const item of items) directoriesByName.set(item.entry.name, [...(directoriesByName.get(item.entry.name) ?? []), item.directoryName]);
+  for (const [name, directories] of directoriesByName) {
+    if (directories.length > 1) issues.push(`${name}: entry name is declared by ${directories.join(", ")}`);
+  }
   if (!fullScope) return issues;
   if (skipped.length) issues.push(`full corpus has skipped entries: ${skipped.map((item) => item.name).join(", ")}`);
   if (!manifest?.corpus) {
     issues.push("full corpus is missing the measurement denominator manifest");
     return issues;
   }
-  const actualNames = items.map((item) => item.directoryName);
+  const actualNames = items.map((item) => item.entry.name);
   if (actualNames.length !== manifest.corpus.entry_count || !equalStringArrays(actualNames, manifest.corpus.entry_names)) {
     issues.push("full corpus entry names/count do not match the frozen measurement denominator");
   }
@@ -1498,18 +1523,18 @@ async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, ful
   if (duplicateCoverage.length) issues.push(`matrix cells have multiple corpus owners: ${duplicateCoverage.join(", ")}`);
   const rowsByName = new Map((manifest.entries ?? []).map((row) => [row.name, row]));
   for (const item of items) {
-    const row = rowsByName.get(item.directoryName);
+    const row = rowsByName.get(item.entry.name);
     if (!row) {
-      issues.push(`${item.directoryName}: missing measurement manifest row`);
+      issues.push(`${item.entry.name}: missing measurement manifest row`);
       continue;
     }
     if ((row.python === null) !== !(item.entry.languages ?? []).includes("python")) {
-      issues.push(`${item.directoryName}: Python manifest pairing disagrees with declared rails`);
+      issues.push(`${item.entry.name}: Python manifest pairing disagrees with declared rails`);
     }
     for (const language of item.entry.languages ?? []) {
       if (item.entry.non_applicable?.[language]) continue;
       const sourceFile = LANGUAGE_FILES[baseLanguage(language)];
-      if (!(await exists(path.join(item.dir, language, sourceFile)))) issues.push(`${item.directoryName}/${language}: declared source is missing`);
+      if (!(await exists(path.join(item.dir, LANGUAGE_SOURCE_DIRS[language] ?? language, sourceFile)))) issues.push(`${item.entry.name}/${language}: declared source is missing`);
     }
   }
   return issues;
@@ -2614,7 +2639,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
     ...(standings?.ceiling ? ["asm"] : []),
   ];
   for (const language of [...languages, ...standingsOnly]) {
-    const sourceDir = language === "asm" ? standings.ceiling.dir : path.join(entryDir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
+    const sourceDir = language === "asm" ? standings.ceiling.dir : path.join(entryDir, LANGUAGE_SOURCE_DIRS[language] ?? language);
     const sourceFile = LANGUAGE_FILES[baseLanguage(language)];
     const row = { language, status: "broken", metrics: {}, diagnostics: [] };
     if (languages.includes(language)) rows[language] = row;
@@ -3097,26 +3122,30 @@ async function loadMergeSource(file) {
 
 // Comparison entries (ENTRY_MODES) go to `loaded`; tool entries (TOOL_MODE)
 // go to `tools`, which never join the matrix denominator; anything else is
-// `skipped`.
+// `skipped`. An entry is known by its entry.json `name`, not its folder, so
+// `selected` keeps the entry that names it; an unreadable entry.json names
+// none.
 async function loadEntries(entriesDir, selected) {
   const loaded = [];
   const tools = [];
   const skipped = [];
   if (!(await exists(entriesDir))) return { loaded, tools, skipped };
   for (const item of (await fs.readdir(entriesDir, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
-    if (!item.isDirectory() || (selected && item.name !== selected)) continue;
+    if (!item.isDirectory()) continue;
     const dir = path.join(entriesDir, item.name);
     const file = path.join(dir, "entry.json");
     try {
       const entry = JSON.parse(await fs.readFile(file, "utf8"));
       const nameDeclared = Object.hasOwn(entry, "name");
       entry.name ??= item.name;
+      if (selected && entry.name !== selected) continue;
       if (entry.mode === TOOL_MODE) tools.push({ dir, entry, directoryName: item.name });
       else if (!ENTRY_MODES.includes(entry.mode)) {
         console.warn(`WARN ${entry.name}: skipped mode ${entry.mode ?? "missing"}`);
         skipped.push({ name: entry.name, reason: `mode ${entry.mode ?? "missing"} is not batch` });
       } else loaded.push({ dir, entry, directoryName: item.name, nameDeclared });
     } catch (error) {
+      if (selected) continue;
       console.warn(`WARN ${item.name}: skipped invalid entry.json: ${error.message}`);
       skipped.push({ name: item.name, reason: `invalid entry.json: ${error.message}` });
     }
@@ -4537,7 +4566,7 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
     blockers.push("source measurement denominator is incomplete");
   }
 
-  const expectedResultNames = loadedEntries.map((item) => item.directoryName ?? item.entry?.name ?? null);
+  const expectedResultNames = loadedEntries.map((item) => item.entry?.name ?? item.directoryName ?? null);
   const actualResultNames = measuredResults.map((result) => result?.entry?.name ?? null);
   if (measuredResults.length !== loadedEntries.length) {
     blockers.push(`result denominator is ${measuredResults.length}/${loadedEntries.length}`);
@@ -4697,7 +4726,7 @@ async function standingsPlans(loaded, policy, references, toolchains) {
       programs[peer] = { path: `${dir}/${file}`, exists: Boolean(file) && await exists(path.join(item.dir, dir, file)) };
     }
     if (entryReferences.length === 1) {
-      const program = `${referenceDir}/${entryReferences[0].name}/${CEILING_POLICY.reference_source}`;
+      const program = `${referenceDir}/${entryReferences[0].dir}/${CEILING_POLICY.reference_source}`;
       programs[policy.ceiling] = { path: program, exists: await exists(path.join(repoDir, program)) };
     }
     const plan = planEntry(item.entry, policy, { programs, references: entryReferences, toolchains });
@@ -4707,7 +4736,7 @@ async function standingsPlans(loaded, policy, references, toolchains) {
       plan,
       stage: {
         peers: policy.peers.filter((peer) => plan.peers[peer].plan === "measure"),
-        ceiling: ceiling.plan === "measure" ? { name: ceiling.reference, dir: path.join(repoDir, referenceDir, ceiling.reference) } : null,
+        ceiling: ceiling.plan === "measure" ? { name: ceiling.reference, dir: path.join(repoDir, referenceDir, entryReferences[0].dir) } : null,
       },
     });
   }
@@ -4841,7 +4870,7 @@ async function main() {
   }
   const rowSourceDir = (item, stage, language) => language === "asm"
     ? stage.ceiling?.dir ?? null
-    : path.join(item.dir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
+    : path.join(item.dir, LANGUAGE_SOURCE_DIRS[language] ?? language);
   const results = [];
   for (const item of loaded) {
     console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
@@ -4933,7 +4962,7 @@ async function main() {
   const allowedUncovered = axisOnly ? new Set() : new Set(sourceManifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
   const unexpectedUncovered = uncovered.filter((cell) => !allowedUncovered.has(cell));
   const denominator = {
-    entry_names_pass: axisOnly || (fullScope && skipped.length === 0 && loaded.length === expectedEntryNames.length && equalStringArrays(loaded.map((item) => item.directoryName ?? path.basename(item.dir)), expectedEntryNames)),
+    entry_names_pass: axisOnly || (fullScope && skipped.length === 0 && loaded.length === expectedEntryNames.length && equalStringArrays(loaded.map((item) => item.entry.name).sort(), [...expectedEntryNames].sort())),
     matrix_coverage_pass: axisOnly || unexpectedUncovered.length === 0,
     source_pairs_pass: axisOnly || (sourceMeasurements?.coverage?.denominator_pass ?? false),
   };

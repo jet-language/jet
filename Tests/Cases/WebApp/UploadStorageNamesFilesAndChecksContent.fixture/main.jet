@@ -52,7 +52,7 @@ kept: fn(name: String) -> String {
     "{found.len()} files, {named} named by an id"
 }
 
-run: fn() (NetError | HTTPError | TaskFailure)! {
+run: fn() (HTTPError | NetError | TaskFailure)! {
     served: web.app().mount("/api", Photos{shelf: app.blobs("photos")})
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()

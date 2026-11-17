@@ -45,7 +45,7 @@ publication_state: fn(run: Dyn) -> Dyn {
         else -> {}
     }
 
-    expected_names: loaded.map(fn(item) { member(item, "directoryName") ?? member(item, "entry/name") ?? Dyn.Null })
+    expected_names: loaded.map(fn(item) { member(item, "entry/name") ?? member(item, "directoryName") ?? Dyn.Null })
     actual_names: results.map(fn(result) { member(result, "entry/name") ?? Dyn.Null })
     if results.len() != loaded.len() {
         blockers.push(Dyn.Text("result denominator is {results.len()}/{loaded.len()}"))

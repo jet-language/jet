@@ -14,7 +14,7 @@ KeyError: enum {
     Blank,
 }
 
-total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!) -> Int (ShopError | E)! {
+total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!) -> Int (E | ShopError)! {
     if rows.len() == 0 -> return Err(ShopError.Empty)
     sum := 0
     loop row in rows -> sum += weigh(row)
@@ -31,7 +31,7 @@ strict: fn(name: String) -> Int KeyError! {
     Ok(name.len())
 }
 
-either: fn(name: String) -> Int (ShopError | KeyError)! {
+either: fn(name: String) -> Int (KeyError | ShopError)! {
     if name == "x" -> return Err(ShopError.Empty)
     if name == "" -> return Err(KeyError.Blank)
     Ok(name.len())
@@ -41,13 +41,13 @@ plain: fn(names: [String]) -> Int ShopError! { total(names, fn(n) { n.len() }) }
 
 same: fn(names: [String]) -> Int ShopError! { total(names, shop_weigh) }
 
-keyed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, strict) }
+keyed: fn(names: [String]) -> Int (KeyError | ShopError)! { total(names, strict) }
 
-mixed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, either) }
+mixed: fn(names: [String]) -> Int (KeyError | ShopError)! { total(names, either) }
 
 reversed: fn(names: [String]) -> Int (KeyError | ShopError)! { total(names, strict) }
 
-failure_name: fn(error: ShopError | KeyError) -> String {
+failure_name: fn(error: KeyError | ShopError) -> String {
     if error == {
         .ShopError -> "shop"
         .KeyError -> "key"

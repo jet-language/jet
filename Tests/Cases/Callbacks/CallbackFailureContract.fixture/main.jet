@@ -28,7 +28,7 @@ checked_owner: fn(order: Order) -> String KeyError! {
     Ok(order.owner)
 }
 
-measured_owner: fn(order: Order) -> String (data.DataError | KeyError)! {
+measured_owner: fn(order: Order) -> String (KeyError | data.DataError)! {
     if order.owner == "" -> return Err(KeyError.Blank)
     if order.total < 0 -> _: data.mean([Float]{})
     Ok(order.owner)
@@ -38,7 +38,7 @@ owner_key: fn(owner: Owner) -> String Never! { owner.key }
 
 checked_key: fn(owner: Owner) -> String KeyError! { Ok(owner.key) }
 
-measured_key: fn(owner: Owner) -> String (data.DataError | KeyError)! { Ok(owner.key) }
+measured_key: fn(owner: Owner) -> String (KeyError | data.DataError)! { Ok(owner.key) }
 
 // A callback that can't fail: the join fails only with its own DataError.
 plain: fn(orders: [Order], owners: [Owner]) -> Int data.DataError! {
@@ -47,19 +47,19 @@ plain: fn(orders: [Order], owners: [Owner]) -> Int data.DataError! {
 }
 
 // A KeyError callback: the join fails with DataError or with that KeyError.
-checked: fn(orders: [Order], owners: [Owner]) -> Int (data.DataError | KeyError)! {
+checked: fn(orders: [Order], owners: [Owner]) -> Int (KeyError | data.DataError)! {
     joined: data.inner_join(orders, owners, checked_owner, checked_key)
     joined.len()
 }
 
 // A callback that fails with DataError or KeyError: the join adds no second
 // DataError, and the callback's own reaches the caller as it was raised.
-measured: fn(orders: [Order], owners: [Owner]) -> Int (data.DataError | KeyError)! {
+measured: fn(orders: [Order], owners: [Owner]) -> Int (KeyError | data.DataError)! {
     joined: data.inner_join(orders, owners, measured_owner, measured_key)
     joined.len()
 }
 
-failure_name: fn(error: data.DataError | KeyError) -> String {
+failure_name: fn(error: KeyError | data.DataError) -> String {
     if error == {
         .DataError(found) -> "data {found.operation}"
         .KeyError -> "key"

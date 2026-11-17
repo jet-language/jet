@@ -6506,9 +6506,6 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 {
         sema_ownership_bind_closure_writes(state, key, checked_lambda.capture_facts.mutable)
-        if checked_lambda.capture_facts.escapes {
-            sema_ownership_bind_lambda_write_borrows(state, checked_lambda.capture_facts.mutable)
-        }
     }
     // A name bound once to a lambda keeps its ClosureInfo for `name.reflect()`.
     if !binding.mutable && init.kind == .Lambda(reflected_lambda) {
@@ -7149,10 +7146,11 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     if sema_ownership_uninit_take(state, binding.key) != None && op != None {
         diagnostics.push(sema_error("E0420", name_span, "`{name}` may be read before it is given a value", "`{name}+=` reads `{name}` first, but it was declared with `Type{{ uninit }}` and has no value yet", "give `{name}` a value with `{name} = …` before updating it"))
     }
-    // An escaping lambda bound in an open scope still holds `name`'s write
-    // access (Rust `lambda_mut_borrow_active`).
+    // A stored lambda made in an open scope changes its own copy of `name`
+    // and still holds its write access (a compound update's read of it
+    // reports above).
     if sema_ownership_lambda_write_borrow_active(state, name) {
-        diagnostics.push(sema_ownership_diag_alias(name, true, name_span))
+        diagnostics.push(sema_ownership_diag_stored_lambda_write(name, name_span))
     }
     tree_op := TBinaryOp?{None}
     if op != None {
