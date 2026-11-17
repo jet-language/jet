@@ -17,7 +17,7 @@ Use this authority order: owner instruction → ratified Tower verdicts and acce
 
 ## Contract and scope
 
-At activation, record a finite target concept or area and its reachable inventory. Search the live target surfaces and dependencies that explain it: specs, examples, stdlib, Syntax registry, CLI, and direct analogues. Map every inventoried running form to one primary ontology family plus optional orthogonal axes; cluster by concept rather than glyph; and recommend the smallest move that creates the “ohhh,” or leave it alone. The target inventory is complete within that declared closure, not an invitation to map unrelated Jet.
+At activation, record a finite target concept or area and its reachable inventory. Search the live target surfaces and dependencies that explain it: specs, examples, stdlib, Syntax registry, CLI, and direct analogs. Map every inventoried running form to one primary ontology family plus optional orthogonal axes; cluster by concept rather than glyph; and recommend the smallest move that creates the “ohhh,” or leave it alone. The target inventory is complete within that declared closure, not an invitation to map unrelated Jet.
 
 `ontology.md` is the canonical category catalog. It is closed at the family layer and open at the instance layer: land each idea in one primary family with optional axes, extend the catalog only through its extension protocol, and never invent a parallel taxonomy.
 

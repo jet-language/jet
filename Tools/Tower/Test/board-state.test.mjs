@@ -147,7 +147,7 @@ test('an epoch the active radar omits still gets a section for its frozen cards,
   assert.equal(boardEpochs(radar, epochs, [cards[1]], []), radar, 'sidequest frozen cards stay in the sidequest section');
 });
 
-test('an epoch is labelled E plus its number, from num or else from the id', () => {
+test('an epoch is labeled E plus its number, from num or else from the id', () => {
   assert.equal(epochLabel({ id: 'e18', name: 'Declarations as types' }), 'E18 Declarations as types');
   assert.equal(epochLabel({ id: 'e18', name: 'Declarations as types' }, { name: false }), 'E18');
   assert.equal(epochLabel({ id: 'x', num: 4, name: 'Metaprogramming' }), 'E4 Metaprogramming');

@@ -1590,7 +1590,7 @@ file in a `Tests/` tree. The ratchet refuses either.
       "file": "Compiler/JetRuntime/Source/Alloc.jet",
       "line": 892,
       "column": 5,
-      "reason": "slab and its linked neighbours are live heap-owned headers protected by the held heap lock"
+      "reason": "slab and its linked neighbors are live heap-owned headers protected by the held heap lock"
     },
     {
       "package": "Compiler",
@@ -4901,7 +4901,7 @@ file in a `Tests/` tree. The ratchet refuses either.
       "file": "Compiler/JetTestKit/Source/StepsSessions.jet",
       "line": 363,
       "column": 5,
-      "reason": "the case explicitly authorizes signalling its own spawned child"
+      "reason": "the case explicitly authorizes signaling its own spawned child"
     },
     {
       "package": "Compiler",
@@ -6273,7 +6273,7 @@ file in a `Tests/` tree. The ratchet refuses either.
       "file": "Examples/ErrorsAndEffects/Effects/SingleUse.jet",
       "line": 85,
       "column": 5,
-      "reason": "event cancelled; the ticket admits to nothing, so voiding it is correct"
+      "reason": "event canceled; the ticket admits to nothing, so voiding it is correct"
     },
     {
       "package": "Examples",
@@ -10841,7 +10841,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 803:9 | "the live totals are process-lifetime arena words; the quiescent caller needs no lock to read them" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 832:5 | "root is an aligned lock word in the process-lifetime state mapping; CAS/xchg acquire all metadata it protects and the futex wait only reads that word" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 851:5 | "the calling thread holds this lock; xchg publishes its completed metadata updates and reports sleepers, and the futex wake only names the word" |
-| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 892:5 | "slab and its linked neighbours are live heap-owned headers protected by the held heap lock" |
+| Compiler | Compiler/JetRuntime/Source/Alloc.jet | 892:5 | "slab and its linked neighbors are live heap-owned headers protected by the held heap lock" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 910:5 | "head and slab are live heap-owned metadata protected by the held heap lock" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 946:5 | "the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 982:5 | "the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block" |
@@ -11314,7 +11314,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 556:5 | "the testkit stops its own step child at a resource guard" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 816:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 194:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
-| Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
+| Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signaling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/Golden/compiler.jet | 32:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
 | Core | Core/Auth/Auth.jet | 220:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
 | Core | Core/Crypto/Crypto.jet | 290:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
@@ -11510,7 +11510,7 @@ file in a `Tests/` tree. The ratchet refuses either.
 | Examples | Examples/Crypto/RandomAPISplit.jet | 36:5 | "compare the typed and raw HKDF rungs" |
 | Examples | Examples/Crypto/VaultKeys.jet | 44:5 | "restore audited raw signing-key material" |
 | Examples | Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet | 6:5 | "the audited block has no low-level operation" |
-| Examples | Examples/ErrorsAndEffects/Effects/SingleUse.jet | 85:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
+| Examples | Examples/ErrorsAndEffects/Effects/SingleUse.jet | 85:5 | "event canceled; the ticket admits to nothing, so voiding it is correct" |
 | Examples | Examples/Interop/FFI/InlineC.jet | 7:1 | "the scalar ABI contract matches the C definition" |
 | Examples | Examples/Interop/FFI/InlineC.jet | 14:1 | "the scalar ABI contract deliberately returns a mismatched result" |
 | Examples | Examples/Interop/FFI/InlineC.jet | 20:5 | "call the audited inline C contract" |

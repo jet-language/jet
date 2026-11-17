@@ -7,7 +7,7 @@ use {
     time: core.time
 }
 
-// A close that shows the cancelled task's cleanup ran.
+// A close that shows the canceled task's cleanup ran.
 Marker: struct {
     name: String,
 
@@ -50,7 +50,7 @@ run: fn() {
         ready_out.flush() ?? process.fail(1, "flush: {err}")
         if busy.join() == {
             .Ok(_) -> { print("busy handler: finished") }
-            .Err(.Cancelled) -> { print("busy handler: cancelled") }
+            .Err(.Cancelled) -> { print("busy handler: canceled") }
             .Err(.DeadlineBlown) -> { print("busy handler: deadline") }
             .Err(.Panicked(reason)) -> print("busy handler: panicked {reason}")
         }

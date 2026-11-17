@@ -239,7 +239,7 @@ None of them prints a terminal line for a successful edit, except Rsbuild's `rea
 
 A syntax error, made by dropping one `}`.
 
-Jet prints five problems for one mistake, in plain text with no colour. The excerpt below shortens the second E0003 and the E0083, and leaves out the third and fourth E0003:
+Jet prints five problems for one mistake, in plain text with no color. The excerpt below shortens the second E0003 and the E0083, and leaves out the third and fourth E0003:
 
 ```
 Error [E0003]: Expected a call, binding, assignment, or `return`, found a piece of quoted text
@@ -354,7 +354,7 @@ Port 5401 is in use, trying another one...
 info    port 5430 is in use, using port 5431.
 ```
 
-Astro ([render](../assets/research/2026-11-04-jet-dev/term-conflict-astro.png)) recognises its own running server:
+Astro ([render](../assets/research/2026-11-04-jet-dev/term-conflict-astro.png)) recognizes its own running server:
 
 ```
 Another astro dev server is already running.
@@ -449,7 +449,7 @@ Shown by most incumbents, missing from Jet:
 5. Per-request lines with status and time (Next splits framework time from application time; Astro shows a timestamp).
 6. The version in the banner (Vite, Next, Astro, Rsbuild).
 7. Which port was chosen when the asked-for one was busy (Vite, Rsbuild).
-8. Colour: a green check or arrow for ready, red for errors.
+8. Color: a green check or arrow for ready, red for errors.
 
 Shown by Jet, missing from most incumbents:
 
@@ -494,7 +494,7 @@ Lesser gaps:
 | G11 | The `jet new` template serves nothing under `jet dev`, and `jet build --target web` is silent and writes no `index.html` | #6418 c25; draft jet-web-template-loop |
 | G12 | One missing `}` gives five errors, with the root cause last | #3720 c28, c29 |
 | G13 | E3001 Why/Fix text speaks of exit codes and "the shared report boundary"; locations point into `<corelib>` | #3720 c14, c48 |
-| G14 | No colour in `jet dev` output (one SGR code in a TTY capture) | draft jet-dev-web-dashboard (header and state words) |
+| G14 | No color in `jet dev` output (one SGR code in a TTY capture) | draft jet-dev-web-dashboard (header and state words) |
 | G15 | Browser runtime errors never reach the terminal | draft jet-dev-browser-console |
 | G16 | No way for an agent to find or stop a running session, and a second `jet dev` panics on bind | draft jet-dev-agent-status |
 | G17 | State is lost on every edit (full restart); five incumbents keep component state | #6386 c13 (#Persist) |
@@ -613,7 +613,7 @@ Four documentation segments are below the item-density floor, and each has a wri
 - `expo-start/02`
 - `vite-features-hmr/03`
 
-Each one is mostly example code or option tables for a feature already itemised once.
+Each one is mostly example code or option tables for a feature already itemized once.
 Every documentation page was fetched as Markdown and read in full, not just searched.
 
 The recall audit has not been run: it needs a fresh-context reviewer.

@@ -66,7 +66,7 @@ Each probe is in `m6313p` and passed on o0, o1 and o2.
 | Optional parameter `Int?{None}`, passed as `Val(9)` | p03 | works |
 | Optional parameter passed a bare value (`limit: 9`, `mode: .Floor`) | p16 | works |
 | Defaulted slot then a variadic tail, plus spread | p04 | works |
-| Labelled enum options on a user static `from_int` | p05 | works |
+| Labeled enum options on a user static `from_int` | p05 | works |
 | A default that reads an earlier parameter, on a generic function | p06 | works |
 | Labels and defaults through a function value `.call` | p07 | works |
 | Label-only zone on an instance method | p08 | works |

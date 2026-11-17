@@ -39,7 +39,7 @@ Not run in this session (budget). `Examples/features/serde/field_metadata_edges.
 
 ## Criteria
 
-1. *State missing/null/default/unknown-field behaviour and atomicity.* Stated by the
+1. *State missing/null/default/unknown-field behavior and atomicity.* Stated by the
    ratified decision (omitted fields keep their existing values; explicit null follows
    the target field's nullability; names, unknown fields, Flatten and validation keep
    decode's law; atomic `Err([FieldError])` with no partial value). The decode side of
@@ -49,7 +49,7 @@ Not run in this session (budget). `Examples/features/serde/field_metadata_edges.
    unsupported `FieldError` before change.
 3. *Do not silently redefine ordinary decode as mutation.* Holds today by absence:
    `json.decode` is the only typed entry and constructs a fresh value; the baseline
-   run above is unchanged decode behaviour.
+   run above is unchanged decode behavior.
 4. *Independently ballot any new typed update API.* Met: D-CORE-TYPED-UPDATE1 ratified A
    on 2026-09-12 (Tower card #3299).
 5. *Golden `serde/json_update`.* Not met: `json.update` does not exist (E1004).

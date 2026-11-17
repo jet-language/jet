@@ -20,10 +20,10 @@ runtime/tool projection after that baseline was recorded.
 
 ## Plan of record
 
-1. **Freeze reuse and licence policy.** Keep GPL Snix/Tvix evaluator code out
+1. **Freeze reuse and license policy.** Keep GPL Snix/Tvix evaluator code out
    of Jet's shipped crates until the owner and legal review approve a separate
    GPL distribution. Use MIT protocol definitions only when the exact files
-   carry that licence. Use Snix as an external oracle and design reference.
+   carry that license. Use Snix as an external oracle and design reference.
 2. **Define one corpus identity.** Pin Nix version and source commit, nixpkgs
    revision and NAR hash, system, attrpath, source digest, and oracle mode.
 3. **Replace symbolic package lookup.** Evaluate the pinned nixpkgs source
@@ -99,15 +99,15 @@ Use these projects in three narrow ways:
 
 - run a separately licensed Snix binary in an off-device conformance job;
 - read Snix source and tests as implementation prior art;
-- reuse only protocol-buffer definitions whose source file and licence grant
+- reuse only protocol-buffer definitions whose source file and license grant
   are MIT.
 
 The Snix repository states that its crates are GPL-3.0 and that direct use,
 including linking or embedding the evaluator, falls under GPL-3.0. It gives the
 MIT exception to protocol-buffer definitions for independent implementations.
-[Snix licence structure](https://git.snix.dev/snix/snix) records this split.
+[Snix license structure](https://git.snix.dev/snix/snix) records this split.
 Tvix records the same split in its repository README.
-[Tvix licence structure](https://github.com/tvlfyi/tvix/)
+[Tvix license structure](https://github.com/tvlfyi/tvix/)
 
 The pinned source review is recorded in
 [`docs/audits/snix-tvix-license-research-2026-08-24.md`](../audits/snix-tvix-license-research-2026-08-24.md).
@@ -120,7 +120,7 @@ development and CI differential oracles (`docs/spec/syntax-decisions.md:5439-544
 
 The owner/legal gate is still open. This report records a recommendation, not
 owner ratification. A direct-reuse option needs a separate GPL package boundary,
-licence review, source notices, and distribution decision. It must not enter
+license review, source notices, and distribution decision. It must not enter
 `Cargo.toml` by implication.
 
 Snix itself reports that its APIs are unstable and that it lacks tooling to
@@ -360,7 +360,7 @@ stronger on mature nixpkgs reach until Jet completes the corpus.
 | Treating `pkgs.fd` as evaluation | `PackageNamespace` returns a package identity | False nixpkgs coverage and wrong derivation identity |
 | Counting fixtures as nixpkgs attrs | 17 semantic rows but 0 attr rows | Misleading percentages |
 | Treating index equality as evaluator equality | Index producer compares staged records only | Overlays and custom flakes remain uncovered |
-| Embedding GPL code casually | Snix/Tvix licence split | Distribution and legal risk |
+| Embedding GPL code casually | Snix/Tvix license split | Distribution and legal risk |
 | Removing limitation text early | No graph or closure rows | User sees support that cannot work |
 
 Jet is structurally safer when it keeps authority explicit and fails closed.

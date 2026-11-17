@@ -6119,7 +6119,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     comptime_functions = validation.functions.move()
     validation.functions = [SemaComptimeFunctionResult]{}
     if request.compiler_events {
-        loop event in jet_driver_checked_events(checked_graph, registration_graph.symbols, canonical_effect_module_identity) {
+        loop event in jet_driver_checked_events(checked_graph, registration_graph.symbols) {
             trace.events.push(event)
         }
     }
@@ -6214,7 +6214,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // (jet_driver_query_build_plan) reads them before generation.
         graph_complete: checked_graph.complete
         if kg.enabled -> checked_graph.complete = true
-        stages := jet_driver_stages(load, checked_graph, resolved_registration.symbols, canonical_effect_module_identity)
+        stages := jet_driver_stages(load, checked_graph, resolved_registration.symbols)
         info: jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources, checked_complete: graph_complete, stages: stages.move())
         checked_graph.complete = graph_complete
         registration_graph = resolved_registration.move()

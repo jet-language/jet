@@ -69,9 +69,9 @@ run: fn() -[Exec, IO, Time.Wait]> {
     report("bounded run", noisy)
     checked("bounded checked", noisy)
 
-    signalled: process.cmd(["sh", "-c", "kill -TERM $$"])
-    killed: process.run_spec(signalled) ?? panic("signal run failed")
-    print("signalled: success={killed.success} code={killed.code} signal={killed.signal ?? 0} exited={process.exited(killed)}")
+    signaled: process.cmd(["sh", "-c", "kill -TERM $$"])
+    killed: process.run_spec(signaled) ?? panic("signal run failed")
+    print("signaled: success={killed.success} code={killed.code} signal={killed.signal ?? 0} exited={process.exited(killed)}")
 
     slow: process.cmd(["sleep", "5"]).timeout(200ms)
     report("timeout run", slow)

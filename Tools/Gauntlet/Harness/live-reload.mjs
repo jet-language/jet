@@ -458,12 +458,12 @@ function validateAxisBudget(axis) {
 }
 
 function outputSpec(runner) {
-  const spec = runner.output ?? runner.acknowledgement ?? runner.output_acknowledgement;
+  const spec = runner.output ?? runner.output_acknowledgement;
   if (!spec || typeof spec.path !== "string" || spec.path.length === 0) {
-    throw new Error("axis runner must declare output acknowledgement path");
+    throw new Error("axis runner must declare output acknowledgment path");
   }
   if (spec.status !== undefined && (!Number.isInteger(spec.status) || spec.status < 100 || spec.status > 599)) {
-    throw new Error("axis output acknowledgement status must be an HTTP status");
+    throw new Error("axis output acknowledgment status must be an HTTP status");
   }
   return spec;
 }
@@ -1015,7 +1015,7 @@ export async function runLiveReloadLifecycleScenario({
     const goodOutputSha256 = good.output.body_sha256;
     scenario.observations.swap = {
       status: markerMatches(good.output.body, budget.edit_to, budget.edit_from) ? "marker_changed" : "not_observed",
-      evidence: "the output acknowledgement changed to the edited marker",
+      evidence: "the output acknowledgment changed to the edited marker",
       criterion: "output transition only; the existing protocol does not identify the swap mechanism",
     };
 
@@ -1059,7 +1059,7 @@ export async function runLiveReloadLifecycleScenario({
         : "the failed edit did not leave the last acknowledged marker in place",
       reason: exactOutputPreserved
         ? null
-        : "the output acknowledgement changed beyond the marker, so this protocol cannot prove the served last-good body",
+        : "the output acknowledgment changed beyond the marker, so this protocol cannot prove the served last-good body",
     };
     scenario.status = markerPreserved ? "complete" : "failed";
     if (!markerPreserved) scenario.reason = "failed edit did not preserve the last-good marker";
@@ -1109,14 +1109,14 @@ export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoD
   const probes = await probeAxisTools(envRunner, runnerDir, runner.tools, jetBin, { envRunnerArgs });
   const result = {
     id: runner.id,
-    output_acknowledgement: runner.output ?? runner.acknowledgement ?? runner.output_acknowledgement,
+    output_acknowledgement: runner.output ?? runner.output_acknowledgement,
     workload: axis.workload,
     tools: probes,
     tool_provenance: probes,
     source_files: files,
     edit_file: runner.edit_file,
     readiness: runner.readiness,
-    output: runner.output ?? runner.acknowledgement ?? runner.output_acknowledgement,
+    output: runner.output ?? runner.output_acknowledgement,
     declared_command: runner.command,
     status: "unmeasured",
     measurements: [],

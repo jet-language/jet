@@ -11,7 +11,8 @@
 // then each checked declaration by module path and declaration order, the
 // checked program, the round that settled it, and the compile's outcome
 // last. A compile settles in one round, whose new items are all of its
-// declarations.
+// declarations. The moments cover only what the program wrote: no module
+// the compiler supplies (Core, the Prelude) and no function sema injects.
 use {
     jet_foundation.[
         COMPILER_EVENT_CHECKED,
@@ -31,12 +32,11 @@ use {
         compiler_event_record,
         compiler_event_stage,
         module_is_core,
-        module_text,
         symbol_is_local,
         symbol_is_none,
         symbol_table_key,
     ]
-    jet_sema.[SemaGraphResult]
+    jet_sema.[JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SemaGraphResult]
 }
 
 // One row to order by: its path and its position in the list it indexes.
@@ -47,6 +47,12 @@ JetDriverEventOrder: struct {
 
 jet_driver_event_order: fn(rows: &[JetDriverEventOrder]) Never! {
     rows.sort_by(fn(left: JetDriverEventOrder, right: JetDriverEventOrder) { (left.path <=> right.path).then(left.index <=> right.index) })
+}
+
+// A module the compiler supplies, which no moment names: a Core module or
+// one of the canonical Prelude's error and effect declarations.
+jet_driver_event_module_is_supplied: fn(module_identity: ModuleID, package_identity: String) -> Bool Never! {
+    module_is_core(module_identity) || package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY
 }
 
 // One checked declaration a `compiler.declared` moment names: its name, its
@@ -79,38 +85,39 @@ jet_driver_declaration_list: fn(rows: [JetDriverDeclared]) -> TComptimeValue Nev
     TComptimeValue.List{values: values}
 }
 
-// The parsed and imported moments of a load: each loaded module outside
-// Core by its file's path; the entry module is parsed, not imported.
+// The parsed and imported moments of a load: each loaded module the
+// compiler does not supply, by its file's path and under its source name;
+// the entry module is parsed, not imported.
 jet_driver_load_events: fn(load: JetDriverLoadResult) -> [CompilerEventRecord] Never! {
     order := [JetDriverEventOrder]{}
     loop (index, loaded) in load.modules {
-        if module_is_core(loaded.module_identity) -> next
+        if jet_driver_event_module_is_supplied(loaded.module_identity, loaded.package_identity) {
+            next
+        }
         order.push(JetDriverEventOrder{path: load.source_units[loaded.source_unit_index].relative_path, index: index})
     }
     jet_driver_event_order(order)
     events := [CompilerEventRecord]{}
     loop row in order {
-        name: module_text(load.module_table, load.modules[row.index].module_identity)
-        events.push(compiler_event_record(COMPILER_EVENT_PARSED, [TComptimeValue]{TComptimeValue.String{value: row.path}, TComptimeValue.String{value: name}}))
+        events.push(compiler_event_record(COMPILER_EVENT_PARSED, [TComptimeValue]{TComptimeValue.String{value: row.path}, TComptimeValue.String{value: load.modules[row.index].module_name}}))
     }
     loop row in order {
         loaded: load.modules[row.index]
         if loaded.module_identity == load.entry_module_identity -> next
-        name: module_text(load.module_table, loaded.module_identity)
         files: TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: row.path}}}
-        events.push(compiler_event_record(COMPILER_EVENT_IMPORTED, [TComptimeValue]{TComptimeValue.String{value: name}, files}))
+        events.push(compiler_event_record(COMPILER_EVENT_IMPORTED, [TComptimeValue]{TComptimeValue.String{value: loaded.module_name}, files}))
     }
     events
 }
 
 // The declared, checked and settled moments of a checked program: each
-// function of a module outside Core (and other than the compiler-owned
-// effect module `effects`), by module path and declaration order, with the
-// names of the declarations it calls in first-call order.
-jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable, effects: ModuleID) -> [CompilerEventRecord] Never! {
+// function written in a module the compiler does not supply (not one sema
+// injected), by module path and declaration order, with the names of the
+// declarations it calls in first-call order.
+jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable) -> [CompilerEventRecord] Never! {
     order := [JetDriverEventOrder]{}
     loop (index, graph_module) in graph.modules {
-        if module_is_core(graph_module.module_identity) || graph_module.module_identity == effects {
+        if jet_driver_event_module_is_supplied(graph_module.module_identity, graph_module.package_identity) {
             next
         }
         order.push(JetDriverEventOrder{path: graph_module.module_path, index: index})
@@ -123,6 +130,7 @@ jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable, effe
         first: declared.len()
         places := [String:Int]{}
         loop function in graph_module.functions {
+            if graph_module.injected_function_keys.contains(function.key) -> next
             places[function.key] = declared.len()
             declared.push(JetDriverDeclared{name: function.name, module: graph_module.module_name, calls: [String]{}, complete: graph_module.complete})
         }
@@ -160,13 +168,13 @@ jet_driver_finished_event: fn(result: JetDriverCompileResult) -> CompilerEventRe
 // moments, then its checked declarations', each as its
 // `core.compiler.Event`, in the fixed order above. The build runs before the
 // program is emitted, so the list ends at the settled round.
-jet_driver_stages: fn(load: JetDriverLoadResult, graph: SemaGraphResult, symbols: SymbolTable, effects: ModuleID) -> [TComptimeValue] Never! {
+jet_driver_stages: fn(load: JetDriverLoadResult, graph: SemaGraphResult, symbols: SymbolTable) -> [TComptimeValue] Never! {
     stages := [TComptimeValue]{}
     loaded: jet_driver_load_events(load)
     loop record in loaded.move() {
         stages.push(compiler_event_stage(record.name, record.data.move()))
     }
-    checked: jet_driver_checked_events(graph, symbols, effects)
+    checked: jet_driver_checked_events(graph, symbols)
     loop record in checked.move() {
         stages.push(compiler_event_stage(record.name, record.data.move()))
     }

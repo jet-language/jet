@@ -1,4 +1,4 @@
-# #3260 — Observable grouped-collection behaviour (CORE-F036)
+# #3260 — Observable grouped-collection behavior (CORE-F036)
 
 Date: 2026-09-29. Binary: `jet-debug-snapshot14`. Author: Closer12. No compiler or Core change.
 

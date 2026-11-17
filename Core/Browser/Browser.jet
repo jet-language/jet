@@ -227,7 +227,7 @@ priv BrowserEngine: struct {
     impl Close {
         close: fn(&&self) {
             // Close cannot fail: an engine that already exited cannot be
-            // signalled, and wait still reaps it.
+            // signaled, and wait still reaps it.
             if self.session_url != "" {
                 http.__request("DELETE", self.session_url).send().drop("a gone driver session needs no delete")
             }
@@ -951,7 +951,7 @@ BrowserTestServer: struct {
     stop: fn(self) -[Exec, Time.Wait]> Never! {
         guard := self.__state.guard_edit()
         if guard.value.child == .Val(child) {
-            // A child that already exited cannot be signalled; wait still reaps it.
+            // A child that already exited cannot be signaled; wait still reaps it.
             child.kill() ?? ()
             if child.wait() == .Ok(receipt) {
                 guard.value.logs = bounded_text("{receipt.output}{receipt.errors}", C_MAX_SERVER_LOG_BYTES)

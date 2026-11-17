@@ -388,8 +388,8 @@ async_payload_free: fn(payload: I64, meta: I64) {
 }
 
 // hard_cancel_state :1316-1339: once; every queued and blocked entry ends
-// Cancelled (a queued one accepted), and the running one's task is
-// cancelled so its handler stops at its next wait.
+// `Cancelled` (a queued one accepted), and the running one's task is
+// canceled so its handler stops at its next wait.
 async_hard_cancel: fn(core: I64) {
     async_lock(core)
     if (sync_load(wrapping(core + I64{112})) != I64{0}) {
@@ -446,7 +446,7 @@ async_prune_listeners: fn(core: I64) {
 }
 
 // JetAsyncEvent::add :1086-1128 (on / once / on_priority): the scope tracks
-// the subscription and the event's hard cancel; a cancelled scope returns
+// the subscription and the event's hard cancel; a canceled scope returns
 // the subscription inactive and the handler is released unregistered.
 #Export(c) jet_async_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
     sub: event_sub_new()
@@ -665,7 +665,7 @@ async_handler_line: fn(lines: I64, index: I64, outcome: I64) {
 // handler's `Result<Unit, E>` lands in `scratch`: an Err is a failure the
 // FailurePolicy keeps (StopFirst and Collect), logs or ignores. A panic is a
 // Panic failure that ends the run HandlerFailed; a cancel or deadline stop
-// ends it Cancelled or DeadlineExceeded, and any other stop ends the task
+// ends it `Cancelled` or `DeadlineExceeded`, and any other stop ends the task
 // with no report.
 async_dispatch: fn(core: I64, entry: I64) -> I64 {
     event_words_remove(wrapping(core + I64{48}), I64{0})

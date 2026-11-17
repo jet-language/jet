@@ -207,7 +207,7 @@ Real Parquet/Arrow reading, encoding coverage, corruption limits, bounded out-of
 
 ### What the application must do
 
-Accept requests, authenticate them, use a database pool, enforce deadlines and load limits, record useful observations, and stop cleanly. A request may be cancelled after it has performed an external effect. Shutdown may race with a callback or a database response.
+Accept requests, authenticate them, use a database pool, enforce deadlines and load limits, record useful observations, and stop cleanly. A request may be canceled after it has performed an external effect. Shutdown may race with a callback or a database response.
 
 ### Current source
 
@@ -300,7 +300,7 @@ The typed result is not a promise that the search is good. Relevance evaluation 
 
 The beginner chooses a declared model package and supplies text. The expert inspects tensor shapes, numerical format, operator/provider selection, retained cache, device transfers, batch limits, and reproducibility scope. A requested GPU that is unavailable does not silently become CPU when the existing policy forbids fallback.
 
-A tokenizer mismatch, wrong vector dimension, incompatible index metric, exhausted context, unsupported operator, and cancelled stream are distinct failures. A model cannot acquire tool authority by emitting a string that resembles a command.
+A tokenizer mismatch, wrong vector dimension, incompatible index metric, exhausted context, unsupported operator, and canceled stream are distinct failures. A model cannot acquire tool authority by emitting a string that resembles a command.
 
 ### What still has to ship
 
@@ -346,7 +346,7 @@ The workbench can show why a field updated, which dependency triggered it, and w
 | Input-method composition | No premature commit or lost composed text |
 | Resize or display-scale change | Pointer conversions use the matching coordinate/frame context |
 | Undo during pending work | New revision is coherent; old work cannot overwrite it |
-| Close during search | Work is cancelled/accounted for and cannot reach a replacement document |
+| Close during search | Work is canceled/accounted for and cannot reach a replacement document |
 | Error state | Field association, readable text, and accessible announcement |
 | No color or reduced motion | Meaning and focus remain available |
 

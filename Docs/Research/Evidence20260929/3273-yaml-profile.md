@@ -1,4 +1,4 @@
-# 3273 — YAML version, trailing input, unsupported features and resource behaviour
+# 3273 — YAML version, trailing input, unsupported features and resource behavior
 
 Date: 2026-09-29. Closer02. Binary: jet-debug-snapshot14 via `$JET_STATE_ROOT/safe-jet.sh`.
 

@@ -17,14 +17,14 @@
 ## Wisdom (Communities)
 
 - [r/weightroom](https://reddit.com/r/weightroom)
-  High-signal subreddit, moderated against bro-science. Use for: programme critique, plateau troubleshooting.
+  High-signal subreddit, moderated against bro-science. Use for: program critique, plateau troubleshooting.
 - Local: Tuesday strength class at {gym name}
   Use for: real-time coaching feedback on lifts.
 ```
 
 ## Rules
 
-- **High-trust only.** Prefer primary sources, recognised experts, peer-reviewed work, and communities with strong moderation. If a resource is marketing dressed as education, leave it out.
+- **High-trust only.** Prefer primary sources, recognized experts, peer-reviewed work, and communities with strong moderation. If a resource is marketing dressed as education, leave it out.
 - **Annotate every entry.** A bare link is useless in three months. Add one line: what it covers and when to reach for it.
 - **Group by Knowledge / Wisdom.** Mirrors the philosophy in [SKILL.md](./SKILL.md). It is fine for a resource to appear in only one group.
 - **Surface gaps explicitly.** If no good resource exists for an area the mission needs, write a `## Gaps` section listing what is missing. This drives future search.

@@ -3743,7 +3743,7 @@ use {
 // opens offline with current data. The system picks the moment
 // (BGTaskScheduler on iOS, WorkManager on Android, a timer on desktops); 30
 // minutes is a floor, not a promise. A run that passes the system's time
-// budget is cancelled like any other task. No window is open while it runs,
+// budget is canceled like any other task. No window is open while it runs,
 // so a failed run's notice goes to the app's log; the next run is on the
 // system's schedule as usual.
 //
@@ -4289,7 +4289,7 @@ crew_tokens: fn() -> CrewTheme Never! {
         surface: ui.paint(light: ui.rgb(0xf3f4f6), dark: ui.rgb(0x15171c)),
         card: ui.paint(light: ui.rgb(0xffffff), dark: ui.rgb(0x1f232b)),
         text: ui.paint(light: ui.rgb(0x111318), dark: ui.rgb(0xeceef2)),
-        // Grey text is the first to fail when a person asks for more contrast.
+        // Gray text is the first to fail when a person asks for more contrast.
         muted: ui.paint(light: ui.rgb(0x5b6270), dark: ui.rgb(0xa3aab8), contrast_light: Val(ui.rgb(0x2f3440)), contrast_dark: Val(ui.rgb(0xd5d9e0))),
         danger: ui.paint(light: ui.rgb(0xb42318), dark: ui.rgb(0xff8a80)),
         gap: ui.px(12),
@@ -5792,7 +5792,7 @@ Upload: struct {
     bytes: Int,
 }
 
-// Media types the server recognises from a file's first bytes.
+// Media types the server recognizes from a file's first bytes.
 Media: enum {
     Image,
     PDF,
@@ -6248,7 +6248,7 @@ link: fn<V>(to: V, body: ui.Node) -> ui.Node Never! { panic("stub") }
 // key when rows move, appear or are filtered out.
 list: fn<T, K>(items: [T], key: fn(T) -> K, row: fn(T) -> ui.Node) -> ui.Node Never! { panic("stub") }
 // A handler runs as a task: the button shows it is busy, refuses a second
-// press, and the task is cancelled if the screen closes. Its error becomes
+// press, and the task is canceled if the screen closes. Its error becomes
 // an app.Notice that the frame shows beside the button.
 button: fn(label: String, on_click: fn() app.Notice!) -> ui.Node Never! { panic("stub") }
 // An icon-only button must say what it does: `label` has no default.

@@ -1,0 +1,241 @@
+// The system bus for the app in ../main.jet, with logind on it. It is its
+// own package, so the app's package does not hold it. It listens at
+// system.sock in the directory it runs in and writes bus.ready once it
+// listens. It answers the app's calls: Hello (the name is the app's) and
+// the rest, AddMatch among them, with an empty answer. Once the app has
+// asked for a match and the compositor has written sleep.go, logind says
+// the machine goes to sleep (PrepareForSleep true), then that it woke
+// (PrepareForSleep false). Once the app has closed the connection it
+// writes heard.txt: a line with the members the app called, in order, and
+// a line with each match rule it asked for.
+use {
+    files: core.files
+    net: core.net
+}
+
+APP: ":1.48"
+
+LOGIND: ":1.2"
+
+run: fn() -[FS, Net, Time]> {
+    listener: net.unix_listen("system.sock") ?? panic("listen on system.sock: {err}")
+    files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
+    stream := net.unix_accept(listener) ?? panic("accept on system.sock: {err}")
+    said := [U8]{}
+    authenticated := false
+    sent := 0
+    members := [String]{}
+    rules := [String]{}
+    slept := false
+    idle := 0
+    loop idle < 6000 {
+        if !slept && rules.len() > 0 && files.exists("sleep.go") {
+            slept = true
+            net.unix_write_all_bytes(stream, prepare_for_sleep(sent + 1, true)) ?? panic("write to the app: {err}")
+            net.unix_write_all_bytes(stream, prepare_for_sleep(sent + 2, false)) ?? panic("write to the app: {err}")
+            sent += 2
+        }
+        ready: net.unix_wait(stream, 10000000) ?? break
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        got: net.unix_receive(stream, 4096) ?? break
+        if got.bytes.len() == 0 -> break
+        loop b in got.bytes -> said.push(b)
+        if !authenticated {
+            // The credentials byte and the AUTH line come first, then
+            // BEGIN and the calls.
+            line_end: crlf_at(said, 0)
+            if line_end < 0 -> next
+            net.unix_write_all_bytes(stream, "OK 0123456789abcdef0123456789abcdef\r\n".bytes()) ?? panic("answer AUTH: {err}")
+            said = said[line_end..<said.len()].copy()
+            authenticated = true
+        }
+        if said.len() >= 7 && String.from_bytes_lossy(said[0..<7].copy()) == "BEGIN\r\n" {
+            said = said[7..<said.len()].copy()
+        }
+        loop said.len() >= 16 && said.len() >= message_length(said) {
+            n: message_length(said)
+            m: said[0..<n].copy()
+            said = said[n..<said.len()].copy()
+            kind: Int{m[1]}
+            if kind != 1 -> next
+            sent += 1
+            member: text_field(m, 3)
+            members.push(member.copy())
+            body := [U8]{}
+            signature := ""
+            if member == "Hello" {
+                put_text(body, APP)
+                signature = "s"
+            }
+            if member == "AddMatch" {
+                asked: body_of(m)
+                rules.push(String.from_bytes_lossy(asked[4..<(4 + word(asked, 0))].copy()))
+            }
+            net.unix_write_all_bytes(stream, reply(sent, word(m, 8), signature, body)) ?? panic("answer the app: {err}")
+        }
+    }
+    files.write("heard.txt", "{members.join(" ")}\n{rules.join("\n")}\n") ?? panic("write heard.txt: {err}")
+}
+
+// The bus's answer `serial` to the app's call `to`.
+reply: fn(serial: Int, to: Int, signature: String, body: [U8]) -> [U8] {
+    out := start(2, serial)
+    field_word(out, 5, to)
+    field_text(out, 6, 115, APP)
+    field_text(out, 7, 115, "org.freedesktop.DBus")
+    if signature != "" -> field_signature(out, 8, signature)
+    finish(out, body)
+    out
+}
+
+// logind's signal `serial` that the machine goes to sleep (`sleeping`) or
+// woke.
+prepare_for_sleep: fn(serial: Int, sleeping: Bool) -> [U8] {
+    out := start(4, serial)
+    field_text(out, 1, 111, "/org/freedesktop/login1")
+    field_text(out, 2, 115, "org.freedesktop.login1.Manager")
+    field_text(out, 3, 115, "PrepareForSleep")
+    field_text(out, 7, 115, LOGIND)
+    field_signature(out, 8, "b")
+    body := [U8]{}
+    put_word(body, if sleeping -> 1 else -> 0)
+    finish(out, body)
+    out
+}
+
+// A message's fixed header: little-endian, `kind`, no flags, version 1;
+// `finish` fills in the lengths.
+start: fn(kind: Int, serial: Int) -> [U8] {
+    out := [U8]{U8{108}, U8{kind}, U8{0}, U8{1}}
+    put_word(out, 0)
+    put_word(out, serial)
+    put_word(out, 0)
+    out
+}
+
+// Ends the header fields of `out` and adds `body`.
+finish: fn(out: &[U8], body: [U8]) {
+    set_word(out, 12, out.len() - 16)
+    pad(out, 8)
+    set_word(out, 4, body.len())
+    loop b in body -> out.push(b)
+}
+
+// A header field `code` holding a string (115) or an object path (111).
+field_text: fn(out: &[U8], code: Int, kind: Int, text: String) {
+    field_head(out, code, kind)
+    put_text(out, text)
+}
+
+// A header field `code` holding a number.
+field_word: fn(out: &[U8], code: Int, n: Int) {
+    field_head(out, code, 117)
+    put_word(out, n)
+}
+
+// A header field `code` holding a signature.
+field_signature: fn(out: &[U8], code: Int, signature: String) {
+    field_head(out, code, 103)
+    out.push(U8{signature.len()})
+    loop b in signature.bytes() -> out.push(b)
+    out.push(U8{0})
+}
+
+// A header field's code and the signature of its value, the one type
+// `kind`, from an 8-byte boundary.
+field_head: fn(out: &[U8], code: Int, kind: Int) {
+    pad(out, 8)
+    out.push(U8{code})
+    out.push(U8{1})
+    out.push(U8{kind})
+    out.push(U8{0})
+}
+
+// A string: its length, its bytes and a NUL, from a 4-byte boundary.
+put_text: fn(out: &[U8], text: String) {
+    pad(out, 4)
+    put_word(out, text.len())
+    loop b in text.bytes() -> out.push(b)
+    out.push(U8{0})
+}
+
+// `n` as a little-endian 32-bit word.
+put_word: fn(out: &[U8], n: Int) {
+    loop b in word_bytes(n) -> out.push(b)
+}
+
+set_word: fn(out: &[U8], at: Int, n: Int) {
+    loop (i, b) in word_bytes(n) -> out[at + i] = b
+}
+
+word_bytes: fn(n: Int) -> [U8] {
+    v := n
+    bytes := [U8]{}
+    loop _ in 0..<4 {
+        bytes.push(U8{v % 256})
+        v = v /% 256
+    }
+    bytes
+}
+
+pad: fn(out: &[U8], to: Int) {
+    loop out.len() % to != 0 -> out.push(U8{0})
+}
+
+// The body of the message `m`.
+body_of: fn(m: [U8]) -> [U8] { m[(16 + aligned(word(m, 12), 8))..<m.len()].copy() }
+
+// The text of the header field `code` of the message `m`, a string or an
+// object path, or "".
+text_field: fn(m: [U8], code: Int) -> String {
+    at: field_at(m, code)
+    if at < 0 -> return ""
+    String.from_bytes_lossy(m[(at + 4)..<(at + 4 + word(m, at))].copy())
+}
+
+// Where the value of the header field `code` of the message `m` starts, or
+// -1.
+field_at: fn(m: [U8], code: Int) -> Int {
+    end: 16 + word(m, 12)
+    at := 16
+    loop at < end {
+        found: Int{m[at]}
+        kind: Int{m[at + 2]}
+        at += 4
+        if kind != 103 -> at = aligned(at, 4)
+        if found == code -> return at
+        if kind == 103 {
+            // A signature: a length byte, the text and a NUL.
+            at += Int{m[at]} + 2
+        } else if kind == 117 { at += 4 } else {
+            // A string or an object path: a length word, the text and a NUL.
+            at += 4 + word(m, at) + 1
+        }
+        at = aligned(at, 8)
+    }
+    -1
+}
+
+// Where the CR LF that ends the first line of `bytes` after `from` ends, or
+// -1.
+crlf_at: fn(bytes: [U8], from: Int) -> Int {
+    loop i in from..<(bytes.len() - 1) {
+        if (Int{bytes[i]}) == 13 && (Int{bytes[i + 1]}) == 10 -> return i + 2
+    }
+    -1
+}
+
+// The length of the message `m` starts with: its fixed header, its header
+// fields padded to 8 bytes, and its body.
+message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
+
+aligned: fn(at: Int, to: Int) -> Int { (at + to - 1) /% to * to }
+
+// The little-endian 32-bit word at `at` of `bytes`.
+word: fn(bytes: [U8], at: Int) -> Int {
+    Int{bytes[at]} + (Int{bytes[at + 1]}) * 256 + (Int{bytes[at + 2]}) * 65536 + (Int{bytes[at + 3]}) * 16777216
+}

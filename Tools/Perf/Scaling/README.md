@@ -42,7 +42,7 @@ the twin enqueue's proofq jobs run the RunGate twin. The report twin
 Set `RUST_JET` and `JETC0` to the current dev head's shared pair recorded in
 `$JET_STATE_ROOT/dev-artifacts.json`, after that head includes these counters.
 Changing compiler binaries requires fresh receipt roots. Older candidates may
-be additional explicitly labelled historical comparisons, not the current gate.
+be additional explicitly labeled historical comparisons, not the current gate.
 
 Every corpus is measured in two layouts: `files` (as generated, many files)
 and `single` (one main.jet). A compiler that fails the multi-file layout fails

@@ -117,13 +117,13 @@ interrupted: fn(l: Lander) {
 // What a drain's signal watcher and its steps share: whether TERM, INT or HUP
 // arrived, and the running precommit.
 Interrupt: struct {
-    signalled: Bool,
+    signaled: Bool,
     pre: ProcessChild?,
 }
 
 // A drain step boundary: after a held signal, revert and end with 143.
 checkpoint: fn(l: Lander, stop: Shared<Interrupt>) {
-    if !stop.guard_read().value.signalled {
+    if !stop.guard_read().value.signaled {
         return
     }
     interrupted(l)
@@ -133,7 +133,7 @@ checkpoint: fn(l: Lander, stop: Shared<Interrupt>) {
 // Once a signal has arrived, stops the running precommit with every process
 // it started (a child leads its own process group).
 halt: fn(state: &Interrupt) {
-    if state.signalled && state.pre == .Val(pre) -> pre.terminate() ?? ()
+    if state.signaled && state.pre == .Val(pre) -> pre.terminate() ?? ()
 }
 
 // Records the running precommit (None: none), and stops it when a signal came first.
@@ -281,7 +281,7 @@ drain: fn(l: Lander, stop: Shared<Interrupt>) {
 // watcher marks the arrival and stops the precommit, and the drain's next
 // step reverts. Closing gives the signals their default action back.
 drain_trapped: fn(l: Lander) {
-    stop: Shared{Interrupt{signalled: false, pre: None}}
+    stop: Shared{Interrupt{signaled: false, pre: None}}
     trap: process.signals([process.ProcessSignal]{.Term, .Int, .Hup}) ?? process.fail(1, "lane-commit: cannot take SIGTERM, SIGINT and SIGHUP")
     arrivals: trap.receiver.copy()
     // Copies of a shared value share its cell.
@@ -289,7 +289,7 @@ drain_trapped: fn(l: Lander) {
     watcher: task {
         _ := arrivals.receive() ?? return
         edit: seen.guard_edit()
-        edit.value.signalled = true
+        edit.value.signaled = true
         halt(edit.value)
     }
     drain(l, stop.copy())

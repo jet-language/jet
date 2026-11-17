@@ -1,5 +1,5 @@
 // Jetpack terminal output, ported from jet_foundation::Terminal (the shared
-// colour policy and palette roles) and jetpack::Output (the one `Theme`
+// color policy and palette roles) and jetpack::Output (the one `Theme`
 // every Jetpack line goes through). Output is quiet, aligned,
 // colored and TTY-aware: one `color` flag flips every line, so
 // `--no-color` / `NO_COLOR` reach every surface through that single value.
@@ -49,7 +49,7 @@ TERMINAL_SPINNER_FRAMES: [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 // hex escape, so the byte is built here once.
 terminal_esc: fn() -> String Never! { String.from_bytes([U8]{U8{27}}) ?? "" }
 
-// The explicit colour choice a user made on the command line.
+// The explicit color choice a user made on the command line.
 ColorChoice: enum {
     Auto,
     Always,
@@ -74,7 +74,7 @@ ColorChoice: enum {
     }
 }
 
-// THE `auto` colour ladder (jet_foundation::Outcome::jet_terminal_auto_color):
+// THE `auto` color ladder (jet_foundation::Outcome::jet_terminal_auto_color):
 // a present `NO_COLOR` wins, then a present `FORCE_COLOR`, then the stream.
 terminal_auto_color: fn(is_tty: Bool) -[Env]> Bool Never! {
     if sys.get("NO_COLOR") != None -> return false
@@ -117,7 +117,7 @@ TerminalPalette: struct {
 }
 
 // A mutation plan row's mark. Plain output keeps the symbol, so logs and
-// reviews read the same plan without colour.
+// reviews read the same plan without color.
 PlanMark: enum {
     Add,
     Remove,
@@ -380,7 +380,7 @@ Theme: struct {
     // cause. A Theme outside an invocation prints each card at once.
     invocation: Shared<DiagnosticCollector>?{None},
 
-    // The deterministic no-colour floor.
+    // The deterministic no-color floor.
     plain: fn() -> Theme Never! { Theme{color: false} }
 
     // Compatibility entry point: `true` is the historical no-color flag.
@@ -473,7 +473,7 @@ Theme: struct {
         "{symbol} {self.bold(terminal_pad_end(name, name_w))}  {self.gray(from)} -> {self.gray(to)}"
     }
 
-    // A mutation plan row. Colour carries the mark on a TTY; plain output
+    // A mutation plan row. Color carries the mark on a TTY; plain output
     // keeps the same + / - / ~ symbols.
     plan_row: fn(self, mark: PlanMark, name: String, name_w: Int, from: String, to: String) -[IO, Time.Wait]> Never! {
         terminal_write_output("{terminal_pad()}{self.render_plan_row(mark, name, name_w, from, to)}\n")
@@ -579,12 +579,12 @@ Theme: struct {
         }
         terminal_write_output("  {self.gutter()}  Apply? [y/N] ")
         answer: term.readline() ?? {
-            self.status("plan cancelled.")
+            self.status("plan canceled.")
             return false
         }
         reply: answer.trim().to_lower()
         apply: reply == "y" || reply == "yes"
-        if !apply -> self.status("plan cancelled.")
+        if !apply -> self.status("plan canceled.")
         apply
     }
 
@@ -606,21 +606,21 @@ Theme: struct {
             }
             terminal_write_output("  {self.gutter()}  Use and remember this catalog for this project? [Y/n] ")
             answer: term.readline() ?? {
-                self.status("catalog setup cancelled.")
+                self.status("catalog setup canceled.")
                 return None
             }
             reply: answer.trim().to_lower()
             if reply == "" || reply == "y" || reply == "yes" -> return Val(path)
-            self.status("catalog setup cancelled.")
+            self.status("catalog setup canceled.")
             return None
         }
         terminal_write_output("  {self.gutter()}  Local catalog directory: ")
         answer: term.readline() ?? {
-            self.status("catalog setup cancelled.")
+            self.status("catalog setup canceled.")
             return None
         }
         if answer.trim() == "" {
-            self.status("catalog setup cancelled.")
+            self.status("catalog setup canceled.")
             return None
         }
         Val(answer.trim())
@@ -629,7 +629,7 @@ Theme: struct {
     // The threshold rule entering and leaving an environment:
     // `  ── myproj ─ temporary shell · exit to leave ──────────────`.
     // The label is bold cyan; the rest is quiet. It reads the same without
-    // colour, so the threshold survives NO_COLOR.
+    // color, so the threshold survives NO_COLOR.
     rule: fn(self, segments: [String]) -[IO, Env, Time.Wait]> Never! {
         if segments.len() == 0 {
             return

@@ -13,7 +13,7 @@ Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-disposit
 
 ## Scope and evidence
 
-At activation, record the target surface and its reachable corpus. Search live specs, examples, stdlib, CLI/tooling, and direct analogues that explain the target. Include dependencies needed to understand it, not unrelated Jet. Prefer `Tools/Agent/JetEnv.jet` and repository search over memory. Use the standing-lens sections relevant to this scope and probe the running binary when a claim is executable.
+At activation, record the target surface and its reachable corpus. Search live specs, examples, stdlib, CLI/tooling, and direct analogs that explain the target. Include dependencies needed to understand it, not unrelated Jet. Prefer `Tools/Agent/JetEnv.jet` and repository search over memory. Use the standing-lens sections relevant to this scope and probe the running binary when a claim is executable.
 
 ## Ten-category sweep
 
@@ -34,4 +34,4 @@ For each outlier, use exactly one kind: **inconsistent** (same idea, two spellin
 
 ## Completion and output
 
-Stop when every reachable source and direct analogue is accounted for, all ten category rows are recorded, every finding has evidence and a concrete action or an honest `unknown`, and the disposition marker is complete. A report-only run writes one report under `Docs/Audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion remains separate from implementation completion.
+Stop when every reachable source and direct analog is accounted for, all ten category rows are recorded, every finding has evidence and a concrete action or an honest `unknown`, and the disposition marker is complete. A report-only run writes one report under `Docs/Audits/` through the project-approved non-serve CLI, cites Tower read-only, and creates no cards, decisions, ballots, or implementation edits unless the owner explicitly changes the boundary. Report completion remains separate from implementation completion.

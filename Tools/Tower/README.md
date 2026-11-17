@@ -60,7 +60,7 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   Each epoch has a `name`, a `goal` description, a `status`, an `order`, and
   `exitCriteria` that say what finishing it means. Every listing — `epoch list`,
   the radar, the Board view, briefings, and `next` — shows epochs by `order`,
-  then by id number. An epoch is labelled `E18` or `E18 <name>`; the stored id
+  then by id number. An epoch is labeled `E18` or `E18 <name>`; the stored id
   stays `e18`. `epoch remove` is refused while any card (live in any phase, or
   archived) or milestone still points at the epoch, and the refusal names the
   counts.
@@ -207,7 +207,7 @@ the draft. Copy your edits before using **Cancel** or **Escape** to load the
 latest file, then merge your changes into it.
 
 Drafts survive navigation between Tower tabs and failed requests. Edits typed
-while a save is pending remain unsaved after its acknowledgement. Drafts are
+while a save is pending remain unsaved after its acknowledgment. Drafts are
 held only in the current page; canceling, reloading, or closing it discards them.
 
 This is one fixed-path editor, not a general source editor. Generic Docs

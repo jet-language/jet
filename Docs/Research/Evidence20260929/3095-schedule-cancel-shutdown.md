@@ -3,7 +3,7 @@
 Closer07, 2026-09-29. Binary: `jet-debug-snapshot14` (sha256 prefix `00b1e35e25ed941c`). Scratch: `$JET_STATE_ROOT/scratch/Closer07/sched/` (package allows FS, Time, IO, Log, Mem.Alloc).
 
 ## Question
-After `tasks.cancel`, does the timer/interval producer stop? At process or App shutdown, are scheduled producers cancelled and joined, or reported rather than silently outliving? Does this hold on JIT (`jet run`), `--interpret` and AOT?
+After `tasks.cancel`, does the timer/interval producer stop? At process or App shutdown, are scheduled producers canceled and joined, or reported rather than silently outliving? Does this hold on JIT (`jet run`), `--interpret` and AOT?
 
 ## Evidence
 ### `cancel_after.jet`
@@ -17,7 +17,7 @@ c :: tasks.after(60000ms, 9); c2 :: tasks.cancel(c); print(c2.receive() ?? -1); 
   Stop [E3013]: Parked tasks remain at process exit:
     task@0 (spawn site 0)  state: blocked  wait target: time sleep
   ```
-  Exit **70**, wall 5 s. The cancelled one-shot timer's producer is still parked at exit, so a program that correctly cancelled its timer fails at exit.
+  Exit **70**, wall 5 s. The canceled one-shot timer's producer is still parked at exit, so a program that correctly canceled its timer fails at exit.
 - `--interpret`: `E0956 core.tasks.after() isn't supported by the current evaluator yet`.
 - AOT (`safe-jet.sh build`): `internal compiler error: MIR nominal type "time.Duration" has no declaration row`.
 
@@ -40,7 +40,7 @@ cancel+100ms Threads: 35
 cancel+600ms Threads: 35
 Stop [E3013]: Parked tasks remain at process exit: task@0 … wait target: time sleep
 ```
-Exit 70. The thread count does not return toward baseline after cancellation. Some of the 35 threads are likely scheduler workers, so this is not a per-producer count; the E3013 report is the direct evidence that a cancelled producer outlives `cancel`.
+Exit 70. The thread count does not return toward baseline after cancellation. Some of the 35 threads are likely scheduler workers, so this is not a per-producer count; the E3013 report is the direct evidence that a canceled producer outlives `cancel`.
 
 `tasks.sleep(1)` itself fails on JIT: `internal compiler error: checked TIR cannot lower to MIR … __jet_core_core_tasks::__jet_host_sleep_ms: missing checked MIR owner type` (`sleep_ice.jet`).
 

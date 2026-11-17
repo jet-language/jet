@@ -33,7 +33,7 @@ Warnings: `msgfmt` warned only about missing `PO-Revision-Date`, `Last-Translato
 
 ## Contract table (criterion 1)
 
-| job | peer behaviour observed | Jet mapping | cell |
+| job | peer behavior observed | Jet mapping | cell |
 |---|---|---|---|
 | Literal IDs | `_("Save")`, `N_("Draft")`, `N_("Published")` → `msgid` entries with `#: app.c:12` / `app.c:8` references | Parser `Expr.Str(parts, span)` (`Compiler/JetAst/Source/AST/Expressions.jet:5`) is a literal ID only if every `StrPart` is `.Lit` (`:204-207`). The span supplies file:line | unsupported (no marker call exists; parser data is sufficient) |
 | Plural forms | `ngettext("%d file", "%d files", n)` → `msgid`/`msgid_plural`, `#, c-format`; `de.po` `Plural-Forms: nplurals=2; plural=(n != 1)` compiled | needs a two-literal marker plus a runtime plural rule; the rule belongs to #3289/#3307 | unsupported |

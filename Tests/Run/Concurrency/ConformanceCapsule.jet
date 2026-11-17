@@ -124,7 +124,7 @@ sibling: fn(done: Sender<Int>) -> Int {
     1
 }
 
-// task.all: first failure keeps its identity; the sibling is cancelled at
+// task.all: first failure keeps its identity; the sibling is canceled at
 // its sleep wait point and never reports completion.
 failfast_cell: fn() {
     { sender: done_tx, receiver: done }: channel<Int>(capacity: 2)
@@ -134,7 +134,7 @@ failfast_cell: fn() {
     }
     if {
         _v, done -> { print("failfast: sibling completed") }
-        after 400ms -> { print("failfast: sibling cancelled at wait point") }
+        after 400ms -> { print("failfast: sibling canceled at wait point") }
     }
 }
 

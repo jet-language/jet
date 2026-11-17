@@ -2,7 +2,7 @@
 // into typed records; every value travels as a bound parameter of a prepared
 // statement; a rolled-back transaction leaves no rows; the bounded pool
 // times out a waiter, releases a lease exactly once,
-// forgets a cancelled waiter, and refuses work while it drains; a closed
+// forgets a canceled waiter, and refuses work while it drains; a closed
 // connection refuses further queries. Another engine or driver is an owner
 // ballot, not something a URL name implies.
 package: {
@@ -108,7 +108,7 @@ run: fn() {
     held.close() ?? panic("second release")
     print("after release: {pool.receipt()}")
 
-    // Cancellation: a cancelled waiter gives up its place in the queue.
+    // Cancellation: a canceled waiter gives up its place in the queue.
     blocker: pool.acquire(deadline: 100ms) ?? panic("blocking lease")
     { sender: started_tx, receiver: started_rx }: channel<Int>(capacity: 1)
     waiter: task wait_for_lease(pool, started_tx)
@@ -120,8 +120,8 @@ run: fn() {
         .Err(error) -> print("waiter: {failure_label(error)}")
     }
     blocker.close() ?? panic("blocker release")
-    next: pool.acquire(deadline: 100ms) ?? panic("lease after a cancelled waiter")
-    print("lease after the cancelled waiter: {next}")
+    next: pool.acquire(deadline: 100ms) ?? panic("lease after a canceled waiter")
+    print("lease after the canceled waiter: {next}")
 
     // Draining refuses new leases; the held one still releases, then drain ends.
     if pool.drain(deadline: 20ms) == {

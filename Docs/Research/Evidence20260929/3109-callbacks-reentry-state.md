@@ -31,7 +31,7 @@ Probe `$JET_STATE_ROOT/scratch/Closer07/plugin/xthread2.jet`: load mathkit on th
 - With the task's `?? { print(err) … }` fallback: E0107 "Nothing named `err` exists here", pointed at the `task {` span (`xthread_err_capture.jet`). The implicit `err` of a `??` block is not visible inside a task body.
 - `xthread.jet` uses `mathkit` again on the owner thread after it was captured by the task. Instead of a use-after-move diagnostic, it gives an ICE on both JIT and interpreter: `MIR pass legality-verification rejected the program: … uses moved place … at 402..407` (the later `mathkit.gcd` use).
 
-So the Component handle's cross-thread behaviour is **not observable** on any hosted tier today:
+So the Component handle's cross-thread behavior is **not observable** on any hosted tier today:
 - the interpreter silently skips task bodies;
 - the JIT ICEs on plugin calls and on task drops;
 - the checker lets the handle move into a task, then ICEs on later owner use rather than rejecting it by ownership law.

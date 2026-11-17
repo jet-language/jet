@@ -66,7 +66,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
-- **What it delivers**: the end-to-end behaviour this ticket makes work
+- **What it delivers**: the end-to-end behavior this ticket makes work
 
 Ask the user:
 
@@ -97,7 +97,7 @@ A reference to the parent Tower card, if the source was an existing card; otherw
 
 ## What to build
 
-The end-to-end behaviour this ticket makes work, from the user's perspective — not layer-by-layer implementation.
+The end-to-end behavior this ticket makes work, from the user's perspective — not layer-by-layer implementation.
 
 ## Acceptance criteria
 

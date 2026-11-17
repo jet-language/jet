@@ -73,7 +73,7 @@ jet Tools/Tower/Board.jet lint --docs [--docs-root DIR] [--json]
                               # on any finding, 0 clean
 tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
-tower epoch list [--json]    # epochs in `order`, labelled E18 <name>, with exit criteria
+tower epoch list [--json]    # epochs in `order`, labeled E18 <name>, with exit criteria
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
@@ -636,7 +636,7 @@ built program, so they are judged against the binary `jet build` writes; the
 first group is that Jet's column and theirs. Interpreted peers (Python, Node,
 Bun, Lua, LuaJIT) start from source, so they are judged against `jet run`
 (compile and run in one step, no binary written); the second group is that
-Jet's column and theirs. Every peer cell is coloured by how its group's Jet
+Jet's column and theirs. Every peer cell is colored by how its group's Jet
 does against it. The standings section names each peer's Jet in `jet_modes`
 (the interpreter set is `STANDINGS_INTERPRETERS` in `run.mjs`). The harness
 records the `jet run` tier as the table row `jet-run`, beside the built
@@ -672,10 +672,10 @@ rows into it as soon as that entry is measured, from a run in any worktree,
 and reuses a row whose program and toolchain are unchanged instead of
 measuring it again (`--remeasure` forces it). Cells the table has no row for
 read "not measured yet". A measured cell shows its values at a glance and is
-grey until Jet is measured, then green or red by whether Jet beats it; an asm
+gray until Jet is measured, then green or red by whether Jet beats it; an asm
 ceiling a peer beats is flagged red. Clicking a cell opens its detail against
 the Jet that judges it, on every metric, and each chart shows a bar for each
-Jet mode. The summary pills and the text table give the one judgement. The
+Jet mode. The summary pills and the text table give the one judgment. The
 page refetches the table every 20 s.
 `node Tools/Gauntlet/Harness/table.mjs import
 RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows.

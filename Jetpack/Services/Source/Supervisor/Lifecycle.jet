@@ -732,7 +732,7 @@ services_watch_changed_debounced: fn(project_dir: String, paths: [String], stamp
 }
 
 // Stop `plan` if a verified service process is on record: TERM, a bounded
-// grace wait, then KILL. A PID-only legacy record is dropped, never signalled.
+// grace wait, then KILL. A PID-only legacy record is dropped, never signaled.
 services_down_one: fn(host: ServiceHost, project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Rand, Time, Time.Wait]> ServicesError! {
     services_validate_service_name(plan.name)
     guard := env_acquire_lock(pkg_managed_dir(project_dir), SERVICES_STATE_LOCK_SCOPE) ?? return Err(ServicesError.new("couldn't lock service state: {err}"))

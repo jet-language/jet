@@ -39,7 +39,7 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [PoolStaleID](Allocation/PoolStaleID.jet) — Pools: a stale `Id<T>` — its pool slot was removed — panics at runtime, mirroring the array-out-of-bounds panic precedent (jet_index_vec/jet_pool_get): a…
 - [ProgramAllocator](Allocation/ProgramAllocator/) — package.jet wraps the hidden system heap once for the whole hosted program.
 - [TryAllocation](Allocation/TryAllocation.jet) — Fallible allocation is a value.
-- [Uninit](Allocation/Uninit.jet) — `name := Type{ uninit }` opts out of automatic zero-fill for a binding, skipping the default initialisation for raw performance.
+- [Uninit](Allocation/Uninit.jet) — `name := Type{ uninit }` opts out of automatic zero-fill for a binding, skipping the default initialization for raw performance.
 - [UserAllocator](Allocation/UserAllocator.jet) — A user-written allocator: `mem.Allocator` over a `mem.Region`.
 
 ## Shared

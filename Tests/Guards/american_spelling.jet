@@ -1,0 +1,846 @@
+// American spelling: no tracked text spells a word the British way. The
+// census reads every tracked text file (sources and their comments,
+// diagnostics, snapshots, docs, data) with `git grep` for the AS_WORDS
+// British spellings, whole words in any case, and names the American spelling
+// for each hit.
+//
+// Three closed lists keep a British spelling, each row with its reason:
+// - AS_IDENTIFIERS: a Jet identifier or machine value whose rename is a
+//   public API and machine-output change. Its exact spelling passes where it
+//   is written as code: in Jet code outside comments and string text, in
+//   program output (a snapshot, a case file's steps, or a generated `.rows`
+//   table), in backticks, after a `.`, as a quoted token without spaces
+//   (`"Cancelled"`, `'cancelled'`, `"sleep-cancelled"`), as the key of a
+//   `key=value` or `key:value` field (`cancelled=false`, `cancelled:0`), or
+//   as the label of an interpolated value (`cancelled: {n}`). Written as
+//   prose, it fails.
+// - AS_QUOTED: a file that quotes an external name (an API identifier, a URL,
+//   a title, quoted upstream text), with the count of each word it keeps.
+// - AS_SKIPPED: the paths the census does not read at all: dated data dumps,
+//   upstream tables copied as published, and this guard's word list.
+// A row that keeps nothing any more fails, so the lists only shrink.
+use as_process: core.process
+
+AmericanSpelling: struct {
+    british: String,
+    american: String,
+}
+
+// Paths the census skips, as a git glob pathspec (`**` crosses folders).
+SpellingSkip: struct {
+    path: String,
+    reason: String,
+}
+
+// A Jet identifier or machine value, spelled exactly, kept where it is code.
+SpellingIdentifier: struct {
+    spelling: String,
+    reason: String,
+}
+
+// A file that keeps `count` British `word`s (any case) because each is part
+// of a quoted external name.
+SpellingQuote: struct {
+    path: String,
+    word: String,
+    count: Int,
+    reason: String,
+}
+
+AS_SKIPPED: [SpellingSkip]{
+    SpellingSkip{path: "Tests/Guards/american_spelling.jet", reason: "this guard's word list"},
+    SpellingSkip{path: "Tools/Tower/.tower/**", reason: "Tower's card store, which only the Tower tool writes"},
+    SpellingSkip{path: "Docs/Audits/**/*.tsv", reason: "dated audit records that quote source lines as they stood"},
+    SpellingSkip{path: "Docs/Audits/**/*.json", reason: "dated audit records that quote source lines as they stood"},
+    SpellingSkip{path: "Docs/Research/**/*.json", reason: "dated research records that quote upstream text as it stood"},
+    SpellingSkip{path: "Tests/Data/Unicode/**", reason: "the Unicode Character Database, as published"},
+    SpellingSkip{path: "Tests/Cases/TextUnicode/*.fixture/data/**", reason: "the Unicode Character Database, as published"},
+    SpellingSkip{path: "Tests/Data/Xkb/**", reason: "xkbcommon's keysym and Compose tables, as published"},
+    SpellingSkip{path: "Docs/Research/mine-for-jet-2026-09-12.md", reason: "a closed 12 MB mining capture, past the size the reviewed editor opens"},
+    SpellingSkip{path: "Docs/Assets/Research/**/*.json", reason: "dated research evidence records, kept as captured"},
+    SpellingSkip{path: "Docs/Audits/RustExitParity/**", reason: "a closed ledger generated from its tsv rows, whose group names it repeats"},
+    SpellingSkip{path: "Compiler/JetRuntime/Assets/MuslErrno1_2_5/COPYRIGHT", reason: "musl's license text, as published"},
+    SpellingSkip{path: "Jetpack/Integrations/Source/Foreign/RustBridge/Runtime/public_suffix_list.dat", reason: "Mozilla's Public Suffix List, as published"},
+}
+
+AS_IDENTIFIERS: [SpellingIdentifier]{
+    SpellingIdentifier{spelling: "Cancelled", reason: "the stopped-from-outside case of TaskFailure, IOError, NetError, HTTPError, DataFreshness, the job and service states, and the other public Core enums"},
+    SpellingIdentifier{spelling: "cancelled", reason: "public fields and counters (HTTPShutdownReport.cancelled, the data stream and loader flags) and the `cancelled` status a JSON report writes"},
+    SpellingIdentifier{spelling: "metres", reason: "core.units' public alias of `meters`"},
+    SpellingIdentifier{spelling: "kilometres", reason: "core.units' public alias of `kilometers`"},
+    SpellingIdentifier{spelling: "METRE", reason: "core.units' public scale constant beside METER"},
+    SpellingIdentifier{spelling: "litre", reason: "the prelude's public volume unit"},
+    SpellingIdentifier{spelling: "millilitre", reason: "the prelude's public volume unit"},
+    SpellingIdentifier{spelling: "specialisation", reason: "JetOS's system field and boot path, named as NixOS spells its `specialisation` option"},
+    SpellingIdentifier{spelling: "specialisations", reason: "JetOS's system field and boot path, named as NixOS spells its `specialisation` option"},
+}
+
+AS_QUOTED: [SpellingQuote]{
+    SpellingQuote{path: "Compiler/JetRuntime/Tests/IOWitness.c", word: "cancelled", count: 1, reason: "the C name of the runtime's IOError `Cancelled` routes"},
+    SpellingQuote{path: "Compiler/JetRuntime/Tests/NetErrorsWitness.c", word: "cancelled", count: 1, reason: "the C name of the runtime's NetError `Cancelled` routes"},
+    SpellingQuote{path: "Core/Jobs/Jobs.jet", word: "cancelled", count: 1, reason: "the SQL column alias the queue status reads back as `cancelled`"},
+    SpellingQuote{path: "Docs/Audits/2026-11-13-3078-c6-shared-operations-evidence.md", word: "marshalling", count: 1, reason: "a Tower criterion quoted verbatim"},
+    SpellingQuote{path: "Docs/Audits/G15202611/RESULTS.md", word: "cancelled", count: 1, reason: "recorded test output"},
+    SpellingQuote{path: "Docs/Audits/JetFoundationsAndTrust20260904/06-interop.html", word: "marshalling", count: 1, reason: "the Microsoft Learn URL of the .NET type marshaling page"},
+    SpellingQuote{path: "Docs/Audits/JetFoundationsAndTrust20260904/06-interop.md", word: "marshalling", count: 1, reason: "the Microsoft Learn URL of the .NET type marshaling page"},
+    SpellingQuote{path: "Docs/Audits/env-as-code-vs-declarative-2026-08-24.md", word: "specialisations", count: 1, reason: "a Tower card title quoted verbatim"},
+    SpellingQuote{path: "Docs/Audits/mine-for-jet-2026-09-09.md", word: "cancelled", count: 4, reason: "Rust status names quoted from the mined sources"},
+    SpellingQuote{path: "Docs/Audits/mine-for-jet-2026-09-09.md", word: "colour", count: 26, reason: "tqdm's `colour` parameter and the topic keys mined from it"},
+    SpellingQuote{path: "Docs/Audits/syntax-roundtrip-census-2026-09-03.md", word: "cancelled", count: 1, reason: "a generated census row of compiler identifiers"},
+    SpellingQuote{path: "Docs/Proposals/2026-11-13-web-app-framework-shape.md", word: "lustre", count: 6, reason: "the Lustre web framework's name and URL"},
+    SpellingQuote{path: "Docs/Proposals/VisualAcceptance/Media/20260908T202558-receipt.json", word: "cancelled", count: 1, reason: "a recorded receipt"},
+    SpellingQuote{path: "Docs/Research/Evidence20260929/3159-typed-ast.md", word: "generalised", count: 1, reason: "a section title of the GHC User's Guide"},
+    SpellingQuote{path: "Docs/Research/Evidence20260929/3180-task-channel-conformance.md", word: "cancelled", count: 1, reason: "recorded program output"},
+    SpellingQuote{path: "Docs/Research/Evidence20260929/3257-async-command-lifecycle.md", word: "cancelled", count: 3, reason: "recorded program output"},
+    SpellingQuote{path: "Docs/Research/mine-for-jet-2026-09-30-code-map.md", word: "coloured", count: 1, reason: "a Tower card title quoted verbatim"},
+    SpellingQuote{path: "Docs/Research/mine-for-jet-2026-09-30-spj-papers.md", word: "generalised", count: 2, reason: "a paper's title and URL"},
+    SpellingQuote{path: "Docs/Research/owner-questions-2026-10-30.md", word: "recognisable", count: 1, reason: "a quotation of C. I. Lewis (1918)"},
+    SpellingQuote{path: "Docs/Spec/Reference/Surfaces/r-surface.json", word: "licence", count: 1, reason: "R base's `licence` function in the surface census"},
+    SpellingQuote{path: "Docs/Spec/Reference/Surfaces/r-surface.json", word: "optimise", count: 1, reason: "R base's `optimise` function in the surface census"},
+    SpellingQuote{path: "Docs/Spec/Reference/prior-art.md", word: "generalised", count: 2, reason: "a cited paper's title and URL"},
+    SpellingQuote{path: "Docs/Spec/Reference/python-surface.json", word: "cancelling", count: 1, reason: "asyncio's `Task.cancelling` method in the surface census"},
+    SpellingQuote{path: "Docs/Spec/syntax-decisions.md", word: "optimise", count: 1, reason: "the `nix store optimise` command"},
+    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Lua.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
+    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Perl.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
+    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Php.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
+    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/R.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
+    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Ruby.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
+    SpellingQuote{path: "Jetpack/JetOS/Source/SystemFacts.jet", word: "specialisation", count: 1, reason: "the boot entry's `hardware-specialisation` proof tag, named after NixOS's `specialisation` option"},
+    SpellingQuote{path: "Jetpack/Provider/Tests/Provider.jet", word: "optimise", count: 1, reason: "the `nix store optimise` command"},
+    SpellingQuote{path: "Tests/CLI/unknown_flag.txt", word: "colour", count: 2, reason: "the misspelled `--colour` flag the unknown-flag test feeds"},
+    SpellingQuote{path: "Tests/Cases/CLIPartsBudget/budget_tty_confirmation_cancel_and_yes_control_mutation.case", word: "cancelled", count: 3, reason: "the ported Rust test's source, quoted"},
+    SpellingQuote{path: "Tests/Cases/JetpackJetOS/os_import_live_semantic_eval_reports_omissions.case", word: "virtualisation", count: 1, reason: "the NixOS option `virtualisation.docker.enable`"},
+    SpellingQuote{path: "Tools/Editors/Zed/languages/jet/highlights.scm", word: "cancelled", count: 1, reason: "the generated literal list names the `Cancelled` case"},
+    SpellingQuote{path: "Tools/Tower/Test/apply.test.mjs", word: "colour", count: 2, reason: "the unknown field the apply test feeds"},
+}
+
+AS_WORDS: [AmericanSpelling]{
+    AmericanSpelling{british: "behaviour", american: "behavior"},
+    AmericanSpelling{british: "behaviours", american: "behaviors"},
+    AmericanSpelling{british: "behavioural", american: "behavioral"},
+    AmericanSpelling{british: "behaviourally", american: "behaviorally"},
+    AmericanSpelling{british: "misbehaviour", american: "misbehavior"},
+    AmericanSpelling{british: "colour", american: "color"},
+    AmericanSpelling{british: "colours", american: "colors"},
+    AmericanSpelling{british: "coloured", american: "colored"},
+    AmericanSpelling{british: "colouring", american: "coloring"},
+    AmericanSpelling{british: "colourful", american: "colorful"},
+    AmericanSpelling{british: "colourless", american: "colorless"},
+    AmericanSpelling{british: "recolour", american: "recolor"},
+    AmericanSpelling{british: "discolour", american: "discolor"},
+    AmericanSpelling{british: "favour", american: "favor"},
+    AmericanSpelling{british: "favours", american: "favors"},
+    AmericanSpelling{british: "favoured", american: "favored"},
+    AmericanSpelling{british: "favouring", american: "favoring"},
+    AmericanSpelling{british: "favourable", american: "favorable"},
+    AmericanSpelling{british: "favourite", american: "favorite"},
+    AmericanSpelling{british: "favourites", american: "favorites"},
+    AmericanSpelling{british: "unfavourable", american: "unfavorable"},
+    AmericanSpelling{british: "honour", american: "honor"},
+    AmericanSpelling{british: "honours", american: "honors"},
+    AmericanSpelling{british: "honoured", american: "honored"},
+    AmericanSpelling{british: "honouring", american: "honoring"},
+    AmericanSpelling{british: "labour", american: "labor"},
+    AmericanSpelling{british: "labours", american: "labors"},
+    AmericanSpelling{british: "laboured", american: "labored"},
+    AmericanSpelling{british: "neighbour", american: "neighbor"},
+    AmericanSpelling{british: "neighbours", american: "neighbors"},
+    AmericanSpelling{british: "neighbouring", american: "neighboring"},
+    AmericanSpelling{british: "neighbourhood", american: "neighborhood"},
+    AmericanSpelling{british: "flavour", american: "flavor"},
+    AmericanSpelling{british: "flavours", american: "flavors"},
+    AmericanSpelling{british: "flavoured", american: "flavored"},
+    AmericanSpelling{british: "humour", american: "humor"},
+    AmericanSpelling{british: "rumour", american: "rumor"},
+    AmericanSpelling{british: "rumours", american: "rumors"},
+    AmericanSpelling{british: "vapour", american: "vapor"},
+    AmericanSpelling{british: "armour", american: "armor"},
+    AmericanSpelling{british: "harbour", american: "harbor"},
+    AmericanSpelling{british: "endeavour", american: "endeavor"},
+    AmericanSpelling{british: "endeavours", american: "endeavors"},
+    AmericanSpelling{british: "savour", american: "savor"},
+    AmericanSpelling{british: "odour", american: "odor"},
+    AmericanSpelling{british: "vigour", american: "vigor"},
+    AmericanSpelling{british: "rigour", american: "rigor"},
+    AmericanSpelling{british: "centre", american: "center"},
+    AmericanSpelling{british: "centres", american: "centers"},
+    AmericanSpelling{british: "centred", american: "centerd"},
+    AmericanSpelling{british: "centring", american: "centering"},
+    AmericanSpelling{british: "metre", american: "meter"},
+    AmericanSpelling{british: "metres", american: "meters"},
+    AmericanSpelling{british: "litre", american: "liter"},
+    AmericanSpelling{british: "litres", american: "liters"},
+    AmericanSpelling{british: "millilitre", american: "milliliter"},
+    AmericanSpelling{british: "millilitres", american: "milliliters"},
+    AmericanSpelling{british: "kilometre", american: "kilometer"},
+    AmericanSpelling{british: "kilometres", american: "kilometers"},
+    AmericanSpelling{british: "centimetre", american: "centimeter"},
+    AmericanSpelling{british: "centimetres", american: "centimeters"},
+    AmericanSpelling{british: "millimetre", american: "millimeter"},
+    AmericanSpelling{british: "millimetres", american: "millimeters"},
+    AmericanSpelling{british: "fibre", american: "fiber"},
+    AmericanSpelling{british: "fibres", american: "fibers"},
+    AmericanSpelling{british: "theatre", american: "theater"},
+    AmericanSpelling{british: "calibre", american: "caliber"},
+    AmericanSpelling{british: "spectre", american: "specter"},
+    AmericanSpelling{british: "lustre", american: "luster"},
+    AmericanSpelling{british: "manoeuvre", american: "maneuver"},
+    AmericanSpelling{british: "licence", american: "license"},
+    AmericanSpelling{british: "licences", american: "licenses"},
+    AmericanSpelling{british: "defence", american: "defense"},
+    AmericanSpelling{british: "defences", american: "defenses"},
+    AmericanSpelling{british: "offence", american: "offense"},
+    AmericanSpelling{british: "offences", american: "offenses"},
+    AmericanSpelling{british: "pretence", american: "pretense"},
+    AmericanSpelling{british: "analyse", american: "analyze"},
+    AmericanSpelling{british: "analysed", american: "analyzed"},
+    AmericanSpelling{british: "analysing", american: "analyzing"},
+    AmericanSpelling{british: "analyser", american: "analyzer"},
+    AmericanSpelling{british: "analysers", american: "analyzers"},
+    AmericanSpelling{british: "paralyse", american: "paralyze"},
+    AmericanSpelling{british: "paralysed", american: "paralyzed"},
+    AmericanSpelling{british: "catalyse", american: "catalyze"},
+    AmericanSpelling{british: "initialise", american: "initialize"},
+    AmericanSpelling{british: "initialised", american: "initialized"},
+    AmericanSpelling{british: "initialises", american: "initializes"},
+    AmericanSpelling{british: "initialising", american: "initializing"},
+    AmericanSpelling{british: "initialisation", american: "initialization"},
+    AmericanSpelling{british: "initialisations", american: "initializations"},
+    AmericanSpelling{british: "initialiser", american: "initializer"},
+    AmericanSpelling{british: "initialisers", american: "initializers"},
+    AmericanSpelling{british: "reinitialise", american: "reinitialize"},
+    AmericanSpelling{british: "uninitialised", american: "uninitialized"},
+    AmericanSpelling{british: "normalise", american: "normalize"},
+    AmericanSpelling{british: "normalised", american: "normalized"},
+    AmericanSpelling{british: "normalises", american: "normalizes"},
+    AmericanSpelling{british: "normalising", american: "normalizing"},
+    AmericanSpelling{british: "normalisation", american: "normalization"},
+    AmericanSpelling{british: "normaliser", american: "normalizer"},
+    AmericanSpelling{british: "serialise", american: "serialize"},
+    AmericanSpelling{british: "serialised", american: "serialized"},
+    AmericanSpelling{british: "serialises", american: "serializes"},
+    AmericanSpelling{british: "serialising", american: "serializing"},
+    AmericanSpelling{british: "serialisation", american: "serialization"},
+    AmericanSpelling{british: "serialiser", american: "serializer"},
+    AmericanSpelling{british: "serialisers", american: "serializers"},
+    AmericanSpelling{british: "deserialise", american: "deserialize"},
+    AmericanSpelling{british: "deserialised", american: "deserialized"},
+    AmericanSpelling{british: "deserialises", american: "deserializes"},
+    AmericanSpelling{british: "deserialising", american: "deserializing"},
+    AmericanSpelling{british: "deserialisation", american: "deserialization"},
+    AmericanSpelling{british: "deserialiser", american: "deserializer"},
+    AmericanSpelling{british: "optimise", american: "optimize"},
+    AmericanSpelling{british: "optimised", american: "optimized"},
+    AmericanSpelling{british: "optimises", american: "optimizes"},
+    AmericanSpelling{british: "optimising", american: "optimizing"},
+    AmericanSpelling{british: "optimisation", american: "optimization"},
+    AmericanSpelling{british: "optimisations", american: "optimizations"},
+    AmericanSpelling{british: "optimiser", american: "optimizer"},
+    AmericanSpelling{british: "optimisers", american: "optimizers"},
+    AmericanSpelling{british: "minimise", american: "minimize"},
+    AmericanSpelling{british: "minimised", american: "minimized"},
+    AmericanSpelling{british: "minimises", american: "minimizes"},
+    AmericanSpelling{british: "minimising", american: "minimizing"},
+    AmericanSpelling{british: "minimisation", american: "minimization"},
+    AmericanSpelling{british: "maximise", american: "maximize"},
+    AmericanSpelling{british: "maximised", american: "maximized"},
+    AmericanSpelling{british: "maximises", american: "maximizes"},
+    AmericanSpelling{british: "maximising", american: "maximizing"},
+    AmericanSpelling{british: "maximisation", american: "maximization"},
+    AmericanSpelling{british: "finalise", american: "finalize"},
+    AmericanSpelling{british: "finalised", american: "finalized"},
+    AmericanSpelling{british: "finalises", american: "finalizes"},
+    AmericanSpelling{british: "finalising", american: "finalizing"},
+    AmericanSpelling{british: "finalisation", american: "finalization"},
+    AmericanSpelling{british: "customise", american: "customize"},
+    AmericanSpelling{british: "customised", american: "customized"},
+    AmericanSpelling{british: "customising", american: "customizing"},
+    AmericanSpelling{british: "customisation", american: "customization"},
+    AmericanSpelling{british: "customisations", american: "customizations"},
+    AmericanSpelling{british: "summarise", american: "summarize"},
+    AmericanSpelling{british: "summarised", american: "summarized"},
+    AmericanSpelling{british: "summarises", american: "summarizes"},
+    AmericanSpelling{british: "summarising", american: "summarizing"},
+    AmericanSpelling{british: "prioritise", american: "prioritize"},
+    AmericanSpelling{british: "prioritised", american: "prioritized"},
+    AmericanSpelling{british: "prioritises", american: "prioritizes"},
+    AmericanSpelling{british: "prioritising", american: "prioritizing"},
+    AmericanSpelling{british: "prioritisation", american: "prioritization"},
+    AmericanSpelling{british: "categorise", american: "categorize"},
+    AmericanSpelling{british: "categorised", american: "categorized"},
+    AmericanSpelling{british: "categorises", american: "categorizes"},
+    AmericanSpelling{british: "categorising", american: "categorizing"},
+    AmericanSpelling{british: "categorisation", american: "categorization"},
+    AmericanSpelling{british: "standardise", american: "standardize"},
+    AmericanSpelling{british: "standardised", american: "standardized"},
+    AmericanSpelling{british: "standardises", american: "standardizes"},
+    AmericanSpelling{british: "standardising", american: "standardizing"},
+    AmericanSpelling{british: "standardisation", american: "standardization"},
+    AmericanSpelling{british: "synchronise", american: "synchronize"},
+    AmericanSpelling{british: "synchronised", american: "synchronized"},
+    AmericanSpelling{british: "synchronises", american: "synchronizes"},
+    AmericanSpelling{british: "synchronising", american: "synchronizing"},
+    AmericanSpelling{british: "synchronisation", american: "synchronization"},
+    AmericanSpelling{british: "authorise", american: "authorize"},
+    AmericanSpelling{british: "authorised", american: "authorized"},
+    AmericanSpelling{british: "authorises", american: "authorizes"},
+    AmericanSpelling{british: "authorising", american: "authorizing"},
+    AmericanSpelling{british: "authorisation", american: "authorization"},
+    AmericanSpelling{british: "authorisations", american: "authorizations"},
+    AmericanSpelling{british: "unauthorised", american: "unauthorized"},
+    AmericanSpelling{british: "emphasise", american: "emphasize"},
+    AmericanSpelling{british: "emphasised", american: "emphasized"},
+    AmericanSpelling{british: "emphasises", american: "emphasizes"},
+    AmericanSpelling{british: "emphasising", american: "emphasizing"},
+    AmericanSpelling{british: "specialise", american: "specialize"},
+    AmericanSpelling{british: "specialised", american: "specialized"},
+    AmericanSpelling{british: "specialises", american: "specializes"},
+    AmericanSpelling{british: "specialising", american: "specializing"},
+    AmericanSpelling{british: "specialisation", american: "specialization"},
+    AmericanSpelling{british: "specialisations", american: "specializations"},
+    AmericanSpelling{british: "utilise", american: "utilize"},
+    AmericanSpelling{british: "utilised", american: "utilized"},
+    AmericanSpelling{british: "utilises", american: "utilizes"},
+    AmericanSpelling{british: "utilising", american: "utilizing"},
+    AmericanSpelling{british: "utilisation", american: "utilization"},
+    AmericanSpelling{british: "materialise", american: "materialize"},
+    AmericanSpelling{british: "materialised", american: "materialized"},
+    AmericanSpelling{british: "materialises", american: "materializes"},
+    AmericanSpelling{british: "materialising", american: "materializing"},
+    AmericanSpelling{british: "materialisation", american: "materialization"},
+    AmericanSpelling{british: "memoise", american: "memoize"},
+    AmericanSpelling{british: "memoised", american: "memoized"},
+    AmericanSpelling{british: "memoising", american: "memoizing"},
+    AmericanSpelling{british: "memoisation", american: "memoization"},
+    AmericanSpelling{british: "sanitise", american: "sanitize"},
+    AmericanSpelling{british: "sanitised", american: "sanitized"},
+    AmericanSpelling{british: "sanitises", american: "sanitizes"},
+    AmericanSpelling{british: "sanitising", american: "sanitizing"},
+    AmericanSpelling{british: "sanitisation", american: "sanitization"},
+    AmericanSpelling{british: "sanitiser", american: "sanitizer"},
+    AmericanSpelling{british: "tokenise", american: "tokenize"},
+    AmericanSpelling{british: "tokenised", american: "tokenized"},
+    AmericanSpelling{british: "tokenises", american: "tokenizes"},
+    AmericanSpelling{british: "tokenising", american: "tokenizing"},
+    AmericanSpelling{british: "tokenisation", american: "tokenization"},
+    AmericanSpelling{british: "tokeniser", american: "tokenizer"},
+    AmericanSpelling{british: "canonicalise", american: "canonicalize"},
+    AmericanSpelling{british: "canonicalised", american: "canonicalized"},
+    AmericanSpelling{british: "canonicalises", american: "canonicalizes"},
+    AmericanSpelling{british: "canonicalising", american: "canonicalizing"},
+    AmericanSpelling{british: "canonicalisation", american: "canonicalization"},
+    AmericanSpelling{british: "localise", american: "localize"},
+    AmericanSpelling{british: "localised", american: "localized"},
+    AmericanSpelling{british: "localises", american: "localizes"},
+    AmericanSpelling{british: "localising", american: "localizing"},
+    AmericanSpelling{british: "localisation", american: "localization"},
+    AmericanSpelling{british: "visualise", american: "visualize"},
+    AmericanSpelling{british: "visualised", american: "visualized"},
+    AmericanSpelling{british: "visualises", american: "visualizes"},
+    AmericanSpelling{british: "visualising", american: "visualizing"},
+    AmericanSpelling{british: "visualisation", american: "visualization"},
+    AmericanSpelling{british: "visualisations", american: "visualizations"},
+    AmericanSpelling{british: "parallelise", american: "parallelize"},
+    AmericanSpelling{british: "parallelised", american: "parallelized"},
+    AmericanSpelling{british: "parallelising", american: "parallelizing"},
+    AmericanSpelling{british: "parallelisation", american: "parallelization"},
+    AmericanSpelling{british: "generalise", american: "generalize"},
+    AmericanSpelling{british: "generalised", american: "generalized"},
+    AmericanSpelling{british: "generalises", american: "generalizes"},
+    AmericanSpelling{british: "generalising", american: "generalizing"},
+    AmericanSpelling{british: "generalisation", american: "generalization"},
+    AmericanSpelling{british: "centralise", american: "centralize"},
+    AmericanSpelling{british: "centralised", american: "centralized"},
+    AmericanSpelling{british: "centralising", american: "centralizing"},
+    AmericanSpelling{british: "stabilise", american: "stabilize"},
+    AmericanSpelling{british: "stabilised", american: "stabilized"},
+    AmericanSpelling{british: "stabilises", american: "stabilizes"},
+    AmericanSpelling{british: "stabilising", american: "stabilizing"},
+    AmericanSpelling{british: "stabilisation", american: "stabilization"},
+    AmericanSpelling{british: "apologise", american: "apologize"},
+    AmericanSpelling{british: "criticise", american: "criticize"},
+    AmericanSpelling{british: "criticised", american: "criticized"},
+    AmericanSpelling{british: "characterise", american: "characterize"},
+    AmericanSpelling{british: "characterised", american: "characterized"},
+    AmericanSpelling{british: "characterises", american: "characterizes"},
+    AmericanSpelling{british: "characterising", american: "characterizing"},
+    AmericanSpelling{british: "characterisation", american: "characterization"},
+    AmericanSpelling{british: "capitalise", american: "capitalize"},
+    AmericanSpelling{british: "capitalised", american: "capitalized"},
+    AmericanSpelling{british: "capitalises", american: "capitalizes"},
+    AmericanSpelling{british: "capitalising", american: "capitalizing"},
+    AmericanSpelling{british: "capitalisation", american: "capitalization"},
+    AmericanSpelling{british: "randomise", american: "randomize"},
+    AmericanSpelling{british: "randomised", american: "randomized"},
+    AmericanSpelling{british: "randomises", american: "randomizes"},
+    AmericanSpelling{british: "randomising", american: "randomizing"},
+    AmericanSpelling{british: "randomisation", american: "randomization"},
+    AmericanSpelling{british: "harmonise", american: "harmonize"},
+    AmericanSpelling{british: "harmonised", american: "harmonized"},
+    AmericanSpelling{british: "modernise", american: "modernize"},
+    AmericanSpelling{british: "modernised", american: "modernized"},
+    AmericanSpelling{british: "neutralise", american: "neutralize"},
+    AmericanSpelling{british: "neutralised", american: "neutralized"},
+    AmericanSpelling{british: "penalise", american: "penalize"},
+    AmericanSpelling{british: "penalised", american: "penalized"},
+    AmericanSpelling{british: "rationalise", american: "rationalize"},
+    AmericanSpelling{british: "rationalised", american: "rationalized"},
+    AmericanSpelling{british: "symbolise", american: "symbolize"},
+    AmericanSpelling{british: "symbolised", american: "symbolized"},
+    AmericanSpelling{british: "vectorise", american: "vectorize"},
+    AmericanSpelling{british: "vectorised", american: "vectorized"},
+    AmericanSpelling{british: "vectorising", american: "vectorizing"},
+    AmericanSpelling{british: "vectorisation", american: "vectorization"},
+    AmericanSpelling{british: "virtualise", american: "virtualize"},
+    AmericanSpelling{british: "virtualised", american: "virtualized"},
+    AmericanSpelling{british: "virtualisation", american: "virtualization"},
+    AmericanSpelling{british: "organise", american: "organize"},
+    AmericanSpelling{british: "organised", american: "organized"},
+    AmericanSpelling{british: "organises", american: "organizes"},
+    AmericanSpelling{british: "organising", american: "organizing"},
+    AmericanSpelling{british: "organisation", american: "organization"},
+    AmericanSpelling{british: "organisations", american: "organizations"},
+    AmericanSpelling{british: "organiser", american: "organizer"},
+    AmericanSpelling{british: "recognise", american: "recognize"},
+    AmericanSpelling{british: "recognised", american: "recognized"},
+    AmericanSpelling{british: "recognises", american: "recognizes"},
+    AmericanSpelling{british: "recognising", american: "recognizing"},
+    AmericanSpelling{british: "recognisable", american: "recognizable"},
+    AmericanSpelling{british: "unrecognised", american: "unrecognized"},
+    AmericanSpelling{british: "realise", american: "realize"},
+    AmericanSpelling{british: "realised", american: "realized"},
+    AmericanSpelling{british: "realises", american: "realizes"},
+    AmericanSpelling{british: "realising", american: "realizing"},
+    AmericanSpelling{british: "realisation", american: "realization"},
+    AmericanSpelling{british: "realisations", american: "realizations"},
+    AmericanSpelling{british: "amortise", american: "amortize"},
+    AmericanSpelling{british: "amortised", american: "amortized"},
+    AmericanSpelling{british: "amortises", american: "amortizes"},
+    AmericanSpelling{british: "amortising", american: "amortizing"},
+    AmericanSpelling{british: "amortisation", american: "amortization"},
+    AmericanSpelling{british: "monetise", american: "monetize"},
+    AmericanSpelling{british: "digitise", american: "digitize"},
+    AmericanSpelling{british: "digitised", american: "digitized"},
+    AmericanSpelling{british: "itemise", american: "itemize"},
+    AmericanSpelling{british: "itemised", american: "itemized"},
+    AmericanSpelling{british: "legalise", american: "legalize"},
+    AmericanSpelling{british: "finalisers", american: "finalizers"},
+    AmericanSpelling{british: "linearise", american: "linearize"},
+    AmericanSpelling{british: "linearised", american: "linearized"},
+    AmericanSpelling{british: "linearisation", american: "linearization"},
+    AmericanSpelling{british: "lexicalise", american: "lexicalize"},
+    AmericanSpelling{british: "desugarise", american: "desugarize"},
+    AmericanSpelling{british: "monomorphise", american: "monomorphize"},
+    AmericanSpelling{british: "monomorphised", american: "monomorphized"},
+    AmericanSpelling{british: "monomorphising", american: "monomorphizing"},
+    AmericanSpelling{british: "monomorphisation", american: "monomorphization"},
+    AmericanSpelling{british: "specialiser", american: "specializer"},
+    AmericanSpelling{british: "discretise", american: "discretize"},
+    AmericanSpelling{british: "discretised", american: "discretized"},
+    AmericanSpelling{british: "discretisation", american: "discretization"},
+    AmericanSpelling{british: "quantise", american: "quantize"},
+    AmericanSpelling{british: "quantised", american: "quantized"},
+    AmericanSpelling{british: "quantisation", american: "quantization"},
+    AmericanSpelling{british: "hypothesise", american: "hypothesize"},
+    AmericanSpelling{british: "parameterise", american: "parameterize"},
+    AmericanSpelling{british: "parameterised", american: "parameterized"},
+    AmericanSpelling{british: "parameterises", american: "parameterizes"},
+    AmericanSpelling{british: "parameterising", american: "parameterizing"},
+    AmericanSpelling{british: "parameterisation", american: "parameterization"},
+    AmericanSpelling{british: "parametrise", american: "parametrize"},
+    AmericanSpelling{british: "parametrised", american: "parametrized"},
+    AmericanSpelling{british: "parametrisation", american: "parametrization"},
+    AmericanSpelling{british: "generalisable", american: "generalizable"},
+    AmericanSpelling{british: "serialisable", american: "serializable"},
+    AmericanSpelling{british: "deserialisable", american: "deserializable"},
+    AmericanSpelling{british: "recognisably", american: "recognizably"},
+    AmericanSpelling{british: "normalisable", american: "normalizable"},
+    AmericanSpelling{british: "initialisable", american: "initializable"},
+    AmericanSpelling{british: "summarisation", american: "summarization"},
+    AmericanSpelling{british: "industrialise", american: "industrialize"},
+    AmericanSpelling{british: "italicise", american: "italicize"},
+    AmericanSpelling{british: "italicised", american: "italicized"},
+    AmericanSpelling{british: "romanise", american: "romanize"},
+    AmericanSpelling{british: "energise", american: "energize"},
+    AmericanSpelling{british: "energised", american: "energized"},
+    AmericanSpelling{british: "fertilise", american: "fertilize"},
+    AmericanSpelling{british: "mechanise", american: "mechanize"},
+    AmericanSpelling{british: "memorise", american: "memorize"},
+    AmericanSpelling{british: "memorised", american: "memorized"},
+    AmericanSpelling{british: "patronise", american: "patronize"},
+    AmericanSpelling{british: "publicise", american: "publicize"},
+    AmericanSpelling{british: "publicised", american: "publicized"},
+    AmericanSpelling{british: "scrutinise", american: "scrutinize"},
+    AmericanSpelling{british: "scrutinised", american: "scrutinized"},
+    AmericanSpelling{british: "sterilise", american: "sterilize"},
+    AmericanSpelling{british: "subsidise", american: "subsidize"},
+    AmericanSpelling{british: "theorise", american: "theorize"},
+    AmericanSpelling{british: "traumatise", american: "traumatize"},
+    AmericanSpelling{british: "trivialise", american: "trivialize"},
+    AmericanSpelling{british: "trivialised", american: "trivialized"},
+    AmericanSpelling{british: "victimise", american: "victimize"},
+    AmericanSpelling{british: "anonymise", american: "anonymize"},
+    AmericanSpelling{british: "anonymised", american: "anonymized"},
+    AmericanSpelling{british: "anonymisation", american: "anonymization"},
+    AmericanSpelling{british: "pseudonymise", american: "pseudonymize"},
+    AmericanSpelling{british: "pseudonymised", american: "pseudonymized"},
+    AmericanSpelling{british: "pseudonymisation", american: "pseudonymization"},
+    AmericanSpelling{british: "containerise", american: "containerize"},
+    AmericanSpelling{british: "containerised", american: "containerized"},
+    AmericanSpelling{british: "containerisation", american: "containerization"},
+    AmericanSpelling{british: "operationalise", american: "operationalize"},
+    AmericanSpelling{british: "internalise", american: "internalize"},
+    AmericanSpelling{british: "internalised", american: "internalized"},
+    AmericanSpelling{british: "externalise", american: "externalize"},
+    AmericanSpelling{british: "externalised", american: "externalized"},
+    AmericanSpelling{british: "cancelled", american: "canceled"},
+    AmericanSpelling{british: "cancelling", american: "canceling"},
+    AmericanSpelling{british: "cancellable", american: "cancelable"},
+    AmericanSpelling{british: "uncancelled", american: "uncanceled"},
+    AmericanSpelling{british: "labelled", american: "labeled"},
+    AmericanSpelling{british: "labelling", american: "labeling"},
+    AmericanSpelling{british: "relabelled", american: "relabeled"},
+    AmericanSpelling{british: "unlabelled", american: "unlabeled"},
+    AmericanSpelling{british: "modelled", american: "modeled"},
+    AmericanSpelling{british: "modelling", american: "modeling"},
+    AmericanSpelling{british: "remodelled", american: "remodeled"},
+    AmericanSpelling{british: "travelled", american: "traveled"},
+    AmericanSpelling{british: "travelling", american: "traveling"},
+    AmericanSpelling{british: "traveller", american: "traveler"},
+    AmericanSpelling{british: "travellers", american: "travelers"},
+    AmericanSpelling{british: "signalled", american: "signaled"},
+    AmericanSpelling{british: "signalling", american: "signaling"},
+    AmericanSpelling{british: "levelled", american: "leveled"},
+    AmericanSpelling{british: "levelling", american: "leveling"},
+    AmericanSpelling{british: "totalled", american: "totaled"},
+    AmericanSpelling{british: "totalling", american: "totaling"},
+    AmericanSpelling{british: "tunnelled", american: "tunneled"},
+    AmericanSpelling{british: "tunnelling", american: "tunneling"},
+    AmericanSpelling{british: "channelled", american: "channeled"},
+    AmericanSpelling{british: "channelling", american: "channeling"},
+    AmericanSpelling{british: "fuelled", american: "fueled"},
+    AmericanSpelling{british: "fuelling", american: "fueling"},
+    AmericanSpelling{british: "counselled", american: "counseled"},
+    AmericanSpelling{british: "dialled", american: "dialed"},
+    AmericanSpelling{british: "dialling", american: "dialing"},
+    AmericanSpelling{british: "marshalled", american: "marshaled"},
+    AmericanSpelling{british: "marshalling", american: "marshaling"},
+    AmericanSpelling{british: "unmarshalled", american: "unmarshaled"},
+    AmericanSpelling{british: "unmarshalling", american: "unmarshaling"},
+    AmericanSpelling{british: "funnelled", american: "funneled"},
+    AmericanSpelling{british: "quarrelled", american: "quarreled"},
+    AmericanSpelling{british: "jewellery", american: "jewelry"},
+    AmericanSpelling{british: "enrolment", american: "enrollment"},
+    AmericanSpelling{british: "enrolments", american: "enrollments"},
+    AmericanSpelling{british: "fulfil", american: "fulfill"},
+    AmericanSpelling{british: "fulfils", american: "fulfills"},
+    AmericanSpelling{british: "fulfilment", american: "fulfillment"},
+    AmericanSpelling{british: "instalment", american: "installment"},
+    AmericanSpelling{british: "instalments", american: "installments"},
+    AmericanSpelling{british: "skilful", american: "skillful"},
+    AmericanSpelling{british: "wilful", american: "willful"},
+    AmericanSpelling{british: "grey", american: "gray"},
+    AmericanSpelling{british: "greys", american: "grays"},
+    AmericanSpelling{british: "greyed", american: "grayed"},
+    AmericanSpelling{british: "greyscale", american: "grayscale"},
+    AmericanSpelling{british: "catalogue", american: "catalog"},
+    AmericanSpelling{british: "catalogues", american: "catalogs"},
+    AmericanSpelling{british: "catalogued", american: "cataloged"},
+    AmericanSpelling{british: "analogue", american: "analog"},
+    AmericanSpelling{british: "analogues", american: "analogs"},
+    AmericanSpelling{british: "programme", american: "program"},
+    AmericanSpelling{british: "programmes", american: "programs"},
+    AmericanSpelling{british: "cheque", american: "check"},
+    AmericanSpelling{british: "cheques", american: "checks"},
+    AmericanSpelling{british: "tyre", american: "tire"},
+    AmericanSpelling{british: "tyres", american: "tires"},
+    AmericanSpelling{british: "aluminium", american: "aluminum"},
+    AmericanSpelling{british: "mould", american: "mold"},
+    AmericanSpelling{british: "moulds", american: "molds"},
+    AmericanSpelling{british: "sceptical", american: "skeptical"},
+    AmericanSpelling{british: "sceptic", american: "skeptic"},
+    AmericanSpelling{british: "aeroplane", american: "airplane"},
+    AmericanSpelling{british: "storey", american: "story"},
+    AmericanSpelling{british: "storeys", american: "stories"},
+    AmericanSpelling{british: "ageing", american: "aging"},
+    AmericanSpelling{british: "judgement", american: "judgment"},
+    AmericanSpelling{british: "judgements", american: "judgments"},
+    AmericanSpelling{british: "acknowledgement", american: "acknowledgment"},
+    AmericanSpelling{british: "acknowledgements", american: "acknowledgments"},
+    AmericanSpelling{british: "artefact", american: "artifact"},
+    AmericanSpelling{british: "artefacts", american: "artifacts"},
+    AmericanSpelling{british: "whilst", american: "while"},
+    AmericanSpelling{british: "amongst", american: "among"},
+    AmericanSpelling{british: "practise", american: "practice"},
+    AmericanSpelling{british: "practised", american: "practiced"},
+    AmericanSpelling{british: "practising", american: "practicing"},
+    AmericanSpelling{british: "speciality", american: "specialty"},
+    AmericanSpelling{british: "specialities", american: "specialties"},
+    AmericanSpelling{british: "learnt", american: "learned"},
+    AmericanSpelling{british: "spelt", american: "spelled"},
+    AmericanSpelling{british: "dreamt", american: "dreamed"},
+    AmericanSpelling{british: "oestrogen", american: "estrogen"},
+    AmericanSpelling{british: "paediatric", american: "pediatric"},
+    AmericanSpelling{british: "encyclopaedia", american: "encyclopedia"},
+    AmericanSpelling{british: "manoeuvres", american: "maneuvers"},
+    AmericanSpelling{british: "draught", american: "draft"},
+    AmericanSpelling{british: "plough", american: "plow"},
+    AmericanSpelling{british: "cosy", american: "cozy"},
+    AmericanSpelling{british: "moustache", american: "mustache"},
+    AmericanSpelling{british: "pyjamas", american: "pajamas"},
+    AmericanSpelling{british: "kerb", american: "curb"},
+}
+
+// Program output and generated tables: every word of such a line is the text
+// of its source, which the census reads there.
+AS_OUTPUT_SUFFIXES: [String]{".out", ".stdout", ".stderr", ".expected", ".rows"}
+
+// The American spelling of each British word, keyed in lower case.
+as_word_map: fn() -> [String:String] Never! {
+    map := [String:String]{}
+    loop row in AS_WORDS -> map[row.british] = row.american
+    map
+}
+
+// Whether `code` is a byte of a word as `git grep -w` reads one: an ASCII
+// letter, digit or underscore.
+as_word_byte: fn(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+// The byte at `at` as an Int, or 0 outside `bytes`.
+as_byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return 0
+    Int{bytes[at]}
+}
+
+// `american` in the case `word` is written in: all capitals, a capital
+// first letter, or lower case.
+as_cased: fn(word: String, american: String) -> String Never! {
+    if word == word.to_upper() -> return american.to_upper()
+    bytes := american.bytes()
+    first: Int{word.bytes()[0]}
+    if first >= 65 && first <= 90 -> bytes[0] = U8{Int{bytes[0]} - 32}
+    String.from_bytes(bytes) ?? ""
+}
+
+// Which bytes of a Jet source line are code: outside a `//` comment and
+// outside string text, where an interpolation's braces hold code again.
+as_jet_code: fn(bytes: [U8], mask: &[Bool]) {
+    in_string := false
+    depth := 0
+    at := 0
+    loop at < bytes.len() {
+        code: Int{bytes[at]}
+        next_code: if at + 1 < bytes.len() -> Int{bytes[at + 1]} else -> 0
+        if !in_string && code == 47 && next_code == 47 {
+            return
+        }
+        if {
+            !in_string && (code == 34 || (code == 125 && depth == 1)) -> {
+                depth = 0
+                in_string = true
+            }
+            !in_string -> {
+                if depth > 0 && code == 123 -> depth += 1
+                if depth > 0 && code == 125 -> depth -= 1
+                mask[at] = true
+            }
+            code == 92 || (code == 123 && next_code == 123) -> at += 1
+            code == 123 -> {
+                in_string = false
+                depth = 1
+            }
+            code == 34 -> in_string = false
+        }
+        at += 1
+    }
+}
+
+// Which bytes of `line` of the file at `path` are code (see AS_IDENTIFIERS).
+as_code_mask: fn(path: String, line: String) -> [Bool] Never! {
+    bytes: line.bytes()
+    output := false
+    loop suffix in AS_OUTPUT_SUFFIXES {
+        if path.ends_with(suffix) -> output = true
+    }
+    if path.ends_with(".case") && !line.trim().starts_with("#") -> output = true
+    mask := [Bool]{}
+    loop _ in 0..<bytes.len() -> mask.push(output)
+    if path.ends_with(".jet") -> as_jet_code(bytes, mask)
+    quoted := false
+    loop at in 0..<bytes.len() {
+        if (Int{bytes[at]}) == 96 -> quoted = !quoted
+        if quoted -> mask[at] = true
+    }
+    mask
+}
+
+// One British word of a tracked file, as written, and whether it is code.
+AmericanHit: struct {
+    path: String,
+    line: String,
+    word: String,
+    code: Bool,
+}
+
+// The first space, tab, or quote byte from `at` on, stepping by `step`, or 0
+// at the edge of the line.
+as_token_edge: fn(bytes: [U8], at: Int, step: Int) -> Int Never! {
+    index := at
+    loop index >= 0 && index < bytes.len() {
+        code: Int{bytes[index]}
+        if code == 32 || code == 9 || code == 34 || code == 39 -> return code
+        index += step
+    }
+    0
+}
+
+// The British words of `text`, line `line` of the file at `path`.
+as_line_hits: fn(path: String, line: String, text: String, words: [String:String], out: &[AmericanHit]) {
+    bytes: text.bytes()
+    mask: as_code_mask(path, text)
+    at := 0
+    loop at < bytes.len() {
+        if !as_word_byte(Int{bytes[at]}) {
+            at += 1
+            next
+        }
+        start: at
+        loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
+        word: String.from_bytes(bytes.slice(start, at)) ?? ""
+        if words.get(word.to_lower()) == None -> next
+        before: as_byte_at(bytes, start - 1)
+        after: as_byte_at(bytes, at)
+        following: as_byte_at(bytes, at + 1)
+        label: after == 61 || (after == 58 && ((following != 32 && following != 0) || as_byte_at(bytes, at + 2) == 123))
+        left: as_token_edge(bytes, start - 1, -1)
+        right: as_token_edge(bytes, at, 1)
+        token: (left == 34 || left == 39) && (right == 34 || right == 39)
+        code: mask[start] || before == 46 || token || label
+        out.push(AmericanHit{path: path, line: line, word: word, code: code})
+    }
+}
+
+// The British words of `git grep -n` output lines (`path:line:text`).
+as_hits: fn(lines: [String], words: [String:String]) -> [AmericanHit] Never! {
+    hits := [AmericanHit]{}
+    loop line in lines {
+        parts: line.split(":").to_list()
+        if parts.len() < 3 -> next
+        text := parts[2]
+        loop index in 3..<parts.len() -> text = "{text}:{parts[index]}"
+        as_line_hits(parts[0], parts[1], text, words, hits)
+    }
+    hits
+}
+
+// The hits against the closed lists: each hit no row keeps, and each row
+// that keeps nothing or a different count.
+as_findings: fn(hits: [AmericanHit], words: [String:String]) -> [String] Never! {
+    findings := [String]{}
+    identifiers := [String:Int]{}
+    loop row in AS_IDENTIFIERS -> identifiers[row.spelling] = 0
+    quoted := [String:Int]{}
+    loop row in AS_QUOTED -> quoted["{row.path}\t{row.word}"] = 0
+    loop hit in hits {
+        if hit.code && identifiers.get(hit.word) != None {
+            identifiers[hit.word] = identifiers[hit.word] + 1
+            next
+        }
+        key: "{hit.path}\t{hit.word.to_lower()}"
+        if quoted.get(key) != None {
+            quoted[key] = quoted[key] + 1
+            next
+        }
+        findings.push("{hit.path}:{hit.line}: `{hit.word}` is British; write `{as_cased(hit.word, words[hit.word.to_lower()])}`")
+    }
+    loop row in AS_IDENTIFIERS {
+        if identifiers[row.spelling] == 0 {
+            findings.push("AS_IDENTIFIERS `{row.spelling}`: no code spells it any more; delete the row")
+        }
+    }
+    loop row in AS_QUOTED {
+        found: quoted["{row.path}\t{row.word}"]
+        if found != row.count {
+            findings.push("{row.path}: {found} `{row.word}`, AS_QUOTED keeps {row.count}; spell the others the American way, or correct the row")
+        }
+    }
+    findings
+}
+
+// `git grep` over the tracked text files for every AS_WORDS spelling, outside
+// AS_SKIPPED.
+as_grep: fn() -> [String] {
+    pattern := ""
+    loop row in AS_WORDS {
+        pattern = if pattern == "" -> row.british else -> "{pattern}|{row.british}"
+    }
+    argv := [String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-n", "-P", "(?i)\\b(?:{pattern})\\b", "--", "."}
+    loop row in AS_SKIPPED -> argv.push(":(exclude,glob){row.path}")
+    listed: as_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
+    assert(listed.code == 0 || listed.code == 1, "git grep failed: {as_process.combined_output(listed).trim()}")
+    lines := [String]{}
+    loop line in as_process.stdout_lines(listed) {
+        if line.len() > 0 -> lines.push(line)
+    }
+    lines
+}
+
+// Each AS_SKIPPED row that no tracked file matches any more.
+as_stale_skips: fn() -> [String] {
+    stale := [String]{}
+    loop row in AS_SKIPPED {
+        listed: as_process.cmd([String]{"git", "ls-files", "--", ":(glob){row.path}"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
+        assert(listed.code == 0, "git ls-files failed: {as_process.combined_output(listed).trim()}")
+        if as_process.stdout_lines(listed).is_empty() {
+            stale.push("AS_SKIPPED `{row.path}`: no tracked file matches it any more; delete the row")
+        }
+    }
+    stale
+}
+
+#Test("the census names each British word and its American spelling") {
+    words: as_word_map()
+    hits: as_hits([String]{"Docs/a.md:3:a Colour: the behaviour of initialise_x", "Docs/b.md:9:color"}, words)
+    assert_eq(hits.len(), 2)
+    findings: as_findings(hits, words)
+    assert(findings.contains("Docs/a.md:3: `Colour` is British; write `Color`"))
+    assert(findings.contains("Docs/a.md:3: `behaviour` is British; write `behavior`"))
+}
+
+#Test("a Jet line's code is outside its comments and string text") {
+    words: as_word_map()
+    hits := [AmericanHit]{}
+    as_line_hits("a.jet", "1", "colour: \"{{colour}} colour\" // colour", words, hits)
+    assert_eq(hits.len(), 4)
+    assert(hits[0].code && hits[1].code && !hits[2].code && !hits[3].code)
+    quoted := [AmericanHit]{}
+    as_line_hits("a.md", "1", "the `colour` field, \"colour\", x.colour and colour", words, quoted)
+    assert(quoted[0].code && quoted[1].code && quoted[2].code && !quoted[3].code)
+    tokens := [AmericanHit]{}
+    as_line_hits("a.md", "1", "\"Red,colour\", 'sleep-colour', \"the colour\"", words, tokens)
+    assert(tokens[0].code && tokens[1].code && !tokens[2].code)
+    output := [AmericanHit]{}
+    as_line_hits("a.case", "1", "# the colour", words, output)
+    as_line_hits("a.case", "2", "stdout: colour", words, output)
+    assert(!output[0].code && output[1].code)
+}
+
+#Test("each word list row is lower case, listed once, and changes the word") {
+    seen := [String:Bool]{}
+    loop row in AS_WORDS {
+        assert(row.british == row.british.to_lower(), "{row.british}: list the word in lower case")
+        assert(row.british != row.american, "{row.british}: the American spelling must differ")
+        assert(seen.get(row.british) == None, "{row.british}: listed twice")
+        seen[row.british] = true
+    }
+}
+
+#Test("no tracked text spells a word the British way") {
+    guards_enter_root()
+    words: as_word_map()
+    findings := as_findings(as_hits(as_grep(), words), words)
+    loop line in as_stale_skips() -> findings.push(line)
+    assert_eq(findings.join("\n"), "")
+}

@@ -12,7 +12,7 @@ The witness is `event_lifecycle.jet`, kept at `$JET_STATE_ROOT/scratch/Closer06/
 
 1. The same handler registered twice.
 2. `unsubscribe` called twice, then `emit`.
-3. A recipient owned by a `view` scope that is cancelled while the event lives.
+3. A recipient owned by a `view` scope that is canceled while the event lives.
 4. `emit_async` from two `task`s on one `AsyncEvent`.
 5. `decision_hook` request/reply with no responder and with two responders under `FirstCancelElseTransform`.
 6. `app.cancel()` owner teardown.
@@ -55,7 +55,7 @@ This output is correct per the D-EVENT1/2 intent:
 
 - Duplicate registration is not deduplicated: two handles, delivered=2.
 - `unsubscribe` is idempotent.
-- A cancelled scope disposes its recipient while the event keeps its other listeners (retained-recipient lifetime is scope-owned).
+- A canceled scope disposes its recipient while the event keeps its other listeners (retained-recipient lifetime is scope-owned).
 - Each concurrent `emit_async` reports its own delivery.
 - Owner teardown disposes everything.
 
@@ -98,7 +98,7 @@ internal compiler error: JIT drop `HookOutcome` enum discriminant is invalid
 
 | job | Jet today | cell |
 |---|---|---|
-| weak registration | none. Recipient lifetime is owned by an `EventScope`; cancelling it disposes the registration (JIT evidence above) | covered by scope ownership; no weak form needed |
+| weak registration | none. Recipient lifetime is owned by an `EventScope`; canceling it disposes the registration (JIT evidence above) | covered by scope ownership; no weak form needed |
 | strong registration | `on`/`once` return `Subscription`; `unsubscribe` is idempotent | proven on the JIT |
 | duplicate registration | allowed, delivered twice | proven on the JIT |
 | token channels | each `Event<T>` value is its own typed channel | proven on the JIT |

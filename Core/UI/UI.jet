@@ -1504,14 +1504,15 @@ Frame: struct {
         }
     }
 
-    // Draws `text` over the bottom of the frame on a dark red bar `bar`
-    // pixels high, in white: how a native window shows the app's newest
-    // notice.
-    __draw_notice: fn(self, text: String, bar: Int) Never! {
-        top: if self.height > bar -> self.height - bar else -> 0
-        self.draw_rectangle(0, top, self.width, self.height - top, Color{r: 153, g: 27, b: 27, a: 255})
+    // Draws `text` on a dark red bar `bar` pixels high, in white, over the
+    // top of the frame when `top`, else over its bottom: how a native
+    // window shows a notice of the app's.
+    __draw_notice: fn(self, text: String, bar: Int, top: Bool) Never! {
+        y: if top || self.height <= bar -> 0 else -> self.height - bar
+        high: if top && self.height > bar -> bar else -> self.height - y
+        self.draw_rectangle(0, y, self.width, high, Color{r: 153, g: 27, b: 27, a: 255})
         size: self.__pixels(16)
-        self.draw_text(text, self.__pixels(8), top + (self.height - top - size) /% 2, size, Color{r: 255, g: 255, b: 255, a: 255})
+        self.draw_text(text, self.__pixels(8), y + (high - size) /% 2, size, Color{r: 255, g: 255, b: 255, a: 255})
     }
 
     is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool {

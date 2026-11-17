@@ -42,11 +42,11 @@ A 30-second flaky loop is barely better than no loop; a 2-second deterministic o
 
 ### Non-deterministic bugs
 
-The goal is not a clean repro but a **higher reproduction rate**. Loop the trigger 100×, parallelise, add stress, narrow timing windows, inject sleeps. A 50%-flake bug is debuggable; 1% is not — keep raising the rate until it's debuggable.
+The goal is not a clean repro but a **higher reproduction rate**. Loop the trigger 100×, parallelize, add stress, narrow timing windows, inject sleeps. A 50%-flake bug is debuggable; 1% is not — keep raising the rate until it's debuggable.
 
 ### When you genuinely cannot build a loop
 
-Stop and say so explicitly. List what you tried. Ask the user for: (a) access to whatever environment reproduces it, (b) a captured artifact (HAR file, log dump, core dump, screen recording with timestamps), or (c) permission to add temporary production instrumentation. Do **not** proceed to hypothesise without a loop.
+Stop and say so explicitly. List what you tried. Ask the user for: (a) access to whatever environment reproduces it, (b) a captured artifact (HAR file, log dump, core dump, screen recording with timestamps), or (c) permission to add temporary production instrumentation. Do **not** proceed to hypothesize without a loop.
 
 ### Completion criterion — a tight loop that goes red
 
@@ -59,7 +59,7 @@ Phase 1 is done when the loop is **tight** and **red-capable**: you can name **o
 
 If you catch yourself reading code to build a theory before this command exists, **stop — jumping straight to a hypothesis is the exact failure this skill prevents.** No red-capable command, no Phase 2.
 
-## Phase 2 — Reproduce + minimise
+## Phase 2 — Reproduce + minimize
 
 Run the loop. Watch it go red — the bug appears.
 
@@ -69,7 +69,7 @@ Confirm:
 - [ ] The failure is reproducible across multiple runs (or, for non-deterministic bugs, reproducible at a high enough rate to debug against).
 - [ ] You have captured the exact symptom (error message, wrong output, slow timing) so later phases can verify the fix actually addresses it.
 
-### Minimise
+### Minimize
 
 Once it's red, shrink the repro to the **smallest scenario that still goes red**. Cut inputs, callers, config, data, and steps **one at a time**, re-running the loop after each cut — keep only what's load-bearing for the failure.
 
@@ -77,9 +77,9 @@ Why bother: a minimal repro shrinks the hypothesis space in Phase 3 (fewer movin
 
 Done when **every remaining element is load-bearing** — removing any one of them makes the loop go green.
 
-Do not proceed until you have reproduced **and** minimised.
+Do not proceed until you have reproduced **and** minimized.
 
-## Phase 3 — Hypothesise
+## Phase 3 — Hypothesize
 
 Generate **3–5 ranked hypotheses** before testing any of them. Single-hypothesis generation anchors on the first plausible idea.
 
@@ -115,11 +115,11 @@ A correct seam is one where the test exercises the **real bug pattern** as it oc
 
 If a correct seam exists:
 
-1. Turn the minimised repro into a failing test at that seam.
+1. Turn the minimized repro into a failing test at that seam.
 2. Watch it fail.
 3. Apply the fix.
 4. Watch it pass.
-5. Re-run the Phase 1 feedback loop against the original (un-minimised) scenario.
+5. Re-run the Phase 1 feedback loop against the original (un-minimized) scenario.
 
 ## Phase 6 — Cleanup + post-mortem
 

@@ -1817,7 +1817,7 @@ exports, from which the interface is rendered. A binding gets no E3101, no C
 signature check and no shared-symbol E1341; its parameters and result must be
 runtime route carriers (E3203 otherwise), and its call lowers through the
 route the IR projects from its Jet signature, as a Core call's does, not
-through the C marshalling of foreign rows. The raw export is the one body of
+through the C marshaling of foreign rows. The raw export is the one body of
 each binding; the binding declares it and nothing else does. A member X of
 `jet.runtime.M` replaces the Core leaf `core.M.__X`, and
 `Tools/Agent/RuntimeEffectRows.jet --check` (a verify-full gate) fails when the

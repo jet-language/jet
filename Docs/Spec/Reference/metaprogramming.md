@@ -894,7 +894,7 @@ is the editor demo the same way: `#Engine.Entity(version: N)` writes a
 struct's inspector rows, an `Edit` impl that sets a field by name from text,
 `diff` into a `Patch` that undo and redo replay through `Edit`, and a
 positional text `save` and `load`, all from the struct's field rows. The
-inspector leaves out a field marked `#Engine.Hidden` and greys a field equal
+inspector leaves out a field marked `#Engine.Hidden` and grays a field equal
 to the default-built value; `save` still writes a hidden field, so editor and
 file policy stay apart. `load` skips a field marked
 `#Engine.Since(version: N)` in a file older than N, which keeps it at its
@@ -1139,12 +1139,14 @@ package that declares it.
 its build ran, each a `compiler.Event` (so the program writes `use
 compiler: core.compiler`; without it the call is E0119): each file
 `.Parsed`, then each module other than the entry `.Imported`, both by file
-path; each declaration `.Declared`, by module path and declaration order,
-with the declarations it calls; then `.Checked` with the whole program and
-`.Settled` with its one round. The order is the same whatever the thread
-count the compile ran on, and `jet build --json` lists the same moments in
-its `events`. It only reads, so it needs no Meta effect, and the build
-refuses a value whose build has returned.
+path and each under its module's source name (`shapes` for `shapes.jet`);
+each declaration written in the program `.Declared`, by module path and
+declaration order, with the declarations it calls; then `.Checked` with the
+whole program and `.Settled` with its one round. Modules the compiler supplies
+(Core and the Prelude) and declarations it adds are not listed. The order is
+the same whatever the thread count the compile ran on, and `jet build --json`
+lists the same moments in its `events`. It only reads, so it needs no Meta
+effect, and the build refuses a value whose build has returned.
 A handler runs inside the build's own call, so it spends the build's
 compile-time step budget, the one every compile-time call has: the build and
 all its handlers share it. A build that runs out stops there with E0952, and

@@ -1584,7 +1584,7 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "open_settings" | "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "context_menu" | "copy_text" | "paste_text" -> {
+        "open_settings" | "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "context_menu" | "copy_text" | "paste_text" | "share" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         "notify" -> {
@@ -1603,8 +1603,9 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
 // notification only while the page is open; its file chooser answers after
 // the page's code has returned; a page's drop gives its own file handles;
 // and the page runtime opens no context menu of the app's and reaches no
-// clipboard yet. So a device call on an app whose resolved target is the
-// web output is refused, never dropped or answered for the browser.
+// clipboard or share sheet yet. So a device call on an app whose resolved
+// target is the web output is refused, never dropped or answered for the
+// browser.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1635,6 +1636,10 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         if member == "copy_text" || member == "paste_text" {
             why = "A browser lets a page reach the clipboard only inside the person's gesture, and the page runtime can't run the call there yet, so the web output has no `{alias}.{member}` to run; dropping a copy would lose it, and making up a paste would be wrong."
             fix = "On the web, let the person copy or paste in a text input, which the browser's own clipboard serves. Keep `{alias}.{member}` for a native build."
+        }
+        if member == "share" {
+            why = "A browser opens its share sheet only inside the person's gesture, and the page runtime can't run the call there yet, so the web output has no `{alias}.share` to run; dropping the link would lose it."
+            fix = "On the web, put the link in the screen as a link the person can share from the browser. Keep `{alias}.share` for a native build."
         }
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
     }

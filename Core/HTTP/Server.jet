@@ -162,7 +162,7 @@ priv HTTPTLSOps: struct {
 }
 
 /// What one served lifetime did: connections accepted, refused (over the
-/// connection limits, or while draining), answered, and cancelled at shutdown.
+/// connection limits, or while draining), answered, and canceled at shutdown.
 HTTPShutdownReport: struct {
     accepted: Int,
     overloaded: Int,
@@ -172,7 +172,7 @@ HTTPShutdownReport: struct {
 
 /// Whether a server should be sent traffic, as `readiness()` and the built-in
 /// `GET /__jet/ready` probe read it. A bound server is NotReady until `serve`
-/// starts, then Ready. From `shutdown`, or an accept a signal cancelled, it is
+/// starts, then Ready. From `shutdown`, or an accept a signal canceled, it is
 /// Draining while the connections in flight finish, and Closed once `serve`
 /// reports. A server shut down before it served is Closed, never Ready. It
 /// displays as the probe's body: `not ready`, `ready`, `draining`, `closed`.
@@ -389,7 +389,7 @@ priv HTTPServerState: struct {
 }
 
 /// A bound listener and its mux. `serve` answers connections until
-/// `shutdown` or a cancelled accept; the report is the same for every caller.
+/// `shutdown` or a canceled accept; the report is the same for every caller.
 /// The listener closes when the drain ends, so nothing listens after serving.
 HTTPServer: struct {
     __state: Shared<HTTPServerState>,
@@ -416,7 +416,7 @@ HTTPServer: struct {
     // from cancellation, so a delivered signal (which cancels every task)
     // stops accepting while the requests in flight are answered. Serving
     // then waits up to one connection deadline for them; the report counts
-    // the connections still open after that as cancelled. What the app runs
+    // the connections still open after that as canceled. What the app runs
     // as it stops (`__on_stop`) has the rest of that time.
     serve: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
         if !server_begin(self) -> return Err(.IO{operation: "HTTP server can only be served once"})
@@ -456,7 +456,7 @@ HTTPServer: struct {
                     }
                 }
                 .Err(error) -> {
-                    // A cancelled accept (the serving task's cancel, or the
+                    // A canceled accept (the serving task's cancel, or the
                     // process's on a delivered `process.on_signal` signal)
                     // stops serving as a shutdown does: the report stands.
                     if accept_cancelled(error) -> running = false else if accept_transient(error) {
@@ -533,7 +533,7 @@ HTTPServer: struct {
     }
 }
 
-// The finish signal; the server holds the receiving end, so only a cancelled
+// The finish signal; the server holds the receiving end, so only a canceled
 // wait refuses it.
 priv server_signal_done: fn(done: Sender<Int>) Err! { done.send(1) }
 
@@ -562,7 +562,7 @@ priv server_stopping: fn(server: HTTPServer) -> Bool Never! {
     guard.value.stopping
 }
 
-// Accepting work has stopped (a shutdown, a cancelled accept or a failed
+// Accepting work has stopped (a shutdown, a canceled accept or a failed
 // one): from here the server reads Draining.
 priv server_mark_stopping: fn(server: HTTPServer) Never! {
     guard := server.__state.guard_edit()
@@ -604,7 +604,7 @@ priv server_request_stop: fn(server: HTTPServer, grace: Duration) -> Int Never! 
 }
 
 // How long serving waits for the connections in flight once accepting
-// stops: the grace `shutdown` gave, else (a cancelled accept: the serving
+// stops: the grace `shutdown` gave, else (a canceled accept: the serving
 // task's cancel or a delivered signal) one connection deadline.
 priv drain_budget: fn(state: Shared<HTTPServerState>, deadline: Duration?) -> Int Never! {
     guard: state.guard_read()
@@ -612,7 +612,7 @@ priv drain_budget: fn(state: Shared<HTTPServerState>, deadline: Duration?) -> In
     if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
 }
 
-// The drain's end: the connections still open are cancelled, and from now
+// The drain's end: the connections still open are canceled, and from now
 // on one whose handler returns sends nothing (drain_ended).
 priv drain_close: fn(state: Shared<HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
     guard := state.guard_edit()
@@ -865,7 +865,7 @@ priv server_serve_once: fn(listener: TCPListener, mux: HTTPMux) -[Net, FS.Read, 
 }
 
 // `app.bind(addr, tls:, deadline:)` (Docs/Spec/syntax-decisions.md:5083,
-// Docs/Spec/spec.md:1928-1931): the labelled `tls:` option serves HTTPS. Its
+// Docs/Spec/spec.md:1928-1931): the labeled `tls:` option serves HTTPS. Its
 // identity is checked here, so an unusable certificate or key fails the bind
 // instead of every handshake.
 priv server_bind: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
@@ -1707,7 +1707,7 @@ priv accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duratio
 // left to the upgraded connection rather than closed here; once that
 // handler returns, what `__on_upgraded` left on `mux` runs. When the drain of
 // `server` ran out while the handler ran, the connection was reported
-// cancelled, so its response is not sent and the socket just closes. The
+// canceled, so its response is not sent and the socket just closes. The
 // server answers the readiness probe, and a `refusing` connection, itself
 // (server_answer).
 priv serve_connection: fn(stream: HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {

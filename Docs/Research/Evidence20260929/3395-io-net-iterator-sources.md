@@ -78,7 +78,7 @@ Source read:
   `[IPAddr] NetError!`.
 - The host resolver and the explicit wire resolver are distinct functions.
 
-So resolution is not modelled as a pure zero-cost source.
+So resolution is not modeled as a pure zero-cost source.
 `net/dns_lookup` golden: MATCH on `jet run`. `--interpret` fails with E3412 "`core.net.getservbyname()` is not available at comptime". AOT fails with rustc E0308 in generated dns_lookup.rs:137946 (`jet_net_dns_ptr` argument). Verdict c3: the effectful shape holds (source), tier parity FAIL.
 
 ## c4 — cleanup and readiness
@@ -105,4 +105,4 @@ channel readiness (F031), no new evidence was produced; see #3224/#3226.
 ## c5
 
 `io/line_producer_contract` was not added. The observed invalid-line
-behaviour is a defect and must not be blessed.
+behavior is a defect and must not be blessed.

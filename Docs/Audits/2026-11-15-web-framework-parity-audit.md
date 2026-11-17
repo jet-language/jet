@@ -98,7 +98,7 @@ HTTP 200 on 2026-11-15. A bracketed key such as [TSR] points there.
 - **Verdict:** partial. One loader per route, server side; no nested
   parallel loaders; pending boundaries are not rendered.
 - **Gap:** pending, error and not-found boundaries on every tier, and a
-  cancelled preload on aborted navigation (#6864 c2).
+  canceled preload on aborted navigation (#6864 c2).
 - **Downsides of the best, and the Jet design:**
   - *Waterfalls between nested loaders when a child needs the parent's
     data.* Design: a screen's reads are known to the compiler, so the server

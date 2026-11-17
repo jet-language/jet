@@ -613,7 +613,7 @@ checks.
 
 Every update prints a plan before mutation. Interactive human mode asks
 `Apply? [y/N]`; only `y` or `yes` applies. N/EOF prints
-`plan cancelled; no baseline changed` and exits OK. Non-TTY without `-y` or
+`plan canceled; no baseline changed` and exits OK. Non-TTY without `-y` or
 `--yes` prints the deterministic plan plus
 `plan only; pass -y or --yes to apply in a non-interactive shell`, performs no
 write, and exits OK. JSON never prompts: without `-y`/`--yes` it returns the
@@ -730,7 +730,7 @@ parsed back from rendered stderr.
 ### Exit law
 
 The exit mapping reuses [`ExitCodes.jet`](../../Compiler/JetFoundation/Source/Registry/ExitCodes.jet): OK=0 covers pass,
-warning-only output, cancelled plans, non-TTY/JSON plan-only output, and
+warning-only output, canceled plans, non-TTY/JSON plan-only output, and
 successful or idempotent mutation. USER_ERROR=1 covers budget, evidence,
 compiler, and tool failure. USAGE=2 covers command, flag, argument, and
 combination errors. RUNTIME_PANIC=70 never comes from budget tooling. ICE=101

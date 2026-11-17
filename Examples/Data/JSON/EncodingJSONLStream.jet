@@ -14,7 +14,7 @@ package: {
 //   is Truncated.
 // - Splitting is disclosed: `jsonl.parse` is eager and returns every record
 //   or one error, while the reader yields the records before a bad one.
-// - Cancelling the consuming task stops the read at its next wait point.
+// - Canceling the consuming task stops the read at its next wait point.
 use {
     encoding: core.encoding
     core.encoding.json
@@ -69,7 +69,7 @@ read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> 
     loop {
         _row: reader.next() ?? break
         count += 1
-        // A refused send means the consumer is gone or this task was cancelled.
+        // A refused send means the consumer is gone or this task was canceled.
         started.send(count) ?? break
         _: gate.receive() ?? 0
     }

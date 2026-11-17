@@ -8,19 +8,20 @@ exit: 0
 stdout: lines = 1 # the status is the one machine line
 json: stdout doc $.action = "build.effects"
 json: stdout doc $.events[0].event = "compiler.parsed" # the load's moments come first
-json: stdout doc $.events[0].data.path : string
+json: stdout doc $.events[0].data.path : string # the file's path, which the work folder decides
+json: stdout doc $.events[0].data.module = "main" # under its module's source name
 json: stdout doc $.events[?event="compiler.declared"][0].data.name = "double" # declaration order
 json: stdout doc $.events[?event="compiler.declared"][0].data.calls #= 0
 json: stdout doc $.events[?event="compiler.declared"][0].data.complete = true
 json: stdout doc $.events[?event="compiler.declared"][1].data.name = "run"
 json: stdout doc $.events[?event="compiler.declared"][1].data.calls[0] = "double" # first-call order
 json: stdout doc $.events[?event="compiler.checked"] #= 1
-json: stdout doc $.events[?event="compiler.checked"][0].data.declarations #>= 2
+json: stdout doc $.events[?event="compiler.checked"][0].data.declarations #= 2 # the program's own two, none the compiler supplies
 json: stdout doc $.events[?event="compiler.settled"][0].data.round = 1
-json: stdout doc $.events[?event="compiler.settled"][0].data.new_items #>= 2
+json: stdout doc $.events[?event="compiler.settled"][0].data.new_items #= 2
 json: stdout doc $.events[-2].event = "compiler.emitted" # the image, written before the compile finishes
 json: stdout doc $.events[-2].data.output = "main"
-json: stdout doc $.events[-2].data.path : string
+json: stdout doc $.events[-2].data.path : string # the image's path, which the work folder decides
 json: stdout doc $.events[-2].data.next = ""
 json: stdout doc $.events[-1].event = "compiler.finished" # the outcome is last
 json: stdout doc $.events[-1].data.ok = true

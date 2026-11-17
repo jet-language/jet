@@ -2,7 +2,7 @@
 
 ## Question
 
-Do the shipped time owners prove these behaviours on the current binary: wall versus
+Do the shipped time owners prove these behaviors on the current binary: wall versus
 monotonic time, ambiguous and nonexistent local times, parse round-trip, and the approved
 `23:59:60` leap label? Are scheduler timers kept separate?
 

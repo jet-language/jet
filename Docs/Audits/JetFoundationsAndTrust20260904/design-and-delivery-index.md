@@ -195,7 +195,7 @@ Full steps, path ownership, focused future commands, and ballot text are in Towe
 
 **Authority:** D-COMPILER-PROOF1,D-TIER-ONEIR1,D-FFI-CAP1,I1,I6,I9
 
-1. Every Jet-owned Core/runtime obligation has implementation-bound proof of its contract, including error policy and lifecycle; proving only dispatch or marshalling cannot close the card.
+1. Every Jet-owned Core/runtime obligation has implementation-bound proof of its contract, including error policy and lifecycle; proving only dispatch or marshaling cannot close the card.
 2. Negative witnesses reject wrong defaults, width/bounds conversions, cleanup count, callback lifetime, cancellation behavior, and changed error interpretation.
 3. Foreign assumptions are named and bounded at their call edges; an external success status or source hash never proves the Jet-owned wrapper.
 4. The same proved semantic bodies serve AOT, default run/dev, interpreter/comptime where reachable, and applicable web targets without host-side policy copies.
@@ -281,7 +281,7 @@ Full steps, path ownership, focused future commands, and ballot text are in Towe
 
 1. The selected learning order works end to end for a loop, a state/lifetime error, an effect boundary, and a foreign-boundary task using real compiler or execution evidence.
 2. The learner must make a prediction, explain the result, change one relevant condition, and solve a structurally different transfer task; copying a solution or matching a canned explanation cannot satisfy all four.
-3. Wrong, unknown, unavailable, stale, cancelled, and completed states behave honestly across watch, one-shot, ordinary editor, and JSON paths; user edits survive interruption and resume.
+3. Wrong, unknown, unavailable, stale, canceled, and completed states behave honestly across watch, one-shot, ordinary editor, and JSON paths; user edits survive interruption and resume.
 4. The same curriculum works offline without AI or Studio, with keyboard/text alternatives and an owner-reviewed learning runbook.
 
 <a id="card-2948"></a>
@@ -316,7 +316,7 @@ Full steps, path ownership, focused future commands, and ballot text are in Towe
 **Authority:** D-TESTKIT1,D-RECORD1,D-ADOPT-TIER1,I6,I9 Owner choice: D-TEST-COMPARE1.
 
 1. An ordinary Jet test compares two pure functions and two explicitly isolated stateful/foreign scenarios, then replays the same identified mismatch through CLI and ordinary editor output.
-2. Empty, entirely discarded, unavailable, timed-out, cancelled, and invalid-oracle runs cannot pass; equal sampled results cannot be described as universal proof.
+2. Empty, entirely discarded, unavailable, timed-out, canceled, and invalid-oracle runs cannot pass; equal sampled results cannot be described as universal proof.
 3. Reduction preserves the same mismatch and observation relation, including ordered effects or typed failure where declared; input/environment contamination is detected.
 4. The same Core behavior and failure meaning reach AOT, default run/dev, interpreter, and applicable web modes through one Prelude implementation, with no external dependency or second test runner.
 

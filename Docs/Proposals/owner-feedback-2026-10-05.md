@@ -1026,7 +1026,7 @@ Evidence conventions:
 ### Bottom line
 
 You are not going off the deep end. Both principles fit Jet, and Jet already
-applies the first one more than you may realise. The honest caveats are below.
+applies the first one more than you may realize. The honest caveats are below.
 
 1. **Mechanisms over policies is already Jet law.** Invariant I8, D-META-ONE1
    (compiler rules are Prelude Jet declarations), D-META-REG1 (one registration
@@ -1057,7 +1057,7 @@ applies the first one more than you may realise. The honest caveats are below.
    variants plus `<picture>`, with `jet dev` converting on demand through the same
    encoder. AVIF stays opt-in. The encoder should be written in Jet, because the
    2023 libwebp exploit (CVE-2023-4863) is the strongest argument against bridging
-   C codecs, and I6 favours it too. It turns on by default per source type only
+   C codecs, and I6 favors it too. It turns on by default per source type only
    after a measured gate against libwebp.
 
 ### Defects found along the way (for cards, whichever ballots win)
@@ -1162,7 +1162,7 @@ Corpus frequency of declaration words: `prep {` 320 uses; `impl` 204;
 | Area | Merge | Before → after | Ballot |
 |---|---|---|---|
 | Language | `tag` and `policy`/`wrap` declarations fold into `marker`. `wrap(call)` becomes a marker-body statement. `#Policy` keeps only scoped settings. This also fixes defect 1 by design. | 3 declaration words → 1; keywords 51 → 49; `#Policy` meanings 2 → 1 | **D-MARKER-DECL1** |
-| Core | Per-call timeouts (`tcp_connect_timeout`, `set_timeout`, `set_read_timeout`, `set_write_timeout`, `udp_set_timeout`, `session_timeout`) retire in favour of one `#Deadline(duration)` block over the existing deadline inheritance (D-DEADLINE1). | 7 functions + 1 expert field → 1 marker | **D-DEADLINE-ONE1** |
+| Core | Per-call timeouts (`tcp_connect_timeout`, `set_timeout`, `set_read_timeout`, `set_write_timeout`, `udp_set_timeout`, `session_timeout`) retire in favor of one `#Deadline(duration)` block over the existing deadline inheritance (D-DEADLINE1). | 7 functions + 1 expert field → 1 marker | **D-DEADLINE-ONE1** |
 | CLI | `fuzz`, `test-compare`, `budget`, `gc`, `emit` and `eval` fold into `test`, `perf`, `inspect` and `run`. | 61 → 55 top-level | **D-CLI-FOLD1** |
 | Governance (Lua for simplicity) | Registry-computed counts plus a ceiling file. A test fails on growth unless an owner decision raised the ceiling. `JET_KEYWORD_LIST` is regenerated from the `KW_*` constants. | no count → counted, gated | **D-SURFACE-BUDGET1** |
 | Hooks (also a merge) | 14 registration shapes → 1 mechanism, with 2 spellings (static `#On`, dynamic `.on`) | see item 11 | **D-HOOK-ONE1** and companions |
@@ -1256,7 +1256,7 @@ ballot. This report supplies that ballot (D-HOOK-STAGES1).
   and parallel). Jet covers the same space with four (Event, Hook, DecisionHook,
   AsyncEvent).
 - **Rollup/Vite:** one plugin hook interface for dev and build, with explicit
-  ordering. That is the analogue of I9.
+  ordering. That is the analog of I9.
 - **Compiler plugins:** Kotlin compiler plugins broke on the K2 rewrite, and KSP
   became the stable API (Google reports KSP up to 2× faster than kapt). Scala 2
   plugins did not survive Scala 3. TypeScript has kept custom transformers out of
@@ -1340,7 +1340,7 @@ D-HOOK-STAGES1 and not recommended.
 
 There is no image pipeline:
 - `core.image` is ratified (D-CORE-IMAGE1=A: Jet-owned PNG/JPEG/GIF decode,
-  PNG/JPEG encode, nearest-neighbour resize, explicit budgets) but has no module
+  PNG/JPEG encode, nearest-neighbor resize, explicit budgets) but has no module
   yet.
 - `b.add_asset_bundle` appears in the spec (spec.md:4060) without an
   implementation.
@@ -1391,10 +1391,10 @@ Accept-header negotiation needs `Vary: Accept`, which fragments CDN caches.
 
 #### Licensing, dependencies and safety (D-IMAGE-ENCODE1 = A)
 
-Licences of the candidate libraries:
+Licenses of the candidate libraries:
 - libwebp: BSD-3-Clause.
 - libavif: BSD-2-Clause.
-- libaom: BSD-2-Clause plus the AOM patent licence.
+- libaom: BSD-2-Clause plus the AOM patent license.
 - rav1e: BSD-2-Clause (Rust).
 - libvips: LGPL-2.1+ (bundled by sharp).
 - image-webp: MIT/Apache-2.0, pure Rust, decoder plus lossless encoder only.

@@ -50,7 +50,7 @@ Interpreter, JSON cells: `E0956 MIR typed codec decode has no builtin decoder fo
 
 1. Separate explicit-ID graph data from implicit reconstruction: **met.** Explicit IDs are data. Implicit identity does not exist in the model.
 2. Reject unsafe instantiation from untrusted input: **met on JIT and AOT.** The type is chosen by the program's target type, never by the input.
-3. Keep identity, cycle and alias behaviour as an explicit profile: **met as a record.** The profile is "explicit IDs only; aliases duplicate; cycles only through IDs; tags 28/29 refused".
+3. Keep identity, cycle and alias behavior as an explicit profile: **met as a record.** The profile is "explicit IDs only; aliases duplicate; cycles only through IDs; tags 28/29 refused".
 4. Graph or API additions need a ballot: **met.** No addition is proposed. If the owner wants a graph profile, it needs a ballot (for example, an opt-in `#Identity` Codable metadata with explicit ID and reference encoding). Nothing is drafted here, because no need was demonstrated.
 5. Golden `serde/graph_identity` on AOT and default run with all four cells: **not met.** The three JSON cells agree on JIT and AOT, but the CBOR tag 28/29 cell crashes the JIT and does not compile on AOT (the CBOR error-type defect, D1/D2 in 3271). The interpreter cannot decode `[Node]`. No golden was blessed. The witness is ready at `$JET_STATE_ROOT/scratch/Closer02/graph_probe.jet` for when CBOR errors work.
 

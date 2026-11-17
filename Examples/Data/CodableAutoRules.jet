@@ -33,8 +33,8 @@ Tag: struct {
     }
 }
 
-// Encode-only: `Tag` has no Decode, so `Labelled` derives Encode alone.
-Labelled: struct {
+// Encode-only: `Tag` has no Decode, so `Labeled` derives Encode alone.
+Labeled: struct {
     #Rename("tag") label: Tag,
     id: Int,
 }
@@ -54,7 +54,7 @@ run: fn() [FieldError]! {
     packed: json.decode<Task>("{{\"name\":\"pack\",\"level\":\"Low\",\"steps\":[],\"note\":\"fragile\"}}")
     print(packed.note ?? "(none)")
     print(packed.level == Level.Low)
-    print(json.to_string(Labelled{label: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
+    print(json.to_string(Labeled{label: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
     hook: Hook{name: "double", apply: fn(n) { n * 2 }}
     print(hook.apply(21))
 }

@@ -138,7 +138,7 @@ Type: struct {
 }
 
 // A send the channel refused: its receiving end is gone, or the sending task
-// was cancelled while it waited. `value` is the payload, handed back unsent,
+// was canceled while it waited. `value` is the payload, handed back unsent,
 // so `tx.send(job) ?? retry(err.value)` keeps the job. A program never has to
 // spell it: `tx.send(v)` fails with `SendError<T>` for the channel's `T`, and
 // passes it up as the default `Err` like any Core error.
@@ -147,7 +147,7 @@ SendError: struct<T> {
     value: T,
 }
 
-// How a task's join fails: the task was cancelled, ran past its deadline, or
+// How a task's join fails: the task was canceled, ran past its deadline, or
 // stopped on a failure it did not handle, with that failure's text. It lives
 // in the prelude because every program can reach it without naming it: a
 // join (`h.join()`, `task.all`, a group) fails with it, and the runtime's

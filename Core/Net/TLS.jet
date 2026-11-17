@@ -327,7 +327,7 @@ client: fn(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
     __client_stream_entry(tcp, host)
 }
 
-// Checked Core call rows keep the moved-stream and labelled handshake forms
+// Checked Core call rows keep the moved-stream and labeled handshake forms
 // of `client`; Sema selects one of these by argument count.
 __client_stream_entry: fn(stream: &&TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
     tls := client_connect(stream, server_name, ClientConfig{}, forever()) ?? return Err(net_to_io(err))
@@ -1904,7 +1904,7 @@ priv io_error: fn(operation: IOOperation, message: String) -> IOError Never! {
     if message.contains("timed out") || message.contains("deadline") {
         return IOError.TimedOut(io_context(operation, message))
     }
-    if message.contains("cancelled") -> return IOError.Cancelled(io_context(operation, message))
+    if message.contains("canceled") -> return IOError.Cancelled(io_context(operation, message))
     IOError.Other(io_context(operation, message))
 }
 

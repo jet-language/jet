@@ -92,7 +92,7 @@ kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! { out.send(chunk
 
 // Drains the child's captured stdout into `out`; an empty chunk marks its end.
 // Cancellation also ends the read empty, so only the task's own return (not a
-// cancelled join) means the stream really ended.
+// canceled join) means the stream really ended.
 kit_steps_session_pull: fn(stream: ProcessStdoutStream, out: Sender<[U8]>) -> String Never! {
     loop {
         chunk: stream.read_bytes(65536) ?? {
@@ -325,7 +325,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         }
         if step.action == "signal" {
             delivered: kit_steps_signal(pending.child.id(), step.argv[0]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "signal delivery: {err}")}
-            state.children[index].signalled = delivered
+            state.children[index].signaled = delivered
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         // Closing a terminal session's input types the end-of-file character;
@@ -348,7 +348,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
         }
         receipt: pending.child.wait() ?? return kit_steps_action_error(state, "session wait: {err}")
         state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
-        if pending.signalled -> state.last.signal = None
+        if pending.signaled -> state.last.signal = None
         if pending.taken > 0 {
             state.last.stdout = kit_steps_byte_slice(state.last.stdout, pending.taken, state.last.stdout.count_bytes())
         }
@@ -360,7 +360,7 @@ kit_steps_session_action: fn(step: KitStep, context: KitStepCtx, previous: KitSt
 
 kit_steps_signal: fn(pid: Int, name: String) -> Bool Err! {
     number: if name == "INT" || name == "SIGINT" -> 2 else if name == "TERM" || name == "SIGTERM" -> 15 else if name == "KILL" || name == "SIGKILL" -> 9 else if name == "HUP" || name == "SIGHUP" -> 1 else if name == "STOP" || name == "SIGSTOP" -> 19 else if name == "CONT" || name == "SIGCONT" -> 18 else -> Int.parse(name) ?? return Err("unknown signal")
-    #Unsafe("the case explicitly authorizes signalling its own spawned child") {
+    #Unsafe("the case explicitly authorizes signaling its own spawned child") {
         sys.kill(pid, number) ?? return Err("signal delivery failed")
     }
     Ok(number != 0)

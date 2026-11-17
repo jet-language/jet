@@ -69,7 +69,7 @@ That is the whole rule. Each line below is "X goes in F because …".
 | a test suite that is plain data (a golden folder), `suites:` | `package.jet` | the suite is part of the package, like an output |
 | a test suite that needs code (a fuzz driver) | `test.jet`, `t.suite(...)` | it is work |
 | generated code, a code-made output, a custom tool step | `build.jet` | it is work |
-| dev-loop behaviour of one service (port, watch, reload) | `dev.jet`, or that output's `options:` | it belongs to that output |
+| dev-loop behavior of one service (port, watch, reload) | `dev.jet`, or that output's `options:` | it belongs to that output |
 | the packages in this repo, `packages:` | `project.jet` | a consumer never sees your repo layout |
 | `version`, `edition`, `license` that every package shares | `project.jet` | a package that leaves one out takes the project's (D-CORE-HEADER1, now written in one place) |
 | build profiles, `release: BuildOptions{ optimize: full }` | `project.jet` `profiles:` | how you choose to build; a consumer's build never reads yours |

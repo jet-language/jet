@@ -12,13 +12,13 @@ Scripts and raw output: `measure.mjs`, `census2.mjs` and `out.json` in the resea
 
 **What the evidence says, in five points.**
 
-1. **No controlled study compares the two head shapes.** I searched the eye-tracking and readability literature and found nothing that tests keyword-first against name-first declaration heads. Carbon's designers looked too and found "a lack of compelling data". Everything published on this exact question is designer opinion (Odin, Go, Carbon, Zig, PEP 8, JS style guides). The research that does exist tells us what to optimise for: people read code non-linearly, they scan and search constantly, repeated regular patterns get cheaper with each instance, and familiarity strongly affects speed.
+1. **No controlled study compares the two head shapes.** I searched the eye-tracking and readability literature and found nothing that tests keyword-first against name-first declaration heads. Carbon's designers looked too and found "a lack of compelling data". Everything published on this exact question is designer opinion (Odin, Go, Carbon, Zig, PEP 8, JS style guides). The research that does exist tells us what to optimize for: people read code non-linearly, they scan and search constantly, repeated regular patterns get cheaper with each instance, and familiarity strongly affects speed.
 2. **The measured differences in Jet code are geometric and small.** Across the four sample pairs (7,635 lines, 1,064 declarations), Jai style puts every declared name at the indent column. Today the name's distance from the indent varies (mean 3.2–4.3 columns, sd 0.9–1.8). In exchange, the kind keyword moves to a ragged column (mean 11.8–16.4, sd 4.6–5.9). Every declaration line gets exactly 3 characters longer. Lines over 100 columns go from 163 to 176. Across the repo, 946 heads would cross the 100-column limit.
 3. **The strongest argument for Jai style comes from Jet itself.** Jet already names values with `NAME :: value` and has no `let`. Seven or more forms are already name-first, and three are hybrids (`alias X :: Y`, `module a :: b<…>(…)`, `marker N = #[…]`). Only name-first can give Jet a single declaration rule. Pillar 4 (Ladders, Not Cliffs) also improves: going from lambda to function never moves the name.
 4. **The strongest argument against is also from Jet itself.** In Jai, Odin and Zig, name-first is *semantically true*: procedures and types really are compile-time constants. In Jet it is not. Types are not values (S26), named functions are not generally values (`&`/`^` parameters make a function direct-call-only), and lambdas follow different recursion and return rules. Zig accepted this exact change in 2019 and rejected it in 2023, on the grounds that "functions have symbol names… the syntax inconsistency appropriately models reality". Every keyword-first language that beginners and AI models know well (Python, JS, Rust, Go, Kotlin, Swift) spells the head the way Jet does today.
 5. **Tooling cost is small; migration cost is large but mechanical.** The parser needs the same 3-token lookahead that `parser_distinct_ahead` already uses. LSP outline, rename and go-to-definition are unaffected. The tree-sitter and TextMate changes are a few rules each. The codemod touches 76,146 head lines in 14,753 `.jet` files, plus about 1,120 doc heads, about 2,400 golden-output lines and about 2,500 compiler/tool string lines. It also amends about ten ratified decisions.
 
-**Recommendation.** Adopt the engineered version of Jai style (Option B below), but only after a two-part experiment that costs one to three days. My confidence is moderate: about 60/40 in favour. Option B is not the mechanical rewrite in the sample. It adds six explicit rules for the misfit forms: multi-head clauses, bodiless requirements, inline markers, `f :: g`, `extern` entries, and dotted names. If the experiment shows that AI models keep emitting `fn name(` heads after a primer, or that people are measurably slower at "what kind of thing is this?", keep today's style (Option A) and fix its three hybrids instead.
+**Recommendation.** Adopt the engineered version of Jai style (Option B below), but only after a two-part experiment that costs one to three days. My confidence is moderate: about 60/40 in favor. Option B is not the mechanical rewrite in the sample. It adds six explicit rules for the misfit forms: multi-head clauses, bodiless requirements, inline markers, `f :: g`, `extern` entries, and dotted names. If the experiment shows that AI models keep emitting `fn name(` heads after a primer, or that people are measurably slower at "what kind of thing is this?", keep today's style (Option A) and fix its three hybrids instead.
 
 ### Comparison table
 
@@ -71,8 +71,8 @@ The two alignments help different reading tasks. I separate what the research me
 
 - **"Where is `X` defined?"** In Jai style the name sits at a fixed column, so a vertical scan finds it without skipping past keywords. Today the eye has to skip a 3–7 character keyword, and the keyword's width varies. *[INFERENCE from geometry; not measured on Jet.]* Search and navigation are a large share of developer time: Google engineers average 5 search sessions and 12 queries per workday, many of them "where is this code" (Sadowski et al. 2015). Ko et al. (2006) measured 35% of maintenance time going to navigation mechanics.
 - **"What kind of thing is `X`?" / "Show me all the types."** Today the kind is at the indent column, so the eye reads kinds straight down. In Jai style the kind sits at column 5–33 with sd ≈ 5. *[INFERENCE.]* Jet partly compensates through naming case at the left edge: `PascalCase ::` is a type, marker or trait; `snake_case ::` is a function, module or value; `ALL_CAPS ::` is a constant. Case separates types from functions, but it does not separate `fn` from `module` or `struct` from `enum`.
-- **Regularity.** Jbara & Feitelson (2017) measured that repeated, regular code patterns cost the most effort on the first instances, that the cost falls off exponentially, and that later instances get skimmed. Both styles are internally regular. Jai style is regular across *all* naming forms (declarations and bindings); today's style is regular within declarations. *[INFERENCE: this favours the style with fewer distinct shapes, which is Jai style, but the study did not test declaration heads.]*
-- **Familiarity dominates small visual effects.** In identifier-style studies, visual form changed speed (Sharif & Maletic 2010: underscores recognised faster with no accuracy difference; Binkley et al. 2009/2013: camelCase more accurate, and people trained in a style were faster in it). The lasting lesson is that training shifts the result. Today's head shape is the one trained by Rust, Go, Kotlin, Swift, Python and JS.
+- **Regularity.** Jbara & Feitelson (2017) measured that repeated, regular code patterns cost the most effort on the first instances, that the cost falls off exponentially, and that later instances get skimmed. Both styles are internally regular. Jai style is regular across *all* naming forms (declarations and bindings); today's style is regular within declarations. *[INFERENCE: this favors the style with fewer distinct shapes, which is Jai style, but the study did not test declaration heads.]*
+- **Familiarity dominates small visual effects.** In identifier-style studies, visual form changed speed (Sharif & Maletic 2010: underscores recognized faster with no accuracy difference; Binkley et al. 2009/2013: camelCase more accurate, and people trained in a style were faster in it). The lasting lesson is that training shifts the result. Today's head shape is the one trained by Rust, Go, Kotlin, Swift, Python and JS.
 
 ### 1.3 The hardest real examples, both ways
 
@@ -298,16 +298,16 @@ So in Jet, Jai style would be a **spelling unification, not a semantic one**. I8
 | Study | What it measured | Relevance |
 |---|---|---|
 | Busjahn et al. 2015, ICPC, doi:10.1109/ICPC.2015.36 | Novices read code less linearly than prose; experts even less | Readers jump between definitions; anchors at the left edge matter for both styles |
-| Jbara & Feitelson 2017, EMSE 22(3), doi:10.1007/s10664-016-9477-x; 2014 ICPC, doi:10.1145/2597008.2597140 | Regular, repeated structures: effort drops exponentially after the first instances; later ones are skimmed | Favours fewer distinct line shapes |
-| Sharif & Maletic 2010, ICPC, doi:10.1109/ICPC.2010.41 | Eye tracking: underscore identifiers recognised faster; no accuracy difference | Small visual-form effects on speed exist |
+| Jbara & Feitelson 2017, EMSE 22(3), doi:10.1007/s10664-016-9477-x; 2014 ICPC, doi:10.1145/2597008.2597140 | Regular, repeated structures: effort drops exponentially after the first instances; later ones are skimmed | Favors fewer distinct line shapes |
+| Sharif & Maletic 2010, ICPC, doi:10.1109/ICPC.2010.41 | Eye tracking: underscore identifiers recognized faster; no accuracy difference | Small visual-form effects on speed exist |
 | Binkley et al. 2009 ICPC, doi:10.1109/ICPC.2009.5090039; 2013 EMSE, doi:10.1007/s10664-012-9201-4 | camelCase more accurate for 135 subjects; people trained in a style were faster in it | **Familiarity changes outcomes**; this matters for any syntax switch |
 | Stefik & Siebert 2013, TOCE, doi:10.1145/2534973 | Novices using Perl and Java were no more accurate than with randomly chosen keywords; Quorum, Python and Ruby did better | Keyword *choice* matters to novices; both options keep `fn` |
 | Buse & Weimer 2010, TSE, doi:10.1109/TSE.2009.70 | 120 annotators; simple local features (line length, blank lines, identifiers) predict judged readability | +3 columns per head is a small negative |
-| Scalabrino et al. 2018, JSEP, doi:10.1002/smr.1958 | 600+ snippets rated by 5K+ people; structural features include line length and character alignment | Alignment is a recognised readability feature, but it was not tested on declaration heads |
+| Scalabrino et al. 2018, JSEP, doi:10.1002/smr.1958 | 600+ snippets rated by 5K+ people; structural features include line length and character alignment | Alignment is a recognized readability feature, but it was not tested on declaration heads |
 | Sadowski et al. 2015, FSE, doi:10.1145/2786805.2786855 | Google: 5 search sessions and 12 queries per workday; many "where is this defined" searches | Grep-ability of definitions matters (§5) |
 | Ko et al. 2006, TSE, doi:10.1109/TSE.2006.116 | 35% of maintenance time spent on navigation mechanics | Same |
 | Gopstein et al. 2017, FSE, doi:10.1145/3106237.3106264 | "Atoms of confusion": small syntactic patterns cause measurable misreadings | Relevant to `:` vs `::` (example 1.3b) |
-| Rodeghero et al. 2014, ICSE, doi:10.1145/2568225.2568247 | Eye tracking of 10 professional Java programmers summarising methods | *[INFERENCE from memory, not verified against the full text]*: reports that fixations concentrate on method signatures, which would make the head the most-read line |
+| Rodeghero et al. 2014, ICSE, doi:10.1145/2568225.2568247 | Eye tracking of 10 professional Java programmers summarizing methods | *[INFERENCE from memory, not verified against the full text]*: reports that fixations concentrate on method signatures, which would make the head the most-read line |
 
 **Opinion and design rationale (not measurements):** gingerBill 2018 (name-focused is "elegant and terse"); Pike 2010 (name first is obvious); Carbon p000438 (a keyword helps people spot functions and helps parsing); Carbon p000339 (an informal "early sign" that identifier-first slows "what is the type of x?", with the stated intent to "conduct a larger study"; that study was never published); Zig #1717 (Kelley: the inconsistency models reality); PEP 8; Airbnb; Google TS; JaiPrimer ("syntax-facilitated refactoring": block → local function → global function with minimal edits).
 
@@ -362,13 +362,13 @@ The compiler is self-hosted, so the migration needs Zig's planned sequence (from
 **Ranked priorities (philosophy.md):**
 
 1. **Memory/type safety**: neutral.
-2. **Beginner experience**: split. Jai style gives one naming rule and a smooth ladder; today's style gives instant recognition. No data decides it. *[INFERENCE: roughly a wash, slightly in favour of Jai style once the first week is past.]*
+2. **Beginner experience**: split. Jai style gives one naming rule and a smooth ladder; today's style gives instant recognition. No data decides it. *[INFERENCE: roughly a wash, slightly in favor of Jai style once the first week is past.]*
 3. **Runtime performance**: neutral.
-4. **One mechanism**: favours Jai style for *spelling*. It must not imply a semantic unification that isn't there (§3.2). Keeping `fn` handles that.
+4. **One mechanism**: favors Jai style for *spelling*. It must not imply a semantic unification that isn't there (§3.2). Keeping `fn` handles that.
 5. **Implementation simplicity/compile speed**: neutral in steady state. The migration is a one-time cost.
-6. **Ecosystem breadth**: slightly favours today (familiarity for AI and humans).
+6. **Ecosystem breadth**: slightly favors today (familiarity for AI and humans).
 
-**Pillars.** Pillar 2 (easy to reason about, read, write) is split. **Pillar 4 (Ladders, Not Cliffs: "A code block can become a lambda, then a function") is clearly in favour of Jai style.** Pillar 7 (fewer layers) is neutral.
+**Pillars.** Pillar 2 (easy to reason about, read, write) is split. **Pillar 4 (Ladders, Not Cliffs: "A code block can become a lambda, then a function") is clearly in favor of Jai style.** Pillar 7 (fewer layers) is neutral.
 
 **I8** (AGENTS.md:131): "Each meaning has one canonical semantic mechanism. Spelling or organization may flex only where that helps users." Jai style doesn't add a mechanism; it changes a spelling. It needs owner approval because it amends ratified spellings.
 
@@ -408,11 +408,11 @@ Not affected: S2/D-BIND1 (they gain support), S14 no-aliases, D-CAP10 no overloa
 
 | Detractor | Design answer |
 |---|---|
-| **D1. `:` field vs `::` method look alike** (1.3b) | Both typos are already errors (field types can't take `self` or a body; methods need a body outside traits). Add targeted diagnostics: "`call: fn(…) {` — a field can't have a body; did you mean `call :: fn`?" and the reverse. Highlighting colours the method name as `entity.name.function`. Optionally, a formatter rule: a blank line between a struct's fields and its methods. |
+| **D1. `:` field vs `::` method look alike** (1.3b) | Both typos are already errors (field types can't take `self` or a body; methods need a body outside traits). Add targeted diagnostics: "`call: fn(…) {` — a field can't have a body; did you mean `call :: fn`?" and the reverse. Highlighting colors the method name as `entity.name.function`. Optionally, a formatter rule: a blank line between a struct's fields and its methods. |
 | **D2. Multi-head looks like redefinition or overloading** | Rule: *adjacent* `name :: fn` heads at the same scope, all with pattern parameters in the same positions, form **one** declaration made of ordered clauses (Haskell 2010 §4.4.3 requires contiguous clauses; OCaml groups clauses under one `let`). A non-adjacent repeat is E0105, as today. The diagnostic text says "clauses", never "overload". Repo impact: 21 groups. |
 | **D3. Bodiless heads look like bindings with no value** (Odin's problem) | Jet never binds types with `::` (S26), so `name :: fn(…)` without a body can't mean "function type". Rule (same as today): bodiless heads are legal only in `trait` and `extern` bodies. `extern` entries fill the body slot with `= "path"` (D-CHOOSE-FNBODY1). |
 | **D4. Inline markers push the name off the left edge** | Formatter rule: before a name-first declaration, markers go on their own line (Odin's `@(…)` convention). Costs about 4,048 extra lines. Exception: one-word markers on one-line declarations may stay inline. Measure both in the experiment. |
-| **D5. Kind column lost** (sd 4.6–5.9) | Case conventions recover type vs function vs constant at the left edge. Highlighting colours the kind keyword. The outline/LSP lists kinds. Residual cost: scanning "all structs" by eye. Test it in the experiment. |
+| **D5. Kind column lost** (sd 4.6–5.9) | Case conventions recover type vs function vs constant at the left edge. Highlighting colors the kind keyword. The outline/LSP lists kinds. Residual cost: scanning "all structs" by eye. Test it in the experiment. |
 | **D6. +3 columns per head; 946 heads over 100** | Re-wrap with the formatter; parameter lists already wrap. Permanent cost: 3 characters on 6% of lines. |
 | **D7. Suggests functions/types are values** (§3.2) | Keep the kind keyword (no Jai-style keyword-less `name :: (…) {…}` for functions). Never allow `fn(…) {…}` literals outside a declaration head; lambdas stay `(…) -> …`. Docs sentence: "`::` names a thing that can't be rebound. The word after it says what kind of thing." |
 | **D8. `f :: g` reads as an alias** | §3.3: a declaration needs a kind keyword. `f :: g` stays a value binding with value rules, and at file scope it gets a teaching diagnostic citing S14. |
@@ -589,7 +589,7 @@ Why B over A:
 Why the confidence is only moderate:
 
 1. No study measures the core readability trade-off.
-2. Familiarity is a measured effect, and it currently favours today's head.
+2. Familiarity is a measured effect, and it currently favors today's head.
 3. Zig, a closely related language, reversed exactly this change after accepting it.
 4. Most code here is written by AI models whose priors are Rust-shaped.
 

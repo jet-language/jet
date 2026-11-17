@@ -326,7 +326,7 @@ real-gap, rejected-conflict, needs-measurement, owner-gate.
     make sense. Jet's sema checks the source AST.
 - **Local lets stay monomorphic** (TLDI 2010; OutsideIn(X) §4.2):
   already implemented. Only 12% of 793 packages needed a signature when local
-  generalisation was removed. Jet requires signatures.
+  generalization was removed. Jet requires signatures.
 - **Inference that never guesses** (OutsideIn(X) §6.5): already implemented.
   Predictability matters more than completeness. Hold this rule for future
   inference, such as element types of list literals and inferred failure
@@ -463,7 +463,7 @@ real-gap, rejected-conflict, needs-measurement, owner-gate.
 | Deferred type errors | Whole program blocked | owner gate | — |
 | Typed holes | `#Todo`, regressed on probed binary | in progress | #3065 |
 | Error localization | Local inference limits distance | needs measurement | #3418 |
-| Local let generalisation | Signatures required | already implemented | — |
+| Local let generalization | Signatures required | already implemented | — |
 | Automatic inliner | `#Inline(Always)` only; JIT `opt_level=none` | real gap | #2919 (proof only) |
 | Join points | MIR blocks; no pre-MIR pass found | needs measurement | — |
 | Unsafe trust by consumer | `policy.unsafe`, gates | already implemented | — |
@@ -484,7 +484,7 @@ real-gap, rejected-conflict, needs-measurement, owner-gate.
   History §3.6). Structural immunity: `debug` is declared effect-free and is
   stripped from shipped artifacts, and `#Unsafe` requires a reason.
 - **Many ways to say one thing** (History §3.6). Structural immunity: I8.
-- **Local let generalisation** (TLDI 2010). Structural immunity: required
+- **Local let generalization** (TLDI 2010). Structural immunity: required
   signatures.
 - **Hand-tuned optimizer constants with no corpus** (Hollenbeck).
   Exposure: any inliner Jet adds.
@@ -516,7 +516,7 @@ real-gap, rejected-conflict, needs-measurement, owner-gate.
    - Gated by paired performance cells on every tier.
 6. **Ballot for `jet dev` deferred type errors** (never `jet build`), reusing
    E3011.
-7. **Ballot for a transaction-scoped wait** (the `retry` analogue). It
+7. **Ballot for a transaction-scoped wait** (the `retry` analog). It
    depends on item 1.
 8. **Measurements.**
    - Blame accuracy on seeded mistakes.

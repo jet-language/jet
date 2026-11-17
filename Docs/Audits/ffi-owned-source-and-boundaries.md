@@ -854,7 +854,7 @@ A wait deadline or quarantine does not permit that authority scope to exit while
 
 An admitted callback may never return. Default stop completion then remains pending and captures stay retained. A configured wait deadline may produce the existing TaskFailure.DeadlineBlown without freeing live state. No in-process timeout can safely reclaim executing captures. Bounded shutdown requires an explicitly selected terminable isolation boundary, or host termination.
 
-Completion tasks return ordinary operation results. Their join keeps only the existing TaskFailure variants: Cancelled, DeadlineBlown, and Panicked. Stopped and native boundary failures belong to the operation result inside the task, not new TaskFailure variants. Both rails must be handled. No completion task or owning registration may become reachable from its own retained callback.
+Completion tasks return ordinary operation results. Their join keeps only the existing TaskFailure variants: `Cancelled`, `DeadlineBlown`, and `Panicked`. Stopped and native boundary failures belong to the operation result inside the task, not new TaskFailure variants. Both rails must be handled. No completion task or owning registration may become reachable from its own retained callback.
 
 ## Technical annex F: enterprise operation and migration
 
@@ -876,7 +876,7 @@ The binding plan must include native and Jet toolchain identities, target triple
 
 Generated package publication and code signing remain the host team's release actions. Jet produces reviewable artifacts and machine-readable provenance; it does not publish automatically. Project policy controls allowed proof bases and approved trust boundaries through the existing configuration home. No secrets belong in generated headers, stubs, or public inspection output.
 
-Binding regeneration must be atomic. A failed native compiler, cancelled build, or invalid contract must not leave a new header paired with an old library. Cache keys include the semantic inputs that matter, not only timestamps. Contract diffs should explain a changed lifetime, failure mapping, copy, thread requirement, authority grant, or placement in reviewable terms.
+Binding regeneration must be atomic. A failed native compiler, canceled build, or invalid contract must not leave a new header paired with an old library. Cache keys include the semantic inputs that matter, not only timestamps. Contract diffs should explain a changed lifetime, failure mapping, copy, thread requirement, authority grant, or placement in reviewable terms.
 
 ### F.3 Observability without an FFI-specific maze
 

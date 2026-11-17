@@ -71,7 +71,7 @@ sema_call_fn_param_label: fn(contract: [CallContractRow]?, metadata: FunctionCal
     if contract == .Val(rows) {
         if index >= 0 && index < rows.len() && rows[index].label != "" -> return rows[index].label
         // An explicitly present contract with an empty label is the
-        // unlabelled function-value ABI. Do not fall through to metadata's
+        // unlabeled function-value ABI. Do not fall through to metadata's
         // local declaration name and accidentally make it public. A declared
         // function's either-zone parameter still answers to its own name.
         either: index >= 0 && index < rows.len() && rows[index].zone == ParamZone.Either
@@ -176,11 +176,11 @@ sema_call_diag_unknown_label: fn(callee: String, label: String, params: [SemaCal
             if !already -> accepted.push(parameter.label)
         }
     }
-    fix: if accepted.len() > 0 -> "`{callee}` accepts `{accepted.join("`, `")}`" else -> "`{callee}` takes no labelled arguments"
+    fix: if accepted.len() > 0 -> "`{callee}` accepts `{accepted.join("`, `")}`" else -> "`{callee}` takes no labeled arguments"
     sema_error(
         "E0764",
         span,
-        "`{callee}` has no parameter labelled `{label}`",
+        "`{callee}` has no parameter labeled `{label}`",
         "a label binds an argument to the parameter of that name",
         fix,
     )
@@ -199,7 +199,7 @@ sema_call_diag_forbidden_label: fn(callee: String, label: String, span: Span) ->
 }
 
 sema_call_diag_ambiguous_positional: fn(callee: String, span: Span) -> Diagnostic {
-    sema_error("E0768", span, "this argument to `{callee}` follows a labelled one without a label", "labels bind by name, so a bare argument after one has no parameter to fill", "label this argument, or move it before the labelled ones")
+    sema_error("E0768", span, "this argument to `{callee}` follows a labeled one without a label", "labels bind by name, so a bare argument after one has no parameter to fill", "label this argument, or move it before the labeled ones")
 }
 
 sema_call_diag_required_label: fn(callee: String, label: String, span: Span) -> Diagnostic {

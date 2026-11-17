@@ -193,7 +193,7 @@ Safety that fires before the learner uses the feature it protects is a cliff.
 Turon's Rust ergonomics framework asks how much information is needed to
 understand a line and how hard it is to find. An implicit feature is judged on
 **applicability** (where it can happen, and whether there is a heads-up),
-**power** (how much it can change behaviour), and **context-dependence** (how
+**power** (how much it can change behavior), and **context-dependence** (how
 far away the deciding information lives). A feature large on one axis should be
 small on the other two. Rust's `?` is marked (low applicability surprise) even
 though powerful; unrestricted implicit conversion is bad on all three
@@ -250,7 +250,7 @@ Jet against them.
   ([summary](https://en.wikipedia.org/wiki/Void_safety)).
 - **Make invalid states unrepresentable; parse, don't validate**
   ([King 2019](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate)).
-- **Function colouring is a reasoning cost** when an effect must be threaded
+- **Function coloring is a reasoning cost** when an effect must be threaded
   through every caller ([Nystrom 2015](https://journal.stuffwithstuff.com/2015/02/01/what-color-is-your-function/)).
 - **Some patterns are measurably misread** (1.6); loops are harder than
   conditionals and some negations add difficulty
@@ -392,7 +392,7 @@ worth showing the literal type in hover and inlay hints.
 | Keep | Evidence |
 |---|---|
 | One way to build text (interpolation); `+` on text is E0109. | probe p02 |
-| Labelled arguments, label-only zones, and editor ghost text for positional calls. | `Examples/features/basics/named_args.jet` |
+| Labeled arguments, label-only zones, and editor ghost text for positional calls. | `Examples/features/basics/named_args.jet` |
 | Keywords are few and conventional (`fn`, `if`, `loop`, `return`, `struct`, `enum`); no `for`/`while`/`foreach` split. | `Examples/features/basics/` |
 | `{expr=}` debug interpolation shows name and value together. | `Examples/features/basics/interp_debug_label.jet` |
 | Every keyword and sigil has one registry home with a decision ID (I7). | `crates/jet-foundation/src/Syntax.rs:1-59` |
@@ -555,7 +555,7 @@ defects, so they are the latest measurement, not the current state.
 
 Ordered by the priority reasoning > reading > writing, then by expected
 effect. "Owner gate" marks choices AGENTS.md reserves to the owner (syntax,
-semantics, public API, product behaviour). Nothing here is ratified.
+semantics, public API, product behavior). Nothing here is ratified.
 
 ### 6.1 Reasoning
 
@@ -656,7 +656,7 @@ proof rows move to `--verbose` and `--json`.
 **P17 — Beginner authority without a manifest cliff (F19; owner gate).**
 Standard output and argv run without a grant in a package with no authority
 block, and experts opt into deny-by-default, matching pillar 1's "experts opt
-out". This is product behaviour and needs a ballot.
+out". This is product behavior and needs a ballot.
 
 **P18 — Tiered help (F21).** `jet help` shows the first-hour verbs first and
 moves the rest under `jet help all`.
@@ -695,7 +695,7 @@ only end-to-end measurement of reading, writing, and reasoning.
 | F7 | no-action | report-only run: P7 recorded; implementation is not authorized here |
 | F8 | no-action | report-only run: P8 recorded; implementation is not authorized here |
 | F9 | no-action | report-only run: evidence only; covered by the P10 glyph review |
-| F10 | no-action | report-only run: P9 recorded; current behaviour is intentional |
+| F10 | no-action | report-only run: P9 recorded; current behavior is intentional |
 | F11 | no-action | report-only run: P10 recorded; each glyph change is an owner choice |
 | F12 | no-action | report-only run: P11 recorded; implementation is not authorized here |
 | F13 | no-action | report-only run: P12 recorded; owner choice |

@@ -1804,7 +1804,7 @@ path exits the process.
 
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
 `shutdown(grace)`, where `grace` defaults to zero, or until its accept is
-cancelled (the serving task's cancel, or a signal `process.on_signal`
+canceled (the serving task's cancel, or a signal `process.on_signal`
 registered), which ends `serve` with its report as a shutdown does. Each
 accepted connection is served by its own task, so a slow or held connection
 does not delay the next one. At most 10000 connections are served at once,
@@ -1836,7 +1836,7 @@ Every caller of `serve` and `shutdown` receives the same
 connection's reads and writes (30 seconds by default).
 
 `readiness()` reads the server's `HTTPReadiness` without I/O: `NotReady` once
-bound, `Ready` from `serve`, `Draining` from `shutdown` or a cancelled accept
+bound, `Ready` from `serve`, `Draining` from `shutdown` or a canceled accept
 until the report, and `Closed` once `serve` reports. A server shut down before
 it served is `Closed` and was never `Ready`. The server answers
 `GET /__jet/ready` itself, before the mux, unless the app has a route on that
@@ -2453,7 +2453,7 @@ filesystem error is not replaced by a source-only empty-path error.
 
 | Method | Result | Description |
 | --- | --- | --- |
-| `handle.poll()` / `handle.events()` | `[WatchEvent]` | Diff the target since the last poll and emit each event to the handle's event. A cancelled handle returns none. |
+| `handle.poll()` / `handle.events()` | `[WatchEvent]` | Diff the target since the last poll and emit each event to the handle's event. A canceled handle returns none. |
 | `handle.on(scope, handler)` / `handle.once(scope, handler)` | `Subscription` | Register a `fn(WatchEvent)` handler for the scope's lifetime. |
 | `handle.cancel()` / `handle.is_active()` | unit/bool | Stop the handle, or ask whether it still polls. |
 | `handle.summary()` | `String` | `watch file <root>`, `watch process <pid>`, or `watch port <host>:<port>`. |
@@ -3014,7 +3014,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.exit(code)` | `-[Exec.Exit]> Never` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
 | `#Unsafe process.exit_unmapped(code)` | `-[Exec.Exit]> Never` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
 | `process.fail(code, message)` | `-[Exec.Exit, IO, Time.Wait]> Never` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
-| `process.on_signal(signal)` | `-[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is cancelled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is cancelled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
+| `process.on_signal(signal)` | `-[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is canceled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is canceled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
 | `process.signals(kinds)` | `-[Exec]> SignalSubscription IOError!` | Take every signal of `kinds` as a value on the subscription's `receiver`, as a shell `trap` does, until `close()`; at most one is pending per kind, and every open subscription that holds a signal receives it. An empty list is `InvalidInput`; a signal the host refuses is `Unsupported` or `Other` with its OS error. |
 | `process.signal_number(signal)` | `Int` | The signal's Linux number: `Hup` 1, `Int` 2, `Quit` 3, `Usr1` 10, `Usr2` 12, `Pipe` 13, `Alrm` 14, `Term` 15, `Chld` 17, `Cont` 18, `Tstp` 20, `Ttin` 21, `Ttou` 22, `Winch` 28. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
@@ -3587,8 +3587,8 @@ run: fn() {
 | `units.to_si(value)` | `Float` | Return the SI scalar value. |
 | `units.abs(value)` | `Measurement<Float>` | Take the absolute value while retaining uncertainty. |
 | `units.show(value)` | `String` | Format a measured value and its uncertainty. |
-| `units.meters(x)` / `metres(x)` | `Measurement<Float>` | Construct a metre-scale value. |
-| `units.kilometers(x)` / `kilometres(x)` | `Measurement<Float>` | Construct a kilometre-scale value. |
+| `units.meters(x)` / `metres(x)` | `Measurement<Float>` | Construct a meter-scale value. |
+| `units.kilometers(x)` / `kilometres(x)` | `Measurement<Float>` | Construct a kilometer-scale value. |
 | `units.grams(x)` / `kilograms(x)` | `Measurement<Float>` | Construct gram- or kilogram-scale values. |
 | `units.seconds(x)` / `milliseconds(x)` | `Measurement<Float>` | Construct second- or millisecond-scale values. |
 | `units.bytes_of(x)` / `kibibytes(x)` | `Measurement<Float>` | Construct byte or kibibyte-scale values. |
@@ -3924,7 +3924,7 @@ which is code point order and the order `LC_COLLATE=C` gives.
 scalars, the items `loop c in s.chars()` visits (S41); it means the same with
 or without `use core.text`. `count_bytes()` and `text.byte_count(value)` report
 the UTF-8 byte length. The public convenience surface is the qualified
-`core.text` module; the old catalogue of unqualified string methods is not a
+`core.text` module; the old catalog of unqualified string methods is not a
 separate core module contract (D-STR-DECLINE1=C).
 
 `s.hash()` returns a `U64` hash of the UTF-8 bytes, read in place. Equal
@@ -4593,7 +4593,7 @@ run: fn() {
 | `DataError` | type | Carries kind, operation, row/column/index location, reason, and cause. |
 | `DataLimits.safe()` | `DataLimits` | Uses `EncodingLimits.safe()`, `max_groups=100000`, `max_sort_rows=1000000`, `max_join_rows=1000000`, and `max_output_rows=1000000`. |
 | `DataLimits` | type | Bounds encoding, groups, sorting, joins, and output materialization. |
-| `DataFreshness` / `DataInvalidationCause` | types | Describe pending/fresh/stale/error/offline/cancelled state and its invalidation cause. |
+| `DataFreshness` / `DataInvalidationCause` | types | Describe pending/fresh/stale/error/offline/canceled state and its invalidation cause. |
 | `DataStatus` | type | Reports `step`, `path`, `clone_value`, `ownership`, `trust`, `fallback`, and `replacement`. |
 | `DataSourceIdentity` / `DataSnapshotIdentity` / `DataProvenance` / `DataSchema` | types | Describe source identity, snapshot identity, provenance, and schema. |
 | `DataSnapshot<T>` / `DataLoader<T>` / `DataLoaderStatus` / `DataWatchStatus` | types | Own typed snapshots and loader/watch lifecycle state. |
@@ -4699,7 +4699,7 @@ return structured errors.
 ### `core.data.stream` — one-shot cursors
 
 `core.data.stream` is a one-shot cursor. `next` returns each row once, then
-stable `None` at end of input. A terminal error remains latched; cancelling a
+stable `None` at end of input. A terminal error remains latched; canceling a
 stream is terminal and does not resume iteration.
 
 | Function | Returns | Description |
@@ -4938,9 +4938,9 @@ sendability rules. The implementation is in
 | `once.call(work: fn()) -> Bool` | ran | Run `work` unless this Once already ran it; `true` when this call ran it. A caller arriving while it runs waits for it. |
 | `once.is_done() -> Bool` | done | Whether the work has run. |
 | `Semaphore.new(count: Int) -> Semaphore` | semaphore | A counting semaphore holding `count` units (none when negative). |
-| `semaphore.acquire() -[Time.Wait]> Bool` | taken | Take a unit, waiting until one is free; `false` when the wait ends without one, as when the task is cancelled. |
+| `semaphore.acquire() -[Time.Wait]> Bool` | taken | Take a unit, waiting until one is free; `false` when the wait ends without one, as when the task is canceled. |
 | `semaphore.try_acquire() -> Bool` | taken | Take a unit only when one is free. |
-| `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is cancelled. |
+| `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is canceled. |
 | `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
 | `semaphore.value() -> Int` | units | The free units at the moment of the read. |
 | `Scheduler: trait { push, pop }`, `QueuedTask` | trait | A scheduler provider: the run queue the runtime's carriers take submitted tasks from. `push(&self, task: QueuedTask)` queues a task; `pop(&self) -> QueuedTask?` answers the next to run, None when nothing waits. |
@@ -4990,8 +4990,8 @@ when it is closed or at capacity, so callers that require backpressure must use
 the scheduler receiver surface. Cancellation closes the receiver and leaves
 its handle available for identity and ownership.
 Generic channels return `(Sender<T>, Receiver<T>)`; tasks send owned values and do not use `async`/`await` (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). Cancellation and pause/resume are control-plane requests on owned task handles (`D-COROUTINE1`), while shared memory uses `Shared<T>` guards and `Condition` rather than a raw lock (`D-SHAREDGUARD1`).
-`tx.send(v) -> () SendError<T>!`: a send the channel refuses (every receiver closed, or the waiting sender cancelled) fails with core.prelude's `SendError<T> { value: T }`, whose `value` is the payload handed back unsent; it converts to the default `Err` as `send on a closed channel` (`D-SEND-ERROR1`).
-`handle.pause()` holds the task at its next wait point, so a loop that never waits keeps running. `handle.pause(mode: .CheckLoops)` also holds it at the check every loop iteration starts with, and every call of a function that can call itself (`D-TASK-PAUSE-TIER1`, `D-TASK-SLICE1`). `cancel()` stops a task at its next wait point or at that check, whichever comes first, so a cancelled loop or recursion that never waits stops at its next iteration or call and runs its Drop cleanup; a passed `#Deadline(limit)` or `task.timeout` deadline stops it there the same way, with E3003 (`D-TASK-SLICE1`). `TaskPauseMode` is the compiler-owned enum `{ WaitPoints, CheckLoops }`; `.WaitPoints` is the default.
+`tx.send(v) -> () SendError<T>!`: a send the channel refuses (every receiver closed, or the waiting sender canceled) fails with core.prelude's `SendError<T> { value: T }`, whose `value` is the payload handed back unsent; it converts to the default `Err` as `send on a closed channel` (`D-SEND-ERROR1`).
+`handle.pause()` holds the task at its next wait point, so a loop that never waits keeps running. `handle.pause(mode: .CheckLoops)` also holds it at the check every loop iteration starts with, and every call of a function that can call itself (`D-TASK-PAUSE-TIER1`, `D-TASK-SLICE1`). `cancel()` stops a task at its next wait point or at that check, whichever comes first, so a canceled loop or recursion that never waits stops at its next iteration or call and runs its Drop cleanup; a passed `#Deadline(limit)` or `task.timeout` deadline stops it there the same way, with E3003 (`D-TASK-SLICE1`). `TaskPauseMode` is the compiler-owned enum `{ WaitPoints, CheckLoops }`; `.WaitPoints` is the default.
 `Condition` and `RealtimeStream` remain native carriers. Their registered Core
 source owners supply their declared methods without manufacturing a struct or
 enum declaration. This ownership does not export `tasks.Condition`: use the
@@ -5366,7 +5366,7 @@ A resize is acknowledged only by the commit of a frame drawn at the new size,
 so the compositor never shows a stretched or cropped frame.
 
 Jet draws the window's frame itself: a title bar with the icon from
-`set_icon` (Jet's mark until one is set), the title centred on the window
+`set_icon` (Jet's mark until one is set), the title centered on the window
 (shifted only as far as it must to clear the icon and the buttons, and cut
 with an ellipsis when even that space is too narrow), and minimize, maximize
 and close buttons, rounded corners and a soft shadow, on a `wl_subsurface`
@@ -5515,7 +5515,7 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | `image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color` premultiplied, alpha included. |
 | `image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. Less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
 | `image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. One with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
-| `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbor resize with a 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
 | `image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
 | `image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | On each pixel's straight color, stored premultiplied again: scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
 | `image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to each pixel's straight red, green and blue, capped at 255; a sum below 0 becomes 1. Or replace every pixel that holds `color` premultiplied, in all four bytes, with `replace`; a clear pixel holds every color of alpha 0. |
@@ -5703,8 +5703,9 @@ tasks never read or change the process registry. The module source is
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
+| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; give back the graph. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
-| `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and greyed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
+| `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and grayed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
 | `menu(title: String, items: [MenuItem]) -> Menu` / `edit_menu() -> Menu` / `window_menu() -> Menu` | menu | A menu bar's menu titled `title` holding `items`; the Edit menu (Cut, Copy, Paste); and the Window menu (Minimize, Close). |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
@@ -5718,6 +5719,7 @@ tasks never read or change the process registry. The module source is
 | `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window. See below. |
 | `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland). See below. |
 | `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none. Delivered by the Linux app window (Wayland). See below. |
+| `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, copies it and says so. Delivered by the Linux app window (Wayland). See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6312,6 +6314,19 @@ A desktop with no session bus or no global menu shows no menu, and the
 key equivalents still work. A key that names no key, or a modifier that
 isn't one of these, panics.
 
+`graph.lifecycle(on_resume:)` runs `on_resume` each time the app comes
+back, from `graph.launch()` on. The runtime follows the app's moments
+itself: on Linux the app goes to the background when its window loses
+the focus and to the foreground when the window takes it again, and the
+machine goes to sleep and wakes when logind says `PrepareForSleep` on the
+system bus. Coming to the foreground or waking after the app was in the
+background or asleep is a resume, and `on_resume` runs then, in a task of
+its own, so the window never waits on it. The app does not see the other
+moments. When `on_resume` fails, its `Notice` shows on a red bar over the
+top of the window that came back, until a click on the bar dismisses it;
+with no window open it joins `app.notices()`. A desktop with no system
+bus or no logind resumes on the focus alone.
+
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the
 graph's title. When the launch was given no link, it opens the address `/`.
@@ -6380,7 +6395,7 @@ in `bytes` (as an `Upload`'s and a `Blob`'s), its `media` (`.Image`) and
 `read()` for its bytes. Where the file is kept never reaches the app.
 `app.location()` gives where the device is as a `Place`: `latitude` and
 `longitude` in degrees and `accuracy_m`, how
-far off it may be in metres (0 when the system did not say). Each asks for
+far off it may be in meters (0 when the system did not say). Each asks for
 its permission as `app.ask` does when the process has not asked yet, and
 the answer counts as that ask's; after an answer other than `.Granted`,
 each is `None` without asking. On Linux the camera portal asks for the
@@ -6412,7 +6427,7 @@ a `PickedFile`: its `name`, its size in `bytes`, its `media` as its first
 bytes show (as a kept `Blob`'s, `None` for none of those media), and
 `read()`, `text()` and `stream()` for its bytes. The dialog offers the kinds
 of file in `types`, each a `FileType`, with the first one chosen. The
-person cancelling is `None` with no notice. A file that can't be read, or
+person canceling is `None` with no notice. A file that can't be read, or
 no dialog to ask with, is `None`, and a notice in the app's notice list says
 why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser) asks, and the file is the path of the
@@ -6426,7 +6441,7 @@ error, E-APP-TARGET-FEATURE, never a file made up for the person.
 `PickedFolder`: its `name`, `files()` (the files directly in it, each a
 `PickedFile`, in name order) and `write(name, bytes)`, which writes a file
 there in one step. A name with a `/`, or `.` or `..`, is an error rather
-than a file outside the folder. The person cancelling is `None` with no
+than a file outside the folder. The person canceling is `None` with no
 notice. No dialog to ask with is `None`, and a notice in the app's notice
 list says why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser), asked for a directory, chooses it.
@@ -6486,12 +6501,24 @@ inside the person's gesture, which the page runtime can't run the call in
 yet, so `app.copy_text` or `app.paste_text` in code whose target is the web
 output is a compile error, E-APP-TARGET-FEATURE.
 
+`app.share(url)` hands `url` to the system's share sheet. Linux has none,
+so there the app's window copies `url` to the clipboard, as
+`app.copy_text` does, and then adds a notice to `app.notices()` saying it
+copied the link, which the window shows, for the person to paste it where
+they would share it; a copy that fails adds its own notice instead, and a
+share while the app has no window adds a notice saying so. The other
+native targets keep a notice saying their share sheet is not built yet. A
+browser opens its share sheet (the Web Share API) only inside the person's
+gesture, which the page runtime can't run the call in yet, so `app.share`
+in code whose target is the web output is a compile error,
+E-APP-TARGET-FEATURE.
+
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
 that was there whole. It is true once the file is written. The dialog
 suggests the name `suggested` and offers the kinds of file in `types`, each
 a `FileType` (`.CSV`, `.JSON` or `.Image`), with the first one chosen. The
-person cancelling is false with no notice. A file that can't be written,
+person canceling is false with no notice. A file that can't be written,
 or no dialog to ask with, is false, and a notice in the app's notice list
 names the file and why. On Linux the desktop portal's save dialog
 (org.freedesktop.portal.FileChooser) asks, and the path of the file:// URI
@@ -6499,7 +6526,7 @@ it answers with is written. A page hands `bytes` to the browser as a
 download named `suggested`, typed by the first kind whose pattern the name
 matches (else the first kind). The browser keeps it in its downloads folder,
 or asks the person where. A page never learns where the file went, or
-whether the person cancelled the browser's dialog, so the call is true once
+whether the person canceled the browser's dialog, so the call is true once
 the browser has the download. Run under node, with no page, it is false
 with a notice. macOS and Windows keep that notice too: their save dialogs
 are not built yet.
@@ -6760,7 +6787,7 @@ that names no file under the root, stays as written. The file's own name
 keeps answering with its validators.
 
 `app.images(formats:, widths:, quality:, enabled:)` sets how variants are
-made. Every option is labelled and optional, and one left out keeps its
+made. Every option is labeled and optional, and one left out keeps its
 setting:
 
 - `formats` is a list of `core.image.ImageFormat`. `.PNG` and `.JPEG` are the
@@ -7448,7 +7475,7 @@ migration cannot silently replace an applied one.
 consumes it. Dropping it, or a `return` that leaves with it still open, is
 E0140, and the result of either call is a failure the caller can't ignore.
 A commit that fails rolls the transaction back before it reports the error.
-An unwind that leaves a transaction still open, such as a task cancelled
+An unwind that leaves a transaction still open, such as a task canceled
 inside it, rolls it back, so it writes nothing and the connection can begin
 again.
 Inside a call of a mounted method, which is one transaction already, `begin`
@@ -7566,7 +7593,7 @@ a Postgres client in Core.
 
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool
-starts draining, or when its task is cancelled at the wait, so a cancelled
+starts draining, or when its task is canceled at the wait, so a canceled
 acquire never blocks the waiters behind it. `DBLease.close()` returns the
 connection once; a second close does nothing. While the pool drains it refuses
 new leases (`database pool is draining`) but still takes back the ones out.
@@ -7737,7 +7764,7 @@ publication"). Service calls name the file and wait effects they reach
 `FS.Write`, the sleep leaves carry `Time.Wait`, and a service call's row is
 inferred from its Core source body like any other call. `service.tree` stays
 `-[]>`; `start` and the workflow waits reach `FS.Read`, `FS.Write` and
-`Time.Wait`. A cancelled or deadline-blown
+`Time.Wait`. A canceled or deadline-blown
 `workflow.sleep` ends its wait without unwinding, so the workflow records
 `sleep-cancelled` or `sleep-deadline` before the call fails.
 
@@ -7957,7 +7984,7 @@ authority/provider policy.
 Payloads and results carry `type_id`, encoded `bytes`, and explicit `publish`.
 Claims carry their signed receipt, payload, worker, lease token, and lease
 expiry. A status reports queued, running, retrying, completed, failed,
-dead-lettered, and cancelled counts rather than exposing mutable queue storage.
+dead-lettered, and canceled counts rather than exposing mutable queue storage.
 All receiver operations retain typed `ServiceError` failures.
 
 The source-owned lifecycle exposes the effects it actually consumes:

@@ -239,7 +239,7 @@ error until a new ballot gives it a job.
 ### Downsides, and how each is designed away
 
 1. **`&&` also means "and".** Kept apart by position, as above, and the
-   editor colours the two differently. A mistyped `a &&b` is still "and",
+   editor colors the two differently. A mistyped `a &&b` is still "and",
    because a move mark cannot start an expression.
 2. **Two keystrokes instead of one.** Moves are 18% of marks, and on
    non-US keyboards `^` costs two keystrokes too.

@@ -43,7 +43,7 @@ with `jet check` and `jet run`, using the wave-12 compiler
    whenever the body may branch per member.
 
 3. **The real gap is one generic body over the built-in numbers.** V's
-   `T Number` gives one monomorphised body that uses `+` for both `int` and
+   `T Number` gives one monomorphized body that uses `+` for both `int` and
    `f64`. In Jet every route to that is closed today:
    - A union in bound position parses but is not a bound. It is reported as
      E0904 about the first member (`Int`), which is a misleading diagnostic,
@@ -61,7 +61,7 @@ with `jet check` and `jet run`, using the wave-12 compiler
   form compiles.
 - Closed type set as a value: no action. D-UNIONTYPE1 covers it.
 - Generic arithmetic over built-in numbers: this needs an owner ballot. The
-  choices are a union bound with monomorphisation, built-in operator
+  choices are a union bound with monomorphization, built-in operator
   capabilities usable as bounds (`T: Add`), or keeping the current "write it
   per type or match on a union" answer. Any of these choices requires a
   language decision, so this note does not propose code.

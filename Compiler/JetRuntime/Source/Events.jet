@@ -187,7 +187,7 @@ event_scope_prune: fn(scope: I64) {
     event_store(base, kept)
 }
 
-// A cancelled scope deactivates every new subscription at once.
+// A canceled scope deactivates every new subscription at once.
 event_scope_track: fn(scope: I64, sub: I64) {
     if (event_word(wrapping(scope + I64{8})) != I64{0}) {
         event_sub_unsubscribe(sub)
@@ -197,7 +197,7 @@ event_scope_track: fn(scope: I64, sub: I64) {
     event_words_push(wrapping(scope + I64{16}), event_sub_retain(sub))
 }
 
-// JetEventScope::track_hard_cancel :616-624: a cancelled scope tracks
+// JetEventScope::track_hard_cancel :616-624: a canceled scope tracks
 // nothing; an event is tracked once.
 event_scope_track_hard_cancel: fn(scope: I64, core: I64) {
     if (event_word(wrapping(scope + I64{8})) != I64{0}) {
@@ -215,7 +215,7 @@ event_scope_track_hard_cancel: fn(scope: I64, core: I64) {
     event_words_push(base, core)
 }
 
-// Releases the tracked async cores of `scope`, hard-cancelling each first
+// Releases the tracked async cores of `scope`, hard-canceling each first
 // when `cancel`.
 event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     base: wrapping(scope + I64{40})
@@ -235,7 +235,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
 
 // JetEventScope::cancel :635-647: once; every tracked subscription is
 // unsubscribed in registration order, then every tracked async event is
-// hard-cancelled, and the scope keeps none.
+// hard-canceled, and the scope keeps none.
 #Export(c) jet_event_scope_cancel: fn(scope: I64) {
     if (event_word(wrapping(scope + I64{8})) != I64{0}) {
         return
@@ -421,7 +421,7 @@ event_core_weak_release: fn(core: I64) {
 }
 
 // JetEvent::add :717-754 (on / once / on_priority). The subscription is
-// tracked by `scope` first; a cancelled scope returns it inactive and the
+// tracked by `scope` first; a canceled scope returns it inactive and the
 // handler is released unregistered.
 #Export(c) jet_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
     sub: event_sub_new()

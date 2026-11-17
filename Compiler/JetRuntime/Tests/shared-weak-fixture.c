@@ -143,11 +143,11 @@ static void physical_owner(void) {
     assert(jet_rt_shared_guard_revision(guard) == 0);
     jet_rt_shared_guard_publish_and_release(guard);
     assert(!jet_rt_shared_guard_held(guard));
-    W cancelled = 1;
-    assert(!jet_rt_shared_guard_reacquire_and_refresh(guard, (W)&cancelled));
+    W canceled = 1;
+    assert(!jet_rt_shared_guard_reacquire_and_refresh(guard, (W)&canceled));
     assert(!jet_rt_shared_guard_held(guard));
-    cancelled = 0;
-    assert(jet_rt_shared_guard_reacquire_and_refresh(guard, (W)&cancelled));
+    canceled = 0;
+    assert(jet_rt_shared_guard_reacquire_and_refresh(guard, (W)&canceled));
     assert(jet_rt_shared_guard_revision(guard) == 0);
     jet_rt_shared_guard_mark_dirty(guard);
     jet_rt_shared_guard_publish_and_release(guard);

@@ -441,7 +441,7 @@ detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [Lab
 CensusItem: struct {
     name: String,
     kind: String,
-    labelled: Bool,
+    labeled: Bool,
 }
 
 Outcome: struct {
@@ -654,9 +654,9 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     // The four measurements the plan names as unmeasured until S0.
     census := [[String]]{}
     census_items: [CensusItem]{
-        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labelled: false},
-        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labelled: false},
-        CensusItem{name: "D12 comptime build", kind: "comptime.build", labelled: true},
+        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.relex", labeled: false},
+        CensusItem{name: "D10b marker groups", kind: "load.marker_groups.reparse", labeled: false},
+        CensusItem{name: "D12 comptime build", kind: "comptime.build", labeled: true},
     }
     loop item in census_items {
         entries := detail(spans, item.kind, clock, notes)
@@ -664,7 +664,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             census.push([String]{item.name, item.kind, "-", "-", "-", "not in trace"})
             next
         }
-        if item.labelled {
+        if item.labeled {
             entries.sort_by(fn(left: LabelEntry, right: LabelEntry) { "{left.sort},[object Object]" <=> "{right.sort},[object Object]" })
             loop entry in entries {
                 census.push([String]{item.name, js_trim("{item.kind} {entry.label}"), "{entry.count}", fixed(entry.ns / BILLION, 3), grouped(entry.ns / lines), grouped(entry.items)})

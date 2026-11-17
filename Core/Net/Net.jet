@@ -696,7 +696,7 @@ dns_srv_at: fn(server: String, name: String) -[Net, Time.Wait]> [SRVRecord] NetE
 dns_error: fn(name: String, message: String) -> NetError Never! {
     if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDNSError.NotFound(name))
     detail: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}
-    if starts_with(message, "network operation cancelled") -> return NetError.Cancelled(detail)
+    if starts_with(message, "network operation canceled") -> return NetError.Cancelled(detail)
     if starts_with(message, "network protocol error") -> return NetError.Protocol(detail)
     if message.contains("timed out") || message.contains("timeout") {
         return NetError.Timeout(detail)
@@ -714,14 +714,14 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
             panic("DNS NotFound")
         }
     }
-    cancelled: dns_error("example.test", "network operation cancelled: timeout")
+    cancelled: dns_error("example.test", "network operation canceled: timeout")
     if cancelled == {
         .Cancelled(detail) -> {
             assert(detail.operation == "dns")
             assert(detail.address == None)
             assert(detail.name == expected_name)
             assert(detail.os_code == None)
-            assert(detail.message == "network operation cancelled: timeout")
+            assert(detail.message == "network operation canceled: timeout")
         }
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
             panic("DNS cancellation")

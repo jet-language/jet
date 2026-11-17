@@ -36,7 +36,7 @@ The tool reads a metrics file that the Jai compiler's metaprogram writes during 
 |---|---|---|
 | Layout | Treemap; each leaf is one procedure | 02:17–02:41 |
 | Size | Expression count (typed tree nodes), not lines | 02:41–03:04 |
-| Colour | Blue (cold) to orange (hot), normalized within this program only; no absolute scale | 03:51–05:00 |
+| Color | Blue (cold) to orange (hot), normalized within this program only; no absolute scale | 03:51–05:00 |
 | Metric menu | 'if' Density, Maximum 'if' Depth, Maximum Loop Depth, Assignments, Global Reads, Global Writes, Heap Allocations, Heap Frees, Call Locality (module), Call Locality (file), Call Constancy, Blend | frames 05:12, 06:40 |
 | Blend | Linear combination of all metrics with Blow's own weights | 03:04–03:51, 07:19–07:41 |
 | Borders | "Modules and Files"; the standard library shows as its own region | 07:41–08:03 |
@@ -104,11 +104,11 @@ The scorer's header rule (`CognitiveComplexity.rs:3-7`) is `1 + enclosing-struct
 - **Live refresh.** Blow's map needs a recompile and a file reload. The Canvas option redraws on every save, because the dev loop already re-checks the program (D-CODEMAP-VIEW1 option A).
 - **Race view with a real meaning.** Jet has no mutable globals, so "global writes" is structurally zero. Counting `Shared<T>` writes points at the only places Jet tasks can race (D-CODEMAP-MEANING1 option A).
 - **Honest gaps.** A metric that cannot be computed is shown as unavailable with a reason, never as zero (#3867 criterion 3).
-- **Runtime colour later.** `jet perf` already produces source-attributed hotness (#2997). It can become one more colour source on the same map. That is not in scope here and is not carded.
+- **Runtime color later.** `jet perf` already produces source-attributed hotness (#2997). It can become one more color source on the same map. That is not in scope here and is not carded.
 
 ## Avoid list
 
-- **Recolouring over absolute numbers.** Blow normalizes within one program, so colours are not comparable across programs or over time. The map must say colours are relative and always show absolute values on hover (#3868 plan step 4).
+- **Recoloring over absolute numbers.** Blow normalizes within one program, so colors are not comparable across programs or over time. The map must say colors are relative and always show absolute values on hover (#3868 plan step 4).
 - **A second analyzer.** Blow's tool computes metrics in a separate metaprogram. In Jet, the rows must come from the one checked projection, and `jet lint --complexity` must share their nesting walker (#3867 criterion 2, I8).
 - **Cost on every build.** Metrics are computed only when asked for; `jet check` does no extra work (#3867 criterion 4).
 

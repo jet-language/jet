@@ -71,7 +71,7 @@ criteria, proof, and handoff changes on the board.
 Cards compute to one lane: `decide` is owner-only; `plan`, `implement`,
 `building`, and `verify` are agent work; `blocked`, `frozen`, and `done` are
 inert. Epochs are the board's one planning axis: `tower epoch list` shows them
-in `order` (then by id number) with their exit criteria, labelled `E18 <name>`.
+in `order` (then by id number) with their exit criteria, labeled `E18 <name>`.
 Set the order and the exit criteria with `tower epoch add|update e18 --order N
 --exit-criteria "…" --by <agent>`; repeat `--exit-criteria` for each row, or
 pass `{"order": N, "exitCriteria": ["…"]}` through `--file`/`--stdin`. An empty

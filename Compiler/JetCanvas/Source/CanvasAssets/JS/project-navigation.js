@@ -62,7 +62,7 @@
     const name = window.prompt("Callback name", "on_event");
     if (name === null) {
       window.__jetCanvasLastTx = null;
-      window.__jetCanvasLastTxResult = { ok: false, changed: false, code: "client_cancelled", message: "Callback creation cancelled" };
+      window.__jetCanvasLastTxResult = { ok: false, changed: false, code: "client_cancelled", message: "Callback creation canceled" };
       if (trigger) trigger.focus({ preventScroll: true });
       return false;
     }

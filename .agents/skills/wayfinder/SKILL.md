@@ -27,7 +27,7 @@ Every map and ticket is a Tower card with a **name** — its title. In everythin
 
 ## The Map
 
-The map is a single Tower card labelled `wayfinder:map` — the canonical artifact. Its tickets are child cards of the map.
+The map is a single Tower card labeled `wayfinder:map` — the canonical artifact. Its tickets are child cards of the map.
 
 The map is an **index**, not a store. It lists the decisions made and points at the tickets that hold their detail; a decision lives in exactly one place — its ticket — so the map never restates it, only gists it and links.
 

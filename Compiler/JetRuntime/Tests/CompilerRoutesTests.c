@@ -38,8 +38,8 @@ int main(int argc, char **argv) {
     assert(pid >= 0);
     if (!pid) { for (;;) pause(); }
     assert(kill(pid, SIGTERM) == 0);
-    Text signalled = text("signal: 15 (SIGTERM)");
-    witness("waited signal", jet_rt_compiler_wait_fixture(pid, &signalled));
+    Text signaled = text("signal: 15 (SIGTERM)");
+    witness("waited signal", jet_rt_compiler_wait_fixture(pid, &signaled));
     witness("64-record history, newest pid, platform names", jet_rt_compiler_status_history_fixture());
     puts("compiler routes: Jet-only (Rust frozen)");
     return 0;

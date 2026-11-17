@@ -140,7 +140,7 @@ No host-format parser, public endpoint, or mapped-region fixture was added. The 
 
 1. The source-owned `SourceDocument`/region input and its validation of UTF-8 boundaries and unchanged mapped segments.
 2. The identity and revision carried by every result, including a stale-result rejection rule after an incremental edit.
-3. How diagnostics, navigation, completion, and edits share one map; edits into generated-only text must be rejected or explicitly labelled.
+3. How diagnostics, navigation, completion, and edits share one map; edits into generated-only text must be rejected or explicitly labeled.
 4. Cancellation behavior when a partial parse/check has already produced intermediate work.
 5. Host UTF-16 conversion and byte-range preservation around astral characters.
 6. The versioned compatibility receipt for one Svelte-like host document containing two Jet regions, without a second checker or generated-backend error surface.
@@ -149,7 +149,7 @@ The current LSP tests are useful anchors but cannot be relabeled as proof of any
 
 ### External blocker and deferred check
 
-The implementation owner must land the compiler-owned region contract through the existing checker path before a fixture can be made executable. The focused check then needs two regions, an edit before the second region, stale/cancelled results, Unicode offsets, partial syntax, and correct diagnostics/edits for the current revision. No alternate parser or host-owned duplicate mapping is authorized.
+The implementation owner must land the compiler-owned region contract through the existing checker path before a fixture can be made executable. The focused check then needs two regions, an edit before the second region, stale/canceled results, Unicode offsets, partial syntax, and correct diagnostics/edits for the current revision. No alternate parser or host-owned duplicate mapping is authorized.
 
 ## #3011 — maintainer algorithm/API cost inventory
 
@@ -169,7 +169,7 @@ No inventory rows or measurement schema were added. The implementation owner mus
 1. The executable source-derived denominator and reconciliation for additions, removals, delegated helpers, generated instances, and target variants.
 2. The operation boundary that joins private/helper cost to an observable operation without counting a helper as an independent feature.
 3. The existing record fields/producers needed for input dimensions, cost model, bound class, setup/output/callback cost, allocations, oracle, target/profile/toolchain/tier, and expiry.
-4. The applicable-mode join for AOT, Cranelift, interpreter, and Web; AOT-only measurements must not be relabelled as another tier.
+4. The applicable-mode join for AOT, Cranelift, interpreter, and Web; AOT-only measurements must not be relabeled as another tier.
 5. The representative pilot and its explicit uncovered remainder: compiler graph work, scalar API, quantile/selection, effectful I/O, and concurrency.
 6. The stale/wrong/zero-valid/all-excluded/broken-oracle/changed-flags/noise controls and the single implementation owner for each unresolved cost finding.
 
@@ -212,7 +212,7 @@ The protected Source/CmdDevTools and related tooling paths are outside this stat
 - Tower #3407 requires exactly thirty preselected puzzle IDs, both parts, a declared diverse rationale, independent expected answers, owned fixtures, natural implementations for every applicable comparison language, applicable Jet-tier agreement, and discovery of all sixty cells without changing historical receipts.
 - Its direct refs are the official Advent of Code about page, sibling #3404, `gauntlet/measurement-manifest.json`, `gauntlet/matrix.json`, and `gauntlet/harness/run.mjs`.
 - `gauntlet/measurement-manifest.json:1-82` fixes the current 24-entry/27-cell Gauntlet report contract, required/optional Jet tiers, output verification, ratio verdicts, and missing=`unmeasured` policy. `:84-123` names its existing integrated-gate inputs and freshness contract.
-- Existing `gauntlet/entries/*` fixtures and historical receipts remain untouched. They are not AoC puzzle answers and must not be relabelled as such.
+- Existing `gauntlet/entries/*` fixtures and historical receipts remain untouched. They are not AoC puzzle answers and must not be relabeled as such.
 
 ### Handoff and exact unknowns
 

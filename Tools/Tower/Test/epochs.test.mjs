@@ -1,5 +1,5 @@
 // Epochs are the board's one planning axis: ordered, with measurable exit
-// criteria, labelled `E18`, and removable only once nothing points at them.
+// criteria, labeled `E18`, and removable only once nothing points at them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -66,7 +66,7 @@ test('epoch remove is refused while a live card, an archived card or a milestone
   assert.equal(s.events.find(e => e.action === 'epoch.remove').ref, 'e4');
 });
 
-test('cli: --order and repeated --exit-criteria, --file JSON lists, ordered E-labelled list, remove refusal', () => {
+test('cli: --order and repeated --exit-criteria, --file JSON lists, ordered E-labeled list, remove refusal', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-epochs-cli-'));
   run(cwd, ['init', '--name', 'Epochs']);
   const added = JSON.parse(run(cwd, ['epoch', 'add', 'e19', '--name', 'Web, end to end', '--order', '2',

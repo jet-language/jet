@@ -42,7 +42,7 @@ Surface check: `Core.jet:92` exports `Pair, Section, Ini, empty, parse, to_strin
 
 1. Format, precedence, interpolation and secrets: the shipped dialect is "Python configparser without interpolation", last-duplicate-wins, with inline comments stripped and quotes removed (ini.jet:12-17, observed above). The selected dialect is D-CORE-INI1=A (ratified). The codec is pure, and nothing in it reads secrets or the environment. **Recorded.**
 2. Owners: `core.encoding.ini` is the owner (a Core source module, `Core.jet:93`), with the encoding family's `DataTree`/`EncodingError` as the target rails. File IO belongs to the caller (`core.files`). **Recorded.**
-3. No new parser or interpolation semantics without a gate: D-CORE-INI1=A is that gate (ratified 2026-09-12), so this card's cutover is authorised. No further ballot is needed. **Met.**
+3. No new parser or interpolation semantics without a gate: D-CORE-INI1=A is that gate (ratified 2026-09-12), so this card's cutover is authorized. No further ballot is needed. **Met.**
 4. Section/default/typed-getter case and duplicate policy: **not met.** The shipped codec is case-sensitive (matches), but it merges duplicate sections, keeps the last duplicate option, does not inherit `DEFAULT`, and puts sectionless keys into `DEFAULT`.
 5. Strict raw versus Basic/Extended interpolation with bounded cycles and expansion: **not met.** No interpolation operation exists, and `%(x)s`/`${s:k}` stay raw text.
 6. Round-trip, comment loss, unsupported domains: partially. Order is kept and comments are dropped (silently, with no disclosure API). Quoted values are rewritten, continuation lines are rejected, and valueless options are rejected (matches).

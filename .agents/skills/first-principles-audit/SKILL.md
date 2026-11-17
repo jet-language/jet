@@ -25,7 +25,7 @@ Load only the phase reference needed. Independent evidence helpers return to thi
 
 ## Scope
 
-At activation, record the named area and its finite related-concept closure. A concept is related when it shares the area's user job, value or data flow, declaration or representation mechanism, control or effect boundary, dependency needed to understand it, ratified decision, or relevant lexical space. Include every source in that closure: specifications, compiler and sema code, prelude, examples, tests, tools, prior audits, Tower state, promised or missing surfaces, and direct analogues where they explain the design. The full-corpus and silhouette pass means complete coverage inside this closure, not an invitation to sweep unrelated Jet.
+At activation, record the named area and its finite related-concept closure. A concept is related when it shares the area's user job, value or data flow, declaration or representation mechanism, control or effect boundary, dependency needed to understand it, ratified decision, or relevant lexical space. Include every source in that closure: specifications, compiler and sema code, prelude, examples, tests, tools, prior audits, Tower state, promised or missing surfaces, and direct analogs where they explain the design. The full-corpus and silhouette pass means complete coverage inside this closure, not an invitation to sweep unrelated Jet.
 
 Parent and child work uses this same definition. Neither may silently add a distant feature, workload, or source set. Record an out-of-closure opportunity for the owner instead of widening the run.
 

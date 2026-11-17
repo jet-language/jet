@@ -1,0 +1,28 @@
+# A Linux app shares a link: Linux has no share sheet, so the app's window
+# copies the link and shows a notice that says so. A fake compositor on
+# $WAYLAND_DISPLAY gives the window the keyboard focus and clicks the
+# board's Share button, whose handler shares the board's link
+# (`app.share`): the window offers it through the seat's data device, the
+# compositor pastes it through a pipe, and the window's next frame shows
+# the notice bar along its bottom. Then the compositor closes the window,
+# which ends the app.
+fixture: ShareCopiesTheLinkOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "board: 200x100, panel [51, 102, 255, 255], corner [255, 255, 255, 255]\nclicked Share\ncopied: https://crewboard.example/board/7\nafter the copy: corner [153, 27, 27, 255]\nclosed the window\n"

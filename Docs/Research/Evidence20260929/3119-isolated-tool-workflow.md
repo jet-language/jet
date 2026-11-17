@@ -9,7 +9,7 @@ rebuild was allowed. Verdict: **PARTIAL**.
 
 Does the shipped `jetpack tool` / `jetpack use` surface give a reproducible
 isolated-tool workflow? That means install, PATH exposure, project isolation,
-update, offline behaviour, and pinned/`#latest`/`#auto` refs under
+update, offline behavior, and pinned/`#latest`/`#auto` refs under
 D-CHANNEL-AUTO1.
 
 ## Method

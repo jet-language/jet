@@ -23,7 +23,7 @@ loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> Data
 
 bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
     if loader.cancelled {
-        return Err(loader_error(DataErrorKind.State, "loader was cancelled", source_path<T>(loader)))
+        return Err(loader_error(DataErrorKind.State, "loader was canceled", source_path<T>(loader)))
     }
     if !accepts_payload<T>(loader) {
         return Err(
@@ -82,7 +82,7 @@ cancel: fn<T>(loader: &DataLoader<T>) Never! {
     loader.cancelled = true
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
     loader.status.freshness = DataFreshness.Cancelled
-    loader.status.error = "loader was cancelled"
+    loader.status.error = "loader was canceled"
     if loader.source.kind == DataLoaderKind.Value -> loader.status.cleanup = "retained" else {
         loader.status.cleanup = "payload-released"
     }
@@ -122,7 +122,7 @@ mark_stale: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
 
 stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if loader.cancelled {
-        return Err(loader_error(DataErrorKind.State, "loader stream was cancelled", source_path<T>(loader)))
+        return Err(loader_error(DataErrorKind.State, "loader stream was canceled", source_path<T>(loader)))
     }
     bytes_opt := loader.payload
     if bytes_opt == None && loader.offline -> bytes_opt = loader.last_good

@@ -208,23 +208,23 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
             result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
             // An inline Option word (IR_OPTION_INT_NONE) never crosses as its payload.
             if ir_option_inline(m, result_row) {
-                return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
             }
             if m.types[result_row].kind == {
                 .Int | .Word | .Bool | .Float | .String -> {}
                 .Pointer -> {
                     if !ir_foreign_handle_type(p, ty) {
-                        return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                        return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
                     }
                 }
                 .Aggregate -> {
                     if !ir_foreign_list(ty) {
-                        return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                        return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
                     }
-                    result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                    result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
                     result_width = ir_foreign_c_width(m, p, result_element) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no C array layout")
                 }
-                .Unit | .Float32 | .Char -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                .Unit | .Float32 | .Char -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshaling")
             }
         }
     }
@@ -246,7 +246,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
         }
         row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
         if ir_option_inline(m, row) {
-            return ir_fail_slot(b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
+            return ir_fail_slot(b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshaling")
         }
         if written {
             if m.types[row].kind == {
@@ -254,7 +254,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                 .Pointer -> {
                     // A borrowed handle crosses as its pointer; it stays the caller's.
                     if !ir_foreign_handle_type(p, param.ty) {
-                        return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                        return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
                     }
                     handle: ir_write_base(m, p, b, arg.value, span)
                     if ir_failed(b) -> return -1
@@ -264,7 +264,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                 .Aggregate -> {
                     if ir_foreign_list(param.ty) {
                         // The C function fills the List's own elements.
-                        element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no native C ABI marshalling")
+                        element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no native C ABI marshaling")
                         width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no C array layout")
                         if width != ir_list_stride(m, element) {
                             return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no C array layout")
@@ -276,10 +276,10 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                         next
                     }
                     if !ir_foreign_plain_struct(m, p, row) {
-                        return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                        return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
                     }
                 }
-                .Unit | .Bool | .Int | .Float32 | .Char | .String -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                .Unit | .Bool | .Int | .Float32 | .Char | .String -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshaling")
             }
             address: ir_place_address(m, p, b, arg.value, backs, span)
             if ir_failed(b) -> return -1
@@ -315,7 +315,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
             }
             .Pointer -> {
                 if !ir_foreign_handle_type(p, param.ty) {
-                    return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                    return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
                 }
                 if param.convention == AccessConvention.Move {
                     // The C function takes the handle: Jet no longer closes it.
@@ -330,9 +330,9 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
             }
             .Aggregate -> {
                 if !ir_foreign_list(param.ty) {
-                    return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                    return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
                 }
-                element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
                 width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no C array layout")
                 values.push(value)
                 stride: ir_list_stride(m, element)
@@ -353,7 +353,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
                 staged_sizes.push(bytes)
                 lowered.push(buffer)
             }
-            .Unit | .Float32 -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+            .Unit | .Float32 -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshaling")
         }
     }
     if result_element >= 0 && length_address < 0 {

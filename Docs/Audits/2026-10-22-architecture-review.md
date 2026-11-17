@@ -577,7 +577,7 @@ marshal values between Core's Jet types and C-ABI carriers, per the
 helper's route census in `evidence/area5-routes.tsv`. Both sides are now
 Jet.
 
-Impact. Every Core runtime call crosses a marshalling layer that exists
+Impact. Every Core runtime call crosses a marshaling layer that exists
 because the runtime used to be Rust, and the route tables of R2 exist to
 describe that layer. Performance and maintainability.
 

@@ -162,7 +162,7 @@ run: fn() {
   loader revalidates by itself. Concurrent fetchers commit each
   revalidation as it lands, and drop a revalidation that started earlier
   than one already committed. The docs name the rare stale case where a
-  cancelled request still reaches the server, and suggest submission
+  canceled request still reaches the server, and suggest submission
   timestamps. There is no offline queue. Sources:
   reactrouter.com/how-to/fetchers, reactrouter.com/explanation/concurrency.
 - **Replicache.** Mutators run on the client against a persistent

@@ -60,7 +60,7 @@ Source read for c3: media types are still spelled as strings in
 - c3 (canonical typed use by HTTP/web/email): FAIL. Those modules splice
   strings (see the list above).
 - c4 (url_mime golden with the new cases): FAIL. The current golden is red
-  on every tier, and the new cases would record wrong behaviour.
+  on every tier, and the new cases would record wrong behavior.
 
 ## Follow-ups
 

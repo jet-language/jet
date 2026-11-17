@@ -1,0 +1,38 @@
+# A Linux app runs its resume each time it comes back. A fake compositor on
+# $WAYLAND_DISPLAY gives the window the keyboard focus, takes it away and
+# gives it back: the app went to the background and came back, so its
+# `lifecycle(on_resume:)` runs, and the board's panel turns yellow. Then a
+# fake logind on the system bus at $DBUS_SYSTEM_BUS_ADDRESS, whose
+# PrepareForSleep signal the app asked for, puts the machine to sleep and
+# wakes it: the app resumes again, the panel turns green, and the resume's
+# failure shows on a red bar over the top of the window. The compositor
+# clicks the bar, which dismisses it, and closes the window, which ends
+# the app.
+fixture: LifecycleEventsReachTheAppOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+spawn bus: jet run bus/fake_logind.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake system bus listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+env: DBUS_SYSTEM_BUS_ADDRESS=unix:path={work}/system.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+wait: bus timeout 60s
+exit: 0
+file: compositor.stdout = "board: 200x100, panel [51, 102, 255, 255]\ntook the focus away and gave it back\nafter the focus came back: panel [230, 180, 30, 255]\nwrote sleep.go\nafter waking: panel [51, 153, 51, 255], top [153, 27, 27, 255]\nclicked the notice\nafter the click: top [51, 153, 51, 255]\nclosed the window\n"
+file: heard.txt = "Hello AddMatch\ntype='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep',path='/org/freedesktop/login1'\n"

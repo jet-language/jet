@@ -3,7 +3,7 @@
 Card #6367. Status: proposal, dev `59213de00f`. Owner choices are the two
 ballots in §8. The full audit is
 [`Docs/Audits/api-composition-2026-10-30.md`](../Audits/api-composition-2026-10-30.md);
-this page summarises it, so you can read this page on its own.
+this page summarizes it, so you can read this page on its own.
 
 ## Plain summary
 
@@ -14,7 +14,7 @@ this page summarises it, so you can read this page on its own.
   step down one rung to the primitive. You never rewrite and you never copy
   Core's source.
 - **Options, not siblings.** If two variants of an operation differ only in a
-  policy, they become one function with a labelled, defaulted, enum-typed
+  policy, they become one function with a labeled, defaulted, enum-typed
   option: `base64.encode(data, alphabet: .Url)`, not `encode_url`. Separate
   names are for separate jobs: a different result type, failure type, safety
   level, effect, or call shape.
@@ -29,7 +29,7 @@ this page summarises it, so you can read this page on its own.
   alphabet), `log` (no fields at a computed level) and `regex` (no "replace the
   first 3"). One module, `core.math.combinatorics`, ships 25 list functions
   that work only on `[Int]`, with a `Bool` where the predicate belongs. Core
-  also has identical twins and names that promise behaviour the body does not
+  also has identical twins and names that promise behavior the body does not
   have (`walk_parallel` is not parallel, `float32` does not round), and the
   language refuses options after a variadic.
 - **How it stays true.** It adds a ninth philosophy pillar and an
@@ -38,7 +38,7 @@ this page summarises it, so you can read this page on its own.
   with lint L2401, which is registered today but never fires.
 - **Owner choices.** Two ballots: adopt the pillar (this also replaces the
   "siblings are the house style" law, which contradicts its own review table),
-  and allow labelled options after a variadic parameter.
+  and allow labeled options after a variadic parameter.
 
 ---
 
@@ -52,7 +52,7 @@ this page summarises it, so you can read this page on its own.
 > for the common case and never seals a path: if a wrapper can do something the
 > primitives cannot, the primitives are incomplete. Stepping from a wrapper to
 > its primitive is one rung on the same ladder, with the same names, types and
-> errors. Variants of one operation are options on one function: labelled,
+> errors. Variants of one operation are options on one function: labeled,
 > defaulted and typed. Separate names are for separate jobs. APIs use every call
 > tool the language provides: defaults, labels, positional-only and label-only
 > zones, variadics and spreads. Then the common call is the shortest one, and
@@ -63,12 +63,12 @@ How it fits the existing pillars and priorities:
 | Pillar | Relation |
 |---|---|
 | 1 Beginner magic, expert control | Wrappers and defaults are the magic; primitives and options are the control. Experts opt out by naming an option, as pillar 1 requires. |
-| 2 Easy to read | A labelled option reads aloud at the call site: `encode(data, alphabet: .Url)` says as much as `encode_url(data)`, and it composes with the next option. |
+| 2 Easy to read | A labeled option reads aloud at the call site: `encode(data, alphabet: .Url)` says as much as `encode_url(data)`, and it composes with the next option. |
 | 3 Friction inverse to commonality | Wrappers exist only for common work. A rare need costs one more rung, not a fork. |
 | 4 Ladders, not cliffs | Wrapper to primitive is a rung. An undocumented worker behind a wrapper is a cliff. |
 | 5 The language is a library | Pillar 5 says "no names only Core may call" for the compiler. Pillar 9 says the same for every API: the worker a wrapper uses is one a user may use. |
 | 7 Fewer layers | One function with options replaces a family of siblings. |
-| 8 Explicit where quality depends on it | A choice that changes behaviour is a written label at the call; the default is the documented common case. |
+| 8 Explicit where quality depends on it | A choice that changes behavior is a written label at the call; the default is the documented common case. |
 | Priority 4, one mechanism | A wrapper is never a second mechanism; it expands into the first. |
 
 It strengthens laws that are already in
@@ -85,11 +85,11 @@ D3 on the same page (§7).
 | Rule | Statement | Machine check |
 |---|---|---|
 | **P1 Complete primitives** | Each area names its primitives in its reference page. Everything a wrapper does is reproducible from documented primitives. A worker that is not meant to be a primitive lives in a `priv module`. | Partly: `api.constant_siblings` finds the wrapper families and names their shared worker |
-| **P2 Wrappers are compositions** | A wrapper's body composes primitives and adds no behaviour of its own. Its doc names the primitive. | Partly |
+| **P2 Wrappers are compositions** | A wrapper's body composes primitives and adds no behavior of its own. Its doc names the primitive. | Partly |
 | **P3 Options, not siblings** | Same operation with the same result, failure, safety and effect shape: one function with options. Otherwise a separate, plainly named job. | Yes: constant-forwarding sibling families |
 | **P4 Typed options** | A policy is an enum or a typed value, never a `Bool` or a bare string. Every option has a default unless the caller must decide. | Yes: positional `Bool` (L2401), string compared only with literals |
 | **P5 Use the call tools** | Four or more parameters, or two adjacent parameters of one type, put the later ones in a `*` zone. A list parameter usually called with a literal list is a variadic. An optional parameter defaults to `None`. | Yes |
-| **P6 No twins, no name lies** | Two public names with identical behaviour, or a name that promises behaviour the body lacks, are defects. | Identical bodies: yes. Name lies: review |
+| **P6 No twins, no name lies** | Two public names with identical behavior, or a name that promises behavior the body lacks, are defects. | Identical bodies: yes. Name lies: review |
 | **P7 Generic before specific** | Do not ship an `[Int]`-only copy of an operation the language already offers generically. | Review |
 | **P8 Wrappers earn their place** | A wrapper exists for work that is common in real programs: the competitive gate's frozen tasks (D-STDRUBRIC1) or counted call sites. | Review |
 
@@ -257,7 +257,7 @@ join_path("C:", "Users", sep: "\\")
 ```
 
 Today the declaration is `E1310 Variadic parameter 'parts' must be last`.
-Python (keyword-only parameters after `*args`), Swift (a labelled parameter
+Python (keyword-only parameters after `*args`), Swift (a labeled parameter
 after a variadic) and Kotlin (named arguments after a `vararg`) all allow it.
 Without it, a variadic API cannot have options, so authors fall back to list
 parameters or sibling families. That is the main reason Core has 2 variadics.
@@ -357,7 +357,7 @@ Reconcile D-VARIADIC-OPTS1 with D-CALLPOS1 (names are required in a `*` zone,
 and the variadic acts as the zone opener), D-META-PARAMS1, and spreads
 (`f(...xs, sep: "-")`). Peers for the comparisons: Python `base64.b64encode(s,
 altchars=)` and keyword-only parameters after `*args`; Go
-`base64.StdEncoding.WithPadding(base64.NoPadding)`; Swift labelled parameters
+`base64.StdEncoding.WithPadding(base64.NoPadding)`; Swift labeled parameters
 after a variadic; Kotlin named arguments after `vararg`.
 
 ## 9. Cards

@@ -450,7 +450,7 @@ runtime with mandatory per-program FatLTO.
 
 Canonical runtime kernels implement arithmetic, text, allocation, bounds,
 formatting, failure and lifecycle policy. Platform adapters supply syscalls,
-marshalling and lawful startup, not another numeric/string/error meaning.
+marshaling and lawful startup, not another numeric/string/error meaning.
 Caller-specific generic glue supplies checked layouts/element operations and
 calls kernels, without universal erased boxing. Semantic specialization beyond
 that baseline is the explicit ballot below.

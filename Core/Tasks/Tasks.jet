@@ -158,7 +158,7 @@ Semaphore: struct {
     }
 
     /// Takes a unit, waiting until one is free; false when the wait ends
-    /// without one, as when the task is cancelled.
+    /// without one, as when the task is canceled.
     acquire: fn(self) -[Time.Wait]> Bool Never! {
         guard := self.count.guard_edit()
         guard.wait(self.changed, fn(units) { units > 0 }) ?? return false
@@ -175,7 +175,7 @@ Semaphore: struct {
     }
 
     /// Takes a unit, waiting at most `limit` for one (sem_timedwait); false
-    /// when none came in time or the task is cancelled. A timer task marks
+    /// when none came in time or the task is canceled. A timer task marks
     /// the wait expired under the count's guard, so the waiter can't miss it.
     acquire_within: fn(self, limit: time.Duration) -[Time.Wait]> Bool Never! {
         if self.try_acquire() -> return true
@@ -183,7 +183,7 @@ Semaphore: struct {
         alarm: task self.expire(expired, limit)
         taken: self.take_unless(expired)
         alarm.cancel()
-        // A cancelled timer joins as a failure; either end is fine here.
+        // A canceled timer joins as a failure; either end is fine here.
         if alarm.join() == {
             .Ok(_) -> {}
             .Err(_) -> {}
@@ -504,10 +504,10 @@ spawn_name: fn(name: String) -> String Never! { name.copy() }
     assert_eq(is_locked(released), false)
     assert_eq(generation(released), 2)
     assert_eq(generation(release(released)), 2)
-    signalled: notify(held)
-    assert_eq(is_locked(signalled), true)
-    assert_eq(generation(signalled), 2)
-    restarted: reset(shutdown(signalled))
+    signaled: notify(held)
+    assert_eq(is_locked(signaled), true)
+    assert_eq(generation(signaled), 2)
+    restarted: reset(shutdown(signaled))
     assert_eq(is_closed(restarted), false)
     assert_eq(is_locked(restarted), false)
     assert_eq(size(restarted), 0)

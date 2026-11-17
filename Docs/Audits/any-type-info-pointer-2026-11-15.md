@@ -1089,7 +1089,7 @@ Other subjects follow the enum rules:
   clause naming a `&&` parameter is accepted today, and its call then gets a
   misleading E0209 (`y07b`, #6839 c45).
 - Over a `&` subject the arm binds read-only, as an enum's arm does (`y08`), so
-  C has no `downcast_mut` analogue. E0205 there blames `item`, not the binding
+  C has no `downcast_mut` analog. E0205 there blames `item`, not the binding
   (#6839 c44).
 
 **Check.**
@@ -1210,7 +1210,7 @@ This serves every `from` result and every arm binding, enum, union and list
 payloads included, so it is not C's alone, and C's gain does not wait for it.
 
 **Verdict: holds as a design for ownership while a plain local holds the view;
-at run time today's analogue copies the payload's bytes into the optional
+at run time today's analog copies the payload's bytes into the optional
 (`y12`).** The copy is gone from direct use, not from the machine. Its address
 shows it (`z01`, `z01b`), and through an escape so does its value (`e11`,
 `h12`, `a03b`). It costs one cell and one byte copy per call, heap blocks
@@ -1462,6 +1462,6 @@ executing the web build; O1 and O2 IR (`jet emit` refuses both,
 E2102); key stability across builds that add a module; a key collision, which
 no probe can force (#6845 c18 rests on source reading); a type arm itself,
 including its `from item` loan, which waits on the compiler (claim 22 rests on
-the enum and union analogues `w01`-`w02b`). The run makes no compile-speed
+the enum and union analogs `w01`-`w02b`). The run makes no compile-speed
 comparison with Jai: the clip's 0.449 s build is one sample on unknown
 hardware (claim K15).

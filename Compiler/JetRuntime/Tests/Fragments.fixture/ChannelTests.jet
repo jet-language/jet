@@ -55,7 +55,7 @@ channel_fixture_check: fn(ok: Bool) {
     channel_fixture_check(!channel_iter_pull(rx, endpoints + I64{16}))
     channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
     channel_fixture_check(jet_scheduler_native_status() == I64{1})
-    // A cancelled send keeps nothing: the value stays the caller's to drop.
+    // A canceled send keeps nothing: the value stays the caller's to drop.
     channel_fixture_check(jet_rt_native_sender_send(tx, endpoints + I64{16}, owned_meta) == I64{0})
     coll_slot_drop(endpoints + I64{16}, owned_meta)
     channel_fixture_check(sync_load(tx + I64{16}) == I64{1})

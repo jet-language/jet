@@ -387,7 +387,7 @@ selected artifact is derived from one source and its target facts enter the
 cache key. The architecture already forbids copied fallback templates and
 requires the embedded parts to be canonical
 (docs/spec/architecture.md:680-694). The current AOT/JIT/interpreter sharing
-pattern shows the acceptable shape: one source, separate marshalling
+pattern shows the acceptable shape: one source, separate marshaling
 (crates/jet-codegen/src/lib.rs:168-193).
 
 I9 impact: highest risk. Exact source selection is compatible. A second source

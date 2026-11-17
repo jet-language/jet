@@ -924,7 +924,7 @@ pub async fn run() -> Result<(), JsValue> {
 Where Jet is ahead:
 
 - Types come from the package's `.d.ts` (D-FFI-JS1).
-- There is no `async`/`.await` colouring, because the Promise is a wait point.
+- There is no `async`/`.await` coloring, because the Promise is a wait point.
 - The same `use js.chartjs` line runs on a native target inside the JS-on-wasm host.
 
 Status: **PARTIAL**. The JS binder exists, scalar-only, with a Node sidecar for bind time:
@@ -1367,7 +1367,7 @@ Competitor: **Rust `libloading`**.
 ```rust
 let lib = unsafe { libloading::Library::new("./plugins/libdemo.so")? };
 let version: libloading::Symbol<unsafe extern "C" fn() -> i32> = unsafe { lib.get(b"demo_version")? };
-println!("{}", unsafe { version() });     // a wrong type here is silent undefined behaviour
+println!("{}", unsafe { version() });     // a wrong type here is silent undefined behavior
 ```
 
 Where Jet is ahead: the signature is checked when it can be. The wasm plugin path has typed
@@ -1976,7 +1976,7 @@ thread by the wrapper.
 
 Jet has no async/await; tasks wait at wait points. A foreign completion, whether a C callback,
 a JS Promise, a Python coroutine or a Rust Future, is a wait point (`ffi.completion<T>`, §4), so
-other tasks keep running. `#Blocking` rows run on the blocking pool. Cancelling the Jet task
+other tasks keep running. `#Blocking` rows run on the blocking pool. Canceling the Jet task
 cancels the foreign operation where the library supports it, and otherwise waits for it.
 
 ### 8.5 Exports
@@ -1997,7 +1997,7 @@ Comptime calls a foreign row only when the row is pure, its Jet row has fixed-wi
 a pointer and count collapse to a list), its source is available, and it builds for wasm32. The
 call runs in a fresh wasm sandbox inside the compiler's comptime child process (I9), so the
 result does not depend on the build machine. The same C can still differ between wasm and a
-native target: float contraction, `long` width and undefined behaviour compile differently. So
+native target: float contraction, `long` width and undefined behavior compile differently. So
 comptime-eligible sources build with strict float flags (`-ffp-contract=off`), and `jet test`
 replays each recorded comptime call natively on each target and fails, naming the row, on any
 difference (G17, ballot D-FFI-COMPTIME1). Every other foreign call at comptime is refused with

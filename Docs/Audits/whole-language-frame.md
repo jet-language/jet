@@ -773,7 +773,7 @@ ledger (one typed query)
 
 ## Verification of the today code
 
-Every "today" program block in elements 1-4, the final program, and the three lexical probes was extracted and run through `scripts/agent/jet-env jet` on four tiers (report: `~/.cache/jet-luna/wla/verify-frame.md`, 27 rows). The records block in element 6 and the status transcripts in element 5 are source-verified against the CLI registry, the receipt store, and lane D's probes, not executed; they are labelled so in place. Blocks marked illustrative were not run; they do not exist yet.
+Every "today" program block in elements 1-4, the final program, and the three lexical probes was extracted and run through `scripts/agent/jet-env jet` on four tiers (report: `~/.cache/jet-luna/wla/verify-frame.md`, 27 rows). The records block in element 6 and the status transcripts in element 5 are source-verified against the CLI registry, the receipt store, and lane D's probes, not executed; they are labeled so in place. Blocks marked illustrative were not run; they do not exist yet.
 
 | block | check | jet run | --interpret | build + binary | note |
 |---|---|---|---|---|---|
@@ -813,7 +813,7 @@ A third pass ran on the integrated deliverable after revision: one fresh-context
 
 | fresh-context finding | fix |
 |---|---|
-| build receipts and `jet build --verify` described as ratified and shipped; `jet check --receipt` is not a check flag | the records baseline now cites the shipped receipt store (D-DEVR-TWICE1), `jet status`, and `--record=NAME`; `--verify` is proposed; the block is labelled source-verified, not executed |
+| build receipts and `jet build --verify` described as ratified and shipped; `jet check --receipt` is not a check flag | the records baseline now cites the shipped receipt store (D-DEVR-TWICE1), `jet status`, and `--record=NAME`; `--verify` is proposed; the block is labeled source-verified, not executed |
 | bare `jet prove` shown producing `proved` rows | every proved row now names `--lens solver` (D-PROVE-LENS1); ballot D-CLAIM1 and card #2502 updated |
 | `no_fix_reason` added while D-REPORT-MACHINE1 was declared unchanged | the amendment is named: one optional field under `jet.report/v2`; the envelope clause is quoted |
 | option meanings and Amends lines drifted between documents and Tower (D-OPENTABLE1, D-RECORD1, D-SHAPE-ONE1) | documents carry the Tower option text; ballots D-RIGHTS1, D-SHAPE-ONE1, D-SHAPE-PROJECT1, D-VERDICT-LOOP1 updated where the ballot was the stale side |

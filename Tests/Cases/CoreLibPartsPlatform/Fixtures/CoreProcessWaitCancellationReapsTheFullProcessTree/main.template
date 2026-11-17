@@ -10,7 +10,7 @@ run: fn() {
     worker: task {
         child: process.cmd(["{work}/cancel-tree.sh"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
         ready_tx.send(1) ?? panic("ready")
-        child.wait() ?? panic("cancelled wait returned")
+        child.wait() ?? panic("canceled wait returned")
     }
     _ready: ready_rx.receive() ?? panic("ready failed")
     time.sleep(100ms)

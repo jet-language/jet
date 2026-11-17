@@ -1,7 +1,7 @@
 # A native artifact that registers `process.on_signal(.Term)`
 # drains on SIGTERM. The signal cancels the process: the entry's accept ends
-# as cancelled, so its `serve` returns its report, and every live task is
-# cancelled at its wait point, so the serving task and the sleeping task both
+# as canceled, so its `serve` returns its report, and every live task is
+# canceled at its wait point, so the serving task and the sleeping task both
 # join as `.Cancelled`. The artifact prints the entry's report and both
 # outcomes and exits 0 within a second, at O0, O1 and O2. Each tier builds
 # into the default directory and its session runs that build, before the next
@@ -21,7 +21,7 @@ repeat while process {pid:o0} alive timeout 1s every 10ms fail "the O0 artifact 
 end repeat
 close o0
 exit: 0
-stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: canceled\nsleep: canceled\n"
 
 step: jet build -O1 --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
@@ -34,7 +34,7 @@ repeat while process {pid:o1} alive timeout 1s every 10ms fail "the O1 artifact 
 end repeat
 close o1
 exit: 0
-stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: canceled\nsleep: canceled\n"
 
 step: jet build -O2 --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
@@ -47,4 +47,4 @@ repeat while process {pid:o2} alive timeout 1s every 10ms fail "the O2 artifact 
 end repeat
 close o2
 exit: 0
-stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: canceled\nsleep: canceled\n"

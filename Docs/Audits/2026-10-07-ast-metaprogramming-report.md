@@ -325,7 +325,7 @@ produce?** New code only, replacements, or arbitrary edits.
 | **Incremental and IDE responsiveness** | An expansion depends on inputs the compiler cannot see, so everything is invalidated; whole-program providers block per-keystroke checking | Roslyn v1 to incremental rewrite; rust-analyzer proc-macro server issues; conflicts with Jet's cone law D-DEVR-CONE1 |
 | **Hygiene and name capture** | Unhygienic insertion captures or shadows caller names | Lisp `gensym`, Rust spans, Swift `makeUniqueName` |
 | **Errors inside generated code** | Diagnostics point at text nobody wrote, or at the call site with no explanation | Swift SE-0382 lists this as a fundamental downside of syntactic macros; Jet's D-BUILD-GENVALUE1 rejected strings for this reason |
-| **Debuggability** | Stepping through expanded code with no source; non-local behaviour | `cargo expand`, Racket macro stepper and Xcode Expand Macro exist because of this |
+| **Debuggability** | Stepping through expanded code with no source; non-local behavior | `cargo expand`, Racket macro stepper and Xcode Expand Macro exist because of this |
 | **AST stability as API** | Node shapes freeze the compiler; every refactor breaks users | Template Haskell, Kotlin K2, Scala 2 to 3; Jet's 381 AST commits in 3 months |
 | **Security and sandboxing** | Build-time code from dependencies runs with your authority | serde_derive binary dispute; npm install scripts; Jet D-JPK-BUILDSCRIPT1 |
 | **Determinism and reproducibility** | Clocks, environment, file reads, iteration order, hash order, parallel ordering | Jai message ordering is a sort problem (#3539 J22 evidence limit); Jet D-BUILDCACHE1 needs complete keys |
@@ -346,7 +346,7 @@ fits.**
 | Compile time | Providers are ordinary Jet compiled once per provider digest, so there is no per-consumer compile of a syntax library; Jet owns the parser. Make expansion results cacheable artifacts in the shared store. `jet build --timings` shows per-provider cost (D-HOOK-STAGES1 rule 6). | D-PREP-FUEL1 step limit; D-BUILDCACHE1; D-HOOK-STAGES1 A |
 | Incremental and IDE | **Recorded reads.** A provider gets facts only through typed queries, and the session records every query and its answer digest. The cache key is the provider digest plus recorded-read digests (Roslyn's pipeline model, Salsa-style). A per-declaration provider is invalidated only when its target's facts change. Whole-program providers key on interface digests with early cutoff. Typed macro *signatures* let the editor check call sites before expansion. Over-approximated cones stay legal (D-DEVR-CONE1). | D-DEVR-CONE1; #3532; architecture.md interface digests |
 | Hygiene | Hygienic by default, identity-based capture, fresh introduced names: already CONTROL2. **Add:** typed quotes make the default path hygienic *without* the author thinking about it; `code.parse_*` from text becomes the escape hatch, not the main road. | D-META-CONTROL2 "Default insertion is hygienic" |
-| Errors in generated code | (1) **Check templates at definition time** for every hole kind, so most errors go to the provider author. (2) **Two-level blame**: a diagnostic on generated code shows the user's site *and* "expanded by provider P at template line L". A post-expansion failure that the template's typing should have prevented is classed as a **provider defect**, the metaprogram analogue of I2. (3) Generated code gets real derived source identities (CONTROL2) so spans are navigable. | D-META-CODE1; D-BIG-DIAGORIGIN1; #3533 |
+| Errors in generated code | (1) **Check templates at definition time** for every hole kind, so most errors go to the provider author. (2) **Two-level blame**: a diagnostic on generated code shows the user's site *and* "expanded by provider P at template line L". A post-expansion failure that the template's typing should have prevented is classed as a **provider defect**, the metaprogram analog of I2. (3) Generated code gets real derived source identities (CONTROL2) so spans are navigable. | D-META-CODE1; D-BIG-DIAGORIGIN1; #3533 |
 | Debuggability | **`jet inspect expand --source`**, a gap today: print materialized expansions with provenance comments. LSP "show expansion" inline. The debugger steps into generated code through the source map. Opt-in in-tree materialization (D-BUILD-GENVALUE1) stays for review. | `core.compiler.source_map`; D-BUILD-GENVALUE1 |
 | AST stability | **Do not publish node shapes.** Publish (a) typed quotes and (b) surface-syntax patterns. Both are parsed by the *current* parser, so they survive internal refactors the way Swift's syntax-level contract does, but checked and typed. (c) A query API over opaque identities with records versioned by the registry (D-META-REFLECT2 already defines this). Where a structural view is unavoidable, expose a **versioned projection** generated from one registry row set and recorded in the provider's lock entry. Before 1.0, use greenfield cutover with `jet fix` migrating providers; after 1.0, follow the edition policy (owner ballot). | D-META-REFLECT2; D-SEMINDEX1 versioning; AGENTS greenfield cutover |
 | Security | Providers run in the prep evaluator with Tier 0/1 effects only, or in the zero-import WASM component (D-HOOK-STAGES1 A). Root opt-in plus digest-bound registration (OPTIN2). A metaprogramming grant is never an FS, Net or Proc grant (OPTIN2). Name `Meta.Rewrite`, `Meta.Expand` and `Meta.Types` as deniable capabilities (needs B1). | D-META-GATE1 capability machinery; D-META-OPTIN2; D-JPK-BUILDSCRIPT1 |
@@ -367,9 +367,9 @@ Ranked by value-to-risk. **[INFERENCE]**: these are design proposals.
 
 Every transform declares one of three contract levels:
 
-- `.Equivalent`: observable behaviour is unchanged (inlining, unrolling, SoA
+- `.Equivalent`: observable behavior is unchanged (inlining, unrolling, SoA
   relayout, fusion).
-- `.Refines`: behaviour is unchanged except for newly declared effects or
+- `.Refines`: behavior is unchanged except for newly declared effects or
   added checks (tracing, contracts, timing).
 - `.Changes`: an acknowledged contract change. This is CONTROL2's
   `acknowledge: true`.
@@ -409,7 +409,7 @@ The lock records `(provider digest, target identity, output digest)`.
 `jet inspect expand --diff` renders the change as a semantic diff using the
 existing `jet diff --structural`. A macro-library upgrade then produces a
 reviewable PR diff of exactly what changed in *your* program. That answers
-the enterprise-auditability pillar and makes "invisible macro behaviour
+the enterprise-auditability pillar and makes "invisible macro behavior
 change" impossible. No current ecosystem does this: Cargo locks the macro
 crate version but not its output.
 

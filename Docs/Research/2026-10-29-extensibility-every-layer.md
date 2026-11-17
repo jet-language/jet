@@ -95,7 +95,7 @@ Jet has more open forms than any single closed list suggests. This is the invent
 
 | # | form | what a package can add | evidence |
 |---|---|---|---|
-| F1 | `trait` + `impl` | behaviour for its own or a foreign type | ordinary language; `impl Token.CheckedText` in `Examples/features/tooling/checked_text_type.jet:6` |
+| F1 | `trait` + `impl` | behavior for its own or a foreign type | ordinary language; `impl Token.CheckedText` in `Examples/features/tooling/checked_text_type.jet:6` |
 | F2 | `marker Name(params, $sites…) { body }` | a compile-time rule that checks or derives | `Examples/features/reflection/user_rule_body.jet`, `derive_loop.jet`; `Core/Http/Server.jet:20-26` declares Core's own route markers |
 | F3 | block marker `#Name { text }` | a small checked language in braces | `Examples/features/tooling/declared_text_block.jet` |
 | F4 | `effect Root.Leaf` | a leaf under an existing effect root | `Examples/features/effects/effect_declarations.jet:1`; `JetFoundation/Data/Syntax/EffectsSurface.jet:29-30` |
@@ -339,7 +339,7 @@ Sema names Core APIs directly: web app methods (`Sema/Calls/Methods.jet:882`), b
 
 **Verdict.** The sema name tables are the main migration work. Each should become either a generated twin of a Core declaration, or a property read from the type. Section 7 gives the rule.
 
-### 4.13 IR and optimisation
+### 4.13 IR and optimization
 
 **Closed.** Census `pipeline.ir`: domain 109/6,674, kernel 33/2,827.
 `IR_RUNTIME_ROUTES` (`JetIR/Source/RuntimeRoutes.jet:49`, CL01031) has 1,618 hand-sorted rows, with key, handle, field and native-type tables after it (:1687, :4946, :5594, :7171).
@@ -348,7 +348,7 @@ Sema names Core APIs directly: web app methods (`Sema/Calls/Methods.jet:882`), b
 
 **Kernel.** The IR op set is kernel by law (D-ARCH-IR1). D-CORE-BOUNDARY1 keeps the numbered kernel table closed.
 
-**Candidates.** (a) Optimisation passes as packages, like LLVM passes [S29] or MLIR dialects [S11, S30]. (b) Rewrite rules declared in Jet, checked against a plain body.
+**Candidates.** (a) Optimization passes as packages, like LLVM passes [S29] or MLIR dialects [S11, S30]. (b) Rewrite rules declared in Jet, checked against a plain body.
 
 **Prior art.** MLIR was built "for extension and evolution", with dialects as the unit of growth (Lattner et al., 2020-02-25 [S11]).
 LLVM documents how to write passes for its new pass manager [S29]. Both systems assume pass authors are compiler engineers `[INFERENCE]`.
@@ -401,10 +401,10 @@ The reasoning view has 9 fixed panels (`LSP/Reasoning.jet:262`, CL01063). Naviga
 
 **Law.** D-HOOK-STAGES1 publishes two editor stages: `lsp.code_actions` and `lsp.hover`. D-ONE-TOOLS1 makes compiler queries the one fact owner.
 
-**Gaps.** No stage exists for completion, semantic tokens, inlay hints, code lenses, rename or diagnostics-on-type. A package that adds a marker or text head cannot teach the editor to complete it or colour it.
+**Gaps.** No stage exists for completion, semantic tokens, inlay hints, code lenses, rename or diagnostics-on-type. A package that adds a marker or text head cannot teach the editor to complete it or color it.
 
 **Prior art.** The Language Server Protocol lets a server register capabilities dynamically per client [S31]. VS Code declares extension features in a `contributes` manifest and starts an extension only on its activation event, such as `onLanguage:python` [S20, S21].
-Tree-sitter colours embedded languages through injection queries in a file next to the grammar [S32].
+Tree-sitter colors embedded languages through injection queries in a file next to the grammar [S32].
 
 **Costs.** An editor stage costs nothing until a package attaches to it. Each attached hook adds latency to the request it serves. VS Code's lazy activation is the answer to that cost: run a package's editor hook only when the file uses that package.
 
@@ -448,7 +448,7 @@ Scalar display hard-codes type names three times: `debug_scalar_class` (`Debug/S
 
 **Costs.** A visualizer runs only while debugging. It costs nothing in the program.
 
-**Candidates.** (a) A Core `DebugView` trait with a pure method that returns a tree of labelled values. The debugger calls it in the inferior or the evaluator. (b) Scripts in a debugger language, as in GDB.
+**Candidates.** (a) A Core `DebugView` trait with a pure method that returns a tree of labeled values. The debugger calls it in the inferior or the evaluator. (b) Scripts in a debugger language, as in GDB.
 
 **Verdict.** (a). It keeps one language and reuses `Debug`. The three scalar name lists should become one read of declared type facts.
 
@@ -599,7 +599,7 @@ All four use a global run-time table. Jet should get the same openness at compil
 **Gaps.** A package cannot ship a migration richer than a rename. Adding a member to a public enum breaks every exhaustive match in dependents.
 
 **Prior art.**
-- Go 1.26's `go fix` runs analyzers that modernise code (Donovan, 2026-02-17 [S17]). `//go:fix inline` lets a library mark a deprecated function so that `go fix` inlines its body at call sites, which "enables self-service API migration" (Donovan, 2026-03-10 [S16]).
+- Go 1.26's `go fix` runs analyzers that modernize code (Donovan, 2026-02-17 [S17]). `//go:fix inline` lets a library mark a deprecated function so that `go fix` inlines its body at call sites, which "enables self-service API migration" (Donovan, 2026-03-10 [S16]).
 - Rust editions require that "crates in one edition must seamlessly interoperate with those compiled with other editions" [S26].
 - Swift SE-0192 split enums into frozen and non-frozen. Clients must handle future cases with `@unknown default`; in Swift 5 the check is a warning (Rose, implemented in Swift 5.0 [S6]).
 - Rust's `#[non_exhaustive]` marks enums and structs that may grow (RFC 2008, 2017-05-24 [S7]).
@@ -673,7 +673,7 @@ Other systems show single parts of the recipe:
 
 ### 5.3 Evidence of where open extension went wrong
 
-- **Global run-time registries.** Go's `sql.Register`, `crypto.RegisterHash` and Python's codec registry are global tables filled at start-up [S40, S41, S51]. Order of imports changes behaviour, and unused members still load `[INFERENCE]`.
+- **Global run-time registries.** Go's `sql.Register`, `crypto.RegisterHash` and Python's codec registry are global tables filled at start-up [S40, S41, S51]. Order of imports changes behavior, and unused members still load `[INFERENCE]`.
 - **Open methods without consolidation.** Julia's invalidations: loading one package recompiled thousands of method instances [S1].
 - **Compiler plug-ins with full access.** Rust procedural macros "have the same resources that the compiler has", including standard input and output [S25].
   When `serde_derive` shipped a precompiled binary, Fedora's packager reported it could not be shipped under distribution rules (decathorpe, serde issue #2538, 2023-07-27 [S23]). dtolnay's `watt` runs procedural macros as WebAssembly instead [S24].

@@ -76,7 +76,7 @@ rather than blessed as failures.
 
 ## Matrix (Linux; macOS and Windows unknown — not run)
 
-| Behaviour | Status | Evidence |
+| Behavior | Status | Evidence |
 |---|---|---|
 | Scoped `..` / absolute / symlink escape → typed `IOError` | **blocked** (FileScope.read E0102) | scope_probe.jet |
 | Directory replacement race (dir swapped for outside link) | **blocked** (same); no `openat`-style public rooted open exists beyond `FileScope.read` | read of files.jet / FSRuntimeOps.rs |
@@ -95,7 +95,7 @@ rather than blessed as failures.
 
 PARTIAL. Criteria 2, 3, 4 and 5 are met by the witness on default run and AOT; the
 `symlink`/`lock`/`copy2` doc comments in `Core/files/files.jet` now state the observed
-behaviour (c5). Criteria 1 and 7 are not met: the rooted-read (`FileScope.read`)
+behavior (c5). Criteria 1 and 7 are not met: the rooted-read (`FileScope.read`)
 escape and replacement cases cannot compile on the current binary. Criterion 6: the
 missing capability is recorded below as a follow-up, not inferred.
 

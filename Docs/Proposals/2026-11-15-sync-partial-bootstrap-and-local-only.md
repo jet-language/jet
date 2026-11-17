@@ -355,7 +355,7 @@ and manual fixes (G38).
   - The binding's first current result after a hold publishes the event
     again, without `after_ms`, so every watcher that read a held result
     reads the current one, whether or not it waited.
-  - No timer runs on the server. A device that honours `after_ms` is what
+  - No timer runs on the server. A device that honors `after_ms` is what
     ends the hold; if none does, the next read of any caller does, and its
     result is published.
   - A connection that starts watching during a hold first receives the
@@ -425,7 +425,7 @@ write log answers nothing that a per-table map cannot (G39). So:
   on server B within one second, with the broker down.
 - **The write log** (version, write set, nonce, timestamp, kept 30 days) is
   built only with D-INVALIDATE1 read sets (#6554). Only then does a write
-  set name ranges that a map cannot summarise. Before it is built, two
+  set name ranges that a map cannot summarize. Before it is built, two
   numbers are measured and recorded here (G5):
   - log bytes per day for Crewboard with 200,000 tasks under its seeded
     write load;
@@ -1305,7 +1305,7 @@ holding the draft's content.
   delete the files. Stores run with SQLite `secure_delete` on, so deleted
   rows are overwritten while the store lives [SQLITE-PRAGMA].
 - `secure_delete` does not cover deleting the whole file. On flash storage,
-  wear levelling can also keep old blocks. The platform's disk encryption is
+  wear leveling can also keep old blocks. The platform's disk encryption is
   the protection there, and the docs say so (G28).
 
 ### 9.7 Switching sync on later
@@ -1429,7 +1429,7 @@ Sync off holds writes only (G31):
 
 ## 10. Failure modes
 
-| Failure | Behaviour |
+| Failure | Behavior |
 |---|---|
 | A live result grows past the cap | `Failed(CallError.TooLarge)` naming the endpoint, cap and size; stored, not re-run on each read (4.2) |
 | Disk full or quota exceeded mid-write | The store transaction aborts whole; the entry is evicted, retried once, then memory-only (8.3) |
@@ -1677,7 +1677,7 @@ These are drafts with alternatives. None is ratified.
 
 ## 14. What the fifth review must attack
 
-- The hold's events (3.2): whether a device that honours `after_ms` can
+- The hold's events (3.2): whether a device that honors `after_ms` can
   still keep a held result as current, including a watcher that joins
   during a hold and receives the topic's replayed latest event, and server
   code that reads the held result itself.
@@ -1727,7 +1727,7 @@ These are drafts with alternatives. None is ratified.
 
 These facts come from knowledge and were not opened for this note:
 
-- Postgres commit-order versus visibility-order behaviour,
+- Postgres commit-order versus visibility-order behavior,
   `max_slot_wal_keep_size`, and LSNs continuing past a point-in-time
   restore on a new timeline;
 - `pg_last_wal_replay_lsn()` on replicas, and hot-standby visibility in

@@ -76,11 +76,11 @@ borrow and allocation columns come from source and docs; I did not measure them.
 | bytes | `Bytes` | positional | — | cursor writes | `copy` | growable |
 
 Core/collections (`Counter`, `Deque`, `OrderedMap`, `Chain`, `StringSet`, Int
-heap helpers `nsmallest`/`nlargest`) are String- or Int-specialised
+heap helpers `nsmallest`/`nlargest`) are String- or Int-specialized
 Python-compatible duplicates of Tally, Queue, the map and Set.
 `Core/collections/collections.jet:34` `OrderedMap` is the only
 **insertion-ordered** map. The built-in `[K:V]` is key-ordered. Retiring or
-generalising these duplicates needs its own card.
+generalizing these duplicates needs its own card.
 
 ## Families versus producers and destinations (criterion 2)
 
@@ -97,7 +97,7 @@ generic collection tree.
 ### Ballot draft A — insertion-ordered map
 - Job: iterate a map in insertion order (Python `dict`, Java `LinkedHashMap`, JS `Map`).
 - Evidence: `[K:V]` iterates in key order (observed). Only the String-only `core.collections.OrderedMap` keeps insertion order.
-- Options: **A** document `[K:V]` as a sorted map and generalise `OrderedMap<K,V>` in core.collections. **B** add an insertion-order builtin kind next to `[K:V]`. **C** no change; applications keep a `[K]` key list next to the map.
+- Options: **A** document `[K:V]` as a sorted map and generalize `OrderedMap<K,V>` in core.collections. **B** add an insertion-order builtin kind next to `[K:V]`. **C** no change; applications keep a `[K]` key list next to the map.
 - Recommendation: A. It adds no new builtin kind and removes the String-only limit.
 - Beginner path: `m := OrderedMap<String,Int>.new()`, then `&m.add(k, v)`. Expert path: the same type, plus `keys()`/`values()` views.
 

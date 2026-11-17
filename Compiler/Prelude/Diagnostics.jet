@@ -1634,7 +1634,9 @@ RetiredDispatchHoleOutsideTable: struct {
         status: .Retired,
         no_fix: None,
 
-        what: fn(self) -> String { "*Retired* (was: `_` read as a value outside an `if` table header)" }
+        what: fn(self) -> String {
+            "*Retired* (was: `_` read as a value outside an `if` table header)"
+        }
 
         why: fn(self) -> String {
             "Jet no longer reports this code; its row stays so an older reference to it still explains"
@@ -1660,7 +1662,9 @@ DispatchHoleCandidatePattern: struct {
             "A hole table puts each arm's candidate in its `<>` as a value, and a pattern or range is not a value; only a plain table matches each arm against its subject."
         }
 
-        fix: fn(self) -> String { "Write the table as `if subject == {{`, or write this arm's candidate as a value." }
+        fix: fn(self) -> String {
+            "Write the table as `if subject == {{`, or write this arm's candidate as a value."
+        }
     }
 }
 
@@ -1673,13 +1677,17 @@ EnumValuesUnavailable: struct {
         meaning: "`T.reflect().values` on a type that is not an enum of payload-free cases",
         detail: true,
 
-        what: fn(self) -> String { "`T.reflect().values` needs an enum whose cases carry no payload" }
+        what: fn(self) -> String {
+            "`T.reflect().values` needs an enum whose cases carry no payload"
+        }
 
         why: fn(self) -> String {
             "`.values` lists every case of one enum type once as a value; a case with a payload is no value until its data is given, and any other type has no fixed set of values to list."
         }
 
-        fix: fn(self) -> String { "Read `.values` on an enum whose cases carry no payload, or list the values you need yourself." }
+        fix: fn(self) -> String {
+            "Read `.values` on an enum whose cases carry no payload, or list the values you need yourself."
+        }
     }
 }
 
@@ -4627,7 +4635,9 @@ MethodReadWithoutCall: struct {
         no_fix: None,
         fix_safety: .NeedsReview,
 
-        what: fn(self) -> String { "A method is read without parentheses where it is no function value" }
+        what: fn(self) -> String {
+            "A method is read without parentheses where it is no function value"
+        }
 
         why: fn(self) -> String {
             "A method read without parentheses is a function value only where a function type is expected, and only while its receiver is kept: a `&self` method's changes must reach the receiver, and a `&&self` method never binds. Anywhere else the read is a forgotten call."
@@ -4646,13 +4656,17 @@ FieldMethodClash: struct {
         meaning: "A read where a function type is expected names a type's field and its method of one name",
         detail: true,
 
-        what: fn(self) -> String { "A read where a function type is expected names both a field and a method" }
+        what: fn(self) -> String {
+            "A read where a function type is expected names both a field and a method"
+        }
 
         why: fn(self) -> String {
             "Where a function type is expected, a method read without parentheses passes the method with its receiver bound, and a field read passes the field's value; a type with both under one name leaves the read ambiguous."
         }
 
-        fix: fn(self) -> String { "Write the closure for the one you mean: `fn(x) {{ value.name(x) }}` calls the method, `fn(x) {{ value.name.call(x) }}` calls the field." }
+        fix: fn(self) -> String {
+            "Write the closure for the one you mean: `fn(x) {{ value.name(x) }}` calls the method, `fn(x) {{ value.name.call(x) }}` calls the field."
+        }
     }
 }
 
@@ -6509,7 +6523,9 @@ GoneFailureArm: struct {
         no_fix: None,
         fix_safety: .BehaviorPreserving,
 
-        what: fn(self) -> String { "This arm names a failure type its subject can no longer fail with" }
+        what: fn(self) -> String {
+            "This arm names a failure type its subject can no longer fail with"
+        }
 
         why: fn(self) -> String {
             "A failure union holds only the failure types that can still reach it, so an arm for any other type never runs"
@@ -8859,7 +8875,9 @@ ImportedScriptExecutes: struct {
 
         what: fn(self) -> String { "*Retired* (was: an imported file with top-level statements)" }
 
-        why: fn(self) -> String { "E0621 names both entries of a program whose files hold a second one" }
+        why: fn(self) -> String {
+            "E0621 names both entries of a program whose files hold a second one"
+        }
 
         fix: fn(self) -> String { "Do not use E0620" }
     }
@@ -10629,11 +10647,11 @@ DuplicateArgumentLabel: struct {
     impl Diagnostic {
         code: "E0765",
         safety_class: .Soundness,
-        safety_reason: "One parameter labelled twice would receive two values.",
+        safety_reason: "One parameter labeled twice would receive two values.",
         expert_path: "none: each parameter receives one argument",
-        meaning: "A parameter labelled twice in one call",
+        meaning: "A parameter labeled twice in one call",
 
-        what: fn(self) -> String { "The same parameter is labelled twice in one call" }
+        what: fn(self) -> String { "The same parameter is labeled twice in one call" }
 
         why: fn(self) -> String { "Each parameter takes exactly one argument" }
 
@@ -10682,19 +10700,19 @@ PositionalAfterLabel: struct {
     impl Diagnostic {
         code: "E0768",
         safety_class: .Soundness,
-        safety_reason: "A bare argument after a labelled one names no parameter, so it has nowhere to go.",
-        expert_path: "none: positional arguments come before labelled ones",
-        meaning: "A bare argument after a labelled one",
+        safety_reason: "A bare argument after a labeled one names no parameter, so it has nowhere to go.",
+        expert_path: "none: positional arguments come before labeled ones",
+        meaning: "A bare argument after a labeled one",
 
         what: fn(self) -> String {
-            "A bare argument follows a labelled one, so it names no parameter"
+            "A bare argument follows a labeled one, so it names no parameter"
         }
 
         why: fn(self) -> String {
             "Labels bind arguments by name, so a bare argument after one has no parameter to fill"
         }
 
-        fix: fn(self) -> String { "Place positional arguments before the first labelled argument." }
+        fix: fn(self) -> String { "Place positional arguments before the first labeled argument." }
     }
 }
 
@@ -11489,7 +11507,9 @@ RawAddressIntoKernel: struct {
         meaning: "A memory kernel's public function or field carries a caller-chosen address to a raw memory operation",
         detail: true,
 
-        what: fn(self) -> String { "`{self.subject}` carries a caller-chosen address to `{self.operation}`" }
+        what: fn(self) -> String {
+            "`{self.subject}` carries a caller-chosen address to `{self.operation}`"
+        }
 
         why: fn(self) -> String {
             "Code outside the kernel files reaches `{self.subject}` without a gate, so the address `{self.operation}` uses would skip the kernel's audit."
@@ -12162,7 +12182,7 @@ UnknownTarget: struct {
         what: fn(self) -> String { "Target `{self.triple}` is not available." }
 
         why: fn(self) -> String {
-            "Jet has no backend for this target, or the target triple is not recognised. `wasm32-wasip2` is the supported WASI Preview 2 server Component target. A `jet build` or `jet run` run reports this target-support diagnostic."
+            "Jet has no backend for this target, or the target triple is not recognized. `wasm32-wasip2` is the supported WASI Preview 2 server Component target. A `jet build` or `jet run` run reports this target-support diagnostic."
         }
 
         fix: fn(self) -> String {
@@ -15295,7 +15315,9 @@ DuplicateCoreRole: struct {
             "The compiler runs the one Core function that fills a role, so each role is filled exactly once."
         }
 
-        fix: fn(self) -> String { "Remove `#Builtin.Role(.{self.role})` from one of the two functions." }
+        fix: fn(self) -> String {
+            "Remove `#Builtin.Role(.{self.role})` from one of the two functions."
+        }
     }
 }
 
@@ -15316,7 +15338,9 @@ MissingCoreRole: struct {
             "The compiler runs the one Core function that fills a role, so each role is filled exactly once."
         }
 
-        fix: fn(self) -> String { "Mark the Core function that does `{self.role}` with `#Builtin.Role(.{self.role})`." }
+        fix: fn(self) -> String {
+            "Mark the Core function that does `{self.role}` with `#Builtin.Role(.{self.role})`."
+        }
     }
 }
 
@@ -15328,7 +15352,9 @@ InlineAlwaysScrub: struct {
         expert_path: "none: a `#Scrub` routine is not `#Inline(Always)`",
         meaning: "An `#Inline(Always)` function marked `#Scrub`",
 
-        what: fn(self) -> String { "`#Inline(Always) fn` is `#Scrub`, and a `#Scrub` routine stays a call" }
+        what: fn(self) -> String {
+            "`#Inline(Always) fn` is `#Scrub`, and a `#Scrub` routine stays a call"
+        }
 
         why: fn(self) -> String {
             "`#Inline(Always)` guarantees every direct call is inlined on every tier, and a `#Scrub` routine reveals a fixed value as a public result: only its own call keeps the value fixed up to that result. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
@@ -15346,13 +15372,17 @@ InlineAlwaysReadsTrace: struct {
         expert_path: "none: a function that reads `context.trace` is not `#Inline(Always)`",
         meaning: "An `#Inline(Always)` function that reads `context.trace`",
 
-        what: fn(self) -> String { "`#Inline(Always) fn` reads `context.trace`, which names the reading function's own frame" }
+        what: fn(self) -> String {
+            "`#Inline(Always) fn` reads `context.trace`, which names the reading function's own frame"
+        }
 
         why: fn(self) -> String {
             "`#Inline(Always)` guarantees every direct call is inlined on every tier, and `context.trace` starts at the frame of the function that reads it, while an inlined copy runs in its caller's frame. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
-        fix: fn(self) -> String { "Drop `#Inline(Always)`, or read `context.trace` in the function's caller." }
+        fix: fn(self) -> String {
+            "Drop `#Inline(Always)`, or read `context.trace` in the function's caller."
+        }
     }
 }
 
@@ -15418,7 +15448,9 @@ ComptimeValueIsComputedFunction: struct {
         stage: [.Comptime],
         meaning: "A compile-time value is a function that running code made, such as a closure, which has no data form",
 
-        what: fn(self) -> String { "This compile-time value is a `{self.type}` that running code made, a function with no data form" }
+        what: fn(self) -> String {
+            "This compile-time value is a `{self.type}` that running code made, a function with no data form"
+        }
 
         why: fn(self) -> String {
             "A compile-time value must be data, which the build keeps and hands to the program. The build keeps a function only when the value names it, as in `F: double`. A function that a call returns, such as a closure, belongs to the run that made it."
@@ -15438,13 +15470,17 @@ InlineAlwaysForeign: struct {
         expert_path: "none: a function with a foreign body is not `#Inline(Always)`",
         meaning: "An `#Inline(Always)` function whose body is foreign: `#FFI(c)`, `#FFI(asm)` or `#Import(c)`",
 
-        what: fn(self) -> String { "`#Inline(Always) fn` has a foreign body, and a function with a foreign body stays a call" }
+        what: fn(self) -> String {
+            "`#Inline(Always) fn` has a foreign body, and a function with a foreign body stays a call"
+        }
 
         why: fn(self) -> String {
             "`#Inline(Always)` guarantees every direct call is inlined on every tier, and the body of an `#FFI` or `#Import(c)` function is foreign code with no Jet body to copy into the caller. Sema refuses each mark that can't keep the guarantee: a call of itself or a cycle of marked calls (E0917), a use as a value (E0918), a body over the size ceiling (E0919), `#Scrub` (E1016), a read of `context.trace` (E1017) and a foreign body (E1021)"
         }
 
-        fix: fn(self) -> String { "Drop `#Inline(Always)` from the function with the foreign body." }
+        fix: fn(self) -> String {
+            "Drop `#Inline(Always)` from the function with the foreign body."
+        }
     }
 }
 
@@ -20760,11 +20796,11 @@ ReactiveFunctionValue: struct {
         what: fn(self) -> String { "A reactive {self.kind} can't hold a {self.type}." }
 
         why: fn(self) -> String {
-            "Signals and derived values hold ordinary data so it can be copied to dependents. A function value isn't reactive data — wrap behaviour in an effect instead."
+            "Signals and derived values hold ordinary data so it can be copied to dependents. A function value isn't reactive data — wrap behavior in an effect instead."
         }
 
         fix: fn(self) -> String {
-            "Use a data value (number, text, list, struct, …); put behaviour in `reactive.autorun`."
+            "Use a data value (number, text, list, struct, …); put behavior in `reactive.autorun`."
         }
     }
 }
@@ -21282,7 +21318,9 @@ FlattenNonStruct: struct {
         detail: true,
         fix_next: "Give the field a `#Codable` struct type, or remove `#Codable(.Flatten)`.",
 
-        what: fn(self) -> String { "`#Codable(.Flatten)` on `{self.field}` needs a struct-typed field." }
+        what: fn(self) -> String {
+            "`#Codable(.Flatten)` on `{self.field}` needs a struct-typed field."
+        }
 
         why: fn(self) -> String {
             "Flatten splices another struct's keys into this object, so the field must itself be a `#Codable` struct — not a primitive, list, or map."
@@ -22632,7 +22670,7 @@ FieldErrorPathUnknown: struct {
         code: "E2813",
         safety_class: .Soundness,
         safety_reason: "A field error whose path names no field of the method's argument is shown beside no field, so the caller never sees what to correct.",
-        expert_path: "none: `FieldError{path:, reason:}` builds an error by hand where no argument field fits",
+        expert_path: "none: `FieldError{{path:, reason:}}` builds an error by hand where no argument field fits",
         stage: [.Compile],
         meaning: "An `app.field_error` whose `at:` path names no field of the method's arguments",
         detail: true,
@@ -22850,9 +22888,7 @@ StateWithoutScreen: struct {
         meaning: "An address taken, with `url_of`, `presence`, `go`, `current` or a push's `open:`, of a state that no screen of the program's app graph opens",
         detail: true,
 
-        what: fn(self) -> String {
-            "No screen of the app graph opens `{self.state}`."
-        }
+        what: fn(self) -> String { "No screen of the app graph opens `{self.state}`." }
 
         why: fn(self) -> String {
             "Every target runs the program's one app graph, and only a `.screen` whose view takes `{self.state}` gives it an address, so a link, push or mail that opens it would open nothing on any target."
@@ -22877,7 +22913,9 @@ MissingAsset: struct {
         meaning: "A `ui.asset` path that names no file, resolved from the calling file's own directory as `embed_bytes` resolves its path",
         detail: true,
 
-        what: fn(self) -> String { "`ui.asset(\"{self.path}\")` names `{self.resolved}`, and there is no file there." }
+        what: fn(self) -> String {
+            "`ui.asset(\"{self.path}\")` names `{self.resolved}`, and there is no file there."
+        }
 
         why: fn(self) -> String {
             "An asset path names a file from the calling file's own directory, as `embed_bytes` names one, and every target ships that file with the program; the path is checked while the program builds, so a path with no file would leave the image, font or icon missing on every target."
@@ -23675,11 +23713,11 @@ TaskCancelled: struct {
         no_fix: None,
 
         what: fn(self) -> String {
-            "*Retired* (was: a task was cancelled at a cooperative wait point)"
+            "*Retired* (was: a task was canceled at a cooperative wait point)"
         }
 
         why: fn(self) -> String {
-            "Cancellation is a value, not a stop: a cancelled task's join gives `TaskFailure.Cancelled`, a cancelled root drains its scope and exits, and an unhandled `Cancelled` reports through the ordinary failure report; the code is registered again if cancellation ever becomes a coded stop"
+            "Cancellation is a value, not a stop: a canceled task's join gives `TaskFailure.Cancelled`, a canceled root drains its scope and exits, and an unhandled `Cancelled` reports through the ordinary failure report; the code is registered again if cancellation ever becomes a coded stop"
         }
 
         fix: fn(self) -> String { "Do not use E3004" }
@@ -23956,7 +23994,9 @@ HoleHeaderOnlyCompares: struct {
         no_fix: None,
         fix_safety: .BehaviorPreserving,
 
-        what: fn(self) -> String { "This header only compares with `<>`, so it is the plain table `if {self.plain} {{`" }
+        what: fn(self) -> String {
+            "This header only compares with `<>`, so it is the plain table `if {self.plain} {{`"
+        }
 
         why: fn(self) -> String {
             "A plain `subject OP {{` table compares each arm with its subject itself, and it keeps pattern and range arms and their coverage"
@@ -23983,7 +24023,9 @@ HoleHeaderEffect: struct {
         no_fix: None,
         fix_safety: .BehaviorPreserving,
 
-        what: fn(self) -> String { "This `if` table header calls `{self.name}`, which {self.action}" }
+        what: fn(self) -> String {
+            "This `if` table header calls `{self.name}`, which {self.action}"
+        }
 
         why: fn(self) -> String {
             "A hole table runs its header once for each arm it tries, so `{self.name}` would run again for every arm"
@@ -24029,7 +24071,9 @@ HoleHeaderInPipeStep: struct {
         no_fix: .Behavior,
         fix_next: "End the pipe in a named value, then start the table with that name.",
 
-        what: fn(self) -> String { "A table in a pipe step has no hole: `<>` here is the step's value" }
+        what: fn(self) -> String {
+            "A table in a pipe step has no hole: `<>` here is the step's value"
+        }
 
         why: fn(self) -> String {
             "Inside a `|>` step `<>` always names the value the step receives, so a table header there has no place for each arm's value"

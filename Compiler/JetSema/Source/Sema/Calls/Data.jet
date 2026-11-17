@@ -702,7 +702,7 @@ sema_data_event_time_labels: fn(method: String, args: [CallArg], diagnostics: &[
                     diagnostics.push(sema_error("E0767", label.span, "argument {index + 1} of `.{method}()` is positional, so it takes no label `{label.name}:`", "the first argument of an event-time stage is its subject and has no name", "drop `{label.name}:`"))
                     valid = false
                 } else if label.name != want {
-                    diagnostics.push(sema_error("E0764", label.span, "`.{method}()` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", "write `{want}:` for argument {index + 1}"))
+                    diagnostics.push(sema_error("E0764", label.span, "`.{method}()` has no parameter labeled `{label.name}`", "a label binds an argument to the parameter of that name", "write `{want}:` for argument {index + 1}"))
                     valid = false
                 }
             }
@@ -1549,8 +1549,8 @@ sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, en
         return None
     }
     // The bound arguments are in parameter order, with omitted ones filled as
-    // unlabelled defaults; a written label before them would leave a bare
-    // argument after a labelled one, so every argument passes by position.
+    // unlabeled defaults; a written label before them would leave a bare
+    // argument after a labeled one, so every argument passes by position.
     loop index in 0..<bound.len() -> bound[index].label = None
     Val(bound)
 }

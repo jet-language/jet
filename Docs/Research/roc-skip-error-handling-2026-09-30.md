@@ -55,7 +55,7 @@ errors or unknowns.
   `jet-debug-snapshot23` (built 2026-09-30 04:54), repository HEAD
   `5273e43d4`, from `$JET_STATE_ROOT/scratch/rocskip/`. `jet run` is the
   default JIT tier; one probe also tried `jet build` (AOT). Other agents were
-  editing failure-model code (#3838, #3708 neighbours) at the time, so the
+  editing failure-model code (#3838, #3708 neighbors) at the time, so the
   snapshot may already be stale for those areas.
 - Tower state was read, not written: #3742 (D-FAIL-VISIBLE1 and
   D-FAIL-PUBSIG1 open; D-OUTCOME-SHAPE1=A ratified 2026-09-29), #3838 (its
@@ -86,7 +86,7 @@ errors or unknowns.
    D-OPT-LIFT1.
 4. **A `dbg(expr)` that works in pure code.** Jet has no print-debugging
    route inside `-[]>` or `#Memo` functions: `print` there is E3401 (p5).
-   Roc's `dbg` is allowed in pure functions because program behaviour never
+   Roc's `dbg` is allowed in pure functions because program behavior never
    depends on it (r2). Candidate ballot D-DBG1.
 5. **Fix the error-union and absence defects these probes hit.** Exhaustive
    matching over a union of `#Error struct` members fails (p8), `{e:Debug}` on
@@ -114,7 +114,7 @@ deliberate `T?` versus Roc's policy of turning every absence into an error that
 ### 1.1 Tag unions and error accumulation through `?`
 
 **What it is.** Roc has no exception system and no declared error types by
-default. An error is a *tag*, a capitalised name with optional payload, written
+default. An error is a *tag*, a capitalized name with optional payload, written
 directly: `Err(NotFound(name))`. Tags belong to *structural* tag unions, which
 need no declaration and are *extensible*: "the type can accumulate new tags
 based on how it's used"
@@ -514,7 +514,7 @@ fn user_of(id: Int) -> String? ConfigError! {
 
 **Verdict: Jet's model already does better on the point that matters, and
 adopts Roc's other point through `.or_err`.** Roc's design is exactly the
-behaviour D-OUTCOME-SHAPE1 option B described and the owner rejected: a lookup
+behavior D-OUTCOME-SHAPE1 option B described and the owner rejected: a lookup
 miss skips the rest of the function. Roc's valid point, that an absence should
 say *why*, is what `.or_err("why")` does, and descriptive data states are
 available through ordinary enums.
@@ -613,7 +613,7 @@ despite D-LIT-DOT1=B describing it as an "anonymous record".
 **Verdict: do not adopt open records.** Row polymorphism mainly serves
 error-union width in Roc, which 1.1 handles with inferred unions instead; for
 data, nominal structs document intent and keep diagnostics simple. No ballot.
-The D-LIT-DOT1 wording versus the E0119 behaviour is worth a spec check.
+The D-LIT-DOT1 wording versus the E0119 behavior is worth a spec check.
 
 ### 1.7 Whole-program type inference
 
@@ -713,7 +713,7 @@ functions must be pure, so they cannot be print-debugged at all. The
 debugger (`jet debug`, D-DBG2/3) is the only route.
 
 **Verdict: adopt, adapted.** Debugging pure code is common; I/O effects exist
-to track behaviour the program depends on, and a debug trace is not that.
+to track behavior the program depends on, and a debug trace is not that.
 
 **Candidate ballot D-DBG1.**
 
@@ -901,7 +901,7 @@ Part 3 (D3, D4).
 mutable instances is declared `mutable class`, fields are `mutable`, instances
 are built with `mutable Point(1, 2)`, and `mutable Point` is a different type
 from `Point`. `readonly X` accepts either; `frozen` methods exist only on the
-immutable form; `freeze(obj)` makes an immutable deep copy, often optimised
+immutable form; `freeze(obj)` makes an immutable deep copy, often optimized
 away when the mutable value does not escape
 ([mutability](https://github.com/skiplang/skip/blob/master/docs/overview/mutability.md)).
 "There are no global mutable values."
@@ -984,7 +984,7 @@ propagation already improve on Skip's exceptions for reasoning (every failure
 is in the signature or inferred). Two notes for the record: Skip argued for a
 prefix `?` on readability grounds, the opposite of D-TYPE-SUFFIX1=A (Jet
 chose the suffix after its own review; no action); and Skip's sentinel layout
-for `Option` is the same kind of internal optimisation D-OUTCOME-SHAPE1's
+for `Option` is the same kind of internal optimization D-OUTCOME-SHAPE1's
 technical note allows for the three-state carrier, subject to a paired
 performance cell.
 

@@ -35,7 +35,7 @@ run: fn() -[Exec, IO, FS, Env, Time.Wait]> {
     ordered: loop i in 0..<4 -> process.cmd(["sh", "-c", "sleep 0.{4 - i}; echo job {i}; exit {i}"])
     loop result in process.run_all(ordered, 2) ?? panic("run_all failed") -> show("ordered", result)
 
-    // One spec cannot start and one times out; their neighbours still run.
+    // One spec cannot start and one times out; their neighbors still run.
     mixed: [ProcessSpec]{
         process.cmd(["/nonexistent/jet-no-such"]),
         process.cmd(["sleep", "5"]).timeout(200ms),

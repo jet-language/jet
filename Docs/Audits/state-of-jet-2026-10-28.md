@@ -12,7 +12,7 @@ searched Tower for every finding. All evidence is reproducible from `$JET_SCRATC
 - `diag_cov.py`, `tower_health.mjs`, `tq.sh`.
 
 Logs are in `notes/`. Code is the source of truth, and docs are never used as evidence of
-behaviour. Claims I did not execute are marked `[INFERENCE]`.
+behavior. Claims I did not execute are marked `[INFERENCE]`.
 
 ## Verdict in one paragraph
 
@@ -95,7 +95,7 @@ CORE-02.
 
 - Lockfile location
 - Script authority and shebang
-- Workspace-root command behaviour
+- Workspace-root command behavior
 - Core one-name purge
 - jet/jetpack boundary for minimal deps
 - `jet doc` output location
@@ -104,7 +104,7 @@ CORE-02.
 - Receiver-mark inference
 - One FFI form
 - Unsafe on imported C
-- One optimisation flag
+- One optimization flag
 - Dataframe and re-scoping #3955
 - REPL model
 - Foreign-spelling teaching (D-S14-PAUSE)
@@ -196,7 +196,7 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
   2. Keep `docs/` but refuse to overwrite files not carrying a Jet "generated" header.
   3. Both.
 - Recommendation: 3 (1 is the default, 2 protects `--out`). Output location is product
-  behaviour → owner decision; the overwrite guard is pure implementation and urgent.
+  behavior → owner decision; the overwrite guard is pure implementation and urgent.
 - Needs owner: Y (default path), N (guard)
 
 ### LAY-04 — Workspace roots are second-class: check/test/build/doc refuse, status lies
@@ -224,7 +224,7 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
   2. Add an explicit `--all` (or `-p '*'`) and keep the refusal as default.
   3. Make the root package.jet declare `default-members:`.
 - Recommendation: 1 (matches every peer, fewest keystrokes), with E0626 printing the
-  dependency's diagnostics inline (collect-all). Owner decision (command behaviour).
+  dependency's diagnostics inline (collect-all). Owner decision (command behavior).
 - Needs owner: Y
 
 ### LAY-05 — Too many root-level config files and two workspace mechanisms
@@ -353,7 +353,7 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
   ("do not extend it"); the native O0 in-memory tier that would host a REPL has not landed
   (#4720, #4741). Bare `jet` was wired to the REPL, so the greeting path is the broken path.
 - Tower: #4719 (REPL failure semantics), #4720 (move REPL off evaluator). No card for bare
-  `jet` behaviour, `jet eval <expr>`, or the `jet ?` TTY crash.
+  `jet` behavior, `jet eval <expr>`, or the `jet ?` TTY crash.
 - Options:
   1. Bare `jet` prints the greeting and the five beginner commands (the greeting already
      exists: `jet_cli_greeting`, Front.jet:1580) until a REPL ships.
@@ -361,7 +361,7 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
      hidden `run.jet`, rebuilds, runs; 20–40 ms builds measured below make this viable.
   3. Wait for native in-memory O0.
 - Recommendation: 1 immediately (implementation), 2 as the REPL/eval path (owner decision:
-  product behaviour of REPL state and side-effect replay), fix `jet ?` to the documented static
+  product behavior of REPL state and side-effect replay), fix `jet ?` to the documented static
   palette.
 - Needs owner: Y for option 2.
 
@@ -400,14 +400,14 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
   2. fix the listed sites only.
 - Recommendation: 1. Pure implementation. Needs owner: N.
 
-### CLI-05 — Three optimisation knobs; tiers are indistinguishable in practice
+### CLI-05 — Three optimization knobs; tiers are indistinguishable in practice
 - Area 2/7; severity minor; personas scripter, expert.
 - Evidence: `jet run --help` lists `--release`, `--profile release|debug|ci|hardened|<bundle>`,
   `--optimize none|basic|full`, `--inline auto|always_marked|off`. `perf_tiers.sh` on
   `proj/perf/bench.jet` (fib 30 + sieve 2M + 200k map ops): none 0.09 s / 4,878,328 B,
   basic 0.08 s / 4,878,288 B, full 0.07 s / 4,886,744 B, `--release` 0.08 s / 4,886,744 B,
   `--profile=debug` 0.08 s; identical output. `--profile ci|hardened` is E2104 (census).
-- Root cause: three overlapping spellings for one choice (I8); the optimiser does little at
+- Root cause: three overlapping spellings for one choice (I8); the optimizer does little at
   this size.
 - Tower: #4913 (one option table), #5925 (x64 code quality), #4155.
 - Options: 1. keep `--release` only (plus `profiles:` in package.jet for experts);
@@ -769,7 +769,7 @@ Each finding gives: ID, area, severity (blocker/major/minor/polish), personas, e
      between top-level manifest fields.
   3. Add a test that `jet new <t> && jet fmt --check` passes for every template.
 - Recommendation: 3 plus 2 (blank-line preservation is a formatter defect; collapsing is a style
-  rule). Formatter style is product behaviour, so the collapse rule needs an owner call.
+  rule). Formatter style is product behavior, so the collapse rule needs an owner call.
 - Needs owner: Y (formatter style), N (test + scaffold fix).
 
 ### TOOL-01 — No editor support, debugger or profiler
@@ -1077,7 +1077,7 @@ follow the AGENTS.md ballot rule.
 - B: every foreign call needs `#Unsafe`.
 - Recommend A.
 
-**B11 D-OPTFLAG1 — one optimisation flag** (CLI-05)
+**B11 D-OPTFLAG1 — one optimization flag** (CLI-05)
 - A: `--release` only, with profiles in `package.jet`.
 - B: `--profile` only.
 - Recommend A.

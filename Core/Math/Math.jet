@@ -12772,7 +12772,7 @@ priv pow_cr: fn(a: Float, y: Float) -> Float Never! {
     if 0x36 <= ey && ey < 0x7F5 {
         r: s_mul(y, l.hi, l.lo)
         e: pow_exp_1(r.hi, r.lo)
-        // 2^-57.579 when log(a) cancelled, else 2^-63.797
+        // 2^-57.579 when log(a) canceled, else 2^-63.797
         bound: if l.cancel -> Float{4.6485168145316e-18} else -> Float{6.246867986000465e-20}
         low: e.hi + fma(bound, -e.hi, e.lo)
         if low == e.hi + fma(bound, e.hi, e.lo) -> return low
@@ -37411,7 +37411,7 @@ priv f32_narrow: fn(x: Float) -> F32 Never! {
 
 // A value rounded to odd, from s, its nearest Float, and e, of the sign of
 // the value minus s (zero when s is exact): s when it is exact, odd or not
-// finite, else s's odd neighbour on e's side.
+// finite, else s's odd neighbor on e's side.
 priv round_odd: fn(s: Float, e: Float) -> Float Never! {
     if e == 0.0 || !is_finite(s) -> return s
     if s == 0.0 -> return copysign(from_bits(1), e)

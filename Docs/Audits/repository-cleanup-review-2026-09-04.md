@@ -331,7 +331,7 @@ Directory presence was inspected through primary repository pages. These observa
 
 The focused persistence and HTTP suites passed all 27 tests after the three new AGENTS cases failed against the old implementation. Eight Chromium scenarios passed on the actual UI and production file helpers with disposable policy files. Desktop (1440×1000) and narrow (390×844) screenshots were inspected.
 
-The browser exercise covered revision conflicts, network failure, retained drafts across Tower navigation, Ctrl/Cmd+S, Escape, focus restoration, newer typing during a save acknowledgement, and completion after leaving the editor. It also covered empty text, read retries, and rejection of the outdated API target. No page errors were observed.
+The browser exercise covered revision conflicts, network failure, retained drafts across Tower navigation, Ctrl/Cmd+S, Escape, focus restoration, newer typing during a save acknowledgment, and completion after leaving the editor. It also covered empty text, read retries, and rejection of the outdated API target. No page errors were observed.
 
 A final read-only check against the existing owner server displayed root AGENTS.md and a revision matching its SHA-256. Both policy files retained their pre-change hashes. No second Tower server was started. The dedicated Chromium process and disposable probes were removed.
 

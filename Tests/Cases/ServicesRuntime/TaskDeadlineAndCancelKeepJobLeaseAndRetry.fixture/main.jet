@@ -3,8 +3,8 @@
 //    worker loop. The loop records it as the job's failure, and the queue's
 //    retry policy applies: Retrying, due again after its 1s backoff.
 // 2. The retried claim is attempt 2, and the first claim's lease is no longer
-//    honoured.
-// 3. A worker task cancelled mid-job leaves the job Running under its lease.
+//    honored.
+// 3. A worker task canceled mid-job leaves the job Running under its lease.
 //    recover_expired doesn't take a lease that hasn't expired, and the lease
 //    holder can still finish the job.
 package: {
@@ -69,7 +69,7 @@ run: fn() {
     second: (queue.claim("w2", 1) ?? panic("claim"))[0]
     print("retried claim: attempt {second.receipt.attempts}")
     if queue.fail(first, failure) == {
-        .Ok(_) -> { print("the first claim's lease: still honoured") }
+        .Ok(_) -> { print("the first claim's lease: still honored") }
         .Err(_) -> print("the first claim's lease: refused")
     }
 
