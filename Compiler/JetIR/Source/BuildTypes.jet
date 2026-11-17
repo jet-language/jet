@@ -3643,10 +3643,15 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
 
 // The failure `payload` (of type `source`, laid out as `source_row`) converted
 // into `target` by the conversion routine `function_name`; a conversion into
-// the default `Err` also records its `source -> Err` step.
+// the default `Err` also records its `source -> Err` step and leaves a copy
+// of the failure on it (ir_err_payload_node).
 ir_try_convert_typed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, source: Type, source_row: Int, function_name: String, target: Type, span: Span) -> Int Never! {
+    if !ir_default_err(p, target) {
+        return ir_try_convert_routine(m, p, b, payload, source_row, function_name, target, span)
+    }
+    node: ir_err_payload_node(m, p, b, payload, source, source_row, span)
     converted: ir_try_convert_routine(m, p, b, payload, source_row, function_name, target, span)
-    if ir_failed(b) || !ir_default_err(p, target) -> return converted
+    if ir_failed(b) -> return converted
     string_row: ir_string_row(m)
     source_text: ir_intern_text(m, ir_error_spelling(p, source))
     target_text: ir_intern_text(m, ir_error_spelling(p, target))
@@ -3655,10 +3660,45 @@ ir_try_convert_typed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int
     target_name: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, target_name, target_text, -1, -1, b.line)
     error_row: b.f.slot_type[converted]
-    applied: ir_runtime(m, b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name}, error_row)
+    applied: ir_runtime(m, b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name, node}, error_row)
     b.fresh[applied] = true
     ir_release(m, b, converted)
     applied
+}
+
+// The node a conversion into the default Err hands jet_err_apply_conversion
+// (JetBackend ErrLayout.jet ERR_PAYLOAD), so the Err keeps the failure's own
+// value and type: a counted box laid out like a function value's (one owner
+// at 0, no code at 8, the release helper at 16 that drops the value and
+// frees the node), the payload key of `source` (ir_trait_key) at 24 and a
+// copy of the failure `payload` at 32. The route takes the node's address
+// as a Word. A compiler value (a BuildError) leaves none (0).
+ir_err_payload_node: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, source: Type, source_row: Int, span: Span) -> Int Never! {
+    word_row: ir_word_row(m)
+    if ir_host_value_row(m, p, source_row) != None {
+        none: ir_temp(m, b, word_row)
+        ir_emit(b.f, IROp.Const, none, 0, -1, -1, b.line)
+        return none
+    }
+    pointer_row: ir_pointer_row(m)
+    unit: m.types[source_row].kind == .Unit
+    captures := [IRCaptureSlot]{}
+    size := 0
+    if !unit {
+        size = m.types[source_row].size
+        captures.push(IRCaptureSlot{name: "payload", offset: 32, row: source_row, by_ref: false})
+    }
+    node: ir_closure_box(m, b, pointer_row, 32 + size, captures)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, node, 8, zero, b.line)
+    key: ir_word_const(m, b, ir_trait_key(p, source))
+    ir_emit(b.f, IROp.Store, -1, node, 24, key, b.line)
+    if !unit {
+        copied: ir_copy_value(m, p, b, payload, span)
+        ir_store_at(m, p, b, node, 32, copied)
+        b.fresh[copied] = false
+    }
+    ir_copy_word(m, b, node, word_row)
 }
 
 // The failure `payload` (laid out as `source_row`) passed to the conversion

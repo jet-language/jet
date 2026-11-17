@@ -4418,6 +4418,8 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if int_abs.handled -> return int_abs
     pointer_cast := sema_expr_try_pointer_cast(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, context, diagnostics)
     if pointer_cast.handled -> return pointer_cast
+    err_as: sema_expr_try_err_as(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, diagnostics)
+    if err_as.handled -> return err_as
     // Complex is not Numeric; its magnitude is its own
     // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
     if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
@@ -6936,6 +6938,33 @@ sema_expr_check_pointer_from_address: fn(alias: String, alias_span: Span, elemen
     if forbidden -> return None
     pointer := Type.Apply{name: "Ptr", args: [Type]{element}}
     sema_expr_expected_owned(sema_tree_node(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, diagnostics)
+}
+
+// `err.as<T>()` on the default Err: the failure value whose conversion built
+// the Err, as a `T?` (Val when that failure was a `T`, else None). The
+// checked tree is the host method `as` of the Err with no arguments, typed
+// `T?`; the IR reads the payload the conversion left (BuildExpr.jet
+// ir_err_as).
+sema_expr_try_err_as: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if method != "as" || sema_expr_unwrap_tag(receiver_value.ty) != (Type.Named{name: "Err"}) {
+        return unhandled
+    }
+    if type_args.len() != 1 {
+        diagnostics.push(sema_call_generic_count_diagnostic(method, 1, type_args.len(), span))
+        return rejected
+    }
+    if args.len() != 0 {
+        diagnostics.push(sema_call_arity_diagnostic(method, 0, args.len(), false, span))
+        return rejected
+    }
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        return rejected
+    }
+    failure: sema_expr_expected_type(type_args[0], environment, program)
+    value: sema_tree_node(Type.Option{inner: failure}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
 }
 
 // `p.cast<U>()` on a raw pointer `*T`: the same address as a `*U`, so reads

@@ -7287,6 +7287,10 @@ subquery from another table) is refused.
 |---|---|---|
 | `open(url: String) -[DB]> Store` | store | Open a database URL. |
 | `open_memory() -[DB]> Store` | store | Open an in-memory database. |
+| `store.query(sql: SQL) -[DB.Read]> [[String: DBValue]] DBError!` / `store.query_one(sql: SQL) -[DB.Read]> [String: DBValue]? DBError!` | rows | Read every row `sql` reads: an opened connection has no row policy, so a script may join tables or touch none. |
+| `store.execute(sql: SQL) -[DB.Write]> Int DBError!` | count | Write through the connection, with no row policy; schema and transaction-control SQL stay with `db.migrate` and `begin`. |
+| `store.all_rows() -> DBScope` | scope | The connection as a scope with no row policy, for a helper written for scopes and for `db.migrate`. |
+| `store.with_policy(policy: RowPolicy, user: String) -[DB]> DBScope` | scope | The scope a row policy narrows to `user`. |
 | `store.table(name: String, key: fn(T) -[]> K) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
@@ -7306,8 +7310,13 @@ subquery from another table) is refused.
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
 | `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `app` live registry; read it with `app.state`. |
 
-Scoped connection and pool handles provide checked `query`, `query_one`,
-`execute`, lease, `begin`, and close operations. A policy expression
+An opened connection (`Store`) queries directly, meaning every row: a script
+asks `db.open("notes.db").query(SQL{"select …"})` with no row policy, and
+`query` needing `DB.Read` while `execute` needs `DB.Write` lets a script that
+only reads ask for read-only database authority. A row policy is for code
+that serves users, through the scope `with_policy` takes from the
+connection. Scoped connection and pool handles provide checked `query`,
+`query_one`, `execute`, lease, `begin`, and close operations. A policy expression
 is intentionally small: the supported forms are `true` and `owner == user`
 with a table identifier. Policy text has a bounded size. Schema and transaction
 control belong to the migration/control path, not to arbitrary interpolated
@@ -7327,9 +7336,10 @@ Inside a call of a mounted method, which is one transaction already, `begin`
 is `DBError.Failed`; outside one, it waits for a call's transaction on the
 store to end.
 
-`DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
-`execute`, `begin`), which a generic bound names bare:
-`count: fn<T: Driver>(conn: T)` takes any scope and calls its methods.
+`Store` and `DBScope` implement the prelude trait `Driver` (`query`,
+`query_one`, `execute`, `begin`), which a generic bound names bare:
+`count: fn<T: Driver>(conn: T)` takes a connection or any scope and calls its
+methods.
 
 A typed table stores `T` rows by key. `store.table("tasks", key: fn(task:
 Task) { task.id })` names the table and the key function; `K` is `Encode`,

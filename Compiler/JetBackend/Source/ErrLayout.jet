@@ -1,8 +1,11 @@
 // Canonical native-pack ABI: the runtime and the IR builder's native Err
-// access share these constants. The words store the checked Prelude Err
-// declaration and its private metadata records; JetIR's IR_DEFAULT_ERR_ABI
-// (BuildExpr.jet) refuses to lower an Err whose declarations leave this layout.
-ERR_BYTES: I64{88}
+// access share these constants. The words up to ERR_PAYLOAD store the checked
+// Prelude Err declaration and its private metadata records; JetIR's
+// IR_DEFAULT_ERR_ABI (BuildExpr.jet) refuses to lower an Err whose
+// declarations leave this layout. ERR_PAYLOAD is the runtime's own word: the
+// counted node holding the value whose conversion built the Err (JetIR
+// BuildTypes.jet ir_err_payload_node), 0 when none did.
+ERR_BYTES: I64{96}
 
 ERR_MESSAGE: I64{0}
 
@@ -17,6 +20,8 @@ ERR_CONTEXT: I64{32}
 ERR_CONVERSIONS: I64{56}
 
 ERR_DETAILS: I64{80}
+
+ERR_PAYLOAD: I64{88}
 
 ERR_CONTEXT_BYTES: I64{24}
 

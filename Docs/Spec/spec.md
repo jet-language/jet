@@ -1796,6 +1796,14 @@ generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:
 an `Unsent<Int>` and an `Unsent<String>` failure both convert through it. It is
 declared in the file that declares the type.
 
+A typed failure that converts into the default `Err` stays on it:
+`err.as<T>()` gives it back as a `T?`, `Val` holding a copy of the failure
+when the one that first converted into this `Err` was a `T`, and `None` when
+it was another type, when the `Err` was written directly (`Err("text")`), or
+when the `Err` is a compile-time constant. Copies of an `Err` share the kept
+value, and each `Err` of a cause chain keeps its own:
+`if err.cause == .Val(inner) -> inner.as<T>()`.
+
 A failure whose error type is a member of the enclosing error union widens
 into that union without a declared conversion. So does a failure whose error
 type is itself a union, when every one of its members is a member of the

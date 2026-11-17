@@ -1,0 +1,38 @@
+// A script asks an opened database directly: no row policy, no scope. It
+// counts, joins two tables and selects a constant through the connection,
+// writes through it, and a row policy still narrows a scope taken from it.
+use db: core.db
+
+// Reading through a connection needs DB.Read and nothing more.
+count_notes: fn(c: db.Store) -[DB.Read]> Int db.DBError! {
+    rows: c.query(SQL{"SELECT id FROM notes"}) ?? return Err(err)
+    rows.len()
+}
+
+// Writing through one needs DB.Write.
+add_note: fn(c: db.Store, id: Int, owner: String, title: String) -[DB.Write]> Int db.DBError! {
+    c.execute(SQL{"INSERT INTO notes (id, owner, title) VALUES ({id}, {owner}, {title})"})
+}
+
+run: fn() {
+    c := db.open("notes.db")
+    _: db.migrate(c.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (id INTEGER, owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (note INTEGER, tag TEXT)"}]) ?? panic("migrate: {err}")
+    _: add_note(c, 1, "ann", "plan") ?? panic("add plan: {err}")
+    _: add_note(c, 2, "ben", "diary") ?? panic("add diary: {err}")
+    _: c.execute(SQL{"INSERT INTO tags (note, tag) VALUES (1, 'work'), (2, 'home')"}) ?? panic("tags: {err}")
+    print("notes: {count_notes(c) ?? panic("count: {err}")}")
+    joined: c.query(SQL{"SELECT notes.title, tags.tag FROM notes JOIN tags ON tags.note = notes.id ORDER BY notes.id"}) ?? panic("join: {err}")
+    loop row in joined {
+        print("{db.row_text(row, "title") ?? "?"} is {db.row_text(row, "tag") ?? "?"}")
+    }
+    one: c.query_one(SQL{"SELECT 1 AS one"}) ?? panic("select 1 reads one row")
+    print("select 1: {db.row_int(one, "one") ?? -1}")
+    if c.execute(SQL{"DROP TABLE tags"}) == {
+        .Ok(_) -> { print("drop outside migrate: ran") }
+        .Err(_) -> { print("drop outside migrate: refused") }
+    }
+    owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")
+    ann: c.with_policy(owned, "ann").query(SQL{"SELECT title FROM notes"}) ?? panic("ann: {err}")
+    print("ann's notes: {ann.len()}")
+    _: c.close()
+}
