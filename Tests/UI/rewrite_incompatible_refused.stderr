@@ -1,0 +1,20 @@
+Error [jet.RewriteIncompatible]: `syntax.rewrite` can't call `count` where `print` was called: its argument 1 is `Int` and the call passes `String`
+  --> Tests/UI/rewrite_incompatible_refused.jet:47:25
+    |
+ 47 |             meta.report(PrintsNumbers{}, at: c)
+    |                         ^^^^^^^^^^^^^^^
+ Why: A rewrite keeps each call's arguments and its use of the result, so the replacement takes what the callee takes and returns what it returns
+ Fix: Name a replacement whose parameters and return type match `print`, or drop the `structured_fix`
+More: jet-lang.dev/e/E1135
+
+Error [jet.RewriteIncompatible]: `syntax.rewrite` can't call `tally` where `print` was called: it returns `Int` and the call's result is `Err!`
+  --> Tests/UI/rewrite_incompatible_refused.jet:48:25
+    |
+ 48 |             meta.report(PrintsTallies{}, at: c)
+    |                         ^^^^^^^^^^^^^^^
+ Why: A rewrite keeps each call's arguments and its use of the result, so the replacement takes what the callee takes and returns what it returns
+ Fix: Name a replacement whose parameters and return type match `print`, or drop the `structured_fix`
+More: jet-lang.dev/e/E1135
+
+2 problems found
+run `jet explain E1135` to learn more
