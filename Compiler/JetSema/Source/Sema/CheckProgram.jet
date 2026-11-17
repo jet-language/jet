@@ -473,6 +473,9 @@ SemaComptimeItemSource: struct {
     // A body site lexically inside an `#Impure` block: its Tier-2 effects
     // need their package to hold `Meta.Host` (E3411), not the block (E3410).
     impure: Bool{false},
+    // A constant's `#StepLimit(n)` (sema_comptime_step_limit): its
+    // evaluation may take n steps instead of the evaluator's default.
+    step_limit: Int?{None},
     // A body site's run-time locals and parameters, which its staged check
     // names as run-time values (E0640) when the code reads one.
     runtime_locals: [String]{[String]{}},
@@ -9630,9 +9633,12 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
         if expected == None -> expected = constant.ty
         constant_key: symbol_table_key(graph.symbols, constant.symbol.id)
         sema_comptime_add_source(sources, graph, source_module.module_identity, constant_key, constant_key, constant.declaration.name, SemaComptimeItemKind.Constant, expression, expected)
-        if module_value && sources.items.len() > 0 {
+        if sources.items.len() > 0 {
             last: sources.items.len() - 1
-            if sources.items[last].key == constant_key -> sources.items[last].module_value = true
+            if sources.items[last].key == constant_key {
+                if module_value -> sources.items[last].module_value = true
+                sources.items[last].step_limit = sema_comptime_step_limit(constant.declaration.markers)
+            }
         }
     }
     loop item in source_module.program.items {
@@ -9641,6 +9647,17 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
     items := sources.items.move()
     sources.items = [SemaComptimeItemSource]{}
     items
+}
+
+// The step limit a binding's `#StepLimit(n)` among `markers` sets, None when
+// it has none. The parser refuses a limit that is not a whole number above 0
+// (parser_check_step_limit).
+sema_comptime_step_limit: fn(markers: [Marker]) -> Int? Never! {
+    loop marker in markers {
+        if !sema_marker_is_hook(marker, MarkerHook.StepLimit) || marker.args.len() != 1 -> next
+        if marker.args[0] == .Expr(written) && written == .Int(value, _, _, _, _) && value > 0 -> return Val(value)
+    }
+    None
 }
 
 // The declaration pass makes no body check of its own (the sources'

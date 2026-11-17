@@ -1983,8 +1983,9 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // `#FFI` and `#Import(c)` shaped the body above; `#Memo`,
             // `#Interrupt`, `#Context`, `#Deadline` and `#Allow` are sema's,
             // `#FX` is the effect row's, `#Redact` marks fields and `#Root` a
-            // parameter.
-            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .Interrupt | .Context | .FX | .Allow | .Deadline -> {}
+            // parameter; `#StepLimit` belongs to bindings, and sema refuses
+            // it on a function by its sites.
+            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .Interrupt | .Context | .FX | .Allow | .Deadline | .StepLimit -> {}
         }
     }
     // `#Job` metadata and its `every:` schedule.
@@ -2602,6 +2603,7 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
         }
         marker_index += 1
     }
+    parser_check_step_limit(state, modifiers.markers)
     result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
     result.attrs = attrs
     result.markers = modifiers.markers
@@ -2611,6 +2613,27 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     result.rust_kind = rust_kind
     result.ty = None
     result
+}
+
+// `#StepLimit(n)` on a constant or module binding: the step limit of the
+// compile-time work of its value, a whole number above 0, which sema reads
+// from the marker (sema_comptime_step_limit). Another shape, or 0, is
+// refused here.
+parser_check_step_limit: fn(state: &JetParserState, markers: [Marker]) {
+    loop marker in markers {
+        if !parser_marker_is_hook(state, marker, MarkerHook.StepLimit) -> next
+        values: parser_marker_bindings(marker, [String]{"steps"}) ?? [Expr?]{None}
+        steps := -1
+        if values[0] == .Val(written) && written == .Int(value, _, _, _, _) -> steps = value
+        if steps < 0 {
+            parser_marker_shape_fatal(state, marker)
+            return
+        }
+        if steps == 0 {
+            parser_add_fatal_code(state, "E0930", marker.span, "`#StepLimit(0)` allows no compile-time step", "the step limit bounds the compile-time work of the binding's value, so it is at least 1", "write the most steps the value may take, such as `#StepLimit(20000000)`; without the marker the limit is 10000000")
+            return
+        }
+    }
 }
 
 // `name: value` / `name := value` at file scope declares a

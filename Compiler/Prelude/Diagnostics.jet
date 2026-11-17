@@ -14155,18 +14155,18 @@ ComptimeFuelExhausted: struct {
     impl Diagnostic {
         code: "E0952",
         safety_class: .Soundness,
-        safety_reason: "The evaluation did not finish within the build's budget, so the value it computes does not exist.",
-        expert_path: "none: the comptime work is reduced or split to fit the budget",
-        meaning: "Compile-time code that ran out of its budget",
+        safety_reason: "The evaluation did not finish within its step limit, so the value it computes does not exist.",
+        expert_path: "none: a budget, not a power: the work is split, or its binding raises the limit with `#StepLimit(n)`",
+        meaning: "Compile-time code that ran past its step limit",
 
-        what: fn(self) -> String { "Comptime budget exhausted (fuel)" }
+        what: fn(self) -> String { "Compile-time step limit reached" }
 
         why: fn(self) -> String {
-            "Compile-time code runs on a fixed budget, so a runaway loop can't stall the build"
+            "Compile-time code runs under a step limit, 10000000 steps unless its binding sets another, so a runaway loop can't stall the build"
         }
 
         fix: fn(self) -> String {
-            "Reduce the comptime work or split it so it fits the fuel budget."
+            "Split the work so it fits; a binding computed while building raises its own limit with `#StepLimit(n)`."
         }
     }
 }

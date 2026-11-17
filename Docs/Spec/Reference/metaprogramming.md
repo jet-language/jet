@@ -156,6 +156,21 @@ more. Each case has a UI snapshot:
 | a value holds a function that running code made, such as a closure | E1020 | the call that made it | [`comptime_dependency_closure_value.jet`](../../../Tests/UI/comptime_dependency_closure_value.jet) |
 | code reads the value as another type | E0112 | the code that reads it | [`comptime_dependency_consumer_type.jet`](../../../Tests/UI/comptime_dependency_consumer_type.jet) |
 
+Compile-time work runs under a step limit, so a runaway loop can't stall
+the build. Each compile-time call may take 10000000 steps; one that runs past
+its limit stops the build with E0952, which names the limit
+([`comptime_step_limit_default_stops_a_spin.jet`](../../../Tests/UI/comptime_step_limit_default_stops_a_spin.jet)).
+`#StepLimit(n)` on a constant or module binding computed while building gives
+the work of its value n steps instead, more or fewer
+([`comptime_step_limit_lowered_stops_a_spin.jet`](../../../Tests/UI/comptime_step_limit_lowered_stops_a_spin.jet),
+[`comptime_step_limit_raised_binding_builds.jet`](../../../Tests/UI/comptime_step_limit_raised_binding_builds.jet)).
+It is a budget, not an effect, so raising it needs no grant; the limit is
+part of the binding's source, so a changed limit computes the value again. A
+limit that is not a whole number above 0 is E0930
+([`comptime_step_limit_zero_is_refused.jet`](../../../Tests/UI/comptime_step_limit_zero_is_refused.jet)).
+A step is measured as time: the evaluator gives n steps n / 2000
+milliseconds.
+
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See

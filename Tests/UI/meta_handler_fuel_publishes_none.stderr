@@ -1,10 +1,10 @@
-Error [jet.ComptimeFuelExhausted]: Compile-time evaluation exhausted its fuel
+Error [jet.ComptimeFuelExhausted]: Compile-time code ran past its step limit of 10000000 steps
   --> Tests/UI/meta_handler_fuel_publishes_none.jet:40:1
     |
  40 | build: fn(b: Build) {
     | ^^^^^^^^^^^^^^^^^^^^^
- Why: Compile-time evaluation is bounded to keep compilation finite
- Fix: Increase the evaluator fuel or simplify the evaluated program
+ Why: Compile-time code runs under a step limit, 10000000 steps unless its binding sets another, so a runaway loop can't stall the build
+ Fix: Split the work so it fits; a binding computed while building raises its own limit above 10000000 with `#StepLimit(n)`
 More: jet-lang.dev/e/E0952
 
 1 problem found
