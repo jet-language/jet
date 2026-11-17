@@ -15,6 +15,47 @@ ir_render_type_key: fn(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> 
     type_carrier_identity(plain)
 }
 
+// The path a `Type` of `ty` holds, `ty` being a type a generic body's
+// TypePath node names, read at the instance being built: the text a written
+// `Type{…}` of the same type holds (ir_type_path_type).
+ir_type_path_text: fn(p: IRProgram, ty: Type) -> String Never! {
+    type_name(ir_type_path_type(p, ty))
+}
+
+// `ty` with each declared type it names spelled by its TTypeDef.path, the
+// spelling Sema's `Type{…}` qualifies it by
+// (sema_comptime_reflection_qualified_type); a type that keeps its bare name
+// is spelled by its declared name, and a nominal with no type row as
+// written. A compiler's tag names no type of its own (type_name skips it);
+// a user's tag keeps its type as written, as Sema's does.
+ir_type_path_type: fn(p: IRProgram, ty: Type) -> Type Never! {
+    if ty == {
+        .Named(name) -> return Type.Named{name: ir_type_path_name(p, name)}
+        .Apply(name, args) -> return Type.Apply{name: ir_type_path_name(p, name), args: loop arg in args -> ir_type_path_type(p, arg)}
+        .List(inner) -> return Type.List{element: ir_type_path_type(p, inner)}
+        .Map(key, key_span, value) -> return Type.Map{key: ir_type_path_type(p, key), key_span: key_span, value: ir_type_path_type(p, value)}
+        .Shared(inner) -> return Type.Shared{inner: ir_type_path_type(p, inner)}
+        .Option(inner) -> return Type.Option{inner: ir_type_path_type(p, inner)}
+        .Result(ok, err) -> return Type.Result{ok: ir_type_path_type(p, ok), err: ir_type_path_type(p, err)}
+        .Tuple(fields) -> return Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: ir_type_path_type(p, field.ty)}}
+        .FixedList(elem, len) -> return Type.FixedList{elem: ir_type_path_type(p, elem), len: len}
+        .Union(members) -> return Type.Union{members: loop member in members -> ir_type_path_type(p, member)}
+        .Case(name, payload) -> return Type.Case{name: name, payload: ir_type_path_type(p, payload)}
+        .Tagged(marker, inner) -> {
+            if marker == .Internal(_) -> return ir_type_path_type(p, inner)
+        }
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    // copy: a form that names no declared type is its own spelling.
+    ty.copy()
+}
+
+ir_type_path_name: fn(p: IRProgram, name: String) -> String Never! {
+    row: ir_type_def(p, name) ?? return name
+    if p.types[row].path == "" -> return p.types[row].name
+    p.types[row].path
+}
+
 // A `Never`-tagged or pattern-tagged type without its tags.
 ir_untag: fn(ty: Type) -> Type Never! {
     if ty == .Tagged(_, inner) -> return ir_untag(inner)
@@ -3587,8 +3628,7 @@ ir_error_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
 
 // The declared name of the nominal type `name` (ir_error_spelling).
 ir_error_spelling_name: fn(p: IRProgram, name: String) -> String Never! {
-    // copy: the spelling outlives the borrowed program row and name.
-    if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
+    if ir_type_def(p, name) == .Val(row) -> return p.types[row].name
     // The last segment, taken out of the split's own list.
     parts := name.split("::").to_list()
     parts.pop() ?? panic("a split name has no segment")
@@ -5197,7 +5237,7 @@ ir_int_literal: fn(p: IRProgram, b: IRBuilder, expression: Int) -> Int? Never! {
                 return Val(0 - number)
             }
         }
-        .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     None
 }

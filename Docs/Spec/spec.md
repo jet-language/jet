@@ -3811,8 +3811,12 @@ static type of a name or field path, read without evaluating it. Two `Type`
 values are equal exactly when they name one type, generic arguments included:
 `Box<Int>` and `Box<String>` are different keys. A builtin type's name is one
 as a declared type's is: `counts[Int] = 1` keys a map by `Int`, and
-`type_of(n) == Int` holds for an `Int` binding. A `Type` displays its path,
-each declared type qualified by its module. Only the compiler builds one.
+`type_of(n) == Int` holds for an `Int` binding. Inside a generic body a type
+parameter is one too: `Type{V}`, or `V` where a `Type` is expected, names the
+type each instance fills `V` with, and is equal to that type's written
+`Type{…}`; `Type{Box<V>}` is `Type{Box<Int>}` at `V = Int`. A `Type` displays
+its path, each declared type qualified by its module. Only the compiler builds
+one.
 
 Anywhere else a type is not a value: binding, passing or printing a type, such
 as `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type,

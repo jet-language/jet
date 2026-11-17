@@ -1,0 +1,46 @@
+// Type values in generic code: inside a generic body `Type{V}` names the type
+// each instance fills `V` with. It is the same value as that type's written
+// `Type{…}`, so a generic store can key a map by its element type, and a type
+// built from a parameter (`Box<V>`) keeps its arguments apart.
+
+Task: struct {
+    title: String,
+}
+
+Note: struct {
+    text: String,
+}
+
+Box: struct<T> {
+    item: T,
+}
+
+// The type this instance's `V` is.
+key_of: fn<V>() -> Type { Type{V} }
+
+// The box type of this instance's `V`.
+box_of: fn<V>() -> Type { Type{Box<V>} }
+
+// Whether `seen` is this instance's `V`.
+holds: fn<V>(seen: Type) -> Bool { seen == V }
+
+// A count per element type, kept by generic code that never names one.
+tally: fn<V>(counts: &[Type:Int]) { counts[Type{V}] = (counts.get(Type{V}) ?? 0) + 1 }
+
+run: fn() {
+    print("key_of<Task> is Type{{Task}}: {key_of<Task>() == Type{Task}}")
+    print("key_of<Task> is key_of<Note>: {key_of<Task>() == key_of<Note>()}")
+    print("key_of<Int> is Int: {key_of<Int>() == Int}")
+    print("box_of<Int> is Type{{Box<Int>}}: {box_of<Int>() == Type{Box<Int>}}")
+    print("box_of<Int> is box_of<String>: {box_of<Int>() == box_of<String>()}")
+    print("holds<Task>(Task): {holds<Task>(Type{Task})}")
+    print("holds<Note>(Task): {holds<Note>(Type{Task})}")
+
+    counts := [Type:Int]{}
+    tally<Task>(counts)
+    tally<Note>(counts)
+    tally<Task>(counts)
+    print("tasks: {counts.get(Task) ?? 0}")
+    print("notes: {counts.get(Note) ?? 0}")
+    print("kinds: {counts.len()}")
+}
