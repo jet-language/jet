@@ -1,0 +1,204 @@
+// Crewboard's "assigned to you" push. `update_task` saves a task and, when
+// its assignee changed, queues `tell_assignee` in the same transaction
+// (`app.enqueue`), so the push goes out only after the write commits. The
+// server names the variable that holds its Web Push key in `.push`. Ann's
+// browser registers its subscription, whose push service is a fake in this
+// process. Ben assigns task 2 to her with no title, which `update_task`
+// refuses after it queued the push: the write rolls back and nothing is
+// sent. Then he assigns task 1 to her, which commits, and one push reaches
+// her push service.
+use {
+    app
+    auth: core.auth
+    db: core.db
+    http: core.http
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+TaskView: struct {
+    id: Int,
+}
+
+#Codable
+Task: struct {
+    id: Int,
+    title: String,
+    assignee: auth.AccountID?,
+}
+
+#Error
+TaskError: enum {
+    NoTitle,
+    Failed(String),
+    Unreachable(String),
+}
+
+impl app.CallError -> TaskError {
+    if self == {
+        .Unreachable(why) -> TaskError.Unreachable(why)
+        .Invalid(errors) -> TaskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> TaskError.Unreachable("signed out")
+        .UpdateRequired -> TaskError.Unreachable("update required")
+    }
+}
+
+tasks_in: fn(store: db.Store) -> db.Table<Int, Task> {
+    store.table("tasks", key: fn(task: Task) { task.id })
+}
+
+// The task screen a push opens.
+task_screen: fn(view: TaskView) -> Int Never! { view.id }
+
+Crew: struct {
+    store: db.Store,
+
+    // Saves task `id` with `title`, assigned to `assignee`, and tells a new
+    // assignee after the commit. A task with no title is refused after the
+    // push is queued, so the call rolls back and the push with it.
+    #App.SignedIn update_task: fn(self, id: Int, title: String, assignee: auth.AccountID) -[DB.Read, DB.Write]> Int TaskError! {
+        before: if tasks_in(self.store).get(id) == {
+            .Val(found) -> found.assignee
+            .None -> None
+            .Err(failure) -> {
+                return Err(TaskError.Failed(failure.message()))
+            }
+        }
+        _: tasks_in(self.store).put(Task{id: id, title: title, assignee: Val(assignee.copy())}) ?? return Err(TaskError.Failed(err.message()))
+        if before != Val(assignee) -> app.enqueue(fn() { self.tell_assignee(id) })
+        if title == "" -> return Err(TaskError.NoTitle)
+        Ok(id)
+    }
+
+    // Pushes "Assigned to you" to task `id`'s assignee; a tap opens the task.
+    #App.Job(retries: 3) tell_assignee: fn(self, id: Int) -[DB.Read, Net]> Int TaskError! {
+        task: if tasks_in(self.store).get(id) == {
+            .Val(found) -> found
+            .None -> {
+                return Ok(0)
+            }
+            .Err(failure) -> {
+                return Err(TaskError.Failed(failure.message()))
+            }
+        }
+        who: task.assignee ?? return Ok(0)
+        app.notify(to: who, title: "Assigned to you", body: task.title, open: TaskView{id: task.id})
+        Ok(id)
+    }
+}
+
+// The push service of Ann's browser: answers each push it takes with 201
+// Created, keeping its request line and the length of its `Topic` header.
+push_service: fn(listener: net.TCPListener, seen: Shared<[String]>) -[Net, Time]> {
+    loop {
+        stream := net.tcp_accept(listener) ?? return
+        input := [U8]{}
+        head := -1
+        length := 0
+        loop head < 0 || input.len() < head + length {
+            read: stream.read_bytes(8192, deadline: time.duration_ms(5000)) ?? return
+            if read.len() == 0 {
+                return
+            }
+            input.extend(read)
+            if head < 0 {
+                head = head_end(input)
+                if head >= 0 {
+                    length = content_length(String.from_bytes(input.slice(0, head)) ?? "")
+                }
+            }
+        }
+        lines: (String.from_bytes(input.slice(0, head)) ?? "").split("\r\n").to_list()
+        topic := 0
+        loop line in lines {
+            if line.lower().starts_with("topic: ") -> topic = line.len() - 7
+        }
+        held := seen.guard_edit()
+        held.value.push("{lines[0]}, a topic of {topic} characters, a body of {length} bytes")
+        stream.write_bytes("HTTP/1.1 201 Created\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".bytes()) ?? return
+    }
+}
+
+// Where the head of the request `input` ends, past its blank line; -1
+// while it goes on.
+head_end: fn(input: [U8]) -> Int Never! {
+    if input.len() < 4 -> return -1
+    loop at in 0..<input.len() - 3 {
+        if input[at] == (U8{13}) && input[at + 1] == (U8{10}) && input[at + 2] == (U8{13}) && input[at + 3] == (U8{10}) {
+            return at + 4
+        }
+    }
+    -1
+}
+
+// The `Content-Length` the request head `head` gives, or 0.
+content_length: fn(head: String) -> Int Never! {
+    loop line in head.split("\r\n") {
+        if line.lower().starts_with("content-length: ") {
+            return Int.parse(line.slice(16, line.len())) ?? 0
+        }
+    }
+    0
+}
+
+// Ann's browser registers its subscription to the push service at
+// `pushes` with the server at `addr`, under her session, as the status the
+// server answers.
+register: fn(addr: String, session: String, pushes: String) -> String HTTPError! {
+    device: "{{\"service\":\"web\",\"token\":\"http://{pushes}/push/ann\",\"key\":\"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4\",\"auth\":\"BTBZMqHH6r4Tts7J_aSIgg\"}}"
+    fields: http.headers_set(http.headers(), "authorization", "Bearer {session}")
+    answer: http.send_request(http.request_with(.Post, "http://{addr}/__jet/push/devices", fields, http.body_text(device)))
+    Ok("{answer.status}")
+}
+
+// What Ben's `update_task` of task `id` with `title`, assigned to Ann,
+// came to.
+assigned: fn(crew: app.Remote<Crew>, id: Int, title: String) -[DB.Read, DB.Write, Net, Time]> String Never! {
+    task: app.as_caller(auth.AccountID.from_string("ben"), fn() { crew.update_task(id, title, auth.AccountID.from_string("ann")) }) ?? return refused(err)
+    "task {task} saved"
+}
+
+refused: fn(failure: TaskError) -> String Never! {
+    if failure == {
+        .NoTitle -> "refused: no title"
+        .Failed(why) -> "failed: {why}"
+        .Unreachable(why) -> "unreachable: {why}"
+    }
+}
+
+// How many pushes the push service took.
+taken: fn(seen: Shared<[String]>) -> Int Never! { seen.guard_read().value.len() }
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    _: app.new("Crewboard").screen("/tasks/:id", task_screen).push(web: app.web_push(key_env: "VAPID_KEY", contact: "mailto:crew@example.com"))
+    auth.register_user("ann", "ann's password hash") ?? panic("ann registers")
+    session: auth.password_login("ann", "ann's password hash", time.now_utc().to_unix_ms(), 3600000) ?? panic("ann signs in")
+    store: db.open("crew.db")
+    loop id in 1..<3 {
+        _: tasks_in(store).put(Task{id: id, title: "Task {id}", assignee: None}) ?? panic("task {id} is added")
+    }
+    pushes: net.tcp_listen("127.0.0.1:0")
+    seen: Shared{[String]{}}
+    service: task { push_service(pushes, seen.copy()) }
+    service.detach()
+    // The server starts its push services as it binds: here it reads
+    // `VAPID_KEY`, and without it the program stops before it listens.
+    server: web.app().mount("/api", Crew{store: store.copy()}).bind("127.0.0.1:0") ?? panic("bind crewboard")
+    addr: server.local_addr() ?? panic("crewboard's address")
+    serving: task { server.serve() ?? panic("serve crewboard") }
+    serving.detach()
+    print("ann's browser registers: {register(addr, auth.session_id(session), pushes.local_addr())}")
+    crew: app.remote(Crew{store: store.copy()})
+    print("ben assigns task 2 to ann with no title: {assigned(crew.copy(), 2, "")}")
+    print("ben assigns task 1 to ann: {assigned(crew.copy(), 1, "Ship it")}")
+    loop _ in 0..<500 {
+        if taken(seen) > 0 -> break
+        time.sleep(10ms)
+    }
+    // A push the rolled-back write had queued would have come by now.
+    time.sleep(500ms)
+    held: seen.guard_read()
+    print("pushes ann's push service took: {held.value.len()}")
+    loop push in held.value -> print("  {push}")
+}
