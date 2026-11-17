@@ -33,7 +33,6 @@ use {
     push_wire: __core_app_push
     dbus: __core_ui_dbus
     url: core.net.url
-    markup: core.text.html
     files: core.files
     sys: core.sys
     process: core.process
@@ -41,6 +40,7 @@ use {
     core.net.[UnixListener, UnixStream]
     builtin: jet_builtins
     core.ui.[UINode]
+    ui: core.ui
 }
 
 SYNC_MAX_SESSION: 256
@@ -2317,9 +2317,10 @@ App: struct {
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
     // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
     // work (`background`) and puts its tray in the desktop's (`tray`). Then
-    // it opens the link the launch was given (`open_link`) and is true. That
-    // link is the first argument that is one, as the desktop passes the link
-    // the entry's `%u` names.
+    // it opens the link the launch was given (`open_link`), else, when the
+    // graph has a window (`window`), the address `/`, opens the window, and
+    // is true. That link is the first argument that is one, as the desktop
+    // passes the link the entry's `%u` names.
     launch: fn(self) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
         link := ""
         loop given in process.args() {
@@ -2334,7 +2335,10 @@ App: struct {
         app_launch_listen(App{title: self.title.copy()}, socket)
         app_background_start(self.title)
         app_tray_start(self.title)
-        if link != "" -> _: self.open_link(link)
+        if link != "" -> _: self.open_link(link) else if app_graph_window() != None {
+            _: self.open_link("/")
+        }
+        app_window_start(self.title)
         true
     }
 
@@ -2381,6 +2385,22 @@ App: struct {
         self.copy()
     }
 
+    // Shows the app in a window `width` x `height` logical pixels on a Linux
+    // desktop from `launch` on, titled the app's title. The window shows the
+    // current screen (`go`, `open_link`): the node tree its view gives, as
+    // core.ui lays it out and draws it, drawn again when another screen
+    // opens. Closing the window ends the app. A desktop with no display, or
+    // one that fails, leaves a notice in the app's notice list (`notices`).
+    // Gives back the graph. Panics when a side isn't positive.
+    window: fn(self, width: Int, height: Int) -> App Never! {
+        if width < 1 || height < 1 {
+            panic("a window is at least one pixel on each side, not {width}x{height}")
+        }
+        held := APP_GRAPH.guard_edit()
+        held.value.window = Val(AppWindow{width: width, height: height})
+        self.copy()
+    }
+
     // The text of the app's Linux desktop entry: an application named
     // `title` that `exec` runs with the link it opens (`%u`), handling the
     // links of each scheme the graph has (`x-scheme-handler/{scheme}`).
@@ -2397,12 +2417,12 @@ App: struct {
     // `query` lists its `#App.Query` fields, and `open` opens the screen at
     // an address: from the text of each of `V`'s fields there, by name, it
     // makes the state, runs `view` with it and the graph's Remotes, and gives
-    // the HTML of what the view shows (a tree's `__html`, else
-    // `__view_html`); None when the texts don't make a `V`. The screen joins
+    // the node tree of what the view shows (the view's own tree, else
+    // `__view_node`); None when the texts don't make a `V`. The screen joins
     // the graph's route set, in the order the graph adds it, where
     // `__url_of` finds its address, `__go` opens it, and a renderer walks it
     // (`screens`).
-    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -[Net, FS.Read]> String? Never!) -> App Never! {
+    __screen: fn<V>(self, path: String, state: String, query: [String], signed_in: Bool, open: &&fn(App, [String:String]) -[Net, FS.Read]> UINode? Never!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.screens.push(AppScreen{path: path, state: state, query: query, signed_in: signed_in, open: Shared{AppOpen{run: open.move()}}})
         self.copy()
@@ -2478,11 +2498,12 @@ App: struct {
         Val(live_json.decode<V>("{{{parts.join(",")}}}") ?? return None)
     }
 
-    // The HTML of what a screen's view shows when it is no node tree: its
-    // text (a string's own text, any other value's JSON), escaped, as a
-    // paragraph. A view that gives a tree shows the tree's HTML (`__html`).
-    __view_html: fn<N: Encode>(self, shown: N) -> String Never! {
-        "<p>{markup.escape(App.__address_arg<N>(shown))}</p>"
+    // What a screen's view shows when it gives no node tree: its text (a
+    // string's own text, any other value's JSON) as a text node, whose HTML
+    // is that text, escaped, as a paragraph. A view that gives a tree shows
+    // the tree.
+    __view_node: fn<N: Encode>(self, shown: N) -> UINode Never! {
+        ui.text(App.__address_arg<N>(shown))
     }
 
     // `app.go(view)` as the compiler lowers it: opens the screen whose state
@@ -2542,9 +2563,9 @@ App: struct {
     }
 
     // Opens `screen` at the address whose field texts are `fields`, by field
-    // name, as a renderer does: the HTML of what its view shows, or None
-    // when the texts make no state of the screen.
-    __open: fn(self, screen: AppScreen, fields: [String:String]) -[Net, FS.Read]> String? Never! {
+    // name, as a renderer does: the node tree of what its view shows, or
+    // None when the texts make no state of the screen.
+    __open: fn(self, screen: AppScreen, fields: [String:String]) -[Net, FS.Read]> UINode? Never! {
         opener: screen.open.guard_read()
         opener.value.run(self.copy(), fields)
     }
@@ -2700,7 +2721,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -2725,10 +2746,10 @@ AppScreen: struct {
     open: Shared<AppOpen>,
 }
 
-// How a screen opens at an address: from its fields' texts, the text of
-// what its view shows, or None when they make no state.
+// How a screen opens at an address: from its fields' texts, the node tree
+// of what its view shows, or None when they make no state.
 AppOpen: struct {
-    run: fn(App, [String:String]) -[Net, FS.Read]> String? Never!,
+    run: fn(App, [String:String]) -[Net, FS.Read]> UINode? Never!,
 }
 
 // How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
@@ -2982,7 +3003,7 @@ priv SitemapTestInbox: struct {
 }
 
 #Test("a sitemap lists each state its list gives whose screen opens without signing in, and robots leave each signed-in screen") {
-    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { String?{None} }).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { String?{None} })
+    graph: new("Crew").__screen<SitemapTestGuide>("/guides/:slug", "app.SitemapTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { UINode?{None} }).__screen<SitemapTestInbox>("/inbox/:box", "app.SitemapTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { UINode?{None} })
     _: graph.__sitemap<SitemapTestGuide>(
         "app.SitemapTestGuide",
         [String]{"slug"},
@@ -3031,7 +3052,7 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
 }
 
 #Test("a screen's head is the last `.head` given for its state, and only a public screen whose head allows it is indexed") {
-    graph: new("Crew").__screen<HeadTestGuide>("/help/:slug", "app.HeadTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { String?{None} }).__screen<HeadTestInbox>("/mail/:box", "app.HeadTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { String?{None} })
+    graph: new("Crew").__screen<HeadTestGuide>("/help/:slug", "app.HeadTestGuide", [String]{}, false, fn(_: App, _: [String:String]) { UINode?{None} }).__screen<HeadTestInbox>("/mail/:box", "app.HeadTestInbox", [String]{}, true, fn(_: App, _: [String:String]) { UINode?{None} })
     faq_fields: [String:String]{"slug": "faq"}
     assert(heads.of(graph, "app.HeadTestGuide", faq_fields) == None)
     assert(heads.indexed("app.HeadTestGuide", None))
@@ -3194,7 +3215,8 @@ AppInstall: struct {
 // the live bindings its view read, the link schemes and web domains whose
 // links open its screens (`.url_scheme`, `.app_links`), the activation
 // tokens of the later launches that handed it their links (`.launch`), its
-// background work (`.background`) and its tray (`.tray`).
+// background work (`.background`), its tray (`.tray`) and its window
+// (`.window`).
 priv AppGraph: struct {
     title: String,
     apis: [String:AppAPI],
@@ -3209,9 +3231,10 @@ priv AppGraph: struct {
     activations: [String],
     backgrounds: [AppBackground],
     tray: AppTray?,
+    window: AppWindow?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
@@ -3234,6 +3257,12 @@ priv AppTray: struct {
 
 priv AppTrayMenu: struct {
     menu: fn() -> [MenuItem] Notice!,
+}
+
+// A graph's window (`App.window`): its size in logical pixels.
+priv AppWindow: struct {
+    width: Int,
+    height: Int,
 }
 
 // One entry of a menu the app shows, its tray's (`App.tray`): an item the
@@ -4035,11 +4064,11 @@ priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
 // `body`, taking the files a person drops on it: each one of a kind in
 // `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
 // with shows beside `body`, as a button's does. A native target delivers
-// drops through the window that shows `body`, and no native target shows
-// an app's `UINode` screens in a window yet, so each keeps a notice that
-// says so and gives `body` back as it is. A page's drop gives the browser's
-// File handles, which the page runtime can't give the app yet, so a call in
-// code whose target is the web output is a compile error.
+// drops through the window that shows `body`, and the Linux window
+// (`App.window`) takes none for `body` yet, so each native target keeps a
+// notice that says so and gives `body` back as it is. A page's drop gives
+// the browser's File handles, which the page runtime can't give the app
+// yet, so a call in code whose target is the web output is a compile error.
 drop_files: fn(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode {
     __keep_notice(Notice{text: "Couldn't take dropped files: this system's drop target is not built yet"})
     body.copy()
@@ -4497,6 +4526,60 @@ priv app_tray_lost: fn(why: String) Never! {
     __keep_notice(Notice{text: "Couldn't show the app in the tray: {why}"})
 }
 
+// Opens the graph's window (`App.window`), when it has one, in a task that
+// keeps it while the app runs.
+priv app_window_start: fn(title: String) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
+    size: app_graph_window() ?? return
+    showing: task { app_window_run(title, size) }
+    showing.detach()
+}
+
+priv app_graph_window: fn() -> AppWindow? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.window.copy()
+}
+
+// Shows the window until the person closes it, which ends the app: a frame
+// draws the current screen's tree (`app_window_tree`) when nothing is drawn
+// yet, another screen opened since the last drawing, or the window took
+// another size. A display that is missing or fails leaves a notice.
+priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
+    window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
+    drawn := false
+    shown := AppCurrent?{None}
+    loop frame in window.frames() {
+        now: app_graph_current()
+        stale := !drawn || now != shown
+        loop event in frame.events() {
+            if event == .Resize(_, _) -> stale = true
+        }
+        if !stale -> next
+        app_window_tree(now).__draw(frame)
+        drawn = true
+        shown = now
+    }
+    if window.failure() == .Val(failure) -> app_window_lost("{failure}")
+    process.exit(0)
+}
+
+// The tree the window shows for the screen `now`, opened as `go` opens it,
+// so the bindings its view reads are the screen's route data: an empty box
+// before a screen opens and for the not-found state.
+priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
+    current: now ?? return ui.box([UINode]{})
+    screen: app_screen(current.state) ?? return ui.box([UINode]{})
+    me: tasks.current_task()
+    resume_begin(me)
+    shown: App{title: app_graph_title()}.__open(screen, current.fields)
+    live_drop(app_graph_route_data(resume_end(me)))
+    shown ?? ui.box([UINode]{})
+}
+
+// Keeps a notice that the window couldn't be shown or kept, and why.
+priv app_window_lost: fn(why: String) Never! {
+    __keep_notice(Notice{text: "Couldn't show the app's window: {why}"})
+}
+
 #Test("a tray shows its items, a notice can't be chosen, and an item's failed run joins the notices") {
     items: [MenuItem]{item("Gate repair", fn() Notice! { Err(Notice{text: "The board is offline"}) }), separator(), MenuItem{label: "Can't load", kind: .Notice, run: Shared{AppMenuRun{run: app_menu_nothing}}}, quit_item()}
     entries: app_tray_entries(items)
@@ -4661,9 +4744,9 @@ priv RouteTestService: struct {}
 // The graph test's board view, as the compiler lowers `.screen`'s `open`:
 // it makes the state from the address's texts, and shows its project and
 // filter.
-priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> String? Never! {
+priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> UINode? Never! {
     state: graph.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{graph.__address_json<String>(fields, "project"), graph.__address_json<String>(fields, "q")}) ?? return None
-    Val(graph.__view_html<String>("{state.project} <{state.q}>"))
+    Val(graph.__view_node<String>("{state.project} <{state.q}>"))
 }
 
 #Test("the app graph opens each screen at its state's address, with the graph's Remotes") {
@@ -4697,15 +4780,20 @@ priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> S
     assert_eq(screens.len(), 1)
     assert_eq(screens[0].path, "/projects/:project/board")
     assert_eq(screens[0].signed_in, true)
-    assert_eq(graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}), Val("<p>p1 &lt;mine&gt;</p>"))
+    opened: graph.__open(screens[0], [String:String]{"project": "p1", "q": "mine"}) ?? panic("the board opens at its address")
+    assert_eq(opened.__html(), "<p>p1 &lt;mine&gt;</p>")
     // A view calls the graph's Remote of a service it mounts in this process.
     assert_eq(remote_post("app.RouteTestService", true, "greet", [String]{"\"p1\""}) ?? "{err}", "{{\"ok\":\"hello p1\"}}")
-    assert_eq(graph.__open(screens[0], [String:String]{"q": "mine"}), String?{None})
+    assert(graph.__open(screens[0], [String:String]{"q": "mine"}) == None)
     // `go` makes a screen the current one.
     assert_eq(App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) == None, true)
+    // A window shows an empty box before a screen opens, then the tree the
+    // current screen's view gives.
+    assert_eq(app_window_tree(app_graph_current()).__html(), "<div></div>")
     App.__go<RouteTestBoard>("app.RouteTestBoard", names, [String]{"p2", ""})
     now: App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) ?? panic("the board is open")
     assert_eq(now.project, "p2")
+    assert_eq(app_window_tree(app_graph_current()).__html(), "<p>p2 &lt;&gt;</p>")
     assert_eq(App.__current<RouteTestService>("app.RouteTestService", fn(_at: App, _fields: [String:String]) { RouteTestService?{None} }) == None, true)
 }
 
