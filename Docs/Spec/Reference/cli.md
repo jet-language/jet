@@ -1361,7 +1361,7 @@ value, chosen and checked as `audit copies` chooses and checks it, without
 writing anything. The sites are the Safe E0228 edits sema gives every module of
 the entry's source root under `#Policy(writes: .Explicit)`: `&` before a value a
 call changes (a `&` parameter or `&self` method), `&&` before one it takes. The
-text form is `calls that change or take a named value: N` and then one
+text form is `Calls that change or take a named value: N` and then one
 `  <path>:<line>:<col>  span=<start>..<end>  mark=<&|&&>  access=<write|take>`
 row per site, sorted by path and then by offset. `--json` emits the
 `audit.writes` status envelope with a `writes` array of `{path, line, column,
@@ -1371,15 +1371,15 @@ span{start, end}, mark, access}`.
 reports the foreign code of an executable entry, chosen as `audit copies`
 chooses it. It checks the entry and links its image in memory as `jet run`
 does; the image is never written or run. The text form has one line per fact:
-`foreign declarations:` (`none`, or a count followed by one
+`Foreign declarations:` (`none`, or a count followed by one
 `  <path>:<line>  <language>  <name> -> <symbol>` row per `#Import(<lang>)` or
 `#FFI(<lang>)` declaration), `FFI effects reached:`, `C libraries linked:`,
-`dynamic loader:` (the ELF interpreter, or `none (static ELF, no needed
-libraries)`), `needed libraries:` when the image names any, and
-`host effects:`, the effects the entry asks of its host, which Jet's runtime
-serves through system calls. The last line, `foreign code: none`, appears only
+`Dynamic loader:` (the ELF interpreter, or `none (static ELF, no needed
+libraries)`), `Needed libraries:` when the image names any, and
+`Host effects:`, the effects the entry asks of its host, which Jet's runtime
+serves through system calls. The last line, `Foreign code: none`, appears only
 when the declarations, `FFI` effects, C libraries and loader needs are all
-empty; otherwise it reads `foreign code: present`. `--json` emits the
+empty; otherwise it reads `Foreign code: present`. `--json` emits the
 `audit.foreign` status envelope with `declarations` (`{path, line, language,
 name, symbol}`), `ffi_effects`, `c_libraries`, `loader` (`{interpreter,
 dynamic, needed}`), `host_effects` and `foreign_free`. The exit code is 0
@@ -1417,7 +1417,7 @@ record. It always reports the planned steps the compiler knows: the JSON
 document `jet.explain-build/v1` carries a `planned` list of `{kind, key,
 subject, inputs}` beside `nodes`, the recorded steps with `duration_ms` and
 `why_ran`. A program with no record exits 0 with `nodes: []`; the text form
-prints `no build recorded for <program> yet; planned steps:` and one
+prints `No build recorded for <program> yet; planned steps:` and one
 `kind key subject inputs` row per planned step, with no time or reason. With a
 record the text form prints the recorded rows. A record for another program
 is refused with E2104.

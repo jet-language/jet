@@ -71,14 +71,14 @@ cli_transition_result: fn(verb: String, result: TransitionResult, check_only: Bo
     loop change in summary.changes {
         action: change.action.as_str()
         if check_only -> print("Would {action}: {change.path}") else {
-            print("{action}d {change.path}.")
+            print("{action.capitalize()}d {change.path}.")
         }
     }
     if summary.before_fingerprint == summary.after_fingerprint {
-        print("package graph unchanged: {summary.after_fingerprint}")
+        print("Package graph unchanged: {summary.after_fingerprint}")
     } else {
-        print("package graph before: {summary.before_fingerprint}")
-        print("package graph after: {summary.after_fingerprint}")
+        print("Package graph before: {summary.before_fingerprint}")
+        print("Package graph after: {summary.after_fingerprint}")
     }
     if check_only -> print("No files changed.") else {
         print("Transition journal: {summary.journal}")

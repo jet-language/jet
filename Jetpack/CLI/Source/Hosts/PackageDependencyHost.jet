@@ -69,7 +69,7 @@ cli_package_dependency_cli_error: fn(code: String, what: String, fix: String?, c
     report: diagnostic_from_registry(code, None, what, row.why, fix ?? row.fix)
     exit_code: if code == "E2102" -> EXIT_USAGE else -> EXIT_USER_ERROR
     if json {
-        line: StatusEnvelope.new("cli", false).with_reports([ReportEnvelope]{cli_diagnostic_to_report(report, ReportPath.from_process(""))}).json_line() ?? return PackageDependencyError{output: PackageDependencyOutput{stderr: "status JSON: {err.message}\n", exit_code: EXIT_USAGE}}
+        line: StatusEnvelope.new("cli", false).with_reports([ReportEnvelope]{cli_diagnostic_to_report(report, ReportPath.from_process(""))}).json_line() ?? return PackageDependencyError{output: PackageDependencyOutput{stderr: "Status JSON: {err.message}\n", exit_code: EXIT_USAGE}}
         return PackageDependencyError{output: PackageDependencyOutput{stdout: line, exit_code: exit_code}}
     }
     PackageDependencyError{output: PackageDependencyOutput{stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: exit_code}}
@@ -261,24 +261,24 @@ cli_package_dependency_success: fn(fetched: PackageFetchResult, options: Package
     output := ""
     loop package in fetched.lock.packages {
         if package.source == .Registry(registry, _, _, _, _, _, tier, gate_status) {
-            output = "{output}resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n"
+            output = "{output}Resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n"
         }
     }
     loop name in fetched.replaced_views {
-        output = "{output}replaced the stale dependency view `{name}` with a verified copy of its store entry\n"
+        output = "{output}Replaced the stale dependency view `{name}` with a verified copy of its store entry\n"
     }
     message: if {
-        options.update && options.update_dep == .Val(name) -> "updated `{name}`"
-        options.update -> "updated all moving selectors"
-        options.locked -> "lock verified"
-        else -> "fetched all dependencies"
+        options.update && options.update_dep == .Val(name) -> "Updated `{name}`"
+        options.update -> "Updated all moving selectors"
+        options.locked -> "Lock verified"
+        else -> "Fetched all dependencies"
     }
     "{output}{message}\n"
 }
 
 cli_package_dependency_edit_success: fn(command: String, name: String, path: String) -> String Never! {
-    if command == "add" -> return "added `{name}` to {path}\n"
-    "removed `{name}` from {path}\n"
+    if command == "add" -> return "Added `{name}` to {path}\n"
+    "Removed `{name}` from {path}\n"
 }
 
 // `jet fetch --lock <script>`: resolve every inline `use pkg#version` of a
@@ -324,7 +324,7 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
     script_hash: pkg_inline_deps_file_hash(path) ?? return cli_package_dependency_cli_error("E2105", "couldn't hash {script}: {err}", None, color, json).output
     env_script_lock_write(path, ScriptLockFile{version: SCRIPT_LOCK_VERSION, script_hash: script_hash, deps: deps}) ?? return cli_package_dependency_cli_error("E2105", "couldn't write {env_script_lock_sidecar_path(script)}: {err}", None, color, json).output
     if quiet -> return PackageDependencyOutput{}
-    PackageDependencyOutput{stdout: "locked {script} in {env_script_lock_sidecar_path(script)}\n"}
+    PackageDependencyOutput{stdout: "Locked {script} in {env_script_lock_sidecar_path(script)}\n"}
 }
 
 // One inline dependency through the registry: the selector becomes the
@@ -435,13 +435,13 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
     foundation_write_file_nofollow_at_root(target, "manifest.json", manifest.bytes(), None) ?? return cli_package_dependency_cli_error("E2105", cli_package_dependency_publication_error(files.join(target, "manifest.json"), err), None, color, json).output
     if quiet -> return PackageDependencyOutput{}
     if names.len() == 0 {
-        return PackageDependencyOutput{stdout: "vendor: no dependencies to copy\n"}
+        return PackageDependencyOutput{stdout: "Vendor: no dependencies to copy\n"}
     }
     shown: if target != root && cli_path_starts_with(target, root) -> files.relative(target, root) else -> target
     out := ""
-    loop name in names -> out = "{out}vendored: {name}\n"
+    loop name in names -> out = "{out}Vendored: {name}\n"
     noun: if names.len() == 1 -> "dependency" else -> "dependencies"
-    PackageDependencyOutput{stdout: "{out}ok: {names.len()} {noun} copied to {shown}/\ntip: commit {shown}/ and use `jet fetch --locked` for reproducible offline builds.\n"}
+    PackageDependencyOutput{stdout: "{out}OK: {names.len()} {noun} copied to {shown}/\nTip: commit {shown}/ and use `jet fetch --locked` for reproducible offline builds.\n"}
 }
 
 // Stage the copy beside its final name and rename it into place once its

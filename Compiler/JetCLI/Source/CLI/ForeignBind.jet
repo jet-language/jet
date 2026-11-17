@@ -160,7 +160,7 @@ JetCLIForeignParse: enum {
 }
 
 jet_cli_foreign_usage: fn(binder: JetCLIForeignBinder) -> String Never! {
-    "usage: {JET_CLI_BINARY} inspect bind {binder.usage}\n"
+    "Usage: {JET_CLI_BINARY} inspect bind {binder.usage}\n"
 }
 
 jet_cli_foreign_usage_failure: fn(binder: JetCLIForeignBinder) -> JetCLIForeignParse Never! {
@@ -350,83 +350,83 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
     if binder.language == {
         .Tcl -> {
             result: pkg_tcl_bind(source, lib, cache)
-            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.tcl-path", text: "{result.lib_dir}\n", what: "the Tcl runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "bound in-process Tcl session from `{path}` → {out}\n"}
+            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.tcl-path", text: "{result.lib_dir}\n", what: "the Tcl runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound in-process Tcl session from `{path}` → {out}\n"}
         }
         .Lua -> {
             result: pkg_lua_bind(path, source, lib, cache)
-            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.lua-path", text: "{result.lib_dir}\n", what: "the Lua runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "bound {jet_cli_foreign_count(result.bound.len(), "in-process Lua function")} from `{path}` → {out}\n"}
+            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.lua-path", text: "{result.lib_dir}\n", what: "the Lua runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "in-process Lua function")} from `{path}` → {out}\n"}
         }
         .Ada -> {
             result: pkg_ada_bind(path, source, lib, cache)
-            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.ada-path", text: "{result.runtime_dir}\n", what: "the GNAT runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "bound {jet_cli_foreign_count(result.bound.len(), "GNAT export")} from `{path}` → {out}\n"}
+            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.ada-path", text: "{result.runtime_dir}\n", what: "the GNAT runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "GNAT export")} from `{path}` → {out}\n"}
         }
         .Java -> {
             result: pkg_java_bind(path, source, lib, cache)
-            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.jvm-path", text: "{result.jvm_dir}\n", what: "the JVM runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "bound {jet_cli_foreign_count(result.bound.len(), "JVM member")} from `{path}` → {out}\n"}
+            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.jvm-path", text: "{result.jvm_dir}\n", what: "the JVM runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "JVM member")} from `{path}` → {out}\n"}
         }
         .Pascal -> {
             result: pkg_pascal_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "FreePascal export")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "FreePascal export")} from `{path}` → {out}\n")
         }
         .Fortran -> {
             result: pkg_fortran_bind(path, source, lib, cache)
-            stdout := "bound {jet_cli_foreign_count(result.bound.len(), "ISO_C_BINDING routine")} from `{path}` → {out}\n"
+            stdout := "Bound {jet_cli_foreign_count(result.bound.len(), "ISO_C_BINDING routine")} from `{path}` → {out}\n"
             loop layout in result.layouts {
                 extents := [String]{}
                 loop extent in layout.extents -> extents.push("{extent}")
-                stdout = "{stdout}  layout: {layout.routine}.{layout.parameter} {layout.order} {extents.join("x")}\n"
+                stdout = "{stdout}  Layout: {layout.routine}.{layout.parameter} {layout.order} {extents.join("x")}\n"
             }
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, stdout)
         }
         .Cobol -> {
             copybook_path: request.companion ?? ""
             result: pkg_cobol_bind(path, source, copybook_path, copybook, lib, cache)
-            stdout := "bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
+            stdout := "Bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
             loop field in result.layout.fields {
-                stdout = "{stdout}  layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}\n"
+                stdout = "{stdout}  Layout: {field.name} offset={field.offset} width={field.width} type={field.kind.jet_type()}\n"
             }
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}, JetCLIForeignFile{path: "{cache}/{lib}.cobol-path", text: "{result.runtime_dir}\n", what: "the libcob runtime identity"}}, stdout: stdout}
         }
         .JS -> {
             runtime: request.companion ?? ""
             result: pkg_javascript_bind(path, source, runtime, lib, cache)
-            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.d.ts", text: source, what: "the typed declaration cache"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "bound {jet_cli_foreign_count(result.bound.len(), "JavaScript export")} from `{path}` → {out}\n"}
+            return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.d.ts", text: source, what: "the typed declaration cache"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "JavaScript export")} from `{path}` → {out}\n"}
         }
         .Py -> {
             result: pkg_python_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "persistent Python function")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Python function")} from `{path}` → {out}\n")
         }
         .DotNet -> {
             result: pkg_dotnet_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "bound {jet_cli_foreign_count(result.bound.len(), ".NET member")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "Bound {jet_cli_foreign_count(result.bound.len(), ".NET member")} from `{path}` → {out}\n")
         }
         .Go -> {
             result: pkg_go_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "Go export")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "Go export")} from `{path}` → {out}\n")
         }
         .PowerShell -> {
             result: pkg_powershell_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "persistent PowerShell function")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent PowerShell function")} from `{path}` → {out}\n")
         }
         .Perl -> {
             result: pkg_perl_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "persistent Perl function")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Perl function")} from `{path}` → {out}\n")
         }
         .Ruby -> {
             result: pkg_ruby_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "persistent Ruby method")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Ruby method")} from `{path}` → {out}\n")
         }
         .Php -> {
             result: pkg_php_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "PHP function")} into a four-worker pool from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "PHP function")} into a four-worker pool from `{path}` → {out}\n")
         }
         .R -> {
             result: pkg_r_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "R function")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "R function")} from `{path}` → {out}\n")
         }
         .Octave -> {
             result: pkg_octave_bind(path, source, lib, cache)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "bound {jet_cli_foreign_count(result.bound.len(), "Octave matrix function")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "Octave matrix function")} from `{path}` → {out}\n")
         }
         .Cpp -> {
             include_dirs := [String]{}
@@ -449,7 +449,7 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
                 templates: request.templates,
             }
             result: pkg_cpp_bind(path, cache, options)
-            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "bound {jet_cli_foreign_count(result.bound.len(), "C++ member")} from `{path}` → {out}\n")
+            return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "Bound {jet_cli_foreign_count(result.bound.len(), "C++ member")} from `{path}` → {out}\n")
         }
         .Dart | .C | .Rust | .Swift | .Com | .Asm -> {}
     }

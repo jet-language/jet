@@ -245,7 +245,7 @@ JET_CLI_EXIT_ICE: EXIT_ICE
 jet_cli_ice: fn(what: String) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{
         stdout: "",
-        stderr: "internal compiler error: {what}\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.",
+        stderr: "Internal compiler error: {what}\nThis is a bug in jet, NOT in your program. Please report it,\nattaching your source file.",
         exit_code: JET_CLI_EXIT_ICE,
     }
 }
@@ -1998,7 +1998,7 @@ jet_cli_release_job_summary: fn(inputs: JetDriverLoweringInputs?, options: Build
         if !job.shipped -> stripped.push(job.name.copy())
     }
     if stripped.len() == 0 -> return ""
-    "stripped {stripped.len()} dev job(s): {stripped.join(", ")} (mark #Job(.Ship) to include)\n"
+    "Stripped {stripped.len()} dev job(s): {stripped.join(", ")} (mark #Job(.Ship) to include)\n"
 }
 
 // A resolved build option value that removes a runtime check
@@ -2259,7 +2259,7 @@ jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: Strin
     build_dir: jet_cli_parent(binary) ?? "."
     path: "{build_dir}/{name}.spdx"
     cli_files.write(path, publication_emit_spdx(lock, root, "NOASSERTION")) ?? return jet_cli_build_failed("couldn't write the SBOM {path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color)
-    JetDriverVerbOutput{stdout: if quiet -> "" else -> "sbom: {path}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: if quiet -> "" else -> "SBOM: {path}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // One build target of a package build: compile `file`, with the other
@@ -2867,7 +2867,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             jet_driver_ice_record(law_faults, "{test.name} [{test.key}]", "sema.laws", "reparse", "{fault}")
         }
     }
-    selected: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("the test harness of `{file}` can't build:\n{err.message}")
+    selected: jet_cli_native_test_selection(plan.tests, plan.functions, options.filter, options.shuffle_seed) ?? return jet_cli_ice("The test harness of `{file}` can't build:\n{err.message}")
     // `--docs` runs the doctest claims alone and `--measure` the measured
     // claims alone, without the output checks. A code suite's child
     // (JET_TEST_SUITE, TestProfile.jet) runs `test: fn` for that suite's rows
@@ -3441,14 +3441,14 @@ jet_cli_new_project: fn(name: String, template: String, annotated: Bool, quiet: 
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("new", true, [JetCLIStatusField]{jet_cli_status_field("new", created)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if quiet -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    status := "created {name}/\n"
+    status := "Created {name}/\n"
     loop file in files -> status = "{status}  {file}\n"
     // A browser test opens only a browser the lock pins, and jetpack pins it.
     if template == "browser-test" {
-        return JetDriverVerbOutput{stdout: "", stderr: "{status}next: cd {name} && jetpack browser lock chromium --binary <chromium> --driver <chromedriver>\nthen: jet test\n", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "", stderr: "{status}Next: cd {name} && jetpack browser lock chromium --binary <chromium> --driver <chromedriver>\nThen: jet test\n", exit_code: JET_DRIVER_EXIT_OK}
     }
     next_command: if template == "web" -> "dev" else -> "run"
-    JetDriverVerbOutput{stdout: "", stderr: "{status}next: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: "{status}Next: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `undocumented_diagnostics` + `render_doc_diagnostics`: one L2201 per public
@@ -3526,7 +3526,7 @@ jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, ch
         if json {
             return JetDriverVerbOutput{stdout: "{jet_cli_doc_status_json(graph)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
-        return JetDriverVerbOutput{stdout: "doc check: passed ({graph.doctests.len()} doctest block(s))\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "Doc check: passed ({graph.doctests.len()} doctest block(s))\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if json {
         return JetDriverVerbOutput{stdout: "{jet_cli_doc_status_json(graph)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -3538,7 +3538,7 @@ jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, ch
     cli_files.create_dir_all(output_dir) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
     cli_files.write("{output_dir}/index.html", jet_cli_doc_html(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
     cli_files.write("{output_dir}/index.md", jet_cli_doc_markdown(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
-    JetDriverVerbOutput{stdout: "doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "Doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `jet inspect semindex <file>`: check the entry through the Jet compiler, then

@@ -164,7 +164,7 @@ jet_cli_cache_status: fn(store: ArtifactStore, status: ArtifactStoreStatus, json
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.status", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
     source: if status.host_limit_bytes != None -> "host policy" else if store.config().cap_bytes() != None -> ENV_JET_STORE_CAP_BYTES else -> "adaptive rule"
-    out: "store      {status.root}\nlimit      {jet_cli_cache_format_size(status.limit_bytes)} ({source})\nreserve    keep {jet_cli_cache_format_size(status.reserve_bytes)} free on that filesystem\nused       {jet_cli_cache_format_size(status.footprint_bytes)} · {blobs} blobs · {records} records · {lto} ThinLTO caches\nleases     {status.live_leases} live\ntiers      {status.tiers.join(" · ")}\n"
+    out: "Store      {status.root}\nLimit      {jet_cli_cache_format_size(status.limit_bytes)} ({source})\nReserve    keep {jet_cli_cache_format_size(status.reserve_bytes)} free on that filesystem\nUsed       {jet_cli_cache_format_size(status.footprint_bytes)} · {blobs} blobs · {records} records · {lto} ThinLTO caches\nLeases     {status.live_leases} live\nTiers      {status.tiers.join(" · ")}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
 }
 
@@ -185,8 +185,8 @@ jet_cli_cache_prune: fn(report: ArtifactPruneReport, json: Bool) -> JetDriverVer
         )
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.prune", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
-    out := "prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nremoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\npinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"
-    if report.blocked -> out = "{out}result     target blocked by live leases\n"
+    out := "Prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nRemoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\nPinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"
+    if report.blocked -> out = "{out}Result     target blocked by live leases\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
 }
 
@@ -207,7 +207,7 @@ jet_cli_cache: fn(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetD
             out: if json -> {
                 cache: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("host_limit_bytes", jet_cli_status_int(bytes)), jet_cli_status_field("root", jet_cli_status_text(store.root()))})
                 "{jet_cli_status_render("cache.limit", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n"
-            } else -> "host limit {jet_cli_cache_format_size(bytes)} (persisted)\nstore      {store.root()}\n"
+            } else -> "Host limit {jet_cli_cache_format_size(bytes)} (persisted)\nStore      {store.root()}\n"
             JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
         }
     }

@@ -242,14 +242,14 @@ jet_cli_solver_human: fn(rows: [JetCLISolverRow]) -> String Never! {
         text = "{text}  {jet_cli_solver_status(row)}  {row.obligation.kind} at {row.path}:{row.line}:{row.column}\n"
         if row.outcome == {
             .Proved(proved) -> {
-                text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {proved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
+                text = "{text}  Backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {proved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
             }
             .Disproved(disproved) -> {
-                text = "{text}  backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {disproved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
+                text = "{text}  Backend {JET_CLI_SOLVER_BACKEND}-v{JET_CLI_SOLVER_BACKEND_VERSION}; steps {disproved.steps}/{JET_CLI_SOLVER_MAX_STEPS}\n"
             }
             .Unknown(unknown) -> {
                 detail: if unknown.reason == row.obligation.reason && row.obligation.detail != "" -> " ({row.obligation.detail})" else -> ""
-                text = "{text}  reason: {unknown.reason}{detail}\n"
+                text = "{text}  Reason: {unknown.reason}{detail}\n"
             }
         }
     }

@@ -32,13 +32,13 @@ jet_cli_inspect_target: fn(request: JetCLIInspectRequest, color: Bool{false}, js
     lacks: loop capability in TARGET_CAPABILITY_ALL if !jet_target_machine_provides_capability(machine, capability) -> jet_target_capability_name(capability)
     provided: if provides.len() == 0 -> "(none)" else -> provides.join(", ")
     lacking: if lacks.len() == 0 -> "(none)" else -> lacks.join(", ")
-    out := "target {machine.name}\n"
-    out = "{out}  triple: {machine.triple}\n"
-    out = "{out}  environment: {jet_target_environment_identity(machine)}\n"
-    out = "{out}  provider identity: {jet_target_provider_identity(machine)}\n"
-    out = "{out}  runs: {jet_cli_inspect_target_runs(machine)}\n"
-    out = "{out}  provides: {provided}\n"
-    out = "{out}  lacks: {lacking}\n"
+    out := "Target {machine.name}\n"
+    out = "{out}  Triple: {machine.triple}\n"
+    out = "{out}  Environment: {jet_target_environment_identity(machine)}\n"
+    out = "{out}  Provider identity: {jet_target_provider_identity(machine)}\n"
+    out = "{out}  Runs: {jet_cli_inspect_target_runs(machine)}\n"
+    out = "{out}  Provides: {provided}\n"
+    out = "{out}  Lacks: {lacking}\n"
     JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
 }
 
@@ -71,11 +71,11 @@ jet_cli_inspect_target_list: fn(json: Bool{false}) -> JetCLIPlan Never! {
         line: jet_cli_status_render("inspect.target", true, [JetCLIStatusField]{jet_cli_status_field("targets", jet_cli_status_array(rows))})
         return JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "{line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
     }
-    out := "target machines\n"
+    out := "Target Machines\n"
     loop machine in machines {
         out = "{out}  {machine.name} ({machine.triple}, {jet_target_environment_identity(machine)}): runs {jet_cli_inspect_target_runs(machine)}\n"
     }
-    out = "{out}run `jet inspect target <machine>` for one machine's dossier\n"
+    out = "{out}Run `jet inspect target <machine>` for one machine's dossier\n"
     JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
 }
 

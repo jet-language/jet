@@ -11,12 +11,12 @@ exit: 0
 step: jet new service OrderBoard --remove --preview
 cwd: {work}/shop
 exit: 0
-stdout: = "would remove Services/OrderBoard.jet\n" # the preview lists the files and removes none
+stdout: = "Would remove Services/OrderBoard.jet\n" # the preview lists the files and removes none
 file: shop/Services/OrderBoard.jet is-file
 step: jet new service OrderBoard --remove
 cwd: {work}/shop
 exit: 0
-stderr: ~ "removed Services/OrderBoard.jet\nrecorded .jet/generated/service-order_board.receipt as removed\n" # exactly the listed file
+stderr: ~ "Removed Services/OrderBoard.jet\nRecorded .jet/generated/service-order_board.receipt as removed\n" # exactly the listed file
 file: shop/Services/OrderBoard.jet absent
 file: shop/Services/Keep.jet = "// Written by hand.\n" # a file the receipt doesn't list stays
 file: shop/.jet/generated/service-order_board.receipt ~ "state: removed\n" # the receipt is kept as removed
@@ -53,7 +53,7 @@ file: shop/Migrations/001_add_index.jet absent
 step: jet new migration AddIndex --up 'CREATE INDEX orders_by_user ON orders (user_id, id)'
 cwd: {work}/shop
 exit: 0
-stderr: ~ "created Migrations/001_add_index.jet" # generated again, it keeps version 1
+stderr: ~ "Created Migrations/001_add_index.jet" # generated again, it keeps version 1
 file: shop/Migrations/001_add_index.jet ~ "orders (user_id, id)" # with the SQL given now
 step: jet new migration AddColumn --remove
 cwd: {work}/shop
@@ -61,4 +61,4 @@ exit: 0
 step: jet new migration AddNote --up 'ALTER TABLE orders ADD COLUMN memo TEXT'
 cwd: {work}/shop
 exit: 0
-stderr: ~ "created Migrations/003_add_note.jet" # a removed migration's version is never given to another
+stderr: ~ "Created Migrations/003_add_note.jet" # a removed migration's version is never given to another

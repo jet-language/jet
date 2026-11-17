@@ -134,12 +134,12 @@ jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, th
 jet_cli_decisions_report: fn(decisions: JetCLIDecisions, scope: String, file: String, profile: String, canonical_route_gaps: [CanonicalPassBoundaryGap], json: Bool, estimate: Bool) -> String Never! {
     r: decisions.report
     if !json {
-        text := "decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
-        loop row in decisions.unbuilt -> text = "{text}unbuilt {row}\n"
+        text := "Decisions: scope={scope} source={file} profile={profile}\n{ir_opt_report_text(r)}\n"
+        loop row in decisions.unbuilt -> text = "{text}Unbuilt {row}\n"
         loop row in decisions.loops -> text = "{text}{row}\n"
         loop row in decisions.masked -> text = "{text}{row}\n"
-        text = "{text}main: {decisions.main}\n"
-        if decisions.timing_host != "" -> text = "{text}timing host: {decisions.timing_host}\n"
+        text = "{text}Main: {decisions.main}\n"
+        if decisions.timing_host != "" -> text = "{text}Timing host: {decisions.timing_host}\n"
         loop row in decisions.large -> text = "{text}{row}\n"
         if canonical_route_gaps.len() > 0 {
             text = "{text}{jet_cli_canonical_route_gap_text(canonical_route_gaps)}"

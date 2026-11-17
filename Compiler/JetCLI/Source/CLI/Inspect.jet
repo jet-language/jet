@@ -727,12 +727,12 @@ jet_cli_inspect_coverage: fn(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Nev
         }
         return jet_cli_done("{jet_cli_status_render("inspect.build", validation == None, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
-    out := "diagnostic coverage\nplane\trows\twith fix_edits\twith reason\tuncovered\tstate\n"
+    out := "Diagnostic Coverage\nplane\trows\twith fix_edits\twith reason\tuncovered\tstate\n"
     loop fact in facts {
         state: if fact.uncovered == 0 -> "closed" else -> "open"
         out = "{out}{fact.plane}\t{fact.rows}\t{fact.edit_covered}\t{fact.reason_covered}\t{fact.uncovered}\t{state}\n"
     }
-    if validation == .Val(error) -> out = "{out}coverage validation error: {error}\n"
+    if validation == .Val(error) -> out = "{out}Coverage validation error: {error}\n"
     jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
 }
 
@@ -772,7 +772,7 @@ jet_cli_inspect_build_query: fn(command: String, args: [String], color: Bool, js
     }
     path: file ?? {
         hint: if command == "explain-build" -> "<target|action|file> " else -> ""
-        return jet_cli_inspect_plain_error("usage: jet {command} {hint}<file.jet>\n", "`jet {command}` needs a Jet file", "run `jet {command} {hint}<file.jet>`", JET_DRIVER_EXIT_USAGE)
+        return jet_cli_inspect_plain_error("Usage: jet {command} {hint}<file.jet>\n", "`jet {command}` needs a Jet file", "run `jet {command} {hint}<file.jet>`", JET_DRIVER_EXIT_USAGE)
     }
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: command, file: path, subject: subject, json: json, color: color, threads: threads, notice: "", project: false}}
 }
@@ -1535,7 +1535,7 @@ jet_cli_inspect_types: fn(programs: [Program], json: Bool) -> JetDriverVerbOutpu
         if json {
             values.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("type", jet_cli_status_text(owner)), jet_cli_status_field("rows", jet_cli_status_texts(rows))}))
         } else {
-            out = "{out}type {owner}:\n"
+            out = "{out}Type {owner}:\n"
             loop row in rows -> out = "{out}  {row}\n"
         }
     }
@@ -1912,28 +1912,28 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     }
     out := jet_cli_inspect_check_text(source, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)
     if !found {
-        out = "{out}symbol `{symbol}` not found in index\n"
+        out = "{out}Symbol `{symbol}` not found in index\n"
         if references.len() == 0 && call_sites.len() == 0 {
             return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
-        out = "{out}partial matches from name references/calls:\n"
+        out = "{out}Partial matches from name references/calls:\n"
     } else {
         defined: if definition_module == .Val(name) -> " (defined in {name})" else -> ""
-        out = "{out}blast radius for `{symbol}`{defined}\n"
+        out = "{out}Blast radius for `{symbol}`{defined}\n"
     }
-    out = "{out}  references:        {references.len()}\n  direct call sites: {call_sites.len()}\n"
-    out = "{out}  upstream callers:  {upstream.len()} (depth <= {job.depth})\n  downstream callees:{downstream.len()} (depth <= {job.depth})\n"
+    out = "{out}  References:        {references.len()}\n  Direct call sites: {call_sites.len()}\n"
+    out = "{out}  Upstream callers:  {upstream.len()} (depth <= {job.depth})\n  Downstream callees:{downstream.len()} (depth <= {job.depth})\n"
     loop reference in references {
-        out = "{out}  ref  {reference.module_path}:{reference.span.start}..{reference.span.end}\n"
+        out = "{out}  Ref  {reference.module_path}:{reference.span.start}..{reference.span.end}\n"
     }
     loop edge in call_sites {
-        out = "{out}  call {edge.caller} -> {edge.callee} @ {edge.module_path}:{edge.span.start}..{edge.span.end}\n"
+        out = "{out}  Call {edge.caller} -> {edge.callee} @ {edge.module_path}:{edge.span.start}..{edge.span.end}\n"
     }
     loop edge in upstream {
-        out = "{out}  upstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
+        out = "{out}  Upstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
     }
     loop edge in downstream {
-        out = "{out}  downstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
+        out = "{out}  Downstream[d{edge.depth}] {edge.caller} -> {edge.callee} @ {edge.module_path}\n"
     }
     status: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: status}
@@ -1990,9 +1990,9 @@ jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: In
 
 // `check_result_text` for a passed explicit-file check.
 jet_cli_inspect_check_text: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> String Never! {
-    out := "check: passed (source={source}, profile={profile}, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
+    out := "Check: passed (source={source}, profile={profile}, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
-        out = "{out}proof: output=not-applicable {row[0]} [not applicable] {row[1]} (diagnostic={row[2]})\n"
+        out = "{out}Proof: output=not-applicable {row[0]} [not applicable] {row[1]} (diagnostic={row[2]})\n"
     }
     out
 }

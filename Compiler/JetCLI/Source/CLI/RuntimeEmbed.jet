@@ -28,7 +28,7 @@ use {
     jet_pkg_model.[JET_VERSION]
 }
 
-JET_CLI_EMBED_USAGE: "usage: jet self devtools embed <image> <runtime-dir> <out> <identity>\n"
+JET_CLI_EMBED_USAGE: "Usage: jet self devtools embed <image> <runtime-dir> <out> <identity>\n"
 
 // An executable the build writes is runnable by everyone and writable by
 // its owner.
@@ -103,7 +103,7 @@ jet_cli_devtools_embed: fn(args: [String], color: Bool, json: Bool) -> JetDriver
     embed_files.set_mode(out, JET_CLI_EMBED_IMAGE_MODE) ?? return jet_cli_maintenance_error("E2105", "couldn't make `{out}` executable: {jet_cli_io_error_text(err)}", None, color, json)
     embed_files.write(identity_file, "{identity}\n") ?? return jet_cli_maintenance_error("E2105", "couldn't write the identity `{identity_file}`: {jet_cli_io_error_text(err)}", None, color, json)
     if trace_sink == .Val(sink) -> sink.end("runtime.embed", shipped.len())
-    JetDriverVerbOutput{stdout: "embed: {out}: {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "Embed: {out}: {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Writes `bytes` to the file `path`; returns why it couldn't ("" when it

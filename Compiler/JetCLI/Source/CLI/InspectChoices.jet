@@ -286,15 +286,16 @@ jet_cli_live_read_choices: fn(functions: [FnBody], decls: DeclTable, symbols: Sy
 
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
     if !json {
-        text := "choices: scope={scope} source={file} profile={profile}\n"
+        text := "Choices: scope={scope} source={file} profile={profile}\n"
         loop kind in JET_CLI_CHOICE_KINDS {
+            label: kind.capitalize()
             count := 0
             loop choice in choices {
                 if choice.kind != kind -> next
-                text = "{text}{kind}: {choice.file}:{choice.line} in {choice.function}: {choice.choice}\n"
+                text = "{text}{label}: {choice.file}:{choice.line} in {choice.function}: {choice.choice}\n"
                 count += 1
             }
-            if count == 0 -> text = "{text}{kind}: none\n"
+            if count == 0 -> text = "{text}{label}: none\n"
         }
         return text
     }

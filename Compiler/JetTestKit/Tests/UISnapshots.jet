@@ -25,16 +25,16 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     call: kit_ui_invocation("run: fn() {{}}", "Tests/UI/example.jet", false)
     assert_eq(call.argv, ["check", "Tests/UI/example.jet"])
     assert_eq(kit_ui_actual(call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: advisory\n")), "(no errors)\n")
-    report: "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n"
+    report: "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nRun `jet explain E0109` to learn more\n"
     assert_eq(kit_ui_actual(call, kit_ui_test_run(1, report)), "Error [jet.OperatorTypeMismatch]: mismatch\n")
     assert_eq(kit_ui_rendered_only("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n"), "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n")
     crlf: "\r\n"
     assert_eq(kit_ui_normalize("Tests/UI/project/workspace.jet", "/staged/Tests/UI/project/member.jet{crlf}Blocking waiting for file lock on package cache\n", "/staged"), "/tmp/member.jet\n")
     lint: kit_ui_invocation("", "Tests/UILint/one.jet", true)
     assert_eq(lint.argv, ["check", "--verbose", "Tests/UILint/one.jet"])
-    assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n\nok: `one.jet` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n")), "Warning [jet.SameEnumGuardTable]: lint\n")
+    assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n\nOK: `one.jet` has no errors (1 warning)\nRun `jet explain L0302` to learn more\n")), "Warning [jet.SameEnumGuardTable]: lint\n")
     all: kit_ui_invocation("// @all_diags\nrun: fn() {{}}", "Tests/UI/example.jet", false)
-    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning [jet.DivergentStatePaths]: split\n\nok: `example.jet` has no errors (1 warning)\nrun `jet explain L0152` to learn more\n")), "Warning [jet.DivergentStatePaths]: split\n")
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning [jet.DivergentStatePaths]: split\n\nOK: `example.jet` has no errors (1 warning)\nRun `jet explain L0152` to learn more\n")), "Warning [jet.DivergentStatePaths]: split\n")
     assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "")), "(no errors)\n")
 }
 

@@ -32,7 +32,7 @@ use {
     if ledger.rows.len() != 8 -> panic("invocation authority writer rows")
     gate_ledger_sort(ledger)
     human: jet_cli_gates_report(ledger, [], None, Val("security"), false)
-    if !human.starts_with("gates: 8\n") || !human.contains("--allow IO  invocation authority grant status=recorded") {
+    if !human.starts_with("Gates: 8\n") || !human.contains("--allow IO  invocation authority grant status=recorded") {
         panic("invocation human projection")
     }
     session: jet_cli_gates_report(ledger, [], None, Val("session"), true)
@@ -41,7 +41,7 @@ use {
     }
     empty: jet_cli_gates_report(ledger, [], Val(GateKind.Unsafe), None, true)
     if !empty.contains("\"entries\":[],\"counts\":{{}}") -> panic("empty JSON ledger")
-    if jet_cli_gates_report(GateLedger{}, [], None, None, false) != "gates: 0\n" {
+    if jet_cli_gates_report(GateLedger{}, [], None, None, false) != "Gates: 0\n" {
         panic("empty human ledger")
     }
 
@@ -49,7 +49,7 @@ use {
     loop index in 0..<17 {
         gate_ledger_push(large, jet_cli_gate_external(GateKind.PrecisionDemotion, "expression", "run.jet", "approx {index}", "demotion", ["run.jet"]))
     }
-    if jet_cli_gates_report(large, [], None, None, false) != "gates: 17\n  precision_demotion: 17 entries\n" {
+    if jet_cli_gates_report(large, [], None, None, false) != "Gates: 17\n  precision_demotion: 17 entries\n" {
         panic("large non-security collapse")
     }
     secure := GateLedger{}

@@ -12,17 +12,17 @@ fixture: InspectChoicesShowsEachInlinedCallAndWhy.fixture
 env: NO_COLOR=1
 step full: jet inspect choices -O2 inline.jet
 exit: 0
-stdout: ~ "choices: scope=" # the report header
-stdout: ~ "storage form: none" # no reactive handle crosses a thread
+stdout: ~ "Choices: scope=" # the report header
+stdout: ~ "Storage form: none" # no reactive handle crosses a thread
 stdout: ~ "inline.jet:4 in run: bump inlined: cost " # the call's line, the callee and its cost
 stdout: ~ "within the O2 limit 60" # the O2 callee limit took it
 step off: jet inspect choices -O2 --inline=off inline.jet
 exit: 0
-stdout: ~ "inlining: none" # off inlines nothing
+stdout: ~ "Inlining: none" # off inlines nothing
 stdout: !~ "bump inlined" # the call stays a call
 step none: jet inspect choices -O0 inline.jet
 exit: 0
-stdout: ~ "inlining: none" # O0 inlines no unmarked callee
+stdout: ~ "Inlining: none" # O0 inlines no unmarked callee
 step marked: jet inspect choices -O2 --inline=always_marked marked.jet
 exit: 0
 stdout: ~ "marked.jet:4 in run: bump inlined: marked #Inline(Always)" # only the marked callee is taken

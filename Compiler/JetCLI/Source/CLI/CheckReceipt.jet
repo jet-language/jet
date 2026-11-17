@@ -247,7 +247,7 @@ jet_cli_check_receipt_replay: fn(receipt: JetDriverRunReceipt, argv: [String], n
     stderr_bytes: jet_cli_receipt_redact_bytes(receipt.stderr, secrets) ?? return None
     stdout: String.from_bytes(stdout_bytes) ?? return None
     stderr: String.from_bytes(stderr_bytes) ?? return None
-    current: if verbose -> "ok: check current (receipt {receipt.claim.key.slice(0, 12)})\n" else -> ""
+    current: if verbose -> "OK: check current (receipt {receipt.claim.key.slice(0, 12)})\n" else -> ""
     Val(JetDriverVerbOutput{stdout: stdout, stderr: "{notice}{stderr}{current}", exit_code: receipt.status})
 }
 
@@ -265,17 +265,17 @@ jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], 
         if verbose {
             changes: jet_cli_check_receipt_changes(receipt.claim.inputs, claim.inputs)
             if changes.len() == 0 {
-                jet_cli_write_notice("receipt: check invalidated (entry candidates or authority context changed)\n")
+                jet_cli_write_notice("Receipt: check invalidated (entry candidates or authority context changed)\n")
             }
             loop path in changes {
-                jet_cli_write_notice("receipt: check invalidated (input changed: `{path}`)\n")
+                jet_cli_write_notice("Receipt: check invalidated (input changed: `{path}`)\n")
             }
         }
         return None
     }
     if receipt.digest != jet_driver_run_receipt_digest(receipt) {
         if verbose {
-            jet_cli_write_notice("receipt: check invalidated (receipt authentication changed)\n")
+            jet_cli_write_notice("Receipt: check invalidated (receipt authentication changed)\n")
         }
         return None
     }

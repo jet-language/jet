@@ -9,16 +9,16 @@ fixture: InspectMemoryReportsSemaStackBound.fixture
 env: NO_COLOR=1
 step direct: jet inspect memory -O0 direct.jet
 exit: 0
-stdout: ~ "entry run" # the program entry
-stdout: ~ "stack bound: " # sema's bound under the backend's stack
+stdout: ~ "Entry run" # the program entry
+stdout: ~ "Stack bound: " # sema's bound under the backend's stack
 stdout: ~ "leaf (" # the deepest path reaches leaf with its frame's bound
-stdout: !~ "stack bound: unbounded" # every call is direct and every value sized
+stdout: !~ "Stack bound: unbounded" # every call is direct and every value sized
 step inlined: jet inspect memory direct.jet
 exit: 0
-stdout: ~ "stack bound: " # inlining adds each inlined body's bound to its caller's frame
+stdout: ~ "Stack bound: " # inlining adds each inlined body's bound to its caller's frame
 step recursive: jet inspect memory -O0 recursive.jet
 exit: 0
-stdout: ~ "stack bound: unbounded, recursion through " # depth calls itself
+stdout: ~ "Stack bound: unbounded, recursion through " # depth calls itself
 step json: jet inspect memory -O0 recursive.jet --json
 exit: 0
 json: stdout doc $.action = "inspect.memory"

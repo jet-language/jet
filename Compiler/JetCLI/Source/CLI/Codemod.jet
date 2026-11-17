@@ -1174,7 +1174,7 @@ jet_cli_codemod_verify_inputs: fn(inputs: [String:String]) -[FS]> JetCLIReadErro
         if jet_cli_source_hash(now) != expected -> drift.push(path.copy())
     }
     if drift.len() > 0 {
-        return Err(jet_cli_codemod_error("codemod inputs drifted; no files written:\n  {drift.join("\n  ")}"))
+        return Err(jet_cli_codemod_error("Codemod inputs drifted; no files written:\n  {drift.join("\n  ")}"))
     }
 }
 
@@ -1704,7 +1704,7 @@ jet_cli_codemod_print_batch: fn(batch: JetCLICodemodBatch, plan: JetCLICodemodPl
     edits := 0
     loop count in plan.counts -> edits += count
     units: jet_cli_codemod_discover_units(batch)
-    jet_cli_codemod_print(run, "codemod `{batch.name}` dry run\n  units: {units.len()}  rules: {batch.rules.len()}  files: {changed}  edits: {edits}")
+    jet_cli_codemod_print(run, "Codemod `{batch.name}` dry run\n  Units: {units.len()}  Rules: {batch.rules.len()}  Files: {changed}  Edits: {edits}")
     loop index in 0..<plan.count_ids.len() {
         jet_cli_codemod_print(run, "  {plan.count_ids[index]}: {plan.counts[index]} matches")
     }
@@ -1754,7 +1754,7 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
         return
     }
     if !yes {
-        run.warning = "warning: an editor that does not honor the codemod lock can still race the final rename\n Fix: review the dry run, then repeat with `--yes`\n"
+        run.warning = "Warning: an editor that does not honor the codemod lock can still race the final rename\n Fix: review the dry run, then repeat with `--yes`\n"
         return Err(jet_cli_codemod_error("apply requires `--yes`"))
     }
     changes := [JetCLISourceChange]{}
@@ -1764,7 +1764,7 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
     }
     log_name: "{jet_cli_fix_name(batch.name)}.log.json"
     log_path: jet_cli_transaction_commit_locked(project, journal, changes, log_name, jet_cli_codemod_v2_log(batch, changes, plan.semantic_ops))
-    jet_cli_codemod_print(run, "codemod `{batch.name}` applied\n  files: {changes.len()}\n  log: {log_path}")
+    jet_cli_codemod_print(run, "Codemod `{batch.name}` applied\n  Files: {changes.len()}\n  Log: {log_path}")
 }
 
 // ---- version 1 ----
@@ -1841,7 +1841,7 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: &JetCLICo
         changes.push(JetCLISourceChange{path: path.copy(), before: before, after: after.bytes()})
     }
     mode: if apply -> "applied" else -> "dry run"
-    jet_cli_codemod_print(run, "codemod `{codemod.name}` {mode}\n  rename: {codemod.from} -> {codemod.to}\n  files: {changes.len()}")
+    jet_cli_codemod_print(run, "Codemod `{codemod.name}` {mode}\n  Rename: {codemod.from} -> {codemod.to}\n  Files: {changes.len()}")
     if !apply {
         return
     }
@@ -2035,5 +2035,5 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     undo_name: jet_cli_codemod_with_extension(jet_cli_file_name(path), "undo.log.json")
     marker: "{{\"schema\":2,\"name\":{foundation_json_quote("{name}-undo")},\"files\":[]}}\n"
     _: jet_cli_transaction_commit_locked(project, journal, changes, undo_name, marker.bytes())
-    jet_cli_codemod_print(run, "codemod undo `{name}` applied")
+    jet_cli_codemod_print(run, "Codemod undo `{name}` applied")
 }

@@ -248,9 +248,9 @@ jet_cli_import_apply: fn(plan: JetCLIImportPlan, mode: JetCLIImportMode, json: B
     if json {
         return jet_cli_import_output("{jet_cli_status_render("import", true, [JetCLIStatusField]{jet_cli_status_field("import", jet_cli_import_report_value(current))})}\n", "", JET_DRIVER_EXIT_OK)
     }
-    verb: if mode == JetCLIImportMode.DryRun -> "would import" else -> "imported"
+    verb: if mode == JetCLIImportMode.DryRun -> "Would import" else -> "Imported"
     boundary: current.boundary
-    out := "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
+    out := "{verb} {current.source} -> {current.target}\n  {current.functions} functions, {current.tests} carried tests, {current.todos.len()} TODO diagnostics\n  Migration: {boundary.disposition.as_str()} (mode: {jet_cli_import_migration_mode(boundary)}; source conversion: {jet_cli_import_migration_source_conversion(boundary)}; source authority: {boundary.source_authority.as_str()})\n"
     loop todo in current.todos {
         diagnostic := jet_cli_import_todo_diagnostic(todo)
         diagnostic.detail = Val(" Target: {todo.target}\n Status: {todo.status}")

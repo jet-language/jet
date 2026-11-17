@@ -195,7 +195,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     path: jet_cli_perf_session_write(capture, action, full, parsed.out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     code: if receipt.signal != None -> 1 else -> receipt.code
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "trace: {path}\n", exit_code: code}
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: code}
 }
 
 // `attach`: one point capture of a running process. A devserver browser
@@ -313,7 +313,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     }
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
-    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `read_browser_capture`: the devserver's browser relay for `pid`, or None

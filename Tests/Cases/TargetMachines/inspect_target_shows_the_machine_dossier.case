@@ -16,21 +16,21 @@ stdout: ~ '"linker":{"kind":"generated"},"allocator":{"kind":"none"},"panic":{"k
 step: jet inspect target hosted
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "target hosted" # the text form names the machine
-stdout: ~ "triple: x86_64-unknown-linux-gnu" # and its triple
-stdout: ~ "environment: hosted" # and its environment
-stdout: ~ "provider identity: target-providers-v1:" # and its provider identity
-stdout: ~ "runs: aot, dev" # a hosted machine runs under jet dev as well
-stdout: ~ "provides: Target.Allocator, Target.Memory, Target.Atomic64, Target.MMIO, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Target.Panic, Panic.Report, Target.Startup" # every capability a hosted machine provides, in capability order
-stdout: ~ "lacks: Target.Hardware" # a hosted machine declares no hardware facts
+stdout: ~ "Target hosted" # the text form names the machine
+stdout: ~ "Triple: x86_64-unknown-linux-gnu" # and its triple
+stdout: ~ "Environment: hosted" # and its environment
+stdout: ~ "Provider identity: target-providers-v1:" # and its provider identity
+stdout: ~ "Runs: aot, dev" # a hosted machine runs under jet dev as well
+stdout: ~ "Provides: Target.Allocator, Target.Memory, Target.Atomic64, Target.MMIO, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Target.Panic, Panic.Report, Target.Startup" # every capability a hosted machine provides, in capability order
+stdout: ~ "Lacks: Target.Hardware" # a hosted machine declares no hardware facts
 step: jet inspect target wasm.no-os
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "target wasm.no-os" # the text form names the machine
-stdout: ~ "runs: aot" # a no-OS machine runs ahead-of-time
-stdout: ~ "provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup" # its declared RAM, atomics, abort panic and generated startup
-stdout: ~ "lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report" # and none of the hosted services
-stdout: !~ "runs: aot, dev" # and never under jet dev
+stdout: ~ "Target wasm.no-os" # the text form names the machine
+stdout: ~ "Runs: aot" # a no-OS machine runs ahead-of-time
+stdout: ~ "Provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup" # its declared RAM, atomics, abort panic and generated startup
+stdout: ~ "Lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report" # and none of the hosted services
+stdout: !~ "Runs: aot, dev" # and never under jet dev
 step: jet inspect target nowhere
 env: NO_COLOR=1
 exit: nonzero
@@ -40,7 +40,7 @@ stderr: ~ "wasm.browser" # and the fix lists the declared machines
 step: jet inspect target
 env: NO_COLOR=1
 exit: 0
-stdout: = "target machines\n  board.sensor_v1 (thumbv7em-none-eabihf, no-os): runs aot\n  board.virt_aarch64 (aarch64-unknown-none, no-os): runs aot\n  wasm.browser (wasm32-unknown-unknown, browser): runs aot, dev\n  wasm.wasi (wasm32-wasip2, wasi): runs aot, dev\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  hosted (x86_64-unknown-linux-gnu, hosted): runs aot, dev\nrun `jet inspect target <machine>` for one machine's dossier\n"
+stdout: = "Target Machines\n  board.sensor_v1 (thumbv7em-none-eabihf, no-os): runs aot\n  board.virt_aarch64 (aarch64-unknown-none, no-os): runs aot\n  wasm.browser (wasm32-unknown-unknown, browser): runs aot, dev\n  wasm.wasi (wasm32-wasip2, wasi): runs aot, dev\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  hosted (x86_64-unknown-linux-gnu, hosted): runs aot, dev\nRun `jet inspect target <machine>` for one machine's dossier\n"
 step: jet inspect target --json
 env: NO_COLOR=1
 exit: 0

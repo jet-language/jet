@@ -415,7 +415,7 @@ jet_cli_replay_consent: fn(identity: JetCLIProveIdentity, members: [JetCLIProveM
     }
     if roots.contains("Rand") -> disclosed = "{disclosed}the random bytes the program reads, "
     hosts: if roots.contains("Net") -> "the hosts the program's HTTP requests name, decided as it runs" else -> "none"
-    cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  authorities: {roots.join(", ")}\n  hosts: {hosts}\n  byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  may disclose: {disclosed}paths, host names, panic text and run metadata\n  destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
+    cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  Authorities: {roots.join(", ")}\n  Hosts: {hosts}\n  Byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  May disclose: {disclosed}paths, host names, panic text and run metadata\n  Destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
     input := cli_term.stdin()
     answer: input.read_line() ?? ""
     if answer.removesuffix("\n").removesuffix("\r") == JET_CLI_REPLAY_CONSENT -> return None

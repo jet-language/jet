@@ -110,7 +110,7 @@ jet_cli_doctor_check_c_compiler: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorC
 // The language server row: start `jet self lsp`, send it `initialize` and read
 // its answer.
 jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
-    label: "language server"
+    label: "Language server"
     command: "`{JET_CLI_BINARY} self lsp`"
     fix: "run {command} and read the error it reports"
     body: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"processId\":null,\"rootUri\":null,\"capabilities\":{{}}}}}}"
@@ -293,8 +293,8 @@ jet_cli_doctor: fn(online: Bool, apply: Bool, cross_target: String?, color: Bool
     prefix := ""
     if apply {
         fixed: jet_cli_doctor_apply_fixes(jet_cli_doctor_run(online, cross_target))
-        if fixed.len() == 0 -> prefix = "doctor: nothing to auto-fix\n"
-        loop label in fixed -> prefix = "{prefix}fixed: {label}\n"
+        if fixed.len() == 0 -> prefix = "Doctor: nothing to auto-fix\n"
+        loop label in fixed -> prefix = "{prefix}Fixed: {label}\n"
     }
     checks: jet_cli_doctor_run(online, cross_target)
     out := "{prefix}{diagnostic_theme_paint(color, "1", "{JET_CLI_BINARY} doctor")}\n"
@@ -323,7 +323,7 @@ jet_cli_doctor: fn(online: Bool, apply: Bool, cross_target: String?, color: Bool
         out = "{out}{report}{jet_driver_explain_pointer_line("L2101", color)}\n"
         return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    JetDriverVerbOutput{stdout: "{out}everything looks good.\n", stderr: "", exit_code: 0}
+    JetDriverVerbOutput{stdout: "{out}Everything looks good.\n", stderr: "", exit_code: 0}
 }
 
 // `jet self doctor [--online] [--fix] [--target <machine>]`: a name that is not a

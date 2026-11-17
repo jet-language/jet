@@ -1096,7 +1096,7 @@ jet_cli_repl_ran_program: fn(session: JetCLIReplSession, binary: String) -> Stri
 
 jet_cli_repl_load: fn(session: &JetCLIReplSession, path: String, run_entry: Bool) {
     source: repl_files.read(path) ?? {
-        jet_cli_repl_err("error: couldn't read `{path}`: {err}\n")
+        jet_cli_repl_err("Error: couldn't read `{path}`: {err}\n")
         return
     }
     parsed: parse_source(source.bytes())
@@ -1112,7 +1112,7 @@ jet_cli_repl_load: fn(session: &JetCLIReplSession, path: String, run_entry: Bool
         }
     }
     session.items.push(source)
-    jet_cli_repl_out("loaded {parsed.program.items.len()} items from `{path}`\n")
+    jet_cli_repl_out("Loaded {parsed.program.items.len()} items from `{path}`\n")
     if has_run && run_entry -> jet_cli_repl_out(jet_cli_repl_run_program(session, "run()"))
 }
 
@@ -1144,11 +1144,11 @@ jet_cli_repl_reset: fn(session: &JetCLIReplSession) {
     session.bindings = [JetCLIReplBinding]{}
     session.turns = [JetCLIReplTurn]{}
     session.step = 0
-    jet_cli_repl_out("session reset\n")
+    jet_cli_repl_out("Session reset\n")
 }
 
 jet_cli_repl_undefined: fn(session: JetCLIReplSession, name: String) -> String Never! {
-    "{diagnostic_theme_paint(session.color, "33", "note")}: `{name}` isn't defined in this session\n"
+    "{diagnostic_theme_paint(session.color, "33", "Note")}: `{name}` isn't defined in this session\n"
 }
 
 jet_cli_repl_type: fn(session: JetCLIReplSession, name: String) {
@@ -1205,7 +1205,7 @@ jet_cli_repl_turns: fn(session: JetCLIReplSession) {
 // `parse_turn_id`: the index of the named turn.
 jet_cli_repl_turn_index: fn(session: JetCLIReplSession, argument: String?) -> Int? {
     text: argument ?? {
-        jet_cli_repl_err("usage: turn command needs a turn id\n")
+        jet_cli_repl_err("Usage: turn command needs a turn id\n")
         return None
     }
     id: Int.parse(text.trim()) ?? {
@@ -1213,11 +1213,11 @@ jet_cli_repl_turn_index: fn(session: JetCLIReplSession, argument: String?) -> In
         return None
     }
     if id == 0 {
-        jet_cli_repl_err("turn ids start at 1\n")
+        jet_cli_repl_err("Turn ids start at 1\n")
         return None
     }
     if id < 0 || id > session.turns.len() {
-        jet_cli_repl_err("turn #{id} does not exist\n")
+        jet_cli_repl_err("Turn #{id} does not exist\n")
         return None
     }
     Val(id - 1)
@@ -1226,24 +1226,24 @@ jet_cli_repl_turn_index: fn(session: JetCLIReplSession, argument: String?) -> In
 jet_cli_repl_meta: fn(session: &JetCLIReplSession, command: String, argument: String?) -> Bool {
     if command == {
         "quit" | "q" | "exit" -> {
-            jet_cli_repl_out("bye\n")
+            jet_cli_repl_out("Bye\n")
             return false
         }
         "reset" -> jet_cli_repl_reset(session)
         "load" -> {
             if argument == .Val(path) -> jet_cli_repl_load(session, path, true) else {
-                jet_cli_repl_err("usage: :load <file.jet>\n")
+                jet_cli_repl_err("Usage: :load <file.jet>\n")
             }
         }
         "type" -> {
             if argument == .Val(name) -> jet_cli_repl_type(session, name) else {
-                jet_cli_repl_err("usage: :type <name>\n")
+                jet_cli_repl_err("Usage: :type <name>\n")
             }
         }
         "run" -> {
             jet_cli_repl_out("{diagnostic_theme_dim(session.color, "compiling session…")} {diagnostic_theme_dim(session.color, "running…")}\n")
             if session.statements.len() == 0 && session.items.len() == 0 {
-                jet_cli_repl_out("note: session is empty — nothing to run\n")
+                jet_cli_repl_out("Note: session is empty — nothing to run\n")
             } else {
                 statements: if jet_cli_repl_functions(session.items).contains("run") -> "run()" else -> session.statements.join("\n")
                 jet_cli_repl_out(jet_cli_repl_run_program(session, statements))
@@ -1254,13 +1254,13 @@ jet_cli_repl_meta: fn(session: &JetCLIReplSession, command: String, argument: St
             index: jet_cli_repl_turn_index(session, argument) ?? return true
             folded: command == "fold"
             session.turns[index].folded = folded
-            jet_cli_repl_out(if folded -> "turn folded\n" else -> "turn unfolded\n")
+            jet_cli_repl_out(if folded -> "Turn folded\n" else -> "Turn unfolded\n")
         }
         "pin" | "unpin" -> {
             index: jet_cli_repl_turn_index(session, argument) ?? return true
             pinned: command == "pin"
             session.turns[index].pinned = pinned
-            jet_cli_repl_out(if pinned -> "turn pinned\n" else -> "turn unpinned\n")
+            jet_cli_repl_out(if pinned -> "Turn pinned\n" else -> "Turn unpinned\n")
         }
         "rerun" | "history" -> {
             jet_cli_repl_err(jet_cli_not_ported_output("repl :{command}", session.color).stderr)
@@ -1272,7 +1272,7 @@ jet_cli_repl_meta: fn(session: &JetCLIReplSession, command: String, argument: St
         }
         "help" -> jet_cli_repl_out(jet_cli_repl_help(session.color))
         else -> {
-            jet_cli_repl_err("unknown meta-command `:{command}`; type {diagnostic_theme_bold(session.color, ":help")} to see available commands\n")
+            jet_cli_repl_err("Unknown meta-command `:{command}`; type {diagnostic_theme_bold(session.color, ":help")} to see available commands\n")
         }
     }
     true
@@ -1353,7 +1353,7 @@ jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions,
     if project == .Val(dir) {
         loaded := jet_cli_repl_load_dir(session, "{dir}/src")
         if loaded == 0 -> loaded = jet_cli_repl_load_dir(session, dir)
-        if loaded > 0 -> jet_cli_repl_out("project: loaded {loaded} source file(s)\n")
+        if loaded > 0 -> jet_cli_repl_out("Project: loaded {loaded} source file(s)\n")
     }
     session.baseline_imports = session.imports.copy()
     session.baseline_items = session.items.copy()

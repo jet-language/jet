@@ -146,7 +146,7 @@ jet_cli_measure_settle: fn(wire: String, name: String, plan: JetCLIMeasurePlan, 
     fields: (frame ?? {
         if passed {
             parts.flags &= 6
-            parts.stderr = "{parts.stderr}the `.measure` region of `{name}` left before its samples finished\n"
+            parts.stderr = "{parts.stderr}The `.measure` region of `{name}` left before its samples finished\n"
         }
         return Ok(jet_cli_native_test_wire(parts))
     }).split("\t").to_list()
@@ -227,10 +227,10 @@ jet_cli_measure_render: fn(record: JetCLIMeasureRecord, json: Bool) -> String Ne
         budgets: loop verdict in record.budgets -> "{{\"name\":{jet_cli_json_string(verdict.name)},\"metric\":{jet_cli_json_string(verdict.metric)},\"status\":\"{verdict.status}\",\"value_ns\":{jet_cli_measure_ns(verdict.value_ps)},\"limit_ns\":{if verdict.limit_ns == .Val(limit) -> "{limit}" else -> "null"}}}"
         return "{{\"name\":{jet_cli_json_string(record.name)},\"ok\":{record.ok},\"tier\":\"aot\",\"profile\":{jet_cli_json_string(record.profile)},\"warmups\":{record.warmups},\"iterations\":{record.iterations},\"serial\":true,\"samples\":{record.samples},\"min_ns\":{jet_cli_measure_ns(record.min_ps)},\"median_ns\":{jet_cli_measure_ns(record.median_ps)},\"mean_ns\":{jet_cli_measure_ns(record.mean_ps)},\"max_ns\":{jet_cli_measure_ns(record.max_ps)},\"budgets\":[{budgets.join(",")}]}}\n"
     }
-    line := "measure {record.name}: ok={record.ok} tier=aot profile={record.profile} warmups={record.warmups} iterations={record.iterations} serial=true samples={record.samples} min_ns={jet_cli_measure_ns(record.min_ps)} median_ns={jet_cli_measure_ns(record.median_ps)} mean_ns={jet_cli_measure_ns(record.mean_ps)} max_ns={jet_cli_measure_ns(record.max_ps)}\n"
+    line := "Measure {record.name}: ok={record.ok} tier=aot profile={record.profile} warmups={record.warmups} iterations={record.iterations} serial=true samples={record.samples} min_ns={jet_cli_measure_ns(record.min_ps)} median_ns={jet_cli_measure_ns(record.median_ps)} mean_ns={jet_cli_measure_ns(record.mean_ps)} max_ns={jet_cli_measure_ns(record.max_ps)}\n"
     loop verdict in record.budgets {
         limit: if verdict.limit_ns == .Val(value) -> " limit_ns={value}" else -> ""
-        line = "{line}  budget {verdict.name}: status={verdict.status} metric={verdict.metric} value_ns={jet_cli_measure_ns(verdict.value_ps)}{limit}\n"
+        line = "{line}  Budget {verdict.name}: status={verdict.status} metric={verdict.metric} value_ns={jet_cli_measure_ns(verdict.value_ps)}{limit}\n"
     }
     line
 }

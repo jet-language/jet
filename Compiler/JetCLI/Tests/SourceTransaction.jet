@@ -49,7 +49,7 @@ JetCLITransactionFixtureRoot: struct {
     stale: jet_cli_commit_source_changes(root, changes, "stale.log.json", log) == .Err(_)
     assert(stale)
     marker: jet_cli_undo_source_changes(root, "test.log.json") ?? panic("undo")
-    assert(marker.starts_with("codemod undo `test` applied\n  files: 2\n"))
+    assert(marker.starts_with("Codemod undo `test` applied\n  Files: 2\n"))
     restored_first: cli_files.read("{root}/first.jet") ?? panic("restored first")
     restored_second: cli_files.read("{root}/second.jet") ?? panic("restored second")
     assert(restored_first == "first" && restored_second == "second")

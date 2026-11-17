@@ -17,8 +17,8 @@ file: keys absent
 step: jet registry keygen
 cwd: project
 exit: 0
-stdout: ^= "created a signing key for registry `jet`.\n  public key:  " # the public key hex varies per run
-stdout: ~ "\n  secret key:  <redacted>/jet.ed25519\n  public file: <redacted>/jet.ed25519.pub\n`jet registry key backup` writes this to <redacted>/jet.ed25519 — losing it means losing your ability to publish signed updates.\n" # the key lines name JET_KEYS_DIR's files, which the kit redacts
+stdout: ^= "Created a signing key for registry `jet`.\n  Public key:  " # the public key hex varies per run
+stdout: ~ "\n  Secret key:  <redacted>/jet.ed25519\n  Public file: <redacted>/jet.ed25519.pub\n`jet registry key backup` writes this to <redacted>/jet.ed25519 — losing it means losing your ability to publish signed updates.\n" # the key lines name JET_KEYS_DIR's files, which the kit redacts
 file: keys/jet.ed25519 size = 32
 file: keys/jet.ed25519 mode = 0600
 file: keys/jet.ed25519.pub size = 64
@@ -31,13 +31,13 @@ stderr: ~ "Error [jet.SigningKeyExists]: `jet registry keygen` refused: a signin
 step: jet registry keygen --force
 cwd: project
 exit: 0
-stdout: ^= "created a signing key for registry `jet`.\n" # the rest names a fresh public key
+stdout: ^= "Created a signing key for registry `jet`.\n" # the rest names a fresh public key
 file: keys/jet.ed25519 size = 32
 file: keys/jet.ed25519 mode = 0600
 step: jet registry key backup
 cwd: project
 exit: 0
-stdout: = "backed up the `jet` signing key to ./jet-signing-key.backup\nwarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n"
+stdout: = "Backed up the `jet` signing key to ./jet-signing-key.backup\nWarning: store this file somewhere safe (e.g. a password manager). Anyone who has it can publish signed updates as you.\n"
 file: project/jet-signing-key.backup size = 32
 step: cmp keys/jet.ed25519 project/jet-signing-key.backup
 exit: 0
@@ -49,12 +49,12 @@ file: project/other.key absent
 step: jet registry keygen --registry=other
 cwd: project
 exit: 0
-stdout: ^= "created a signing key for registry `other`.\n" # the rest names a fresh public key
+stdout: ^= "Created a signing key for registry `other`.\n" # the rest names a fresh public key
 file: keys/other.ed25519 size = 32
 step: jet registry key backup --registry other other.key
 cwd: project
 exit: 0
-stdout: ^= "backed up the `other` signing key to other.key\n" # the safe-keeping warning line follows
+stdout: ^= "Backed up the `other` signing key to other.key\n" # the safe-keeping warning line follows
 step: cmp keys/other.ed25519 project/other.key
 exit: 0
 step: jet registry key rotate

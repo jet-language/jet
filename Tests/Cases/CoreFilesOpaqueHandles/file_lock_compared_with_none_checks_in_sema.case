@@ -25,12 +25,12 @@ exit: 1
 stderr: count "[jet.OperatorTypeMismatch]" = 1 # the one `lock != None`
 stderr: ~ "Only an optional value can be compared with `None`" # E0109's text
 stderr: ~ "E0109" # the registered code
-stderr: !~ "internal compiler error" # sema refuses it; ir.build never sees it
+stderr: !~ "Internal compiler error" # sema refuses it; ir.build never sees it
 step: jet run plain/main.jet
 exit: 1
 stderr: ~ "E0109" # run checks first and stops there
-stderr: !~ "internal compiler error" # no backend fault
+stderr: !~ "Internal compiler error" # no backend fault
 step: jet check declared/main.jet
 exit: 1
 stderr: count "[jet.OperatorTypeMismatch]" = 2 # `point != None` and `mode == None`
-stderr: !~ "internal compiler error" # both refused in sema
+stderr: !~ "Internal compiler error" # both refused in sema

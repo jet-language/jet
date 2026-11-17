@@ -58,10 +58,10 @@ JetCLIStructMerged: struct {
 
 jet_cli_structural_help: fn(command: String) -> String? Never! {
     if command == "diff" {
-        return Val("usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n")
+        return Val("Usage: jet diff --structural <before.jet> <after.jet> [--json]\n\nCompares checked Jet definitions by semantic identity.\n")
     }
     if command == "merge" {
-        return Val("usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--json]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n")
+        return Val("Usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--json]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n")
     }
     None
 }
@@ -383,9 +383,9 @@ jet_cli_struct_conflicts: fn(conflicts: [JetCLIStructConflict], json: Bool) -> J
         stderr = "{jet_cli_status_render("merge.structural", false, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("conflicts", jet_cli_status_array(rows))}))})}\n"
     } else {
         loop conflict in conflicts {
-            stderr = "{stderr}conflict: {conflict.identity} ({conflict.kind})\n stable id: {conflict.stable_id}\n ours: {conflict.ours}\n theirs: {conflict.theirs}\n"
+            stderr = "{stderr}Conflict: {conflict.identity} ({conflict.kind})\n Stable id: {conflict.stable_id}\n Ours: {conflict.ours}\n Theirs: {conflict.theirs}\n"
         }
-        stderr = "{stderr}merge stopped: resolve conflicts manually; no output was written\n"
+        stderr = "{stderr}Merge stopped: resolve conflicts manually; no output was written\n"
     }
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
@@ -431,7 +431,7 @@ jet_cli_struct_install: fn(argv: [String]) -> JetDriverVerbOutput {
         if attrs != "" && !attrs.ends_with("\n") -> attrs = "{attrs}\n"
         cli_files.write(path, "{attrs}{line}\n") ?? return jet_cli_struct_fail("could not write `{path}`: {jet_cli_io_error_text(err)}", "fix repository permissions")
     }
-    JetDriverVerbOutput{stdout: "installed structural merge driver in {repo}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "Installed structural merge driver in {repo}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // argv starts with the command; normalization and registry validation stay
@@ -485,7 +485,7 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
             }
             stdout = "{jet_cli_status_render("diff.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_diff", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("changes", jet_cli_status_array(rows)), jet_cli_status_field("failures", jet_cli_failure_value(failures))}))})}\n"
         } else {
-            if changes.len() == 0 -> stdout = "no structural changes\n"
+            if changes.len() == 0 -> stdout = "No structural changes\n"
             loop change in changes {
                 stdout = "{stdout}{change.kind}: {change.after ?? (change.before ?? "definition")} [{change.stable_id}]\n"
             }
@@ -511,6 +511,6 @@ jet_cli_structural: fn(argv: [String], command: String, json: Bool) -> JetDriver
         }
     }
     cli_files.write(output, formatted.text) ?? return jet_cli_struct_fail("could not write `{output}`: {jet_cli_io_error_text(err)}", "choose a writable --out path")
-    stdout: if json -> "{jet_cli_status_render("merge.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("output", jet_cli_status_text(output))}))})}\n" else -> "merged: {output}\n"
+    stdout: if json -> "{jet_cli_status_render("merge.structural", true, [JetCLIStatusField]{jet_cli_status_field("structural_merge", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("output", jet_cli_status_text(output))}))})}\n" else -> "Merged: {output}\n"
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

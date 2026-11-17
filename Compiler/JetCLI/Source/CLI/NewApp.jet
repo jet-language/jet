@@ -471,10 +471,10 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
     cli_files.create_dir_all("{root}/.jet/generated") ?? return jet_cli_new_failed("E2105", "couldn't create `.jet/generated/`: {err}", fix_io, color)
     cli_files.write(receipt_path, receipt_text) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
     status := ""
-    loop file in files -> status = "{status}created {file.path}\n"
-    status = "{status}recorded {receipt_relative}\nundo: {command} --remove\n"
+    loop file in files -> status = "{status}Created {file.path}\n"
+    status = "{status}Recorded {receipt_relative}\nUndo: {command} --remove\n"
     if request.kind == "route" && !jet_cli_new_app_serves_routes(root) {
-        status = "{status}next: serve the page with `.routes(from: \"Routes\")` on the app\n"
+        status = "{status}Next: serve the page with `.routes(from: \"Routes\")` on the app\n"
     }
     jet_cli_new_app_output(request, "", status, fields)
 }
@@ -507,7 +507,7 @@ jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, rec
     }
     if request.preview {
         shown := ""
-        loop path in present -> shown = "{shown}would remove {path}\n"
+        loop path in present -> shown = "{shown}Would remove {path}\n"
         return jet_cli_new_app_output(request, shown, "", fields)
     }
     loop path in present {
@@ -516,7 +516,7 @@ jet_cli_new_app_remove: fn(request: JetCLINewApp, root: String, key: String, rec
     kept: jet_cli_new_app_receipt_text(request, key, receipt.version, "removed", receipt.files)
     cli_files.write("{root}/{receipt_relative}", kept) ?? return jet_cli_new_failed("E2105", "couldn't write `{receipt_relative}`: {err}", fix_io, color)
     status := ""
-    loop path in present -> status = "{status}removed {path}\n"
-    status = "{status}recorded {receipt_relative} as removed\n"
+    loop path in present -> status = "{status}Removed {path}\n"
+    status = "{status}Recorded {receipt_relative} as removed\n"
     jet_cli_new_app_output(request, "", status, fields)
 }

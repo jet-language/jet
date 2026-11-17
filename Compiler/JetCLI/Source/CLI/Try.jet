@@ -433,14 +433,14 @@ jet_cli_try_output: fn(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: 
             reports: jet_cli_reports_json(jet_cli_report_base(plan.entry), plan.entry, entry_source, verdict.diagnostics)
             return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("try", false, reports, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
-        return JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: "", stderr: "Try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if json {
         fields: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(keep)), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("try", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    kept: if keep -> "  kept: working tree now contains the staged bytes\n" else -> "  rolled back (default): working tree is byte-identical\n"
-    JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    kept: if keep -> "  Kept: working tree now contains the staged bytes\n" else -> "  Rolled back (default): working tree is byte-identical\n"
+    JetDriverVerbOutput{stdout: "Try `{plan.name}`: verdict clean\n  Receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 jet_cli_try_run: fn(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {

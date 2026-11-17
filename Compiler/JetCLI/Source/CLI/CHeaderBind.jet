@@ -58,7 +58,7 @@ JetCLICBindInputs: struct {
 }
 
 jet_cli_c_bind_usage: fn() -> String Never! {
-    "usage: jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n"
+    "Usage: jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n"
 }
 
 // E3208, as the driver reports a binding it could not generate.
@@ -420,8 +420,8 @@ jet_cli_c_bind_done: fn(header: String, shown: String, bound: CBindFiles) -> Jet
     count: bound.bound.len()
     plural: if count == 1 -> "" else -> "s"
     notes := [String]{}
-    loop entry in bound.skipped -> notes.push("note: skipped `{entry.name}`: {entry.reason}\n")
-    jet_cli_done("bound {count} C function{plural} from {header} → {shown}\n", notes.join(""), JET_DRIVER_EXIT_OK)
+    loop entry in bound.skipped -> notes.push("Note: skipped `{entry.name}`: {entry.reason}\n")
+    jet_cli_done("Bound {count} C function{plural} from {header} → {shown}\n", notes.join(""), JET_DRIVER_EXIT_OK)
 }
 
 jet_cli_c_bind_argument_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {

@@ -278,7 +278,7 @@ jet_cli_gc_render: fn(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String N
             return "{out}\nNo automatic GC promotions recorded.\nRemove the effective gc opt-in; ownership already proves every allocation.\n"
         }
         loop site in trace.sites {
-            out = "{out}\n{diagnostic_theme_paint(color, "1", "{site.source}:{site.span_start}..{site.span_end}")}  {site.type_name}\n  scope: {site.scope}\n  policy: {site.policy}\n  reason: {site.reason}\n  allocations: {site.identities.len()}  retained: {jet_cli_gc_retained(site.identities)}\n  identities: {jet_cli_gc_identity_summary(site.identities)}\n  rewrite: {jet_cli_gc_recommendation(site)}\n"
+            out = "{out}\n{diagnostic_theme_paint(color, "1", "{site.source}:{site.span_start}..{site.span_end}")}  {site.type_name}\n  Scope: {site.scope}\n  Policy: {site.policy}\n  Reason: {site.reason}\n  Allocations: {site.identities.len()}  Retained: {jet_cli_gc_retained(site.identities)}\n  Identities: {jet_cli_gc_identity_summary(site.identities)}\n  Rewrite: {jet_cli_gc_recommendation(site)}\n"
         }
         return out
     }

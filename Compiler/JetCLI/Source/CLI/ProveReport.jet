@@ -1626,12 +1626,12 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
         passed: jet_cli_prove_count(tests.items, [Int]{0, 2}, 0, 0)
         failed_tests: jet_cli_prove_count(tests.items, [Int]{0, 2}, 1, 1)
         skipped: jet_cli_prove_count(tests.items, [Int]{0, 2}, 2, 9)
-        stdout = "{stdout}TESTS    unit: {passed} passed, {failed_tests} failed, {skipped} skipped\n"
+        stdout = "{stdout}TESTS    Unit: {passed} passed, {failed_tests} failed, {skipped} skipped\n"
         if jet_cli_prove_count(tests.items, [Int]{4}, 0, 9) > 0 {
-            stdout = "{stdout}         doctest: {jet_cli_prove_count(tests.items, [Int]{4}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{4}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{4}, 2, 9)} skipped\n"
+            stdout = "{stdout}         Doctest: {jet_cli_prove_count(tests.items, [Int]{4}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{4}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{4}, 2, 9)} skipped\n"
         }
         if jet_cli_prove_count(tests.items, [Int]{3}, 0, 9) > 0 {
-            stdout = "{stdout}         property: {jet_cli_prove_count(tests.items, [Int]{3}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{3}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{3}, 2, 9)} skipped\n"
+            stdout = "{stdout}         Property: {jet_cli_prove_count(tests.items, [Int]{3}, 0, 0)} passed, {jet_cli_prove_count(tests.items, [Int]{3}, 1, 1)} failed, {jet_cli_prove_count(tests.items, [Int]{3}, 2, 9)} skipped\n"
         }
         loop item in tests.items {
             if item.state == 1 -> stdout = "{stdout}{item.name}: FAIL\n"
@@ -1658,10 +1658,10 @@ jet_cli_prove_human: fn(members: [JetCLIProveMember], front: JetCLIProveFront, t
         stdout = "{stdout}BUDGETS  {met} met, {failed_budgets} failed, {warned} warned, {budgets.rejected.len()} unavailable · verified canonical reports\n"
         loop fact in budgets.facts {
             if fact.outcome != "pass" || fact.evidence == "unavailable" {
-                stdout = "{stdout}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+                stdout = "{stdout}  Budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
             }
         }
-        loop reason in budgets.rejected -> stdout = "{stdout}  unavailable: {reason}\n"
+        loop reason in budgets.rejected -> stdout = "{stdout}  Unavailable: {reason}\n"
     }
     // The solver section shows only when the solver lens ran; each verified
     // counterexample is an E2950 on stderr.
@@ -1686,10 +1686,10 @@ jet_cli_prove_outside: fn(lenses: [String], tests: JetCLIProveTests, budgets: Je
         loop item in tests.items {
             if item.state < 1 -> next
             kind: if item.kind == {
-                2 -> "runtime"
-                3 -> "property"
-                4 -> "doctest"
-                else -> "unit"
+                2 -> "Runtime"
+                3 -> "Property"
+                4 -> "Doctest"
+                else -> "Unit"
             }
             state: if item.state == {
                 1 -> "failed"
@@ -1703,22 +1703,22 @@ jet_cli_prove_outside: fn(lenses: [String], tests: JetCLIProveTests, budgets: Je
     if !jet_cli_prove_lens_shows(lenses, "contracts") {
         loop contract in tests.contracts {
             if contract.state == 1 {
-                rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: {contract.message.replace("\n", " ").replace("\r", " ")}\n"
+                rows = "{rows}  Contract {contract.marker} at {contract.path}:{contract.line}: {contract.message.replace("\n", " ").replace("\r", " ")}\n"
             }
             if contract.state == -1 {
-                rows = "{rows}  contract {contract.marker} at {contract.path}:{contract.line}: not observed\n"
+                rows = "{rows}  Contract {contract.marker} at {contract.path}:{contract.line}: not observed\n"
             }
         }
     }
     if !jet_cli_prove_lens_shows(lenses, "budgets") {
         loop fact in budgets.facts {
             if fact.outcome != "pass" || fact.evidence == "unavailable" {
-                rows = "{rows}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
+                rows = "{rows}  Budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
             }
         }
-        loop reason in budgets.rejected -> rows = "{rows}  budget unavailable: {reason}\n"
+        loop reason in budgets.rejected -> rows = "{rows}  Budget unavailable: {reason}\n"
     }
-    if rows == "" -> rows = "  none failed or unavailable\n"
+    if rows == "" -> rows = "  None failed or unavailable\n"
     "OUTSIDE SELECTED LENSES\n{rows}"
 }
 
@@ -1736,7 +1736,7 @@ jet_cli_prove_stop_text: fn(item: JetCLIProveTestItem) -[FS]> String Never! {
     // A failed property says how to replay it and what it shrank to.
     replay := ""
     if item.property == .Val(run) {
-        replay = "  property failed on case {run.case_index + 1} (seed {run.seed}; replay with JET_PROP_SEED={run.seed})\n"
+        replay = "  Property failed on case {run.case_index + 1} (seed {run.seed}; replay with JET_PROP_SEED={run.seed})\n"
         if run.minimized != "" -> replay = "{replay}  minimized_inputs: {run.minimized}\n"
     }
     "  {diagnostic_stop_line(item.code, item.message)}\n    --> {item.path}:{item.line}\n{shown}{replay}  {diagnostic_more_line(item.code)}"

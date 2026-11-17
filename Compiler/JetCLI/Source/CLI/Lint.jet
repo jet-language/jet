@@ -39,7 +39,7 @@ jet_cli_lint_a11y: fn(file: String, source: String, color: Bool, json: Bool) -> 
                 if jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
             }
             if lints.len() == 0 {
-                jet_cli_finish(JetDriverVerbOutput{stdout: if json -> "" else -> "ok: `{file}` has no accessibility problems\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+                jet_cli_finish(JetDriverVerbOutput{stdout: if json -> "" else -> "OK: `{file}` has no accessibility problems\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
             }
             count: lints.len()
             stderr: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} accessibility warning{if count == 1 -> "" else -> "s"} found\n"

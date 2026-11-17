@@ -53,7 +53,7 @@ jet_driver_is_a11y_lint: fn(code: String) -> Bool Never! { code == "E2930" || co
 
 // The one dim teaching pointer after a rendered report.
 jet_driver_explain_pointer_line: fn(code: String, color: Bool) -> String Never! {
-    diagnostic_theme_dim(color, "run `jet explain {code}` to learn more")
+    diagnostic_theme_dim(color, "Run `jet explain {code}` to learn more")
 }
 
 // `jet explain <CODE>` for a registered diagnostic code: the essay on stdout,
@@ -76,7 +76,7 @@ jet_driver_explain_code: fn(code: String?, color: Bool) -> JetDriverVerbOutput N
     }
     JetDriverVerbOutput{
         stdout: "",
-        stderr: "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n       jet explain effects [<file>[:<line>]] [--caps] [--json]\n",
+        stderr: "Usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n       jet explain effects [<file>[:<line>]] [--caps] [--json]\n",
         exit_code: JET_DRIVER_EXIT_USAGE,
     }
 }
@@ -269,10 +269,10 @@ jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnos
     stderr := ""
     if {
         count > 0 -> {
-            stderr = jet_driver_problem_report(file, source, shown, "ok: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
+            stderr = jet_driver_problem_report(file, source, shown, "OK: `{file}` has no errors ({count} warning{jet_driver_plural(count)})", color)
         }
         quiet -> {}
-        else -> stderr = "ok: `{file}` has no problems\n"
+        else -> stderr = "OK: `{file}` has no problems\n"
     }
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }

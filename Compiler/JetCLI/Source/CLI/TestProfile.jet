@@ -628,13 +628,13 @@ jet_cli_test_code_suite_summary: fn() -[FS, Env]> String Never! {
     jet_cli_test_code_rows_summary(suite, text)
 }
 
-// `suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`; the
+// `Suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`; the
 // child knows no ledger, so its counts are the rows' own.
 jet_cli_test_code_rows_summary: fn(suite: String, text: String) -> String Never! {
     code: jet_cli_test_code_rows(text, None, [String:String]{})
     passed: code.rows.filter(fn(row) { jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED }).len()
     plural: if code.rows.len() == 1 -> "" else -> "s"
-    "suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
+    "Suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
 }
 
 // A code-suite row's state as its `results` verdict: a row that neither
@@ -703,12 +703,12 @@ jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetC
     if !quiet || diff.lost.len() > 0 {
         text = "{site}: {count} rows against `{shown}`: {diff.lost.len()} lost, {diff.changed.len()} changed, {diff.added.len()} new\n"
     }
-    loop line in diff.lost -> text = "{text}  lost: {line}\n"
+    loop line in diff.lost -> text = "{text}  Lost: {line}\n"
     if !quiet {
-        loop line in diff.changed -> text = "{text}  changed: {line}\n"
-        loop line in diff.added -> text = "{text}  new: {line}\n"
+        loop line in diff.changed -> text = "{text}  Changed: {line}\n"
+        loop line in diff.added -> text = "{text}  New: {line}\n"
     }
-    if diff.lost.len() > 0 -> text = "{text}  run again with `-u` to make these rows the baseline\n"
+    if diff.lost.len() > 0 -> text = "{text}  Run again with `-u` to make these rows the baseline\n"
     text
 }
 

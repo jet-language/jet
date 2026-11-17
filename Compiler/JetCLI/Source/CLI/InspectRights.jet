@@ -343,8 +343,8 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     application: jet_cli_rights_authority(result)
     scope_chain: [JetCLIScopeFrame]{JetCLIScopeFrame{scope: "package", name: application.authority, grants: jet_cli_rights_normalize(application.granted), provenance: JetCLIRightsProvenance{source: application.authority, reason: "selected application authority"}}}
     scope_name: if project -> "project" else -> "explicit-file"
-    text := "rights\nscope: {scope_name}\ntarget: {target}\nevidence: checked_static\nruntime observation: not_run\nprovenance scope: checked_semantic_index\n"
-    text = "{text}authority: {application.authority}\ngranted: {jet_cli_rights_text(application.granted)}\ndenied: {jet_cli_rights_text(application.denied)}\nauthority facts:\n"
+    text := "Rights\nScope: {scope_name}\nTarget: {target}\nEvidence: checked_static\nRuntime observation: not_run\nProvenance scope: checked_semantic_index\n"
+    text = "{text}Authority: {application.authority}\nGranted: {jet_cli_rights_text(application.granted)}\nDenied: {jet_cli_rights_text(application.denied)}\nAuthority facts:\n"
     facts := [JetCLIStatusValue]{}
     loop declaration in EFFECT_VOCABULARY_ROWS {
         marker: if declaration.irreversible -> " (irreversible)" else -> ""
@@ -383,13 +383,13 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         }
         denials: jet_cli_rights_walk(declared, inferred_effects, call_chain, scope_chain)
         verdict: jet_cli_rights_verdict(denials)
-        text = "{text}callable: {view.key} @ {view.source}:{view.span.start}-{view.span.end}\n  declared row: {jet_cli_rights_row_text(declared)}\n  inferred row: {jet_cli_rights_row_text(inferred)}\n"
-        text = "{text}  inferred effects: {jet_cli_rights_text(inferred_effects)}\n  verdict: {verdict}\n"
-        if denials.len() == 0 -> text = "{text}  denials: none\n"
+        text = "{text}Callable: {view.key} @ {view.source}:{view.span.start}-{view.span.end}\n  Declared row: {jet_cli_rights_row_text(declared)}\n  Inferred row: {jet_cli_rights_row_text(inferred)}\n"
+        text = "{text}  Inferred effects: {jet_cli_rights_text(inferred_effects)}\n  Verdict: {verdict}\n"
+        if denials.len() == 0 -> text = "{text}  Denials: none\n"
         denial_values := [JetCLIStatusValue]{}
         loop denial in denials {
             via: if denial.call_chain.len() == 0 -> "none" else -> denial.call_chain.join(" -> ")
-            text = "{text}  denial: {denial.right} ({denial.verdict}) via {via}\n"
+            text = "{text}  Denial: {denial.right} ({denial.verdict}) via {via}\n"
             spans := [JetCLIStatusValue]{}
             if summary == .Val(found) {
                 if found.solved.contains(denial.right) {
