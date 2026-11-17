@@ -6294,8 +6294,14 @@ person cancelling is false with no notice. A file that can't be written,
 or no dialog to ask with, is false, and a notice in the app's notice list
 names the file and why. On Linux the desktop portal's save dialog
 (org.freedesktop.portal.FileChooser) asks, and the path of the file:// URI
-it answers with is written. The other targets keep that notice: their save
-dialogs are not built yet.
+it answers with is written. A page hands `bytes` to the browser as a
+download named `suggested`, typed by the first kind whose pattern the name
+matches (else the first kind). The browser keeps it in its downloads folder,
+or asks the person where. A page never learns where the file went, or
+whether the person cancelled the browser's dialog, so the call is true once
+the browser has the download. Run under node, with no page, it is false
+with a notice. macOS and Windows keep that notice too: their save dialogs
+are not built yet.
 
 A browser asks for a device permission itself, when a page first uses the
 device, and keeps no settings page of the app's, so `app.ask`,

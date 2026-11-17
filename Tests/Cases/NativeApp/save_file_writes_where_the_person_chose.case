@@ -2,8 +2,10 @@
 # a file and writes it there, in one step. On Linux the desktop portal's
 # save dialog (org.freedesktop.portal.FileChooser) asks: it gets the
 # suggested name and the kinds of file to offer, and its answer is a
-# file:// URI, decoded to the path the file is written to. With no dialog
-# to ask, nothing is saved and a notice that names the file says so.
+# file:// URI, decoded to the path the file is written to. A page hands the
+# bytes to the browser as a download under the suggested name, typed by the
+# kind the name matches. With no dialog to ask, or no page to download in,
+# nothing is saved and a notice that names the file says so.
 fixture: SaveFileWritesWhereThePersonChose.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -23,3 +25,17 @@ env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
 exit: 0
 stdout: ~ "saved: false" # no dialog to ask, so nothing is written
 stdout: ~ "notice: Couldn't save board.csv:" # the notice names the file
+when tool node
+step: jet build --target web main.jet
+exit: 0
+copy: download.mjs .jet/build/download.mjs
+step: node download.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "saved: true\ndownloaded: board.csv text/csv\ntitle,status\nFix the gate,done\n"
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: ~ "saved: false" # node has no page, so nothing is downloaded
+stdout: ~ "notice: Couldn't save board.csv: there is no page to download it in" # the notice names the file and why
+end when
