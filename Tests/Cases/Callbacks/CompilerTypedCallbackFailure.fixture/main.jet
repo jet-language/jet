@@ -1,0 +1,159 @@
+// The Core calls the compiler types by its own signature fail with their
+// callback's failure too: a route handler, a query replay, a form validator,
+// a table row transform and an expiring secret's loan each reach the caller
+// as the program's own `KeyError`, beside the call's own failure, and a
+// callback that can't fail leaves the call failing only with its own.
+use {
+    crypto: core.crypto
+    vault: core.crypto.vault
+    core.web.forms
+    core.web.query
+    core.web.router
+    core.web.table
+}
+
+#Error
+KeyError: enum {
+    Blank,
+}
+
+page: fn(navigation: WebNavigation) -> String KeyError! {
+    if navigation.path == "/blank" -> return Err(KeyError.Blank)
+    Ok("page {navigation.path}")
+}
+
+replay: fn(key: String) KeyError! {
+    if key == "blank" -> return Err(KeyError.Blank)
+    Ok()
+}
+
+named: fn(value: String) KeyError! {
+    if value == "" -> return Err(KeyError.Blank)
+    Ok()
+}
+
+doubled: fn(value: Int) -> Int KeyError! {
+    if value == 0 -> return Err(KeyError.Blank)
+    Ok(value * 2)
+}
+
+routes: fn(pattern: String) -> Int (WebRouterError | KeyError)! {
+    routed: router.route(router.new(), pattern, [], [], page)
+    routed.routes.len()
+}
+
+replays: fn(key: String) -> Int (WebQueryError | KeyError)! {
+    created := query.new(key, query.WebQuerySeed{data: "data", generation: 1, subscribers: 0})
+    query.retry(created, replay)
+}
+
+validates: fn(value: String) -> String (WebFormError | KeyError)! {
+    field: WebFormFieldSpec{
+        name: "name",
+        value_type: .String,
+        required: false,
+        default: None,
+        label: "Name",
+        control: .Text,
+        group: None,
+        wire_name: "name",
+    }
+    input: forms.input("Profile", [field])
+    typed := forms.typed(input, "save")
+    forms.typed_set(typed, "name", value)
+    chain: forms.typed_validate_field(typed, "name", .Blur, named)
+    forms.typed_validation_render(chain)
+}
+
+updates: fn(key: String) -> Int (WebTableError | KeyError)! {
+    rows := table.new("Rows", [Int]{0, 1, 2})
+    table.update_row(rows, key, doubled)
+    table.remove_row(rows, key)
+}
+
+lent: fn(strict: Bool) -> Int KeyError! {
+    if strict -> return Err(KeyError.Blank)
+    Ok(1)
+}
+
+lends: fn(strict: Bool) -> Int (Expired | KeyError)! {
+    clock := Clock.new(100)
+    ttl := Duration.seconds(1) ?? panic("duration")
+    key := crypto.SigningKey.new_random() ?? panic("key")
+    secret := vault.ExpiringSecret.new(key, ttl, clock)
+    secret.with(fn(borrowed) {
+        _: borrowed.public_key()
+        lent(strict)
+    })
+}
+
+plain_route: fn() -> Int WebRouterError! {
+    routed: router.route(router.new(), "/plain", [], [], fn(navigation) { navigation.path })
+    routed.routes.len()
+}
+
+route_line: fn(pattern: String) -> String {
+    if routes(pattern) == {
+        .Ok(n) -> "routes {n}"
+        .Err(e) -> if e == {
+            .KeyError -> "key"
+            .WebRouterError -> "router"
+        }
+    }
+}
+
+replay_line: fn(key: String) -> String {
+    if replays(key) == {
+        .Ok(n) -> "generation {n}"
+        .Err(e) -> if e == {
+            .KeyError -> "key"
+            .WebQueryError -> "query"
+        }
+    }
+}
+
+validate_line: fn(value: String) -> String {
+    if validates(value) == {
+        .Ok(shown) -> shown
+        .Err(e) -> if e == {
+            .KeyError -> "key"
+            .WebFormError -> "form"
+        }
+    }
+}
+
+update_line: fn(key: String) -> String {
+    if updates(key) == {
+        .Ok(n) -> "row {n}"
+        .Err(e) -> if e == {
+            .KeyError -> "key"
+            .WebTableError -> "table"
+        }
+    }
+}
+
+lend_line: fn(strict: Bool) -> String {
+    if lends(strict) == {
+        .Ok(n) -> "lent {n}"
+        .Err(e) -> if e == {
+            .KeyError -> "key"
+            .Expired -> "expired"
+        }
+    }
+}
+
+run: fn() {
+    print(route_line("/rows"))
+    print(route_line("/blank"))
+    print(route_line(""))
+    print(replay_line("rows"))
+    print(replay_line("blank"))
+    print(validate_line("Ada"))
+    print(validate_line(""))
+    print(update_line("1"))
+    print(update_line("0"))
+    print(update_line("9"))
+    print(lend_line(false))
+    print(lend_line(true))
+    print(plain_route() ?? -1)
+}

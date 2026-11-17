@@ -1,0 +1,18 @@
+# The Core calls the compiler types by its own signature fail with their
+# callback's failure as the other Core calls do: a route handler, a query
+# replay, a form validator, a table row transform and an expiring secret's
+# loan each reach the caller as the program's `KeyError` beside the call's own
+# failure, and a handler that can't fail leaves the route failing only with
+# `WebRouterError`. Nothing is converted on the way, on every tier.
+fixture: CompilerTypedCallbackFailure.fixture
+step check: jet check main.jet
+exit: 0
+step run: jet run main.jet
+exit: 0
+stdout: = "routes 1\nkey\nrouter\ngeneration 2\nkey\nname:valid\nkey\nrow 2\nkey\ntable\nlent 1\nkey\n1\n"
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: == run
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == run

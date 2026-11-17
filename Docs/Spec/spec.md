@@ -5355,8 +5355,9 @@ The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
 `facts` read values and bounded lifecycle facts. `mark_stale(q)` marks a
 query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
-`retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
-in-flight operation was canceled. `mutate` checks the key and optional
+`retry(q, replay)` are fallible operations, and a failure of `replay` is
+`retry`'s, unchanged; `cancel(q)` returns whether an in-flight operation was
+canceled. `mutate` checks the key and optional
 expected value, applies the mutation, and returns a `WebMutationState`;
 `mutate_with_invalidations` additionally validates target keys.
 

@@ -2315,7 +2315,8 @@ the payload out of its slot and ends the owned payload's scope, so its
 The sole wipe host operation is the plain-byte `crypto.__wipe` kernel beneath `crypto.wipe`.
 No observer or loan callback crosses that host boundary.
 Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
-is the fallible credential accessor. This is Main's owner-approved, veto-able
+is the fallible credential accessor: it fails with `Expired`, or with what its
+callback fails with, unchanged. This is Main's owner-approved, veto-able
 private-field correction following Measurement/LogSpan, not a plaintext
 `secret()` accessor that bypasses expiry. Debug/Printable are opted out.
 

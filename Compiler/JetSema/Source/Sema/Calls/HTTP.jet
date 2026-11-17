@@ -987,7 +987,20 @@ sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method:
         diagnostics.push(sema_error("E0904", span, "`core.web.forms.{member}` has no typed call contract", "the opaque form method uses its canonical native route", "provide the registered Core typed signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    all_params: sema_call_core_parameter_records(signature, [Type]{}, span, false)
+    // A form method whose callback may fail is generic in the callback's
+    // failure; its arguments infer it, and a callback that can't fail leaves
+    // a result that can't fail either.
+    type_args := [Type]{}
+    if signature.type_parameters.len() > 0 {
+        shape: sema_call_core_parameter_records(signature, [Type]{}, span, false)
+        shape_params := [SemaCallParam]{}
+        loop (index, parameter) in shape {
+            if index > 0 -> shape_params.push(parameter)
+        }
+        binding: sema_call_bind_args(method, shape_params, updated_args, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        type_args = sema_call_core_infer_type_args(signature, shape_params, binding, updated_args, [Type]{}, expected, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    all_params: sema_call_core_parameter_records(signature, type_args, span, false)
     params := [SemaCallParam]{}
     loop (index, parameter) in all_params {
         if index > 0 -> params.push(parameter)
@@ -999,9 +1012,11 @@ sema_call_try_web_form_method: fn(receiver: Expr, receiver_value: TExpr, method:
         values.push(argument)
         implicit_clones.push(false)
     }
-    result: signature.return_type ?? Type.Named{name: "Unit"}
+    declared: signature.return_type ?? Type.Named{name: "Unit"}
+    names: loop parameter in signature.type_parameters -> parameter.name
+    result: sema_owned_infallible(sema_inference_substitute_type(declared, names, type_args))
     fallibility: sema_call_failure_carrier(Val(result))
-    if !sema_call_core_record_effects(record, span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+    if !sema_call_core_record_effects(record, span, type_args, result, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     value: sema_call_core_tree(record, values, span, [Type]{}, implicit_clones, result, fallibility, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
