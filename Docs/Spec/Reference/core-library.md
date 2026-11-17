@@ -5091,7 +5091,7 @@ rules. The implementation is in
 | Signature | Result | Description |
 |---|---|---|
 | `spawn<S, M>(state: S, handler: fn(S, M) -> S) -> Actor<M>` | actor | Start an actor whose state begins as `state`; it stops when `handler` fails or when it is stopped. |
-| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`; when `handler` fails, the message is dropped and `strategy` decides what follows. |
+| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`. Each message is handled in a `task.group` child, so a handler that panics fails its turn as one that fails does; the message is dropped and `strategy` decides what follows. |
 | `actor.send(message: M) -[Time.Wait]> SendError<M>!` | — | Queue `message`; fails with the message back once the actor has stopped. |
 | `actor.ask<R, E>(request: fn(Reply<R>) -> M E!) -[Time.Wait]> R? E!` | answer | Send the message `request` builds around a fresh `Reply<R>` and wait until the actor has handled it: the handler's answer, or None when the actor stopped first or the handler failed or did not answer. A failure of `request` is the call's, unchanged, and sends nothing. |
 | `actor.stop()` | — | Stop the actor once it has handled the messages already queued; later sends fail. |

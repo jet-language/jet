@@ -2240,6 +2240,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // the spawn named it and no callable is expected of it. The fact and the
     // propagation it harvests belong to this body alone, never a nested one.
     task_body: !inline_loop && expected == None && context.taskgroups.spawn_body
+    // A scoped child's captures it has no copy of are left to the spawn
+    // check, which borrows them until the join (TCaptureFacts.lent).
+    scoped_task: task_body && context.taskgroups.spawn_scoped
+    left_captures := [Int]{}
     lambda_context.taskgroups.spawn_body = false
     lambda_context.task_body_propagates = false
     if !inline_loop {
@@ -2820,6 +2824,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                                     sema_expression_lambda_append_name(lambda_work.meta.cloned_captures, binding.symbol.name)
                                     lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
                                 }
+                                // A scoped child neither copies nor takes it:
+                                // the spawn check borrows the owner's place
+                                // until the join, or takes the value there when
+                                // no loan reaches it
+                                // (sema_taskgroup_check_lambda_captures).
+                                scoped_task -> left_captures.push(captures.len() - 1)
                                 borrowed -> {
                                     diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, task_body, lambda.span))
                                     // A task still proves its result and detach
@@ -2827,8 +2837,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                                     if !task_body -> return None
                                 }
                                 else -> {
+                                    // The owner gives the value up: a later use
+                                    // of it, or another turn of an enclosing
+                                    // loop, is E0121.
                                     sema_expression_lambda_append_name(lambda_work.meta.moved_captures, binding.symbol.name)
-                                    if !sema_ownership_mark_move(lambda_state, Expr.Ident{name: binding.symbol.name, span: binding.symbol.span, id: AST_NODE_GENERATED}, lambda_scopes, "an escaping lambda", diagnostics) {
+                                    consumer: if task_body -> "a task that captures it" else -> "an escaping lambda"
+                                    if !sema_ownership_mark_move(state, Expr.Ident{name: binding.symbol.name, span: lambda.span, id: AST_NODE_GENERATED}, lambda_scopes, consumer, diagnostics) {
                                         return None
                                     }
                                 }
@@ -2982,7 +2996,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         })
     }
     fn_ty := Type.Fn{params: param_types, ret: ret_slot, effect_bound: effect_bound, param_contract: expected_contract, call_metadata: lambda_metadata, return_view_provenance: lambda_return_provenance}
-    captures_facts := TCaptureFacts{escapes: escapes, needs_fn_mut: lambda_work.meta.needs_fn_mut, mutable: lambda_work.meta.mut_captures, cloned: lambda_work.meta.cloned_captures, frozen: lambda_work.meta.frozen_captures, materialized: lambda_work.meta.materialized_captures, moved: lambda_work.meta.moved_captures, lent: [Int]{}}
+    captures_facts := TCaptureFacts{escapes: escapes, needs_fn_mut: lambda_work.meta.needs_fn_mut, mutable: lambda_work.meta.mut_captures, cloned: lambda_work.meta.cloned_captures, frozen: lambda_work.meta.frozen_captures, materialized: lambda_work.meta.materialized_captures, moved: lambda_work.meta.moved_captures, lent: left_captures}
     sema_ownership_note_lambda(state, lambda_state, lambda.span, captures_facts)
     sema_ownership_keep_mutations(state, lambda_state)
     // A deferred body's reads and writes of enclosing bindings count for

@@ -4135,8 +4135,11 @@ task { work() }
 ```
 
 Copyable captures are copied at closure creation; owned non-copyable captures
-move. A task-boundary value must be sendable (**E1102**). Mutable or otherwise
-non-sendable captures report **E1101** or **E1102**. A `view` borrow, a struct
+move, so a later use of the owner, or another turn of a loop around the task,
+is **E0121**. A group child or a combinator branch borrows a non-copyable
+capture instead (see below). A task-boundary value must be sendable
+(**E1102**). Mutable or otherwise non-sendable captures report **E1101** or
+**E1102**. A `view` borrow, a struct
 containing `ref` fields, a trait value, or a closure with non-sendable captures
 cannot cross. Give ownership to a child with `task &&name`, make an immutable owned
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
@@ -4590,6 +4593,13 @@ an owner that remains accessible through that join. Reads are unrestricted;
 write borrows require a proof of non-overlap. Distinct fields and distinct
 constant indexes are disjoint, while dynamic places are overlapping. Two
 children reaching one place report **E1101**.
+
+A non-copyable capture, such as a function value or a struct holding one, is
+borrowed the same way and is never taken from its owner: a loop that spawns a
+child calling the same function value on every turn keeps that value. A
+branch of `task.all`, `task.race` or `task.any` borrows reads the same way
+until the combinator returns. A child takes a non-copyable capture it writes,
+or one whose owner the group cannot outlive, as any task does.
 
 A view or write window whose owner outlives the group is borrowed the same
 way: a child that captures it holds a loan on the place it looks into until

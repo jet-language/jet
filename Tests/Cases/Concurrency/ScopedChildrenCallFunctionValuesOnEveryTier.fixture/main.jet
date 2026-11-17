@@ -1,0 +1,95 @@
+// A scoped child (a `task.group` child or a `task.any` branch) that calls a
+// function value borrows it until the join, so the owner's value outlives
+// every turn of the loop around the group. Each run below turns a loop four
+// or five times: a child that took the value instead freed it on the first
+// turn, and a later turn read freed memory.
+
+Strategy: enum {
+    Stop,
+    Restart(limit: Int),
+}
+
+Plan: struct<S> {
+    handler: fn(S) -> S,
+    strategy: Strategy,
+    name: String,
+}
+
+bump: fn(value: Int) -> Int { value + 1 }
+
+step: fn(state: Int, message: Int) -> Int {
+    if message < 0 -> panic("negative message")
+    state + message
+}
+
+// A generic child calls a field of the plan it borrows; the plan's other
+// fields stay intact.
+through_plan: fn<S>(plan: &&Plan<S>, start: &&S) -> S {
+    current := start
+    loop turn in 0..4 {
+        task.group group {
+            attempt: task plan.handler(current)
+            if attempt.join() == {
+                .Ok(next) -> { current = next }
+                .Err(_) -> print("plan turn {turn} failed")
+            }
+        }
+        print("plan {turn}: {plan.name}, restart {plan.strategy == .Restart(2)}")
+    }
+    current
+}
+
+// A child calls a function value held by an owned parameter, by a read
+// parameter, and by a local.
+through_owned: fn(handler: &&fn(Int) -> Int) -> Int {
+    current := 0
+    loop _ in 0..4 {
+        task.group group {
+            attempt: task handler(current)
+            current = attempt.join() ?? -1
+        }
+    }
+    current
+}
+
+through_read: fn(handler: fn(Int) -> Int) -> Int {
+    current := 0
+    loop _ in 0..4 {
+        task.group group {
+            attempt: task handler(current)
+            current = attempt.join() ?? -1
+        }
+    }
+    current
+}
+
+through_local: fn() -> Int {
+    handler := bump
+    current := 0
+    loop _ in 0..4 {
+        task.group group {
+            attempt: task handler(current)
+            current = attempt.join() ?? -1
+        }
+    }
+    current
+}
+
+// A generic `task.any` branch calls the handler; a panicking turn keeps the
+// state it had.
+through_any: fn<S, M>(handler: &&fn(S, M) -> S, start: &&S, messages: [M]) -> S {
+    current := start
+    loop message in messages -> current = task.any {handler(current, message)} ?? current
+    current
+}
+
+run: fn() {
+    label := "plan"
+    print(through_plan(Plan<Int>{handler: bump, strategy: .Restart{limit: 2}, name: label}, 0))
+    offset := 10
+    print(through_owned(bump))
+    print(through_owned(fn(value) { value + offset }))
+    print(through_read(bump))
+    print(through_local())
+    print(through_any(step, 100, [Int]{1, 2, -3, 4, 5}))
+}

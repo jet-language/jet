@@ -959,21 +959,27 @@ priv taken_stream: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
 priv tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> HTTPSecure? Never! {
     tcp: taken_stream(accepted) ?? return None
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
+    // The three methods drive the one TLS session; each lambda holds the
+    // shared handle to it, and the stream closes once, through `close`.
+    session: Shared{secure}
     staged: Shared{[U8]{}}
     Val(HTTPSecure{
         read_into: fn(limit: Int, deadline: Duration) {
+            stream: session.guard_read()
             guard := staged.guard_edit()
-            secure.read_into(guard.value, limit, deadline: deadline)
+            stream.value.read_into(guard.value, limit, deadline: deadline)
         },
         staged: staged,
         write_all: fn(bytes: [U8], deadline: Duration) {
-            if secure.write_bytes(bytes, deadline: deadline) == {
+            stream: session.guard_read()
+            if stream.value.write_bytes(bytes, deadline: deadline) == {
                 .Ok(_) -> true
                 .Err(_) -> false
             }
         },
         close: fn() {
-            if secure.close() == {
+            stream: session.guard_read()
+            if stream.value.close() == {
                 .Ok(_) -> {}
                 .Err(_) -> {}
             }

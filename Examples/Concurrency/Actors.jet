@@ -19,12 +19,13 @@ count: fn(total: Int, message: Count) -> Int {
     }
 }
 
-// The worker refuses a negative amount by failing; its supervisor decides
-// what happens next.
+// The worker refuses a negative amount by failing and panics on a huge one;
+// its supervisor decides what happens next either way.
 checked: fn(total: Int, message: Count) -> Int {
     if message == {
         .Add(amount) -> {
             if amount < 0 -> return Err("negative amount {amount}")
+            if amount > 1000 -> panic("amount {amount} is too large")
             total + amount
         }
         .Total(reply) -> {
@@ -45,12 +46,15 @@ run: fn() {
     counter.stop()
     counter.send(.Add(1)) ?? print("counter refuses sends after stop")
 
-    // The supervisor restarts the worker from `fresh()` once, then stops it.
-    worker: actor.supervise(fresh, checked, .Restart{limit: 1})
+    // The supervisor restarts the worker from `fresh()` twice, then stops it.
+    // Each message runs in a group child, so a panic fails only its turn.
+    worker: actor.supervise(fresh, checked, .Restart{limit: 2})
     worker.send(.Add(1)) ?? panic("worker stopped")
     print("worker: {worker.ask(Count.Total) ?? -1}")
     worker.send(.Add(-1)) ?? panic("worker stopped")
-    print("after a restart: {worker.ask(Count.Total) ?? -1}")
+    print("after a failed turn: {worker.ask(Count.Total) ?? -1}")
+    worker.send(.Add(5000)) ?? panic("worker stopped")
+    print("after a panicked turn: {worker.ask(Count.Total) ?? -1}")
     worker.send(.Add(-2)) ?? panic("worker stopped")
     // A stopped actor answers no ask.
     if worker.ask(Count.Total) == None -> print("worker stopped after its restart limit")

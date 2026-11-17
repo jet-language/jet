@@ -1344,9 +1344,18 @@ testing_history_derived: fn<T>(command_type: &&String, variants: [String], make:
         kinds.push(fields)
         distributions.push(HistoryDistribution{operation: parts[0].copy(), weight: 1})
     }
+    // `generate` and `rebuild` both build commands with `make`; each lambda
+    // holds the shared handle to the one function value.
+    maker: Shared{make}
     HistoryStrategy<T>{
-        generate: fn(rng: HistoryRNG, case_index: Int, max_steps: Int) { testing_history_derived_generate<T>(rng, case_index, max_steps, command_type, names, kinds, make) },
-        rebuild: fn(case: HistoryCase) { testing_history_derived_rebuild<T>(case, names, kinds, make) },
+        generate: fn(rng: HistoryRNG, case_index: Int, max_steps: Int) {
+            held: maker.guard_read()
+            testing_history_derived_generate<T>(rng, case_index, max_steps, command_type, names, kinds, held.value)
+        },
+        rebuild: fn(case: HistoryCase) {
+            held: maker.guard_read()
+            testing_history_derived_rebuild<T>(case, names, kinds, held.value)
+        },
         valid: fn(typed: TypedHistoryCase<T>) { testing_history_case_error(typed.case) == "" },
         bounds: HistoryBounds{max_steps: 64, max_resources: 64, max_shrink_attempts: 10000, max_discarded_cases: 100},
         distributions: distributions,
