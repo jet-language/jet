@@ -6118,7 +6118,9 @@ grant. A hook path no function marked `#On(build.before_write)` declares,
 an action with no command, and a step that fails or writes no file are
 E3506, naming the executable and where `post_link` was written; a hook that
 doesn't run stops with its report's own code, as a link hook does. Each
-leaves no executable. Example:
+leaves no executable. Examples:
+[`Examples/Tooling/Build/PostLinkManifest`](../../Examples/Tooling/Build/PostLinkManifest/tools.jet),
+which embeds a manifest in the executable,
 [`Tests/Cases/BuildEntry/post_link_step_signs_artifact.case`](../../Tests/Cases/BuildEntry/post_link_step_signs_artifact.case).
 Every other command, and a web build, refuses a post-link step with E2104.
 

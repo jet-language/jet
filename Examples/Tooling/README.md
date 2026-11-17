@@ -21,6 +21,7 @@ Run a lesson from the repository root, for example `jet run Examples/Tooling/<Le
 - [BuildOptions](Build/BuildOptions/) — Build options never change what a program prints, only how hard it is optimized: jet run --profile=fast run.jet                  optimize: O2, from the…
 - [BuildProfiles](Build/BuildProfiles/) — Named build profiles — an example package that declares custom profiles in its `build {}` block.
 - [EmitTiers](Build/EmitTiers.jet) — `jet emit` prints one compiler tier of a file, the same tree as text or, with `--json`, as the `emit` status; `--fn NAME` keeps one function: jet emit --ast…
+- [PostLinkManifest](Build/PostLinkManifest/) — A post-link step: `jet build --profile=shipped` embeds Manifest.txt in the executable it writes, through the `BuildAction` a `#On(build.before_write)` hook returns.
 - [RunDefault](Build/RunDefault/) — The package default: bare `jet run` selects this file.
 
 ## Debugging

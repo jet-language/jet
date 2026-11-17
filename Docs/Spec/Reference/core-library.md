@@ -6128,16 +6128,18 @@ never share a key.
 A server's push services are named once in the graph, with the variables
 that hold their keys: `.push(apns: app.apns(key_env:, key_id_env:, team:,
 topic:), fcm: app.fcm(service_account_env:), web: app.web_push(key_env:,
-contact:))`, each argument optional. The server reads each variable once,
-as it starts (`bind`, `serve`, `serve_on` or the first `serve_once`), and
+contact:))`, each argument optional. That call reads each variable once,
+so only an app that names push services reaches `Env`, and the server
 keeps its value only as the service's key. A variable holds the file
 itself (the `.p8` key, the service account's JSON, the VAPID key's PEM) or
 its base64 on one line; the FCM project is the service account's
 `project_id`. A variable that is unset, empty or holds no key stops the
-start before it listens, naming the variable, the maker's argument and the
-`.push` call (E2416, exit 78), and so does a second `.push`, naming both
-calls. A device whose service the graph doesn't name is skipped and kept
-with its reason. APNs pushes go to its production service.
+server as it starts (`bind`, `serve`, `serve_on` or the first
+`serve_once`), before it listens, naming the variable, the maker's
+argument and the `.push` call (E2416, exit 78), and so does a second
+`.push`, naming both calls. A device whose service the graph doesn't name
+is skipped and kept with its reason. APNs pushes go to its production
+service.
 `app.notify(title:, body:, open: state)`, written without `to:`, shows a
 notification on this device with no server. On Linux the desktop's
 notification service (org.freedesktop.Notifications on the session bus)

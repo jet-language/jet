@@ -1,0 +1,11 @@
+# A server whose graph names a push service's variable that is unset stops
+# as it binds, before it listens: E2416, exit 78, naming the variable, the
+# maker's argument that names it and the `.push` call. Crewboard's graph
+# names `VAPID_KEY` for Web Push, and the environment has no `VAPID_KEY`.
+fixture: AssigneePushIsSentAfterCommitOnly.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -A main.jet
+exit: 78
+stdout: = ""
+stderr: ^= "Stop [E2416]: `VAPID_KEY` (`app.web_push(key_env:)`) is unset, so the app's push services can't start\n  --> main.jet:174 in run\n"

@@ -2149,33 +2149,19 @@ priv(package) push: module {
         held.value.last.copy()
     }
 
-    // Sets up the push services the graph's `.push` names, from the
-    // variables its makers name, as a server starts (`App.push`): "" once
-    // they are set up or when the graph names none, and otherwise why the
-    // start is refused, ending in the `.push` call's place. Each variable is
-    // read once, here, and its value is kept only as the service's key.
-    start: fn() -[Env, Net]> String Never! {
+    // Sets up the push services the graph's `.push` named, from the keys
+    // it read (`App.push`), as a server starts: "" once they are set up or
+    // when the graph names none, and otherwise why the start is refused,
+    // ending in the `.push` call's place. It reads no variable itself, so a
+    // server whose graph names no push services never reaches `Env`.
+    start: fn() -[Net]> String Never! {
         named: app_push_named() ?? return ""
         place: "\n  --> {named.at.file}:{named.at.line} in {named.at.function}"
         if named.again == .Val(again) {
             return "The app gives its push services twice: give them in one `.push`, as at {named.at.file}:{named.at.line}.\n  --> {again.file}:{again.line} in {again.function}"
         }
-        settings := push_wire.PushSettings{apns: None, fcm: None, web: None}
-        if named.apns == .Val(apns) {
-            key: app_push_variable(apns.key_env, "app.apns", "key_env") ?? return "{err.reason}{place}"
-            key_id: app_push_variable(apns.key_id_env, "app.apns", "key_id_env") ?? return "{err.reason}{place}"
-            settings.apns = Val(push_wire.PushAPNs{origin: push_wire.PUSH_APNS_ORIGIN, team_id: apns.team.copy(), key_id: key_id.trim(), key: push_wire.push_key_text(key), key_from: app_push_source(apns.key_env, "app.apns", "key_env"), topic: apns.topic.copy()})
-        }
-        if named.fcm == .Val(fcm) {
-            account: app_push_variable(fcm.service_account_env, "app.fcm", "service_account_env") ?? return "{err.reason}{place}"
-            source: app_push_source(fcm.service_account_env, "app.fcm", "service_account_env")
-            settings.fcm = Val(push_wire.push_fcm_account(push_wire.push_key_text(account), source) ?? return "{err.reason}{place}")
-        }
-        if named.web == .Val(web) {
-            key: app_push_variable(web.key_env, "app.web_push", "key_env") ?? return "{err.reason}{place}"
-            settings.web = Val(push_wire.PushWeb{contact: web.contact.copy(), key: push_wire.push_key_text(key), key_from: app_push_source(web.key_env, "app.web_push", "key_env")})
-        }
-        push_wire.push_configure(settings) ?? return "{err.reason}{place}"
+        if named.refused != "" -> return "{named.refused}{place}"
+        push_wire.push_configure(named.settings) ?? return "{err.reason}{place}"
         ""
     }
 }
@@ -2476,19 +2462,25 @@ App: struct {
     // Gives the server the push services `app.notify(to:)` sends through:
     // Apple's (`apns`), Google's (`fcm`) and the browsers' (`web`), each
     // made by its maker (`apns`, `fcm`, `web_push`), which names the
-    // environment variables that hold its keys. A server reads them once as
-    // it starts, as secrets; a variable that is unset or empty, or that
-    // holds no key its service takes, refuses the start, naming the
-    // variable and this call's place. A service left out sends nothing: a
-    // push to one of its devices is skipped. A second `.push` on the graph
-    // refuses the start, naming both places. Gives back the graph.
-    push: fn(self, *, apns: APNs?{None}, fcm: FCM?{None}, web: WebPush?{None}, at: SourceLocation{#caller}) -> App Never! {
+    // environment variables that hold its keys. This call reads them once,
+    // as secrets, so only an app that names push services reaches `Env`;
+    // a variable that is unset or empty, or that holds no key its service
+    // takes, refuses the server's start, naming the variable and this
+    // call's place. A service left out sends nothing: a push to one of its
+    // devices is skipped. A second `.push` on the graph refuses the start,
+    // naming both places. Gives back the graph.
+    push: fn(self, *, apns: APNs?{None}, fcm: FCM?{None}, web: WebPush?{None}, at: SourceLocation{#caller}) -[Env]> App Never! {
         held := APP_GRAPH.guard_edit()
         if held.value.push == .Val(first) {
-            held.value.push = Val(AppPush{apns: first.apns.copy(), fcm: first.fcm.copy(), web: first.web.copy(), at: first.at.copy(), again: Val(at)})
-        } else {
-            held.value.push = Val(AppPush{apns: apns, fcm: fcm, web: web, at: at, again: None})
+            held.value.push = Val(AppPush{settings: first.settings.copy(), refused: first.refused.copy(), at: first.at.copy(), again: Val(at)})
+            return self.copy()
         }
+        named := AppPush{settings: push_wire.PushSettings{apns: None, fcm: None, web: None}, refused: "", at: at, again: None}
+        if app_push_read(apns, fcm, web) == {
+            .Ok(settings) -> { named.settings = settings }
+            .Err(problem) -> named.refused = problem.reason
+        }
+        held.value.push = Val(named)
         self.copy()
     }
 
@@ -2880,12 +2872,12 @@ web_push: fn(key_env: String, contact: String) -> WebPush Never! {
     WebPush{key_env: key_env, contact: contact}
 }
 
-// The push services a graph's `.push` names, where it named them, and where
-// a second `.push` named them again.
+// The push services a graph's `.push` names, with the keys it read, or why
+// they can't start (`refused`, "" when they can), where it named them, and
+// where a second `.push` named them again.
 priv AppPush: struct {
-    apns: APNs?,
-    fcm: FCM?,
-    web: WebPush?,
+    settings: push_wire.PushSettings,
+    refused: String,
     at: SourceLocation,
     again: SourceLocation?,
 }
@@ -2896,8 +2888,30 @@ priv app_push_named: fn() -> AppPush? Never! {
     held.value.push.copy()
 }
 
-// The value of the variable `name` that `argument` of `maker` names, as a
-// server starts; an unset or empty variable fails.
+// The settings of the services `apns`, `fcm` and `web` name, each from the
+// variables its maker names, read once here: a variable that is unset,
+// empty or holds no key its service takes fails, naming it.
+priv app_push_read: fn(apns: APNs?, fcm: FCM?, web: WebPush?) -[Env]> push_wire.PushSettings push_wire.PushError! {
+    settings := push_wire.PushSettings{apns: None, fcm: None, web: None}
+    if apns == .Val(given) {
+        key: app_push_variable(given.key_env, "app.apns", "key_env") ?? return Err(err)
+        key_id: app_push_variable(given.key_id_env, "app.apns", "key_id_env") ?? return Err(err)
+        settings.apns = Val(push_wire.PushAPNs{origin: push_wire.PUSH_APNS_ORIGIN, team_id: given.team.copy(), key_id: key_id.trim(), key: push_wire.push_key_text(key), key_from: app_push_source(given.key_env, "app.apns", "key_env"), topic: given.topic.copy()})
+    }
+    if fcm == .Val(given) {
+        account: app_push_variable(given.service_account_env, "app.fcm", "service_account_env") ?? return Err(err)
+        source: app_push_source(given.service_account_env, "app.fcm", "service_account_env")
+        settings.fcm = Val(push_wire.push_fcm_account(push_wire.push_key_text(account), source) ?? return Err(err))
+    }
+    if web == .Val(given) {
+        key: app_push_variable(given.key_env, "app.web_push", "key_env") ?? return Err(err)
+        settings.web = Val(push_wire.PushWeb{contact: given.contact.copy(), key: push_wire.push_key_text(key), key_from: app_push_source(given.key_env, "app.web_push", "key_env")})
+    }
+    Ok(settings)
+}
+
+// The value of the variable `name` that `argument` of `maker` names; an
+// unset or empty variable fails.
 priv app_push_variable: fn(name: String, maker: String, argument: String) -[Env]> String push_wire.PushError! {
     value: sys.get(name) ?? return Err(push_wire.PushError{reason: "{app_push_source(name, maker, argument)} is unset, so the app's push services can't start"})
     if value.trim() == "" {

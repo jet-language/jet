@@ -60,11 +60,13 @@ move_mark_fixture_accept: fn(file: String) {
 }
 
 // A non-escaping lambda borrows a capture it only reads, so the captured name
-// stays usable beside it and after it; a lambda that escapes still owns a
-// capture it cannot clone.
+// stays usable beside a read argument and after the call; the borrow lasts
+// through the call that receives the lambda, so a write argument beside it is
+// refused; a lambda that escapes still owns a capture it cannot clone.
 #Test("lambda_capture_fixtures") {
     fixture_root: "Compiler/JetSema/Tests/Fixtures"
     move_mark_fixture_accept("{fixture_root}/CaptureReadBesideArgument.fixture/CaptureReadBesideArgument.jet")
     move_mark_fixture_reject("{fixture_root}/CaptureEscapingMove.fixture/CaptureEscapingMove.jet", "E0121")
+    move_mark_fixture_reject("{fixture_root}/CaptureReadHeldThroughCall.fixture/CaptureReadHeldThroughCall.jet", "E0204")
     print("lambda captures that only read are borrowed: passed")
 }

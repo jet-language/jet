@@ -770,7 +770,10 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
             candidates.push(definition.name)
         }
     }
-    if candidates.len() == 0 -> return used
+    if candidates.len() == 0 {
+        used.sort()
+        return used
+    }
     indexed_spans: parser_import_span_index(import_spans)
     // Per name id: whether the name is a candidate, and whether it is used.
     candidate_ids := [Bool]{}
@@ -792,6 +795,9 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
     if parser_low_level_tier_spelled(tokens, tables) {
         parser_collect_core_mem_gate_names(imports, used)
     }
+    // A set, in name order: a layout change that reorders spellings (`jet
+    // fmt` putting union members in canonical order) keeps the same tree.
+    used.sort()
     used
 }
 
