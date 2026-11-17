@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111000,
+    "rev": 111025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39620,7 +39620,7 @@
       "body": "One home for the 2026-09-27 foundations review, so these critical items do not scatter across the board. Evidence and design live in Docs/proposals/memory-model-foundations-2026-09-27.md (findings F1-F10 with repro programs, proposals, and the stack-replacement analysis). The owner asked for every owner decision to be balloted here. Self-hosting is done and every ballot here is ratified (16 of 16), so implementation proceeds.\n\nSoundness defects found (not owner choices, still critical): F1 generic code bypasses the task sendability check (check passes, jet run runs, AOT ICE 101); F2 the JIT tier has no second checker and documents a stale stack-slot hazard in crates/jet-jit/src/Concurrency.rs. Conflicts with ratified text: F3 recursive Shared types rejected by E0221; F4 #Policy(gc) stores copy, contrary to D-OPTGC1=A; F5 storing a Shared handle consumes it; F6 ~ on Cell aliases; F9 misplaced #Unsafe site diagnostic after an earlier error.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e11",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -39824,7 +39824,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-16T12:54:33.778Z",
+      "updated": "2026-11-17T01:39:28.459Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -39838,8 +39838,8 @@
       "body": "Measured by the Jetpack port (#3590) with target/debug/jet (built 2026-09-26), each under a cgroup cap. jet check src/jetpack.jet on the assembled Jetpack unit: NixEval area only (5,539 lines) 195 s, 680 MB peak; Foundation+PackageModel only (3,663 lines) 79 s; both together (9.2k lines, master 31b1e0bf3) 329 s, 800 MB peak, 0 errors, 199 lints. Receipts: ~/.cache/jet-luna/jetpack-bootstrap/lead-c3e0b738ad/check.receipt and 5efbbecdee/check.receipt. The port targets ~120k lines in one unit (mirroring Compiler/Bootstrap); at this rate a single check would take far longer than an hour, which blocks the per-slice proof loop and later the build-time performance cell. Note the binary is a debug build; release timings are unmeasured. Needs: profile where check time goes on this unit (the unit is available by re-running Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh) and a root fix.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m02-fast-compiler-loop",
+      "epoch": "e24",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
       "plan": "## Goal\nMake `jet check` on a large single unit roughly linear in source size, and stop it running out of memory. Today it blocks three things: the Jetpack per-slice proof loop (#3590), stage zero of self-hosting (#218 criterion 12), and later the build-time performance cell.\n\n## Current state\nMeasured with the debug `target/debug/jet` (built 2026-09-26), under a cgroup cap. Release timings are unmeasured.\n\n| Unit | Lines | Wall | Peak memory |\n|---|---|---|---|\n| Jetpack NixEval only | 5,539 | 195 s | 680 MB |\n| Foundation + PackageModel | 3,663 | 79 s | — |\n| Both (master 31b1e0bf3) | 9.2k | 329 s | 800 MB (0 errors, 199 lints) |\n| Compiler front slice (70 files, 2.93 MB) | — | 39 min single-core, OOM-killed | 8 GB, no verdict |\n| EnvModel unit (185 sources) | — | exceeds the 6 GB cap in ~8 s | — |\n\n- The lexer slice (94 KB) takes 25 s. Receipts: `~/.cache/jet-luna/jetpack-bootstrap/lead-c3e0b738ad/check.receipt` and `5efbbecdee/check.receipt`.\n- Root-cause lead (`~/.cache/jet-luna/jetpack-port/jet-packages-study.md` §3): cost follows content, not size. The NixEval prefix timings are:\n  - Text (225 lines): 0.5 s.\n  - Adding API types and NixJson (825 lines): 37.4 s.\n  - Adding the Lexer and Parser (1,588 lines): 69.6 s.\n  - Adding `Jetpack/NixEval/Source/Evaluator/Values.jet` (260 lines of recursive `NixEvalValue`/`NixEvalNative`/`NixEvalThunk` enums and impls): 180.2 s, i.e. +110.6 s.\n  - Adding 1,796 lines of evaluator methods: only +15.9 s.\n- Splitting into files or packages does not help: a 5-line app over NixEval takes 207.6 s on the first run and 209.7 s on an unchanged rerun.\n- Receipts are never reused under systemd-run. The environment identity at `Source/ReceiptStore.rs:3566-3573` ignores the Nix temp variables but not `INVOCATION_ID`.\n- The bootstrap assembles one compiler unit on purpose (`Compiler/Bootstrap/sources.list`), and `Compiler/JetDriver/Source/Driver/Identity.jet` carries the whole module graph into checking.\n\n## Changes\n1. Profile first. Run `perf record` (or the sema phase timers) with a release `jet check` on `Jetpack/NixEval` and on a synthetic recursive-enum fixture. Name the pass whose cost grows with the recursive type graph times its use sites; likely suspects are drop/copy/derive/structural-recursion or type-identity walks without memoization.\n2. Fix it at the root in the shipped checker (`crates/jet-sema`, the bootstrap checker used for stage zero). Memoize per type identity, or compute the fixpoint once per SCC. Then make the same fix in `Compiler/JetSema` so the self-hosted checker never inherits the algorithm.\n3. Add `INVOCATION_ID` to the receipt environment-ignore list (`ReceiptStore.rs:3571`) as an immediate fix. #2517 later deletes ReceiptStore and replaces it with per-module memoization.\n4. Add the scaling regression `recursive_enum_check_scales_linearly` in `tests/cli_compiler_speed.rs`. Checking N and 4N use sites of a three-way recursive enum must take at most 5x the time, with a fixed memory ceiling.\n\n## Proof\n- `jet test Compiler --profile cases cli_compiler_speed/recursive_enum_check_scales_linearly`: passes.\n- Measurement with a release build: `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area NixEval` finishes in under 20 s (today 195 s on a debug build) and stays under 1 GB peak. The receipt is recorded.\n- `bash ~/.cache/jet-luna/slice-scaling.sh target/release/jet after lexer parser front`: the front slice finishes under the 6 GB cap with a verdict.\n- An unchanged rerun under systemd-run replays the receipt.\n\n## Batch\nbatch-jetc-sema: the root cause is in the checker. The Rust bootstrap checker and Compiler/JetSema get the same fix in one build.\n\n## Dependencies\nNone. This card unblocks #3590 and #218 stage zero.\n",
@@ -39987,7 +39987,7 @@
       "parentId": "c0uwol3w",
       "needsAcceptance": false,
       "created": "2026-09-28T10:48:43.582Z",
-      "updated": "2026-11-16T12:54:36.553Z",
+      "updated": "2026-11-17T01:39:31.580Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -40650,7 +40650,7 @@
       "body": "Destination: a #Job declared once runs by name (`jet <job>`, `jet jobs <job>`, `jet run -- <job>`) with typed scalar parameters from argv, its `after:` predecessors in order, validation before any effect, declared input/output freshness, and one process and job identity model for inspection and lifecycle events, with byte-identical output from a built binary and from `jet jobs`.\n\nWhy: project commands are how users drive their work; a job that behaves differently on another tier breaks trust.\n\nHistory: the 2026-09-28 owner-reported defects (core.process compile, ignored `after:`, E1321 on parameter jobs) were fixed in the retired Rust compiler and met as c1-c3. Today the Jet driver does not make parameter jobs argv-selectable (Pipeline.jet:2685-2688) and the top-level `jet <job>` lookup is unbuilt (Front.jet:1688-1717 against Docs/spec cli.md). Source generation through #Job is #6952.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -40945,7 +40945,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-09-28T15:53:06.743Z",
-      "updated": "2026-11-17T01:36:58.788Z",
+      "updated": "2026-11-17T01:39:35.045Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -41347,7 +41347,7 @@
       "body": "Destination: every active diagnostic reads in plain words, enforced so it cannot regress:\n- What names the learner's specific problem, using the names in their code.\n- Why gives the reason in one or two plain sentences.\n- Fix gives a concrete edit or command.\n- No internal vocabulary: decision IDs, constant names, 'unit', byte offsets, stage names. That material lives in `jet explain CODE --verbose` and `--json`.\n\nWhy it matters: owner-directed P0 (2026-09-28, learnability report F17). A census of 813 active rows found 218 with a placeholder Why, 297 whose What repeats the internal meaning, and 287 with decision IDs in user-facing text. The research basis is Becker et al. 2019, Barik et al. 2018 and Ko et al. 2004.\n\nThe authority is the diagnostic registry; Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet is generated from it.\n\nRelated cards (2026-11-15 split): stop locations and traces #6915, error values in handlers #6916, progress output #6917, user-visible text case #6734, IOError #6881, ComputeError #6624.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -42201,7 +42201,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-17T01:37:47.541Z",
+      "updated": "2026-11-17T01:39:38.090Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -42214,8 +42214,8 @@
       "title": "Last use moves everywhere; kept parameters inferred; x.move() and x.copy() are the exact pins",
       "body": "D-COPY-DEFAULT1=A (ratified; owner comment: 'Compiler chooses if unmarked, programmer can manually put sigils where desired for exact. full control'). Parent #3741. Evidence: probe p34/p35 — storing a read parameter deep-copies even at the caller's last use (~20% slower builder).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
@@ -42397,7 +42397,7 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-16T12:54:42.165Z",
+      "updated": "2026-11-17T01:39:42.281Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -43660,8 +43660,8 @@
       "title": "Use newer CPU instructions in one binary: multiversioned functions and typed intrinsics",
       "body": "Owner request: leverage what hardware can do now (bottom-up), give experts direct access to machine instructions, and stay forward-facing for new hardware.\n\nToday D-FFI-ASM-CPU1=B builds for the target baseline and needs explicit CPU flags for newer instructions; a shipped binary cannot use AVX-512 when present and fall back otherwise. Experts can reach instructions only through audited `#FFI(asm)`; the compiler-only `__core_intrinsic` namespace (D-CORE-CALL1) is closed to users. Prior art: Rust `#[target_feature]` + `is_x86_feature_detected!` + `core::arch`; GCC `target_clones`; Google Highway dynamic dispatch; Mojo `CompilationTarget` queries and `comptime if`; Odin `@(enable_target_feature=...)` and `base:intrinsics` (265 procedures).\n\nBallot D-CPU-DISPATCH1 decides how code opts into newer instructions.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e6",
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -43789,7 +43789,7 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:08.474Z",
-      "updated": "2026-11-16T12:54:44.940Z",
+      "updated": "2026-11-17T01:39:46.523Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -44941,8 +44941,8 @@
       "title": "Close package roots, typed configuration and environment ownership",
       "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Reserved Package source-file law; Jet root noun for the complete checked graph; runtime: package field for runtime PATH deps; First-class cargo build field: Recipe.cargo(lock:); What should changing a JetOS machine feel like?; Should packages and JetOS live in one project?; How much must plain jet check prove?; Build/config: one plane of typed facts; Facts in text, actions in the function; One meaning for the word profile; What jet split does with inline Package facts; formatter: passthrough for non-.jet files; jet split/fold law (Fold-only); Public typed package model for Jet tools; Build file versions without lost locks or rewritten evidence; Package policy and exception source surface\n\n**Decision IDs:** D-ECO-FILEROOT1, D-ECO-ROOTNAME2, D-ECO11, D-ECO2, D-ECO-JETOS2, D-ECO1, D-CHECKSCOPE1, D-CONF-PLANE1, D-CONF-SPLIT1, D-CONF-WORD1, D-ECO-SPLITPOLICY1, D-ECO12, D-ECO13, D-PACKAGE-MODEL1, D-BUILDCOMPAT1, D-JPK-POLICYSURFACE1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-BUILDCOMPAT1:** Use version in a clear scope, preserve originals, and automatically read supported older data without changing its meaning. Version-1 locks from older Jet releases remain readable.\n  - **Gap witness:** PARTIAL: Jet has registered unsupported lock-version diagnostics and refuses unknown required marker meanings (Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:11310-11312). Complete original-evidence preservation, linked readable views and automatic older-version translation in Rust and Jet were not established.\n- **D-CHECKSCOPE1:** Resolve the owning project and every declared runnable output; Validate imports, reachable Core closure, canonical TIR, and every applicable execution-tier lowering; Preserve isolated single-file checks.\n  - **Gap witness:** PARTIAL: Rust project check explicitly sets inspect-only execute:false/no authority grant (crates/jet-driver/src/Driver/mod.rs:3477-3481); tests/project_check.rs is the consumer suite. Jet CLI exposes file check (Compiler/JetCli/Source/Cli/Host.jet:47-61; Front.jet:502), not an established all-runnable-output/workspace check.\n- **D-CONF-PLANE1:** Adopt the model; Configuration is the program's knowledge about itself: every build fact (identity, machine, profile, settings, policy) is a typed value on one registered plane, with one contribution law and one audit command; The ratified role-typed Package shape becomes the only manifest vocabulary; the legacy flat parser is deleted. build.os, which already works this way, becomes the plane's first row; Later D-CONF ballots (fact reads, settings, contribution law) land on this substrate.\n  - **Gap witness:** PARTIAL: Rust folded fact vocabulary is registered (crates/jet-foundation/src/Syntax.rs:36-37). Jet has folded snapshots (Compiler/JetSema/Source/Sema/Registration/Items.jet:462-464), but loader explicitly lacks declared manifest settings (Expressions/FactReads.jet:640-643); complete typed single fact plane/cutover missing.\n- **D-CONF-SPLIT1:** Manifest text is the complete index of what is configurable: every fact is declared there with its type and default. fn build performs actions — probes, steps, generated code — and may contribute a value to a declared fact; Every computed contribution is recorded in .jet/lock and named by jet explain. fn build can never mint an undeclared fact; The pushback the owner asked for is honest: a flat facts-in-text-only rule fails, because a probed toolchain or a find() member list is only knowable by computation; The law keeps those as computed contributions instead of banning them.\n  - **Gap witness:** PARTIAL: Rust pipeline records contributions/generated modules in .jet/lock (Source/CmdCompile.rs:3682-3686). Jet loader still declares no manifest settings (Compiler/JetSema/Source/Sema/Expressions/FactReads.jet:640-643), so text-declared facts plus checked computed contributions are not complete.\n- **D-CONF-WORD1:** release, debug, and ci keep the word, matching --profile and its ratified sugar --release; The board identity is a machine description; before its unbuilt surface ships, it is renamed into the machine vocabulary and selected beside triples with --target; Environment profiles become presets (amends D-ENV-PROFILE1's field and flag spelling). Package/user profiles are already generation snapshots and take the generation word (amends D-JPK-PROFILE1's wording only). Each rename is an amendment named here; none changes behavior.\n  - **Gap witness:** PARTIAL: Rust machine axis is selected by target (Source/main.rs:2879-2882); Jet CLI registers separate env/preset selectors (Compiler/JetCli/Source/Cli/Commands.jet:961-964). Jet environment command is unavailable (Front.jet:491-506); full profile/generation manifest vocabulary cutover not established.\n- **D-ECO-FILEROOT1:** package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n  - **Gap witness:** CONTRADICTED — Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n- **D-ECO-JETOS2:** A System is another typed project value. Jet builds a complete generation, shows its changes, proves it is ready, switches once, and keeps the previous generation.\n  - **Gap witness:** PARTIAL — Rust JetOS commands/plan/store/generation/proof owners exist; ModuleEval/PackageOutput.rs:4-5 lowers System/Fleet from outputs. A complete checked-build/diff/readiness/atomic-switch/retained-rollback machine generation acceptance remains open; Compiler/ only prepares semantics.\n- **D-ECO-ROOTNAME2:** Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph.\n  - **Gap witness:** CONTRADICTED — The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n- **D-ECO-SPLITPOLICY1:** Split creates the closed Config needed to move inline facts and records a reversible ledger.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO1:** One checked Jetspace graph connects package sources, environments, outputs, services, images, systems and fleets; a machine can point to the package it runs. Final names/file law are D-ECO-ROOTNAME2 and D-ECO-FILEROOT1.\n  - **Gap witness:** PARTIAL — Rust Package/Config/output/System/Fleet graph owners exist, but complete checked Jetspace identity/names and one source-to-machine proof graph are not established; the root still uses Package (Package/mod.rs:3-5). Jet port package engine is outside compiler and in progress.\n- **D-ECO11:** runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n  - **Gap witness:** CONTRADICTED — Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n- **D-ECO12:** formatter names an external formatter for non-Jet files. jet fmt formats .jet natively and delegates other languages to the named tool, so one command formats the whole tree, matching the flake's formatter attribute.\n  - **Gap witness:** PARTIAL: Rust: production fmt seam exists at Source/main.rs:3604-3607; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO13:** Split moves whole modules plus attached comments into the conventional file, computed fields verbatim; A STABILITY test pins byte-identical round-trip; If a top-level binding is shared across the split boundary, split refuses with E13xx naming both referents and the fix; Reversibility is guaranteed for whole modules.\n  - **Gap witness:** PARTIAL: Rust: production split seam exists at Source/main.rs:3667-3671; its complete decision contract was not established by this static read (dispatch is not semantic proof). Jet port: the executable front door dispatches only help, explain, check and build (Compiler/JetCli/Source/Cli/Front.jet:491-506); this decision's command path is refused by jet_cli_not_ported at :94-102, not implemented by its help/registry row.\n- **D-ECO2:** build takes a typed recipe. Recipe.cargo(lock:) maps buildRustPackage and cargoLock.lockFile in one line.\n  - **Gap witness:** PARTIAL — Recipe.cargo is registered at Rust Syntax/package_files.rs:648, but inspected ModuleEval/Eval.rs:2400-2439 parses copy/prebuilt/build recipes and not cargo. No complete lock-driven Recipe.cargo consumer was established; finite Recipe.build is a different ratified feature.\n- **D-JPK-POLICYSURFACE1:** All package policy — sources, licenses, advisories, maturity, hooks, cache roles, exceptions — lives in the one ratified `policy:` namespace of the workspace manifest beside `policy.trust`, `policy.providers`, and `policy.replacements` (D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-JPK-REPLACEPOLICY1); no second config file and no inline dependency markers. Absent policy means the ratified safe defaults; effective policy is the auditable intersection of the source request/max with stronger org/host policy, which may refuse or narrow but never weaken, and source exceptions cannot override stronger policy.\n  - **Gap witness:** PARTIAL — Rust Source/Publish/Policy.rs:1-5 implements manifest-side package policy/source mapping receipts. Jetpack Foundation/Source/Syntax.jet:531-534 declares the shared policy namespace. Complete expiring exception drafts, org/host intersection, inspect receipts and all policy families were not established in both ecosystem implementations.\n- **D-PACKAGE-MODEL1:** Add one immutable typed package model to the existing compile-time-only core.compiler seam. Reuse jet-pkg-model and jet-env-model.\n  - **Gap witness:** PARTIAL: Rust exposes compile-time compiler package values (crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:520-523), and Jet CompilerServices has the ordinary compiler-value seam (Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet:251-265). Full immutable package/lock/resolved-profile data, shared package/env-model reuse and runtime rejection consumer proof were not established.\n\n\nEffective-scope corrections:\n\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V43 (D-NAME-ROLEMOD1):\nDecision IDs: D-NAME-ROLEMOD1\n\nActive contract: Complete the ratified ruling. Ecosystem entries are typed values in package.jet; role declarations like module env.dev respell as those values.\n\nGap evidence (static source witness, not a passing test): Rust EnvFile.rs:183-199 still reads ENV_FILE and parses legacy pkg.source calls; jet-env-model/ModuleEval/Source.rs:554-555,834-835 still uses env.jet and teaches module env.<name>. Jetpack EnvModel/ModuleEval/EnvPlanBuilder.jet:213,348-349 retains the matching ENV_FILE root and role-module teaching path. The ruling requires typed package values, not a second role-module/role-file interpretation; parser aliases unrelated to this ruling are not evidence.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V26 (D-ECO11):\nDecision IDs: D-ECO11\n\nActive contract: runtime is the package field for external tools required on PATH at runtime, separate from build dependencies. Output wrappers consume that same typed list.\n\nGap evidence (static source witness, not a passing test): Rust crates/jet-pkg-model/src/Manifest.rs:536-541 now parses runtime as core/alloc/hosted, not a list of PATH dependencies; no later ratified decision was found reversing this specific chosen field meaning. Jet PackageModel consumes the same changed schema.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V56 (D-ECO-ROOTNAME2):\nDecision IDs: D-ECO-ROOTNAME2\n\nActive contract: Jetspace names the whole checked graph of sources, environments, outputs, systems and fleets. Package names the graph’s package nodes, not the complete root graph.\n\nGap evidence (static source witness, not a passing test): The checked root remains called Package in Rust Package/mod.rs:3-5 and Manifest.rs:555, with PackageOutputPlan.graph_identity at ModuleEval/PackageOutput.rs:47-49. No Jetspace public type/diagnostic surface was found in Rust Package or Jet PackageModel searches.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V25 (D-ECO-FILEROOT1):\nDecision IDs: D-ECO-FILEROOT1\n\nActive contract: package.jet is the sole reserved source filename, for the root Config contribution. Other source files may contribute named typed Config values; legacy project/workspace/env source-role filenames do not remain independent reserved authorities.\n\nGap evidence (static source witness, not a passing test): Rust Syntax/jetpack_config.rs:404 has package.jet, but :412 still defines workspace.jet and Source/CmdCompile.rs:2056-2057 loads env.jet as an active environment root; ModuleEval/mod.rs:1772 reads repository env.jet. Jet module tooling likewise retains role contributions. Sole-reserved-file cutover is not complete.\n\nCoverage disposition: Same contract boundary is already assigned to P11.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -45488,7 +45488,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:54.174Z",
-      "updated": "2026-11-16T12:54:52.755Z",
+      "updated": "2026-11-17T01:39:50.758Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -76388,111 +76388,111 @@
           "n": 4,
           "text": "(was #5925) probe instructions per byte/element recorded before and after each step; FIXED_POINT; goldens; self-compile A/B.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Merged into #6414 c15: before-and-after instruction counts are c15 method",
-          "at": "2026-11-15T05:42:07.700Z",
+          "evidence": "Merged into #6414 c15: before-and-after instruction counts are c15 method (folded into another criterion of this card, whose proof covers it)",
+          "at": "2026-11-17T01:39:26.468Z",
           "closure": "obsolete"
         },
         {
           "n": 5,
           "text": "(was #5925) (was #5064) Optimizer verification: O0 as reference semantics for every IR optimization pass",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c1: optimizer pipeline",
-          "at": "2026-11-15T05:42:09.713Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:27.519Z",
+          "closure": "duplicate"
         },
         {
           "n": 6,
           "text": "(was #5925) (was #5471) Packed list element strides: [Bool]/[U8] at 1 byte, [I32] at 4 (today 8)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6969 c1: data representation",
-          "at": "2026-11-15T05:42:10.697Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:29.475Z",
+          "closure": "duplicate"
         },
         {
           "n": 7,
           "text": "(was #5925) (was #5473) Fieldless enum ==/compare lowers to a 3852-instruction derived compare chain; use a tag compare",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c1: hot code shape",
-          "at": "2026-11-15T05:42:11.720Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:30.673Z",
+          "closure": "duplicate"
         },
         {
           "n": 8,
           "text": "(was #5925) (was #5475) Reference counts are always atomic (rc_add): non-atomic unless shared",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6969 c2: data representation",
-          "at": "2026-11-15T05:42:13.161Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:32.576Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
           "text": "(was #5469) Option of a scalar is heap-boxed: pop/get/first/last allocate on every call",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6969 c3: data representation",
-          "at": "2026-11-15T05:42:14.104Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:33.754Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
           "text": "(was #5919) a micro program with flat allocation counts for an aggregate capture; FIXED_POINT; goldens; same-generation self-compile A/B.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6969 c4: data representation",
-          "at": "2026-11-15T05:42:15.042Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:36.036Z",
+          "closure": "duplicate"
         },
         {
           "n": 11,
           "text": "(was #6362) A & list parameter passed an exclusively owned list does no uniqueness test or copy on entry at o2 (emitted code shows none), copy-on-write meaning unchanged, and k6343/axpy.jet within the gate's band against C.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c2: hot code shape",
-          "at": "2026-11-15T05:42:16.209Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:37.191Z",
+          "closure": "duplicate"
         },
         {
           "n": 12,
           "text": "(was #6363) Slicing touches only the requested range and does not copy the whole text; k6342/slice_loop.jet is faster than Rust (Jet/Rust < 1.00, no parity band) and meets its asm-parity ceiling, output unchanged on o0, o1 and o2.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c3: hot code shape",
-          "at": "2026-11-15T05:42:17.165Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:39.058Z",
+          "closure": "duplicate"
         },
         {
           "n": 13,
           "text": "(was #6363) Building a string by repeated interpolated append (`s += \"{i % 10}\"`, 10k times) costs less than the Rust equivalent at o2 (Jet/Rust < 1.00) (today about 470 cycles and 2,800 instructions per append, 5.27M cycles in total against Rust 6.39M for the whole slice_loop program).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c4: hot code shape",
-          "at": "2026-11-15T05:42:18.107Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:40.236Z",
+          "closure": "duplicate"
         },
         {
           "n": 14,
           "text": "(was #5001) Constants are copied into every use site: build them once (static/lazy) and use hashed lookup tables",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6328 c15: constants built once with static storage for aggregates",
-          "at": "2026-11-15T05:42:19.013Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:41.417Z",
+          "closure": "duplicate"
         },
         {
           "n": 15,
@@ -76501,68 +76501,68 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c9, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:55.498Z",
+          "at": "2026-11-17T01:39:43.251Z",
           "closure": "duplicate"
         },
         {
           "n": 17,
           "text": "(was #2414) The pinned report reproduces every current Jet loss with the frozen task, hostile input, selected peer, toolchain, sample policy, tolerance, and source boundary unchanged.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6953 c13: gauntlet scoring policy",
-          "at": "2026-11-15T05:42:19.905Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:44.450Z",
+          "closure": "duplicate"
         },
         {
           "n": 18,
           "text": "(was #2414) Root-seam fixes eliminate the measured source-effort, build, edit, runtime, memory, artifact-size, diagnostics, debugging, and deployment gaps without weakening a workload contract or exclusion.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6756 c5: losses fixed at the root in the general mechanism until the census is empty",
-          "at": "2026-11-15T05:42:20.783Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:45.604Z",
+          "closure": "duplicate"
         },
         {
           "n": 19,
           "text": "(was #2414) Every applicable native, cross-target, O0, O1, O2, normal and hostile execution row still produces the frozen observable result with separate artifact and output receipts.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6953 c14: gauntlet scoring policy",
-          "at": "2026-11-15T05:42:21.682Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:47.497Z",
+          "closure": "duplicate"
         },
         {
           "n": 20,
           "text": "(was #2414) The release gate passes with zero unowned losses; any remaining loss names a live narrower Tower owner and keeps the release claim false.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6953 c15: gauntlet scoring policy",
-          "at": "2026-11-15T05:42:22.568Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:48.661Z",
+          "closure": "duplicate"
         },
         {
           "n": 22,
           "text": "(was #2414) Every declared compiled-workload peer and comparable metric is measured independently: Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. Selected-best-peer, aggregate, missing, invalid, or unmeasured evidence fails.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6953 c1: the same per-peer and ceiling law",
-          "at": "2026-11-15T05:42:23.472Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:49.842Z",
+          "closure": "duplicate"
         },
         {
           "n": 23,
           "text": "(was #2414) [#1414] A frozen workload manifest covers systems, service, CLI, library, compute, embedded and cross-platform tasks against the best compiled peer, with the same inputs, versions and source boundary. Reports cover the ten metrics plus the unsafe/audit burden. Proof runs on Linux, macOS and Windows, native and cross where applicable. Removal canaries make false greens fail. The release gate cannot pass with an unowned loss, and a fresh reviewer verifies fairness.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6953 c16: gauntlet scoring policy",
-          "at": "2026-11-15T05:42:24.376Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:51.733Z",
+          "closure": "duplicate"
         },
         {
           "n": 24,
@@ -76857,7 +76857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:39:25.061Z",
+      "updated": "2026-11-17T01:39:51.733Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -217864,6 +217864,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-17T01:39:51.733Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#23"
+    },
+    {
+      "at": "2026-11-17T01:39:50.758Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jm0xjt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:49.842Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-17T01:39:48.661Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-17T01:39:47.497Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-17T01:39:46.523Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l389gj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:45.604Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-17T01:39:44.450Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-17T01:39:43.251Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-17T01:39:42.281Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jxsy7l",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:41.417Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-17T01:39:40.237Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-17T01:39:39.058Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-17T01:39:38.090Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:37.192Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-17T01:39:36.036Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-17T01:39:35.045Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c077ihdp",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:33.754Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-17T01:39:32.576Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T01:39:31.580Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07xffyh",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:39:30.673Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-17T01:39:29.475Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T01:39:28.460Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:27.519Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T01:39:26.468Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#4"
+    },
+    {
       "at": "2026-11-17T01:39:25.061Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -221306,713 +221481,6 @@
       "action": "card.criteria-meet",
       "ref": "c07ywjvi",
       "note": "#14"
-    },
-    {
-      "at": "2026-11-16T23:14:03.364Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c07ywjvi",
-      "note": "#14: No program reaches DMAStart or DMAWait (no board import resolves, and no TargetMachine declares a DMA channel), so that clause moved to #6518, which owns DMA. The kind list now matches the live enum.; was: Comptime on native O0 supports every CoreClosureCall kind (Spawn, Realtime, Serve, OnInterrupt, OnCommit, Rollback, Reactive, UI and the rest), the typed-text kernels (SQL, HTML, Sh, URL, Path, DateTi"
-    },
-    {
-      "at": "2026-11-16T23:13:58.923Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c09brw5t",
-      "note": "#8 (moved from #6847 c14) Comptime on native O0 handles DMAStar"
-    },
-    {
-      "at": "2026-11-16T23:13:53.746Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-16T23:03:39.936Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gy2j07",
-      "note": "#7: Add a p232 load-only failure.; was: The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPSe"
-    },
-    {
-      "at": "2026-11-16T23:03:12.828Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07b6pyn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T23:03:10.589Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07b6pyn",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T22:58:11.865Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06sazo9",
-      "note": "#5 page.storage_get works on Firefox the same as on Chromium; t"
-    },
-    {
-      "at": "2026-11-16T22:54:24.981Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0yvmuru",
-      "note": "Closest-first: #6868 closed, #6857 c14 met, blocked halves moved, workers re-aimed"
-    },
-    {
-      "at": "2026-11-16T22:54:22.328Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00xuadc",
-      "note": "#10 (moved from #6813 c1) kit.file_button uploads through app.Up"
-    },
-    {
-      "at": "2026-11-16T22:54:19.827Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0pg5tj9",
-      "note": "#1: Owner closure-first split: the kit.file_button progress half moved to #6821, which owns the kit views.; was: An app.Upload streams to storage. A body over the api's max_upload gets 413 before it is read, and kit.file_button reports progress. Proof: `jet test Compiler --profile cases --filter WebApp/upload_ov"
-    },
-    {
-      "at": "2026-11-16T22:53:33.194Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0exjsbx",
-      "note": "#2: Needs kit.Form (#6821 c1); moved to #6821, which owns the form.; was [open]: A FieldError from the server shows beside its field in kit.form, the same as a validate failure. Proof: `jet test Compiler --profile cases --filter WebApp/server_field_error_shows_beside_the_field`."
-    },
-    {
-      "at": "2026-11-16T22:53:29.504Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00xuadc",
-      "note": "#9 (moved from #6831 c2; it needs kit.Form from c1) A FieldErro"
-    },
-    {
-      "at": "2026-11-16T22:53:26.086Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00cqn1l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T22:53:19.115Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c00cqn1l",
-      "note": "#12: Waits only on the D-WARM-SET1 ballot; moved to the ballot card #6981, which owns the decision and its build.; was [open]: Warm coverage per screen (sync review gap G10): the build reports, for each screen, which of its live reads are in the warm set and which are not, and a check fails a screen marked offline that reads "
-    },
-    {
-      "at": "2026-11-16T22:53:16.189Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozl5j4",
-      "note": "#1 After D-WARM-SET1 is ratified, build its outcome (moved from"
-    },
-    {
-      "at": "2026-11-16T22:53:13.431Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-16T22:40:58.695Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PREDICT-PIN1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-16T22:40:58.694Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PREDICT-JOB1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-16T22:39:27.539Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0ou36st",
-      "note": ""
-    },
-    {
-      "at": "2026-11-16T22:38:39.064Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-16T22:38:39.064Z"
-    },
-    {
-      "at": "2026-11-16T22:20:51.954Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing073b2t0",
-      "note": "p229/p230 landed: #6864 closed; brace-only records met (#6857 c3/c4); jet new generators"
-    },
-    {
-      "at": "2026-11-16T22:20:41.854Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T22:20:40.709Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T22:20:28.795Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c016keg2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T22:20:27.359Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07b6pyn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-16T22:20:26.016Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07b6pyn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T21:59:03.668Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gy2j07",
-      "note": "#7: Add the p229 load-only failure (C toolchain unpack race).; was: The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPSe"
-    },
-    {
-      "at": "2026-11-16T21:58:53.821Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0drmvwg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:58:50.328Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0drmvwg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T21:55:52.159Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing078ga0s",
-      "note": "Native cards split: Linux in G9, other platforms in G13 (#6982-#6993); #4623 to G5"
-    },
-    {
-      "at": "2026-11-16T21:55:50.862Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G13",
-      "note": "Owner order 2026-11-16: the macOS, Windows, iOS and Android "
-    },
-    {
-      "at": "2026-11-16T21:55:49.605Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G9",
-      "note": "Owner order 2026-11-16: native-platform cards that need cros"
-    },
-    {
-      "at": "2026-11-16T21:55:29.225Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0akrada",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:55:25.627Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0akrada",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6993.; was: Phone and desktop apps sign in with a short-lived access token and a refresh token stored in Keychain or Keystore; revoking a device ends its refresh within one access-token lifetime. Proof: `jet test"
-    },
-    {
-      "at": "2026-11-16T21:55:23.723Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08b38mr",
-      "note": "#1 Phone, macOS and Windows apps sign in with a short-lived acc"
-    },
-    {
-      "at": "2026-11-16T21:55:21.750Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c08b38mr",
-      "note": "Native sessions on macOS, Windows and phones: refresh tokens in Keychain, Keystore and the Windows credential store"
-    },
-    {
-      "at": "2026-11-16T21:55:19.770Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s5hn28",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:55:15.964Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0s5hn28",
-      "note": "#10: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6992: it covers no Linux or web behavior.; was [open]: The same one-line install works on macOS arm64 and Windows x64 (`irm … | iex`), and `jet run hello.jet` prints the greeting on both. Proof: the release gate's committed install receipts for both hosts"
-    },
-    {
-      "at": "2026-11-16T21:55:13.891Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s5hn28",
-      "note": "#15: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The app's ui.asset files are packaged per native target: a desktop bundle, an iOS asset catalog with Info.plist entries, and Android resources with manifest entries. (Moved from #6816 c2.) Proof: `jet"
-    },
-    {
-      "at": "2026-11-16T21:55:11.902Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s5hn28",
-      "note": "#14: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: A published toolchain channel lists per-platform releases with digests; `jet self` resolves, verifies, installs beside the running binary and swaps; a corrupt or mismatched release is refused with a r"
-    },
-    {
-      "at": "2026-11-16T21:55:09.874Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s5hn28",
-      "note": "#12: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The install, scaffold, run, check, test and edit commands named in the getting-started docs are the same on every supported beginner host, and each runs as documented. Proof: `jet test Compiler --prof"
-    },
-    {
-      "at": "2026-11-16T21:55:07.820Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0s5hn28",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6992.; was: The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --pro"
-    },
-    {
-      "at": "2026-11-16T21:55:05.788Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qocvhc",
-      "note": "#4 The app's ui.asset files are packaged per target: an iOS ass"
-    },
-    {
-      "at": "2026-11-16T21:55:03.678Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qocvhc",
-      "note": "#3 The getting-started commands are the same on macOS and Windo"
-    },
-    {
-      "at": "2026-11-16T21:55:00.832Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qocvhc",
-      "note": "#2 The same one-line install works on macOS arm64 and Windows x"
-    },
-    {
-      "at": "2026-11-16T21:54:58.798Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qocvhc",
-      "note": "#1 The desktop output writes an MSIX on Windows and a signed an"
-    },
-    {
-      "at": "2026-11-16T21:54:56.739Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0qocvhc",
-      "note": "Desktop install, auto-update and signing on macOS and Windows: MSIX, notarized DMG, and phone asset packaging"
-    },
-    {
-      "at": "2026-11-16T21:54:54.524Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:54:50.686Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c051j6ab",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6991.; was: On resume, live queries resubscribe and the offline queue sends with no app code. Proof: `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue`."
-    },
-    {
-      "at": "2026-11-16T21:54:48.600Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c051j6ab",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6991.; was: ui.saved state, such as the half-typed comment in comment_box, survives the phone ending the process in the background, and a reload on the web. Proof: `jet test Compiler --profile cases --filter Nati"
-    },
-    {
-      "at": "2026-11-16T21:54:46.415Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c051j6ab",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6991.; was: start, foreground, background, suspend and terminate reach the app on every target: through scenePhase-equivalent events on phones, window events on desktops and the Page Lifecycle API on the web. nat"
-    },
-    {
-      "at": "2026-11-16T21:54:44.266Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c007r8za",
-      "note": "#3 On resume, live queries resubscribe and the offline queue se"
-    },
-    {
-      "at": "2026-11-16T21:54:42.058Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c007r8za",
-      "note": "#2 ui.saved state survives the phone ending the process in the "
-    },
-    {
-      "at": "2026-11-16T21:54:39.981Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c007r8za",
-      "note": "#1 start, foreground, background, suspend and terminate reach t"
-    },
-    {
-      "at": "2026-11-16T21:54:37.724Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c007r8za",
-      "note": "App lifecycle and saved state on macOS, Windows and phones"
-    },
-    {
-      "at": "2026-11-16T21:54:35.623Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rom5jy",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:54:31.495Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0rom5jy",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6990.; was: ui.announce reaches screen readers as a polite announcement and does not move focus. Proof: `jet test Compiler --profile cases --filter NativeApp/announce_is_polite_and_keeps_focus`."
-    },
-    {
-      "at": "2026-11-16T21:54:29.250Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0rom5jy",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6990.; was: kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android (the web is a separate cr"
-    },
-    {
-      "at": "2026-11-16T21:54:27.196Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08flpt1",
-      "note": "#2 ui.announce is a polite announcement that keeps focus on mac"
-    },
-    {
-      "at": "2026-11-16T21:54:25.033Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08flpt1",
-      "note": "#1 kit views export their role, name and state through AccessKi"
-    },
-    {
-      "at": "2026-11-16T21:54:22.984Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c08flpt1",
-      "note": "Accessibility on macOS, Windows and phones: UIA, NSAccessibility, UIAccessibility and AccessibilityNodeInfo"
-    },
-    {
-      "at": "2026-11-16T21:54:20.786Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02inyar",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:54:16.780Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c02inyar",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6989.; was: native.ask gives Granted, Denied or Restricted on every target, and prompts only at first use. native.open_settings opens the app's settings page. Proof: `jet test Compiler --profile cases --filter Na"
-    },
-    {
-      "at": "2026-11-16T21:54:14.524Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c02inyar",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6989.; was: The build writes each purposes: line into Info.plist usage descriptions and AndroidManifest.xml uses-permission entries. A call that needs a permission with no purposes: line fails the build, naming t"
-    },
-    {
-      "at": "2026-11-16T21:54:12.467Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bemp8t",
-      "note": "#2 native.ask gives Granted, Denied or Restricted on macOS, Win"
-    },
-    {
-      "at": "2026-11-16T21:54:10.036Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bemp8t",
-      "note": "#1 The build writes each purposes: line into Info.plist usage d"
-    },
-    {
-      "at": "2026-11-16T21:54:07.926Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0bemp8t",
-      "note": "Device permissions on macOS, Windows and phones: Info.plist, AndroidManifest and typed grants"
-    },
-    {
-      "at": "2026-11-16T21:54:05.611Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:54:01.724Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0fqrrpk",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6988.; was: ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2"
-    },
-    {
-      "at": "2026-11-16T21:53:58.802Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0fqrrpk",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6988.; was: native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter Native"
-    },
-    {
-      "at": "2026-11-16T21:53:56.522Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0fqrrpk",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6988.; was: native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile ca"
-    },
-    {
-      "at": "2026-11-16T21:53:54.247Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02q0uvv",
-      "note": "#3 ui.drop_zone<T> refuses other types and offers a move withou"
-    },
-    {
-      "at": "2026-11-16T21:53:51.970Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02q0uvv",
-      "note": "#2 native.copy_text and native.paste_text round-trip on macOS, "
-    },
-    {
-      "at": "2026-11-16T21:53:49.984Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02q0uvv",
-      "note": "#1 native.share opens the system share sheet on phones, macOS a"
-    },
-    {
-      "at": "2026-11-16T21:53:47.810Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c02q0uvv",
-      "note": "System share sheet, clipboard and drag and drop on macOS, Windows and phones"
-    },
-    {
-      "at": "2026-11-16T21:53:45.480Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0unyp7q",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:53:40.964Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0unyp7q",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6987: it covers no Linux or web behavior.; was [open]: The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --"
-    },
-    {
-      "at": "2026-11-16T21:53:38.656Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0unyp7q",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6987.; was: Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs a"
-    },
-    {
-      "at": "2026-11-16T21:53:36.430Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0unyp7q",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6987.; was: https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path"
-    },
-    {
-      "at": "2026-11-16T21:53:33.915Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0p5qaad",
-      "note": "#3 A second launch on macOS or Windows hands its link to the ru"
-    },
-    {
-      "at": "2026-11-16T21:53:31.816Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0p5qaad",
-      "note": "#2 The server output serves /.well-known/apple-app-site-associa"
-    },
-    {
-      "at": "2026-11-16T21:53:29.628Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0p5qaad",
-      "note": "#1 An iOS universal link, an Android App Link and crewboard://t"
-    },
-    {
-      "at": "2026-11-16T21:53:27.399Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0p5qaad",
-      "note": "Deep links on macOS, Windows and phones: iOS universal links, Android App Links and single instance"
-    },
-    {
-      "at": "2026-11-16T21:53:25.215Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c097myt8",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:53:20.463Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c097myt8",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6986.; was: native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_"
-    },
-    {
-      "at": "2026-11-16T21:53:18.009Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c097myt8",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6986.; was: After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Ge"
-    },
-    {
-      "at": "2026-11-16T21:53:15.423Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03vcitf",
-      "note": "#2 native.location_updates and the motion sensors stop with the"
-    },
-    {
-      "at": "2026-11-16T21:53:13.078Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03vcitf",
-      "note": "#1 After native.ask grants access, native.take_photo gives a Pi"
-    },
-    {
-      "at": "2026-11-16T21:53:10.753Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06m6abh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T21:53:08.697Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c03vcitf",
-      "note": "Camera, sensors and location on macOS, Windows and phones"
-    },
-    {
-      "at": "2026-11-16T21:53:06.438Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mq8xwu",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:53:04.282Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0441rvj",
-      "note": "logEntry,goals"
-    },
-    {
-      "at": "2026-11-16T21:53:01.053Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6985.; was: Access to a chosen folder survives a restart. This uses security-scoped bookmarks on macOS and iOS, persisted URI permissions on Android, and in the browser a stored FileSystemDirectoryHandle that ask"
-    },
-    {
-      "at": "2026-11-16T21:52:58.841Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6985.; was: native.save_file writes where the person chose: through the system save dialog on desktops, the document picker on phones, and showSaveFilePicker or a download in the browser. Proof: `jet test Compile"
-    },
-    {
-      "at": "2026-11-16T21:52:55.432Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6985.; was: native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. It is backed by a path on desktops, a content "
-    },
-    {
-      "at": "2026-11-16T21:52:53.186Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w0s724",
-      "note": "#3 Access to a chosen folder survives a restart through securit"
-    },
-    {
-      "at": "2026-11-16T21:52:50.949Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w0s724",
-      "note": "#2 native.save_file writes through the system save dialog on ma"
-    },
-    {
-      "at": "2026-11-16T21:52:48.718Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w0s724",
-      "note": "#1 A PickedFile is backed by a path on macOS and Windows, a con"
-    },
-    {
-      "at": "2026-11-16T21:52:46.455Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0w0s724",
-      "note": "Files on macOS, Windows and phones: native pickers, content URIs, security-scoped URLs and persisted folder access"
-    },
-    {
-      "at": "2026-11-16T21:52:44.328Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01pk3vf",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:52:40.519Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c01pk3vf",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6984: it covers no Linux or web behavior.; was [open]: A run that passes the system's time budget is cancelled as an ordinary task cancellation, and its cleanup runs. Proof: `jet test Compiler --profile cases --filter NativeApp/background_run_past_its_bud"
     }
   ],
   "nextNum": 368,
