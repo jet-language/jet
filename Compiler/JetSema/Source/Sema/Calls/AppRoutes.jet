@@ -486,9 +486,9 @@ sema_app_remote_service: fn(graph: SemaRegistrationGraph, ty: Type, module_ident
 // A screen's opener, as `App.__screen` takes it:
 // `fn(graph, fields) { state: made ?? return None; Val(shown) }`, where
 // `made` is the state `V` made from the address's field texts `fields`
-// (`sema_app_state_made`), and `shown` the HTML of what the view gives:
-// `view(…).__html()` when it gives a node tree (`text` empty), else
-// `graph.__view_html<N>(view(…))`, `N` what it gives (`text`'s one type).
+// (`sema_app_state_made`), and `shown` the node tree of what the view
+// gives: `view(…)` itself when it gives a tree (`text` empty), else
+// `graph.__view_node<N>(view(…))`, `N` what it gives (`text`'s one type).
 // `view` is the written view, called with its parameters in order, each
 // Remote one the graph's Remote of its service (`services`,
 // `App.__remote<S>`) and the state one the state. The view runs in the
@@ -508,7 +508,7 @@ sema_app_screen_opener: fn(view: Expr, services: [{ty: Type, key: String}?], sta
         view == .Field(base, member, _, _) -> sema_app_member_call(base, member, [Type]{}, view_args, span)
         else -> Expr.CallValue{callee: view.copy(), args: view_args, span: span, id: AST_NODE_GENERATED}  // copy: the written argument keeps its expression
     }
-    shown: if text.len() == 0 -> sema_app_member_call(called, "__html", [Type]{}, [CallArg]{}, span) else -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_html", text, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
+    shown: if text.len() == 0 -> called else -> sema_app_member_call(sema_app_ident(graph_name, span), "__view_node", text, [CallArg]{sema_app_arg(called, AccessConvention.Read, span)}, span)
     made: sema_app_state_made(sema_app_ident(graph_name, span), found, state_ty, fields_name, graph, span)
     none: Expr.Absent{span: span, id: AST_NODE_GENERATED}
     state: Expr.OrFallback{value: made, fallback: OrFallback.Return{value: Val(none), span: span}, is_option: true, span: span, id: AST_NODE_GENERATED}

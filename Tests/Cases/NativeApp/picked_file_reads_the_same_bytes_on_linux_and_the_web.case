@@ -7,9 +7,11 @@
 # import (a copy of Examples/Apps/Crewboard's Desktop and Logic) adds its
 # rows to a project as tasks. With no dialog to ask, no file is picked and
 # a notice says why. A browser's file chooser answers after the page's code
-# returns, and the page runtime can't wait for it yet, so the same app built
-# for the web output is an E-APP-TARGET-FEATURE compile error at each
-# open_file call, Crewboard's import_tasks among them.
+# returns, and the page runtime can't wait for it yet; a page's drop gives
+# the browser's own file handles, which it can't hand to the app yet. So the
+# same app built for the web output is an E-APP-TARGET-FEATURE compile error
+# at each open_file call, Crewboard's import_tasks among them, and at
+# Crewboard's drop_files call.
 fixture: PickedFileReadsTheSameBytesOnLinuxAndTheWeb.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -33,4 +35,6 @@ step: jet build --target web main.jet
 exit: nonzero
 stderr: ~ "App feature `.open_file` needs target `native`, but the resolved target is `Web`." # never a file made up for the person
 stderr: ~ "main.jet:17:" # at the app's open_file call
-stderr: ~ "Desktop/files.jet:40:" # at Crewboard's import_tasks
+stderr: ~ "Desktop/files.jet:43:" # at Crewboard's import_tasks
+stderr: ~ "App feature `.drop_files` needs target `native`, but the resolved target is `Web`." # never dropped files made up
+stderr: ~ "Desktop/files.jet:57:" # at Crewboard's drop_csv

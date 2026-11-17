@@ -153,6 +153,13 @@ UINode: struct {
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
     __html: fn(self) -> String Never! { html.node(self) }
+
+    // Draws the tree into `frame`, a native window's, as every backend lays
+    // it out (`placed_leaves`), one unit a logical pixel: the window's
+    // background, then each leaf in its place, every leaf but text a box
+    // filled with its color, else a light gray, and its label in black from
+    // the box's top left, 16 units to the em. A text's color is its ink.
+    __draw: fn(self, frame: Frame) Never! { internal.draw_tree(frame, self) }
 }
 
 // Whether a backend used an input event.
@@ -346,7 +353,8 @@ preview_registry: fn(entries: &&[UIPreview]) -> UIPreviewRegistry UIPreviewError
 // null backend records what each leaf would draw as text commands; the
 // TUI backend writes each leaf's label into a grid of terminal cells. Both
 // keep a focus ring, the buttons and text inputs the latest paint found,
-// which Tab advances, and a web build's page shows each paint's scene.
+// which Tab advances, a web build's page shows each paint's scene, and a
+// native app's window draws its screen's tree (`UINode.__draw`).
 // Copies of a backend share it.
 
 UIBackendState: struct {
@@ -364,6 +372,13 @@ UIBackendState: struct {
     priv rows: Int,
     priv cells: [Int],
     priv renders: Int,
+}
+
+// A leaf of a tree and the frame a paint lays it out in
+// (`internal.placed_leaves`).
+priv UIPlaced: struct {
+    node: UINode,
+    frame: Rect,
 }
 
 NullBackend: struct {
@@ -1718,10 +1733,12 @@ priv internal: module {
             if state.rows == 0 -> reset_cells(state, frame.width, frame.height)
             loop index in 0..<state.cells.len() -> state.cells[index] = 32
         }
-        visit(state, tree, frame)
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, frame, leaves)
+        loop leaf in leaves -> paint_leaf(state, leaf.node, leaf.frame)
         if core.ui.__web_attached() {
             records := [String]{}
-            scene_records(tree, frame, records)
+            loop leaf in leaves -> records.push(scene_record(leaf.node, leaf.frame))
             core.ui.__web_scene(records.join(""))
         }
         found := [UINode]{}
@@ -1732,17 +1749,23 @@ priv internal: module {
         }
     }
 
-    // A box stacks its children down its frame, each its own height across
-    // the frame's width; every other node is a leaf painted into its frame.
-    visit: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
+    // The leaves of `node` in paint order, each with its frame: a box stacks
+    // its children down its frame, each its own height across the frame's
+    // width; every other node is a leaf painted into its frame. Every
+    // backend lays a tree out this way.
+    placed_leaves: fn(node: UINode, frame: Rect, leaves: &[UIPlaced]) Never! {
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                visit(state, child, Rect{x: frame.x, y: at, width: frame.width, height: child.height})
+                placed_leaves(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, leaves)
                 at += child.height
             }
             return
         }
+        leaves.push(UIPlaced{node: node.copy(), frame: frame})
+    }
+
+    paint_leaf: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
         if state.tui {
             row: cell_index(frame.y)
             if row < state.rows {
@@ -1757,6 +1780,30 @@ priv internal: module {
         }
         state.commands.push("text({place}, {node.label})")
     }
+
+    // `tree` drawn into a native window's `frame` (`UINode.__draw`): laid out
+    // from the origin at its own size, each unit `frame.scale` pixels.
+    draw_tree: fn(frame: Frame, tree: UINode) Never! {
+        frame.clear_background(Color{r: 255, g: 255, b: 255, a: 255})
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
+        ink: Color{r: 0, g: 0, b: 0, a: 255}
+        size: pixel(16.0, frame.scale)
+        loop leaf in leaves {
+            x: pixel(leaf.frame.x, frame.scale)
+            y: pixel(leaf.frame.y, frame.scale)
+            if leaf.node.kind == .Text {
+                frame.draw_text(leaf.node.label, x, y, size, leaf.node.color ?? ink)
+                next
+            }
+            fill: leaf.node.color ?? Color{r: 221, g: 221, b: 221, a: 255}
+            frame.draw_rectangle(x, y, pixel(leaf.frame.width, frame.scale), pixel(leaf.frame.height, frame.scale), fill)
+            frame.draw_text(leaf.node.label, x, y, size, ink)
+        }
+    }
+
+    // The whole pixels of `units` at `scale` pixels per unit.
+    pixel: fn(units: Float, scale: Float) -> Int Never! { cell_index(units * scale) }
 
     // The interactive nodes (buttons and text inputs) of a tree, in pre-order.
     collect_focus: fn(node: UINode, found: &[UINode]) Never! {
@@ -1881,22 +1928,14 @@ priv internal: module {
         String.from_bytes(out) ?? shown
     }
 
-    // A paint's web scene, one record per leaf in paint order: a box adds
-    // none and stacks its children as a paint does. A record is its fields
-    // separated by tabs, kind (Custom 0, Text 1, Box 2, Button 3, TextInput 4),
-    // click slot and drop slot (0 for none), x, y, width, height, color (its
-    // `to_hex` text, empty for none) and the label's UTF-8 byte length, then
-    // the label and a newline. A web build's host (JetWeb Host.jet) turns it
-    // into the page's elements.
-    scene_records: fn(node: UINode, frame: Rect, records: &[String]) Never! {
-        if node.kind == .Box {
-            at := frame.y
-            loop child in node.children {
-                scene_records(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, records)
-                at += child.height
-            }
-            return
-        }
+    // A leaf's record in a paint's web scene, which has one per leaf in paint
+    // order (`placed_leaves`). A record is its fields separated by tabs, kind
+    // (Custom 0, Text 1, Box 2, Button 3, TextInput 4), click slot and drop
+    // slot (0 for none), x, y, width, height, color (its `to_hex` text,
+    // empty for none) and the label's UTF-8 byte length, then the label and
+    // a newline. A web build's host (JetWeb Host.jet) turns it into the
+    // page's elements.
+    scene_record: fn(node: UINode, frame: Rect) -> String Never! {
         kind: if node.kind == {
             .Custom -> 0
             .Text -> 1
@@ -1906,7 +1945,7 @@ priv internal: module {
         }
         color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
         place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
-        records.push("{kind}\t{node.click}\t{node.drop}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n")
+        "{kind}\t{node.click}\t{node.drop}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
     }
 }
 
@@ -1973,6 +2012,23 @@ priv html_name: fn(tree: UINode) -> String Never! {
     assert(grid.on_event(resize_event(3.0, 1.0)) == EventResult.Handled)
     assert_eq(grid.frame_lines(), [String]{""})
     assert(grid.render_count() == 1)
+}
+
+#Test("a native window draws a tree where every backend lays it out") {
+    window: headless(width: 40, height: 24, script: [[UIEvent]]{[UIEvent]{}}) ?? panic("headless")
+    blue: Color{r: 0, g: 0, b: 255, a: 255}
+    loop frame in window.frames() {
+        if frame.index == 0 {
+            box([text("hi"), node_color("", 10.0, 4.0, blue), button("")]).__draw(frame)
+        }
+    }
+    screen: window.load_image_from_screen()
+    // The colored leaf fills its frame under the one-unit text, a button its
+    // own under that, light gray, and the rest is the window's background.
+    assert(get_image_color(screen, 5, 3) == blue && get_image_color(screen, 9, 4) == blue)
+    assert(get_image_color(screen, 2, 5) == Color{r: 221, g: 221, b: 221, a: 255})
+    assert(get_image_color(screen, 30, 3) == Color{r: 255, g: 255, b: 255, a: 255})
+    assert(get_image_color(screen, 30, 20) == Color{r: 255, g: 255, b: 255, a: 255})
 }
 
 #Test("UI event constructors preserve named payloads") {

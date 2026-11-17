@@ -5659,6 +5659,7 @@ tasks never read or change the process registry. The module source is
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
+| `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
 | `item(label: String, run: fn() Notice!) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, a separator line, and the item that quits the app. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
@@ -5668,6 +5669,7 @@ tasks never read or change the process registry. The module source is
 | `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
 | `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
+| `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Not delivered on any target yet. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6237,6 +6239,19 @@ item runs its `run`, and a run that fails adds its `Notice` to
 with no tray host (no `org.kde.StatusNotifierWatcher`), or a session bus
 that goes away, adds a notice, and the app runs on without a tray.
 
+`graph.window(width:, height:)` shows the app in a Linux desktop window of
+`width` by `height` logical pixels from `graph.launch()` on, titled the
+graph's title. When the launch was given no link, it opens the address `/`.
+The window shows the current screen: the `UINode` tree its view gives, or
+its result's text as a text node. core.ui lays the tree out as every
+backend does, one unit a logical pixel, and draws it: a white background,
+each leaf but text a box filled with its color (else light gray), and each
+label in black from its box's top left, 16 units to the em. A text's color
+is its ink. The window draws again when another screen opens or it takes
+another size, and shows an empty box for the not-found state. Closing the
+window ends the process with status 0. A desktop with no display, or a
+display that fails, adds a notice. A side below one pixel panics.
+
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
 `Grant` is `.Granted`, `.Denied` or `.Restricted`, the last when the
@@ -6344,6 +6359,17 @@ or a folder that is gone, is `None`. A browser's directory picker answers
 after the page's code has returned too, so `app.open_folder` and
 `app.kept_folder` in code whose target is the web output are a compile
 error, E-APP-TARGET-FEATURE.
+
+`app.drop_files(body, types:, on_drop:)` gives `body` back, taking the files
+the person drops on it: each one of a kind in `types` goes to `on_drop` as a
+`PickedFile`, and a notice `on_drop` fails with shows beside `body`, as a
+button's does. A native target delivers a drop through the window that
+shows `body`. The Linux window (`graph.window`) does not take a drop for
+`body` yet, so each native target keeps a notice saying its drop target is
+not built yet and gives `body` back as it is. A page's drop gives the
+browser's own file handles, which the page runtime can't hand to the app
+yet, so `app.drop_files` in code whose target is the web output is a
+compile error, E-APP-TARGET-FEATURE.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

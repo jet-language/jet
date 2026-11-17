@@ -35,6 +35,7 @@ use {
     core.log.[LogField, TraceSpan]
     log_rt: jet.runtime.log
     rt: jet.runtime.time
+    core.ui.[UINode]
     builtin: jet_builtins
 }
 
@@ -1304,7 +1305,7 @@ priv app_screen_page: fn(screen: calls.AppScreen, fields: [String:String]) -[Net
         shown: calls.App.__graph().__open(screen, fields) ?? return ""
         held := marked.guard_edit()
         held.value = true
-        shown
+        shown.__html()
     })
     held: opened.guard_read()
     if !held.value -> return None
@@ -1734,7 +1735,7 @@ priv CrawlTestInbox: struct {
 }
 
 // A crawl test screen's opener: the crawl opens no screen.
-priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> String? Never! { None }
+priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> UINode? Never! { None }
 
 #Test("the sitemap lists the public pages the graph's sitemap gives, at the origin asked, and robots leave the signed-in screens") {
     graph: calls.new("Crawl").__screen<CrawlTestGuide>("/help/:slug", "web.CrawlTestGuide", [String]{}, false, crawl_test_open).__screen<CrawlTestInbox>("/mail/:box", "web.CrawlTestInbox", [String]{}, true, crawl_test_open)
@@ -1781,17 +1782,17 @@ priv ScreenTestInbox: struct {
 
 // The board screen's opener, as the compiler lowers `.screen`: its view
 // shows the board and the tab the address gives.
-priv screen_test_board_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
+priv screen_test_board_open: fn(graph: calls.App, fields: [String:String]) -> UINode? Never! {
     state: graph.__address_state<ScreenTestBoard>([String]{"board", "tab"}, [String?]{graph.__address_json<String>(fields, "board"), graph.__address_json<String>(fields, "tab")}) ?? return None
-    Val(graph.__view_html<String>("{state.board} <{state.tab}>"))
+    Val(graph.__view_node<String>("{state.board} <{state.tab}>"))
 }
 
 // The inbox screen's opener: its view shows the box and the caller it acts
 // for.
-priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> String? Never! {
+priv screen_test_inbox_open: fn(graph: calls.App, fields: [String:String]) -> UINode? Never! {
     state: graph.__address_state<ScreenTestInbox>([String]{"box"}, [String?]{graph.__address_json<String>(fields, "box")}) ?? return None
     caller: calls.maybe_caller() ?? auth.AccountID.from_string("no one")
-    Val(graph.__view_html<String>("{state.box} for {caller.raw()}"))
+    Val(graph.__view_node<String>("{state.box} for {caller.raw()}"))
 }
 
 #Test("a screen's address answers a GET with the page its view shows there and the page's resume state, 401 when only a signed-in caller opens it, and 404 when the address makes no state") {
