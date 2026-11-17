@@ -1,0 +1,84 @@
+// Crewboard in a Linux window: the board's Copy Link button copies the
+// board's link (`app.copy_text`), and its Paste button pastes the
+// clipboard's text (`app.paste_text`). The board's panel shows what the
+// last paste gave: blue before one, green for the text another program
+// copied, red for anything else. The compositor pastes the window's copy,
+// copies text of its own, clicks Paste, and closes the window once the
+// panel turns, which ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+LINK: "https://crewboard.example/board/7"
+
+THEIRS: "Standup notes, from the team's wiki"
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+// What the last paste gave: 0 before one, 1 for THEIRS, 2 for anything
+// else.
+Board: struct {
+    pasted: Int,
+}
+
+BOARD: Shared{Board{pasted: 0}}
+
+last_paste: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.pasted)
+}
+
+keep_paste: fn(text: String?) {
+    held := BOARD.guard_edit()
+    held.value.pasted = if (text ?? "") == THEIRS -> 1 else -> 2
+}
+
+paste: fn() -[Env, Net, Time]> {
+    keep_paste(app.paste_text())
+    app.invalidate(last_paste)
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    pasted: if app.state(app.live(last_paste)) == {
+        .Loaded(pasted) -> pasted
+        .Failed(_) | .Idle | .Loading -> 0
+    }
+    color: if pasted == 0 -> Color{r: 51, g: 102, b: 255, a: 255} else if pasted == 1 -> Color{r: 51, g: 153, b: 51, a: 255} else -> Color{r: 204, g: 51, b: 51, a: 255}
+    ui.box(
+        [
+            ui.node_color("", 200.0, 30.0, color),
+            ui.button(
+                "Copy Link",
+                fn() {
+                    app.copy_text(LINK)
+                },
+            ),
+            ui.button(
+                "Paste",
+                fn() {
+                    paste()
+                },
+            ),
+        ],
+    )
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100)
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}

@@ -1,0 +1,29 @@
+# A Linux app copies and pastes text through its window's clipboard. A
+# fake compositor on $WAYLAND_DISPLAY gives the window the keyboard focus
+# and clicks the board's Copy Link button, whose handler copies the board's
+# link (`app.copy_text`): the window offers it through the seat's data
+# device, and the compositor pastes it through a pipe. Then another program
+# copies text, and the compositor clicks Paste, whose handler pastes it
+# (`app.paste_text`): the window reads it through a pipe of its own, and the
+# board's panel turns green. Then the compositor closes the window, which
+# ends the app.
+fixture: ClipboardRoundTripsOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "board: 200x100, panel [51, 102, 255, 255]\nclicked Copy Link\ncopied: https://crewboard.example/board/7\nanother program copied; clicked Paste\nthe window pasted it as text/plain;charset=utf-8\nafter Paste: panel [51, 153, 51, 255]\nclosed the window\n"

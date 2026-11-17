@@ -5716,6 +5716,8 @@ tasks never read or change the process registry. The module source is
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
 | `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window. See below. |
 | `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window. See below. |
+| `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland). See below. |
+| `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none. Delivered by the Linux app window (Wayland). See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6468,6 +6470,21 @@ keep a notice saying their context menu is not built yet and give `body`
 back as it is. The page runtime can't open the app's menu in place of the
 browser's yet, so `app.context_menu` in code whose target is the web output
 is a compile error, E-APP-TARGET-FEATURE.
+
+`app.copy_text(text)` puts `text` on the clipboard, and `app.paste_text()`
+gives the clipboard's text, which this app or another program copied, or
+`None` when the clipboard holds no text. On Linux the app's window
+(`graph.window`) serves both through the display server, so a copy takes
+place before the window's next frame and a paste waits up to 2 s for the
+program that copied. The display server takes a copy only from a window
+the person is using: a copy or paste while the app has no window, or one
+the display server refuses, adds a notice to `app.notices()`, and a paste
+then gives `None`. The Linux window speaks Wayland; an X11 session has no
+app window yet. The other native targets keep a notice saying their
+clipboard is not built yet. A browser lets a page reach the clipboard only
+inside the person's gesture, which the page runtime can't run the call in
+yet, so `app.copy_text` or `app.paste_text` in code whose target is the web
+output is a compile error, E-APP-TARGET-FEATURE.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
