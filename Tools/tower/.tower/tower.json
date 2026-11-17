@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110875,
+    "rev": 110900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35,7 +35,7 @@
         "radar:e3"
       ]
     },
-    "completionCursor": "2026-11-17T01:19:59.510Z"
+    "completionCursor": "2026-11-17T01:37:39.804Z"
   },
   "epochs": [
     {
@@ -207,6 +207,54 @@
       "id": "e17",
       "name": "Best scripting language",
       "goal": "Jet becomes the best scripting language of all time: it beats Lua, JavaScript, TypeScript, Bash and Python on startup and run time for real scripts, and on how easy a script is to write, read and reason about, measured by tokens per task and by review of the same programs written in each language. Jet already runs the repository's own tooling, so its scripting surface is infrastructure.",
+      "status": "planned"
+    },
+    {
+      "id": "e18",
+      "name": "G6 · Declarations as types and metaprogramming",
+      "goal": "Markers, diagnostics, effects, facts and derives are ordinary types with Core traits; markers can sit in bodies; reflection, generation and const generics are complete; Core declares its own host leaves.",
+      "status": "active"
+    },
+    {
+      "id": "e19",
+      "name": "G9 · Web, end to end, re-measured against competitors",
+      "goal": "The web target, server runtime, jet dev experience and framework are fully built, then the 2026-11-04 study (Docs/research/2026-11-04-jet-dev-vs-incumbents.md) is rerun against Vite, Bun, Next.js, Deno, Astro, Rsbuild and Parcel with every gap closed or explained (a #6552 criterion; the study's timing cells are G11, on #2858). #6553-#6558 are owner-paused.",
+      "status": "planned"
+    },
+    {
+      "id": "e20",
+      "name": "G5 · Developer experience: CLI, errors and editor",
+      "goal": "Every error in plain words, every registered command and flag built, one settings table for run, build, dev and test, a generated CLI reference, a working LSP and developer tools, and a world-class testing toolkit.",
+      "status": "planned"
+    },
+    {
+      "id": "e21",
+      "name": "G3 · Core library completeness",
+      "goal": "Core data, collections, codecs, math, text, files, processes, networking, tasks and the APIs the spec ratifies are complete and correct in Jet, with no wrong-meaning bugs.",
+      "status": "planned"
+    },
+    {
+      "id": "e22",
+      "name": "G10 · Memory safety and soundness",
+      "goal": "Memory checks accept every safe program and refuse every unsafe one (including the 2026-11-04 double close), zero leaks, zero undefined behavior, proven task outcomes and cancellation, and closed authority boundaries. Rust-level safety or better, easier than Rust: every memory-safe program is accepted, neither over- nor under-strict; never copy where Rust borrows or moves; #Unsafe is the only opt-out.",
+      "status": "planned"
+    },
+    {
+      "id": "e23",
+      "name": "G7 · Packages, configuration and replacing Nix",
+      "goal": "Package roots, typed configuration and environment ownership are closed, and Jet with Jetpack replaces Nix: native packages translated from Nixpkgs, environments, one-command install, a registry with short-lived publish identities, and FFI v3 packaging of foreign code.",
+      "status": "planned"
+    },
+    {
+      "id": "e24",
+      "name": "G11 · Speed and size",
+      "goal": "The performance gate passes against every peer and the machine ceiling: measurement gate and dashboards, self-compile memory and time, codegen equal to hand-written assembly, and the smallest binaries (see G4, G10 and G12).",
+      "status": "planned"
+    },
+    {
+      "id": "e25",
+      "name": "G13 · Hillclimbing",
+      "goal": "Owner order 2026-11-06: hillclimbing starts once the defined work in the earlier goals is done. Every open-ended climb toward the physical limit lives here as a card with a measured metric and a ratchet; G1-G12 hold only defined work with fixed end conditions.",
       "status": "planned"
     }
   ],
@@ -21497,8 +21545,8 @@
       "body": "Owner acquired `jet-lang.dev` 2026-08-25. This card makes signing possible later without doing the key ceremony now.\n\nWHY THIS IS THE FIRST DOMAIN CARD: card #2157 deferred official signed publication partly because there was nowhere to publish. A signature is only worth something if a verifier can independently obtain the public key from a place the project controls. Owning a domain supplies that place.\n\nMEASURED TODAY: the only working catalog is signed by a hardcoded test key `jet-test-index-v1` whose seed is 32 bytes of the value 7 (`target-nixfeed/sign-test.mjs`). Anyone can forge it. Card #2157 requires deleting it rather than promoting it.\n\nWHAT TO BUILD: a documented, stable location under the owned domain that serves the Jet public signing key or keys, in a form the client already understands (`trust/nix-index-v1.ed25519.pub` is the current shape read by `IndexClient::from_roots_with_mode` in `crates/jetpack/src/NixIndex.rs`). Include key id, algorithm and validity, and a documented rotation story even if rotation is manual at first.\n\nEXPLICITLY NOT THIS CARD: generating production key material, choosing custody, or signing a real catalog. Those stay owner-gated on #2157. This card only establishes the address and the format so the later ceremony has somewhere to land.\n\nTRAP: fetching a key over HTTPS is not the same as trusting it. The client must pin or verify the key it already has rather than accepting whatever the host returns. A trust root served over a network is only an anchor if the client refuses substitutions.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m06-ecosystem-adoption",
+      "epoch": "e23",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
       "plan": "## Goal\nEstablish the stable public trust-root address and client format, and prove that the client pins its local key and refuses substitutes. This card creates no production key material and performs no ceremony.\n\n## Current state\n- Criterion 1 is verified: `Docs/site/dist/keys/README.md:9-22` fixes `https://keys.jet-lang.dev/nix-index-v1.ed25519.pub`, the one-line `key-id:base64-public-key` format, validity via `issued_unix`/`expires_unix`, and the pin path `<JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub`. `trust-manifest.json` is `awaiting-key-ceremony`.\n- Rotation is written up in `README.md:45-48` and `Docs/spec/packaging/trust-root.md` (criterion 4).\n- Client refusals already exist in `crates/jetpack/src/NixIndex.rs`: test-key rejection `:32,3563-3598` and `nix_index_refuses_a_server_signature_from_a_substituted_key` `:3832`.\n- Publication tests exist in `tests/jetpack_trust_root.rs`: `trust_publication_contract_is_owned_pending_and_has_no_fake_root` :21 and `trust_publication_exporter_rejects_the_test_index_key` :50. The exporter file names are at `TrustRoot.rs:1527-1529`.\n- Missing: a test that stages a key with `Tools/jetpack-infra/stage-trust-root.sh` and has the existing client read that exact file and verify a signed index (criterion 2).\n- The Jet `NixIndexClient` referenced at `Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:265` is undefined; its port is #3622 and is not required here. #2157 is done.\n\n## Changes\n1. `tests/jetpack_trust_root.rs`: add `staged_index_key_file_is_read_by_the_pinned_client`. Generate an ephemeral Ed25519 key under `~/.cache/jet-test-scratch`, stage it with `stage-trust-root.sh --index-key`, copy the staged `nix-index-v1.ed25519.pub` to the pin path, then have `IndexClient::from_roots_with_mode` verify a fixture-signed manifest. A host-served different key must be refused.\n2. Keep the test key rejected, and do not promote `jet-test-index-v1`.\n3. After the DNS, TLS and hosting gates, publish the static files (criterion 6, owner-gated).\n\n## Proof\n- `Tools/agent/jet-env cargo test --test jetpack_trust_root`: all pass, including the new staged-key test (criteria 2, 3, 5).\n- `Tools/agent/jet-env cargo test -p jetpack --lib -- nix_index_refuses_a_server_signature_from_a_substituted_key nix_index_never_accepts_the_test_key_as_an_official_root`: both pass.\n\n## Batch\nbatch-host-cli: the proof runs on the shipped Rust jetpack host and its publication tooling.\n\n## Dependencies\nNone open. Criterion 6 waits on external DNS/TLS/hosting, not a card.",
@@ -21731,7 +21779,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-08-25T19:59:25.500Z",
-      "updated": "2026-11-17T01:27:01.199Z",
+      "updated": "2026-11-17T01:37:43.775Z",
       "updatedBy": "Main",
       "workOrder": 1,
       "probe": null,
@@ -41863,28 +41911,28 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6858 c6, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:52:54.839Z",
+          "at": "2026-11-17T01:37:21.460Z",
           "closure": "duplicate"
         },
         {
           "n": 52,
           "text": "(was #3703) [#3582] Once the TCP carrier (#3557) lands: IOOperation resolves to the canonical Core declaration (a shadow user type is not mistaken for it), and IOError projection and Show/Debug agree on every level with original payloads. UI fixture tests/ui/ioerror_shadow_user_type.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6881 c9: IOError identity and rendering belong on the IOError card #6881 (the TCP carrier #3557 condition is gone; the self-hosted IOError exists)",
-          "at": "2026-11-15T04:07:20.977Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:22.618Z",
+          "closure": "duplicate"
         },
         {
           "n": 53,
           "text": "(was #3703) [#3206] A handled ComputeError (e.g. `compute.eye(-1)`) shows its typed detail through the supported surface, with a golden on every level. The E0915 suggestion for ComputeError-like types passes on the next check, and suggestions are applicability-aware.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6624 c9: ComputeError detail belongs on the core.compute correctness card #6624",
-          "at": "2026-11-15T04:07:21.985Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:23.792Z",
+          "closure": "duplicate"
         },
         {
           "n": 55,
@@ -41929,7 +41977,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #3202 c30, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:52:56.268Z",
+          "at": "2026-11-17T01:37:25.764Z",
           "closure": "duplicate"
         },
         {
@@ -41945,81 +41993,81 @@
           "n": 62,
           "text": "(was #2206 c1) Status and progress lines obey the ratified law, including lines assembled from runtime fragments Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6734 c2: status and progress line case is part of the user-visible text case rule",
-          "at": "2026-11-15T04:07:01.933Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:27.715Z",
+          "closure": "duplicate"
         },
         {
           "n": 63,
           "text": "(was #2206 c2) Prompts and confirmations obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6734 c2: prompt case is part of the user-visible text case rule",
-          "at": "2026-11-15T04:07:02.899Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:29.620Z",
+          "closure": "duplicate"
         },
         {
           "n": 64,
           "text": "(was #2206 c3) Table headers and column labels obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6734 c2: table header case is part of the user-visible text case rule",
-          "at": "2026-11-15T04:07:03.872Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:31.596Z",
+          "closure": "duplicate"
         },
         {
           "n": 65,
           "text": "(was #2206 c4) TUI, Canvas and Studio buttons, menus, tabs and panel titles obey it Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6734 c2: TUI, Canvas and Studio label case is part of the user-visible text case rule",
-          "at": "2026-11-15T04:07:04.887Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:33.578Z",
+          "closure": "duplicate"
         },
         {
           "n": 66,
           "text": "(was #2206 c5) Machine output is byte-identical before and after, proven by comparing JSON from every machine door Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6734 c4: machine-output stability belongs with the case rule on #6734",
-          "at": "2026-11-15T04:07:07.131Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:35.562Z",
+          "closure": "duplicate"
         },
         {
           "n": 67,
           "text": "(was #2207 c1) A check reads every user-facing string from its source of truth and fails when one violates the ratified law Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6734 c2: #6734 c2 requires the guard over every user-facing string source",
-          "at": "2026-11-15T04:07:05.878Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:37.619Z",
+          "closure": "duplicate"
         },
         {
           "n": 68,
           "text": "(was #2215 c1) Realization progress renders in a single bottom-anchored status region and diagnostics print atomically above it; no interleaved torn lines Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6917 c1: progress output has its own card",
-          "at": "2026-11-15T04:06:59.984Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:41.659Z",
+          "closure": "duplicate"
         },
         {
           "n": 69,
           "text": "(was #2215 c2) Plain sequential fallback used for non-TTY, NO_COLOR, and CI, covered by a test asserting no ANSI cursor movement in that mode Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6917 c2: progress output has its own card",
-          "at": "2026-11-15T04:07:00.973Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:37:42.853Z",
+          "closure": "duplicate"
         },
         {
           "n": 70,
@@ -42064,7 +42112,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6939 c11, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:52:57.708Z",
+          "at": "2026-11-17T01:37:44.777Z",
           "closure": "duplicate"
         },
         {
@@ -42092,7 +42140,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #3202 c31, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:52:59.152Z",
+          "at": "2026-11-17T01:37:45.962Z",
           "closure": "duplicate"
         },
         {
@@ -42148,7 +42196,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-17T01:37:19.954Z",
+      "updated": "2026-11-17T01:37:45.962Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -217811,6 +217859,174 @@
   ],
   "events": [
     {
+      "at": "2026-11-17T01:37:45.962Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#81"
+    },
+    {
+      "at": "2026-11-17T01:37:44.777Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#78"
+    },
+    {
+      "at": "2026-11-17T01:37:43.776Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nctuf1",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:37:42.853Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#69"
+    },
+    {
+      "at": "2026-11-17T01:37:41.659Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-17T01:37:39.804Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-17T01:37:39.804Z"
+    },
+    {
+      "at": "2026-11-17T01:37:38.591Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e25",
+      "note": "G13 · Hillclimbing"
+    },
+    {
+      "at": "2026-11-17T01:37:37.619Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-17T01:37:36.594Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e24",
+      "note": "G11 · Speed and size"
+    },
+    {
+      "at": "2026-11-17T01:37:35.562Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#66"
+    },
+    {
+      "at": "2026-11-17T01:37:34.560Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e23",
+      "note": "G7 · Packages, configuration and replacing Nix"
+    },
+    {
+      "at": "2026-11-17T01:37:33.578Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#65"
+    },
+    {
+      "at": "2026-11-17T01:37:32.600Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e22",
+      "note": "G10 · Memory safety and soundness"
+    },
+    {
+      "at": "2026-11-17T01:37:31.596Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-17T01:37:30.601Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e21",
+      "note": "G3 · Core library completeness"
+    },
+    {
+      "at": "2026-11-17T01:37:29.620Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#63"
+    },
+    {
+      "at": "2026-11-17T01:37:28.649Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e20",
+      "note": "G5 · Developer experience: CLI, errors and editor"
+    },
+    {
+      "at": "2026-11-17T01:37:27.715Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#62"
+    },
+    {
+      "at": "2026-11-17T01:37:26.742Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e19",
+      "note": "G9 · Web, end to end, re-measured against competitors"
+    },
+    {
+      "at": "2026-11-17T01:37:25.764Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#60"
+    },
+    {
+      "at": "2026-11-17T01:37:24.768Z",
+      "by": "Main",
+      "action": "epoch.add",
+      "ref": "e18",
+      "note": "G6 · Declarations as types and metaprogramming"
+    },
+    {
+      "at": "2026-11-17T01:37:23.792Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-17T01:37:22.618Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#52"
+    },
+    {
+      "at": "2026-11-17T01:37:21.460Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#51"
+    },
+    {
       "at": "2026-11-17T01:37:19.954Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -221183,713 +221399,6 @@
       "action": "card.criteria-remove",
       "ref": "c01pk3vf",
       "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. Moved whole to #6984: it covers no Linux or web behavior.; was [open]: A run that passes the system's time budget is cancelled as an ordinary task cancellation, and its cleanup runs. Proof: `jet test Compiler --profile cases --filter NativeApp/background_run_past_its_bud"
-    },
-    {
-      "at": "2026-11-16T21:52:38.373Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c01pk3vf",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6984.; was: native.background(every:, run:) registers per platform. On iOS it is a BGAppRefreshTask whose identifier the build writes into Info.plist BGTaskSchedulerPermittedIdentifiers. On Android it is a WorkMa"
-    },
-    {
-      "at": "2026-11-16T21:52:36.135Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01epn5m",
-      "note": "#2 A run that passes the system's time budget is cancelled as a"
-    },
-    {
-      "at": "2026-11-16T21:52:33.648Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01epn5m",
-      "note": "#1 native.background(every:, run:) registers per platform. On i"
-    },
-    {
-      "at": "2026-11-16T21:52:31.545Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c01epn5m",
-      "note": "Background work on phones and on macOS and Windows: BGTaskScheduler, WorkManager and login items"
-    },
-    {
-      "at": "2026-11-16T21:52:29.344Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f4o904",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:52:24.082Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0f4o904",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6983.; was: One server call, app.notify(to:, title:, body:, open:), reaches every device the account registered with .with(native.push()): APNs on Apple systems, FCM HTTP v1 on Android, and Web Push (RFC 8030 wit"
-    },
-    {
-      "at": "2026-11-16T21:52:21.878Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxaibg",
-      "note": "#2 A tap on a notification opens the open: state through the on"
-    },
-    {
-      "at": "2026-11-16T21:52:19.840Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jxaibg",
-      "note": "#1 app.notify reaches every Apple device the account registered"
-    },
-    {
-      "at": "2026-11-16T21:52:17.425Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0jxaibg",
-      "note": "Notifications on macOS, Windows and phones: APNs, FCM and local notifications"
-    },
-    {
-      "at": "2026-11-16T21:52:15.075Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0prey1k",
-      "note": "title,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:52:10.722Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0prey1k",
-      "note": "#3: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6982.; was: native.context_menu opens on right click on desktops, on long press on phones and on contextmenu on the web. An Err from an item's run goes to the app's error surface (section 3.7) and is never droppe"
-    },
-    {
-      "at": "2026-11-16T21:52:08.250Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0prey1k",
-      "note": "#2: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6982.; was: On macOS, native.menu_bar from crewboard/Desktop/desktop.jet becomes the menu bar with the app, Edit and Window menus and their key equivalents. On Windows and Linux the same value becomes the window'"
-    },
-    {
-      "at": "2026-11-16T21:52:05.836Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0prey1k",
-      "note": "#1: Owner order 2026-11-16: native-platform cards split; Linux and the web stay in G9, macOS, Windows, iOS and Android move to G13. The other platforms are on #6982.; was: The tray from examples/tray.jet stays after the last window closes on Linux, Windows and macOS. Its menu lists the caller's projects and is rebuilt when my_projects changes. Proof: `jet test Compiler "
-    },
-    {
-      "at": "2026-11-16T21:52:03.434Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zekkja",
-      "note": "#3 native.context_menu opens on right click on Windows and macO"
-    },
-    {
-      "at": "2026-11-16T21:52:01.032Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zekkja",
-      "note": "#2 On macOS, native.menu_bar becomes the menu bar with the app,"
-    },
-    {
-      "at": "2026-11-16T21:51:58.059Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zekkja",
-      "note": "#1 The tray from examples/tray.jet stays after the last window "
-    },
-    {
-      "at": "2026-11-16T21:51:54.417Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0zekkja",
-      "note": "App menus, context menus, the tray and the macOS menu bar on macOS, Windows and phones"
-    },
-    {
-      "at": "2026-11-16T21:36:07.556Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing002f80z",
-      "note": "p227/p228 landed: brace-only records; #6845 closed; #6857 c8, #6852 c6 met"
-    },
-    {
-      "at": "2026-11-16T21:35:50.864Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-16T21:35:48.918Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-16T21:13:20.709Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gy2j07",
-      "note": "#7: Add the p227 load-only failures.; was: The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPSe"
-    },
-    {
-      "at": "2026-11-16T21:13:10.230Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0apk7x9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T21:13:03.791Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m0czk2",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-16T21:13:01.935Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0apk7x9",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-16T21:12:53.185Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qqeaqb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T20:50:22.777Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing02ftgpr",
-      "note": "p226 landed; #6813 c2-c5, #6864 c2 met; p227 (brace records) running"
-    },
-    {
-      "at": "2026-11-16T20:50:11.187Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pg5tj9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T20:50:09.461Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0drmvwg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-16T20:50:08.434Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pg5tj9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-16T20:50:07.356Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pg5tj9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T20:50:06.275Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pg5tj9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T20:50:05.264Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pg5tj9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-16T20:49:51.343Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0gy2j07",
-      "note": "#7: Add the p226 load-only failure of the native scaffold case.; was: The rows that failed only under full-suite load in cycles p220-p225 pass under that load, fixed at their root (a timing or resource assumption in the test or runtime), not by retry: Tests/Cases/HTTPSe"
-    },
-    {
-      "at": "2026-11-16T20:46:59.319Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0exjsbx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T20:45:56.598Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00cqn1l",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-16T20:37:17.418Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0apk7x9",
-      "note": "#11: Correct the owning criterion number on #6418 (c154).; was: One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing, inconclusive or untracked row fails the "
-    },
-    {
-      "at": "2026-11-16T20:37:03.013Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hn7w1n",
-      "note": "#154 `jet build --lib` builds a library output instead of reporti"
-    },
-    {
-      "at": "2026-11-16T20:36:59.633Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kkogun",
-      "note": "#4 MetaSuite family J34 (native callbacks and C calling convent"
-    },
-    {
-      "at": "2026-11-16T20:36:56.323Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0apk7x9",
-      "note": "#11: Split the blocked half to the cards that own the missing work: J34's witness waits on the callback trampoline (#6947) and cffi E0003 (#6945 c2), J35's on `jet build --lib` (E2104, #6418). DeclTypes-6-1 checked on the p224 seed that every other family passes.; was: One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing or inconclusive row fails the check, and "
-    },
-    {
-      "at": "2026-11-16T20:33:28.729Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0255wk0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T20:33:13.873Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0255wk0",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-16T20:33:12.050Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0255wk0",
-      "note": "#10: The ui filter spelled the snapshot folders' pre-TitleCase names (qualified_marker_) and selected 0 tests; the folders are Tests/UI/QualifiedMarker* under the TitleCase rule, so the filter follows them.; was: A package-declared marker is named through its module, `#web.Get` (D-MARKER-MODULE1=A); unknown, private and ambiguous marker names each report a registered code with a UI snapshot. Proof: `jet test C"
-    },
-    {
-      "at": "2026-11-16T20:28:55.702Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0skf57i",
-      "note": "p225 landed (1 new = load flake); 3 criteria met; p226 running"
-    },
-    {
-      "at": "2026-11-16T20:28:54.389Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0drmvwg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T20:28:43.567Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-16T20:28:41.641Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T20:28:40.426Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gy2j07",
-      "note": "#7 The rows that failed only under full-suite load in cycles p2"
-    },
-    {
-      "at": "2026-11-16T20:24:13.987Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0drmvwg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T20:05:43.951Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0fjmt0n",
-      "note": "Power loss recovered; 3 agents (2 G6, 1 G9); p224 landed, p225 running"
-    },
-    {
-      "at": "2026-11-16T20:05:20.735Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0pg5tj9",
-      "note": "#2: Restore the text: a stray command by Main overwrote it with a placeholder.; was: $(true)"
-    },
-    {
-      "at": "2026-11-16T20:05:06.405Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0pg5tj9",
-      "note": "#2: x; was: Storage names each stored file itself and returns a blob ID. The client's file name is kept only as metadata and never becomes part of a path, so a name such as ../../etc/passwd stores safely. The ser"
-    },
-    {
-      "at": "2026-11-16T20:05:05.268Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-16T19:56:58.303Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-16T19:56:58.303Z"
-    },
-    {
-      "at": "2026-11-16T19:49:51.010Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01gyy9b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T19:34:46.963Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T19:34:44.546Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T19:34:29.174Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing07qh4fr",
-      "note": "p223 landed clean (0 new); #3147 closed; p224 running"
-    },
-    {
-      "at": "2026-11-16T19:34:06.150Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0drmvwg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T19:34:04.438Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sdz4q0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T19:34:02.702Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0w7t4qu",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-16T19:33:49.919Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0drmvwg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T19:29:21.089Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-16T19:29:21.088Z"
-    },
-    {
-      "at": "2026-11-16T19:12:42.872Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing03vwici",
-      "note": "p222 landed; #6814 and #6825 closed; p223 running"
-    },
-    {
-      "at": "2026-11-16T19:12:24.856Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0se7lpr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T19:12:22.643Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b8qwec",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T19:12:20.450Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m0czk2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T19:12:17.817Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00cqn1l",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T19:12:16.123Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0se7lpr",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-16T19:12:13.771Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0se7lpr",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-16T19:12:12.140Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0b8qwec",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-16T19:12:10.558Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0b8qwec",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T19:06:06.761Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0drmvwg",
-      "note": "#1: Names the ratified app shape (the screen state struct is the route) without changing the requirement or proof.; was: A route declares typed path and search parameters, its loader and its navigation contract; a link or navigation to an unknown route or with a wrong parameter type is a compile error with a registered "
-    },
-    {
-      "at": "2026-11-16T18:57:10.712Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tgi103",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T18:56:58.406Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0tgi103",
-      "note": "#2: Moved to #6817 (styling build-out): the preload hint needs ui.theme/ui.font, graph .theme and web bundling of ui.asset bytes, none of which exist; a CSS @font-face path would be a second font mechanism beside the ratified theme fonts.; was [open]: The first screen's fonts get preload hints on the web build. Proof: `jet test Compiler --profile cases --filter WebBuild/first_screen_fonts_get_preload_hints`."
-    },
-    {
-      "at": "2026-11-16T18:56:54.944Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ha077m",
-      "note": "#6 Fonts belong to the graph's theme (D-THEME2): `.theme(ui.the"
-    },
-    {
-      "at": "2026-11-16T18:47:06.329Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0s5hn28",
-      "note": "#15 The app's ui.asset files are packaged per native target: a d"
-    },
-    {
-      "at": "2026-11-16T18:47:05.214Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0tgi103",
-      "note": "#2: Per-target native packaging (desktop bundle, iOS asset catalog, Android resources) does not exist in the compiler; it moves to #6810 as its own criterion so #6816 closes on the web half.; was: The first screen's fonts get preload hints on the web. The same assets are packaged per target: a desktop bundle, an iOS asset catalog and Android resources. Proof: `jet test Compiler --profile cases "
-    },
-    {
-      "at": "2026-11-16T18:47:04.195Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ujz0kr",
-      "note": "#15 When the store is Postgres, live-query invalidations travel "
-    },
-    {
-      "at": "2026-11-16T18:47:03.199Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c00cqn1l",
-      "note": "#4: The Postgres LISTEN/NOTIFY broker needs a Postgres client, which Core does not have; that half moves to #6889 (core.db tools) as its own criterion so #6868 is not held by an unbuilt client.; was: Invalidations reach subscribers on other servers through a broker, Postgres LISTEN/NOTIFY first. Proof: `jet test Compiler --profile cases --filter WebApp/live_query_cross_server_invalidation`."
-    },
-    {
-      "at": "2026-11-16T18:47:02.240Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tgi103",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T18:47:01.248Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00cqn1l",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-16T18:41:13.295Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0b5xq4b",
-      "note": "#12 Each mail a job sends gets its own Message-ID, made from the"
-    },
-    {
-      "at": "2026-11-16T18:41:12.320Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0se7lpr",
-      "note": "#10: The mail half needs app.mail, which #6826 c4 owns and which is not built; it moves to #6826 as a criterion so it is kept and does not hold #6825 open.; was: Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the "
-    },
-    {
-      "at": "2026-11-16T18:40:39.795Z",
-      "by": "Main",
-      "action": "briefing.post",
-      "ref": "briefing0npqub6",
-      "note": "p221 landed; p222 running (8 SUBs); closure-first ordering"
-    },
-    {
-      "at": "2026-11-16T18:40:29.942Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T18:40:27.184Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01gyy9b",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-16T18:39:43.072Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0se7lpr",
-      "note": "#9: D-JOB-STORE1=A (ratified) rewords c9 to this text and proof; WebApp/ is the TitleCase path of the decision's web_app/; was: A queue store adapter that cannot keep the job store's durability and acknowledgement contract is refused at check time with a registered error naming what it lacks. Proof: `jet test Compiler --profil"
-    },
-    {
-      "at": "2026-11-16T18:32:09.385Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0b8qwec",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-16T18:31:41.622Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b4rnem",
-      "note": "logEntry,goals"
-    },
-    {
-      "at": "2026-11-16T18:31:37.977Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c059ge5n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T18:26:01.260Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T18:18:45.130Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07ywjvi",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-16T18:18:36.610Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m0czk2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-16T18:18:32.904Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0p39lw2",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-16T18:18:30.162Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0255wk0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-16T18:18:09.245Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gvf2dr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T18:18:07.451Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0flvd7x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-16T17:57:07.767Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kwu568",
-      "note": "#19 Concurrent first use of the C toolchain pack waits for one u"
-    },
-    {
-      "at": "2026-11-16T17:56:46.779Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01gyy9b",
-      "note": "#14 Every nested guard package under Tests/Guards runs in the ce"
-    },
-    {
-      "at": "2026-11-16T17:56:32.452Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0voqhky",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-16T17:56:30.065Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01gyy9b",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
