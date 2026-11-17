@@ -13,6 +13,7 @@ package: {
 use {
     cli
     fs: core.files
+    process: core.process
 }
 
 // The standard marker supplies root help, --version, --color, --verbose, and
@@ -68,7 +69,7 @@ CLI: struct {
     ) { print("{one},{two},{three},{four},{five},{six},{seven},{eight},{nine},{ten}") }
 
     #Doc("exit with the exact requested status code") exit: fn(self, code: Int{7}) {
-        cli.exit_with(code)
+        process.exit(code)
     }
 }
 
@@ -110,18 +111,10 @@ run_all: fn(config_root: String) {
 #[Job(.Dev, every: 1h), Doc("refresh the CLI battery fixture")]
 refresh: fn() { print("job=refresh") }
 
-// Gate notes: search's ignore-aware walk and process_demo's stdin.close are
-// real core API calls. An older binary must report that gate instead
-// of substituting a manual matcher or a shell pipeline.
-// Future command matrix (the release/golden lane owns these proofs):
-//   help:    jet run Tests/Run/CLI/Battery -- --help
-//   demo:    jet run Tests/Run/CLI/Battery -- demo
-//   process: jet run Tests/Run/CLI/Battery -- process
-//   eof:     jet run Tests/Run/CLI/Battery -- eof
-//   exit:    jet run Tests/Run/CLI/Battery -- exit --code 9  (status 9)
-//   script:  jet run Examples/Basics/ScriptRun.jet
-//   release: jet build Tests/Run/CLI/Battery --release
-//            mkdir -p bin && cp build/run bin/cli-battery
-//            ./bin/cli-battery flags
+// Every library path here is a canonical API call: search's walk is the core
+// ignore-aware walk, process_demo closes the child's stdin through the core
+// handle, and `exit` is core.process's exit. Tests/Cases/CLI/Battery builds
+// this program on every tier and as an installed release build, and checks
+// it against these goldens.
 
 run: fn(args: CLI) { run_all(args.config_dir) }

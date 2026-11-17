@@ -1,0 +1,35 @@
+# Every named library path the CLI battery consumer runs is a canonical Core
+# API, not a private stand-in. The consumer's `search` walks a tree that
+# its own .gitignore prunes: the ignored folder and the ignored extension
+# stay unread, and a nested file is still found, so this is the core
+# ignore-aware walk and not a one-folder scan or a hand-written matcher.
+# Its `eof` path writes lines to a child's stdin and then closes it, and the
+# child echoes every line before its end of input. The battery source names
+# those core calls, and it carries no wrapper of its own for core.process's
+# exit, which the consumer calls directly.
+fixture: ../../../Run/CLI/Battery
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+copy: {root}/Jetpack/Provider/Batteries/cli/cli.jet battery.jet
+mkdir: tree/nested
+mkdir: tree/ignored
+write: tree/.gitignore = "ignored/\n*.secret\n"
+write: tree/keep.txt = "needle root\nother root\n"
+write: tree/nested/deep.txt = "needle nested\n"
+write: tree/ignored/skip.txt = "needle ignored\n"
+write: tree/private.secret = "needle secret\n"
+artifact: run
+step: jet build
+exit: 0
+step: built search --root tree
+exit: 0
+stdout: = "keep.txt                :1: needle root\nnested/deep.txt         :1: needle nested\n" # only the files the .gitignore keeps, nested ones included
+step: built eof
+exit: 0
+stdout: ~ " eof=true consumer=keep-one\nkeep-two " # the child read both lines, then end of input
+file: battery.jet ~ "fs.walk_files(root, ignore: \".gitignore\")" # the search is the core ignore-aware walk
+file: battery.jet ~ "consumer.stdin.close()" # end of input is the core stdin handle's close
+file: battery.jet !~ "process.exit(" # no battery wrapper stands in for core.process's exit
+file: run.jet ~ "process.exit(code)" # the consumer exits through core.process

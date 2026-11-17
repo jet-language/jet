@@ -1,0 +1,54 @@
+# The CLI battery (Jetpack/Provider/Batteries/cli) and its typed executable
+# consumer (Tests/Run/CLI/Battery, whose golden run checks the same goldens)
+# build on O0, O1, O2 and as a release build. Each build prints the
+# #CLI(Standard) root help and runs the demo, which drives every battery path
+# once, and both match the consumer's goldens. The release build is installed
+# under a prefix's bin as `cli-battery` and runs from there: typed options keep
+# their defaults or take the given value, and `exit` returns the exact status
+# it is given.
+fixture: ../../../Run/CLI/Battery
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+artifact: run
+step: jet build -O0
+exit: 0
+step: built
+exit: 0
+stdout: = ../../../Run/CLI/Battery.out
+step: built demo
+exit: 0
+stdout: = ../../../Run/CLI/Battery.demo.out
+step: jet build -O1
+exit: 0
+step: built
+exit: 0
+stdout: = ../../../Run/CLI/Battery.out
+step: built demo
+exit: 0
+stdout: = ../../../Run/CLI/Battery.demo.out
+step: jet build -O2
+exit: 0
+step: built
+exit: 0
+stdout: = ../../../Run/CLI/Battery.out
+step: built demo
+exit: 0
+stdout: = ../../../Run/CLI/Battery.demo.out
+step: jet build --release
+exit: 0
+step: built demo
+exit: 0
+stdout: = ../../../Run/CLI/Battery.demo.out
+step: sh -c "mkdir -p {work}/prefix/bin && cp .jet/build/run {work}/prefix/bin/cli-battery"
+exit: 0
+step: {work}/prefix/bin/cli-battery --help
+exit: 0
+stdout: ~ "Usage: cli-battery [options]\n" # the installed program's help names it as installed
+stdout: ~ "  --config-dir CONFIG_DIR  directory for the CLI config file [default: cli-config] [precedence: flag > env > default] [env: CLI_CONFIG_DIR]\n" # the typed option shows its default, precedence and env source
+step: {work}/prefix/bin/cli-battery flags --three three
+exit: 0
+stdout: = "1,2,three,4,5,6,7,8,9,10\n" # nine defaults and one given typed option
+step: {work}/prefix/bin/cli-battery exit --code 9
+exit: 9 # the exact requested status
