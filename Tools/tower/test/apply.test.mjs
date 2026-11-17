@@ -102,7 +102,7 @@ test('every shape problem in a plan is reported before anything runs', () => {
   assert.equal(refused.stderr, [
     'tower: plan refused, nothing applied:',
     '  op 1 (meet): needs evidence',
-    '  op 2: unknown op "retitle" — one of meet, edit, add, remove, move, card.update, epoch.update, milestone.add, milestone.update',
+    '  op 2: unknown op "retitle" — one of meet, edit, add, remove, move, card.update, epoch.update, milestone.add, milestone.update, milestone.retire',
     '  op 3 (card.update): unknown field colour',
     '  op 3 (card.update): changes nothing',
     '  op 4 (epoch.update): changes nothing',

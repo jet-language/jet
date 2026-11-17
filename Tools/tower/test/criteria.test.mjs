@@ -192,12 +192,12 @@ test('removeCriterion drops a row, logs it, and never reuses its number', () => 
 
 test('milestone criteria edit and remove mirror the card rules', () => {
   const st = fresh();
-  const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', criteria: [{ text: 'one' }, { text: 'two' }] }));
+  const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', exitCriteria: [{ text: 'one' }, { text: 'two' }] }));
   st.mutate((s) => db.meetMilestoneCriterion(s, m.id, 1, { evidence: 'done', by: 'builder' }));
   const { result } = st.mutate((s) => db.editMilestoneCriterion(s, m.id, 1, { text: 'one, stricter', reason: 'tightened', by: 'owner' }));
   assert.equal(result.reopened, true);
   st.mutate((s) => db.removeMilestoneCriterion(s, m.id, 2, { reason: 'merged into one', by: 'owner' }));
   st.mutate((s) => db.addMilestoneCriterion(s, m.id, 'three', 'planner'));
   const saved = st.load().milestones.find(x => x.id === m.id);
-  assert.deepEqual(saved.criteria.map(i => [i.n, i.text, i.status]), [[1, 'one, stricter', 'open'], [3, 'three', 'open']]);
+  assert.deepEqual(saved.exitCriteria.map(i => [i.n, i.text, i.status]), [[1, 'one, stricter', 'open'], [3, 'three', 'open']]);
 });

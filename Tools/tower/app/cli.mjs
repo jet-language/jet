@@ -23,7 +23,7 @@ import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
-import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs, sortMilestones } from './ui/board-state.js';
 import { applyPlan } from './apply.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
@@ -135,10 +135,11 @@ const COMMAND_FLAGS = {
     remove: by(),
   }},
   milestone: { verbs: {
-    list: ['epoch', 'archived'],
-    add: payload('id', 'epoch', 'title', 'goal', 'criteria'),
-    update: payload('title', 'goal', 'criteria', 'status', 'epoch', 'archive', 'unarchive'),
-    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    list: ['epoch', 'retired'],
+    add: payload('id', 'epoch', 'title', 'goal', 'order', 'exitCriteria'),
+    update: payload('title', 'goal', 'order', 'exitCriteria', 'status', 'epoch'),
+    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    retire: by('reason'),
     closeout: by('commit'),
     verify: by('evidence', 'expectRev'),
     delete: by(),
@@ -211,8 +212,8 @@ const FLAG_VALUE = {
   tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"', order: 'N', exitCriteria: '"…"',
-  status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
-  unarchive: null, archived: null, draft: null, drafts: null, reviewedBy: 'X', reject: null, comment: '"…"', quote: '"…"',
+  status: 'S', open: null, all: null, untagged: null, force: null, retired: null,
+  draft: null, drafts: null, reviewedBy: 'X', reject: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, scratch: null, note: '"…"',
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
@@ -951,18 +952,26 @@ function cmdMilestone(store, { pos, flags }) {
   switch (verb) {
     case 'list': {
       const s = store.project();
-      let ms = s.milestones;
+      const rank = new Map(sortEpochs(s.epochs).map((e, i) => [e.id, i]));
+      let ms = sortMilestones(s.milestones).sort((a, b) => ((rank.get(a.epochId) ?? Infinity) - (rank.get(b.epochId) ?? Infinity)) || 0);
       if (flags.epoch) ms = ms.filter(m => m.epochId === flags.epoch);
-      if (!flags.archived) ms = ms.filter(m => !m.archived);
+      if (!flags.retired) ms = ms.filter(m => m.status !== 'retired');
       if (flags.json) return out(flags, null, ms);
-      for (const m of ms) console.log(`${m.id.padEnd(12)} ${epochTag(s, m.epochId).padEnd(4)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}${m.archived ? '  [archived]' : ''}`);
+      for (const m of ms) console.log(`${m.id.padEnd(12)} ${epochTag(s, m.epochId).padEnd(4)} ${(m.status || 'open').padEnd(8)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}${m.status === 'retired' ? `  [retired: ${m.retired?.reason || '—'}]` : ''}`);
       if (!ms.length) console.log('(no milestones)');
       return;
     }
     case 'add': {
       const p = readPayload(flags) || {};
-      const { result } = store.mutate((s) => db.addMilestone(s, { ...p, id: flags.id ?? p.id, epochId: flags.epoch ?? p.epochId, title: flags.title ?? p.title, goal: flags.goal ?? p.goal, criteria: flags.criteria ?? p.criteria, by: flags.by }));
+      const { result } = store.mutate((s) => db.addMilestone(s, {
+        ...p, id: flags.id ?? p.id, epochId: flags.epoch ?? p.epochId, title: flags.title ?? p.title, goal: flags.goal ?? p.goal,
+        order: flags.order ?? p.order, exitCriteria: flags.exitCriteria ?? p.exitCriteria, by: flags.by,
+      }));
       return out(flags, `added milestone ${result.id} in ${result.epochId} — ${result.title}`, result);
+    }
+    case 'retire': {
+      const { result } = store.mutate((s) => db.retireMilestone(s, id, { reason: flags.reason, by: flags.by }));
+      return out(flags, `retired milestone ${result.id} — ${result.retired.reason}`, result);
     }
     case 'criteria': {
       if (flags.reopen !== undefined) {
@@ -984,15 +993,15 @@ function cmdMilestone(store, { pos, flags }) {
         return out(flags, `added criterion #${result.n} to milestone ${id}`, result);
       }
       if (flags.meet !== undefined) {
-        const { result } = store.mutate((s) => db.meetMilestoneCriterion(s, id, flags.meet, { evidence: flags.evidence, by: flags.by }));
+        const { result } = store.mutate((s, cfg, history) => db.meetMilestoneCriterion(s, id, flags.meet, { evidence: flags.evidence, by: flags.by, kind: flags.kind }, cfg, history));
         return out(flags, `criterion #${result.n} met on milestone ${id}`, result);
       }
       if (flags.verify !== undefined) {
-        const { result } = store.mutate((s) => db.verifyMilestoneCriterion(s, id, flags.verify, { evidence: flags.evidence, by: flags.by }));
+        const { result } = store.mutate((s, cfg, history) => db.verifyMilestoneCriterion(s, id, flags.verify, { evidence: flags.evidence, by: flags.by, kind: flags.kind }, cfg, history));
         return out(flags, `criterion #${result.n} verified on milestone ${id}`, result);
       }
       const found = store.load().milestones.find(m => m.id === id) || (() => { throw new TowerError('E_NOT_FOUND', `no milestone ${id}`); })();
-      return out(flags, null, found.criteria || []);
+      return out(flags, null, found.exitCriteria);
     }
     case 'closeout': {
       const { result } = store.mutate(
@@ -1005,23 +1014,17 @@ function cmdMilestone(store, { pos, flags }) {
       return out(flags, `verified milestone ${result.id}`, result);
     }
     case 'update': {
-      const p = readPayload(flags) || {};
-      const patch = {};
-      for (const [f, k] of [['title', 'title'], ['goal', 'goal'], ['criteria', 'criteria'], ['status', 'status'], ['epoch', 'epochId']])
+      const patch = { ...(readPayload(flags) || {}) };
+      for (const [f, k] of [['title', 'title'], ['goal', 'goal'], ['order', 'order'], ['exitCriteria', 'exitCriteria'], ['status', 'status'], ['epoch', 'epochId']])
         if (flags[f] !== undefined) patch[k] = flags[f];
-      if (flags.archive) patch.archived = true;
-      if (flags.unarchive) patch.archived = false;
-      Object.assign(patch, p);
-      if (flags.criteria !== undefined) patch.criteria = flags.criteria;
-      if (flags.epoch !== undefined) patch.epochId = flags.epoch;
       const { result } = store.mutate((s) => db.updateMilestone(s, id, patch, flags.by));
-      return out(flags, `updated milestone ${result.id} — ${result.status}`, result);
+      return out(flags, `updated milestone ${result.id} in ${result.epochId} — ${result.status}`, result);
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteMilestone(s, id, flags.by));
       return out(flags, `deleted milestone ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/criteria/closeout/verify/delete`);
+    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/retire/criteria/closeout/verify/delete`);
   }
 }
 

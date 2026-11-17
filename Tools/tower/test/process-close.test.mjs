@@ -54,13 +54,13 @@ test('owner legacy close bypasses the card guard and records the audit event', (
   assert.equal(event.note, 'owner bypass');
 });
 
-test('all linked cards done makes a milestone review-ready, not met', () => {
+test('all linked cards done makes a milestone ready for review, still open, not met', () => {
   const st = fresh();
   const milestone = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
   addCard(st, { milestoneId: milestone.id });
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
   const state = st.load();
-  assert.equal(state.milestones[0].status, 'review-ready');
+  assert.equal(state.milestones[0].status, 'open');
   assert.equal(state.milestones[0].verification, undefined);
   assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, reviewReady: true, met: false });
 });
@@ -77,7 +77,7 @@ test('milestone status cannot bypass explicit verification', () => {
 test('milestone verify needs all cards done and all milestone criteria verified', () => {
   const st = fresh();
   const milestone = st.mutate((s) => db.addMilestone(s, {
-    epochId: 'e1', title: 'MVP', criteria: [{ text: 'user path' }],
+    epochId: 'e1', title: 'MVP', exitCriteria: [{ text: 'user path' }],
   })).result;
   addCard(st, { milestoneId: milestone.id });
   st.mutate((s) => db.meetMilestoneCriterion(s, milestone.id, 1, { by: 'builder' }));
@@ -106,7 +106,7 @@ test('milestone verify needs all cards done and all milestone criteria verified'
 test('milestone verifier must differ from the criterion builder', () => {
   const st = fresh();
   const milestone = st.mutate((s) => db.addMilestone(s, {
-    epochId: 'e1', title: 'MVP', criteria: [{ text: 'user path' }],
+    epochId: 'e1', title: 'MVP', exitCriteria: [{ text: 'user path' }],
   })).result;
   st.mutate((s) => db.meetMilestoneCriterion(s, milestone.id, 1, { by: 'builder' }));
   assert.throws(
@@ -118,7 +118,7 @@ test('milestone verifier must differ from the criterion builder', () => {
 test('reopening a linked card or milestone criterion clears milestone signoff', () => {
   const st = fresh();
   const milestone = st.mutate((s) => db.addMilestone(s, {
-    epochId: 'e1', title: 'MVP', criteria: [{ text: 'user path' }],
+    epochId: 'e1', title: 'MVP', exitCriteria: [{ text: 'user path' }],
   })).result;
   addCard(st, { milestoneId: milestone.id });
   st.mutate((s) => db.meetMilestoneCriterion(s, milestone.id, 1, { by: 'builder' }));
@@ -135,7 +135,7 @@ test('reopening a linked card or milestone criterion clears milestone signoff', 
   st.mutate((s) => db.beginMilestoneCloseout(s, milestone.id, { sourceCommit: 'c'.repeat(40), by: 'orchestrator' }));
   st.mutate((s) => db.verifyMilestone(s, milestone.id, { evidence: 'second review', by: 'milestone-reviewer' }));
   st.mutate((s) => db.reopenMilestoneCriterion(s, milestone.id, 1, { reason: 'new case', by: 'repairer' }));
-  assert.equal(st.load().milestones[0].status, 'review-ready');
+  assert.equal(st.load().milestones[0].status, 'open');
   assert.equal(st.load().milestones[0].verification, undefined);
   assert.equal(st.load().milestones[0].closeout, undefined);
 });
