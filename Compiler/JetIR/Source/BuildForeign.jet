@@ -416,13 +416,14 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
 }
 
 // A C callback argument: the address of code that C calls with its own
-// arguments and no closure box. A named function is that code itself: an
-// infallible top-level function of C primitives already is a C function, as
-// an export is (ir_export_signature_problems). A capture-free lambda's
-// function takes its box first (ir_build_lambda), so an adapter with the
-// callback's parameters calls it with a null box, which a lambda without
-// captures never reads. Sema admits no other callback argument (E3203,
-// E2104).
+// arguments and no closure box. An infallible named function of C
+// primitives is that code itself: it already is a C function, as an export
+// is (ir_export_signature_problems). A named function that keeps an inferred
+// Result carrier (sema projects `T Never!` only onto a function no value
+// names) returns a Result box, and a capture-free lambda's function takes
+// its box first (ir_build_lambda); each gets an adapter with the callback's
+// C parameters (ir_c_callback_adapter). Sema admits no other callback
+// argument (E3203, E2104).
 ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: BodyCallArg, span: Span) -> Int Never! {
     if arg.fn_coerce != None {
         return ir_fail_slot(b, span, "C callback argument needs a function coercion")
@@ -433,6 +434,15 @@ ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: Body
         key: ir_body_symbol_key(p, b, symbol)
         row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "C callback {key} is not a named function")
         function: p.functions[row]
+        if function.failure_carrier == .Result(_, _) {
+            returned: ir_executable_return(function) ?? return ir_fail_slot(b, span, "C callback {function.name} has no result type")
+            if !ir_is_result(returned) {
+                return ir_fail_slot(b, span, "C callback {function.name} has a Result carrier but returns {ir_type_name(returned)}")
+            }
+            outcome_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
+            target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "C callback {function.name} has no body")
+            return ir_c_callback_adapter(m, p, b, ty, target, boxed: false, outcome_row: outcome_row, name: function.name, span: span)
+        }
         if !ir_infallible(function) || ir_export_signature_problems(function).len() > 0 {
             return ir_fail_slot(b, span, "C callback {function.name} is not a C function of primitives")
         }
@@ -441,20 +451,27 @@ ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: Body
         ir_emit(b.f, IROp.FunctionAddress, code, target, -1, -1, b.line)
         return code
     }
-    if node.kind == .Lambda(lambda) -> return ir_c_callback_lambda(m, p, b, ty, lambda, span)
+    if node.kind == .Lambda(lambda) {
+        if lambda.captures.len() > 0 {
+            return ir_fail_slot(b, span, "C callback lambda captures a local")
+        }
+        if lambda.failure_carrier != .Infallible {
+            return ir_fail_slot(b, span, "C callback lambda can fail")
+        }
+        target: ir_lambda_function(m, b, lambda, [IRCaptureSlot]{}, false)
+        return ir_c_callback_adapter(m, p, b, ty, target, boxed: true, outcome_row: -1, name: "lambda", span: span)
+    }
     ir_fail_slot(b, span, "C callback argument is neither a named function nor a lambda")
 }
 
-// ir_c_callback of a capture-free lambda: an adapter that calls its function
-// with a null box.
-ir_c_callback_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, span: Span) -> Int Never! {
+// The adapter C calls for callback type `ty`: a function with the
+// callback's C parameters that calls function `target` with them, after a
+// null box when `boxed` (a lambda without captures never reads it). An
+// `outcome_row` (-1: none) is the Result box `target` returns: the adapter
+// hands C its Ok payload and stops the program on an Err, which C has no
+// way to receive.
+ir_c_callback_adapter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, target: Int, boxed: Bool, outcome_row: Int, name: String, span: Span) -> Int Never! {
     pointer_row: ir_pointer_row(m)
-    if lambda.captures.len() > 0 {
-        return ir_fail_slot(b, span, "C callback lambda captures a local")
-    }
-    if lambda.failure_carrier != .Infallible {
-        return ir_fail_slot(b, span, "C callback lambda can fail")
-    }
     params := [Type]{}
     returned := Type?{None}
     if ir_untag(ty) == .Fn(fn_params, fn_ret, _, _, _, _) {
@@ -478,21 +495,47 @@ ir_c_callback_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, la
             result_row = ir_value_type(m, p, ret) ?? return ir_type_fail(b, span, ret)
         }
     }
-    start: lambda.source_span.start
-    target: ir_lambda_function(m, b, lambda, [IRCaptureSlot]{}, false)
-    a := ir_builder_new(ir_hashed_function("{b.f.name}.c_callback@{start}", ir_closure_key(b, "c_callback"), "{b.f.symbol}__c_callback_", b.f.source_file, b.line))
+    a := ir_builder_new(ir_hashed_function("{b.f.name}.c_callback@{span.start}", ir_closure_key(b, "c_callback"), "{b.f.symbol}__c_callback_", b.f.source_file, b.line))
     a.line = b.line
-    box: ir_temp(m, a, pointer_row)
-    ir_emit(a.f, IROp.Const, box, 0, -1, -1, a.line)
-    arguments := [Int]{box}
+    // A function's parameters are its first slots.
+    received := [Int]{}
     loop (index, param_row) in rows {
-        arguments.push(ir_new_slot(a, param_row, IRSlotKind.Param, ir_intern_name(m, "_{index}")))
+        received.push(ir_new_slot(a, param_row, IRSlotKind.Param, ir_intern_name(m, "_{index}")))
     }
+    arguments := [Int]{}
+    if boxed {
+        box: ir_temp(m, a, pointer_row)
+        ir_emit(a.f, IROp.Const, box, 0, -1, -1, a.line)
+        arguments.push(box)
+    }
+    loop slot in received -> arguments.push(slot)
     a.f.result = result_row
-    dst: if result_row >= 0 -> ir_temp(m, a, result_row) else -> -1
+    // The Result box is the adapter's own, freed once its payload is out.
+    dst: if {
+        outcome_row >= 0 -> ir_fresh_temp(m, a, outcome_row)
+        result_row >= 0 -> ir_temp(m, a, result_row)
+        else -> -1
+    }
     operands: ir_args(a.f, arguments)
     ir_emit(a.f, IROp.Call, dst, target, operands, arguments.len(), a.line)
-    ir_emit(a.f, IROp.Return, -1, dst, -1, -1, a.line)
+    value := dst
+    if outcome_row >= 0 {
+        selector: ir_load_word(m, a, dst, 0)
+        zero: ir_word_const(m, a, 0)
+        failed: ir_bool_op(m, a, IROp.Eq, selector, zero)
+        ir_open_if(a.f, failed, a.line)
+        message: ir_static_text(m, a, "C callback {name} failed, and C has no way to receive a failure")
+        _: ir_runtime(m, a, "jet_rt_panic_message", message, -1)
+        ir_emit(a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        ir_end(a.f, a.line)
+        if result_row < 0 {
+            // A Unit success has no payload: the box is only freed.
+            a.fresh[dst] = false
+            ir_emit(a.f, IROp.Drop, -1, dst, -1, -1, a.line)
+        }
+        value = if result_row >= 0 -> ir_box_take(m, p, a, dst, 8, result_row) else -> -1
+    }
+    ir_emit(a.f, IROp.Return, -1, value, -1, -1, a.line)
     adapter: m.functions.len()
     m.functions.push(a.f.move())
     code: ir_temp(m, b, pointer_row)
