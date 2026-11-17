@@ -1,0 +1,37 @@
+// A lambda passed to a method binds the method's failure parameter `E` as it
+// does for a direct call: a lambda that can't fail binds `E = Never`, so the
+// call can't fail either, and one that fails with the program's `KeyError`
+// makes the call fail with that `KeyError`.
+#Error
+KeyError: enum {
+    Blank,
+}
+
+Purse: struct {
+    base: Int,
+
+    // Calls `step` on the base; a failure of `step` is this call's.
+    apply: fn<E>(self, step: fn(Int) -> Int E!) -> Int E! { step(self.base) }
+}
+
+checked: fn(purse: Purse) -> Int KeyError! {
+    purse.apply(fn(n: Int) -> Int KeyError! {
+        if n < 0 -> return Err(KeyError.Blank)
+        Ok(n * 2)
+    })
+}
+
+report: fn(purse: Purse) {
+    line: if checked(purse) == {
+        .Ok(n) -> "doubled {n}"
+        .Err(_) -> "key"
+    }
+    print(line)
+}
+
+run: fn() {
+    purse: Purse{base: 3}
+    print(purse.apply(fn(n: Int) { n + 1 }))
+    report(Purse{base: 5})
+    report(Purse{base: -1})
+}

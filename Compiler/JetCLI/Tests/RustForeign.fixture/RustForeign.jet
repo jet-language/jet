@@ -43,7 +43,7 @@ cli_rust_foreign_test_detail: fn(plan: JetDriverRustForeignPlan) Never! {
     assert(signature.why.contains("must name a safe Rust function"))
     assert_eq(signature.why, "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote")
     signature_detail: signature.detail ?? panic("Cargo signature detail must be retained")
-    assert_eq(signature_detail, "  cargo said:\n{expected}")
+    assert_eq(signature_detail, "  Cargo said:\n{expected}")
     assert_eq(signature.fix, "check the path and types on `encode` in `extern rust \"base64@0.22\"`, or pick a different Rust function")
     // Metadata errors cannot be relabeled as a checked-signature mismatch.
     metadata: jet_cli_rust_foreign_cargo_error(plan, stderr, cache, false)
@@ -58,7 +58,7 @@ cli_rust_foreign_test_detail: fn(plan: JetDriverRustForeignPlan) Never! {
     fetch: jet_cli_rust_foreign_cargo_error(plan, "error: no matching package named base64 found", cache, true)
     assert_eq(fetch.code, "E0704")
     fetch_detail: fetch.detail ?? panic("Cargo fetch detail must be retained")
-    assert_eq(fetch_detail, "  cargo said:\n    error: no matching package named base64 found")
+    assert_eq(fetch_detail, "  Cargo said:\n    error: no matching package named base64 found")
 }
 
 cli_rust_foreign_test_provenance: fn(plan: JetDriverRustForeignPlan) {

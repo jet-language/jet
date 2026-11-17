@@ -1,0 +1,16 @@
+# A lambda passed to a generic method binds the method's failure parameter
+# `E` as it does for a direct call: a lambda that can't fail binds
+# `E = Never`, and one that fails with `KeyError` makes the call fail with
+# it, on every tier.
+fixture: MethodLambdaFailure.fixture
+step check: jet check main.jet
+exit: 0
+step run: jet run main.jet
+exit: 0
+stdout: = "4\ndoubled 10\nkey\n"
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: == run
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: == run
