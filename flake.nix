@@ -24,10 +24,11 @@
         };
         jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
 
-        # User FFI helpers opt into this compiler/sysroot explicitly. Keep
-        # normal Jet compilation and runtime Rust on nixpkgs' source-built
-        # toolchain: its metadata is not interchangeable with upstream std.
-        # Both inputs pin the same compiler version; no ambient rustup needed.
+        # User FFI helpers opt into this compiler/sysroot explicitly
+        # (JET_RUST_MUSL_TOOLCHAIN). Other `extern rust` bridge builds use
+        # nixpkgs' source-built rustc: its metadata is not interchangeable with
+        # upstream std. Jet itself builds with no Rust. Both inputs pin the same
+        # compiler version; no ambient rustup needed.
         jetHasMuslHelpers = system == "x86_64-linux";
         jetRustToolchain = pkgs.rust-bin.stable.${pkgs.rustc.version}.default.override {
           targets = [
