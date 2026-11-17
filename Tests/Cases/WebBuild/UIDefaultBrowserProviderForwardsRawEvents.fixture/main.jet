@@ -1,6 +1,9 @@
 package: {
     name: "ui_default_provider"
     version: "0.1.0"
+    deps: {
+        font: "0.1.0",
+    }
     authority: {
         allow: [IO, Mem.Alloc, Browser, FS]
         needs: [UI.FileDialog, UI.Clipboard, UI.IME, UI.DragDrop]
@@ -9,8 +12,10 @@ package: {
 
 // The page's default core.ui.host provider forwards browser primitives only:
 // the harness's DOM stub fires composition, drag/drop and paste events before
-// the run, and Core decodes and judges each one.
+// the run, and Core decodes and judges each one. Glyph shaping is the font
+// battery's provider capability.
 use {
+    font
     host: core.ui.host
     clipboard: core.ui.host.clipboard
     drag_drop: core.ui.host.drag_drop
@@ -42,6 +47,7 @@ show_drops: fn() {
 run: fn() {
     facts: host.capabilities()
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
+    print("capability FontShaping: {font.shaping_available()}")
 
     grant: host.fs_grant(".", host.fs_rights_read()) ?? panic("the working directory grant is valid")
     if host.open_file(host.open_request(grant)) == {

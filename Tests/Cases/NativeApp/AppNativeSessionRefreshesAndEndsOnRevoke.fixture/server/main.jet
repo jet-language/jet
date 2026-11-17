@@ -1,0 +1,30 @@
+// Crewboard's server for the app in ../main.jet. It is its own package. It
+// serves Crew at $CREW_PORT, signs native apps in with access tokens that
+// last three seconds, and writes server.ready once it listens. Ann is its
+// one account.
+use {
+    app
+    auth: core.auth
+    files: core.files
+    sys: core.sys
+    web: core.web
+}
+
+Crew: struct {
+    // The account the call came from.
+    #App.SignedIn whoami: fn(self) -> String { app.caller().raw() }
+
+    // Ends the refresh of the caller's device `device`: whether it held one.
+    #App.SignedIn revoke: fn(self, device: String) -[DB]> Bool {
+        auth.revoke_device(app.caller().raw(), device) ?? false
+    }
+}
+
+run: fn() {
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    _: app.new("Crewboard").sessions(access: Duration{3s}, refresh: Duration{1h})
+    auth.register_user("acct_ann", "ann's credential") ?? panic("register ann: {err}")
+    server: web.app().mount("/api", Crew{}).bind("127.0.0.1:{port}") ?? panic("bind crewboard: {err}")
+    files.write("server.ready", "") ?? panic("write server.ready: {err}")
+    _: server.serve() ?? panic("serve crewboard: {err}")
+}

@@ -8,6 +8,7 @@ use {
         PlanMark,
         TERMINAL_INT_MAX,
         TerminalPalette,
+        TerminalRegion,
         Theme,
         terminal_ansi_visible_width,
         terminal_esc,
@@ -15,6 +16,8 @@ use {
         terminal_human_size,
         terminal_live_output_enabled,
         terminal_pad,
+        terminal_region_print,
+        terminal_region_replace,
     ]
     sys: core.sys
     term: core.term
@@ -130,6 +133,41 @@ terminal_test_env: fn(name: String, value: String?) {
     assert(!terminal_live_output_enabled(true, false, false), "non-TTY")
     assert(!terminal_live_output_enabled(false, true, false), "NO_COLOR")
     assert(!terminal_live_output_enabled(true, true, true), "CI")
+}
+
+#Test("terminal region redraw erases exactly the rows it drew") {
+    esc: terminal_esc()
+    first: terminal_region_replace(TerminalRegion{text: "", rows: 0}, [String]{"Downloading 0/3"})
+    assert_eq(first.output, "Downloading 0/3\n")
+    second: terminal_region_replace(first.region, [String]{"Resolving 1/2", "[####  ]"})
+    assert_eq(second.output, "{esc}[1F{esc}[0JResolving 1/2\n[####  ]\n")
+    assert_eq(second.region.rows, 2)
+    cleared: terminal_region_replace(second.region, [String]{})
+    assert_eq(cleared.output, "{esc}[2F{esc}[0J")
+    assert_eq(cleared.region.rows, 0)
+}
+
+#Test("terminal permanent text prints whole above the region") {
+    esc: terminal_esc()
+    drawn: terminal_region_replace(TerminalRegion{text: "", rows: 0}, [String]{"Downloading 2/3"}).region
+    card: "Error [jet.X]: failed\n Why: because\n Fix: retry\n"
+    write: terminal_region_print(drawn, card)
+    // The region is erased, the card follows whole, and the region is drawn
+    // again under it.
+    assert_eq(write.output, "{esc}[1F{esc}[0J{card}Downloading 2/3\n")
+    assert_eq(write.region.rows, 1)
+    // With no region drawn the text goes out alone, with no cursor control.
+    plain: terminal_region_print(TerminalRegion{text: "", rows: 0}, card)
+    assert_eq(plain.output, card)
+}
+
+#Test("terminal prompt text ends the region") {
+    esc: terminal_esc()
+    drawn: terminal_region_replace(TerminalRegion{text: "", rows: 0}, [String]{"Planning 1/2"}).region
+    write: terminal_region_print(drawn, "Apply? [y/N] ")
+    // The answer is typed after the prompt, so no region is drawn under it.
+    assert_eq(write.output, "{esc}[1F{esc}[0JApply? [y/N] ")
+    assert_eq(write.region.rows, 0)
 }
 
 #Test("terminal live lines fit a narrow terminal with ansi intact") {

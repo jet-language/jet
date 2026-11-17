@@ -1,34 +1,414 @@
-// One invocation-scoped checked cost producer for every consumer.
-use jet_foundation.[Span, TCostKind, TCostState]
+// One invocation-scoped checked cost producer for every consumer: the typed
+// cost sites of the program's own functions, read off their checked bodies.
+use {
+    unicode: core.text
+    jet_sema.[SemaGraphModuleResult]
+    jet_foundation.[
+        BodyPlace,
+        BodyTree,
+        DeclID,
+        DeclTable,
+        Diagnostic,
+        FnBody,
+        ModuleID,
+        Span,
+        StmtKind,
+        SymbolTable,
+        TBinaryOp,
+        TCostFact,
+        TCostKind,
+        TCostState,
+        TIndexKind,
+        TIntegerBounds,
+        Type,
+        body_cost_fact,
+        body_cost_integer_bounds,
+        body_cost_type,
+        body_each_expr_child,
+        body_each_stmt_child,
+        body_node,
+        body_stmt,
+        body_type,
+        checked_cost_combine_bounds,
+        checked_cost_int_fact,
+        decl_table_find,
+        decl_table_find_symbol,
+        module_is_core,
+        sema_casing_is_alphanumeric,
+        type_name,
+    ]
+}
 
 TCostSite: struct {
     function: String,
+    module_identity: ModuleID,
     span: Span,
     loop_depth: Int,
     kind: TCostKind,
     state: TCostState,
+    // The view type a ViewMaterialization copies; empty for every other kind.
+    view: String,
+    // The source file the site is in and the 1-based line it starts on
+    // (jet_driver_cost_place); empty and 0 until the site is placed.
+    path: String{""},
+    line: Int{0},
 }
 
 TCostReport: struct {
     sites: [TCostSite]{[TCostSite]{}},
 }
 
-JetDriverCostQueryResult: struct {
-    compile: JetDriverCompileResult,
-    report: TCostReport?,
-    gaps: [String],
+// What a cost projection knows of each declaration, by DeclID row: the
+// position of its checked body among the projected functions, and whether it
+// is foreign (its body lives outside Jet).
+JetDriverCostCallees: struct {
+    bodies: [Int?],
+    foreign: [Bool],
 }
 
-jet_driver_cost_query: fn(request: &&JetDriverCompileRequest) -> JetDriverCostQueryResult {
-    selected := request.move()
-    selected.mode = JetDriverCompileMode.Doc
-    selected.capture_cost_report = true
-    compile := jet_driver_compile(selected)
-    // Move the report rows out and reset the fields with whole assignments,
-    // so `compile` is whole again when it moves below.
-    report := compile.cost_report.move()
-    compile.cost_report = None
-    gaps := compile.cost_gaps.move()
-    compile.cost_gaps = [String]{}
-    JetDriverCostQueryResult{compile: compile.move(), report: report.move(), gaps: gaps.move()}
+// The functions a cost projection covers, and the declarations it reaches
+// but cannot see into: a direct call to a declaration with neither a checked
+// body nor a foreign row.
+JetDriverCostCover: struct {
+    covered: [JetDriverCostCovered],
+    gaps: [JetDriverCostGap],
+}
+
+// A declaration the projection reaches but cannot see into, at the first
+// call that reaches it: the calling function's position and the call's span.
+JetDriverCostGap: struct {
+    callee: DeclID,
+    caller: Int,
+    span: Span,
+}
+
+// A function the projection covers: its position among the projected
+// functions and the name its sites carry, a generic function's being that
+// of the specialization reached.
+JetDriverCostCovered: struct {
+    position: Int,
+    name: String,
+}
+
+// The callee facts of `functions` (each body by its key) and of the foreign
+// rows of `modules`, over the rows of `decls`.
+jet_driver_cost_callees: fn(functions: [FnBody], modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) -> JetDriverCostCallees Never! {
+    callees := JetDriverCostCallees{bodies: [Int?]{}, foreign: [Bool]{}}
+    loop _ in 0..<decls.rows.len() {
+        callees.bodies.push(None)
+        callees.foreign.push(false)
+    }
+    loop position in 0..<functions.len() {
+        if decl_table_find(decls, symbols, functions[position].key) == .Val(id) {
+            callees.bodies[id.row.index()] = Val(position)
+        }
+    }
+    loop semantic_module in modules {
+        loop row in semantic_module.foreign_functions {
+            if decl_table_find(decls, symbols, row.key) == .Val(id) {
+                callees.foreign[id.row.index()] = true
+            }
+            if decl_table_find_symbol(decls, row.symbol_id) == .Val(id) {
+                callees.foreign[id.row.index()] = true
+            }
+        }
+    }
+    callees
+}
+
+// Whether the projection reports `function`'s sites: a function the program
+// wrote, not Core's, a compiler-made one or a stand-in.
+jet_driver_cost_reports: fn(function: FnBody) -> Bool Never! {
+    !function.synthetic && !function.stand_in && !module_is_core(function.module_identity)
+}
+
+// What a projection of `functions` covers. It covers each non-generic
+// function the program wrote, then, transitively, each specialization of a
+// generic function of the program that a covered body calls, named
+// `name__generic__<type arguments>`. A direct call from a covered body to a
+// declaration with no checked body that is not foreign is a gap.
+jet_driver_cost_cover: fn(functions: [FnBody], callees: JetDriverCostCallees) -> JetDriverCostCover Never! {
+    cover := JetDriverCostCover{covered: [JetDriverCostCovered]{}, gaps: [JetDriverCostGap]{}}
+    loop position in 0..<functions.len() {
+        if jet_driver_cost_reports(functions[position]) && functions[position].generic_params.len() == 0 {
+            cover.covered.push(JetDriverCostCovered{position: position, name: functions[position].name})
+        }
+    }
+    specializations := [String:Bool]{}
+    gap_rows := [Int:Bool]{}
+    cursor := 0
+    loop cursor < cover.covered.len() {
+        position: cover.covered[cursor].position
+        cursor += 1
+        tree: functions[position].tree
+        loop id in jet_driver_cost_nodes(functions[position]) {
+            node: body_node(tree, id)
+            if node.kind == .Call(callee, type_args, _) {
+                row: callee.row.index()
+                if callees.bodies[row] == .Val(target) {
+                    if jet_driver_cost_reports(functions[target]) && functions[target].generic_params.len() > 0 {
+                        specialization: "{functions[target].name}__generic__{jet_driver_cost_type_suffix(type_args)}"
+                        if specializations.get("{target}/{specialization}") == None {
+                            specializations["{target}/{specialization}"] = true
+                            cover.covered.push(JetDriverCostCovered{position: target, name: specialization})
+                        }
+                    }
+                } else if !callees.foreign[row] && gap_rows.get(row) == None {
+                    gap_rows[row] = true
+                    cover.gaps.push(JetDriverCostGap{callee: callee, caller: position, span: node.span})
+                }
+            }
+        }
+    }
+    cover
+}
+
+// The E2104 refusal of a projection gap: `caller` calls `callee`, whose body
+// the typed cost projection can't read, at `span`.
+jet_driver_cost_gap_diagnostic: fn(load: JetDriverLoadResult, caller: FnBody, callee: String, span: Span) -> Diagnostic {
+    jet_driver_diagnostic_at_loaded_site(load, caller.module_identity, "E2104", span, "`{caller.name}` calls `{callee}`, which has no checked body, so the typed cost projection is incomplete", "every function a checked body reaches has a checked body or a foreign row, and the typed cost report reads them", "report this as a compiler defect: checking lost the body of `{callee}`")
+}
+
+// The cost report of the `covered` functions of `functions`: each one's
+// sites, in cover order.
+jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered]) -> TCostReport Never! {
+    report := TCostReport{}
+    loop row in covered {
+        jet_driver_cost_function_sites(functions[row.position], row.name, jet_driver_cost_nodes(functions[row.position]), report.sites)
+    }
+    report
+}
+
+// Each site of `report` placed in its source file: the file's path and the
+// line its span starts on.
+jet_driver_cost_place: fn(load: JetDriverLoadResult, report: &TCostReport) {
+    lines := JetDriverForeignLines{}
+    loop index in 0..<report.sites.len() {
+        location: jet_driver_source_location_for_load_module(load, report.sites[index].module_identity, report.sites[index].span) ?? next
+        offset: report.sites[index].span.start - location.aggregate_start + location.source_start
+        report.sites[index].line = jet_driver_foreign_line(lines, load.source_files, location.source_path, offset)
+        report.sites[index].path = location.source_path
+    }
+}
+
+// The L2510 lints of `report`: one per distinct site a loop repeats whose
+// cost remains in the emitted code.
+jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Diagnostic] {
+    lints := [Diagnostic]{}
+    seen := [String:Bool]{}
+    loop site in report.sites {
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder -> next
+        operation: jet_driver_cost_operation(site)
+        key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2510", site.span, "{operation} inside a loop", "A repeated copy or representation fallback can make a growing value's cost super-linear.", "To keep the loop's cost linear, {jet_driver_cost_fix(site.kind)}."))
+    }
+    lints
+}
+
+// What a cost kind is, as `explain --cost` names it.
+jet_driver_cost_kind_label: fn(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "view materialization"
+        .CollectionCopyOnWrite -> "map copy-on-write"
+        .ExactIntSpill -> "exact Int spill"
+        .OutcomeConstruction -> "outcome construction"
+        .RepresentationFallback -> "generic representation fallback"
+    }
+}
+
+// Whether a site's cost remains, as `explain --cost` names it.
+jet_driver_cost_state_label: fn(state: TCostState) -> String Never! {
+    if state == {
+        .SemanticRemainder -> "semantic remainder"
+        .OptimizerRemoved -> "optimizer-proven removed"
+    }
+}
+
+// The operation a site repeats, as the L2510 lint names it.
+jet_driver_cost_operation: fn(site: TCostSite) -> String Never! {
+    if site.kind == {
+        .ViewMaterialization -> "This copy of `{site.view}` view into an owned slot"
+        .CollectionCopyOnWrite -> "Editing a shared map backing store"
+        .ExactIntSpill -> "An exact Int operation may spill to bigint"
+        .OutcomeConstruction -> "Constructing an Outcome carrier"
+        .RepresentationFallback -> "Using a generic collection representation"
+    }
+}
+
+// How to take a cost kind's work out of a loop, the L2510 lint's fix.
+jet_driver_cost_fix: fn(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
+        .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
+        .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept the exact bigint cost"
+        .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
+        .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
+    }
+}
+
+// Every expression of `function`'s body, statement blocks entered, in
+// pre-order.
+jet_driver_cost_nodes: fn(function: FnBody) -> [Int] Never! {
+    nodes := [Int]{}
+    loop statement in function.body {
+        jet_driver_cost_reach_statement(function.tree, statement, nodes)
+    }
+    nodes
+}
+
+// The suffix a specialization at `type_args` carries: each type's name with
+// every character but letters and digits spelled `_`, joined by `__`.
+jet_driver_cost_type_suffix: fn(type_args: [Type]) -> String Never! {
+    parts := [String]{}
+    loop argument in type_args {
+        part := ""
+        loop scalar in unicode.scalars(type_name(argument)) {
+            part = if sema_casing_is_alphanumeric(scalar) -> "{part}{scalar}" else -> "{part}_"
+        }
+        parts.push(part)
+    }
+    parts.join("__")
+}
+
+// Pushes `expression` and every expression below it, statement blocks
+// entered, in pre-order onto `found`.
+jet_driver_cost_reach: fn(tree: BodyTree, expression: Int, found: &[Int]) Never! {
+    found.push(expression)
+    body_each_expr_child(tree, body_node(tree, expression), fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
+}
+
+// Pushes every expression of statement `statement` of `tree` in pre-order
+// onto `found`.
+jet_driver_cost_reach_statement: fn(tree: BodyTree, statement: Int, found: &[Int]) Never! {
+    body_each_stmt_child(tree, body_stmt(tree, statement), fn(child: Int) { jet_driver_cost_reach(tree, child, found) })
+}
+
+// Pushes onto `found` every expression a loop statement runs once per
+// iteration: its body, a `while`'s condition, a counted loop's condition and
+// step. A statement that is no loop pushes none.
+jet_driver_cost_iterated: fn(tree: BodyTree, statement: StmtKind, found: &[Int]) Never! {
+    if statement == .Loop(_, body, _) {
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    } else if statement == .While(_, condition, body, _) {
+        jet_driver_cost_reach(tree, condition, found)
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    } else if statement == .CountedLoop(_, _, condition, step, _, body, _) {
+        jet_driver_cost_reach(tree, condition, found)
+        if step == .Val(row) -> jet_driver_cost_reach_statement(tree, row, found)
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    } else if statement == .ForRange(_, _, _, _, _, _, body, _, _) {
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    } else if statement == .Range(_, _, _, _, _, _, _, _, body, _) {
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    } else if statement == .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) {
+        loop row in body -> jet_driver_cost_reach_statement(tree, row, found)
+    }
+}
+
+// The loop depth of each expression of `tree`, by node id: how many loops
+// run it once per iteration. An expression no loop repeats is absent.
+jet_driver_cost_loop_depths: fn(tree: BodyTree) -> [Int:Int] Never! {
+    depths := [Int:Int]{}
+    loop statement in tree.stmts {
+        iterated := [Int]{}
+        jet_driver_cost_iterated(tree, statement, iterated)
+        loop id in iterated -> depths[id] = (depths.get(id) ?? 0) + 1
+    }
+    depths
+}
+
+// Marks in `consumed` the expressions of `tree` whose Option or Result the
+// enclosing code takes apart on the spot (a discarded value, a binding or
+// match subject, an `if let` subject, the operand of `?`, `?.`, `is`, a
+// lifted call or a drop), so no carrier outlives the expression; and in
+// `removed` each `??` operand, whose carrier the fallback's fast path
+// removes.
+jet_driver_cost_consumed: fn(tree: BodyTree, consumed: &[Int:Bool], removed: &[Int:Bool]) Never! {
+    loop statement in tree.stmts {
+        if statement == .ExprStmt(value, _) -> consumed[value] = true else if statement == .RefutableBind(_, init, _, _) {
+            consumed[init] = true
+        } else if statement == .Match(subject, _, _, _) { consumed[subject] = true } else if statement == .EnumMatch(scrutinee, _, _, _, _) {
+            consumed[scrutinee] = true
+        } else if statement == .If(condition, _, _, _, _) {
+            if condition == .IfLet(_, subject) -> consumed[subject] = true
+        }
+    }
+    loop node in tree.nodes {
+        if node.kind == .Try(value, _, _) -> consumed[value] = true else if node.kind == .TryWithContext(inner, _, _, _, _, _) {
+            consumed[inner] = true
+        } else if node.kind == .OrFallback(value, _, _) { removed[value] = true } else if node.kind == .OptField(base, _, _) {
+            consumed[base] = true
+        } else if node.kind == .OptMethodCall(base, _, _, _) { consumed[base] = true } else if node.kind == .PatternMatches(subject, _) {
+            consumed[subject] = true
+        } else if node.kind == .DecodeUnder(_, inner) { consumed[inner] = true } else if node.kind == .OptionLift2(_, left, right) {
+            consumed[left] = true
+            consumed[right] = true
+        } else if node.kind == .Drop(value) { consumed[value] = true } else if node.kind == .IfExpr(condition, _, _, _, _) {
+            if condition == .IfLet(_, subject) -> consumed[subject] = true
+        }
+    }
+}
+
+// Pushes onto `sites` the cost sites of `function`, reported as `name`:
+// those of its expressions `nodes`, in order, then those of its assignments.
+// An Outcome a `??` takes apart is optimizer-removed; one the enclosing code
+// consumes otherwise is no site.
+jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int], sites: &[TCostSite]) Never! {
+    tree: function.tree
+    depths: jet_driver_cost_loop_depths(tree)
+    consumed := [Int:Bool]{}
+    removed := [Int:Bool]{}
+    jet_driver_cost_consumed(tree, consumed, removed)
+    loop id in nodes {
+        node: body_node(tree, id)
+        fact: body_cost_fact(tree, node) ?? next
+        state := fact.state
+        if fact.kind == TCostKind.OutcomeConstruction {
+            if removed.get(id) != None -> state = TCostState.OptimizerRemoved else if consumed.get(id) != None {
+                next
+            }
+        }
+        span := node.span
+        if node.kind == .CoreCall(_, _, source_span, _, _, _) -> span = source_span
+        view := ""
+        if node.kind == .MaterializeView(value) -> view = type_name(body_type(tree, value))
+        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view})
+    }
+    loop statement in tree.stmts {
+        if statement == .Assign(place, op, value, _, span) {
+            fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? next
+            sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: ""})
+        }
+    }
+}
+
+// The cost of assigning `value` to `place` with compound operator `op`: a
+// store into a map entry edits the map's possibly shared backing store, and
+// an Int `+=`, `-=` or `*=` is an exact Int operation.
+jet_driver_cost_assign_fact: fn(tree: BodyTree, place: BodyPlace, op: TBinaryOp?, value: Int) -> TCostFact? Never! {
+    target := TIntegerBounds?{None}
+    if place == .Expr(expression) {
+        if body_node(tree, expression).kind == .Index(_, _, kind, _, _, _) {
+            if kind == TIndexKind.Map {
+                return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
+            }
+        }
+        if body_cost_type(tree, expression) != .Val(Type.Int) -> return None
+        target = body_cost_integer_bounds(tree, expression)
+    } else if place == .Local(local) {
+        if local.ty != Type.Int -> return None
+        target = local.integer_bounds
+    }
+    operator: op ?? return None
+    if operator != TBinaryOp.Add && operator != TBinaryOp.Sub && operator != TBinaryOp.Mul {
+        return None
+    }
+    operand: body_cost_integer_bounds(tree, value)
+    result := TIntegerBounds?{None}
+    if target == .Val(first) && operand == .Val(second) {
+        result = checked_cost_combine_bounds(operator, first, second)
+    }
+    Val(checked_cost_int_fact([TIntegerBounds?]{target, operand}, result))
 }

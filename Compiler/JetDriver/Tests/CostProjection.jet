@@ -1,0 +1,103 @@
+// The typed cost projection (CostQueries.jet) over a checked program: the
+// sites of the program's own functions with their loop depths, a generic
+// function's once per specialization it is called at, the gap a reachable
+// callee without a checked body leaves, and a captured report's lines and
+// L2510 lints.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileRequest,
+        JetDriverCoreSource,
+        JetDriverHeldState,
+        jet_driver_compile,
+        jet_driver_cost_callees,
+        jet_driver_cost_cover,
+        jet_driver_cost_report,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_foundation.[FnBody, decl_table_key]
+}
+
+// One function with an Int product, a generic one called at two types, and
+// a caller with an accumulator inside a loop and a sum after it.
+cost_projection_source: fn() -> String {
+    [String]{
+        "helper: fn(value: Int) -> Int {{ value * 2 }}",
+        "pick: fn<T>(value: T) -> T {{ value }}",
+        "measure: fn() -> Int {{",
+        "    total := Int{{0}}",
+        "    loop index in 0..<4 {{",
+        "        total += helper(index)",
+        "    }}",
+        "    first: pick(1)",
+        "    second: pick(true)",
+        "    if second -> total + first else -> total",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+// The request of a `jet check` of `source`, the only file.
+cost_projection_request: fn(source: String) -> JetDriverCompileRequest {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{
+            JetDriverAuthorizedSourceRoot{
+                canonical_path: "/cost-fixture",
+                identity: "cost-root",
+                allow_hardlinks: false,
+                files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/cost-fixture/main.jet", relative_path: "main.jet", identity: "cost-file", source: source}},
+                foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+            },
+        },
+        entry_root_identity: "cost-root",
+        entry_path: "/cost-fixture/main.jet",
+    }
+    jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+}
+
+// The held compile state of a `jet check` of `source`, the only file.
+cost_projection_held: fn(source: String) -> JetDriverHeldState {
+    request := cost_projection_request(source)
+    request.hold_check_state = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    compiled.held.move() ?? panic("a held check keeps its compile state")
+}
+
+#Test("the cost projection reports the program's own sites, a generic function's per specialization") {
+    held: cost_projection_held(cost_projection_source())
+    cover: jet_driver_cost_cover(held.functions, jet_driver_cost_callees(held.functions, held.modules, held.registration.decls, held.registration.symbols))
+    assert_eq(cover.gaps.len(), 0)
+    covered: loop row in cover.covered -> row.name
+    assert(covered.contains("helper") && covered.contains("measure"), "the non-generic functions are covered: {covered}")
+    assert(covered.contains("pick__generic__Int") && covered.contains("pick__generic__Bool") && !covered.contains("pick"), "a generic function is covered per specialization: {covered}")
+    sites: loop site in jet_driver_cost_report(held.functions, cover.covered).sites -> "{site.function} {site.kind:Debug} {site.state:Debug} depth {site.loop_depth}"
+    assert_eq(sites, [String]{"helper ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 0", "measure ExactIntSpill SemanticRemainder depth 1"})
+}
+
+#Test("a reachable callee with no checked body is a projection gap at its call") {
+    held: cost_projection_held(cost_projection_source())
+    kept: held.functions.filter(fn(row: FnBody) { row.name != "helper" })
+    cover: jet_driver_cost_cover(kept, jet_driver_cost_callees(kept, held.modules, held.registration.decls, held.registration.symbols))
+    gaps: loop gap in cover.gaps -> "{kept[gap.caller].name} calls {decl_table_key(held.registration.decls, held.registration.symbols, gap.callee)}"
+    assert_eq(gaps.len(), 1)
+    assert(gaps[0].starts_with("measure calls ") && gaps[0].ends_with("helper"), "the gap names its caller and callee: {gaps}")
+}
+
+#Test("a captured cost report places its sites on their lines and lints the cost a loop repeats") {
+    request := cost_projection_request(cost_projection_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    sites: loop site in report.sites -> "{site.function} {site.path}:{site.line} depth {site.loop_depth}"
+    assert_eq(sites, [String]{"helper main.jet:1 depth 0", "measure main.jet:10 depth 0", "measure main.jet:6 depth 1"})
+    lints := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2510" -> lints.push(row.what)
+    }
+    assert_eq(lints, [String]{"An exact Int operation may spill to bigint inside a loop"})
+}

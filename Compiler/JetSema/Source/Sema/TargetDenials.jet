@@ -19,6 +19,7 @@ use jet_foundation.[
     jet_target_machine_use_default,
     jet_target_machine_use_from_core_apis,
     jet_target_machine_validate,
+    jet_target_allocator_provides_heap,
     module_is_core,
     sema_effect_covers,
 ]
@@ -29,23 +30,14 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         return
     }
     // Each checked function by key: its module result and its row there.
-    // The roots are the entry module's `run` and every function an Output
-    // links, the entries the artifact starts at (sema_liveness_is_root); a
-    // `build: fn` runs on the building machine, not the target.
     slots := [String:SemaTargetSlot]{}
-    roots := [String]{}
     loop module_index in 0..<modules.len() {
         loop (row, function) in modules[module_index].functions {
             if slots.get(function.key) != None -> next
             slots[function.key] = SemaTargetSlot{module_index: module_index, row: row}
-            if function.name == "run" && function.module_identity == graph.entry_module_identity {
-                roots.push(function.key)
-            }
         }
     }
-    loop reference in graph.output_name_references {
-        roots.push(symbol_table_key(graph.symbols, reference.symbol.id))
-    }
+    roots: sema_target_entry_keys(modules, graph)
     // The functions the entry reaches through calls and function values,
     // in the order the walk first meets them.
     reached := [String]{}
@@ -109,6 +101,31 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
     }
 }
 
+// The keys of the functions a build's artifact starts at: the entry module's
+// `run` and every function an Output links (sema_liveness_is_root). A
+// `build: fn` runs on the building machine, not the target.
+sema_target_entry_keys: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph) -> [String] Never! {
+    roots := [String]{}
+    loop module_row in modules {
+        loop function in module_row.functions {
+            if function.name == "run" && function.module_identity == graph.entry_module_identity && !roots.contains(function.key) {
+                roots.push(function.key)
+            }
+        }
+    }
+    loop reference in graph.output_name_references {
+        roots.push(symbol_table_key(graph.symbols, reference.symbol.id))
+    }
+    roots
+}
+
+// Whether the build's machine has no heap: a machine with no OS whose
+// allocator provides none. Nothing such a program reaches may allocate
+// (sema_effect_check_heap_free).
+sema_target_heap_free: fn(graph: SemaRegistrationGraph) -> Bool Never! {
+    graph.target_machine.no_os && !jet_target_allocator_provides_heap(graph.target_machine.allocator)
+}
+
 // Where a checked function's body is: its module result and its row there.
 SemaTargetSlot: struct {
     module_index: Int,
@@ -140,9 +157,10 @@ sema_target_denied_diagnostic: fn(function: String, denied: String, target: Stri
 // `typed_head`) needs no service, and `#Live`'s terminal (a row naming only
 // `core.term`) is refused at the block (E3301). A module no machine without
 // an OS can serve is refused at each call instead (E3301,
-// sema_call_core_no_os_hint), and the validator's runtime-layer and allocator
-// rows are the per-site E3301 and E3303 reports, so only its capability rows
-// are reported here.
+// sema_call_core_no_os_hint), the validator's runtime-layer rows are those
+// E3301 reports and its allocator rows the heap proof's E3303
+// (sema_effect_check_heap_free), so only its capability rows are reported
+// here.
 sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaCoreUsageResult, diagnostics: &[Diagnostic]) -> Bool Never! {
     machine: graph.target_machine
     if !machine.no_os -> return true

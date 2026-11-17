@@ -1,0 +1,37 @@
+# Port of tests/cli_parts/surface.rs:2133-2162, with the verdict the typed
+# producer gives. The original refused a generic call and a foreign call as an
+# incomplete reachable projection (E2104); the typed projection reads each
+# generic specialization as its own body
+# (cost_cli_projects_generic_specializations) and a foreign row as a call it
+# does not enter, so both programs project completely: check, `lint --cost`
+# and `explain --cost` accept them and none reports E2104. E2104 stays the
+# refusal of a reachable call whose checked body is missing.
+fixture: Fixtures/Cost
+step: jet check {work}/tests/cli/cost_incomplete_generic.jet
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "E2104"
+step: jet lint --cost {work}/tests/cli/cost_incomplete_generic.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "no hidden dynamic costs in loops"
+stderr: !~ "E2104"
+step: jet explain --cost {work}/tests/cli/cost_incomplete_generic.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"action\":\"explain.cost\""
+stderr: !~ "E2104"
+step: jet check {work}/tests/cli/cost_incomplete_foreign.jet
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "E2104"
+step: jet lint --cost {work}/tests/cli/cost_incomplete_foreign.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "no hidden dynamic costs in loops"
+stderr: !~ "E2104"
+step: jet explain --cost {work}/tests/cli/cost_incomplete_foreign.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"action\":\"explain.cost\""
+stderr: !~ "E2104"

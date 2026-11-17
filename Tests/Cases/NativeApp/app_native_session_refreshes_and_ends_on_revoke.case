@@ -1,0 +1,44 @@
+# A Linux desktop app signs in to its server with a short-lived access
+# token and a refresh token the desktop's Secret Service keeps, the store
+# libsecret uses. Crewboard's server gives `.sessions(access: 3s)`. A fake
+# Secret Service on $DBUS_SESSION_BUS_ADDRESS keeps Ann's refresh token and
+# logs each change to kept.txt. Ann's app signs in for her laptop, so each
+# call carries her access token and the server knows her. Past the
+# access token's three seconds, the next call spends the refresh token for
+# a new pair, and the Secret Service keeps the new refresh token. She then
+# revokes the laptop: the call right after is still answered, since the
+# access token lasts, but once it ends the refresh is refused, the kept
+# token is deleted and the app is signed out, within one access-token
+# lifetime. The app runs the same at O0, O1 and O2.
+fixture: AppNativeSessionRefreshesAndEndsOnRevoke.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: CREW_PORT={free-port:crew}
+spawn server: jet run server/main.jet
+stdout: file server.stdout
+stderr: file server.stderr
+await: file server.ready timeout 120s every 10ms # the server listens
+spawn bus: jet run bus/fake_secrets.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake session bus listens
+step o0: jet run -O0 main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = app_native_session_refreshes_and_ends_on_revoke.stdout.expected
+step o1: jet run -O1 main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = app_native_session_refreshes_and_ends_on_revoke.stdout.expected
+step o2: jet run -O2 main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = app_native_session_refreshes_and_ends_on_revoke.stdout.expected
+file: kept.txt = "kept dev.jet.Session for the crew server: a new token\nkept dev.jet.Session for the crew server: a new token\ndeleted\nkept dev.jet.Session for the crew server: a new token\nkept dev.jet.Session for the crew server: a new token\ndeleted\nkept dev.jet.Session for the crew server: a new token\nkept dev.jet.Session for the crew server: a new token\ndeleted\n"
+signal bus: TERM
+wait: bus timeout 30s
+exit: any # the fake bus serves until the case stops it
+signal server: TERM
+wait: server timeout 30s
+exit: any # the server serves until the case stops it

@@ -1,5 +1,6 @@
 // The same slip, waived on purpose: `jet test` lists the law as waived, with
-// the reason, and runs the others.
+// the reason, and runs the others. The slip breaks only `reflexive`, so every
+// other law passes on any generated values.
 Price: struct {
     dollars: Int,
     cents: Int,
@@ -7,7 +8,7 @@ Price: struct {
     #Waive(reflexive, "the fixture keeps the slip to show the waiver")
     impl Equatable {
         equal: fn(self, rhs: Price) -> Bool {
-            self.dollars == rhs.dollars && self.cents == rhs.dollars
+            self.dollars == rhs.cents && self.cents == rhs.dollars
         }
     }
 }

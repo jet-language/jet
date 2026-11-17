@@ -1,0 +1,65 @@
+# Without an interactive terminal, with NO_COLOR, or under CI, realization
+# output is the plain sequential fallback: lines are only appended, never
+# moved over or erased. The same failing `env --prep` (the peer's runtime NAR
+# fails admission after progress began) runs piped with color forced, on a
+# pty with NO_COLOR, and on a pty under CI; screen.jet counts the cursor-moving
+# and erasing controls in each captured stream, and every count is zero while
+# the failure's card still prints.
+fixture: ../JetpackEngine/LocalCatalogMixesNativeRecipeAndNixMapping.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+copy: {root}/Tests/Cases/CLIOutput/Screen.fixture/screen.jet screen.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source badnar {work}/catalog
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jet run --allow=Env,FS.Read,FS.Write native-setup.jet -- {work}/catalog {work}/project
+exit: 0
+step piped: sh -c "exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog' > ../piped.out 2>&1"
+cwd: project
+env: FORCE_COLOR=1
+unset: NO_COLOR
+unset: CI
+exit: 2 # the runtime package cannot be admitted, the same class as a missing Nix bridge
+step: jet run --allow=FS.Read screen.jet -- controls piped.out
+exit: 0
+stdout: = "cursor controls: 0\n" # a pipe is never redrawn, even with color forced
+step: jet run --allow=FS.Read screen.jet -- screen piped.out
+exit: 0
+stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+step no_color: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
+cwd: project
+env: NO_COLOR=1
+unset: FORCE_COLOR
+unset: CI
+stdout: file no-color.out
+exit: 2 # the same admission failure
+step: jet run --allow=FS.Read screen.jet -- controls no-color.out
+exit: 0
+stdout: = "cursor controls: 0\n" # NO_COLOR on a terminal appends plain lines only
+step: jet run --allow=FS.Read screen.jet -- screen no-color.out
+exit: 0
+stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+step ci: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
+cwd: project
+env: CI=true
+unset: NO_COLOR
+unset: FORCE_COLOR
+stdout: file ci.out
+exit: 2 # the same admission failure
+step: jet run --allow=FS.Read screen.jet -- controls ci.out
+exit: 0
+stdout: = "cursor controls: 0\n" # CI on a terminal appends plain lines only
+step: jet run --allow=FS.Read screen.jet -- screen ci.out
+exit: 0
+stdout: ~ "Error [jet.NixCacheAdmissionFailed]" # the card still prints
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

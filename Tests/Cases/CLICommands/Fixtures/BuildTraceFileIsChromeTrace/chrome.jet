@@ -1,0 +1,40 @@
+// Reads `trace.json` the way a trace viewer reads Chrome trace events: one
+// JSON array, its closing `]` optional. Every event names itself and its
+// phase, process and thread; every event but metadata has a timestamp; and
+// each thread's `E` closes a `B` it opened.
+use {
+    json: core.encoding.json
+    files: core.files
+}
+
+run: fn() {
+    raw: files.read("trace.json") ?? panic("read the trace: {err}")
+    body := raw.trim_end()
+    if body.ends_with(",") -> body = body.slice(0, body.len() - 1)
+    if !body.ends_with("]") -> body = "{body}]"
+    events: json.parse(body) ?? panic("the trace is not a JSON array: {err}")
+    open := [String:Int]{}
+    spans := 0
+    loop index in 0..<events.len() {
+        event: events[index]
+        name: event["name"].text() ?? panic("event {index} has no name")
+        phase: event["ph"].text() ?? panic("event {index} ({name}) has no phase")
+        pid: event["pid"].int() ?? panic("event {index} ({name}) has no pid")
+        tid: event["tid"].int() ?? panic("event {index} ({name}) has no tid")
+        if phase != "M" {
+            ts: event["ts"].int() ?? panic("event {index} ({name}) has no timestamp")
+            if ts < 0 -> panic("event {index} ({name}) has a negative timestamp")
+        }
+        lane: "{pid}:{tid}"
+        if phase == "B" {
+            open[lane] = (open.get(lane) ?? 0) + 1
+            spans += 1
+        } else if phase == "E" {
+            depth: open.get(lane) ?? 0
+            if depth == 0 -> panic("event {index} ({name}) closes no open span on lane {lane}")
+            open[lane] = depth - 1
+        }
+    }
+    if spans == 0 -> panic("the trace has no spans")
+    print("A Chrome trace with {spans} spans")
+}

@@ -2088,14 +2088,14 @@ JetCLIOverlay: struct {
 // `settings` are the command line's `--set` writers and `profile` the
 // `--profile` it selects ("" keeps the request's default; `jet check`);
 // `target_machine` is the machine without an OS it checks for ("" for the
-// host; `jet check --target`); `hold_check_state` as in
-// jet_cli_compile_prepared.
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// host; `jet check --target`); `hold_check_state` and `capture_cost_report`
+// as in jet_cli_compile_prepared.
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) {
         overlays.push(JetCLIOverlay{path: file, source: replacement})
     }
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -2195,12 +2195,13 @@ jet_cli_unread_file_what: fn(file: String) -[FS]> String Never! {
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
-// driver's phases; `hold_check_state` as in jet_cli_compile_prepared.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// driver's phases; `hold_check_state` and `capture_cost_report` as in
+// jet_cli_compile_prepared.
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -2222,7 +2223,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // `hold_check_state`: the caller ends the process with the result still held
 // (Host.jet jet_cli_finish), so a check's compile state moves into the
 // result and is never dropped (JetDriverCompileRequest.hold_check_state).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// `capture_cost_report`: a check keeps its typed cost report and its L2510
+// lints (`explain --cost`, `lint --cost`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2237,6 +2240,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.every_core_body = every_core_body
             selected.core_layers = core_layers
             selected.hold_check_state = hold_check_state
+            selected.capture_cost_report = capture_cost_report
             // A check of a program over the built-in Core loads that Core's
             // function checks as a bound native compile does. Neither a
             // Prelude source's check nor `jet check Core` does, as they check
@@ -2749,6 +2753,11 @@ JET_CLI_TRACE_PROGRESS_STRIDE: 16
 // comptime item's `comptime.apply`) share one `/proc/self` read.
 JET_CLI_TRACE_PROCESS_MS: 50
 
+// The shortest top-level phase whose readable close names the cores it kept
+// busy (µs): ten of `/proc/self/stat`'s 10 ms ticks, so the figure is off by
+// at most about a tenth of a core per busy thread.
+JET_CLI_TRACE_CORES_US: 100000
+
 // A process spliced into the trace (jet_cli_trace_splice) has its lanes
 // numbered from this many times its place, apart from jet's own.
 JET_CLI_TRACE_SPLICE_LANES: 1000000
@@ -2802,6 +2811,11 @@ JetCLITraceState: struct {
     process_ms: Int,
     // How many other processes' traces were spliced in (jet_cli_trace_splice).
     spliced: Int,
+    // The process's CPU clock when the trace opened (ns, -1 unknown), and how
+    // many phases (spans that are not items) have closed: the readable
+    // stream's summary (jet_cli_trace_summary).
+    opened_cpu_ns: Int{-1},
+    phases: Int{0},
     // The events not written yet, in order, and their bytes.
     pending: [String]{[String]{}},
     pending_bytes: Int{0},
@@ -2871,6 +2885,7 @@ JetCLITraceSink: struct {
             if !closed.item {
                 now = jet_cli_trace_process(permit.value, (self.start_us + ts) /% 1000, cpu_ns, stack.len() == 0)
                 memory = permit.value.memory
+                permit.value.phases += 1
             }
             spent: jet_cli_trace_usage_since(closed.start, now)
             line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, Val(spent), ts, task, stack.len())}"
@@ -3020,6 +3035,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
             memory: None,
             process_ms: -1,
             spliced: 0,
+            opened_cpu_ns: jet_cli_trace_process_cpu_ns(),
         }},
     })
 }
@@ -3168,17 +3184,25 @@ jet_cli_trace_open: fn(sink: JetCLITraceSink, name: String, detail: String, args
 
 // A span's close. Machine form: its `E` event (with args only for the span
 // `end` named), then a phase's `memory` counter; readable form: one line
-// with the span's duration, CPU time, item count and memory.
+// with the span's duration, its task's CPU time, the cores the process kept
+// busy over it, item count and memory. The cores are a top-level phase's of
+// at least JET_CLI_TRACE_CORES_US: only its open and close read the
+// process's CPU clock fresh (jet_cli_trace_process), and that clock counts
+// 10 ms ticks.
 jet_cli_trace_close_line: fn(sink: JetCLITraceSink, span: JetCLITraceSpan, named: Bool, items: Int, memory: JetCLITraceMemory?, spent: JetCLITraceUsage?, ts: Int, task: Int, depth: Int) -> String Never! {
     if sink.human {
         item: if span.label == span.kind -> "" else -> " {span.label}"
         counted: if items >= 0 -> " items={items}" else -> ""
         abandoned: if named -> "" else -> " (left open)"
+        wall: ts - span.start_us
         cpu := ""
         if spent == .Val(usage) {
             if usage.cpu_ns >= 0 -> cpu = " cpu={jet_cli_trace_seconds(usage.cpu_ns /% 1000)}s"
+            if depth == 0 && wall >= JET_CLI_TRACE_CORES_US {
+                cpu = "{cpu}{jet_cli_trace_cores(usage.proc_cpu_ns, wall)}"
+            }
         }
-        return "{jet_cli_trace_prefix(sink, ts, task, depth)}< {span.kind}{item} {jet_cli_trace_seconds(ts - span.start_us)}s{cpu}{counted}{jet_cli_trace_resident(memory)}{abandoned}\n"
+        return "{jet_cli_trace_prefix(sink, ts, task, depth)}< {span.kind}{item} {jet_cli_trace_seconds(wall)}s{cpu}{counted}{jet_cli_trace_resident(memory)}{abandoned}\n"
     }
     head: jet_cli_trace_head(span.label, Val(span.kind), "E", ts, sink.pid, task)
     if !named -> return "{head}}},\n"
@@ -3355,6 +3379,13 @@ jet_cli_trace_process_usage: fn() -> JetCLITraceUsage Never! {
     usage
 }
 
+// The process's CPU time to the nanosecond (core.sys.cpu_time), -1 when
+// unknown: the readable stream's summary measures the whole compile by it.
+jet_cli_trace_process_cpu_ns: fn() -[Env]> Int Never! {
+    spent: cli_sys.cpu_time() ?? return -1
+    spent.ns
+}
+
 // A phase span's usage at clock `now_ms` with its task's `cpu_ns`, and
 // `state.memory` set: the process's clocks, faults and memory read again
 // when `fresh` (a top-level span) or when the last read is
@@ -3412,15 +3443,43 @@ jet_cli_trace_drain: fn(target: String, state: &JetCLITraceState) Never! {
 // Ends the buffering of `sink`'s trace once its compile is over, whether it
 // returned, failed or panicked (Host.jet jet_cli_compile_on_worker): the
 // `trace.bytes` counter (every event's bytes before it) and `trace.flushes`
-// (the blocks written, this last one included), then every waiting event.
-// An event after it is written at once.
-jet_cli_trace_finish: fn(sink: JetCLITraceSink) -[FS, Time]> Never! {
+// (the blocks written, this last one included), the readable stream's
+// summary (jet_cli_trace_summary), then every waiting event. An event after
+// it is written at once.
+jet_cli_trace_finish: fn(sink: JetCLITraceSink) -[Env, FS, Time]> Never! {
     totals: jet_cli_trace_totals(sink.state)
     sink.counter("counters.trace.bytes", totals.bytes)
     sink.counter("counters.trace.flushes", totals.flushes + 1)
+    summary: if sink.human -> jet_cli_trace_summary(sink, jet_cli_trace_micros(sink.start_us), jet_cli_trace_process_cpu_ns(), jet_cli_trace_memory()) else -> ""
     permit := sink.state.guard_edit()
+    if summary != "" -> jet_cli_trace_write(sink.target, permit.value, summary)
     permit.value.finished = true
     jet_cli_trace_drain(sink.target, permit.value)
+}
+
+// The readable stream's last line at clock `ts`: how many phases closed, the
+// wall time since the trace opened, the process's CPU seconds over it (by
+// `cpu_ns`, the process's CPU clock now), the cores they kept busy on
+// average, and the process's memory.
+jet_cli_trace_summary: fn(sink: JetCLITraceSink, ts: Int, cpu_ns: Int, memory: JetCLITraceMemory?) -> String Never! {
+    permit: sink.state.guard_read()
+    phases: if permit.value.phases == 1 -> "1 phase" else -> "{permit.value.phases} phases"
+    cpu := ""
+    if cpu_ns >= 0 && permit.value.opened_cpu_ns >= 0 {
+        spent: cpu_ns - permit.value.opened_cpu_ns
+        cpu = ", cpu={jet_cli_trace_seconds(spent /% 1000)}s{jet_cli_trace_cores(spent, ts)}"
+    }
+    "{jet_cli_trace_prefix(sink, ts, JET_CLI_TRACE_MAIN_LANE, 0)}Trace summary: {phases} in {jet_cli_trace_seconds(ts)}s{cpu}{jet_cli_trace_resident(memory)}\n"
+}
+
+// ` cores=N.N`: how many cores `cpu_ns` of process CPU time kept busy over
+// `wall_us` of wall time, to a tenth; "" with no CPU time measured or no wall
+// time to divide by.
+jet_cli_trace_cores: fn(cpu_ns: Int, wall_us: Int) -> String Never! {
+    if cpu_ns <= 0 || wall_us <= 0 -> return ""
+    wall_ns: wall_us * 1000
+    tenths: (cpu_ns * 10 + wall_ns /% 2) /% wall_ns
+    " cores={tenths /% 10}.{tenths %% 10}"
 }
 
 jet_cli_trace_totals: fn(state: Shared<JetCLITraceState>) -> {bytes: Int, flushes: Int} Never! {

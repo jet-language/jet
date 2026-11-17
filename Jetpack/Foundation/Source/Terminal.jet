@@ -219,8 +219,75 @@ terminal_columns: fn() -[Env]> Int Never! {
     if value > 0 -> value else -> 80
 }
 
-// Every Jetpack stderr transition is one complete write, which may wait for IO.
+// The status region at the bottom of a terminal: the live lines drawn
+// under every permanent line, each fitted to one row and ending in a
+// newline, and how many rows they take. No rows: nothing is drawn.
+TerminalRegion: struct {
+    text: String,
+    rows: Int,
+}
+
+// What one stderr write puts out, and the region it leaves drawn.
+TerminalRegionWrite: struct {
+    output: String,
+    region: TerminalRegion,
+}
+
+// Permanent `text` under the lines before it and above `region`: the
+// region is erased, `text` follows, and the region is drawn again under
+// it. A `text` that leaves its line open (a prompt) ends the region, so
+// what is typed next follows it.
+terminal_region_print: fn(region: TerminalRegion, text: String) -> TerminalRegionWrite Never! {
+    if region.rows == 0 -> return TerminalRegionWrite{output: text, region: region}
+    erase: terminal_erase_lines(region.rows)
+    // A text that leaves its line open ends the region.
+    ended: TerminalRegion{text: "", rows: 0}
+    if !text.ends_with("\n") -> return TerminalRegionWrite{output: "{erase}{text}", region: ended}
+    TerminalRegionWrite{output: "{erase}{text}{region.text}", region: region}
+}
+
+// `lines` drawn as the region in place of `region`; no lines erase it.
+terminal_region_replace: fn(region: TerminalRegion, lines: [String]) -> TerminalRegionWrite Never! {
+    text := ""
+    loop line in lines -> text = "{text}{line}\n"
+    erase: if region.rows == 0 -> "" else -> terminal_erase_lines(region.rows)
+    TerminalRegionWrite{output: "{erase}{text}", region: TerminalRegion{text: text, rows: lines.len()}}
+}
+
+// The region stderr shows now. Every Jetpack stderr write takes it, so a
+// diagnostic or row printed while progress is drawn lands whole above the
+// progress, never inside it, and a redraw erases only the region.
+priv TERMINAL_REGION: Shared{TerminalRegion{text: "", rows: 0}}
+
+// Writes permanent `text` to stderr in one write, above the status region
+// when one is drawn (`terminal_region_print`); it may wait for IO.
 terminal_write_output: fn(text: String) -[IO, Time.Wait]> Never! {
+    held := TERMINAL_REGION.guard_edit()
+    write: terminal_region_print(held.value, text)
+    held.value = write.region
+    terminal_write_stderr(write.output)
+}
+
+// Draws `lines` as the status region, in place of the one drawn; no lines
+// erase it. The caller fits each line to one row.
+terminal_region_show: fn(lines: [String]) -[IO, Time.Wait]> Never! {
+    held := TERMINAL_REGION.guard_edit()
+    write: terminal_region_replace(held.value, lines)
+    held.value = write.region
+    if write.output != "" -> terminal_write_stderr(write.output)
+}
+
+// Erases the status region and puts permanent `text` where it was, in one
+// write.
+terminal_region_end: fn(text: String) -[IO, Time.Wait]> Never! {
+    held := TERMINAL_REGION.guard_edit()
+    write: terminal_region_replace(held.value, [String]{})
+    held.value = write.region
+    output: "{write.output}{text}"
+    if output != "" -> terminal_write_stderr(output)
+}
+
+priv terminal_write_stderr: fn(text: String) -[IO, Time.Wait]> Never! {
     stderr_handle := term.stderr()
     stderr_handle.write(text).drop("terminal output is best-effort")
 }
@@ -554,7 +621,7 @@ Theme: struct {
     // A live region for one tier-2 phase. An interactive TTY redraws its
     // status lines in place; non-TTY, NO_COLOR and CI use the plain ledger.
     live_region: fn(self) -[IO, Env]> LiveRegion Never! {
-        LiveRegion{theme: self, tty: self.live_enabled(), drawn: 0, progress: ByteProgress.new()}
+        LiveRegion{theme: self, tty: self.live_enabled(), progress: ByteProgress.new()}
     }
 
     // `Download <human size>`, e.g. `Download 240 MB`.
@@ -659,25 +726,26 @@ Theme: struct {
     }
 
     // A live spinner while a package realizes. It spins only on an
-    // interactive, non-CI TTY; otherwise the caller's status line stands.
-    // Closing it stops the task and clears the line.
+    // interactive, non-CI TTY, as the one-line status region; otherwise the
+    // caller's status line stands. Closing it stops the task and erases the
+    // region.
     spinner: fn(self, msg: String) -[IO, Env, Time]> Spinner Never! {
         if !self.live_enabled() -> return Spinner{stop: None, running: None}
         stop: Shared{SpinnerState{stop: false}}
         flag: stop.copy()
         pad: terminal_pad()
-        shown: terminal_fit_live_line(msg, terminal_columns() - 1)
+        columns: terminal_columns()
         esc: terminal_esc()
-        carriage_return: "\r"
         running: task {
             frame := 0
             loop !flag.stop {
                 glyph: TERMINAL_SPINNER_FRAMES[frame % TERMINAL_SPINNER_FRAMES.len()]
-                terminal_write_output("{carriage_return}{pad}{esc}[{ACCENT_SGR}m{glyph}{esc}[0m {shown}")
+                frame_line: terminal_fit_live_line("{esc}[{ACCENT_SGR}m{glyph}{esc}[0m {msg}", columns)
+                terminal_region_show(["{pad}{frame_line}"])
                 frame += 1
                 time.sleep(time.duration_ms(80))
             }
-            terminal_write_output("{carriage_return}{esc}[2K")
+            terminal_region_show([String]{})
         }
         Spinner{stop: Val(stop), running: Val(running.move())}
     }
@@ -764,7 +832,6 @@ ByteProgressSnapshot: struct {
 AggregateProgressRenderer: struct {
     theme: Theme,
     tty: Bool,
-    drawn: Int,
 }
 
 // Mutable progress facts behind one lock. Updates are additive; an unknown
@@ -925,18 +992,15 @@ ByteProgress: struct {
         state: self.state
         permit: state.guard_edit()
         if permit.value.renderer == None {
-            permit.value.renderer = Val(AggregateProgressRenderer{theme: theme, tty: tty, drawn: 0})
+            permit.value.renderer = Val(AggregateProgressRenderer{theme: theme, tty: tty})
         }
     }
 
-    // Drop the aggregate renderer; the erase control for what it drew.
-    clear_renderer: fn(self) -> String Never! {
+    // Drop the aggregate renderer; whoever drew the region next erases it.
+    clear_renderer: fn(self) Never! {
         state: self.state
         permit: state.guard_edit()
-        renderer: permit.value.renderer ?? return ""
         permit.value.renderer = None
-        if renderer.tty && renderer.drawn > 0 -> return terminal_erase_lines(renderer.drawn)
-        ""
     }
 
     // Redraw the aggregate line on a structural change or after enough bytes.
@@ -969,61 +1033,51 @@ ByteProgress: struct {
             return
         }
         line: renderer.theme.render_aggregate_progress(current.phase, current.package_done, current.package_total, current.object_done, current.object_total, current.transferred, current.total)
-        erase: if renderer.tty && renderer.drawn > 0 -> terminal_erase_lines(renderer.drawn) else -> ""
-        terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
-        permit.value.renderer = Val(AggregateProgressRenderer{theme: renderer.theme, tty: renderer.tty, drawn: 1})
+        shown: "{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}"
+        if renderer.tty -> terminal_region_show([shown]) else -> terminal_write_output("{shown}\n")
     }
 }
 
-// A tier-2 live region: `set_status` redraws its lines in place on a TTY and
-// `finish` promotes one permanent row above it. Non-TTY, NO_COLOR and CI only
-// ever print sequential lines; `set_status` and `collapse` never emit cursor
-// controls there.
+// A tier-2 live region: `set_status` redraws its lines as the terminal's
+// status region (`terminal_region_show`) on a TTY, and `finish` promotes
+// one permanent row in its place. Non-TTY, NO_COLOR and CI only ever print
+// sequential lines; `set_status` and `collapse` never emit cursor controls
+// there.
 LiveRegion: struct {
     theme: Theme,
     tty: Bool,
-    // Lines currently drawn, so the next redraw erases exactly that many.
-    drawn: Int,
     progress: ByteProgress,
-
-    clear_control: fn(&self) -> String Never! {
-        erase := self.progress.clear_renderer()
-        if self.tty && self.drawn > 0 -> erase = "{erase}{terminal_erase_lines(self.drawn)}"
-        self.drawn = 0
-        erase
-    }
 
     // Erase the drawn status lines, so no stale progress text sits beside
     // a diagnostic.
-    clear: fn(&self) -[IO, Time.Wait]> Never! {
-        erase: self.clear_control()
-        if erase != "" -> terminal_write_output(erase)
+    clear: fn(self) -[IO, Time.Wait]> Never! {
+        self.progress.clear_renderer()
+        if self.tty -> terminal_region_show([String]{})
     }
 
     // Promote one finished row: erase the region, then print the row
     // permanently. On non-TTY this is the whole deterministic ledger.
-    finish: fn(&self, line: String) -[IO, Env, Time.Wait]> Never! {
-        erase: self.clear_control()
-        terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
+    finish: fn(self, line: String) -[IO, Env, Time.Wait]> Never! {
+        self.progress.clear_renderer()
+        row: "{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n"
+        if self.tty -> terminal_region_end(row) else -> terminal_write_output(row)
     }
 
     // Redraw the status lines in place; inert on non-TTY.
-    set_status: fn(&self, lines: [String]) -[IO, Env, Time.Wait]> Never! {
+    set_status: fn(self, lines: [String]) -[IO, Env, Time.Wait]> Never! {
         if !self.tty {
             return
         }
-        output := self.clear_control()
+        self.progress.clear_renderer()
         columns: terminal_columns()
-        loop line in lines {
-            output = "{output}{terminal_pad()}{terminal_fit_live_line(line, columns)}\n"
-        }
-        terminal_write_output(output)
-        self.drawn = lines.len()
+        drawn := [String]{}
+        loop line in lines -> drawn.push("{terminal_pad()}{terminal_fit_live_line(line, columns)}")
+        terminal_region_show(drawn)
     }
 
     // Start or advance the aggregate realization line with the package-level
     // count and the current phase, before the provider begins work.
-    set_aggregate_status: fn(&self, phase: String, completed_packages: Int, total_packages: Int) -[IO, Env, Time.Wait]> Never! {
+    set_aggregate_status: fn(self, phase: String, completed_packages: Int, total_packages: Int) -[IO, Env, Time.Wait]> Never! {
         self.progress.begin_aggregate_step(phase, completed_packages, total_packages)
         self.progress.activate_renderer(self.theme, self.tty)
         self.progress.render_if_needed(true)
@@ -1031,7 +1085,7 @@ LiveRegion: struct {
 
     // Project one dependency edge: a two-line pinned region on a TTY, one
     // stable chain line per node otherwise.
-    set_dependency_status: fn(&self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) -[IO, Env, Time.Wait]> Never! {
+    set_dependency_status: fn(self, phase: String, completed: Int, total: Int, source: String, node: String, state: String) -[IO, Env, Time.Wait]> Never! {
         base_line: self.theme.render_dependency_status(phase, completed, total, source, node, state)
         line: if self.progress.has_facts() -> "{base_line}  {self.theme.gray(self.progress.render())}" else -> base_line
         if !self.tty {
@@ -1042,9 +1096,10 @@ LiveRegion: struct {
     }
 
     // Close the region into one final summary line.
-    collapse: fn(&self, summary: String) -[IO, Env, Time.Wait]> Never! {
-        erase: self.clear_control()
-        line: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
-        terminal_write_output("{erase}{line}\n")
+    collapse: fn(self, summary: String) -[IO, Env, Time.Wait]> Never! {
+        self.progress.clear_renderer()
+        fitted: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
+        line: "{fitted}\n"
+        if self.tty -> terminal_region_end(line) else -> terminal_write_output(line)
     }
 }

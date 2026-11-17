@@ -1,20 +1,22 @@
 // A file trace keeps its events in memory and writes them in blocks
 // (Request.jet jet_cli_trace_write): at a top-level span's begin and end, and
 // at the finish, which adds the trace's `trace.bytes` and `trace.flushes`
-// counters (jet_cli_trace_finish).
+// counters (jet_cli_trace_finish) and, for the readable stream, its summary
+// (jet_cli_trace_summary).
 use {
     blocks_files: core.files
     blocks_process: core.process
     blocks_sys: core.sys
-    jet_cli.[JetCLITraceSink, JetCLITraceSpan, JetCLITraceState, JetCLITraceUsage, jet_cli_trace_finish, jet_cli_trace_opening_lanes]
+    jet_cli.[JetCLITraceSink, JetCLITraceSpan, JetCLITraceState, JetCLITraceUsage, jet_cli_trace_cores, jet_cli_trace_finish, jet_cli_trace_opening_lanes]
 }
 
-// A file sink holding only its `[` header.
-blocks_test_sink: fn(path: String) -> JetCLITraceSink {
-    blocks_files.write(path, "[\n") ?? panic("write the trace header: {err}")
+// A sink holding only its `[` header (a file trace) or nothing (`human`, the
+// readable stream).
+blocks_test_sink: fn(path: String, human: Bool{false}) -> JetCLITraceSink {
+    blocks_files.write(path, if human -> "" else -> "[\n") ?? panic("write the trace header: {err}")
     JetCLITraceSink{
         target: path,
-        human: false,
+        human: human,
         start_us: 0,
         start_unix_us: 0,
         pid: 7,
@@ -70,4 +72,32 @@ blocks_counter: fn(trace: String, name: String) -> Int Never! {
     // phase's begin, its end, and the finish.
     assert_eq(blocks_counter(finished, "trace.bytes"), ended.count_bytes() - 2)
     assert_eq(blocks_counter(finished, "trace.flushes"), 3)
+}
+
+#Test("the cores a phase kept busy are its process CPU time over its wall time, to a tenth") {
+    assert_eq(jet_cli_trace_cores(2000000000, 1000000), " cores=2.0")
+    assert_eq(jet_cli_trace_cores(1500000, 1000), " cores=1.5")
+    assert_eq(jet_cli_trace_cores(1049999, 1000), " cores=1.0")
+    // No CPU time read, or no wall time: no figure rather than a wrong one.
+    assert_eq(jet_cli_trace_cores(0, 1000), "")
+    assert_eq(jet_cli_trace_cores(-1, 1000), "")
+    assert_eq(jet_cli_trace_cores(1000, 0), "")
+}
+
+#Test("a readable trace prints each phase as it closes and ends with a summary of every phase") {
+    path: "{blocks_sys.temp_dir()}/jet-trace-summary-{blocks_process.current_pid()}.txt"
+    sink: blocks_test_sink(path, human: true)
+    sink.begin("parse", "", -1, -1)
+    sink.end("parse", -1)
+    sink.begin("check", "", -1, -1)
+    sink.begin("item", "main", 0, 1)
+    sink.end("item", -1)
+    sink.end("check", 1)
+    jet_cli_trace_finish(sink)
+    text: blocks_files.read(path) ?? panic("read the trace: {err}")
+    blocks_files.remove(path).drop("the test's trace file")
+    assert(text.contains("< parse "))
+    assert(text.contains("< check "))
+    // Two phases close; the item inside the second is not a phase.
+    assert(text.contains("] Trace summary: 2 phases in "))
 }

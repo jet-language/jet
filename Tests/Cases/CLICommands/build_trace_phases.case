@@ -1,0 +1,18 @@
+# `jet build --trace` prints each phase on stderr as it ends: its wall time,
+# its CPU seconds and the process's memory (and, for a top-level phase of at
+# least 100 ms, the cores the process kept busy over it); then one summary
+# line: the phases, their wall time, the process's CPU seconds over them and
+# the cores they kept busy.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "run: fn() {\n    print(\"traced\")\n}\n"
+step: jet build --trace main.jet
+exit: 0
+stderr: ~ "] trace: jet pid " # the stream opens naming the process
+stderr: ~ "] < native.link " # a phase prints as it ends
+stderr: ~ "s cpu=" # with its wall and CPU seconds
+stderr: ~ "MB peak=" # and the process's memory
+stderr: ~ "] Trace summary: " # the summary closes the stream
+stderr: ~ " phases in " # counting the phases and their wall time
+stderr: ~ "s, cpu=" # the process's CPU seconds over them
+stderr: ~ "s cores=" # and the cores they kept busy

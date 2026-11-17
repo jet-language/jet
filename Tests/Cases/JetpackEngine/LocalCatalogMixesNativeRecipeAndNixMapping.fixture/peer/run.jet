@@ -169,6 +169,14 @@ peer_routes: fn(endpoint: String, root: String, source: String, mode: String, ca
         name: files.basename(path)
         routes["/{name.slice(0, 32)}.narinfo"] = peer_narinfo(path, "{kinds[i]}.nar", nar, references)
         routes["/nar/{kinds[i]}.nar"] = nar
+        // `badnar`: the runtime NAR's last padding byte is no longer zero, so
+        // its stream is not canonical and its admission fails after the
+        // other objects have downloaded.
+        if mode == "badnar" && kinds[i] == "runtime" {
+            bad := nar
+            bad[bad.len() - 1] = U8{1}
+            routes["/nar/{kinds[i]}.nar"] = bad
+        }
     }
     key: crypto.SigningKey.from_bytes(peer_seed()) ?? panic("public fixture key")
     public_key: base64.encode(key.public_key().bytes)

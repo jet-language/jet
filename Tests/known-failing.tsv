@@ -162,7 +162,6 @@ Tests/Cases/Determinism/system_clock_is_monotonic_and_effectful.case	#6843	`jet 
 Tests/Cases/ModulesAndEnums/enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors.case	#6843	c1 passes; `jet check c2/main.jet` reports E0332 "`Branch` is a group, not a value" where the original requires exactly one E0304 for the bad child
 Tests/Cases/FailureTierParity/runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.case	#6843	stops with E3010 `Value doesn't fit in destination type` (#5544)
 Tests/Cases/LibraryOutputs/guest_import_rejects_invalid_signature_and_duplicate_native_symbol.case	#6843	`jet build --lib v2/library.jet` builds `libguestimport.a` (exit 0) where it must refuse the `&Int` capability guest import with E1341 "hidden C bridge"; v1, v3, v4 and v5 are refused as the case expects
-Tests/Cases/LibraryOutputs/library_rejects_colliding_c_symbols_before_codegen.case	#6843	E2104 `jet build --lib` is not built yet (#4833)
 Tests/Cases/LibraryOutputs/locked_library_compile_requires_the_lock_stamp.case	#6843	E2104 `jet build --locked` is not built yet (#4833)
 Tests/Cases/OutcomeCarrier/the_middle_states_read_off_the_same_carrier.case	#6843	E2417 Explicit failure domain `ImportErr` is not an Error type (#5554)
 Tests/Cases/SharedTransaction/shared_plain_access_repl_uses_the_same_value_surface.case	#6843	`jet repl` reports E0915: `Shared<Counter>` has no Display, so `cell` is never bound and `cell.value += 1` is E0107
@@ -173,8 +172,6 @@ Tests/Cases/WsLaw/ambient_deadline_cancels_recv.case	#6843	`jet run main.jet` ex
 Tests/Cases/WsLaw/oversized_client_frame_is_rejected.case	#6843	`jet run main.jet` exits 0 and the echo round-trips (`echo:0123456789`), but the oversized client frame never yields `MessageTooLarge` (#5578)
 Tests/Cases/Pure/store_generations_empty.case	#6843	`jet profile generations dev --json` exits 2 with E2101: `profile` isn't a jet command (#5694)
 Tests/Cases/Pure/store_record_generation.case	#6843	`jet profile build dev` exits 2 with E2101: `profile` isn't a jet command (#5694)
-Tests/Cases/CLIPartsSurface/cost_cli_projects_generic_specializations.case	#6652	cost producer not built: `jet explain --cost` is an unbuilt form (E2104)
-Tests/Cases/CLIPartsSurface/cost_cli_rejects_incomplete_reachable_projection.case	#6652	cost producer not built: `jet lint --cost` and `jet explain --cost` are unbuilt forms (E2104), and `jet check` does not reject an incomplete reachable cost projection
 Tests/Cases/Fmt/layout_compiler_fact_rejects_unknown_and_user_owned_at_members.case	#6898	ok: `a.jet` has no problems
 Tests/Cases/Fmt/fmt_layout_block_round_trips_byte_for_byte.case	#6898	expected output stream predicate not matched on HEAD (no replayable first error)
 Tests/Cases/Fmt/fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table.case	#6898	elif/run.jet
@@ -686,7 +683,6 @@ Tests/Cases/Terminal/stdin_lines_emit_before_eof_and_stop_at_blank.case	#3594	RE
 Tests/Cases/WsLaw/public_aot_ws_connect_rejects_url_controls_before_connecting.case	#3594	REFUSED: process-file-fd core.process cannot give a child a file descriptor as stdout or stderr while the case awaits that file
 Tests/Cases/HTTPClientLaw/ambient_context_deadline_upper_bounds_client_total_timeout.case	#3665	`HTTPClient.new` is not built yet (E2104)
 Tests/Cases/RunRegressions/shared_and_closure_owner_topology_is_preserved.case	#6548	`counter.copy()` on a closure is E0211; spec.md:889-905 doesn't say whether a copied function value shares its captured environment (oracle 102/202/302 needs sharing)
-Tests/Cases/Cffi/cffi_named_pure_callback_has_stable_c_symbol.case	#6947	jet build main.jet: E2104 "passing a Jet function to `c.call_twice` is not built yet": no native C callback trampoline (exit 1, expected 0)
 Tests/Cases/Cffi/default_int_outside_i64_stops_at_c_boundary_with_e1003.case	#6946	built: exits 70 but stops with Stop [E3010] `native Int argument exceeds host range` --> <core.prelude>:0, not Stop [E1003] "Integer value is outside destination width"
 Tests/Cases/Cffi/cffi_card436_c_abi_shapes_round_trip.case	#6945	jet build main.jet: E2104 "calling `c436.add_f32` is not built yet": the native backend has no C ABI marshaling for the F32 parameter a, and E2104 "calling `c436.make_point` is not built yet": none for the #Layout(c) struct Coord returned by value (exit 1, expected 0)
 Tests/Cases/Cffi/cffi_repr_c_enums_match_native_c_layout.case	#6945	jet build main.jet: E2104 "calling `c.repr_packet` is not built yet": the native backend has no C ABI marshaling for the #Layout(c, tag: U8) payload enum Packet (exit 1, expected 0)
@@ -721,7 +717,6 @@ Tests/Cases/CoreLib/core_http_client_owns_pre_response_errors.case	#3665	`jet te
 Tests/Cases/CoreLib/core_http_client_rejects_invalid_redirect_limits_before_transport.case	#3665	`jet test fixture.jet` UnknownMethod: `to_list` isn't a method on the value at fixture.jet:49
 Tests/Cases/Effects/cross_module_foreign_undo_bindings_keep_distinct_identities.case	#6951	foreign crate bridge fails to build: cargo E0428 `jet_ffi_mutate` is defined multiple times for two modules' undo bindings
 Tests/Cases/Effects/strided_source_loop_projects_exact_arena_audit_multiplicity.case	#6066	MemoryDenialViolated: sema proves no byte size for the loop source list literal at exact.jet:9, so `!Mem.Alloc(above: 12)` rejects it (D-MEM-FACTS1); past it, `!Mem.Alloc(above: 12)` cannot be proved through the open dispatch at exact.jet:11
-Tests/Cases/FFICallbacksTasks/foreign_callback_reenters_jet_and_completes_on_a_jet_task.case	#6947	`jet build main.jet` E2104: passing a Jet function to a C callback parameter is not built yet (no native C callback trampoline)
 Tests/Cases/HTTPClientLaw/cookie_jar_enforces_per_domain_and_global_count_bounds.case	#3665	UnknownMethod: `strip_prefix` isn't a method on the value at main.jet:69
 Tests/Cases/HTTPClientLaw/cross_origin_redirect_strips_request_credentials_and_rejects_proxy_auth.case	#3665	BindingTypeMismatch at main.jet:47: this needs Unit, but the value is Bool
 Tests/Cases/HTTPClientLaw/h1_skips_early_hints_reuses_final_response_and_rejects_upgrade.case	#3665	the fixture stops with `panic: reuse` (exit 70, expected 0)

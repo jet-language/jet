@@ -1,13 +1,15 @@
-// A price written by hand, with a copy-paste slip in its `equal`: the second
-// comparison reads `rhs.dollars` where it means `rhs.cents`, so a price is
-// not equal to itself. Equatable's `reflexive` law catches it.
+// A price written by hand, with a copy-paste slip in its `equal`: each part
+// is compared with the other side's opposite part (`self.dollars` with
+// `rhs.cents`), so a price whose dollars and cents differ is not equal to
+// itself. Equatable's `reflexive` law catches it; the slip is symmetric, so
+// `symmetric` holds on every generated pair.
 Price: struct {
     dollars: Int,
     cents: Int,
 
     impl Equatable {
         equal: fn(self, rhs: Price) -> Bool {
-            self.dollars == rhs.dollars && self.cents == rhs.dollars
+            self.dollars == rhs.cents && self.cents == rhs.dollars
         }
     }
 }

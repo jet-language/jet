@@ -1,19 +1,18 @@
-// Fallible allocation is a value.
-// Freestanding-safe: Fixed owns one compile-time inline buffer, so exhaustion
-// is deterministic and does not call the hosted aborting allocator.
-// Run with: jet run Examples/Memory/Allocation/TryAllocation.jet
+// Fallible allocation is a value, with no heap: Fixed owns one compile-time
+// inline buffer, so exhaustion is deterministic and calls no allocator, and
+// each report is literal text, which allocates nothing.
 use core.mem
 
 run: fn() {
     fixed: mem.Fixed.new(size: 40)
 
     if fixed.try_alloc(7) == {
-        .Ok(value) -> { print("success {value}") }
-        .Err(error) -> { print("unexpected failure {error.requested_bytes} {error.allocator}") }
+        .Ok(_) -> { print("success") }
+        .Err(_) -> { print("unexpected failure") }
     }
 
     if fixed.try_alloc(9) == {
-        .Ok(value) -> { print("unexpected success {value}") }
-        .Err(error) -> { print("failure {error.requested_bytes} {error.allocator}") }
+        .Ok(_) -> { print("unexpected success") }
+        .Err(_) -> { print("failure") }
     }
 }

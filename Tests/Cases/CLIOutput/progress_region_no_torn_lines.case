@@ -1,0 +1,45 @@
+# Realization progress is one status region anchored at the bottom of the
+# terminal, and a failure's card prints whole above where it stood. A real
+# terminal (script's pty, 30x120, color on, not CI) runs `env --prep` while the
+# peer serves a runtime NAR whose last byte is flipped, so its admission fails
+# after progress has been drawn. screen.jet replays the captured bytes the way
+# a terminal shows them: the final screen must hold the card's lines together
+# and no progress line, so no redraw erased a permanent line and no progress
+# line was left behind among them.
+fixture: ../JetpackEngine/LocalCatalogMixesNativeRecipeAndNixMapping.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+copy: {root}/Tests/Cases/CLIOutput/Screen.fixture/screen.jet screen.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source badnar {work}/catalog
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jet run --allow=Env,FS.Read,FS.Write native-setup.jet -- {work}/catalog {work}/project
+exit: 0
+step realize: script -qfec "stty rows 30 cols 120; exec '{jetpack}' env --prep --trust --yes --local-nix-catalog '{work}/catalog'" /dev/null
+cwd: project
+unset: NO_COLOR
+unset: FORCE_COLOR
+unset: CI
+stdout: file realize.out
+exit: 2 # the runtime package cannot be admitted, the same class as a missing Nix bridge
+step: jet run --allow=FS.Read screen.jet -- controls realize.out
+exit: 0
+stdout: !~ "cursor controls: 0\n" # an interactive terminal draws progress as a live region
+step: jet run --allow=FS.Read screen.jet -- screen realize.out
+exit: 0
+stdout: !~ "Planning " # no planning progress line stays on the screen
+stdout: !~ "Resolving " # no resolving progress line stays on the screen
+stdout: !~ "Downloading " # no download progress line stays on the screen
+stdout: ~ "Error [jet.NixCacheAdmissionFailed]: Native Nix cache closure could not be admitted\n Why: E1350: native Nix cache admission failed during NAR decoding" # the card starts whole
+stdout: ~ "\n Fix: Repair the signed cache response or restore network access, then retry the realization.\nMore: jet-lang.dev/e/E1350\n" # and ends whole, nothing drawn inside it
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0

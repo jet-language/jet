@@ -8468,15 +8468,22 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
             if lambda.capture_facts.escapes -> ir_move_stored(m, p, b, slot.row, boxed, slot.offset)
         }
     }
-    id: m.functions.len()
-    m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", ir_closure_key(b, "lambda"), "{b.f.symbol}__lambda_", b.f.source_file, b.line))
-    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node, task_body: task_body})
-    m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
+    id: ir_lambda_function(m, b, lambda, captures, task_body)
     pointer_row: ir_pointer_row(m)
     code: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.FunctionAddress, code, id, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, boxed, 8, code, b.line)
     boxed
+}
+
+// The function of `lambda`, queued for ir_build_lambda: it takes the closure
+// box first, then the lambda's parameters, and reads `captures` from the box.
+ir_lambda_function: fn(m: &IRModule, b: &IRBuilder, lambda: BodyLambda, captures: [IRCaptureSlot], task_body: Bool) -> Int Never! {
+    id: m.functions.len()
+    m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", ir_closure_key(b, "lambda"), "{b.f.symbol}__lambda_", b.f.source_file, b.line))
+    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node, task_body: task_body})
+    m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
+    id
 }
 
 // Whether a value of type row `row` holds an Atomic word inline: the word

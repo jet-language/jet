@@ -245,13 +245,15 @@ SemaMemoryOpen: struct {
 }
 
 // The first violation on a path: an event (in node `owner`) or an open
-// dispatch, and the arena bytes used up to it.
+// dispatch, and the arena bytes used up to it. A search's finding also
+// keeps its path as the nodes from its root to `owner` (`steps`).
 SemaMemoryFinding: struct {
     event: SemaMemoryEvent?,
     owner: Int,
     open: SemaMemoryOpen?,
     path: [String],
     used: Int,
+    steps: [Int]{[Int]{}},
 }
 
 // Rust `ArenaProof`, or the finding that stops the proof.
@@ -4711,37 +4713,108 @@ sema_effect_arena_failure: fn(finding: SemaMemoryFinding) -> SemaMemoryArena Nev
 
 // Rust `shortest_violation` for the unbounded facts: breadth-first search
 // gives the shortest call path to the first event of `kind` ("alloc" for
-// `!Mem.Alloc`, "rc" for `!Mem.Rc`) or to an open dispatch.
-sema_effect_memory_search: fn(nodes: [SemaEffectNode], root: Int, kind: String) -> SemaMemoryFinding? {
+// `!Mem.Alloc`, "rc" for `!Mem.Rc`) or, with `opens`, to an open dispatch.
+sema_effect_memory_search: fn(nodes: [SemaEffectNode], root: Int, kind: String, opens: Bool{true}) -> SemaMemoryFinding? {
     queue := [Int]{root}
-    paths := [[String]]{[String]{nodes[root].display_key}}
+    // The node each reached node was first reached from; -1 for the root.
+    parents := (loop _ in nodes -> -1)
     seen := (loop _ in nodes -> false)
+    seen[root] = true
     cursor := 0
     loop cursor < queue.len() {
         index: queue[cursor]
-        path: paths[cursor].copy()
         cursor += 1
-        if seen[index] -> next
-        seen[index] = true
         loop event in sema_effect_memory_sorted_events(nodes[index].memory_events) {
             if event.kind == kind {
-                return Val(SemaMemoryFinding{event: Val(event), owner: index, open: None, path: path, used: 0})
+                return Val(sema_effect_memory_found(nodes, parents, index, Val(event), None))
             }
         }
         // copy: the memory finding owns its open site, while the site stays in nodes[index] (the
         // caller's read-only effect graph), which later searches read.
-        if nodes[index].rare == .Val(rare) && rare.memory_opens.len() > 0 {
-            return Val(SemaMemoryFinding{event: None, owner: index, open: Val(rare.memory_opens[0].copy()), path: path, used: 0})
+        if opens && nodes[index].rare == .Val(rare) && rare.memory_opens.len() > 0 {
+            return Val(sema_effect_memory_found(nodes, parents, index, None, Val(rare.memory_opens[0].copy())))
         }
         loop target in nodes[index].call_targets {
-            if target < 0 -> next
-            next_path := path.copy()
-            next_path.push(nodes[target].display_key)
+            if target < 0 || seen[target] -> next
+            seen[target] = true
+            parents[target] = index
             queue.push(target)
-            paths.push(next_path)
         }
     }
     None
+}
+
+// A search's finding at node `owner`, which it reached from its root along
+// `parents` (sema_effect_memory_search).
+sema_effect_memory_found: fn(nodes: [SemaEffectNode], parents: [Int], owner: Int, event: SemaMemoryEvent?, open: SemaMemoryOpen?) -> SemaMemoryFinding Never! {
+    back := [Int]{owner}
+    loop parents[back[back.len() - 1]] >= 0 { back.push(parents[back[back.len() - 1]]) }
+    steps: loop at in 0..<back.len() -> back[back.len() - 1 - at]
+    path: loop step in steps -> nodes[step].display_key
+    SemaMemoryFinding{event: event, owner: owner, open: open, path: path, used: 0, steps: steps}
+}
+
+// On a machine with no heap (named `machine`), the program keeps the promise
+// `-[!Mem.Alloc]>` makes from its start: nothing an entry (`entries`, by key)
+// reaches allocates, in Core and packages as in the program's own code (the
+// graph modules `own_modules` marks). The first allocation each entry
+// reaches is E3303 where the program's own code allocates, or at the
+// program's call that leads to it, whose report names each step and the line
+// that allocates. An open dispatch is no allocation the proof finds: a
+// foreign body runs on the machine's own memory, not the program's heap.
+sema_effect_check_heap_free: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], own_modules: [Bool], node_by_key: NameRows, entries: [String], machine: String, diagnostics: &[Diagnostic]) Never! {
+    reported := [String]{}
+    loop key in entries {
+        root: sema_effect_node_index(node_by_key, key) ?? next
+        found: sema_effect_memory_search(nodes, root, "alloc", opens: false) ?? next
+        event: found.event ?? next
+        // The program's own code runs from the entry to the first step
+        // outside it, which the last step inside it calls.
+        own := 0
+        loop own + 1 < found.steps.len() && sema_effect_own_node(nodes[found.steps[own + 1]], inputs, own_modules) {
+            own += 1
+        }
+        caller: found.steps[own]
+        // The program's call: the step inside it that leads out of it.
+        span := event.span
+        if own + 1 < found.steps.len() {
+            span = nodes[caller].name_span
+            loop call in nodes[caller].memory_calls {
+                if call.target == found.steps[own + 1] {
+                    span = call.span
+                    break
+                }
+            }
+        }
+        at: "{nodes[caller].module_index}:{span.start}:{span.end}"
+        if reported.contains(at) -> next
+        reported.push(at)
+        heap_diagnostics: [Diagnostic]{sema_effect_heap_free_diagnostic(nodes, inputs, found, event, own, span, machine)}
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[caller].module_index].source_segments, heap_diagnostics)
+    }
+}
+
+// The E3303 of a heap-free proof's finding (sema_effect_check_heap_free) at
+// `span`: the program's own allocation, or its call that leads past step
+// `own` of `found.steps` to the allocation, which the report's chain names
+// with each step and its line.
+sema_effect_heap_free_diagnostic: fn(nodes: [SemaEffectNode], inputs: [SemaEffectModuleInput], found: SemaMemoryFinding, event: SemaMemoryEvent, own: Int, span: Span, machine: String) -> Diagnostic Never! {
+    if own + 1 == found.steps.len() {
+        return sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations.")
+    }
+    owner: nodes[found.owner]
+    line: sema_source_line_at(inputs[owner.module_index].source_segments, event.span)
+    site: if line == .Val(number) -> "{owner.source_display}:{number}" else -> owner.source_display
+    chain: loop step in found.steps -> nodes[step].chain_name
+    diagnostic: sema_error("E3303", span, "`{nodes[found.steps[own + 1]].display_key}` allocates memory, but target `{machine}` has no heap", "`{owner.display_key}` allocates at {site}: {event.operation}; on a machine with no heap, nothing the program reaches may allocate, in Core and packages as in its own code", "Select a target machine with an allocator, or call a heap-free operation instead.")
+    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+}
+
+// Whether `node` is the program's own code: a function of a graph module
+// `own_modules` marks.
+sema_effect_own_node: fn(node: SemaEffectNode, inputs: [SemaEffectModuleInput], own_modules: [Bool]) -> Bool Never! {
+    graph_module: inputs[node.module_index].module_index
+    graph_module < own_modules.len() && own_modules[graph_module]
 }
 
 // Rust `may_reach_arena` over the known call graph.
@@ -6226,8 +6299,11 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // packages' rows, `expert_modules` each graph module's row among them (-1:
 // none, as for Core) and `main_package` the identity of the package being
 // built: a function's own use of an expert effect needs its package to hold
-// it (sema_effect_expert_not_held_diagnostic).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}) -> SemaEffectGraphResult {
+// it (sema_effect_expert_not_held_diagnostic). `heap_free` names the
+// selected machine when it has no heap ("" when it has one), and `entries`
+// are the keys of the functions the program starts at, from which nothing
+// may allocate (sema_effect_check_heap_free).
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -6445,6 +6521,12 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
         }
+    }
+    // A machine with no heap holds everything the program reaches to the
+    // promise `-[!Mem.Alloc]>` makes, Core's bodies included.
+    if heap_free != "" {
+        walks = true
+        sema_effect_check_heap_free(nodes, inputs, denial_modules, calls.node_by_key, entries, heap_free, diagnostics)
     }
     // A package's every other denial is a compile-time prohibition on its
     // own functions, exactly as if each wrote `-[!E]>`;

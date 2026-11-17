@@ -433,6 +433,9 @@ JetDriverCompileRequest: struct {
     capture_build_program: Bool{false},
     capture_build_nodes: Bool{false},
     build_output_names: [String]{[String]{}},
+    // A check keeps its typed cost report (`cost_report`), its sites placed
+    // on their lines, and adds its L2510 lints to its diagnostics
+    // (CostQueries.jet; `explain --cost`, `lint --cost`).
     capture_cost_report: Bool{false},
     // A Doc compile builds its shared GateLedger (GateProjection.jet
     // jet_driver_doc_gate_projection) only for the verbs that read it: `jet
@@ -950,8 +953,8 @@ JetDriverCompileResult: struct {
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}},
     build_program: TComptimeValue?{None},
     build_nodes: [BuildGraphNode]?{None},
+    // A captured check's typed cost report (capture_cost_report).
     cost_report: TCostReport?{None},
-    cost_gaps: [String]{[String]{}},
     // Checked signature facts retain helper identity order. Realization for
     // check/run/build is a CLI host action, never a compiler process probe.
     rust_foreign: JetDriverRustForeignFacts{jet_driver_rust_foreign_empty()},

@@ -1,0 +1,15 @@
+# `jet build --trace=FILE` writes Chrome trace events, the JSON array a trace
+# viewer such as Perfetto reads (its closing `]` optional): every event names
+# itself, its phase, process and thread, every event but metadata has a
+# timestamp, and each thread's span ends close spans it began. The fixture's
+# `chrome.jet` reads the file that way.
+fixture: Fixtures/BuildTraceFileIsChromeTrace
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --trace=trace.json main.jet
+exit: 0
+file: trace.json ~ "{\"name\":\"process_name\",\"ph\":\"M\"," # the process names its track
+file: trace.json ~ "{\"name\":\"trace.start\",\"ph\":\"i\"," # the trace marks its start
+step: jet run chrome.jet
+exit: 0
+stdout: ~ "A Chrome trace with " # the whole file reads as Chrome trace events

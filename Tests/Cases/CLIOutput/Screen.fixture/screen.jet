@@ -1,0 +1,179 @@
+// Replays a captured terminal stream the way a terminal shows it, so a case
+// can judge what the user sees rather than the raw bytes.
+//   screen FILE    prints the final screen, one row per line
+//   controls FILE  prints how many cursor-moving or erasing controls the
+//                  stream holds: CSI cursor, erase and scroll sequences,
+//                  cursor save and restore, and a carriage return that
+//                  rewrites its row instead of ending it
+use {
+    files: core.files
+    core.process.[args]
+}
+
+ESC: 27
+
+// The final byte of a CSI sequence that moves the cursor, erases or scrolls.
+CURSOR_FINALS: "ABCDEFGHJKSTdfsu"
+
+Screen: struct {
+    rows: [[String]],
+    row: Int,
+    col: Int,
+
+    new: fn() -> Screen { Screen{rows: [[String]]{[String]{}}, row: 0, col: 0} }
+
+    put: fn(&self, cell: String) {
+        loop self.rows[self.row].len() < self.col -> self.rows[self.row].push(" ")
+        if {
+            self.col < self.rows[self.row].len() -> self.rows[self.row][self.col] = cell.copy()
+            else -> self.rows[self.row].push(cell.copy())
+        }
+        self.col += 1
+    }
+
+    newline: fn(&self) {
+        self.row += 1
+        self.col = 0
+        loop self.rows.len() <= self.row -> self.rows.push([String]{})
+    }
+
+    // Erase the cursor's row from the cursor to its end.
+    erase_right: fn(&self) {
+        kept := [String]{}
+        loop at in 0..<self.rows[self.row].len() {
+            if at < self.col -> kept.push(self.rows[self.row][at].copy())
+        }
+        self.rows[self.row] = kept
+    }
+
+    control: fn(&self, final: String, parameter: String) {
+        count: Int.parse(parameter) ?? 1
+        if {
+            final == "F" || final == "A" -> {
+                self.row = if self.row > count -> self.row - count else -> 0
+                if final == "F" -> self.col = 0
+            }
+            // Erase from the cursor to the end of the screen.
+            final == "J" -> {
+                self.erase_right()
+                loop self.rows.len() > self.row + 1 -> _: self.rows.pop()
+            }
+            final == "K" -> {
+                if parameter == "2" -> self.rows[self.row] = [String]{} else { self.erase_right() }
+            }
+        }
+    }
+
+    render: fn(self) -> String {
+        lines := [String]{}
+        loop cells in self.rows {
+            line := ""
+            loop cell in cells -> line = "{line}{cell}"
+            lines.push(line.trim_end())
+        }
+        loop lines.len() > 0 && lines[lines.len() - 1] == "" -> _: lines.pop()
+        text := ""
+        loop line in lines -> text = "{text}{line}\n"
+        text
+    }
+}
+
+// The byte length of the UTF-8 scalar `lead` starts.
+screen_utf8_length: fn(lead: Int) -> Int {
+    if lead < 0x80 -> return 1
+    if lead >= 0xF0 -> return 4
+    if lead >= 0xE0 -> return 3
+    if lead >= 0xC0 -> return 2
+    1
+}
+
+// The index just past the control sequence at `index` (an ESC), with its
+// CSI final byte and parameter text; a non-CSI escape has final "ESC x".
+ScreenSequence: struct {
+    end: Int,
+    final: String,
+    parameter: String,
+}
+
+screen_sequence: fn(raw: [U8], index: Int) -> ScreenSequence {
+    if index + 1 >= raw.len() -> return ScreenSequence{end: raw.len(), final: "", parameter: ""}
+    second: Int{raw[index + 1]}
+    if second != 0x5B {
+        // ESC ] ... BEL is an operating-system command; ESC x is two bytes.
+        if second == 0x5D {
+            at := index + 2
+            loop at < raw.len() && (Int{raw[at]}) != 7 -> at += 1
+            return ScreenSequence{end: at + 1, final: "", parameter: ""}
+        }
+        return ScreenSequence{end: index + 2, final: "ESC {String.from_bytes([U8]{raw[index + 1]}) ?? "?"}", parameter: ""}
+    }
+    at := index + 2
+    loop at < raw.len() && ((Int{raw[at]}) < 0x40 || (Int{raw[at]}) > 0x7E) -> at += 1
+    if at >= raw.len() -> return ScreenSequence{end: raw.len(), final: "", parameter: ""}
+    parameter: String.from_bytes(raw[index + 2..<at]) ?? ""
+    final: String.from_bytes([U8]{raw[at]}) ?? ""
+    ScreenSequence{end: at + 1, final: final, parameter: parameter}
+}
+
+screen_controls: fn(raw: [U8]) -> Int {
+    count := 0
+    index := 0
+    loop index < raw.len() {
+        byte: Int{raw[index]}
+        if byte == ESC {
+            sequence: screen_sequence(raw, index)
+            if sequence.final == "ESC 7" || sequence.final == "ESC 8" || (sequence.final.len() == 1 && CURSOR_FINALS.contains(sequence.final)) {
+                count += 1
+            }
+            index = sequence.end
+            next
+        }
+        if byte == 13 && (index + 1 >= raw.len() || (Int{raw[index + 1]}) != 10) -> count += 1
+        index += 1
+    }
+    count
+}
+
+screen_replay: fn(raw: [U8]) -> String {
+    screen := Screen.new()
+    index := 0
+    loop index < raw.len() {
+        byte: Int{raw[index]}
+        if byte == ESC {
+            sequence: screen_sequence(raw, index)
+            if sequence.final.len() == 1 -> screen.control(sequence.final, sequence.parameter)
+            index = sequence.end
+            next
+        }
+        if byte == 10 {
+            screen.newline()
+            index += 1
+            next
+        }
+        if byte == 13 {
+            screen.col = 0
+            index += 1
+            next
+        }
+        if byte < 32 {
+            index += 1
+            next
+        }
+        end: index + screen_utf8_length(byte)
+        stop: if end > raw.len() -> raw.len() else -> end
+        cell := [U8]{}
+        loop at in index..<stop -> cell.push(raw[at])
+        screen.put(String.from_bytes(cell) ?? "?")
+        index = stop
+    }
+    screen.render()
+}
+
+run: fn() {
+    argv: args()
+    raw: files.read_bytes(argv[1]) ?? panic("read {argv[1]}")
+    if {
+        argv[0] == "controls" -> print("cursor controls: {screen_controls(raw)}")
+        else -> print(screen_replay(raw))
+    }
+}

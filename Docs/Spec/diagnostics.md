@@ -257,7 +257,9 @@ remains explicit.
 
 E3301 covers the modules no machine without an OS can serve (`core.files`,
 the network and HTTP modules, `core.tasks`, `core.process`, `core.log`,
-`core.watcher`, `core.crypto.vault`) and `#Live`. A Core operation a machine's
+`core.watcher`, `core.crypto.vault`) and `#Live`, in every body checked for
+the machine: Core's and a package's as well as the program's, with no
+exemption by name. A Core operation a machine's
 declared services can back, such as `core.time`'s clocks or `core.term`'s
 reads and writes, is checked against the selected machine instead: each
 service the operation needs that the machine's profile lacks is E3311 at the
@@ -267,6 +269,25 @@ and `jet check --target=<machine>` select the machine; `board.sensor_v1`
 declares a monotonic clock, so `time.instant()` is accepted for it and
 `time.now()` is refused, as `Tests/UI/target_missing_capability_e3311.stderr`
 shows.
+
+## No-heap E3303 contract
+
+On a machine with no OS whose allocator provides no heap (`// @no-os`,
+`board.sensor_v1`, `board.virt_aarch64`, `wasm.no-os`), nothing the program's
+entries reach may allocate. The proof is the one behind `-[!Mem.Alloc]>`
+(`sema_effect_memory_search` in `Compiler/JetSema/Source/Sema/Effects/Checks.jet`):
+it starts at the entry module's `run` and each linked output, and it follows
+calls into Core and packages as into the program's own code. It runs once the
+program's bodies check, so an E3301 or other error is not repeated as a heap
+use. An allocation in the program's own code is E3303 at the allocating
+expression, as `Tests/UI/freestanding_e3303.stderr` shows. An allocation
+inside Core or a package is E3303 at the program's own call that leads to it;
+the note names the function and the line that allocates, and the call chain
+lists each step from the entry, as `Tests/UI/no_heap_target_core_path.stderr`
+shows. A foreign body is not followed, since it runs on the machine's own
+memory, and neither is an open dispatch (a trait-value or function-value call
+whose implementations this proof does not yet seal), so a call through one is
+not refused.
 
 ## Explain and website output
 

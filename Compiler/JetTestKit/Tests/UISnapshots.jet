@@ -361,11 +361,16 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(web.argv, ["build", "Tests/UI/web.jet", "--target=web"])
     assert(!web.parent && !web.unlocked_toolchain)
     assert_eq(web.streams, "rendered-both")
-    // A lint fixture's `@a11y_cli` keeps the rendered, nonzero-exit stream.
+    // A lint fixture's `@a11y_cli` or `@cost_cli` keeps the rendered,
+    // nonzero-exit stream.
     a11y: kit_ui_invocation("// @a11y_cli\n", "Tests/UILint/a11y.jet", true)
     assert_eq(a11y.argv, ["lint", "--a11y", "Tests/UILint/a11y.jet"])
     assert_eq(a11y.exit, "nonzero")
     assert_eq(a11y.streams, "rendered")
+    cost: kit_ui_invocation("// @cost_cli\n", "Tests/UILint/cost.jet", true)
+    assert_eq(cost.argv, ["lint", "--cost", "Tests/UILint/cost.jet"])
+    assert_eq(cost.exit, "nonzero")
+    assert_eq(cost.streams, "rendered")
     files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
 }
 
