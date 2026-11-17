@@ -76,6 +76,35 @@ run: fn() {}
     assert_eq(colon_test_trait(program, "Shape"), " / 1")
 }
 
+// A comma ends a member: a function-typed field stops at its comma, even
+// after nested type arguments, while a method's signature keeps the commas
+// of its type arguments.
+#Test("a member ends at its comma, not at a comma in its type arguments") {
+    program: parser_test_program(
+        `Pair: struct<A, B> {
+    first: A,
+    pick: fn(A) -> Pair<B, Pair<A, B>>,
+
+    make: fn<C: [Eq, Hash]>(first: A, pick: fn(A) -> B) -> Pair<A, B> { Pair<A, B>{first: first, pick: pick} }
+
+    // Read through the pick.
+    second: fn(self) -> B { panic("unused") }
+}
+`,
+    )
+    shape := ""
+    loop item in program.items {
+        if item == .Struct(value) {
+            fields := [String]{}
+            loop field in value.fields -> fields.push(field.name)
+            methods := [String]{}
+            loop method in value.methods -> methods.push(method.name)
+            shape = "{fields.join(",")} / {methods.join(",")}"
+        }
+    }
+    assert_eq(shape, "first,pick / make,second")
+}
+
 #Test("a dashed module name declares a module while a-b in code stays a subtraction") {
     source: `web-app: module {
 }
@@ -151,7 +180,7 @@ run: fn() { print(int_cache.size()) }
         "struct Point {{\n    x: Int\n}}\n",
         "fn run() {{}}\n",
         "geometry: module {{\n    fn twice(value: Int) -> Int {{ value * 2 }}\n}}\n",
-        "Point: struct {{\n    x: Int\n    fn area(self) -> Int {{ self.x }}\n}}\n",
+        "Point: struct {{\n    x: Int,\n    fn area(self) -> Int {{ self.x }}\n}}\n",
         "Point: struct {{}}\nimpl Point {{\n    fn area(self) -> Int {{ 1 }}\n}}\n",
         "Shape: trait {{\n    type Output\n}}\n",
         "run: fn() {{\n    point :: 3\n    print(point)\n}}\n",

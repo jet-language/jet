@@ -43,6 +43,7 @@ use {
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_BLOCK_COMMENT,
+        TOKEN_COMMA,
         TOKEN_COLON,
         TOKEN_DOLLAR,
         TOKEN_DOT,
@@ -286,10 +287,12 @@ parser_colon_head_colon: fn(tokens: [Token], head: Int) -> Int Never! {
 
 // Whether the `fn` signature at `keyword` has a body before its line ends:
 // a `{` outside its groups, or an arrow past the result's (the arrow body).
-// Each `fn` type in the signature brings an arrow of its own, and a `pub` or
-// `priv` starts the next member of a one-line body.
+// Each `fn` type in the signature brings an arrow of its own, and a comma
+// outside its groups and type arguments, a `pub` or a `priv` ends the member
+// first.
 parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
     depth := 0
+    angles := 0
     arrows := 0
     types := 0
     index := keyword + 1
@@ -302,6 +305,15 @@ parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
             if kind == TOKEN_LBRACE -> return true
             if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
                 return false
+            }
+            if kind == TOKEN_COMMA && angles == 0 -> return false
+            // A signature holds no comparison, so `<` and `>` there only
+            // open and close type arguments, whose commas end nothing.
+            if kind == TOKEN_LT -> angles += 1
+            if kind == TOKEN_GT && angles > 0 -> angles -= 1
+            if kind == TOKEN_SHR {
+                angles -= 2
+                if angles < 0 -> angles = 0
             }
             if kind == TOKEN_KW_FN -> types += 1
             if kind == TOKEN_UNIFIED_ARROW {
@@ -643,7 +655,9 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                 after: parser_colon_code_at(tokens, index + 1)
                 if after >= tokens.len() || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true
             }
-        } else if current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP {
+        } else if (current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP) || (current == TOKEN_COMMA && (frame == PARSER_COLON_FRAME_SHAPE || frame == PARSER_COLON_FRAME_CONTAINER)) {
+            // A line break ends a statement, and the comma after a data
+            // member of a type or trait body ends that member.
             at_start = true
             head_kind = -1
             head_marker = PARSER_COLON_MARKER_NONE

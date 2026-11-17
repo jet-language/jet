@@ -526,8 +526,9 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
         parser_add_error_code(state, "E0999", span, "a named marker group needs at least two members", "a group names a marker stack, not a marker alias or an empty rule", "write the marker directly at its use site, or give the group at least two members")
     } else if markers.len() == 1 { parser_report_singleton_marker_group(state, span, markers[0]) }
     // Rust `parse_marker_bracket_group`: a group on its own line still
-    // attaches to the declaration below.
-    parser_skip_semicolons(state)
+    // attaches to the declaration below. A `group:` setting ends like the
+    // other settings, at its comma or its line end.
+    if !declaration -> parser_skip_semicolons(state)
     ParsedMarkerGroup{markers: markers, span: span}
 }
 
