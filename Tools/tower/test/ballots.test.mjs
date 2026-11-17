@@ -61,7 +61,7 @@ test('decision review and post move a ballot through its stages from the CLI', (
   assert.deepEqual([db.decisionStage(d), d.draftedBy, d.reviewedBy, d.draft], ['reviewed', 'author-1', 'reviewer-1', true]);
   const ready = cli(data, 'decision', 'update', 'D-SYN1', '--ready', '--by', 'author-1');
   assert.notEqual(ready.status, 0, 'decision update --ready is gone; decision post replaces it');
-  assert.match(ready.stderr, /unknown flag for `tower decision`: --ready/);
+  assert.match(ready.stderr, /unknown flag for `tower decision update`: --ready — run `tower help`/);
 });
 
 test('tower ballots lists every stage with the cards and criteria waiting on each ballot', () => {

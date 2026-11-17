@@ -421,7 +421,7 @@ export function openStore(dataDir) {
   // (see test/history.test.mjs for the duplicate-tolerance this buys).
   // #1738: expectRev is mandatory — a whole-board replace with no rev proof
   // is exactly the overwrite class that once deleted 112 cards.
-  const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
+  const restore = (prevState, { expectRev, by } = {}) => withLock(file, () => {
     recoverPendingRepairLocked(dataDir);
     const currentPair = readConsistentPair();
     const cur = currentPair.state;
@@ -434,6 +434,7 @@ export function openStore(dataDir) {
         fail('E_CONFLICT', `undo refused: board changed during restore (rev ${pair.state.meta.rev} ≠ ${cur.meta.rev})`);
       const s = normalize(prevState, pair.history.cards);
       s.meta.rev = cur.meta.rev + 1;
+      logEvent(s, { by, action: 'board.undo', note: `back to rev ${prevState.meta?.rev ?? '?'} content` });
       writeJSONHeld(root, 'tower.json', s);
       return { result: { restored: true }, state: s };
     }, preparedPairAt);
@@ -1469,6 +1470,23 @@ export function findHardeningCard(s, history, key) {
   return findHardeningMatch(s, history, key)?.card || null;
 }
 
+// Everything that happened to one card, newest first: events on the card
+// itself, on its decisions and questions, and board.apply plans that touched
+// it. The card may be live or archived; events may be live or spilled to
+// history.json.
+export function cardHistory(s, history, ref) {
+  const live = findCard(s, ref);
+  const archived = live ? null : findCard({ cards: history?.cards || [] }, ref);
+  const card = live || archived || fail('E_NOT_FOUND', `no card ${ref}`);
+  const related = new Set([card.id,
+    ...[...s.decisions, ...(history?.decisions || [])].filter(d => d.cardId === card.id).map(d => d.id),
+    ...s.questions.filter(q => q.cardId === card.id).map(q => q.id)]);
+  const events = [...s.events, ...(history?.events || [])]
+    .filter(e => related.has(e.ref) || (e.refs || []).includes(card.id))
+    .sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  return { card: { id: card.id, num: card.num, title: card.title, ...(archived ? { archived: true } : {}) }, events };
+}
+
 // Store known blocker refs canonically. Card lanes accept #N for convenience;
 // preserve dangling add-time refs so lint can report them, while update keeps
 // the existing hard rejection for an unknown replacement.
@@ -1518,8 +1536,9 @@ const checkRefs = (val) => {
     fail('E_INVALID', 'refs must be an array of strings');
 };
 
-export function logEvent(s, { by = 'agent', action, ref = null, note = '', draft = false }) {
-  s.events.unshift({ at: now(), by, action, ref, note, ...(draft ? { draft: true } : {}) });
+// `refs`: further records the event touched, beyond its primary `ref`.
+export function logEvent(s, { by = 'agent', action, ref = null, refs, note = '', draft = false }) {
+  s.events.unshift({ at: now(), by, action, ref, ...(refs?.length ? { refs } : {}), note, ...(draft ? { draft: true } : {}) });
   if (s.events.length > 2000) s.events.length = 2000;
 }
 
@@ -3560,7 +3579,9 @@ export function updateEpoch(s, id, patch) {
   if ('order' in patch) next.order = planOrder(patch.order);
   if ('exitCriteria' in patch) next.exitCriteria = epochExitCriteria(patch.exitCriteria);
   for (const k of ['name', 'goal', 'status']) if (k in patch) next[k] = patch[k];
+  const changed = Object.keys(next).filter(k => JSON.stringify(e[k]) !== JSON.stringify(next[k]));
   Object.assign(e, next);
+  if (changed.length) logEvent(s, { by: patch.by, action: 'epoch.update', ref: e.id, note: changed.join(', ') });
   return e;
 }
 // Removing an epoch must never strand work: it is refused while any card
@@ -3582,13 +3603,16 @@ export function removeEpoch(s, history, id, by) {
 // D-TWR-OPS1=A: `epoch current <id>` is now sugar for activating that epoch;
 // `epoch current none` demotes the live epoch back to planned. The retired
 // meta.currentEpoch field is gone — status is the only source of truth.
-export function setCurrentEpoch(s, id) {
+export function setCurrentEpoch(s, id, by) {
   if (id == null) {
     const cur = s.epochs.find(e => e.status === 'active');
-    if (cur) cur.status = 'planned';
+    if (cur) {
+      cur.status = 'planned';
+      logEvent(s, { by, action: 'epoch.current', ref: cur.id, note: 'none active' });
+    }
     return { active: null };
   }
-  updateEpoch(s, id, { status: 'active' });
+  updateEpoch(s, id, { status: 'active', by });
   return { active: id };
 }
 

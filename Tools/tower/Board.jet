@@ -18,7 +18,7 @@
 // as Tower normalizes and projects them: a card carries its clearance, linked
 // decisions and questions, open question count and lane; a milestone its
 // progress. Lists need --json; a refusal prints `tower: <message>` on stderr,
-// `{"error":CODE,"message":...}` on stdout under --json, and exits 1. The lint
+// `{"error":{"code":CODE,"message":...}}` on stdout under --json, and exits 1. The lint
 // prints its findings (a `{rule, ref, msg}` array under --json) and exits 1
 // when there are any. Tower writes and the board lint rules stay in
 // Tools/tower/tower.mjs.
@@ -203,7 +203,8 @@ run: fn() {
 refuse: fn(failure: Failure, json_out: Bool) -[Exec, IO]> Never {
     term.eprint("tower: {failure.message}")
     if json_out {
-        error: Dyn.Object([{key: String, value: Dyn}]{{key: "error", value: Dyn.Text(failure.code.copy())}, {key: "message", value: Dyn.Text(failure.message.copy())}})
+        detail: Dyn.Object([{key: String, value: Dyn}]{{key: "code", value: Dyn.Text(failure.code.copy())}, {key: "message", value: Dyn.Text(failure.message.copy())}})
+        error: Dyn.Object([{key: String, value: Dyn}]{{key: "error", value: detail}})
         print(json.to_string(error) ?? "")
     }
     process.exit(1)

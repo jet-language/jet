@@ -59,6 +59,9 @@ tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpa
 tower lint [--json]          # durability sweeper over the live board; exit 1
                               # on any finding, 0 clean
 tower lint --proofs --tree DIR  # proofs whose filter matches no Tests/Examples file
+tower lint --evidence [--json]  # settled rows whose evidence cites a scratch
+                              # path, a wave tree or a Rust-era command and no
+                              # commit on dev/master; warnings, exit 0
 tower prove --card '#N'|--epoch E [--yes --jet PATH --tree DIR --commit SHA --by X] [--dry-run]
                               # run row proofs; meet the passing rows (see Proofs)
 jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
@@ -71,6 +74,9 @@ tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
 tower card update '#12' --add-tag ready-for-agent --by me
+tower card history '#12' [--limit N] [--json]  # everything that happened to the
+                              # card, its ballots and questions, and the plans
+                              # (board.apply) that touched it, newest first
 tower events --limit 20      # who did what, when
 ```
 
@@ -284,6 +290,13 @@ code is 1 when any row failed.
 `tower lint --proofs --tree DIR` lists every open row on an unfinished card
 whose proof filter is not a case-insensitive substring of any file path under
 `DIR/Tests` or `DIR/Examples` (rule `proof-unmatched`); exit 1 on a finding.
+
+`tower lint --evidence` lists every met or verified row, on a card or a
+milestone, whose evidence cites a scratch path (`/tmp/…`, `/mnt/…`,
+`~/.cache/…`, `$JET_SCRATCH_ROOT/…`), a wave tree (`wave 12 tree`) or a Rust-era command (`cargo
+test`, `rustc`), unless the same evidence also names a commit on a durable
+branch (rule `evidence-provenance`). The findings are warnings: old evidence
+stays readable, so the exit code is 0.
 
 ### Blocked criteria
 
@@ -631,11 +644,29 @@ RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows
 tower gauntlet standings [--table PATH] [--json]   # same table as text
 ```
 
+## CLI contract
+
+- `--json` on every verb prints exactly one JSON document on stdout (lists are
+  one array). A failure prints `{"error":{"code":"E_…","message":"…"}}` on
+  stdout, `tower: message` on stderr, and exits 1 (2 on `E_CONFLICT`); an
+  unexpected failure is `E_INTERNAL`. `serve --json` prints one
+  `{url, port, project, data}` line once it listens.
+- A mistyped command, verb or flag names the nearest real one (`unknown flag
+  for \`tower card add\`: --titel (did you mean --title?)`). A missing argument
+  or required flag is named (`tower card log needs REF and --text "…"`); a
+  flag given with no value or blank text counts as missing.
+- `--by` attributes every write, including `epoch add|update|current` and
+  `undo` (logged as `epoch.update`, `epoch.current` and `board.undo`).
+- `tower help` shows each command with its argument; `tower help --json` lists
+  every command path with `arg`, `required` and `flags`; `tower help --check`
+  holds the help text to the parser.
+
 ## HTTP API (when `tower serve` is up, default :7878)
 
 ```
 GET  /api/state                     board index (card summaries; ETag/304)
 GET  /api/card?id=&live=0|1         one full card; live=1 answers from memory
+GET  /api/card/history?id=          the card's events, newest first (card history)
 GET  /api/closed                    done + archived card summaries
 GET  /api/stream?rev=&boot=         SSE: `state` (full index), then `delta`
                                      patches per change; a client already at
@@ -668,5 +699,5 @@ POST /api/epoch/add|update|current|remove      (add/update: {order, exitCriteria
 POST /api/milestone/add|update|retire|criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen|verify|delete
 ```
 
-POST bodies are JSON; include `by`, optionally `expectRev`. Errors are
+POST bodies are JSON; include `by`, optionally `expectRev`. HTTP errors are
 `{error: CODE, message}` with 400/404/409 status.

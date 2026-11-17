@@ -54,6 +54,14 @@ state back. Confirm the phase, criteria, log attribution, revision, and linked
 state that the write was meant to change. A successful command without a
 read-back is not completion.
 
+With `--json`, every verb prints one JSON document; a refusal is
+`{"error":{"code":"E_…","message":"…"}}` with a non-zero exit. A mistyped
+command, verb or flag names the nearest real one, and a missing argument or
+flag is named. `tower help --json` lists every command's argument, required
+flags and flags. `tower card history '#N'` shows everything that happened to a
+card, newest first. `tower lint --evidence` warns on met rows whose evidence
+cites only scratch paths, wave trees or Rust-era commands.
+
 Workers do not write Tower. In an orchestrated run, they return `CHECK OK` for
 code or `DOCS ONLY` for prose/static data. The orchestrator attributes phase,
 criteria, proof, and handoff changes on the board.

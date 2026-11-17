@@ -1,6 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
-  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand, epochChain, closestCards,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand, epochChain, closestCards, refLinks,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -36,8 +36,10 @@ const safePhase = (value) => Object.hasOwn(PHASE_LABELS, value) ? value : 'plann
 const phaseLabel = (value) => PHASE_LABELS[safePhase(value)];
 const CRITERION_STATUSES = Object.freeze(new Set(['open', 'met', 'verified']));
 const safeCriterionStatus = (value) => CRITERION_STATUSES.has(value) ? value : 'open';
-const md = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  .split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+// `#N`, `#N cM` and (with config commitUrl) commit SHAs as links; see refLinks.
+const links = (html) => refLinks(html, { commitUrl: S?.config?.commitUrl || '' });
+const md = (s) => links(esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join(''));
 
 // ---- tiny generic syntax highlighter (tokenize, then escape per token) ----
 const HL_KW = new Set(('fn func function def let var const val mut return yield if elif else match switch case when default for while loop do in of as is import use mod module package from pub priv private public protected internal static struct enum trait impl interface type class extends implements where async await comptime defer go chan select new self this super sizeof typeof null nil none None true false True False and or not break continue throw try catch finally with lambda then begin end macro derive emit').split(' '));
@@ -1445,8 +1447,16 @@ async function showDetail(ref) {
   else showDetailMessage(summary ? `Loading #${summary.num} ${summary.title}…` : 'Loading card…');
   await loadDetail(id);
 }
-// A card named by its number, as move links and text references cite it.
-const showCardNum = (num) => showDetail(allCards().find(c => c.num === num)?.id || `#${num}`);
+// A card named by its number, as move links and text references cite it;
+// `crit` scrolls to that exit criterion and marks it.
+async function showCardNum(num, crit = null) {
+  await showDetail(allCards().find(c => c.num === num)?.id || `#${num}`);
+  if (crit == null) return;
+  const row = $(`#detail [data-crit-n="${crit}"]`);
+  if (!row) return;
+  row.classList.add('critrow--target');
+  row.scrollIntoView({ block: 'center' });
+}
 // A criterion blocker ref (`#M`, `#M cK`, `D-…`): a card ref links to the card.
 function blockerLink(ref) {
   const num = /^#(\d+)/.exec(ref);
@@ -1542,7 +1552,8 @@ function renderDetail(c) {
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>
       <div class="modal__h">Log</div>
-      <ul class="log">${c.log.map(l => `<li><time>${esc(l.at)}</time>${l.by ? `<span class="by">${esc(l.by)}</span>` : ''}<span>${esc(l.text)}</span></li>`).join('') || '<li><span>No entries.</span></li>'}</ul>
+      <ul class="log">${c.log.map(l => `<li><time>${esc(l.at)}</time>${l.by ? `<span class="by">${esc(l.by)}</span>` : ''}<span>${links(esc(l.text))}</span></li>`).join('') || '<li><span>No entries.</span></li>'}</ul>
+      <details class="timeline" data-keep-toggle="history:${esc(c.id)}"><summary class="modal__h">History</summary><ul class="log" id="m-history"><li><span>Loading…</span></li></ul></details>
       <div class="modal__danger"><button class="btn btn--danger btn--sm" id="del-card">Delete card</button></div>
     </div></div>`;
 
@@ -1570,23 +1581,22 @@ function renderDetail(c) {
   const cb = $('#m-criteria', m);
   if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
   for (const it of (c.criteria || [])) {
-    const row = el(`<div class="critrow${it.blockedBy && it.status === 'open' ? ' critrow--blocked' : ''}">
+    const row = el(`<div class="critrow${it.blockedBy && it.status === 'open' ? ' critrow--blocked' : ''}" data-crit-n="${esc(it.n)}">
         <div class="critrow__head"><span class="critrow__n">#${esc(it.n)}</span>
           <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span>
           ${it.blockedBy ? '<span class="critrow__badge critrow__badge--blocked">blocked</span>' : ''}
           <span style="margin-left:auto">${it.blockedBy ? '<button class="btn btn--ghost btn--sm" data-crit-unblock>Unblock</button>' : ''}
           <button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
           <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
-        <div class="critrow__text">${esc(it.text)}</div>
+        <div class="critrow__text">${links(esc(it.text))}</div>
         ${it.proof ? `<div class="critrow__proof"><code>${esc(proofCommand(it.proof))}</code></div>` : ''}
         ${it.blockedBy ? `<div class="critrow__moved">waits on ${blockerLink(it.blockedBy)}</div>` : ''}
         ${it.unblockedFrom ? `<div class="critrow__moved">unblocked: ${blockerLink(it.unblockedFrom)} resolved</div>` : ''}
         ${it.movedFrom ? `<div class="critrow__moved">← moved from <button class="linkbtn" data-card-num="${esc(it.movedFrom.card)}">#${esc(it.movedFrom.card)} c${esc(it.movedFrom.n)}</button></div>` : ''}
         ${it.movedTo ? `<div class="critrow__moved">→ moved to <button class="linkbtn" data-card-num="${esc(it.movedTo.card)}">#${esc(it.movedTo.card)} c${esc(it.movedTo.n)}</button></div>` : ''}
-        ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
+        ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${links(esc(it.evidence))}</div>` : ''}
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
       </div>`);
-    row.querySelectorAll('[data-card-num]').forEach(b => b.addEventListener('click', () => showCardNum(Number(b.dataset.cardNum))));
     // Editing a met row reopens it on the server: its evidence proved the old wording.
     const text = $('.critrow__text', row);
     const editBtn = $('[data-crit-edit]', row);
@@ -1597,9 +1607,10 @@ function renderDetail(c) {
         editBtn.textContent = 'Edit';
         if (next && next !== it.text)
           await api('card/criteria-edit', { id, n: it.n, text: next, reason: 'edited by the owner in the Tower UI', by: 'owner' });
-        else text.textContent = it.text;
+        else text.innerHTML = links(esc(it.text));
         return;
       }
+      text.textContent = it.text;
       text.contentEditable = 'plaintext-only';
       editBtn.textContent = 'Save';
       text.focus();
@@ -1624,14 +1635,26 @@ function renderDetail(c) {
   for (const q of c.questions) {
     qb.appendChild(el(`<div class="qrow"><div class="qrow__top"><span class="${q.by === 'owner' ? 'qrow__by--owner' : ''}">${esc(q.by)}</span>
         <span>${esc(q.kind)}</span><span>${esc(q.status)}</span>${q.decisionId ? `<span>${esc(q.decisionId)}</span>` : ''}</div>
-        <div class="qrow__text">${esc(q.text)}</div>
-        ${q.answer ? `<div class="qrow__ans"><b>${esc(q.answeredBy || 'agent')}</b> ${esc(q.answer)}</div>` : ''}</div>`));
+        <div class="qrow__text">${links(esc(q.text))}</div>
+        ${q.answer ? `<div class="qrow__ans"><b>${esc(q.answeredBy || 'agent')}</b> ${links(esc(q.answer))}</div>` : ''}</div>`));
   }
   const qadd = el(`<div class="qadd"><input data-keep="q-add" placeholder="Leave a note or question for an agent…"><button class="btn btn--red btn--sm">Post</button></div>`);
   const post = async () => { const i = $('input', qadd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('question/add', { cardId: id, text: t, kind: 'question', by: 'owner' }); };
   $('button', qadd).addEventListener('click', post);
   $('input', qadd).addEventListener('keydown', e => { if (e.key === 'Enter') post(); });
   qb.appendChild(qadd);
+
+  // The timeline loads when opened, and again on each redraw while open.
+  const timeline = $('.timeline', m);
+  timeline.addEventListener('toggle', async () => {
+    if (!timeline.open) return;
+    const r = await fetch(`/api/card/history?id=${encodeURIComponent(id)}`);
+    const found = await r.json().catch(() => ({}));
+    if (!r.ok) { $('#m-history', m).innerHTML = `<li><span>${esc(found.message || `request failed (${r.status})`)}</span></li>`; return; }
+    $('#m-history', m).innerHTML = (found.events || []).map(e => `<li><time>${esc(String(e.at).slice(0, 16).replace('T', ' '))}</time>`
+      + `<span class="by">${esc(e.by)}</span><span><b>${esc(e.action)}</b> ${links(esc(e.note))}</span></li>`).join('')
+      || '<li><span>No events.</span></li>';
+  });
 
   // Text fields save when the owner leaves them, and only if the owner
   // actually changed them. The description is edited as its stored Markdown
@@ -2793,6 +2816,18 @@ window.addEventListener('hashchange', () => {
 
 checkVersion();
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); checkVersion(); } });
+
+// Card references anywhere (`#N`, `#N cM`) open that card. Inside an editable
+// field a link press must not focus the field, which swaps in its raw source.
+document.addEventListener('click', (e) => {
+  const ref = e.target instanceof Element ? e.target.closest('[data-card-num]') : null;
+  if (!ref) return;
+  e.preventDefault();
+  showCardNum(Number(ref.dataset.cardNum), ref.dataset.crit ? Number(ref.dataset.crit) : null);
+});
+document.addEventListener('mousedown', (e) => {
+  if (e.target instanceof Element && e.target.closest('[contenteditable] :is([data-card-num], a[href])')) e.preventDefault();
+});
 
 // PWA: service worker (offline shell only — web push removed)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});

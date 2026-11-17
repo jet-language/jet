@@ -164,7 +164,7 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 ```
 tower status | state | next | events | ballots
 tower brief [ref] [--agent me] [--json] [--no-claim]
-tower card      list|show|add|update|claim|release|delete
+tower card      list|show|add|update|claim|release|delete|criteria|log|history
 tower decision  list|show|add|update|review|post|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower message   list|add|done
@@ -243,9 +243,17 @@ renewable 24-hour work lease (unless `--no-claim`); without `--agent` it is
 read-only. Expired leases never block work, and owner-facing card views do
 not show durable ownership markings.
 
-`--json` everywhere for machine output; `--file x.json` / `--file -` (stdin)
-for rich payloads; cards accept `#num` or id; `--by <name>` attributes every
-write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
+`--json` on every verb prints exactly one JSON document; a failure prints
+`{"error":{"code":"E_…","message":"…"}}` on stdout (and `tower: message` on
+stderr) and exits non-zero. A mistyped command, verb or flag names the nearest
+real one, and a missing argument or required flag is named
+(`tower card log needs REF and --text "…"`). `tower help --json` lists every
+command with its argument, required flags and flags. `--file x.json` /
+`--file -` (stdin) carry rich payloads; cards accept `#num` or id; `--by
+<name>` attributes every write; `--expect-rev N` gives optimistic concurrency
+(exit 2 on conflict). `tower card history '#12'` lists everything that happened
+to a card, its ballots and questions, and the plans that touched it, newest
+first.
 
 ## Reliability
 
@@ -268,14 +276,18 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
   "decisionGroups": ["design", "api", "ui", "tooling"],
   "port": 7878,
   "backups": 20,
-  "retireAfterDays": 3
+  "retireAfterDays": 3,
+  "commitUrl": "https://github.com/OWNER/REPO/commit/{sha}"
 }
 ```
 
 Everything is optional; the UI and validation follow whatever you set.
 `retireAfterDays` is the walk-back buffer before a done card / ratified
 decision moves to the archive, `Tools/tower/.tower/history.json` (with its
-shards under `history/` once sharded).
+shards under `history/` once sharded). `commitUrl` makes commit SHAs in
+criterion evidence, logs and questions link to that URL (`{sha}` is replaced);
+without it they stay text. `#N` and `#N cM` in any text open that card (and
+criterion) in the UI; the CLI prints them as written.
 
 There is no runtime credential file. `auth` and `push` are removed fields.
 Tower rejects them in tracked `config.json` with `ConfigError`; remove those

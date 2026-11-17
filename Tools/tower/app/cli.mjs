@@ -14,7 +14,7 @@ import { findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from '.
 import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
-import { lint } from './lint.mjs';
+import { evidenceProvenance, lint } from './lint.mjs';
 import { executeRuns, proveEvidence, proveRuns, proveTargets, unmatchedProofs } from './proof.mjs';
 import { findDuplicateCandidates } from './card-matching.mjs';
 import { hasHardeningPayload } from './hardening.mjs';
@@ -63,7 +63,7 @@ const payload = (...flags) => by('file', 'stdin', ...flags);
 // Flags belong to verbs, not nouns. A noun-wide allow-list makes a valid flag
 // on one verb silently disappear on its sibling (for example --meet on card
 // add). This table is the CLI contract; help below is rendered from it.
-const COMMAND_FLAGS = {
+export const COMMAND_FLAGS = {
   init: { flags: ['name', 'dir'] },
   import: { flags: ['dir', 'name', 'force'] },
   serve: { flags: ['port', 'open', 'noWatch', 'worker'] },
@@ -94,6 +94,7 @@ const COMMAND_FLAGS = {
     delete: by(),
     criteria: by('add', 'edit', 'text', 'proof', 'blockedBy', 'unblock', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
+    history: ['limit'],
   }},
   decision: { verbs: {
     list: ['open', 'card', 'drafts'],
@@ -131,7 +132,7 @@ const COMMAND_FLAGS = {
     list: [],
     add: payload('name', 'goal', 'status', 'order', 'exitCriteria'),
     update: payload('name', 'goal', 'status', 'order', 'exitCriteria'),
-    current: [],
+    current: by(),
     remove: by(),
   }},
   milestone: { verbs: {
@@ -149,14 +150,14 @@ const COMMAND_FLAGS = {
   closest: { flags: ['epoch', 'limit'] },
   ballots: { flags: [] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
-  lint: { flags: ['proofs', 'tree'] },
+  lint: { flags: ['proofs', 'tree', 'evidence'] },
   prove: { flags: by('card', 'epoch', 'jet', 'tree', 'commit', 'dryRun', 'yes') },
   docs: { verbs: {
     list: [],
     show: ['path', 'scratch'],
     add: payload('section', 'title', 'path', 'id', 'body'),
     update: payload('title', 'path', 'body', 'scratch'),
-    delete: ['path'],
+    delete: by('path'),
   }},
   verdict: { flags: by('outcome', 'title', 'supersedes') },
   archive: { verbs: {
@@ -170,12 +171,67 @@ const COMMAND_FLAGS = {
   }},
   redact: { flags: by('apply', 'expectRev') },
   events: { flags: ['limit'] },
-  undo: { flags: ['expectRev'] },
+  undo: { flags: by('expectRev') },
   githook: { verbs: { install: [], 'post-commit': [] } },
   board: { verbs: { commit: by(), check: [] } },
   apply: { flags: payload('dryRun', 'expectRev') },
   publish: { flags: by('title', 'file') },
   gauntlet: { verbs: { standings: ['table'] } },
+};
+
+// What a command cannot run without: its positional argument (named as help
+// shows it) and its required flags, keyed `noun verb` (or the bare command).
+// `waivedBy` flags stand in for all of them: a --file/--stdin payload carries
+// the same fields, and a hardening card is matched by its dedup key.
+const PAYLOAD_WAIVER = ['file', 'stdin'];
+const REQUIRED = {
+  'status post': { flags: ['file'], waivedBy: ['stdin'] },
+  'briefing post': { flags: ['file'] },
+  'card show': { arg: 'REF', waivedBy: ['hardeningDedupKey'] },
+  'card add': { flags: ['title'], waivedBy: [...PAYLOAD_WAIVER, 'hardeningDedupKey'] },
+  'card update': { arg: 'REF' },
+  'card claim': { arg: 'REF' },
+  'card release': { arg: 'REF' },
+  'card delete': { arg: 'REF' },
+  'card criteria': { arg: 'REF' },
+  'card log': { arg: 'REF', flags: ['text'] },
+  'card history': { arg: 'REF' },
+  'decision show': { arg: 'ID' },
+  'decision scaffold': { arg: 'REF', flags: ['id'] },
+  'decision add': { flags: ['card'], waivedBy: PAYLOAD_WAIVER },
+  'decision update': { arg: 'ID' },
+  'decision review': { arg: 'ID' },
+  'decision post': { arg: 'ID' },
+  'decision report': { arg: 'ID' },
+  'decision ratify': { arg: 'ID', flags: ['outcome'] },
+  'decision reopen': { arg: 'ID' },
+  'decision delete': { arg: 'ID' },
+  'question ask': { arg: 'REF', flags: ['text'] },
+  'question answer': { arg: 'ID', flags: ['text'] },
+  'question delete': { arg: 'ID' },
+  'message add': { arg: 'REF', flags: ['text'] },
+  'message done': { arg: 'ID' },
+  'idea promote': { arg: 'ID' },
+  'idea delete': { arg: 'ID' },
+  'epoch add': { arg: 'E', waivedBy: PAYLOAD_WAIVER },
+  'epoch update': { arg: 'E' },
+  'epoch current': { arg: 'E|none' },
+  'epoch remove': { arg: 'E' },
+  'milestone add': { flags: ['epoch', 'title'], waivedBy: PAYLOAD_WAIVER },
+  'milestone update': { arg: 'M' },
+  'milestone criteria': { arg: 'M' },
+  'milestone retire': { arg: 'M', flags: ['reason'] },
+  'milestone closeout': { arg: 'M' },
+  'milestone verify': { arg: 'M' },
+  'milestone delete': { arg: 'M' },
+  verdict: { arg: 'REF' },
+  'archive show': { arg: 'ID' },
+  'archive restore': { arg: 'ID' },
+  'repair apply': { flags: ['manifest'] },
+  import: { arg: 'FILE' },
+  'board commit': { flags: ['by'] },
+  apply: { flags: ['file'], waivedBy: ['stdin'] },
+  publish: { flags: ['title', 'file', 'by'] },
 };
 
 const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
@@ -185,20 +241,78 @@ const commandFlags = (cmd, verb) => {
   if (!spec.verbs) return spec.flags;
   return verb ? spec.verbs[verb] : spec.flags || spec.verbs[cmd === 'githook' ? 'install' : verb];
 };
+// `noun verb` for a command with verbs, else the bare command.
+const commandPath = (cmd, verb) => COMMAND_FLAGS[cmd]?.verbs && verb !== undefined ? `${cmd} ${verb}` : cmd;
+
+// Optimal-string-alignment distance: insertions, deletions, substitutions and
+// adjacent swaps each cost one.
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+// The option a mistyped word most likely meant: the nearest one within a third
+// of the word's length (at least one edit), else the only option it begins.
+function nearest(word, options) {
+  const w = String(word).toLowerCase();
+  let best = null;
+  let bestDistance = Infinity;
+  for (const option of options) {
+    const distance = editDistance(w, option.toLowerCase());
+    if (distance < bestDistance) { best = option; bestDistance = distance; }
+  }
+  if (best !== null && bestDistance <= Math.max(1, Math.floor(w.length / 3))) return best;
+  const prefixed = w.length >= 2 ? options.filter(option => option.toLowerCase().startsWith(w)) : [];
+  return prefixed.length === 1 ? prefixed[0] : null;
+}
+const didYouMean = (guess) => guess ? ` — did you mean \`${guess}\`?` : '';
 
 function checkFlags(cmd, verb, flags) {
   const spec = COMMAND_FLAGS[cmd];
-  if (!spec) return; // unknown command — the dispatcher reports that instead
-  const knownFlags = commandFlags(cmd, verb) || (spec.verbs && !verb
-    ? [...new Set(Object.values(spec.verbs).flat())] : null);
-  if (spec.verbs && !knownFlags)
-    throw new TowerError('E_USAGE', `unknown ${cmd} verb "${verb}" — run \`tower help\``);
-  const known = [...GLOBAL_FLAGS, ...(knownFlags || [])];
+  if (!spec) {
+    const guess = nearest(cmd, Object.keys(COMMAND_FLAGS));
+    throw new TowerError('E_USAGE', `unknown command "${cmd}"${didYouMean(guess && `tower ${guess}`)} — run \`tower help\``);
+  }
+  if (spec.verbs) {
+    const verbs = Object.keys(spec.verbs);
+    if (verb === undefined && !spec.flags && cmd !== 'githook')
+      throw new TowerError('E_USAGE', `\`tower ${cmd}\` needs a verb: ${verbs.join('|')}`);
+    if (verb !== undefined && !Object.hasOwn(spec.verbs, verb)) {
+      const guess = nearest(verb, verbs);
+      throw new TowerError('E_USAGE', `unknown ${cmd} verb "${verb}"${didYouMean(guess && `tower ${cmd} ${guess}`)} — one of ${verbs.join('|')}`);
+    }
+  }
+  const known = [...GLOBAL_FLAGS, ...commandFlags(cmd, verb)];
   const unknown = Object.keys(flags).filter(f => !known.includes(f));
   if (!unknown.length) return;
+  const named = unknown.map((f) => {
+    const guess = nearest(spellFlag(f), known.map(spellFlag));
+    return `${spellFlag(f)}${guess ? ` (did you mean ${guess}?)` : ''}`;
+  });
   throw new TowerError('E_USAGE',
-    `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower ${cmd}\`: `
-    + `${unknown.map(spellFlag).join(', ')} — run \`tower help\``);
+    `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower ${commandPath(cmd, verb)}\`: `
+    + `${named.join(', ')} — run \`tower help\``);
+}
+
+// A required flag counts as given only with a value; `--text` alone or with
+// blank text is missing.
+function checkRequired(cmd, verb, args, flags) {
+  const path = commandPath(cmd, verb);
+  const need = REQUIRED[path];
+  if (!need || (need.waivedBy || []).some(f => flags[f] !== undefined)) return;
+  const given = (f) => flags[f] !== undefined && flags[f] !== true && String(flags[f]).trim() !== '';
+  const missing = [
+    ...(need.arg && !args.length ? [need.arg] : []),
+    ...(need.flags || []).filter(f => !given(f)).map(f => flagToken(f, path)),
+  ];
+  if (missing.length) throw new TowerError('E_USAGE', `tower ${path} needs ${missing.join(' and ')}`);
 }
 
 const FLAG_VALUE = {
@@ -221,20 +335,23 @@ const FLAG_VALUE = {
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE', results: 'PATH',
 };
 
-const flagToken = (key) => {
-  const value = FLAG_VALUE[key];
+// A flag that is a value elsewhere but a switch on one command.
+const SWITCH_AT = { lint: ['evidence'] };
+const flagToken = (key, path) => {
+  const value = SWITCH_AT[path]?.includes(key) ? null : FLAG_VALUE[key];
   return `${spellFlag(key)}${value == null ? '' : String(value).startsWith('=') ? value : ` ${value}`}`;
 };
-const flagSynopsis = (flags) => flags
+const flagSynopsis = (flags, path) => flags
   .filter((key) => key !== 'by')
   .concat(flags.includes('by') ? ['by'] : [])
-  .map(flagToken)
+  .map((key) => flagToken(key, path))
   .join(' ');
 const helpLine = (path, flags) => {
   if (path === 'brief' && flags.includes('color')) {
-    return `  tower brief [${flagSynopsis(flags.filter((key) => key !== 'color'))}]\n              [${flagToken('color')}]`;
+    return `  tower brief [${flagSynopsis(flags.filter((key) => key !== 'color'), path)}]\n              [${flagToken('color', path)}]`;
   }
-  return `  tower ${path}${flags.length ? ` [${flagSynopsis(flags)}]` : ''}`;
+  const arg = REQUIRED[path]?.arg;
+  return `  tower ${path}${arg ? ` ${arg}` : ''}${flags.length ? ` [${flagSynopsis(flags, path)}]` : ''}`;
 };
 
 // Generated from COMMAND_FLAGS. Keep this as the only user-facing command
@@ -249,10 +366,16 @@ const HELP_ENTRIES = Object.entries(COMMAND_FLAGS).flatMap(([cmd, spec]) => {
 });
 const HELP_SURFACE = HELP_ENTRIES.join('\n');
 
+// A --file/--stdin JSON payload; null when the command was given neither.
 const readPayload = (flags) => {
-  if (flags.file === '-' || flags.stdin) return JSON.parse(readFileSync(0, 'utf8'));
-  if (flags.file) return JSON.parse(readFileSync(flags.file, 'utf8'));
-  return null;
+  const source = flags.file === '-' || flags.stdin ? 0 : flags.file;
+  if (source === undefined || source === false) return null;
+  const named = source === 0 ? 'stdin' : source;
+  let text;
+  try { text = readFileSync(source, 'utf8'); }
+  catch (error) { throw new TowerError('E_USAGE', `cannot read ${named}: ${error.message}`); }
+  try { return JSON.parse(text); }
+  catch (error) { throw new TowerError('E_USAGE', `${named} is not a JSON payload: ${error.message}`); }
 };
 
 const out = (flags, human, data) => {
@@ -346,15 +469,15 @@ function ensureDataIgnores(dir) {
 function cmdInit({ flags }) {
   const dir = resolve(flags.dir || '.', '.tower');
   const file = join(dir, 'tower.json');
-  if (existsSync(file)) { console.error(`tower: already initialized at ${file}`); process.exitCode = 1; return; }
+  if (existsSync(file)) throw new TowerError('E_EXISTS', `already initialized at ${file}`);
   mkdirSync(dir, { recursive: true });
   const name = flags.name || 'Project';
   writeJSON(file, db.empty(name));
   const cfg = { project: name };
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), cfg);
   ensureDataIgnores(dir);
-  console.log(`initialized Tower for "${name}" at ${dir}`);
-  console.log('next: tower epoch add e1 --name "First epoch" && tower serve --open');
+  return out(flags, `initialized Tower for "${name}" at ${dir}\nnext: tower epoch add e1 --name "First epoch" && tower serve --open`,
+    { project: name, dir, file });
 }
 
 function cmdStatus(store, { flags }) {
@@ -407,7 +530,6 @@ function cmdStatus(store, { flags }) {
 function cmdBriefing(store, { pos, flags }) {
   const [verb, id] = pos;
   if (verb === 'post') {
-    if (typeof flags.file !== 'string') throw new TowerError('E_USAGE', 'briefing post requires --file FILE (markdown)');
     const body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
     const sections = flags.sections ? JSON.parse(readFileSync(flags.sections, 'utf8')) : [];
     const { result } = store.mutate(s => db.postBriefing(s, {
@@ -519,7 +641,7 @@ function cmdCard(store, { pos, flags }) {
           ...candidates.map(c => `  ${c.id ?? '(no id)'}  #${c.num ?? '?'}  [${c.phase}]  ${c.title}`),
         ].join('\n');
         if (flags.json) {
-          console.log(JSON.stringify({ error: 'E_DUPLICATE', message, candidates }, null, 2));
+          console.log(JSON.stringify({ error: { code: 'E_DUPLICATE', message, candidates } }, null, 2));
           process.exitCode = 1;
           return;
         }
@@ -638,12 +760,20 @@ function cmdCard(store, { pos, flags }) {
       return out(flags, `deleted card #${result.num}${ballots}`, result);
     }
     case 'log': {
-      if (typeof flags.text !== 'string' || !flags.text.trim())
-        throw new TowerError('E_USAGE', 'card log needs --text <text>');
       const { result } = store.mutate((s, cfg) => db.updateCard(s, ref, {
         logEntry: flags.text.trim(), by,
       }, cfg));
       return out(flags, `logged card #${result.num}`, result);
+    }
+    case 'history': {
+      const { state, history } = store.loadPair();
+      const found = db.cardHistory(state, history, ref);
+      const events = found.events.slice(0, Number(flags.limit || found.events.length));
+      if (flags.json) return out(flags, null, { ...found, events });
+      console.log(`#${found.card.num} ${found.card.title}${found.card.archived ? '  (archived)' : ''}`);
+      for (const e of events) console.log(`${e.at}  ${String(e.by || '').padEnd(10)} ${e.action.padEnd(22)} ${e.note || ''}`);
+      if (!events.length) console.log('(no events)');
+      return;
     }
     default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/claim/release/delete/criteria/log`);
   }
@@ -682,8 +812,7 @@ function runCardProbe(card, root) {
 }
 
 function scaffoldDecision(store, ref, flags) {
-  const id = typeof flags.id === 'string' ? flags.id.trim() : '';
-  if (!id) throw new TowerError('E_USAGE', 'decision scaffold needs --id <decision-id>');
+  const id = flags.id.trim();
   const state = store.load();
   const card = db.findCard(state, ref);
   if (!card) throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
@@ -932,7 +1061,7 @@ function cmdEpoch(store, { pos, flags }) {
     case 'update': {
       const patch = { ...(readPayload(flags) || {}) };
       for (const f of ['name', 'goal', 'status', 'order', 'exitCriteria']) if (flags[f] !== undefined) patch[f] = flags[f];
-      const { result } = store.mutate((s) => db.updateEpoch(s, id, patch));
+      const { result } = store.mutate((s) => db.updateEpoch(s, id, { ...patch, by: flags.by }));
       return out(flags, `updated epoch ${epochLabel(result)}`, result);
     }
     case 'remove': {
@@ -940,7 +1069,7 @@ function cmdEpoch(store, { pos, flags }) {
       return out(flags, `removed epoch ${result.removed}`, result);
     }
     case 'current': {
-      const { result } = store.mutate((s) => db.setCurrentEpoch(s, id === 'none' ? null : id));
+      const { result } = store.mutate((s) => db.setCurrentEpoch(s, id === 'none' ? null : id, flags.by));
       return out(flags, `current ${store.config.terms.epoch.toLowerCase()}: ${result.active || '—'}`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown epoch verb "${verb}" — list/add/update/remove/current`);
@@ -1113,15 +1242,15 @@ function cmdLint(store, { flags }) {
   const s = store.load();
   if (flags.tree !== undefined && !flags.proofs) throw new TowerError('E_USAGE', 'lint --tree goes with --proofs');
   if (flags.proofs && typeof flags.tree !== 'string') throw new TowerError('E_USAGE', 'lint --proofs needs --tree DIR, a checkout holding Tests and Examples');
-  const findings = flags.proofs ? unmatchedProofs(s, resolve(flags.tree)) : lint(s, store.loadHistory());
-  if (flags.json) {
-    console.log(JSON.stringify(findings, null, 2));
-    process.exitCode = findings.length ? 1 : 0;
-    return;
-  }
+  if (flags.proofs && flags.evidence) throw new TowerError('E_USAGE', 'lint --proofs and --evidence are separate sweeps; run one at a time');
+  const findings = flags.proofs ? unmatchedProofs(s, resolve(flags.tree))
+    : flags.evidence ? evidenceProvenance(s, store.config.durability)
+    : lint(s, store.loadHistory());
+  // --evidence warns: old evidence stays readable, so its findings never fail the run.
+  process.exitCode = findings.length && !flags.evidence ? 1 : 0;
+  if (flags.json) return out(flags, null, findings);
   for (const f of findings) console.log(`${f.rule}  ${f.ref}  ${f.msg}`);
   if (!findings.length) console.log('(clean)');
-  process.exitCode = findings.length ? 1 : 0;
 }
 
 // Run the proofs of a card's or an epoch's open criteria and meet the ones
@@ -1418,8 +1547,6 @@ function cmdRepair(store, { pos, flags }) {
   const [verb] = pos;
   if (verb !== 'apply')
     throw new TowerError('E_USAGE', 'repair supports only: apply --manifest FILE --expect-rev N --by X [--dry-run]');
-  if (!flags.manifest || flags.manifest === true)
-    throw new TowerError('E_USAGE', 'repair apply requires --manifest FILE');
   let manifest;
   try { manifest = JSON.parse(readFileSync(resolve(flags.manifest), 'utf8')); }
   catch (error) { throw new TowerError('E_MANIFEST', `cannot read repair manifest: ${error.message}`); }
@@ -1475,7 +1602,6 @@ function cmdEvents(store, { flags }) {
 
 function cmdImport({ pos, flags }) {
   const [src] = pos;
-  if (!src) throw new TowerError('E_USAGE', 'tower import <old-tower.json> [--name Project] [--dir .]');
   const old = readJSON(resolve(src));
   if (!old) throw new TowerError('E_NOT_FOUND', `cannot read ${src}`);
   const dir = resolve(flags.dir || '.', '.tower');
@@ -1486,7 +1612,8 @@ function cmdImport({ pos, flags }) {
   writeJSON(file, s);
   if (!existsSync(join(dir, 'config.json'))) writeJSON(join(dir, 'config.json'), { project: s.meta.project });
   ensureDataIgnores(dir);
-  console.log(`imported ${s.cards.length} cards, ${s.decisions.length} decisions, ${s.questions.length} questions, ${s.ideas.length} ideas → ${file}`);
+  return out(flags, `imported ${s.cards.length} cards, ${s.decisions.length} decisions, ${s.questions.length} questions, ${s.ideas.length} ideas → ${file}`,
+    { file, cards: s.cards.length, decisions: s.decisions.length, questions: s.questions.length, ideas: s.ideas.length });
 }
 
 // ---- undo, git hook -------------------------------------------------------
@@ -1496,7 +1623,7 @@ function cmdUndo(store, { flags }) {
   const cur = store.load();
   const prev = readLatestJSON(bdir, 'tower-', null);
   if (!prev) throw new TowerError('E_INVALID', 'nothing to undo (no backups yet)');
-  store.restore(prev, { expectRev: flags.expectRev ?? cur.meta.rev });
+  store.restore(prev, { expectRev: flags.expectRev ?? cur.meta.rev, by: flags.by });
   return out(flags, `undid last write — board back to rev ${prev.meta?.rev ?? '?'} content (now rev ${cur.meta.rev + 1})`, { ok: true });
 }
 
@@ -1507,7 +1634,6 @@ function cmdBoard(store, { pos, flags }) {
   const [verb] = pos;
   switch (verb) {
     case 'commit': {
-      if (!flags.by) throw new TowerError('E_USAGE', 'board commit needs --by <agent>');
       const result = store.commitBoard(flags.by);
       if (result.committed) return out(flags, `committed board rev ${result.rev} to ${result.branch} as ${result.committed.slice(0, 10)} (${result.paths.join(', ')})`, result);
       if (/board is current/.test(result.reason)) return out(flags, `board unchanged: ${result.reason}`, result);
@@ -1528,7 +1654,6 @@ function cmdBoard(store, { pos, flags }) {
 // write (apply.mjs). --dry-run runs it on a copy and writes nothing.
 function cmdApply(store, { flags }) {
   const plan = readPayload(flags);
-  if (!plan) throw new TowerError('E_USAGE', 'apply needs --file plan.json (or --file - / --stdin)');
   if (flags.dryRun) {
     const pair = store.loadPair();
     const result = applyPlan(structuredClone(pair.state), plan, flags.by, store.config, structuredClone(pair.history));
@@ -1541,9 +1666,6 @@ function cmdApply(store, { flags }) {
 // `tower publish`: post the briefing, commit the board, push the board branch
 // and confirm origin holds that very commit; anything less exits non-zero.
 function cmdPublish(store, { flags }) {
-  if (typeof flags.title !== 'string' || !flags.title.trim()) throw new TowerError('E_USAGE', 'publish needs --title "…"');
-  if (typeof flags.file !== 'string') throw new TowerError('E_USAGE', 'publish needs --file FILE (markdown)');
-  if (typeof flags.by !== 'string' || !flags.by) throw new TowerError('E_USAGE', 'publish needs --by <agent>');
   const body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
   const { result: briefing } = store.mutate(s => db.postBriefing(s, { title: flags.title, body, sections: [], by: flags.by }));
   const pushed = store.publishBoard(flags.by);
@@ -1567,7 +1689,7 @@ async function cmdGauntlet(store, { pos, flags }) {
 
 // Installs a post-commit hook that appends any commit mentioning #<num> to
 // that card's log. Silent + always exit 0, so it can never break a commit.
-function cmdGithookInstall(store) {
+function cmdGithookInstall(store, flags) {
   const projectRoot = dirname(store.dataDir);
   const gitDir = (() => {
     let d = projectRoot;
@@ -1585,27 +1707,29 @@ function cmdGithookInstall(store) {
     writeFileSync(hookPath, cur);
     chmodSync(hookPath, 0o755);
   }
-  console.log(`installed post-commit hook → ${hookPath}\ncommits mentioning #<num> now append to that card's log`);
+  return out(flags, `installed post-commit hook → ${hookPath}\ncommits mentioning #<num> now append to that card's log`, { hook: hookPath });
 }
 
-// The real post-commit worker: read HEAD, find #N refs, log them.
-async function githookPostCommit(store) {
-  const { execSync } = await import('node:child_process');
-  let subject = '', hash = '';
-  try {
-    hash = execSync('git rev-parse --short HEAD', { cwd: dirname(store.dataDir), encoding: 'utf8' }).trim();
-    subject = execSync('git log -1 --format=%s', { cwd: dirname(store.dataDir), encoding: 'utf8' }).trim();
-  } catch { return; }
+// The real post-commit worker: read HEAD, find #N refs, log them. Outside a
+// git work tree it logs nothing.
+async function githookPostCommit(store, flags) {
+  const git = (...args) => spawnSync('git', args, { cwd: dirname(store.dataDir), encoding: 'utf8' });
+  const head = git('rev-parse', '--short', 'HEAD');
+  const hash = head.status === 0 ? head.stdout.trim() : '';
+  const subject = hash ? git('log', '-1', '--format=%s').stdout.trim() : '';
   const nums = [...new Set([...subject.matchAll(/#(\d+)\b/g)].map(m => Number(m[1])))];
-  if (!nums.length) return;
-  const s = store.load();
+  const s = nums.length ? store.load() : null;
+  const logged = [];
   for (const n of nums) {
     const c = s.cards.find(x => x.num === n);
     if (!c) continue;
     try {
       store.mutate((s2, cfg) => db.updateCard(s2, c.id, { logEntry: `commit ${hash}: ${subject.slice(0, 110)}`, by: 'git' }, cfg));
+      logged.push(n);
     } catch { /* never break a commit */ }
   }
+  if (!flags.json && !logged.length) return;
+  return out(flags, `logged commit ${hash} on ${logged.map(n => `#${n}`).join(', ')}`, { commit: hash || null, cards: logged });
 }
 
 const HELP = `tower — file-backed project board for an owner + AI agents
@@ -1658,15 +1782,30 @@ function helpContract() {
   return mismatches;
 }
 
-function cmdHelpCheck() {
+function cmdHelpCheck(flags) {
   const mismatches = helpContract();
-  if (mismatches.length) {
-    console.error(`tower: help/parser mismatch: ${mismatches.join('; ')}`);
-    process.exitCode = 1;
-    return;
-  }
-  console.log(JSON.stringify({ ok: true, mismatches: [], checked: Object.keys(COMMAND_FLAGS).length }));
+  if (mismatches.length) throw new TowerError('E_HELP', `help/parser mismatch: ${mismatches.join('; ')}`);
+  const result = { ok: true, mismatches: [], checked: Object.keys(COMMAND_FLAGS).length };
+  out(flags, JSON.stringify(result), result);
 }
+
+// `tower help --json`: every command path with its argument, required flags
+// and accepted flags, from the same tables the parser enforces.
+function helpJSON() {
+  const entry = (path, flags) => [path, {
+    arg: REQUIRED[path]?.arg ?? null,
+    required: (REQUIRED[path]?.flags || []).map(spellFlag),
+    flags: flags.map(spellFlag),
+  }];
+  return {
+    commands: Object.fromEntries(Object.entries(COMMAND_FLAGS).flatMap(([cmd, spec]) => [
+      ...(spec.flags ? [entry(cmd, spec.flags)] : []),
+      ...Object.entries(spec.verbs || {}).map(([verb, flags]) => entry(`${cmd} ${verb}`, flags)),
+    ])),
+    globalFlags: GLOBAL_FLAGS.map(spellFlag),
+  };
+}
+const printHelp = (flags) => out(flags, HELP, helpJSON());
 
 // ---- dispatch ----------------------------------------------------------------
 
@@ -1675,14 +1814,14 @@ export async function run(argv) {
   const [cmd, ...rest] = pos;
   const sub = { pos: rest, flags };
   try {
-    if (!cmd) return console.log(HELP);
+    if (!cmd) return printHelp(flags);
     if (cmd === 'help') {
-      const unknown = Object.keys(flags).filter((key) => ![...commandFlags('help'), ...GLOBAL_FLAGS].includes(key));
-      if (unknown.length) throw new TowerError('E_USAGE', `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower help\`: ${unknown.map(spellFlag).join(', ')}`);
-      return flags.check ? cmdHelpCheck() : console.log(HELP);
+      checkFlags(cmd, undefined, flags);
+      return flags.check ? cmdHelpCheck(flags) : printHelp(flags);
     }
     checkFlags(cmd, rest[0], flags);
-    if (flags.help) return console.log(HELP);
+    if (flags.help) return printHelp(flags);
+    checkRequired(cmd, rest[0], COMMAND_FLAGS[cmd].verbs ? rest.slice(1) : rest, flags);
     if (cmd === 'init') return cmdInit(sub);
     if (cmd === 'import') return cmdImport(sub);
 
@@ -1702,17 +1841,19 @@ export async function run(argv) {
           return superviseServe({
             towerRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
             argv: process.argv.slice(2),
+            // Under --json stdout carries only each worker's listening record.
+            ...(flags.json ? { log: (...a) => console.error(...a) } : {}),
           });
         }
         const { serve } = await import('./server.mjs');
         const port = Number(flags.port || store.config.port);
-        if (!flags.worker) return serve(store, port, !!flags.open);
+        if (!flags.worker) return serve(store, port, !!flags.open, { json: !!flags.json });
         const { serveWorker } = await import('./restart.mjs');
-        return serveWorker({ serveFn: (open) => serve(store, port, open), open: !!flags.open })();
+        return serveWorker({ serveFn: (open) => serve(store, port, open, { json: !!flags.json }), open: !!flags.open })();
       }
       case 'status':    return sub.pos.length ? cmdStatusReport(store, sub) : cmdStatus(store, sub);
       case 'briefing':  return cmdBriefing(store, sub);
-      case 'state':     return console.log(JSON.stringify(store.project(), null, 2));
+      case 'state':     return out(flags, null, store.project());
       case 'card':      return cmdCard(store, sub);
       case 'decision':  return cmdDecision(store, sub);
       case 'question':  return cmdQuestion(store, sub);
@@ -1739,17 +1880,17 @@ export async function run(argv) {
       case 'publish':   return cmdPublish(store, sub);
       case 'gauntlet':  return await cmdGauntlet(store, sub);
       case 'githook':
-        if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);
-        return cmdGithookInstall(store);
-      default: throw new TowerError('E_USAGE', `unknown command "${cmd}" — run \`tower help\``);
+        if (sub.pos[0] === 'post-commit') return await githookPostCommit(store, flags);
+        return cmdGithookInstall(store, flags);
     }
   } catch (e) {
-    if (e instanceof TowerError || e instanceof ConfigError) {
-      console.error(`tower: ${e.message}`);
-      process.exitCode = e.code === 'E_CONFLICT' ? 2 : 1;
-      if (flags.json) console.log(JSON.stringify({ error: e.code, message: e.message }));
-      return;
-    }
-    throw e;
+    // Under --json every failure is one `{ error: { code, message } }` object
+    // on stdout, whatever threw it.
+    const known = e instanceof TowerError || e instanceof ConfigError;
+    if (!known && !flags.json) throw e;
+    const code = known ? e.code : 'E_INTERNAL';
+    console.error(`tower: ${e.message}`);
+    process.exitCode = code === 'E_CONFLICT' ? 2 : 1;
+    if (flags.json) console.log(JSON.stringify({ error: { code, message: e.message } }));
   }
 }

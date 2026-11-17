@@ -157,7 +157,7 @@ const routes = {
   'idea/promote':    (s, p, cfg) => db.promoteIdea(s, p.id, p, cfg),
   'epoch/add':       (s, p) => db.addEpoch(s, p),
   'epoch/update':    (s, p) => db.updateEpoch(s, p.id, p),
-  'epoch/current':   (s, p) => db.setCurrentEpoch(s, p.epoch),
+  'epoch/current':   (s, p) => db.setCurrentEpoch(s, p.epoch, p.by),
   'epoch/remove':    (s, p, cfg, history) => db.removeEpoch(s, history, p.id, p.by),
   'milestone/add':   (s, p) => db.addMilestone(s, p),
   'milestone/update': (s, p) => db.updateMilestone(s, p.id, p, p.by),
@@ -352,7 +352,8 @@ async function serveMedia(req, res, store, url) {
   } catch { res.writeHead(404); return res.end('not found'); }
 }
 
-export function serve(store, port = 7878, open = false) {
+// `json`: the listening banner and a busy port are one JSON object on stdout.
+export function serve(store, port = 7878, open = false, { json = false } = {}) {
   const live = createLiveBoard(store, { decorate: decorateIndex });
   const sseClients = new Set();
   let unsubscribe = null;
@@ -423,6 +424,10 @@ export function serve(store, port = 7878, open = false) {
         card ||= db.projectCard(s, ref, live.archive());
         if (!card) return send(res, 404, { error: 'E_NOT_FOUND', message: `no card ${ref}` });
         return send(res, 200, { rev: s.meta.rev, card }, { revision: s.meta.rev });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/card/history') {
+        const s = live.state();
+        return send(res, 200, db.cardHistory(s, live.archive(), url.searchParams.get('id')), { revision: s.meta.rev });
       }
       if (req.method === 'GET' && url.pathname === '/api/closed') {
         return sendBody(req, res, live.closed().body);
@@ -552,7 +557,7 @@ export function serve(store, port = 7878, open = false) {
         const bdir = join(store.dataDir, 'backups');
         const prev = readLatestJSON(bdir, 'tower-', null);
         if (prev === null) return send(res, 400, { error: 'E_INVALID', message: 'nothing to undo (no backups yet)' });
-        const { state } = store.restore(prev, { expectRev: p.expectRev });
+        const { state } = store.restore(prev, { expectRev: p.expectRev, by: p.by });
         return sendCommitted(res, undefined, state);
       }
       if (req.method === 'POST' && (url.pathname === '/api/acceptance/challenge' || url.pathname === '/api/acceptance/resolve')) {
@@ -651,14 +656,17 @@ export function serve(store, port = 7878, open = false) {
   });
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
-      console.error(`tower: port ${port} is already in use (another Tower or app?) — try --port ${port + 1}`);
+      const message = `port ${port} is already in use (another Tower or app?) — try --port ${port + 1}`;
+      console.error(`tower: ${message}`);
+      if (json) console.log(JSON.stringify({ error: { code: 'E_PORT', message } }));
       process.exit(1);
     }
     throw e;
   });
   const onListen = () => {
     const url = `http://localhost:${port}`;
-    console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}\n    network: private LAN only; no access key or public-host mode\n`);
+    if (json) console.log(JSON.stringify({ url, port, project: store.config.project, data: store.file }));
+    else console.log(`\n  ▲ Tower — ${store.config.project} — ${url}\n    data: ${store.file}\n    network: private LAN only; no access key or public-host mode\n`);
     if (open) import('node:child_process').then(({ spawn }) => {
       const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
       spawn(cmd, [url], { stdio: 'ignore', detached: true }).unref();

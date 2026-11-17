@@ -53,7 +53,7 @@ export const APPLY_OPS = {
   'epoch.update': {
     needs: ['id'], may: EPOCH_FIELDS, change: true,
     ref: o => o.id,
-    run: (s, o) => db.updateEpoch(s, o.id, pick(o, EPOCH_FIELDS)),
+    run: (s, o, by) => db.updateEpoch(s, o.id, { ...pick(o, EPOCH_FIELDS), by }),
   },
   'milestone.add': {
     needs: ['epochId', 'title'], may: ['id', 'goal', 'order', 'exitCriteria'],
@@ -114,6 +114,9 @@ export function applyPlan(s, plan, by, config, history) {
     return { op: o.op, ref: spec.ref(o) };
   });
   const summary = Object.entries(counts).map(([op, n]) => `${n} ${op}`).join(', ');
-  db.logEvent(s, { by, action: 'board.apply', note: `${ops.length} op${ops.length === 1 ? '' : 's'}: ${summary}` });
+  // The cards the plan touched, so each card's history shows the plan.
+  const refs = [...new Set(plan.ops.flatMap(o => [o.card, o.to])
+    .filter(ref => ref != null).map(ref => db.findCard(s, ref)?.id).filter(Boolean))];
+  db.logEvent(s, { by, action: 'board.apply', refs, note: `${ops.length} op${ops.length === 1 ? '' : 's'}: ${summary}` });
   return { applied: ops.length, summary, ops };
 }
