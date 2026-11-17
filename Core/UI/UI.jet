@@ -196,6 +196,19 @@ UINode: struct {
     __files_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
         internal.files_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale)
     }
+
+    // The text of the text input that is node `focused` of the tree's focus
+    // ring (`__input`), None when that node is no text input.
+    __focused_text: fn(self, focused: Int) -> String? Never! {
+        internal.focused_input(self, focused)
+    }
+
+    // Makes `text` the text of the text input that is node `focused` of the
+    // tree's focus ring (`__input`); whether one is, which then needs
+    // drawing again.
+    __set_focused_text: fn(&self, focused: Int, text: String) -> Bool Never! {
+        internal.set_focused_input(self, focused, text)
+    }
 }
 
 // Whether a backend used an input event.
@@ -972,6 +985,21 @@ Window: struct {
         None
     }
 
+    // Names the window's menu bar: the dbusmenu at `path` that the session
+    // bus connection `service` (its unique name) serves, for a desktop
+    // whose global menu shows it (KDE Plasma's, through
+    // org_kde_kwin_appmenu). Whether the display server takes it; a
+    // headless window, or a display server without the protocol, does
+    // not. Call it before the frames: a frame's wait holds the window.
+    __menu_address: fn(self, service: String, path: String) -[Net, Time]> Bool {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection := link.guard_edit()
+            return wayland.set_menu_address(connection.value, service, path)
+        }
+        false
+    }
+
     // The FNV-1a checksum of each frame a headless window showed.
     checksums: fn(self) -> [Int] {
         guard: self.state.guard_read()
@@ -1425,6 +1453,12 @@ Frame: struct {
 
     is_key_released: fn(self, key: Key) -> Bool { self.pending.contains(UIEvent.KeyUp(key)) }
 
+    // Whether `key`, pressed in this frame with the modifiers it holds, is
+    // `shortcut`, as a button's shortcut matches (`UINode.__input`).
+    __pressed: fn(self, shortcut: UIShortcut, key: Key) -> Bool Never! {
+        internal.shortcut_pressed(shortcut, key, internal.held_modifiers(self))
+    }
+
     is_mouse_button_down: fn(self, button: UIPointerButton) -> Bool {
         self.buttons.contains(button)
     }
@@ -1865,13 +1899,7 @@ priv internal: module {
     window_input: fn(tree: &UINode, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
         leaves := [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
-        ring := [Int]{}
-        loop index in 0..<leaves.len() {
-            role: leaves[index].node.role
-            if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) {
-                ring.push(index)
-            }
-        }
+        ring: focus_ring_of(leaves)
         if focused >= ring.len() -> focused = -1
         if event == {
             .PointerDown(button) -> {
@@ -1940,6 +1968,41 @@ priv internal: module {
             }
             .KeyUp(_) | .Compose(_) | .PointerMove(_, _) | .PointerUp(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Close -> false
         }
+    }
+
+    // The focus ring of a tree whose leaves are `leaves`, in paint order:
+    // the index of each button and text input.
+    focus_ring_of: fn(leaves: [UIPlaced]) -> [Int] Never! {
+        ring := [Int]{}
+        loop index in 0..<leaves.len() {
+            role: leaves[index].node.role
+            if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) {
+                ring.push(index)
+            }
+        }
+        ring
+    }
+
+    // `UINode.__focused_text`.
+    focused_input: fn(tree: UINode, focused: Int) -> String? Never! {
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
+        ring: focus_ring_of(leaves)
+        if focused < 0 || focused >= ring.len() -> return None
+        node: leaves[ring[focused]].node
+        if node.kind != .TextInput -> return None
+        Val(node.label.copy())
+    }
+
+    // `UINode.__set_focused_text`.
+    set_focused_input: fn(tree: &UINode, focused: Int, text: String) -> Bool Never! {
+        if focused_input(tree, focused) == None -> return false
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
+        ring: focus_ring_of(leaves)
+        seen := 0
+        tree = retyped(tree, ring[focused], seen, text)
+        true
     }
 
     // The index in `ring` of the leaf whose frame holds the point (x, y), in

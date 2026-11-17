@@ -1,0 +1,35 @@
+# A Linux app's menu bar becomes its window's menu: once the app launches,
+# its window tells a fake compositor on $WAYLAND_DISPLAY where its menu is
+# (org_kde_kwin_appmenu), and the menu is a dbusmenu on the session bus at
+# that address. A fake desktop on the bus reads it: the app's File menu,
+# then Edit and Window, each item with its key equivalents. It chooses
+# New Task, and the board's panel turns green. The compositor then presses
+# Ctrl+N in the window, the key equivalent of New Task, and the panel turns
+# red; then Ctrl+W, Close's, which closes the window and ends the app.
+fixture: MenuBarMapsToTheLinuxWindowMenu.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+spawn bus: jet run bus/fake_bus.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+wait: bus timeout 60s
+exit: 0
+file: compositor.stdout = "menu: :1.48 /MenuBar\nboard: 200x100, panel [51, 102, 255, 255]\nwrote first.frame\nchosen from the menu: panel [51, 153, 51, 255]\npressed Ctrl+N\nafter Ctrl+N: panel [204, 51, 51, 255]\npressed Ctrl+W\n"
+file: heard.txt = "File(New Task[Control+n] | - | Quit[Control+q]) | Edit(Cut[Control+x] | Copy[Control+c] | Paste[Control+v]) | Window(Minimize[Control+m] | Close[Control+w])\n"

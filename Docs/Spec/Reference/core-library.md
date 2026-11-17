@@ -5700,8 +5700,10 @@ tasks never read or change the process registry. The module source is
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
+| `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
-| `item(label: String, run: fn() Notice!) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, a separator line, and the item that quits the app. |
+| `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and greyed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
+| `menu(title: String, items: [MenuItem]) -> Menu` / `edit_menu() -> Menu` / `window_menu() -> Menu` | menu | A menu bar's menu titled `title` holding `items`; the Edit menu (Cut, Copy, Paste); and the Window menu (Minimize, Close). |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
@@ -6279,6 +6281,31 @@ item runs its `run`, and a run that fails adds its `Notice` to
 `app.notices()`. Choosing Quit ends the process with status 0. A desktop
 with no tray host (no `org.kde.StatusNotifierWatcher`), or a session bus
 that goes away, adds a notice, and the app runs on without a tray.
+
+`graph.menu_bar(menus)` gives the app's window a menu bar from
+`graph.launch()` on: the menus `menus` makes, in order, each an
+`app.menu(title, items)`. `app.edit_menu()` and `app.window_menu()` are the
+menus every window has, whose items the window runs itself: Cut and Copy
+put the focused text input's text on the clipboard (Cut then empties it),
+Paste types the clipboard's text into it, Minimize minimizes the window and
+Close closes it, which ends the process with status 0. An item's `key:`
+names its key equivalent: modifiers and a key joined by `+`, such as
+`"Cmd+N"` or `"Cmd+Shift+E"`. `Cmd` is Control on Linux; `Ctrl`, `Alt`,
+`Shift` and `Super` name the others. A key the window reads pressed with
+exactly an item's modifiers runs that item, before the screen's tree sees
+it, and an item not `enabled` does not run. On Linux the menus are a
+dbusmenu (`com.canonical.dbusmenu`) on the session bus, and the window
+tells the compositor where it is (`org_kde_kwin_appmenu`), so a desktop
+with a global menu shows it in its menu bar or the window's title bar,
+with each item's keys. Like the tray's, the menu bar asks `menus` again
+every quarter second and after each call the desktop makes, so menus made
+from a live binding follow it. When `menus` fails, the menu bar keeps its
+last menus under a first entry with the notice's text, which can't be
+chosen. Choosing an item runs its `run`, and a run that fails adds its
+`Notice` to `app.notices()`. A session bus that goes away adds a notice.
+A desktop with no session bus or no global menu shows no menu, and the
+key equivalents still work. A key that names no key, or a modifier that
+isn't one of these, panics.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the

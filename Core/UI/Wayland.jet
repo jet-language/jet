@@ -216,6 +216,10 @@ Connection: struct {
     priv icon_manager: Int,
     priv icon_pool: Int,
     priv icon_buffers: [Int],
+    // org_kde_kwin_appmenu_manager (0 without one), and the window's
+    // org_kde_kwin_appmenu once `set_menu_address` made it.
+    priv appmenu_manager: Int,
+    priv appmenu: Int,
     priv keyboard: Int,
     priv output: Int,
     // Every output, with its integer scale, and those the surface is on.
@@ -541,6 +545,8 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         icon_manager: 0,
         icon_pool: 0,
         icon_buffers: [Int]{},
+        appmenu_manager: 0,
+        appmenu: 0,
         keyboard: 0,
         output: 0,
         outputs: [OutputScale]{},
@@ -1528,6 +1534,9 @@ global: fn(c: &Connection, name: Int, interface: String, version: Int) {
     if interface == "xdg_toplevel_icon_manager_v1" && c.icon_manager == 0 {
         c.icon_manager = bind(c, name, interface, 1)
     }
+    if interface == "org_kde_kwin_appmenu_manager" && c.appmenu_manager == 0 {
+        c.appmenu_manager = bind(c, name, interface, 1)
+    }
 }
 
 output_index: fn(c: Connection, object: Int) -> Int {
@@ -2349,6 +2358,24 @@ is_fullscreen: fn(c: Connection) -> Bool { c.fullscreen }
 // xdg_toplevel.set_app_id: the desktop matches it to the application's
 // desktop entry, for its name, icon and grouping.
 set_app_id: fn(c: &Connection, app_id: String) { request(c, c.toplevel, 3, text_argument(app_id)) }
+
+// Names the window's menu: the dbusmenu at `path` of the session bus
+// connection `service` (its unique name), through org_kde_kwin_appmenu
+// (create, then set_address), and flushes. A desktop with a global menu
+// (KDE Plasma's) shows it as the window's menu bar. Whether the compositor
+// offers the protocol; without it, nothing is sent.
+set_menu_address: fn(c: &Connection, service: String, path: String) -[Net, Time]> Bool {
+    if c.appmenu_manager == 0 -> return false
+    if c.appmenu == 0 {
+        c.appmenu = new_id(c)
+        request(c, c.appmenu_manager, 0, words([Int]{c.appmenu, c.surface}))
+    }
+    arguments := text_argument(service)
+    loop b in text_argument(path) -> arguments.push(b)
+    request(c, c.appmenu, 0, arguments)
+    flush(c)
+    true
+}
 
 // Shows `icon` through xdg_toplevel_icon_v1: its theme name and its
 // images, as square premultiplied ARGB8888 buffers in one new sealed

@@ -1,0 +1,30 @@
+// The desktop app: the shared graph in a window with a menu bar. On Linux
+// the menu bar is the window's menu, which the desktop shows in its own
+// menu bar or the window's title bar. File imports a CSV file's rows into a
+// project as tasks (Cmd+O) and quits; Edit and Window hold the items every
+// window has, which the window runs itself. Each item's key equivalent
+// works in the window whether or not the desktop shows the menu.
+use {
+    app
+    logic
+    screens
+}
+
+desktop: fn(crew: app.Remote<logic.Crew>, project: String) -> app.App Never! {
+    screens.crewboard()
+        .window(width: 1200, height: 800)
+        .menu_bar(fn() -> [app.Menu] app.Notice! { menus(crew.copy(), project.copy()) })
+}
+
+menus: fn(crew: app.Remote<logic.Crew>, project: String) -> [app.Menu] app.Notice! {
+    import: app.item("Import Tasks…", fn() app.Notice! { import_into(crew.copy(), project.copy()) }, key: "Cmd+O")
+    file: app.menu("File", [app.MenuItem]{import, app.separator(), app.quit_item()})
+    Ok([app.Menu]{file, app.edit_menu(), app.window_menu()})
+}
+
+// Imports the CSV file the person picks into `project`; a failed import
+// shows its notice by the menu bar.
+import_into: fn(crew: app.Remote<logic.Crew>, project: String) app.Notice! {
+    _: import_tasks(crew, project) ?? return Err(import_notice(err))
+    Ok()
+}
