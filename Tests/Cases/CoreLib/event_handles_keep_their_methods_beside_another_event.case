@@ -1,0 +1,11 @@
+# Claim: core.event's built-in `Event<T>` handle keeps its methods in a module that loads another module declaring its own `Event`. The other `Event` (here signals.jet's enum, standing in for any same-named type such as a Core one) is a different type, keyed by its owner path, and shadows the handle only in a module that declares or imports that name. The program's `event.new<Int>()` value keeps `on`, `emit` and `listener_count`, and core.watcher's `WatchHandle.on` still subscribes through its own `Event<WatchEvent>`.
+# Hand-derived: the one listener prints `got 7`, so the emit summary reports one delivery. One listener stays subscribed, and `signals.Event.Started` is labelled `started`.
+fixture: EventHandlesKeepTheirMethodsBesideAnotherEvent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0 # o0
+stdout: = event_handles_keep_their_methods_beside_another_event.out # o0
+step: jet run -O2 main.jet
+exit: 0 # o2
+stdout: = event_handles_keep_their_methods_beside_another_event.out # o2
