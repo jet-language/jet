@@ -1,0 +1,240 @@
+// On-demand stack segments: deep recursion runs past a thread's or fiber's
+// own stack on segments mapped as it goes deeper, up to a total stack
+// budget, and returns them as it comes back up.
+//
+// A body that can reach itself again (a call cycle, or any indirect call:
+// JetIR X64Select.jet) starts with `cmp rsp, gs:[STACK_TCB_LIMIT]; jb grow`
+// before its frame. Its cold `grow` path saves the argument registers and
+// calls jet_rt_stack_grow(need, rsp). A zero result runs the body in place;
+// any other is the top of a fresh segment, where the trampoline writes the
+// bridge frame and the stack arguments, calls the body there, comes back
+// to its own stack and calls jet_rt_stack_shrink. Below the top, highest
+// first: the caller's return address, the caller's frame pointer (the
+// bridge frame the body's saved rbp names), STACK_SEGMENT_BRIDGE, the
+// trampoline's own frame pointer, then the stack arguments.
+//
+// TCB words (Thread.jet's layout): limit @1024, the lowest rsp a checked
+// body enters without growing (0: never grows, STACK_SEGMENT_PROBE: the
+// next check finds the stack's bounds); the running segment's record @1032
+// (0 on the thread's own stack); the kept spare segment's record @1040; the
+// bytes segments may still map @1048; the stack's size for a probe @1056.
+// A thread without a TCB reads the limit from the allocator state page's
+// word 1024, which stays zero (Alloc.jet), so it never grows.
+//
+// A segment is one mapping: a guard page, the stack, and its record in the
+// top STACK_SEGMENT_RECORD bytes: the limit and segment record it replaced
+// @0 and @8, its mapping @16 and the mapping's bytes @24.
+//
+// A thread's stack and its segments together hold at most the budget: the
+// soft RLIMIT_STACK, at least STACK_BUDGET_LEAST, at most
+// THREAD_STACK_MAXIMUM, and under a finite RLIMIT_AS its share
+// (thread_stack_capped). Past it the recursion runs in place into the guard
+// page, and the fault report names the overflow (E3012).
+
+STACK_TCB_LIMIT: I64{1024}
+
+STACK_TCB_SEGMENT: I64{1032}
+
+STACK_TCB_SPARE: I64{1040}
+
+STACK_TCB_ROOM: I64{1048}
+
+STACK_TCB_PROBE: I64{1056}
+
+// The TCB's size (Context.jet context_tcb_bytes).
+STACK_TCB_END: I64{1064}
+
+// The limit word of a stack whose bounds the next check finds.
+STACK_SEGMENT_PROBE: I64{-1}
+
+// The room a body below the limit still has: the frames of the calls it
+// makes that never reach a check, the grow call and the trampoline.
+STACK_SEGMENT_RED: I64{262144}
+
+// How far above a probing check's rsp a stack's top may lie: the program's
+// arguments and environment and the frames before the first check.
+STACK_SEGMENT_PROBE_SLACK: I64{1048576}
+
+STACK_SEGMENT_RECORD: I64{32}
+
+// The first segment's stack; each deeper one is twice the one it grows
+// from, up to STACK_SEGMENT_MOST.
+STACK_SEGMENT_FIRST: I64{1048576}
+
+STACK_SEGMENT_MOST: I64{268435456}
+
+// The least total stack budget: 1 GiB.
+STACK_BUDGET_LEAST: I64{1073741824}
+
+// The word below a bridge frame ("jet_stk!"): the frame walks
+// (stack_frame_caller, the fault report's walk) follow its saved frame
+// pointer down to the stack the segment grew from.
+STACK_SEGMENT_BRIDGE: I64{7666661893975862049}
+
+// The budget jet_rt_thread_init measures once; 0 before.
+stack_budget := I64{0}
+
+// Measures the total stack budget: the first thread's start, before any
+// other thread exists.
+stack_budget_init: fn() {
+    soft: thread_rlimit_soft(I64{3})
+    total := if (soft < I64{0} || soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft
+    if (total < STACK_BUDGET_LEAST) { total = STACK_BUDGET_LEAST }
+    #Unsafe("runtime-init runs before any other thread exists") {
+        stack_budget = thread_stack_capped(total)
+    }
+}
+
+// What segments may map beside a stack of `bytes`.
+stack_room: fn(bytes: I64) -> I64 {
+    budget: if (stack_budget == I64{0}) -> STACK_BUDGET_LEAST else -> stack_budget
+    if (budget > bytes) -> budget - bytes else -> I64{0}
+}
+
+// Arms `tcb` for a stack whose lowest usable byte (above its guard) is
+// `low` and that holds `bytes`: a fiber's or a runtime thread's own mapping.
+stack_arm: fn(tcb: I64, low: I64, bytes: I64) {
+    sync_store(wrapping(tcb + STACK_TCB_ROOM), stack_room(bytes))
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(low + STACK_SEGMENT_RED))
+}
+
+// Arms `tcb` for a stack of `bytes` whose top only its own thread can see:
+// the main thread's and a libc thread's. The first check on it probes.
+stack_arm_probe: fn(tcb: I64, bytes: I64) {
+    if (sync_load(wrapping(tcb + STACK_TCB_LIMIT)) != I64{0}) {
+        return
+    }
+    sync_store(wrapping(tcb + STACK_TCB_ROOM), stack_room(bytes))
+    sync_store(wrapping(tcb + STACK_TCB_PROBE), bytes)
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), STACK_SEGMENT_PROBE)
+}
+
+// The main thread's stack: the soft RLIMIT_STACK, as the kernel and the
+// loader (JetBackend Image/Loader.jet loader_stack_size) size it.
+stack_main_bytes: fn() -> I64 {
+    soft: thread_rlimit_soft(I64{3})
+    if (soft < I64{0} || soft > THREAD_STACK_MAXIMUM) -> THREAD_STACK_MAXIMUM else -> soft
+}
+
+// A checked body's slow path, at `sp` on the running stack, for a frame and
+// stack arguments of `need` bytes: the top of a segment the trampoline
+// moves onto, or 0 to run in place (no TCB, never growing, a probe, or the
+// budget or the address space spent).
+#Export(c) jet_rt_stack_grow: fn(need: I64, sp: I64) -> I64 {
+    tcb: thread_base()
+    if (tcb == I64{0} || tcb == thread_detached_base()) { return I64{0} }
+    limit: sync_load(wrapping(tcb + STACK_TCB_LIMIT))
+    if (limit == I64{0}) { return I64{0} }
+    if (limit == STACK_SEGMENT_PROBE) {
+        low: wrapping(wrapping((sp & I64{-4096}) - sync_load(wrapping(tcb + STACK_TCB_PROBE))) + STACK_SEGMENT_PROBE_SLACK)
+        sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(low + STACK_SEGMENT_RED))
+        return I64{0}
+    }
+    // Nothing this call reaches grows again.
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), I64{0})
+    record: stack_segment_take(tcb, need)
+    if (record == I64{0}) {
+        sync_store(wrapping(tcb + STACK_TCB_LIMIT), limit)
+        return I64{0}
+    }
+    sync_store(record, limit)
+    sync_store(wrapping(record + I64{8}), sync_load(wrapping(tcb + STACK_TCB_SEGMENT)))
+    sync_store(wrapping(tcb + STACK_TCB_SEGMENT), record)
+    low: wrapping(sync_load(wrapping(record + I64{16})) + THREAD_GUARD_BYTES)
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), wrapping(low + STACK_SEGMENT_RED))
+    record
+}
+
+// The trampoline is back on the stack the running segment grew from: that
+// stack's limit and segment return, and the segment becomes the spare (the
+// larger of it and the spare is kept, the other unmapped).
+#Export(c) jet_rt_stack_shrink: fn() {
+    tcb: thread_base()
+    record: sync_load(wrapping(tcb + STACK_TCB_SEGMENT))
+    sync_store(wrapping(tcb + STACK_TCB_SEGMENT), sync_load(wrapping(record + I64{8})))
+    sync_store(wrapping(tcb + STACK_TCB_LIMIT), sync_load(record))
+    spare: sync_load(wrapping(tcb + STACK_TCB_SPARE))
+    if (spare == I64{0}) {
+        sync_store(wrapping(tcb + STACK_TCB_SPARE), record)
+        return
+    }
+    if (sync_load(wrapping(spare + I64{24})) >= sync_load(wrapping(record + I64{24}))) {
+        stack_segment_unmap(tcb, record)
+        return
+    }
+    stack_segment_unmap(tcb, spare)
+    sync_store(wrapping(tcb + STACK_TCB_SPARE), record)
+}
+
+// A segment for a frame of `need` bytes: the spare when it holds one, else
+// a new mapping twice the running segment (STACK_SEGMENT_FIRST on the
+// thread's own stack), within the room left; its record, or 0.
+stack_segment_take: fn(tcb: I64, need: I64) -> I64 {
+    least: wrapping(wrapping(need + STACK_SEGMENT_RED) + I64{8191}) & I64{-4096}
+    spare: sync_load(wrapping(tcb + STACK_TCB_SPARE))
+    if (spare != I64{0}) {
+        sync_store(wrapping(tcb + STACK_TCB_SPARE), I64{0})
+        if (wrapping(sync_load(wrapping(spare + I64{24})) - THREAD_GUARD_BYTES) >= least) {
+            return spare
+        }
+        stack_segment_unmap(tcb, spare)
+    }
+    running: sync_load(wrapping(tcb + STACK_TCB_SEGMENT))
+    bytes := STACK_SEGMENT_FIRST
+    if (running != I64{0}) {
+        bytes = wrapping(wrapping(sync_load(wrapping(running + I64{24})) - THREAD_GUARD_BYTES) * I64{2})
+    }
+    if (bytes > STACK_SEGMENT_MOST) { bytes = STACK_SEGMENT_MOST }
+    if (bytes < least) { bytes = least }
+    room: sync_load(wrapping(tcb + STACK_TCB_ROOM)) & I64{-4096}
+    if (wrapping(bytes + THREAD_GUARD_BYTES) > room) { bytes = wrapping(room - THREAD_GUARD_BYTES) }
+    if (bytes < least) { return I64{0} }
+    mapping := thread_stack_map(bytes)
+    if (mapping < I64{0} && bytes > least) {
+        bytes = least
+        mapping = thread_stack_map(bytes)
+    }
+    if (mapping < I64{0}) { return I64{0} }
+    total: wrapping(bytes + THREAD_GUARD_BYTES)
+    sync_store(wrapping(tcb + STACK_TCB_ROOM), wrapping(sync_load(wrapping(tcb + STACK_TCB_ROOM)) - total))
+    record: wrapping(wrapping(mapping + total) - STACK_SEGMENT_RECORD)
+    sync_store(wrapping(record + I64{16}), mapping)
+    sync_store(wrapping(record + I64{24}), total)
+    record
+}
+
+// Unmaps the segment of `record`, which no frame runs on, and gives its
+// bytes back to the room.
+stack_segment_unmap: fn(tcb: I64, record: I64) {
+    mapping: sync_load(wrapping(record + I64{16}))
+    total: sync_load(wrapping(record + I64{24}))
+    sync_store(wrapping(tcb + STACK_TCB_ROOM), wrapping(sync_load(wrapping(tcb + STACK_TCB_ROOM)) + total))
+    #Unsafe("no frame runs on a returned segment and nothing else holds its address") {
+        _ := os_unmap_untracked_i64(mapping, total)
+    }
+}
+
+// Unmaps the spare segment of a TCB that is going away: a thread's detach
+// and a fiber's teardown. No segment runs then.
+stack_release: fn(tcb: I64) {
+    spare: sync_load(wrapping(tcb + STACK_TCB_SPARE))
+    if (spare == I64{0}) {
+        return
+    }
+    sync_store(wrapping(tcb + STACK_TCB_SPARE), I64{0})
+    stack_segment_unmap(tcb, spare)
+}
+
+// The frame the frame at `frame` returns to: its saved frame pointer when
+// that ascends by less than 16 MiB, or across a segment's bridge frame
+// (STACK_SEGMENT_BRIDGE below it) the caller's frame on the stack the
+// segment grew from; 0 at the chain's end. The word below a frame that is
+// not on a page boundary lies on the frame's own stack page.
+#Unsafe("frame is a live [saved rbp][return address] pair of the calling thread's frame-pointer chain")
+stack_frame_caller: fn(frame: I64) -> I64 {
+    above: os_load_i64(frame)
+    if (above & I64{7} != I64{0}) { return I64{0} }
+    if (above > frame && wrapping(above - frame) < I64{16777216}) { return above }
+    if (above == I64{0} || frame & I64{4095} == I64{0}) { return I64{0} }
+    if (os_load_i64(wrapping(frame - I64{8})) == STACK_SEGMENT_BRIDGE) -> above else -> I64{0}
+}

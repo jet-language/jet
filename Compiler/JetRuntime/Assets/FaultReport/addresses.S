@@ -159,7 +159,9 @@ signal:
 
 # The return addresses of up to 64 callers along the saved-rbp chain from
 # the faulting frame, while each frame is 8-aligned and ascends (the first
-# from the stack pointer) by under 16 MiB.
+# from the stack pointer) by under 16 MiB, or crosses a stack segment's
+# bridge frame (the word below it "jet_stk!", JetRuntime StackSegment.jet)
+# to the caller's frame on the stack the segment grew from.
 walk:
     push 64
     pop r13
@@ -170,10 +172,19 @@ walk:
     jnz 2f
     mov rcx, r12
     sub rcx, rax
-    jle 2f
+    jle 3f
     cmp rcx, 16777216
-    jge 2f
-    mov rax, [r12 + 8]
+    jl 4f
+3:  cmp r13d, 64
+    je 2f
+    test r12, r12
+    jz 2f
+    test eax, 4095
+    jz 2f
+    movabs rcx, 0x6a65745f73746b21
+    cmp [rax - 8], rcx
+    jne 2f
+4:  mov rax, [r12 + 8]
     call address
     mov rax, r12
     mov r12, [r12]

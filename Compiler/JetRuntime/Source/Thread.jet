@@ -29,7 +29,11 @@
 // turn request (Scheduler.jet SCHEDULER_TCB_TURN); @456 root Context record
 // (48 bytes); @504 + 16 per row, eight Alloc kept large-mapping rows
 // [mapping][bytes] (Alloc.jet ALLOC_LARGE_ROWS); @632 + 8 per class, thirteen
-// Alloc window run stacks (Alloc.jet ALLOC_WINDOW_ROWS).
+// Alloc window run stacks (Alloc.jet ALLOC_WINDOW_ROWS). @736 to @1016 stay
+// unused, so the stack segment words start at an offset where the
+// allocator state page, an unattached thread's GS target, reads zero:
+// @1024 stack limit, @1032 running segment, @1040 spare segment, @1048
+// segment room, @1056 probe size (StackSegment.jet STACK_TCB_LIMIT).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
@@ -39,7 +43,7 @@
 // the first GS read, never lazily from TLS: GS of an unattached thread
 // points at the allocator's zero word (thread_detached_base), so
 // thread_base() reads 0 there instead of faulting, and only the allocator
-// tests for that zero.
+// and the stack segments (StackSegment.jet jet_rt_stack_grow) test for it.
 
 // Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
 // List header@16, scope native List header@40 (0 thread, 1 attempt),
@@ -227,17 +231,21 @@ thread_unregister_tcb: fn(tcb: I64) {
 // main reads no thread block: its traps find the report domain by probe
 // (Scheduler.jet scheduler_report_base), so its main thread stays on the
 // detached zero word jet_rt_alloc_init installs. Repeating it is harmless:
-// the attach finds the thread's live block.
+// the attach finds the thread's live block. The first call measures the
+// stack budget and arms the main thread's stack segments (StackSegment.jet).
 // runtime-init: 2 when thread_tls_registry,alloc_cache_linked
 #Export(c) jet_rt_thread_init: fn() {
     // Runtime-object .init_array priority follows allocator and host init.
-    if (thread_tls_registry == I64{0}) {
+    first: thread_tls_registry == I64{0}
+    if first {
         #Unsafe("runtime-init runs before any other thread exists") {
             thread_tls_registry = jet_rt_alloc(THREAD_ROOT_BYTES, I64{8})
         }
         thread_zero(thread_tls_registry, THREAD_ROOT_BYTES)
+        stack_budget_init()
     }
     jet_rt_thread_attach()
+    if first -> stack_arm_probe(thread_base(), stack_main_bytes())
 }
 
 // Word-only native List growth: no Core List indexing or exact-Int carrier.
@@ -375,6 +383,7 @@ priv thread_tls_destroy: fn(table: I64, key: I64, attempt_only: Bool) -> Bool {
     thread_tls_teardown(tcb)
     context_tcb_release(tcb)
     sentry_thread_detach()
+    stack_release(tcb)
     // Every destructor above has run its last free: return the cache, the
     // kept large mappings and the window runs before the TCB that holds them
     // goes away, then release the TCB on the locked path.
@@ -434,7 +443,14 @@ rt_thread_entry_address: fn() -> I64 {
     entry: sync_load(start)
     argument: sync_load(wrapping(start + I64{8}))
     handle: sync_load(wrapping(start + I64{16}))
+    stack_bytes: sync_load(wrapping(start + I64{32}))
     jet_rt_free(start, THREAD_START_BYTES, I64{8})
+    // Its stack segments: a raw clone's stack is the handle's mapping above
+    // its guard; a libc thread's top only a probe finds.
+    mapping: sync_load(handle)
+    if (mapping != I64{0}) {
+        stack_arm(thread_base(), wrapping(mapping + THREAD_GUARD_BYTES), stack_bytes)
+    } else { stack_arm_probe(thread_base(), stack_bytes) }
     result := I64{0}
     #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
         result = os_call_address_i64(entry, argument)
@@ -519,8 +535,8 @@ THREAD_DETACHED: I64{1}
 THREAD_FINISHED: I64{2}
 
 // The start record jet_rt_thread_entry frees: entry@0, argument@8, handle@16,
-// the spawner's signal mask@24.
-THREAD_START_BYTES: I64{32}
+// the spawner's signal mask@24, the stack's bytes below its top@32.
+THREAD_START_BYTES: I64{40}
 
 // The PROT_NONE page below each stack.
 THREAD_GUARD_BYTES: I64{4096}
@@ -578,6 +594,7 @@ thread_spawn: fn(entry: I64, argument: I64) -> I64 {
     sync_store(start, entry)
     sync_store(wrapping(start + I64{8}), argument)
     sync_store(wrapping(start + I64{16}), handle)
+    sync_store(wrapping(start + I64{32}), bytes)
     // The child pops jet_rt_thread_entry's address and its start record.
     stack: wrapping(wrapping(mapping + total) - I64{16})
     sync_store(stack, rt_thread_entry_address())
@@ -678,6 +695,7 @@ thread_libc_spawn: fn(entry: I64, argument: I64, bytes: I64) -> I64 {
         _ := os_syscall_i64(I64{14}, I64{2}, masks, wrapping(masks + I64{8}), I64{8}, I64{0}, I64{0})
         sync_store(wrapping(start + I64{24}), sync_load(wrapping(masks + I64{8})))
         loop {
+            sync_store(wrapping(start + I64{32}), size)
             status = thread_libc_call(thread_libc_create, wrapping(handle + I64{8}), rt_thread_entry_address(), start, size)
             if (status != I64{11} || size <= THREAD_STACK_FLOOR) { break }
             size = size >> I64{1}

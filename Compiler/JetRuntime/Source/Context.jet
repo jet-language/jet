@@ -59,10 +59,10 @@ CONTEXT_NODE_NEXT: I64{32}
 
 context_current: fn() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SLOT)) }
 
-// TCB bytes including the appended root record and, after it, Alloc's kept
-// large-mapping rows and window run stacks (Thread.jet; Alloc.jet
-// ALLOC_LARGE_ROWS, ALLOC_WINDOW_ROWS).
-context_tcb_bytes: fn() -> I64 { ALLOC_WINDOW_ROWS + wrapping(ALLOC_WINDOW_CLASSES * I64{8}) }
+// TCB bytes including the appended root record, Alloc's kept large-mapping
+// rows and window run stacks, and the stack segment words (Thread.jet;
+// Alloc.jet ALLOC_LARGE_ROWS, ALLOC_WINDOW_ROWS; StackSegment.jet).
+context_tcb_bytes: fn() -> I64 { STACK_TCB_END }
 
 // A zeroed root record is the empty root context.
 context_tcb_install_root: fn(tcb: I64) {

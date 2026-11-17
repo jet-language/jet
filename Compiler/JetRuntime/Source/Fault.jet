@@ -173,7 +173,8 @@ fault_raise: fn(signal: I64) {
 // the table doesn't hold adds no line: the runtime's own, or every frame of
 // an image without a table. A function the table holds with no row for the
 // address gets line 0. As in the report's walk, it stops after 4096 frames
-// or at a link that doesn't ascend by less than 16 MiB.
+// or at a link that doesn't ascend by less than 16 MiB, and crosses a stack
+// segment's bridge frame (StackSegment.jet stack_frame_caller).
 #Export(c) jet_rt_context_trace: fn() -> I64 { trace_text() }
 
 // The calling chain's frame lines, innermost first, as
@@ -360,16 +361,16 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_functio
     steps := I64{0}
     loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{4096}) {
         address := I64{0}
-        above := I64{0}
-        #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB") {
+        #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack") {
             address = os_load_i64(wrapping(frame + I64{8}))
-            above = os_load_i64(frame)
         }
         // The call's own address, at link time.
         if (address != I64{0} && trace_frame(text, table, table_end, wrapping(wrapping(address - I64{1}) - bias), with_function)) {
             return true
         }
-        frame = if (above > frame && wrapping(above - frame) < I64{16777216}) -> above else -> I64{0}
+        #Unsafe("each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on this thread's chain") {
+            frame = stack_frame_caller(frame)
+        }
         steps = wrapping(steps + I64{1})
     }
     false

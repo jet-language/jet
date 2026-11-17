@@ -253,16 +253,25 @@ walk:
     mov rax, [r12 + 8]
     call r13
     add ebx, eax
-    # The caller: the saved rbp when it ascends by under 16 MiB.
+    # The caller: the saved rbp when it ascends by under 16 MiB, or across a
+    # stack segment's bridge frame (the word below it "jet_stk!", JetRuntime
+    # StackSegment.jet) the caller's frame on the stack the segment grew from.
     mov rax, [r12]
     test al, 7
     jnz 4f
     cmp rax, r12
-    jle 4f
+    jle 5f
     mov rcx, rax
     sub rcx, r12
     cmp rcx, 16777216
     jl 1b
+5:  test rax, rax
+    jz 4f
+    test r12d, 4095
+    jz 4f
+    movabs rcx, 0x6a65745f73746b21
+    cmp [r12 - 8], rcx
+    je 1b
     jmp 4f
 3:  xor ebx, ebx
 4:  mov eax, ebx
