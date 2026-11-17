@@ -3704,6 +3704,131 @@ open_settings: fn() -[Env, Exec]> Bool {
     }
 }
 
+// A file the person gave the app: a photo it took, or one they picked or
+// dropped. It has a name, a size in bytes and what it holds, and the app
+// reads it through the handle; where it is kept never reaches the app.
+PickedFile: struct {
+    name: String,
+    bytes: Int,
+    media: Media?,
+    priv path: String,
+
+    // The file's bytes.
+    read: fn(self) -[FS.Read]> [U8] IOError! { files.read_bytes(self.path) }
+}
+
+// A place on Earth: degrees north and east, and how far off it may be, in
+// metres (0 when the system did not say).
+Place: struct {
+    latitude: Float,
+    longitude: Float,
+    accuracy_m: Float,
+}
+
+// The frames `take_photo` lets the camera take; the last is the photo, so
+// the camera has settled its exposure.
+priv PHOTO_FRAMES: 15
+
+// How many photos this process took.
+priv PHOTOS: Shared{0}
+
+// Takes a photo with the device's camera and gives it, or `None` when the
+// person does not allow the camera, there is none, or it gave no photo. It
+// asks for the camera as `ask(.Camera)` does when this process has not
+// asked yet, and the answer counts as that ask's. On Linux the camera
+// portal asks, and the photo comes from the camera through PipeWire:
+// GStreamer's `pipewiresrc` (`gst-launch-1.0`, with its PipeWire plugin)
+// takes a few frames and keeps the last as a JPEG, `photo-1.jpg` for the
+// process's first. On the other native targets it is `None`.
+take_photo: fn() -[Env, Exec, FS, Net, Time]> PickedFile? {
+    if app_asked(Permission.Camera) == .Val(known) {
+        if known != .Granted -> return None
+    }
+    #if #build.target.os == {
+        .Linux -> {
+            said: app_linux_camera()
+            app_settle(Permission.Camera, app_grant(said))
+            if said != .Allowed -> return None
+            return app_photo()
+        }
+        .MacOS -> { return None }
+        .Windows -> { return None }
+        .Web -> { return None }
+        .Wasm -> { return None }
+        .Freestanding -> { return None }
+    }
+}
+
+// Where the device is now, or `None` when the person does not allow the
+// location or no location came in time. It asks for the location as
+// `ask(.Location)` does when this process has not asked yet, and the
+// answer counts as that ask's. On Linux it is the first location the
+// desktop portal's location session reports after the person allows it
+// (GeoClue finds it). On the other native targets it is `None`.
+location: fn() -[Env, Net, Time]> Place? {
+    if app_asked(Permission.Location) == .Val(known) {
+        if known != .Granted -> return None
+    }
+    #if #build.target.os == {
+        .Linux -> {
+            fix: app_linux_place()
+            app_settle(Permission.Location, app_grant(fix.answer))
+            if fix.place == .Val(at) {
+                return Val(Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy})
+            }
+            return None
+        }
+        .MacOS -> { return None }
+        .Windows -> { return None }
+        .Web -> { return None }
+        .Wasm -> { return None }
+        .Freestanding -> { return None }
+    }
+}
+
+// Keeps `grant` as this process's answer for `permission` unless it has one.
+priv app_settle: fn(permission: Permission, grant: Grant) Never! {
+    if app_asked(permission) == None -> app_remember(permission, grant)
+}
+
+// The camera portal's answer; no session bus or portal is `.Absent`.
+priv app_linux_camera: fn() -[Env, Net, Time]> dbus.PortalAnswer Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return dbus.PortalAnswer.Absent
+    dbus.portal_camera(bus, ASK_WAIT_NS) ?? dbus.PortalAnswer.Absent
+}
+
+// The location portal's answer and first location; no session bus or
+// portal is `.Absent`.
+priv app_linux_place: fn() -[Env, Net, Time]> dbus.PortalFix Never! {
+    nothing: dbus.PortalFix{answer: .Absent, place: None}
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return nothing
+    dbus.portal_place(bus, ASK_WAIT_NS) ?? nothing
+}
+
+// A photo from the camera through PipeWire, kept in a directory of this
+// process's under the temporary directory. The camera has 30 seconds.
+priv app_photo: fn() -[Env, Exec, FS, Time]> PickedFile? Never! {
+    held := PHOTOS.guard_edit()
+    held.value += 1
+    name: "photo-{held.value}.jpg"
+    folder: "{sys.temp_dir()}/jet-photos-{sys.getpid()}"
+    files.create_dir_all(folder) ?? return None
+    path: "{folder}/{name}"
+    argv: [String]{"gst-launch-1.0", "-q", "pipewiresrc", "num-buffers={PHOTO_FRAMES}", "!", "videoconvert", "!", "jpegenc", "!", "multifilesink", "location={path}"}
+    ran: process.cmd(argv).timeout(30s).run() ?? return None
+    if ran.code != 0 -> return None
+    photo: files.read_bytes(path) ?? return None
+    if photo.len() == 0 -> return None
+    Val(PickedFile{name: name, bytes: photo.len(), media: Val(Media.Image), path: path})
+}
+
+#Test("a photo and a place are none once the person refused them") {
+    app_remember(Permission.Camera, Grant.Denied)
+    assert_eq(take_photo(), None)
+    app_remember(Permission.Location, Grant.Restricted)
+    assert_eq(location(), None)
+}
+
 // One remote call of the endpoint at `path` of a service the app graph
 // mounts (`App.__remote_public`), answered in this process as a server
 // answers it (Web's `app_remote_response`): `body` is the JSON array of its

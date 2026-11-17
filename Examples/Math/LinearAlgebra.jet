@@ -1,0 +1,49 @@
+// Small fixed matrices: `Mat2`, `Mat3` and `Mat4` hold Float cells column by
+// column. Each has identity, products with matrices and vectors, transpose,
+// determinant and an inverse that fails on a singular matrix.
+run: fn() {
+    two_by_two()
+    three_by_three()
+    four_by_four()
+    singular()
+}
+
+// `Mat2.new` takes the cells column by column: this one turns a quarter.
+two_by_two: fn() {
+    turn: Mat2.new(0.0, 1.0, -1.0, 0.0)
+    print(turn.to_array())
+    print(turn.transpose().to_array())
+    print((turn * Vec2.new(1.0, 0.0)).to_array())
+    print((turn * turn).to_array())
+    print((turn + Mat2.identity()).to_array())
+    print(turn.determinant())
+    back: turn.inverse() ?? Mat2.identity()
+    print((turn * back).to_array())
+}
+
+three_by_three: fn() {
+    m: Mat3.new(2.0, 0.0, 0.0, 0.0, 4.0, 0.0, 1.0, 0.0, 8.0)
+    print(Mat3.identity().to_array())
+    print(m.determinant())
+    inverse: m.inverse() ?? Mat3.identity()
+    print(inverse.to_array())
+    print((m * inverse).to_array())
+    print((m * Vec3.new(1.0, 1.0, 1.0)).to_array())
+}
+
+// A scale by 2 then a move by (1, 2, 3), as one transform, and its undo.
+four_by_four: fn() {
+    m: Mat4.new(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0, 2.0, 3.0, 1.0)
+    print(m.determinant())
+    print((m * Vec4.new(1.0, 1.0, 1.0, 1.0)).to_array())
+    undo: m.inverse() ?? Mat4.identity()
+    print(undo.to_array())
+    print((undo * m).to_array() == Mat4.identity().to_array())
+}
+
+// A matrix whose determinant is zero has no inverse.
+singular: fn() {
+    flat: Mat3.new(1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 0.0, 0.0, 1.0)
+    print(flat.determinant())
+    if flat.inverse() == .Err(.Singular) -> print("singular: no inverse")
+}

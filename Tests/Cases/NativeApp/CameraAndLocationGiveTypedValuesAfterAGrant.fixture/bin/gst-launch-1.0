@@ -1,0 +1,9 @@
+#!/bin/sh
+# GStreamer for the case: records the pipeline, and writes a 4-byte JPEG
+# where the pipeline's sink would keep its frames.
+printf '%s\n' "$*" > gst.args
+for a in "$@"; do
+    case "$a" in
+        location=*) printf '\377\330\377\331' > "${a#location=}" ;;
+    esac
+done

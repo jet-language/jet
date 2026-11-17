@@ -8461,7 +8461,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
                         diagnostics.push(sema_error("E0111", expr_span(swizzle_base), "this write needs a place, not a temporary", "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
                         return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment swizzle place")
                     }
-                    return sema_stmt_check_projected_assignment(write.target, None, op_span, write.value, environment, program, scopes, state, tail_store, context, diagnostics)
+                    return sema_stmt_check_assignment_target(write.target, None, op_span, write.value, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
                 args := [CallArg]{}
                 loop index in 0..<count {

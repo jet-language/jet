@@ -90,27 +90,28 @@ Odin heading: Enumerated array.
 
 Odin headings: matrix type, Submatrix casting, Casting non-square matrices,
 Technical information of matrix types. Jet has two matrix families today:
-`Mat3` and `Mat4` in core.math (Float, column-major, fixed size), and the
-heap `Matrix<M, N>` of core.compute, whose shape is checked while compiling.
+`Mat2`, `Mat3` and `Mat4` in core.math (Float, column-major, fixed size), and
+the heap `Matrix<M, N>` of core.compute, whose shape is checked while
+compiling. Examples/Math/LinearAlgebra.jet shows the fixed family.
 
 | # | Odin feature | Jet probe | Result | Status | Owner |
 |---|---|---|---|---|---|
-| M1 | `matrix[R, C]T` of any size up to 64 elements, with integer, float or complex elements | `Mat3`, `Mat4`; `compute.matrix(3, 4, 1.0)` | runs; Float only, and fixed sizes only 3x3 and 4x4 | PARTIAL | #6177 c4; D-ARRAY-MAT21=A |
-| M2 | 2x2 matrices | `Mat2(1.0, 2.0, 3.0, 4.0)` | E0102 | MISSING | D-ARRAY-MAT21=A (ratified, not built); #6177 c4 |
+| M1 | `matrix[R, C]T` of any size up to 64 elements, with integer, float or complex elements | `Mat2`, `Mat3`, `Mat4`; `compute.matrix(3, 4, 1.0)` | runs; Float only, and fixed sizes only 2x2, 3x3 and 4x4 | PARTIAL | D-ARRAY-MAT21=A (the three become `Matrix<N, N>`); element types: D-ARRAY-MATOPS1 (section 9, B9) |
+| M2 | 2x2 matrices | `Mat2.new(0.0, 1.0, -1.0, 0.0)` | runs; products, transpose, determinant and inverse | PASS | — |
 | M3 | matrix literal | `Mat3(1.0, …, 9.0)`, column-major | runs | PASS | — |
-| M4 | `m[1, 2]`, row and column index | `m[1, 2]` on `Mat3` | E0003 | MISSING | D-MATRIX-INDEX1=E; #6177 c4 |
-| M5 | a scalar acts as a scaled identity; identity matrix | `Mat3.identity()`, `m * 2.0` | E0311, E2511 | MISSING | #6177 c4 |
+| M4 | `m[1, 2]`, row and column index | `m[1, 2]` on `Mat3` | E0003 | MISSING | D-MATRIX-INDEX1=E (ratified, not built) |
+| M5 | a scalar acts as a scaled identity; identity matrix | `Mat3.identity()`, `m * 2.0` | identity runs on `Mat2`, `Mat3`, `Mat4`; `m * 2.0` is E2511 | PARTIAL | D-ARRAY-MATOPS1 (section 9, B9: the scalar scale) |
 | M6 | matrix times matrix | `m * m` on `Mat3` | `[30.0, 36.0, …, 150.0]` | PASS | — |
 | M7 | matrix times column vector | `m * Vec3(1.0, 0.0, 0.0)` | `[1.0, 2.0, 3.0]` | PASS | — |
-| M8 | row vector times matrix, `v * m` | `Vec3(…) * m` | E2511 | MISSING | #6177 c4 (D-MATRIX-MUL1) |
+| M8 | row vector times matrix, `v * m` | `Vec3(…) * m` | E2511 | MISSING | D-MATRIX-BCAST1=E (ratified, not built: `v.as_row() * m`) |
 | M9 | `a + b`, `a - b` | `m + m` on `Mat3` | `[2.0, 4.0, …, 18.0]` | PASS | — |
-| M10 | `&`, `\|`, `~`, `&~` on integer matrices | `Mat3(1, 2, …, 9)` | builds a Float matrix; there are no integer matrices | MISSING | #6177 c4 |
-| M11 | `hadamard_product(a, b)` | `m.hadamard(m)` | E0102 | MISSING | #6177 c4 |
+| M10 | `&`, `\|`, `~`, `&~` on integer matrices | `Mat3(1, 2, …, 9)` | builds a Float matrix; there are no integer matrices | MISSING | D-ARRAY-MATOPS1 (section 9, B9) |
+| M11 | `hadamard_product(a, b)` | `m.hadamard(m)` | E0102 | MISSING | D-MATRIX-MUL1=F (ratified, not built: `a .* b`) |
 | M12 | `transpose(m)` | `m.transpose()` | `[1.0, 4.0, 7.0, …]` | PASS | — |
-| M13 | `outer_product(a, b)` | `a.outer(a)` on `Vec3` | E0102 | MISSING | #6177 c4 |
+| M13 | `outer_product(a, b)` | `a.outer(a)` on `Vec3` | E0102 | MISSING | D-ARRAY-MATOPS1 (section 9, B9) |
 | M14 | `matrix_flatten(m)`, column-major | `m.to_array()` | the 9 floats in column order | PASS | — |
-| M15 | `determinant`, `adjugate`, `inverse`, `inverse_transpose`, `hermitian_adjoint`, `matrix_trace`, `matrix_minor` | `m.determinant()` on `Mat3`; core.compute `det`, `inv` | E0102 on `Mat3`; core.compute has `det`, `inv`, `eye` and `solve` for its heap matrices | PARTIAL | D-ARRAY-INVERSE1=A (ratified, not built); #6177 c4 |
-| M16 | `conj(m)` for complex elements | `m.conj()` on `Mat3` | E0102; there are no complex matrices | MISSING | #6177 c4 |
+| M15 | `determinant`, `adjugate`, `inverse`, `inverse_transpose`, `hermitian_adjoint`, `matrix_trace`, `matrix_minor` | `m.determinant()`, `m.inverse()` on `Mat2`, `Mat3`, `Mat4`; core.compute `det`, `inv` | `determinant` and `inverse` run, `inverse` fails with `MatrixError.Singular` (D-ARRAY-INVERSE1); the other five are E0102 | PARTIAL | D-ARRAY-MATOPS1 (section 9, B9) |
+| M16 | `conj(m)` for complex elements | `m.conj()` on `Mat3` | E0102; there are no complex matrices | MISSING | D-ARRAY-CONJ1 and D-ARRAY-COMPLEXT1 (section 9, B5 and B6) |
 | M17 | cast to a smaller or larger square matrix | `Mat4{m}` with `m: Mat3` | E0303 | MISSING | D-ARRAY-MATRESIZE1 (section 9, B3) |
 | M18 | cast between non-square shapes with the same element count | `reshape` in Core/Compute/Compute.jet | heap tensors only; nothing for `Mat3` or `Mat4` | PARTIAL | D-ARRAY-MATRESIZE1 (section 9, B3) |
 | M19 | `#row_major` storage | `Mat3.from_rows(…)` | E0311; column-major only | MISSING | D-ARRAY-ROWMAJOR1 (section 9, B4) |
@@ -188,6 +189,7 @@ ballot and is not built until the owner rules on it (I7).
 | B6 | D-ARRAY-COMPLEXT1 | Q6 | Does `Complex` take an element type (`Complex<F32>`), or does it stay Float only? |
 | B7 | D-ARRAY-LANEBCAST1 | S3 | Does a scalar operand broadcast across the lanes of a lane type (`a * 2.0`), as it already does for `Vec3 * Float`? |
 | B8 | D-ARRAY-ZIPCOLUMNS1 | O5 | Is there a zip of separate lists into one columnar view, and an unzip back? |
+| B9 | D-ARRAY-MATOPS1 | M1, M5, M10, M13, M15 | Which of Odin's other matrix built-ins does the fixed family name, and how: a scalar scale (`m * 2.0`), integer elements with bit operators, `outer`, `trace`, `adjugate`, `minor` and `inverse_transpose`? |
 
 S13 and S14 need no new spelling: they extend `-` and `/` to vectors and
 lanes, which D-VECARITH1 already allows for this family. They belong in a
@@ -195,7 +197,7 @@ lanes, which D-VECARITH1 already allows for this family. They belong in a
 
 ## 10. Counts
 
-Of the 83 rows: 29 PASS, 12 PARTIAL, 41 MISSING and 1 NOT ADOPTED. The card
+Of the 83 rows: 30 PASS, 13 PARTIAL, 39 MISSING and 1 NOT ADOPTED. The card
 log of 2026-10-29 recorded swizzle writes as failing on every tier. They now
 run (W3, S5).
 
@@ -227,16 +229,15 @@ to an owner ballot before it is built.
 | E1 | decision | D-ARRAY-ENUMTABLE1 |
 | E2 | decision | D-ARRAY-KEYED1 |
 | E3 | decision | D-ARRAY-ENUMTABLE1 |
-| M1 | card | #6177 |
-| M2 | decision | D-ARRAY-MAT21 |
-| M4 | card | #6177 |
-| M5 | card | #6177 |
-| M8 | card | #6177 |
-| M10 | card | #6177 |
-| M11 | card | #6177 |
-| M13 | card | #6177 |
-| M15 | decision | D-ARRAY-INVERSE1 |
-| M16 | card | #6177 |
+| M1 | card | #6177 (D-ARRAY-MAT21; ballot B9, D-ARRAY-MATOPS1) |
+| M4 | decision | D-MATRIX-INDEX1 |
+| M5 | card | #6177 (ballot B9, D-ARRAY-MATOPS1) |
+| M8 | decision | D-MATRIX-BCAST1 |
+| M10 | card | #6177 (ballot B9, D-ARRAY-MATOPS1) |
+| M11 | decision | D-MATRIX-MUL1 |
+| M13 | card | #6177 (ballot B9, D-ARRAY-MATOPS1) |
+| M15 | card | #6177 (ballot B9, D-ARRAY-MATOPS1) |
+| M16 | card | #6177 (ballots B5 and B6, D-ARRAY-CONJ1, D-ARRAY-COMPLEXT1) |
 | M17 | card | #6177 (ballot B3, D-ARRAY-MATRESIZE1) |
 | M18 | card | #6177 (ballot B3, D-ARRAY-MATRESIZE1) |
 | M19 | card | #6177 (ballot B4, D-ARRAY-ROWMAJOR1) |

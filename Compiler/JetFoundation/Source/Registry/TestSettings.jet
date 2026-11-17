@@ -15,7 +15,8 @@
 // How a row's value is written. Switch: the bare flag `--serial` (or
 // `--serial=false`), the field `serial: true`, the call `t.serial()` (or
 // `t.serial(false)`). Count: a whole number of at least 1; Seed: of at least
-// 0 (`--shuffle=7`, `shuffle: 7`, `t.shuffle(7)`). Text and Path: nonempty
+// 0 (`--shuffle=7`, `shuffle: 7`, `t.shuffle(7)`); Retries: from 0 to 5,
+// 0 for none (`--browser-retries=0`). Text and Path: nonempty
 // text (`--results=r.json`, `results: "r.json"`, `t.results("r.json")`).
 // Capture: failed, all or none. Shard: I/N with 1 <= I <= N <= 4096
 // (`--shard=3/8`, `shard: 3/8`, `t.shard(3, 8)`). Levels: the levels of the
@@ -29,6 +30,7 @@ TestSettingKind: enum {
     Switch,
     Count,
     Seed,
+    Retries,
     Text,
     Path,
     Capture,
@@ -125,7 +127,7 @@ JET_TEST_SETTINGS: #run { [TestSettingRow]{
     // JET_TEST_BROWSERS, JET_TEST_RETRIES, JET_TEST_REPORTER,
     // JET_TEST_BROWSER_UI and JET_TEST_TRACE, over browser-tests.conf.
     {name: "browser", kind: TestSettingKind.Text, ported: true, help: "Select browser engines for tests"},
-    {name: "browser_retries", kind: TestSettingKind.Count, ported: true, help: "Retry each browser attempt up to five times"},
+    {name: "browser_retries", kind: TestSettingKind.Retries, ported: true, help: "Retry each browser attempt up to five times"},
     {name: "browser_reporter", kind: TestSettingKind.Text, ported: true, help: "Browser report format: text, json, or html"},
     {name: "browser_ui", kind: TestSettingKind.Switch, ported: true, help: "Write/open the local browser report viewer"},
     {name: "browser_visual", kind: TestSettingKind.Switch, ported: false, help: "Capture screenshots for passing browser attempts"},
@@ -177,7 +179,7 @@ test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
     flag: test_setting_flag(row.name)
     if row.kind == {
         .Switch -> "{flag}, `{row.name}: true`, `t.{row.name}()`"
-        .Count -> "{flag}=<n>, `{row.name}: 4`, `t.{row.name}(4)`"
+        .Count | .Retries -> "{flag}=<n>, `{row.name}: 4`, `t.{row.name}(4)`"
         .Seed -> "{flag}=<n>, `{row.name}: 7`, `t.{row.name}(7)`"
         .Text | .Path -> "{flag}=<text>, `{row.name}: \"x\"`, `t.{row.name}(\"x\")`"
         .Capture -> "{flag}=all, `{row.name}: all`, `t.{row.name}(\"all\")`"
@@ -203,6 +205,7 @@ test_setting_hint: fn(row: TestSettingRow) -> String Never! {
         .Switch -> "true or false"
         .Count -> "a whole number of at least 1"
         .Seed -> "a whole number of at least 0"
+        .Retries -> "a whole number from 0 to 5"
         .Text -> if row.name == "grade" -> "`generated`" else -> "nonempty text"
         .Path -> "a nonempty path"
         .Capture -> "failed, all or none"
@@ -215,7 +218,7 @@ test_setting_hint: fn(row: TestSettingRow) -> String Never! {
 
 // The canonical text of `text` as a value of `row`, None when it is none
 // (test_setting_hint says what the row takes). Switch is `true`/`false`;
-// Count and Seed are decimal; Capture is failed, all or none (failure,
+// Count, Seed and Retries are decimal; Capture is failed, all or none (failure,
 // failures and off are accepted); Shard is `I/N`; Levels is the levels
 // joined by `,` (written `O0,O2`, `[O0, O2]` or `["O0", "O2"]`);
 // Duration is whole milliseconds, `<n>ms`; Size is whole bytes.
@@ -226,9 +229,10 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
             if trimmed == "true" || trimmed == "false" -> return Val(trimmed.copy())
             None
         }
-        .Count | .Seed -> {
+        .Count | .Seed | .Retries -> {
             count: test_setting_whole(trimmed) ?? return None
             if row.kind == TestSettingKind.Count && count < 1 -> return None
+            if row.kind == TestSettingKind.Retries && count > 5 -> return None
             Val("{count}")
         }
         .Text | .Path -> {

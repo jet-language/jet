@@ -1161,7 +1161,7 @@ portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswe
     if present.body.len() != 1 || present.body[0] != DbusValue.Variant(DbusValue.Bool(true)) {
         return Ok(PortalAnswer.Absent)
     }
-    watch_responses(c, deadline) ?? return Err(err)
+    watch(c, REQUEST, "Response", deadline) ?? return Err(err)
     token: request_token(c)
     asked: call_until(c, PORTAL_NAME, PORTAL_PATH, CAMERA, "AccessCamera", [DbusValue]{string_option("handle_token", token)}, deadline) ?? return Err(err)
     request: answered_path(asked, "AccessCamera") ?? return Err(err)
@@ -1172,8 +1172,36 @@ portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswe
 // for the person's answer: a location session is made and started, which
 // is when the person is asked, and closed once they answer.
 portal_location: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
+    fix: located(c, timeout_ns, false) ?? return Err(err)
+    Ok(fix.answer)
+}
+
+// A location the portal reported: degrees north and east, and how far off
+// it may be, in metres (0 when the portal did not say).
+PortalPlace: struct {
+    latitude: Float,
+    longitude: Float,
+    accuracy: Float,
+}
+
+// The person's answer to a location request and, once they allowed it,
+// the first location the portal reported in time.
+PortalFix: struct {
+    answer: PortalAnswer,
+    place: PortalPlace?,
+}
+
+// Asks for the device's location as `portal_location` does and, once the
+// person allows it, waits for the first location the session reports; the
+// session is closed after it, or once `timeout_ns` ran out.
+portal_place: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalFix DbusError! {
+    located(c, timeout_ns, true)
+}
+
+located: fn(c: &DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]> PortalFix DbusError! {
     deadline: now() + timeout_ns
-    watch_responses(c, deadline) ?? return Err(err)
+    watch(c, REQUEST, "Response", deadline) ?? return Err(err)
+    if wants_place -> watch(c, LOCATION, "LocationUpdated", deadline) ?? return Err(err)
     session_token: request_token(c)
     made: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "CreateSession", [DbusValue]{string_option("session_handle_token", session_token)}, deadline) ?? return Err(err)
     session: answered_path(made, "CreateSession") ?? return Err(err)
@@ -1181,20 +1209,72 @@ portal_location: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAns
     started: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "Start", start_body, deadline) ?? return Err(err)
     request: answered_path(started, "Start") ?? return Err(err)
     answer: response(c, request, deadline) ?? return Err(err)
+    place := PortalPlace?{None}
+    if wants_place && answer == .Allowed {
+        place = if first_place(c, session, deadline) == {
+            .Err(err) -> {
+                return Err(err)
+            }
+            .Ok(found) -> found
+        }
+    }
     _: call(c, PORTAL_NAME, session, SESSION, "Close", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
-    Ok(answer)
+    Ok(PortalFix{answer: answer, place: place})
 }
 
 // How long closing a location session may take.
 CLOSE_WAIT_NS: 1000000000
 
-// Asks the bus for every request's Response signal; `response` picks out
-// the one it waits for.
-watch_responses: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> DbusError! {
+// Asks the bus for every signal `member` of `interface`; the portal sends
+// each request's Response and each location session's LocationUpdated to
+// the caller, and the reader picks out its own.
+watch: fn(c: &DbusConnection, interface: String, member: String, deadline: Int) -[Net, Time]> DbusError! {
     q: ascii(39)
-    rule: "type={q}signal{q},interface={q}{REQUEST}{q},member={q}Response{q}"
+    rule: "type={q}signal{q},interface={q}{interface}{q},member={q}{member}{q}"
     _: call_until(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, deadline) ?? return Err(err)
     Ok()
+}
+
+// The first LocationUpdated signal of the session at `session` that is
+// here or arrives by `deadline`, read as a place.
+first_place: fn(c: &DbusConnection, session: String, deadline: Int) -[Net, Time]> PortalPlace? DbusError! {
+    wait := 0
+    loop {
+        got: signals(c, wait) ?? return Err(err)
+        loop m in got {
+            if m.interface == LOCATION && m.member == "LocationUpdated" && m.body.len() == 2 && m.body[0] == DbusValue.Path(session) {
+                return Ok(place_of(m.body[1]))
+            }
+        }
+        wait = deadline - now()
+        if wait <= 0 -> return Ok(None)
+    }
+    Ok(None)
+}
+
+// The place a LocationUpdated signal's options give, when they name both
+// coordinates.
+place_of: fn(options: DbusValue) -> PortalPlace? {
+    latitude := Float?{None}
+    longitude := Float?{None}
+    accuracy := Float{0.0}
+    if options == .Array(_, entries) {
+        loop entry in entries {
+            if entry == .Entry(key, value) {
+                if value == .Variant(inner) {
+                    if inner == .Double(f) {
+                        name: string_of(key)
+                        if name == "Latitude" -> latitude = Val(f)
+                        if name == "Longitude" -> longitude = Val(f)
+                        if name == "Accuracy" -> accuracy = f
+                    }
+                }
+            }
+        }
+    }
+    north: latitude ?? return None
+    east: longitude ?? return None
+    Val(PortalPlace{latitude: north, longitude: east, accuracy: accuracy})
 }
 
 // A token for the next request's object path, unique on this connection.
@@ -1215,24 +1295,43 @@ answered_path: fn(reply: DbusMessage, member: String) -> String DbusError! {
 }
 
 // Waits until `deadline` for the Response signal of the request at
-// `request` and reads its code; no answer by then is `.Ended`.
+// `request` and reads its code; no answer by then is `.Ended`. The other
+// signals it reads stay queued, in order, for their own readers.
 response: fn(c: &DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalAnswer DbusError! {
     wait := 0
+    others := [DbusMessage]{}
     loop {
         got: signals(c, wait) ?? return Err(err)
-        loop m in got {
-            if m.interface == REQUEST && m.member == "Response" && m.path == request && m.body.len() > 0 {
-                if m.body[0] == .Uint32(code) {
-                    if code == 0 -> return Ok(PortalAnswer.Allowed)
-                    if code == 1 -> return Ok(PortalAnswer.Refused)
-                    return Ok(PortalAnswer.Ended)
-                }
+        loop i in 0..<got.len() {
+            code: response_code(got[i], request)
+            if code == NO_VALUE {
+                if others.len() >= QUEUE_MAX -> others = others[1..<others.len()].copy()
+                others.push(got[i].copy())
+                next
             }
+            loop later in got[(i + 1)..<got.len()] -> others.push(later.copy())
+            c.queued = others.concat(c.queued)
+            if code == 0 -> return Ok(PortalAnswer.Allowed)
+            if code == 1 -> return Ok(PortalAnswer.Refused)
+            return Ok(PortalAnswer.Ended)
         }
         wait = deadline - now()
-        if wait <= 0 -> return Ok(PortalAnswer.Ended)
+        if wait <= 0 {
+            c.queued = others.concat(c.queued)
+            return Ok(PortalAnswer.Ended)
+        }
     }
     Ok(PortalAnswer.Ended)
+}
+
+// The code of `m` when it is the Response signal of the request at
+// `request`, or -1.
+response_code: fn(m: DbusMessage, request: String) -> Int {
+    if m.interface != REQUEST || m.member != "Response" || m.path != request || m.body.len() == 0 {
+        return NO_VALUE
+    }
+    if m.body[0] == .Uint32(code) -> return code
+    NO_VALUE
 }
 
 // ---- test fixtures
@@ -1679,6 +1778,67 @@ repeat: fn(text: String, times: Int) -> String {
     bus_says(quiet.server, script)
     f := start(quiet.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(portal_camera(f, 50000000) ?? panic("unanswered: {err}"), PortalAnswer.Ended)
+}
+
+#Test("a location session gives the first place it reports once the person allows it") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
+    allowed := test_bus("place")
+    session: "{PORTAL_PATH}/session/1_46/jet4"
+    started: "{PORTAL_PATH}/request/1_46/jet5"
+    here: place_options([Float]{Float{52.52}, Float{13.405}, Float{20.0}})
+    elsewhere: place_options([Float]{Float{1.0}, Float{2.0}, Float{3.0}})
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.46")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(session)}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Path(started)}), 5))
+    // Another session's report is not this one's, and the report may come
+    // with the answer.
+    append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path("{PORTAL_PATH}/session/1_46/other"), elsewhere}), 6))
+    append(script, wire(signal(started, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), no_options.copy()}), 7))
+    append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path(session), here}), 8))
+    append(script, wire(reply_to(6, [DbusValue]{}), 9))
+    bus_says(allowed.server, script)
+    c := start(allowed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    fix: portal_place(c, 1000000000) ?? panic("place: {err}")
+    assert_eq(fix.answer, PortalAnswer.Allowed)
+    assert_eq(fix.place, Val(PortalPlace{latitude: Float{52.52}, longitude: Float{13.405}, accuracy: Float{20.0}}))
+    asked: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.portal.Location.CreateSession",
+        "org.freedesktop.portal.Location.Start",
+        "org.freedesktop.portal.Session.Close",
+    }
+    assert_eq(calls_heard(allowed.server), asked)
+    // Refused: no place, and nothing waited for.
+    refused := test_bus("no-place")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.47")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path("{PORTAL_PATH}/session/1_47/jet4")}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Path("{PORTAL_PATH}/request/1_47/jet5")}), 5))
+    append(script, wire(signal("{PORTAL_PATH}/request/1_47/jet5", REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 6))
+    append(script, wire(reply_to(6, [DbusValue]{}), 7))
+    bus_says(refused.server, script)
+    d := start(refused.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    none: portal_place(d, 1000000000) ?? panic("no place: {err}")
+    assert_eq(none.answer, PortalAnswer.Refused)
+    assert_eq(none.place, None)
+}
+
+// A LocationUpdated signal's options: latitude, longitude and accuracy.
+place_options: fn(values: [Float]) -> DbusValue {
+    names: [String]{"Latitude", "Longitude", "Accuracy"}
+    items := [DbusValue]{}
+    loop i in 0..<names.len() {
+        items.push(DbusValue.Entry{key: DbusValue.Text(names[i]), value: DbusValue.Variant(DbusValue.Double(values[i]))})
+    }
+    DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: items}
 }
 
 // The interface and member of each call the client made after it

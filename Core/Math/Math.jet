@@ -39467,6 +39467,80 @@ impl Float.Div(Vec4) {
     assert_eq(value.distance_sq(Vec4.splat(1.0)), 14.0)
 }
 
+// The 2x2 matrix, column-major like Mat3 and Mat4: `lanes[column * 2 + row]`.
+Mat2: struct {
+    lanes: [Float#4],
+
+    new: fn(m0: Float, m1: Float, m2: Float, m3: Float) -> Mat2 Never! {
+        Mat2{lanes: [Float#4]{m0, m1, m2, m3}}
+    }
+
+    identity: fn() -> Mat2 Never! { Mat2.new(1.0, 0.0, 0.0, 1.0) }
+
+    from_array: fn(lanes: [Float#4]) -> Mat2 Never! { Mat2{lanes: lanes} }
+
+    to_array: fn(self) -> [Float#4] Never! { self.lanes }
+
+    matmul: fn(self, other: Mat2) -> Mat2 Never! {
+        a: self.lanes
+        b: other.lanes
+        Mat2.new(a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3])
+    }
+
+    transform: fn(self, value: Vec2) -> Vec2 Never! {
+        Vec2.new(self.lanes[0] * value.lanes[0] + self.lanes[2] * value.lanes[1], self.lanes[1] * value.lanes[0] + self.lanes[3] * value.lanes[1])
+    }
+
+    transpose: fn(self) -> Mat2 Never! {
+        Mat2.new(self.lanes[0], self.lanes[2], self.lanes[1], self.lanes[3])
+    }
+
+    determinant: fn(self) -> Float Never! {
+        self.lanes[0] * self.lanes[3] - self.lanes[2] * self.lanes[1]
+    }
+
+    // Fails when the determinant is not finite or within 2.2e-16 of zero.
+    inverse: fn(self) -> Mat2 MatrixError! {
+        det: self.determinant()
+        if matrix_singular(det) -> return Err(MatrixError.Singular)
+        scale: Float{1.0} / det
+        Ok(Mat2.new(self.lanes[3] * scale, -self.lanes[1] * scale, -self.lanes[2] * scale, self.lanes[0] * scale))
+    }
+
+    impl Add {
+        add: fn(self, rhs: Mat2) -> Mat2 Never! {
+            Mat2.new(self.lanes[0] + rhs.lanes[0], self.lanes[1] + rhs.lanes[1], self.lanes[2] + rhs.lanes[2], self.lanes[3] + rhs.lanes[3])
+        }
+    }
+
+    impl Sub {
+        sub: fn(self, rhs: Mat2) -> Mat2 Never! {
+            Mat2.new(self.lanes[0] - rhs.lanes[0], self.lanes[1] - rhs.lanes[1], self.lanes[2] - rhs.lanes[2], self.lanes[3] - rhs.lanes[3])
+        }
+    }
+
+    impl Mul {
+        mul: fn(self, rhs: Mat2) -> Mat2 Never! { self.matmul(rhs) }
+    }
+
+    impl Mul(Vec2) {
+        mul: fn(self, rhs: Vec2) -> Vec2 Never! { self.transform(rhs) }
+    }
+}
+
+// The rule every matrix and transform inverse uses: a determinant that is not
+// finite, or within 2.2e-16 of zero, has no inverse.
+priv matrix_singular: fn(det: Float) -> Bool Never! {
+    !is_finite(det) || fabs(det) <= 0.0000000000000002220446049250313
+}
+
+// Why a matrix operation has no answer: `Singular` is a matrix whose
+// determinant fails the rule above, so it has no inverse.
+#Error
+MatrixError: enum {
+    Singular,
+}
+
 Mat3: struct {
     lanes: [Float#9],
 
@@ -39474,9 +39548,38 @@ Mat3: struct {
         Mat3{lanes: [Float#9]{m0, m1, m2, m3, m4, m5, m6, m7, m8}}
     }
 
+    identity: fn() -> Mat3 Never! { Mat3.new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0) }
+
     from_array: fn(lanes: [Float#9]) -> Mat3 Never! { Mat3{lanes: lanes} }
 
     to_array: fn(self) -> [Float#9] Never! { self.lanes.copy() }
+
+    // Expanded along the first row; `lanes[column * 3 + row]`.
+    determinant: fn(self) -> Float Never! {
+        m: self.lanes
+        m[0] * (m[4] * m[8] - m[7] * m[5]) - m[3] * (m[1] * m[8] - m[7] * m[2]) + m[6] * (m[1] * m[5] - m[4] * m[2])
+    }
+
+    // The adjugate over the determinant; fails as Mat2.inverse does.
+    inverse: fn(self) -> Mat3 MatrixError! {
+        m: self.lanes
+        det: self.determinant()
+        if matrix_singular(det) -> return Err(MatrixError.Singular)
+        scale: Float{1.0} / det
+        Ok(
+            Mat3.new(
+                (m[4] * m[8] - m[7] * m[5]) * scale,
+                (m[7] * m[2] - m[1] * m[8]) * scale,
+                (m[1] * m[5] - m[4] * m[2]) * scale,
+                (m[6] * m[5] - m[3] * m[8]) * scale,
+                (m[0] * m[8] - m[6] * m[2]) * scale,
+                (m[3] * m[2] - m[0] * m[5]) * scale,
+                (m[3] * m[7] - m[6] * m[4]) * scale,
+                (m[6] * m[1] - m[0] * m[7]) * scale,
+                (m[0] * m[4] - m[3] * m[1]) * scale,
+            ),
+        )
+    }
 
     matmul: fn(self, other: Mat3) -> Mat3 Never! {
         result := self.lanes.copy()
@@ -39538,6 +39641,28 @@ Mat4: struct {
 
     new: fn(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float, m9: Float, m10: Float, m11: Float, m12: Float, m13: Float, m14: Float, m15: Float) -> Mat4 Never! {
         Mat4{lanes: [Float#16]{m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15}}
+    }
+
+    identity: fn() -> Mat4 Never! {
+        Mat4.new(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    }
+
+    // Expanded along the first column, with the cofactors of the adjugate.
+    determinant: fn(self) -> Float Never! {
+        m: self.lanes
+        a: mat4_adjugate(m)
+        m[0] * a[0] + m[1] * a[4] + m[2] * a[8] + m[3] * a[12]
+    }
+
+    // The adjugate over the determinant; fails as Mat2.inverse does.
+    inverse: fn(self) -> Mat4 MatrixError! {
+        m: self.lanes
+        a := mat4_adjugate(m)
+        det: m[0] * a[0] + m[1] * a[4] + m[2] * a[8] + m[3] * a[12]
+        if matrix_singular(det) -> return Err(MatrixError.Singular)
+        scale: Float{1.0} / det
+        loop i in 0..<16 -> a[i] = a[i] * scale
+        Ok(Mat4{lanes: a})
     }
 
     impl Add {
@@ -39613,6 +39738,30 @@ Mat4: struct {
     }
 }
 
+// The adjugate of a 4x4 matrix stored as `lanes[column * 4 + row]`: the
+// transposed cofactors, so `m * mat4_adjugate(m)` is the determinant of `m`
+// times the identity.
+priv mat4_adjugate: fn(m: [Float#16]) -> [Float#16] Never! {
+    [Float#16]{
+        m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10],
+        -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10],
+        m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6],
+        -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6],
+        -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10],
+        m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10],
+        -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6],
+        m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6],
+        m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9],
+        -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9],
+        m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5],
+        -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5],
+        -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9],
+        m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9],
+        -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5],
+        m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5],
+    }
+}
+
 #Test("Mat3 source column-major products and transpose") {
     matrix: Mat3.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0)
     assert_eq(matrix.transpose().to_array()[1], 4.0)
@@ -39621,6 +39770,30 @@ Mat4: struct {
     assert_eq((matrix * matrix).to_array()[8], 150.0)
     assert_eq((matrix + matrix).to_array()[7], 16.0)
     assert_eq((matrix - matrix).to_array()[7], 0.0)
+}
+
+#Test("Mat2 products, determinant and inverse") {
+    turn: Mat2.new(0.0, 1.0, -1.0, 0.0)
+    assert_eq(turn.transform(Vec2.new(1.0, 0.0)).lane(1), 1.0)
+    assert_eq((turn * turn).to_array()[0], -1.0)
+    assert_eq(turn.transpose().to_array()[1], -1.0)
+    assert_eq(turn.determinant(), 1.0)
+    back: turn.inverse() ?? Mat2.identity()
+    assert_eq((turn * back).to_array(), Mat2.identity().to_array())
+    assert(Mat2.new(1.0, 2.0, 2.0, 4.0).inverse() == .Err(.Singular))
+}
+
+#Test("Mat3 and Mat4 inverse undo the matrix and refuse a singular one") {
+    m: Mat3.new(2.0, 0.0, 0.0, 0.0, 4.0, 0.0, 1.0, 0.0, 8.0)
+    assert_eq(m.determinant(), 64.0)
+    undo: m.inverse() ?? Mat3.identity()
+    assert_eq((m * undo).to_array(), Mat3.identity().to_array())
+    assert(Mat3.new(1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 0.0, 0.0, 1.0).inverse() == .Err(.Singular))
+    moved: Mat4.new(2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0, 2.0, 3.0, 1.0)
+    assert_eq(moved.determinant(), 8.0)
+    back: moved.inverse() ?? Mat4.identity()
+    assert_eq((back * moved).to_array(), Mat4.identity().to_array())
+    assert(Mat4.new(0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0).inverse() == .Err(.Singular))
 }
 
 // Exact Int fields hold the normalized ratio. #4767 affects native Int
@@ -43117,7 +43290,7 @@ Transform: struct<From, To> {
 
     inverse: fn(self) -> Transform<To, From> TransformError! {
         det: self.m00 * self.m11 - self.m01 * self.m10
-        if !is_finite(det) || fabs(det) <= 0.0000000000000002220446049250313 {
+        if matrix_singular(det) {
             return Err(TransformError{message: "transform is singular and has no inverse"})
         }
         inv_det: Float{1.0} / det
@@ -43197,7 +43370,7 @@ Transform2: struct<T, From, To> {
 
     inverse: fn(self) -> Transform2<T, To, From> TransformError! {
         det: self.m00 * self.m11 - self.m01 * self.m10
-        if !is_finite(det) || fabs(det) <= 0.0000000000000002220446049250313 {
+        if matrix_singular(det) {
             return Err(TransformError{message: "transform is singular and has no inverse"})
         }
         inv_det: Float{1.0} / det
