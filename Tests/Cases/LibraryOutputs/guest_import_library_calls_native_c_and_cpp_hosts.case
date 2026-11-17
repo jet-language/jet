@@ -1,15 +1,28 @@
-# Port of tests/library_outputs.rs:163-240; fixture source bytes unchanged.
-# Partial forms reproduce original predicates; literal expected bytes need no blessing.
-# PENDING-GRAMMAR(batch-four): host-name conditional; missing mandatory C/C++ compiler remains REFUSED, not PASS.
+# `jet build --lib` builds a library whose `#Export(c)` function calls a
+# function its host provides through `#Import(c)`. The build writes the static
+# archive and its C header to .jet/build, or to the directory --output-dir
+# names. A C host and a C++ host each compile against that header and archive
+# with the pinned toolchain (`jet cc`, `jet c++`), so the host needs no C
+# compiler of its own. Each host gets its own function called back through the
+# library. The toolchain pack carries only libc, so the C++ host includes the
+# C headers it uses.
+requires: os-name:linux
 fixture: ../../Fixtures/GuestImportLibrary
 step: jet build --lib library.jet
+exit: 0
 file: .jet/build/libguestimport.a is-file
 file: .jet/build/guestimport.h is-file
-when os-name linux: step: {tool:cc|gcc|clang} -std=c11 -I .jet/build foreign.c .jet/build/libguestimport.a -o foreign-c -ldl -lpthread -lm
-when os-name !linux: step: {tool:cc|gcc|clang} -std=c11 -I .jet/build foreign.c .jet/build/libguestimport.a -o foreign-c
+step: jet build --lib --output-dir=lib library.jet
+exit: 0
+file: lib/libguestimport.a is-file
+file: lib/guestimport.h is-file
+step: jet cc -std=c11 -I lib foreign.c lib/libguestimport.a -o foreign-c -ldl -lpthread -lm
+exit: 0
 step: {work}/foreign-c
+exit: 0
 stdout: = guest_import_library_calls_native_c_and_cpp_hosts.out
-when os-name linux: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp .jet/build/libguestimport.a -o foreign-cpp -pthread -ldl -lpthread -lm
-when os-name !linux: step: {tool:c++|g++|clang++} -std=c++17 -I .jet/build foreign.cpp .jet/build/libguestimport.a -o foreign-cpp -pthread
+step: jet c++ -std=c++17 -I lib foreign.cpp lib/libguestimport.a -o foreign-cpp -pthread -ldl -lpthread -lm
+exit: 0
 step: {work}/foreign-cpp
+exit: 0
 stdout: = guest_import_library_calls_native_c_and_cpp_hosts.out
