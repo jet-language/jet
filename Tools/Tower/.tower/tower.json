@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111900,
+    "rev": 111910,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74804,7 +74804,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -74813,6 +74813,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c5 proved on p271 (6d6315d3bd)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -74836,8 +74841,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Docs/research/2026-10-30-fixed-text-and-buffer.md (SurfaceDesign-docs3.patch): String is already a fixed value and += rebinds with in-place append for a sole owner (Text.jet:54-58, 357-367); probes m6342/m6342b/m6342c o0=o1=o2 for every write form, the missing edits (E0311, E0107, E0119) and the try_push ICE; representation costs (two allocations, len() builds a list, slice scans and copies); peers Go/Java/C#/Dart/Kotlin/Odin/Zig/Rust/Swift/Mojo",
-          "at": "2026-10-30T18:53:31.552Z"
+          "evidence": "Docs/Research/2026-10-30-fixed-text-and-buffer.md, landed e784bb1ffe.",
+          "at": "2026-11-17T18:43:52.227Z"
         },
         {
           "n": 2,
@@ -74845,8 +74850,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Ballots $JET_SCRATCH_ROOT/lanes/SurfaceDesign/ballot/D-TEXT-FIXED1.json v2 (A: one String value with copy-on-write, in-place insert/remove/truncate/reserve on := names and &String params; B: fixed String plus StringBuffer; C: today) and D-TEXT-NAMES1.json v2 (A: keep String; B: rename to Text): both PLAIN OK, READY, recommendation losses empty",
-          "at": "2026-10-30T18:53:33.148Z"
+          "evidence": "The note's ballots D-TEXT-FIXED1 and D-TEXT-NAMES1 were posted on Tower and are ratified (A and A); the research note landed in e784bb1ffe.",
+          "at": "2026-11-17T18:43:49.930Z",
+          "closure": "decision"
         },
         {
           "n": 3,
@@ -74854,8 +74860,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Note sections 1.4 and 4-6: nine kernels at Jet o0/o1/o2 vs Rust o0/o3/o3+overflow-checks in perf cycles:u/instructions:u (probes/pstat6342.tsv; len_loop 32.36x, slice_loop 11003.62x, append_plus_eq 10.66x instructions); census 81,344 String mentions, 1,397 append sites, 45 &String params, 5 try_push; jet fix rule per option; compiler criteria; paired cells with Jet sources probes/k6342 and Rust peers probes/r6342/kernels.rs",
-          "at": "2026-10-30T18:53:34.482Z"
+          "evidence": "Sections 1.4 and 4-6 of Docs/Research/2026-10-30-fixed-text-and-buffer.md (landed e784bb1ffe) size the migration and give the jet fix rule and paired-cell plans.",
+          "at": "2026-11-17T18:43:51.114Z"
         },
         {
           "n": 4,
@@ -74863,17 +74869,18 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "D-TEXT-NAMES1=A (keep String) and D-TEXT-FIXED1=A ratified 2026-10-31; tower decision list shows no open decision on this card.",
-          "at": "2026-10-31T04:48:30.604Z"
+          "evidence": "Owner decisions D-TEXT-FIXED1=A and D-TEXT-NAMES1=A are ratified on Tower; this card has no open ballot.",
+          "at": "2026-11-17T18:43:35.401Z",
+          "closure": "decision"
         },
         {
           "n": 5,
           "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; a paired perf cell compares against building a new String. Proof: `jet test Compiler --profile golden --filter Text/StringEditInPlace` on O0, O1 and O2 and `jet test Compiler --profile ui --filter string_edit_fixed_name`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:48:04.233Z"
+          "evidence": "Landed 6d6315d3bd (p271). On batch compiler p271: golden Text/StringEditInPlace 3/3 (O0, O1, O2) and ui string_edit_fixed_name 1/1.",
+          "at": "2026-11-17T18:42:07.853Z"
         },
         {
           "n": 6,
@@ -74881,8 +74888,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: With CardClose-10 (wave/14/in): FailureLaw.jet sema_unknown_type_name gives `Text` the Why \"Jet's text type is `String`\" and the Fix \"write `String` instead of `Text`\". The new UI snapshot tests/ui/unknown_type_text_points_to_string has its header, span and More lines taken from the w12 jet; with the old Why/Fix it PASSes under testkit ui, which proves the format. tests/ui/unknown_param_type_no_followon.stderr is updated to match. lane-check OK. The snapshot passes after the rebuild.",
-          "at": "2026-10-31T21:20:08.919Z"
+          "evidence": "Landed in 2a64086b44, which added Tests/UI/unknown_type_text_points_to_string (E0119 for Text: the Why says Jet's text type is String and the Fix says to write String). It passes in the p271 ui suite on 6d6315d3bd.",
+          "at": "2026-11-17T18:43:27.628Z"
         }
       ],
       "refs": [],
@@ -74890,8 +74897,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T17:30:09.329Z",
-      "updated": "2026-11-17T01:42:25.814Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T18:43:54.167Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T18:43:54.167Z"
     },
     {
       "id": "c0smtxuc",
@@ -96137,11 +96145,11 @@
         {
           "n": 4,
           "text": "A lambda bound to a local reads the captured local's current value, or the program is refused. Today 'v := [1]; f := fn() { v.len() }; v.push(2); f()' prints the stale count (accepted on p267 and p268): the outer write is invisible to the lambda's copy, the converse of c3. Proof: a case in Tests/Cases/Closures where each tier prints the current value or the UI snapshot shows the registered refusal.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T15:27:55.185Z"
+          "evidence": "Landed 6683523959 (p271). On batch compiler p271 (6d6315d3bd): cases Closures/bound_lambda_reads_changed_capture PASS 1/1 and golden ClosureCaptureWrites 3/3.",
+          "at": "2026-11-17T18:41:53.327Z"
         }
       ],
       "refs": [],
@@ -96149,7 +96157,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-17T16:05:34.995Z",
+      "updated": "2026-11-17T18:41:53.327Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -117827,11 +117835,20 @@
         {
           "n": 1,
           "text": "Stack depth and time are measured for a recursive list builder; if it is not already stack-safe, one shared JetIR tail-recursion-modulo-cons transform makes a 1,000,000-element builder stack-safe. Proof: `jet test Compiler --profile golden --filter Trmc` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed fd2966ab60 (on-demand stack segments: a stack check on the bodies of call cycles) and c5bc388e54 (Trmc goldens) in p271. On batch compiler p271 (6d6315d3bd), golden Trmc 9/9 (O0, O1, O2): the 1,000,000-element recursive builder is stack-safe.",
+          "at": "2026-11-17T18:42:11.435Z"
+        },
+        {
+          "n": 2,
+          "text": "The stack-segment change leaves the suite green. p271 found three new failures. Cases TaskgroupStack/a_joined_task_runs_on_the_joining_thread and a_stack_group_runs_recursion_the_default_stack_cannot now complete (reached 8000006000010) where they expected exit 70: their expectation has to follow the new meaning, so a stack overflow is reached only past the stack budget. UI E3012_comptime_stack_overflow_names_its_function lost the function name ('Stack overflow' instead of 'Stack overflow in deep'). Proof: those three pass on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:18:42.450Z"
+          "at": "2026-11-17T18:42:12.520Z"
         }
       ],
       "refs": [],
@@ -117842,8 +117859,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:49.254Z",
-      "updated": "2026-11-17T14:25:13.598Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T18:42:12.520Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0ywczn1",
@@ -215756,6 +215774,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T18:43:54.167Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l7lwif",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T18:43:52.227Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T18:43:51.114Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T18:43:49.930Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T18:43:35.401Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T18:43:27.628Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T18:42:12.520Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vucs0t",
+      "note": "#2 The stack-segment change leaves the suite green. p271 found "
+    },
+    {
+      "at": "2026-11-17T18:42:11.435Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vucs0t",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T18:42:07.853Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0l7lwif",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T18:41:53.328Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08zzpo5",
+      "note": "#4"
+    },
     {
       "at": "2026-11-17T18:02:31.253Z",
       "by": "Main",
