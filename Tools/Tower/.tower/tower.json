@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111800,
+    "rev": 111809,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54732,6 +54732,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "c1 decision (within D-LINK-STEP1=A, no ballot): build.action(name, run:, inputs:, outputs:, allow:) is the ratified constructor that the link and before_write hooks return; the session handle type is BuildStep. LinkInputs.default (selected by --link=default) is a BuildAction of a built-in kind that BuildExecute's step runner runs as Jet's in-process native link over the on-disk link inputs. It adds no public command (no `jet link`), and `jet inspect build` shows it as the stock link. This replaces the draft ballot D-LINK-DEFAULT1, which was never posted."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c1c decision (Main, within D-LINK-STEP1=A): BuildAction is the plain description struct core.build.BuildAction{name, run, inputs, outputs, allow} that the free build.action(...) makes and a link hook returns (the ratified spelling). The build-session handle that b.run/b.action return is renamed BuildStep in one cutover, and b.action builds the same description and registers it (one mechanism). D-BUILDACTION1 names no handle type. The hook runs at compile time through the tool-stage #run mechanism, and the driver runs the returned action in the hermetic executor."
         },
         {
@@ -54884,7 +54889,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-17T10:50:48.674Z",
+      "updated": "2026-11-17T11:20:29.311Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -69886,6 +69891,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T11:19:32.550Z"
+        },
+        {
+          "n": 14,
+          "text": "D-ARRAY-CONJ1=A: Complex.conj() (and Complex32.conj()) returns the conjugate at the value's own precision; no conjugate alias exists. Proof: golden example printing 3 - 4i for Complex{real: 3.0, imaginary: 4.0}.conj() on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T11:19:34.162Z"
+        },
+        {
+          "n": 15,
+          "text": "D-ARRAY-LANEBCAST1=A: + - * / between an exact lane value and its element scalar, on either side, wherever the lane-lane operation exists, through ordinary owning-package operator hooks (no new sema mechanism). Proof: golden example (pixels * gain, F32{1.0} - pixels, F32{2.0} / pixels) on o0, o1 and o2, and a UI snapshot for a scalar of the wrong element type.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T11:19:35.428Z"
+        },
+        {
+          "n": 16,
+          "text": "D-ARRAY-SHUFFLE1=B: lanes and fixed arrays pick slots by number with .swizzle(i, ...) (rgb.swizzle(2, 1, 0), eight.swizzle(7, 6, 5, 4)); out-of-range or non-constant indexes are a registered build error with a UI snapshot; no single-instruction promise. Proof: golden example on o0, o1 and o2 plus the UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T11:19:36.549Z"
         }
       ],
       "refs": [],
@@ -69893,9 +69925,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-17T11:19:32.550Z",
+      "updated": "2026-11-17T11:19:36.549Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 16
     },
     {
       "id": "c05l3kpi",
@@ -95008,7 +95040,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -95017,6 +95049,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion met. c2: the self-host chain's fixed point on dev b7588ea8e5 after the debug-info determinism fix (b5e5c48bba); golden is clean on p260."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -95069,11 +95106,11 @@
         {
           "n": 2,
           "text": "Every in-repository import, module mapping, test, example, golden, generated table and doc reference follows the rename in the same stack; the case, ui and golden suites pass on O0/O1/O2 and the self-host chain reaches its fixed point. Proof: `jet test Compiler --profile cases`, `--profile ui` and `--profile golden` pass on O0, O1 and O2, and the self-host chain reaches its fixed point.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T04:25:01.978Z"
+          "evidence": "Self-host chain reaches its fixed point on dev b7588ea8e5 (cycle p260, which includes IfHole's debug-info determinism fix b5e5c48bba): `Chain.jet $JET_SCRATCH_ROOT/lanes/Main/chain6733b full`, seed = batch compiler p259, admitted by the p260 census receipt. s1, s2 and s3 BUILT rc=0, FIXED_POINT s2 == s3 (jet e9cb317451f1cbae). The earlier run on aa80e241d2 differed only in .debug_info (s2 27d15d5dc24a6a99 != s3 919fe728be450a16). On batch compiler p260: golden 5056 PASS / 0 FAIL on o0, o1 and o2; cases thread_count_builds_are_byte_identical 1/0. No cases or ui failure of the p260 run names a pre-rename path (tests/, Tools/tower, JetCli, lowercase cases/guards/fixtures); the remaining failures are the steady-state set owned by their own cards.",
+          "at": "2026-11-17T11:21:31.944Z"
         },
         {
           "n": 3,
@@ -95117,9 +95154,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-17T10:28:47.385Z",
+      "updated": "2026-11-17T11:21:34.194Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T11:21:34.194Z"
     },
     {
       "id": "c0cnf5w8",
@@ -98178,6 +98216,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "Speed-3-3 paused for ballot rework (owner priority). Unlanded: SUB Speed-3-3-type-value-generic, the c3 prerequisite (Type{V} per generic instance via NodeKind.TypePath), in cycle p261. Drafted, ready to submit after it lands: drop_zone (c3), with the rebased files in $JET_SCRATCH_ROOT/lanes/Speed-3-3/merge/rb/dz and merge/dz3 and the stage in stage/keep/tv-tree; its case needs the Core.rows exports and Type{V} in the seed. HANDOFF.md in that lane holds the steps."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c1 Linux half landed: dev 1723acbd02 (Speed-3-3-6805-c1-share, cycle p259). On batch compiler p259: cases NativeApp/share_copies_the_link_on_linux 1/0. The Web Share API half waits on #6556 c9."
         },
         {
@@ -98235,7 +98278,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-17T10:50:51.591Z",
+      "updated": "2026-11-17T11:21:59.596Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98471,6 +98514,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "c3 resume (Linux): rebased files in $JET_SCRATCH_ROOT/lanes/Speed-3-3/merge/rb/c3 (on drop_zone) and the case NativeApp/resume_resubscribes_and_drains_the_queue_on_linux in drafts/c3. Not run yet; stage in stage/6809-c3-resume. Paused with Speed-3-3 for ballot rework."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c1 Linux half landed: dev dea923069c (Speed-3-3-6809-c1-lifecycle, cycle p259), graph.lifecycle(on_resume:) -> App. On batch compiler p259: cases NativeApp/lifecycle_events_reach_the_app_on_linux 1/0, NativeApp 21/0, Core/App/App.jet PASS. The browser half (Page Lifecycle) and the every_target case remain."
         },
         {
@@ -98522,7 +98570,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-17T10:50:50.607Z",
+      "updated": "2026-11-17T11:22:00.550Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -100401,7 +100449,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 Table.search drafted in $JET_SCRATCH_ROOT/lanes/Speed-3-3/drafts/fts, unchecked. Open point: its unicode (core.text) import is not in core.db's depends_on in Core.rows. Either add it there (needs a built compiler) or split words by bytes."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -100448,7 +100502,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:20.796Z",
-      "updated": "2026-11-17T01:47:10.043Z",
+      "updated": "2026-11-17T11:22:01.942Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -217234,6 +217288,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T11:22:01.942Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w7y8wz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T11:22:00.550Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c051j6ab",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T11:21:59.596Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fqrrpk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T11:21:34.194Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T11:21:31.944Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07k91t6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T11:20:29.311Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gmf0y4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T11:19:36.549Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c05gn07n",
+      "note": "14 criteria, soft limit 6: The ratified D-ARRAY ballots each add one build criterion to the card that owns them"
+    },
+    {
+      "at": "2026-11-17T11:19:36.549Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#16 D-ARRAY-SHUFFLE1=B: lanes and fixed arrays pick slots by num"
+    },
+    {
+      "at": "2026-11-17T11:19:35.428Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c05gn07n",
+      "note": "13 criteria, soft limit 6: The ratified D-ARRAY ballots each add one build criterion to the card that owns them"
+    },
+    {
+      "at": "2026-11-17T11:19:35.428Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#15 D-ARRAY-LANEBCAST1=A: + - * / between an exact lane value an"
+    },
+    {
+      "at": "2026-11-17T11:19:34.162Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c05gn07n",
+      "note": "12 criteria, soft limit 6: The ratified D-ARRAY ballots each add one build criterion to the card that owns them"
+    },
+    {
+      "at": "2026-11-17T11:19:34.162Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#14 D-ARRAY-CONJ1=A: Complex.conj() (and Complex32.conj()) retur"
+    },
     {
       "at": "2026-11-17T11:19:32.550Z",
       "by": "Main",
