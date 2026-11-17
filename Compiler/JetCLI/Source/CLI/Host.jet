@@ -971,6 +971,9 @@ JetCLINativeFailure: enum {
 // The native route's result: the linked executable, else why not.
 JetCLINativeLinked: enum {
     Image(executable: X64Executable),
+    // The inputs Jet's own link would read, which the package's link step
+    // links instead: their names and bytes, in link order.
+    Inputs(names: [String], bytes: [[U8]]),
     Failed(failure: JetCLINativeFailure),
 }
 
@@ -1196,6 +1199,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     }
     loop name in closure.names -> names.push(name.copy())
     loop input in closure.bytes -> bytes.push(input.copy())
+    // A link step links these inputs itself (LinkStep.jet).
+    if jet_cli_link_hooked(options) -> return JetCLINativeLinked.Inputs{names: names, bytes: bytes}
     input_count: names.len()
     // copy: only a C closure can refuse LINK_RUN_BASE, and the retry at LINK_RUN_LOW_BASE needs the inputs again.
     retry: if base != LINK_BASE && closure.names.len() > 0 -> Val(bytes.copy()) else -> None
@@ -1850,8 +1855,10 @@ jet_cli_ir_trap: fn(function: &IRFunction) Never! {
 // once with exit 101 (AGENTS.md I2; jet_cli_ice_census). With `--keep-going`
 // the rows also go to the `--keep-going-report` census after the front end's, and the
 // executable is still written while the route has object bytes (each faulty
-// function traps).
-jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, color: Bool) -[FS, Env, Exec, Time, FFI.Asm]> JetCLIBuilt Never! {
+// function traps). With a `link` hook the package's link step links the
+// image and writes it (jet_cli_link_step), its effects granted by
+// `invocation` beside the package's and the workspace's policy.
+jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, invocation: JetCLIInvocationAuthority?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIBuilt Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("native.sources", "", -1, -1)
     sources: jet_cli_native_c_sources(snapshot, options) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {err.message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)}
     if result.trace_sink == .Val(sink) -> sink.end("native.sources", -1)
@@ -1882,6 +1889,7 @@ jet_cli_build_native: fn(file: String, command: String, options: BuildOptions, r
     }
     if linked.move() == {
         .Image(executable) -> JetCLIBuilt.Image{executable: executable.move(), path: binary}
+        .Inputs(names, bytes) -> jet_cli_link_step(file, options, result, snapshot, binary, names.move(), bytes.move(), invocation, color)
         .Failed(failure) -> JetCLIBuilt.Failed{output: jet_cli_native_report(file, command, failure, color)}
     }
 }
@@ -2049,8 +2057,10 @@ JetCLIBuilt: enum {
 // Build executable `name` for a compile with no errors, through the native
 // route (one route at every profile), and write it to the output directory
 // (jet_cli_output_dir_path) unless `command` is `run`, which runs the image
-// from memory. `name` is the file stem, or a build target's name.
-jet_cli_build_binary: fn(file: String, name: String, command: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time, FFI.Asm]> JetCLIBuilt Never! {
+// from memory. `name` is the file stem, or a build target's name. A link
+// step writes the image it links itself (jet_cli_link_step), with the
+// effects `invocation` grants.
+jet_cli_build_binary: fn(file: String, name: String, command: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, invocation: JetCLIInvocationAuthority?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIBuilt Never! {
     if result.internal_problem == .Val(problem) {
         return JetCLIBuilt.Failed{output: jet_cli_ice(problem)}
     }
@@ -2064,13 +2074,13 @@ jet_cli_build_binary: fn(file: String, name: String, command: String, color: Boo
     build_dir: if command == "build" -> jet_cli_output_dir_path(snapshot, options) else -> jet_cli_build_dir_path(snapshot)
     binary: "{build_dir}/{name}"
     if command == "run" {
-        return jet_cli_build_native(file, command, options, result, checked, snapshot, binary, color)
+        return jet_cli_build_native(file, command, options, result, checked, snapshot, binary, invocation, color)
     }
     if jet_cli_build_dir(build_dir, color) == .Val(refused) {
         return JetCLIBuilt.Failed{output: refused}
     }
-    built := jet_cli_build_native(file, command, options, result, checked, snapshot, binary, color)
-    if built == .Image(executable, path) {
+    built := jet_cli_build_native(file, command, options, result, checked, snapshot, binary, invocation, color)
+    if built == .Image(executable, path) && !jet_cli_link_hooked(options) {
         if result.trace_sink == .Val(sink) -> sink.begin("native.write", "", -1, -1)
         written: jet_cli_native_write(path, executable)
         if result.trace_sink == .Val(sink) -> sink.end("native.write", executable.tail.len())
@@ -2151,7 +2161,7 @@ jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAut
 // on stderr, which `quiet` leaves out; under `json` the same projection is
 // the one `build.effects` status on stdout. `verbose` adds the store's
 // `[build]` lines.
-jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, dev: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time, Rand, FFI.Asm]> JetDriverVerbOutput Never! {
+jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, dev: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetDriverVerbOutput Never! {
     // Only the problems are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors: jet_driver_present_diagnostics(if dev -> jet_cli_errors(result.diagnostics) else -> jet_driver_check_failures(result.diagnostics), snapshot, result.generated_source_files)
@@ -2183,7 +2193,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     if build_options_value(options, "os") == "web" {
         built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
     } else {
-        if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose) == {
+        if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose, invocation) == {
             .Failed(failure) -> return failure
             .Written(path, lines, reused) -> {
                 log = lines
@@ -2710,7 +2720,7 @@ jet_cli_run_build: fn(file: String, source: String, color: Bool, options: BuildO
         listed: if used.len() == 0 -> "none" else -> used.join(", ")
         cli_term.eprint("jet run: effects used: {listed}")
     }
-    jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot)
+    jet_cli_build_binary(file, jet_cli_stem(file), "run", color, options, result, inputs, snapshot, invocation)
 }
 
 // `jet run <file>`: build it (jet_cli_run_build), then hand its program to
@@ -2926,6 +2936,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if census.len() > 0 -> return jet_cli_ice_census(file, census)
     if native == {
         .Failed(failure) -> return jet_cli_test_native_failure(file, failure, color)
+        .Inputs(_, _) -> return jet_cli_ice("`jet test` refuses a link hook, so its harness links in process")
         .Image(executable) -> {
             if jet_cli_native_write(binary, executable) == .Val(failure) {
                 return jet_cli_test_native_failure(file, failure, color)

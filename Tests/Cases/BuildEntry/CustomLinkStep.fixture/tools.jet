@@ -1,0 +1,13 @@
+use {
+    build: core.build
+    compiler: core.compiler
+}
+
+// A link step that links nothing: its command checks that the program
+// object it reads is there and writes, as the executable, a script naming
+// it.
+#On(build.link) relink: fn(inputs: compiler.LinkInputs) -> build.BuildAction {
+    object: inputs.objects[0]
+    script: "#!/bin/sh\necho 'relinked {inputs.output_name} from {object}'\n"
+    build.action("relink", run: ["sh", "-c", "test -s \"$2\" && printf '%s' \"$0\" > \"$1\" && chmod +x \"$1\"", script, inputs.output, object], inputs: inputs.objects, outputs: [inputs.output], allow: [.Exec, .FS])
+}

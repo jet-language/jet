@@ -1,0 +1,9 @@
+use {
+    build: core.build
+    compiler: core.compiler
+}
+
+// A link step whose command fails: it says why on stderr and exits 3.
+#On(build.link) relink: fn(inputs: compiler.LinkInputs) -> build.BuildAction {
+    build.action("link", run: ["sh", "-c", "echo 'no linker for {inputs.output_name}' >&2; exit 3"], inputs: inputs.objects, outputs: [inputs.output], allow: [.Exec])
+}

@@ -5,9 +5,11 @@
 // A hook runs only for a document that imports its package, and a qualified
 // block (`#Tools.Query { … }`) only reaches the package its qualifier names.
 // The host compiles the program beside the document (JetCLI ToolStages.jet),
-// so the hooks run as every compile-time value does.
+// so the hooks run as every compile-time value does. `jet build`'s link step
+// calls its `build.link` hook the same way (JetCLI LinkStep.jet).
 use {
     jet_foundation.[
+        COMPILER_EVENT_BUILD_LINK,
         ImportDecl,
         Span,
         TComptimeField,
@@ -186,7 +188,7 @@ jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, sta
     imports: modules[document].imports
     blocks: jet_driver_tool_stage_blocks(source)
     bytes: source.bytes()
-    uses := [String]{"use {{\n    jet_tool_stage_compiler: core.compiler\n"}
+    uses := [String]{"jet_tool_stage_compiler: core.compiler"}
     values := [String]{}
     loop (index, module_ref) in modules {
         if index == document || blocks.len() == 0 -> next
@@ -204,7 +206,7 @@ jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, sta
                         }
                         if slot < 0 {
                             slot = uses.len() - 1
-                            uses.push("    jet_tool_stage_{slot}: {module_ref.module_name}\n")
+                            uses.push("jet_tool_stage_{slot}: {module_ref.module_name}")
                         }
                         start: jet_driver_tool_stage_position(bytes, block.body.start)
                         text: jet_config_string_escape(foundation_byte_text(bytes, block.body.start, block.body.end))
@@ -217,7 +219,13 @@ jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, sta
         }
     }
     if bodies.len() == 0 -> return JetDriverToolStagePlan{bodies: bodies, program: ""}
-    JetDriverToolStagePlan{bodies: bodies, program: "{uses.join("")}}}\n{values.join("")}"}
+    JetDriverToolStagePlan{bodies: bodies, program: "{jet_driver_tool_stage_uses(uses)}{values.join("")}"}
+}
+
+// A stage program's `use` block, one import per row (`alias: module`).
+jet_driver_tool_stage_uses: fn(rows: [String]) -> String Never! {
+    lines: loop row in rows -> "    {row}\n"
+    "use {{\n{lines.join("")}}}\n"
 }
 
 // A 1-based line and byte column.
@@ -350,4 +358,127 @@ jet_driver_tool_stage_text: fn(value: &&TComptimeValue) -> String? Never! {
     }
     if value.move() == .String(text) -> return Val(text)
     None
+}
+
+// The name of the value a link stage's program gives its hook's answer.
+JET_DRIVER_LINK_STAGE_VALUE: "LINK_STAGE_CALL"
+
+// One output's link as a `build.link` hook gets it (core.compiler
+// `LinkInputs`), each path relative to the package root: the object files
+// and libraries, the `link_args` option, and the output's name and path.
+// Its `default` is Jet's own link: a `BuildAction` with no command, reading
+// the objects and libraries and making the output.
+JetDriverLinkInputs: struct {
+    objects: [String],
+    libraries: [String],
+    args: [String],
+    output_name: String,
+    output: String,
+}
+
+// A `BuildAction` a link hook returned (core.build): its name, its command,
+// the files it reads and makes, and the names of the effects it may use.
+// No command is Jet's own link over `inputs`.
+JetDriverLinkAction: struct {
+    name: String,
+    run: [String],
+    inputs: [String],
+    outputs: [String],
+    allow: [String],
+}
+
+// Whether `snapshot` declares the link hook `hook` (`tools.relink`): its
+// module's file (`tools.jet`; `lib/tools.jet` for `lib.tools`) marks the
+// function `#On(build.link)`. Read from a parse, with no check; the program
+// that calls the hook checks it.
+jet_driver_link_stage_declared: fn(snapshot: JetDriverAuthorizedSourceSnapshot, hook: String) -> Bool Never! {
+    path: hook.rpartition(".")
+    file_path: "{path.head.replace(".", "/")}.jet"
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if file.relative_path != file_path && !file.relative_path.ends_with("/{file_path}") {
+                next
+            }
+            parsed: parse_source(file.source.bytes())
+            loop item in parsed.program.items {
+                if item == .Func(func) && func.name == path.tail {
+                    loop marker in func.markers {
+                        moment: stage_hook(marker) ?? next
+                        if moment.stage == COMPILER_EVENT_BUILD_LINK -> return true
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+// The program that calls the link hook `hook` (a module path and a function
+// name joined by `.`, `tools.relink`) on `inputs`, as a tool stage's program
+// calls its hooks: its `{JET_DRIVER_LINK_STAGE_VALUE}` is the hook's answer.
+jet_driver_link_stage_program: fn(hook: String, inputs: JetDriverLinkInputs) -> String Never! {
+    path: hook.rpartition(".")
+    // Jet's own link reads the objects, then the libraries.
+    linked := jet_driver_link_stage_quoted(inputs.objects)
+    loop library in jet_driver_link_stage_quoted(inputs.libraries) -> linked.push(library)
+    output: "\"{jet_config_string_escape(inputs.output)}\""
+    default: "jet_link_build.BuildAction{{name: \"link\", run: [String]{{}}, inputs: [String]{{{linked.join(", ")}}}, outputs: [String]{{{output}}}, allow: [jet_link_lang.Effect]{{}}}}"
+    given: "jet_link_compiler.LinkInputs{{objects: {jet_driver_link_stage_strings(inputs.objects)}, libraries: {jet_driver_link_stage_strings(inputs.libraries)}, args: {jet_driver_link_stage_strings(inputs.args)}, output_name: \"{jet_config_string_escape(inputs.output_name)}\", output: {output}, default: {default}}}"
+    uses: jet_driver_tool_stage_uses([String]{"jet_link_build: core.build", "jet_link_compiler: core.compiler", "jet_link_lang: core.compiler.lang", "jet_link_hook: {path.head}"})
+    "{uses}\n{JET_DRIVER_LINK_STAGE_VALUE}: #run {{ jet_link_hook.{path.tail}({given}) }}\n"
+}
+
+// Each of `values` as a string literal.
+jet_driver_link_stage_quoted: fn(values: [String]) -> [String] Never! {
+    loop value in values -> "\"{jet_config_string_escape(value)}\""
+}
+
+// `values` as a `[String]` literal.
+jet_driver_link_stage_strings: fn(values: [String]) -> String Never! {
+    "[String]{{{jet_driver_link_stage_quoted(values).join(", ")}}}"
+}
+
+// The `BuildAction` a link stage's program answered, read from the values of
+// its compile; None when it has none or it is malformed.
+jet_driver_link_stage_action: fn(values: &&[SemaComptimeItemValue]) -> JetDriverLinkAction? Never! {
+    loop value in values.move() {
+        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_DRIVER_LINK_STAGE_VALUE}") {
+            next
+        }
+        fields: if value.value.move() == .Struct(_, fields) -> fields else -> {
+            return None
+        }
+        action := JetDriverLinkAction{name: "", run: [String]{}, inputs: [String]{}, outputs: [String]{}, allow: [String]{}}
+        loop field in fields.move() {
+            if field.name == "name" {
+                action.name = jet_driver_tool_stage_text(field.value.move()) ?? return None
+                next
+            }
+            items: if field.value.move() == .List(items) -> items else -> {
+                return None
+            }
+            words := [String]{}
+            loop item in items.move() {
+                words.push(jet_driver_link_stage_word(item.move()) ?? return None)
+            }
+            if field.name == {
+                "run" -> action.run = words.move()
+                "inputs" -> action.inputs = words.move()
+                "outputs" -> action.outputs = words.move()
+                "allow" -> action.allow = words.move()
+                else -> return None
+            }
+        }
+        return Val(action)
+    }
+    None
+}
+
+// A String value, or the name of an `Effect` value.
+jet_driver_link_stage_word: fn(value: &&TComptimeValue) -> String? Never! {
+    if value == .Enum(_, _, _) {
+        if value.move() == .Enum(_, variant, _) -> return Val(variant)
+        return None
+    }
+    jet_driver_tool_stage_text(value.move())
 }

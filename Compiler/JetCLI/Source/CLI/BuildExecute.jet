@@ -168,29 +168,59 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     if jet_cli_build_overwrite(root, graph, needs.steps, last.made) == .Val(overwritten) {
         return jet_cli_build_execution_failed("E3502", overwritten.copy(), None, "move the file, declare the step's output at another path, or keep the file in git with `.output(path, kept: true)`", color)
     }
+    granted := jet_cli_build_steps_granted(plan, graph, needs.steps, needs.host, root, workspace, policy, invocation, member, color)
+    if granted.move() == {
+        .Refused(output) -> output
+        .Granted(grants, probes) -> {
+            // Steps reuse saved work only while it is reused
+            // (BUILD_REUSE_SAVED_WORK, off): a default build opens no store,
+            // and every step runs.
+            store := BuildArtifactStoreHandle?{None}
+            if BUILD_REUSE_SAVED_WORK && needs.steps.len() > 0 {
+                store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
+            }
+            jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, made, selected, needs, root, member, options, threads, invocation, generated, last.kept, trace_sink, color)
+        }
+    }
+}
+
+// What the steps of a run start with, the effects granted to them and the
+// facts of the probes they read, else the report of what refused them.
+JetCLIBuildGranted: enum {
+    Granted(grants: [BuildEffect], probes: [BuildProbeFact]),
+    Refused(output: JetDriverVerbOutput),
+}
+
+// Make ready to run `steps` of `plan` (`graph` lowered) and build the `host`
+// targets, under the project root `root`: every step's effects are granted
+// (by the package `policy`, the enclosing `workspace`'s build policy and this
+// invocation), every probe they and the targets read runs, the native
+// sandbox is made usable, and each listed package's file a step reads is
+// copied where its sandbox reads it.
+jet_cli_build_steps_granted: fn(plan: HermeticBuildPlan, graph: BuildPlanExecution, steps: [Int], host: [Int], root: String, workspace: OverlayPolicy, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand]> JetCLIBuildGranted Never! {
     grants: jet_cli_build_grants(policy, workspace, invocation)
-    loop step in needs.steps {
+    loop step in steps {
         action: plan.actions[step]
         loop cap in action.caps {
             if !grants.contains(cap) {
-                return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: action.name, capability: cap}, member, color)
+                return JetCLIBuildGranted.Refused{output: jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: action.name, capability: cap}, member, color)}
             }
         }
     }
-    probe_ids := plan.selected_probe_ids() ?? return jet_cli_ice("the checked build plan is not a valid executor graph: {err.debug_text()}")
-    loop step in needs.steps {
+    probe_ids := plan.selected_probe_ids() ?? return JetCLIBuildGranted.Refused{output: jet_cli_ice("the checked build plan is not a valid executor graph: {err.debug_text()}")}
+    loop step in steps {
         loop probe in plan.actions[step].probes {
             if !probe_ids.contains(probe.id) -> probe_ids.push(probe.id)
         }
     }
-    loop target in needs.host {
+    loop target in host {
         loop probe in graph.targets[target].probes {
             if !probe_ids.contains(probe) -> probe_ids.push(probe)
         }
     }
     probe_ids.sort()
     if probe_ids.len() > 0 && !grants.contains(BuildEffect.Exec) {
-        return jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: "probe {plan.probes[probe_ids[0]].name}", capability: BuildEffect.Exec}, member, color)
+        return JetCLIBuildGranted.Refused{output: jet_cli_build_execution_error(BuildExecutionError.MissingGrant{action: "probe {plan.probes[probe_ids[0]].name}", capability: BuildEffect.Exec}, member, color)}
     }
     // Steps and the probes that run a program run only in the native sandbox:
     // make it usable before the first of them, fetching Jet's pinned
@@ -199,13 +229,13 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
     sandboxed_probes: build_probes_run_sandboxed(plan, probe_ids)
     if sandboxed_probes {
         if foundation_native_sandbox_prepare() == .Err(error) {
-            return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+            return JetCLIBuildGranted.Refused{output: jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)}
         }
     }
-    probes: build_execute_probes(plan, probe_ids) ?? return jet_cli_build_execution_error(err, member, color)
-    if needs.steps.len() > 0 && !sandboxed_probes {
+    probes: build_execute_probes(plan, probe_ids) ?? return JetCLIBuildGranted.Refused{output: jet_cli_build_execution_error(err, member, color)}
+    if steps.len() > 0 && !sandboxed_probes {
         if foundation_native_sandbox_prepare() == .Err(error) {
-            return jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)
+            return JetCLIBuildGranted.Refused{output: jet_cli_build_execution_error(BuildExecutionError.SandboxUnavailable{reason: error.message()}, member, color)}
         }
     }
     // A file of a listed package (`b.dependency(name).file(path)`) is copied
@@ -216,16 +246,10 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
         from: file.from ?? next
         to: jet_cli_entry_join(root, file.path)
         folder: jet_cli_parent(to) ?? root
-        cli_files.create_dir_all(folder) ?? return jet_cli_build_failed("couldn't create `{folder}` for the package files steps read: {err}", jet_cli_why("E2105"), "make `{folder}` writable", color)
-        cli_files.copy2(from, to) ?? return jet_cli_build_failed("couldn't copy the package file `{from}` a step reads: {err}", jet_cli_why("E2105"), "correct the path given to `.file(path)` on `b.dependency(name)`", color)
+        cli_files.create_dir_all(folder) ?? return JetCLIBuildGranted.Refused{output: jet_cli_build_failed("couldn't create `{folder}` for the package files steps read: {err}", jet_cli_why("E2105"), "make `{folder}` writable", color)}
+        cli_files.copy2(from, to) ?? return JetCLIBuildGranted.Refused{output: jet_cli_build_failed("couldn't copy the package file `{from}` a step reads: {err}", jet_cli_why("E2105"), "correct the path given to `.file(path)` on `b.dependency(name)`", color)}
     }
-    // Steps reuse saved work only while it is reused (BUILD_REUSE_SAVED_WORK,
-    // off): a default build opens no store, and every step runs.
-    store := BuildArtifactStoreHandle?{None}
-    if BUILD_REUSE_SAVED_WORK && needs.steps.len() > 0 {
-        store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
-    }
-    jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, made, selected, needs, root, member, options, threads, invocation, generated, last.kept, trace_sink, color)
+    JetCLIBuildGranted.Granted{grants: grants, probes: probes}
 }
 
 // Run `nodes` to the end: each round runs every ready step at once and

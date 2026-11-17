@@ -1,8 +1,11 @@
 # The link hook rows. `link` is `default` or a hook path and `post_link` a
 # list of hook paths, written unquoted in a profile, as flags (one
 # `--post-link` per step) and in `build: fn`. A value that is no hook path is
-# refused, and since no command runs a link hook yet, every command refuses
-# a hook in either row with E2104 and names where it was written.
+# refused. Only `jet build` runs a link hook: one that returns
+# `inputs.default` links with Jet, and one no function marks
+# `#On(build.link)` is E3506. Every other command refuses a link hook, and
+# every command refuses a post-link step, with E2104 naming where it was
+# written.
 fixture: Fixtures/LinkHooks
 artifact: app
 env: NO_COLOR=1
@@ -15,9 +18,11 @@ exit: 0
 stdout: = "linked\n"
 step: jet build --link=tools.relink app.jet
 cwd: open
-exit: 2
-stderr: ~ "Error [jet.InvalidCommandInput]" # no command runs a link hook yet
-stderr: ~ "`--link=tools.relink` names a link hook, and `jet build` links every image itself" # the flag is named
+exit: 0
+file: open/.jet/build/link/app/app.o exists # the hook got the program object
+step: {work}/open/.jet/build/app
+exit: 0
+stdout: = "linked\n" # `inputs.default` is Jet's own link
 step: jet run --link=relink app.jet
 cwd: open
 exit: 2
@@ -41,5 +46,6 @@ exit: 2
 stderr: ~ "`link: relink` in profile `bare` of package.jet isn't a value of `link`" # a profile's value is checked as a flag's is
 step: jet build
 cwd: code
-exit: 2
-stderr: ~ "`b.link(tools.relink)` at build.jet:2 names a link hook" # fn build writes the hook as a path
+exit: nonzero
+stderr: ~ "`b.link(tools.relink)` at build.jet:2 names `tools.relink`, which is no function marked `#On(build.link)`" # fn build writes the hook as a path
+stderr: ~ "jet-lang.dev/e/E3506" # the link step's code

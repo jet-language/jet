@@ -6074,9 +6074,30 @@ A profile writes `link: tools.relink` and `post_link: [tools.sign]`, unquoted;
 `build: fn` writes `b.link(tools.relink)` (`b.link(.Default)` for the stock)
 and `b.post_link([tools.sign])`; the flags write `--link=tools.relink` and
 one `--post-link=tools.sign` per step. A value that is no hook path, such as
-`--link=relink`, is refused with E2104. `jet run`, `jet test` and `jet dev`
-link their image in memory, and `jet build` runs no link hook yet, so every
-command refuses a hook in either row with E2104.
+`--link=relink`, is refused with E2104.
+
+`jet build` runs the link hook on each executable it writes, on every build.
+It writes the link inputs, the program object, the runtime and any C or Core
+libraries, under `.jet/build/link/<name>/`, and calls the hook on a
+`LinkInputs` holding their paths, the `link_args` words and the
+executable's name and path, each relative to the package root. The hook
+returns a `build.BuildAction`. One with no command (`inputs.default`, or
+any action whose `run` is empty) is Jet's own link, in process, over the
+action's `inputs` to its one output, the executable. Any other runs as a
+build step: the program `run[0]` is found as a `find_program` probe finds
+it, the rest of `run` are its arguments, it reads `inputs`, makes `outputs`,
+which must hold the executable, and uses the effects in `allow`, which the
+package, its workspace or `--allow` must grant. It runs in the build
+sandbox, and the executable is the file it wrote. A hook path no function
+marked `#On(build.link)` declares, a hook that doesn't check, and a step
+that fails or writes no executable are E3506, naming the executable and
+where `link` was written; Jet never links the executable another way.
+Example:
+[`Tests/Cases/BuildEntry/custom_link_step.case`](../../Tests/Cases/BuildEntry/custom_link_step.case).
+`jet run`, `jet test` and `jet dev` link their image in memory, and a web
+build writes a WebAssembly module, so each refuses a link hook with E2104.
+No command runs `post_link` steps yet, so every command refuses one with
+E2104.
 
 ### Language server
 

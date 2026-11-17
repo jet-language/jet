@@ -562,8 +562,12 @@ events --schema` prints the `--json` schema from them.
 `Declaration.calls` names the functions a declaration calls directly, by
 resolved name; a call through a function value is not in it. `complete` is
 false when the compiler checked only part of the declaration. `LinkInputs.default`
-is the command Jet's own link runs, so a hook that changes one argument keeps
-the rest. In `jet build --json`, the one `build.effects` status lists the
+is the step Jet's own link is, a core.build `BuildAction` with no command
+that reads the objects and libraries and makes the output; a `build.link`
+hook returns it, or another `BuildAction` that links the output (`jet build`
+runs it, spec "Output places, link inputs and targets"). In its JSON form a
+`BuildAction`'s `allow` lists effect names (`["Exec"]`). In `jet build
+--json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
 Each object follows the JSON Schema that `jet inspect events --schema` prints

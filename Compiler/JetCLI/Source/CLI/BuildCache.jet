@@ -26,8 +26,9 @@ JetCLIStoredBuild: enum {
 // the same key stored it (jet_cli_build_cache_key), else built through
 // jet_cli_build_binary and stored. `verbose` reports the runtime pack and the
 // cache decision as `[build]` lines. A store that can't be opened or written,
-// or saved work that isn't reused, leaves the build uncached.
-jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand, FFI.Asm]> JetCLIStoredBuild Never! {
+// or saved work that isn't reused, leaves the build uncached, as does a link
+// step, which runs on every build. `invocation` grants a link step's effects.
+jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool, invocation: JetCLIInvocationAuthority?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIStoredBuild Never! {
     log := ""
     if verbose {
         log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"
@@ -38,12 +39,17 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
         if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
             return JetCLIStoredBuild.Failed{output: refused}
         }
-        if BUILD_REUSE_SAVED_WORK {
+        if BUILD_REUSE_SAVED_WORK && !jet_cli_link_hooked(options) {
             key = jet_cli_build_cache_key(file, name, options, snapshot, result.comptime_inputs) ?? ""
         }
         if {
             !BUILD_REUSE_SAVED_WORK -> {
                 if verbose -> log = "{log}[build] cache off -> every build compiles live\n"
+            }
+            jet_cli_link_hooked(options) -> {
+                if verbose {
+                    log = "{log}[build] cache off -> a link step links this executable on every build\n"
+                }
             }
             key == "" -> {
                 if verbose {
@@ -89,7 +95,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
         }
         if verbose -> log = "{log}[build] cache miss -> compiling\n"
     }
-    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot)
+    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot, invocation)
     if built.move() == {
         .Failed(failure) -> JetCLIStoredBuild.Failed{output: failure}
         .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}", reused: false}

@@ -126,8 +126,8 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // The link step of each executable `jet build` writes: default is Jet's
     // own link, and a hook path names a `#On(build.link)` function whose
     // build action links the image instead. A run, a test and `jet dev` link
-    // their image in memory, and `jet build` doesn't run a link hook yet, so
-    // any other value is refused (E2104).
+    // their image in memory, and a web build writes a module no native link
+    // makes, so each refuses a hook (E2104).
     {name: "link", kind: BuildOptionKind.Hook, values: [String]{"default"}, stock_build: "default", stock_run: "default", removes_check: [String]{}, help: "The link step of each executable: default, or a link hook such as tools.relink"},
     // The steps `jet build` runs on each linked executable, in order: each
     // names a `#On(build.before_write)` function whose build action turns the
@@ -863,12 +863,15 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
         if !word.starts_with("-") && word.ends_with(".a") -> next
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(link_args)} passes `{word}`, and the native linker takes only `-L<dir>`, `-l<name>` and `.a` archive paths", fix: "drop `{word}`, or name the library or archive it links"}
     }
-    // A run, a test and `jet dev` link their image in memory, and `jet build`
-    // runs no link hook yet: each keeps Jet's own link and writes the image
-    // it links.
+    // A run, a test and `jet dev` link their image in memory, and a web build
+    // writes a module no native link makes: each keeps Jet's own link. Only
+    // a native `jet build` runs a link hook.
     link: build_option_index("link")
-    if values[link].value != BUILD_OPTION_HOOK_DEFAULT {
-        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and `jet {command}` links every image itself: it runs no link hook", fix: "drop it, or write `link: default`"}
+    if values[link].value != BUILD_OPTION_HOOK_DEFAULT && command != "build" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and `jet {command}` links every image itself: only `jet build` runs one", fix: "drop it, or use `jet build`"}
+    }
+    if values[link].value != BUILD_OPTION_HOOK_DEFAULT && os.value == "web" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and a web build writes a WebAssembly module, which no native link step makes", fix: "drop it, or build for a native target"}
     }
     post_link: build_option_index("post_link")
     if values[post_link].value != "" {
@@ -955,6 +958,23 @@ BUILD_REUSE_SAVED_WORK: false
                 .Resolved(_, _) -> { panic("`jet run` took a link hook") }
                 .Refused(_, what, _) -> {
                     assert(what.contains("`--link=tools.relink` names a link hook, and `jet run` links every image itself"))
+                }
+            }
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(options, _) -> {
+                    assert_eq(build_options_value(options, "link"), "tools.relink")
+                }
+                .Refused(_, what, _) -> panic(what)
+            }
+        }
+        .Refused(_, what, _) -> panic(what)
+    }
+    if build_option_flags([String]{"--link=tools.relink", "--os=web"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(_, _) -> { panic("a web build took a link hook") }
+                .Refused(_, what, _) -> {
+                    assert(what.contains("a web build writes a WebAssembly module"))
                 }
             }
         }

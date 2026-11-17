@@ -4,7 +4,8 @@
 // packages resolve as the document's own imports do, and each call's `#run`
 // value runs in the sealed comptime child, as a config value does
 // (ConfigEval.jet). A program that does not check answers nothing, and
-// `problem` names its first error.
+// `problem` names its first error. `jet build`'s link step calls its hook
+// the same way (LinkStep.jet).
 use {
     cli_files: core.files
     jet_driver.[
@@ -34,21 +35,36 @@ jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetCLIOverlay], stage:
     if bodies.len() == 0 {
         return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: None}
     }
+    ran := jet_cli_tool_stage_values(document, overlays.move(), program.move())
+    if ran.problem == .Val(problem) {
+        return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val(problem)}
+    }
+    JetCLIToolStageRun{answers: jet_driver_tool_stage_answers(stage, bodies, ran.values.move()), problem: None}
+}
+
+// The compile-time values of `program` checked beside `document`, else the
+// first problem that stopped it.
+JetCLIToolStageValues: struct {
+    values: [SemaComptimeItemValue],
+    problem: String?,
+}
+
+jet_cli_tool_stage_values: fn(document: String, overlays: &&[JetCLIOverlay], program: &&String) -> JetCLIToolStageValues Never! {
     given := overlays.move()
     given.push(JetCLIOverlay{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
-        .Refused(output) -> return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val(output.stderr.trim())}
+        .Refused(output) -> return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, problem: Val(output.stderr.trim())}
         .Prepared(request, _) -> {
-            result := jet_driver_compile(request) ?? return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {err}")}
+            result := jet_driver_compile(request) ?? return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, problem: Val("internal compiler error: {err}")}
             loop diagnostic in result.diagnostics {
                 if diagnostic.severity == DIAGNOSTIC_ERROR {
-                    return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("{diagnostic.code}: {diagnostic.what}")}
+                    return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, problem: Val("{diagnostic.code}: {diagnostic.what}")}
                 }
             }
             if result.internal_problem == .Val(problem) {
-                return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {problem}")}
+                return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, problem: Val("internal compiler error: {problem}")}
             }
-            return JetCLIToolStageRun{answers: jet_driver_tool_stage_answers(stage, bodies, result.comptime_values.move()), problem: None}
+            return JetCLIToolStageValues{values: result.comptime_values.move(), problem: None}
         }
     }
 }
