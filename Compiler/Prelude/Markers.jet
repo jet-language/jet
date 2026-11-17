@@ -734,6 +734,19 @@ Static: struct {
     }
 }
 
+// `#StepLimit(n)` on a constant or module binding computed while building:
+// the compile-time work of its value may take n steps instead of the
+// default 10000000, and running past them stops the build with E0952. It is
+// a budget, not an effect: raising it needs no grant. A limit of 0 is
+// invalid.
+StepLimit: struct {
+    steps: Int,
+
+    impl Marker {
+        sites: [.Constant, .Declaration],
+    }
+}
+
 // The built-in value tags. `Input` is untrusted input, so it protects the
 // integrity of what it may flow into; `Secret` keeps its value out of timing.
 #FX(!DB, !Exec, !Net)

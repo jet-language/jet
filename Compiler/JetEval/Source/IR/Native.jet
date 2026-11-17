@@ -185,6 +185,9 @@ JetEvalIRState: struct {
     pages: [[U8]],
     page_rows: [Int:Int],
     budget: Int,
+    // config.fuel: the call's step limit, named when the call runs out of it
+    // (jet_eval_ir_out_of_fuel); negative for none.
+    step_limit: Int,
     stdout: String,
     stderr: String,
     // JetEvalIRResult.debug_trace.
@@ -682,6 +685,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
         pages: [[U8]]{},
         page_rows: [Int:Int]{},
         budget: if config.fuel < 0 -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
+        step_limit: config.fuel,
         stdout: "",
         stderr: "",
         max_depth: config.max_call_depth,
@@ -1476,7 +1480,7 @@ jet_eval_ir_function_value_refused: fn(s: &JetEvalIRState, shown: String) Never!
 
 jet_eval_ir_out_of_fuel: fn(s: &JetEvalIRState) -> Int? Never! {
     if s.failure == None {
-        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time evaluation exhausted its fuel", "compile-time evaluation is bounded to keep compilation finite", "increase the evaluator fuel or simplify the evaluated program"))
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Fuel, s.span, "compile-time code ran past its step limit of {s.step_limit} steps", "compile-time code runs under a step limit, 10000000 steps unless its binding sets another, so a runaway loop can't stall the build", "split the work so it fits; a binding computed while building raises its own limit above {s.step_limit} with `#StepLimit(n)`"))
     }
     None
 }

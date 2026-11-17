@@ -1115,6 +1115,15 @@ struct is E0732, and using a tag where dispatch or method attachment is
 expected is E0731. Tag names are PascalCase. Prelude declares `Input`, `PII`,
 `Secret`, and `Credential` as tag structs (D-QUAL2, D-TAG-MARKER1, D-CASING1).
 
+A package adds a taint kind the same way, with no compiler edit: its tag
+struct's `#FX(!…)` row names the kind's sinks and its `from` row the kind's
+sources, a function path written as the package's own module names it. A
+value a dependent gets from such a source carries the tag, and a sink the
+row denies refuses it in the dependent too (E0721), though the dependent never
+names the tag. A health-data package's `#FX(!Net, !Exec) PHI` with
+`from: [read_record]` makes `phi.read_record(7)` in an importing package a
+`PHI` value that `process.cmd` refuses.
+
 A `Credential` value passed to a call is E0722 when the callee's declaration
 says the call writes it out: its effect row names `Log` or `IO`, or it is a
 `to_string`/`to_bytes` form over an `Encode`-bounded or `Dyn` value. Core
@@ -3018,6 +3027,13 @@ the build with E1220, naming the dependency, the effect and the call path
 (D-AUTH-DEFAULT1). A grant line is one the user writes; `jet add` writes
 none. See
 [`Examples/Modules/Packages/GrantLine`](../../Examples/Modules/Packages/GrantLine/package.jet).
+An effect a dependency declares as its own root, a kind of no Prelude effect,
+is governed by these rows like a Prelude root, under the name the manifest
+gives it: `ledger.Ledger` for the `Ledger` effect of the dependency `ledger`.
+`allow: [IO, ledger.Ledger]` admits it, a `grants` line names it the same
+way, a `deny` row refuses it, and a kind of it is governed through it. A new
+package effect needs no edit to the compiler's policy code. A dependency
+effect that is a kind of a Prelude effect is governed through that effect.
 Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
 own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and

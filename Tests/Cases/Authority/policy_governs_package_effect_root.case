@@ -1,0 +1,29 @@
+# Claim: an effect a dependency declares as its own root (`Ledger`, a kind
+# of no Prelude effect) is governed by the root package's `authority` rows
+# under the name the manifest gives it, `ledger.Ledger`, with no policy code
+# naming it. `allow` is the ceiling, a dependency's `grants` line replaces
+# `allow` for it, `deny` wins, and a kind of the root (`Post`) is governed
+# through it.
+fixture: PolicyGovernsPackageEffectRoot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step outside: jet check outside/main.jet
+exit: 1 # `allow: [IO]` doesn't name the dependency's effect root
+stderr: ~ "E1220" # the dependency is outside the budget
+stderr: ~ "`ledger`" # the dependency is named
+stderr: ~ "uses the `ledger.Ledger` effect" # its root is named as the manifest writes it
+stderr: ~ "add `ledger.Ledger` to `authority.allow`" # the fix names the row entry
+step kind: jet check kind/main.jet
+exit: 1 # a kind of the root is the root's
+stderr: ~ "uses the `ledger.Ledger` effect" # `Post` is governed through `ledger.Ledger`
+step allowed: jet run allowed/main.jet
+exit: 0 # the allow row names the root
+stdout: = "4\n"
+step denied: jet check denied/main.jet
+exit: 1 # deny wins over allow
+stderr: ~ "E1220" # the dependency reaches a denied effect
+stderr: ~ "`ledger.Ledger`" # the denied root is named
+step granted: jet run granted/main.jet
+exit: 0 # the dependency's grant line names its root
+stdout: = "4\n"

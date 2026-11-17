@@ -3744,6 +3744,68 @@ Place: struct {
     accuracy_m: Float,
 }
 
+// A kind of file `save_file` offers to save as.
+FileType: enum {
+    CSV,
+    JSON,
+    Image,
+}
+
+// Asks the person where to save a file and writes `bytes` there, all at
+// once, giving whether it did. The dialog suggests the name `suggested`
+// and offers the kinds in `types`, the first one chosen. The person
+// cancelling is `false` with no notice; a file that can't be written, or
+// no dialog to ask with, is `false` with a notice that names the file. On
+// Linux the desktop portal's save dialog asks
+// (org.freedesktop.portal.FileChooser); the other targets keep that notice.
+save_file: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool {
+    #if #build.target.os == {
+        .Linux -> { return app_save_linux(suggested, bytes, types) }
+        .MacOS -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+        .Windows -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+        .Web -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+        .Wasm -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+        .Freestanding -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+    }
+}
+
+priv SAVE_UNBUILT: "this system's save dialog is not built yet"
+
+// `save_file` on Linux: the portal's dialog, then the chosen file written
+// in one step, so a failed write leaves any file that was there whole.
+priv app_save_linux: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_unsaved(suggested, "{err}")
+    filters := [dbus.FileFilter]{}
+    loop kind in types -> filters.push(app_file_filter(kind))
+    uri: if dbus.portal_save_file(bus, "Save File", suggested, filters, ASK_WAIT_NS) == {
+        .Err(err) -> {
+            return app_unsaved(suggested, "{err}")
+        }
+        .Ok(chosen) -> chosen ?? return false
+    }
+    if !uri.starts_with("file://") {
+        return app_unsaved(suggested, "the dialog chose {uri}, which is not a local file")
+    }
+    path: url.percent_decode(uri.removeprefix("file://")) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a file path")
+    files.write_atomic(path, bytes) ?? return app_unsaved(suggested, "{err}")
+    true
+}
+
+// What the save dialog shows and matches for `kind`.
+priv app_file_filter: fn(kind: FileType) -> dbus.FileFilter Never! {
+    if kind == {
+        .CSV -> dbus.FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
+        .JSON -> dbus.FileFilter{name: "JSON", globs: [String]{"*.json"}, media: [String]{"application/json"}}
+        .Image -> dbus.FileFilter{name: "Image", globs: [String]{"*.png", "*.jpg", "*.jpeg"}, media: [String]{"image/png", "image/jpeg"}}
+    }
+}
+
+// Keeps the notice that `suggested` was not saved, and why; gives `false`.
+priv app_unsaved: fn(suggested: String, why: String) -> Bool Never! {
+    __keep_notice(Notice{text: "Couldn't save {suggested}: {why}"})
+    false
+}
+
 // The frames `take_photo` lets the camera take; the last is the photo, so
 // the camera has settled its exposure.
 priv PHOTO_FRAMES: 15

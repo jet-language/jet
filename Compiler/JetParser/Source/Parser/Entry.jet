@@ -1120,6 +1120,7 @@ parser_parse_program: fn(state: &JetParserState) -> Program {
                 loop parser_current_kind(state) == TOKEN_HASH {
                     markers.push(parser_parse_marker(state))
                 }
+                parser_check_step_limit(state, markers)
                 start: parser_current(state).span
                 errors_before: state.diagnostics.len()
                 statement: parser_parse_binding_statement(state)

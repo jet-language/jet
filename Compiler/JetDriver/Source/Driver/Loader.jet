@@ -9,6 +9,7 @@ use {
         ExprNode,
         ast_expr,
         ast_visit_body,
+        authority_package_effect,
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
         CORE_BUILTINS_MODULE,
@@ -472,7 +473,7 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             name.len() == 0 -> {
                 diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             }
-            sema_effect_parse_name(sema_effect_root(name)) == None -> {
+            sema_effect_parse_name(sema_effect_root(name)) == None && !authority_package_effect(name) -> {
                 diagnostics.push(jet_driver_authority_unknown_effect(name, span, (loop entry in items -> jet_driver_manifest_item_span(tokens, entry, jet_driver_manifest_field_value(source, tokens, entry).next_index)), position))
             }
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> {

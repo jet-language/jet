@@ -1,0 +1,18 @@
+// A crew app exports its board: the person chooses where in the system's
+// save dialog, and the app writes the file there. A board the app couldn't
+// save leaves a notice instead.
+use {
+    app
+    files: core.files
+}
+
+run: fn() -[Env, FS, IO, Net, Time]> {
+    _: app.new("Crew")
+    board: "title,status\nFix the gate,done\n"
+    saved: app.save_file(suggested: "board.csv", bytes: board.bytes(), types: [app.FileType]{app.FileType.CSV})
+    print("saved: {saved}")
+    // The fake portal's person chose `saved board.csv` here; the file
+    // ends with a newline, which print adds back.
+    if saved -> print((files.read("saved board.csv") ?? "unreadable: {err}").trim())
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}

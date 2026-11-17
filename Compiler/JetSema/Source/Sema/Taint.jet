@@ -858,6 +858,20 @@ sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph,
     None
 }
 
+// The declaration of a tag a value carries in module `module_identity`: the
+// one the module sees by name (sema_taint_find_tag), else the first tag of
+// that name any module declares. A value takes a tag from any module's `from`
+// row (sema_taint_source_tags, sema_taint_callable_source_tags), so a
+// package's taint kind keeps its sinks in every module the value reaches.
+sema_taint_carried_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> SemaTaintTagFact? {
+    scoped: sema_taint_find_tag(catalog, graph, module_identity, name)
+    if scoped != None -> return scoped
+    loop tag_value in catalog.tags {
+        if tag_value.name == name -> return Val(tag_value)
+    }
+    None
+}
+
 // The callable `name` of `owner` declared in `module_identity`, else, for a
 // method, the first `name` of any type called `owner` (of a Core module's
 // when `module_identity` is Core's: Core names no type of a program's). A
@@ -1091,6 +1105,25 @@ sema_taint_source_tags: fn(state: SemaTaintFlowState, destinations: [String]) ->
     tags
 }
 
+// The tags whose `from` row names `callable` as its own module writes it
+// (`read_record`, `Store.read`): a call from another module reaches a
+// package's source function under the name it is imported by, which the
+// destination names of sema_taint_source_tags don't match. In a Core body
+// only Core's tags count, as there.
+sema_taint_callable_source_tags: fn(state: SemaTaintFlowState, callable: SemaTaintCallableFact?) -> [String] Never! {
+    tags := [String]{}
+    found: callable ?? return tags
+    if module_is_core(state.module_identity) && !sema_taint_core_fact(found.module_identity) {
+        return tags
+    }
+    loop fact in state.catalog.tags {
+        if fact.module_identity != found.module_identity -> next
+        named: if found.owner == "" -> fact.from.contains(found.name) else -> fact.from.contains("{found.owner}.{found.name}")
+        if named -> sema_taint_add(tags, fact.name)
+    }
+    tags
+}
+
 sema_taint_core_alias: fn(state: SemaTaintFlowState, alias: String) -> String Never! {
     if state.scope_at < 0 -> return ""
     loop item in state.scopes[state.scope_at].imports {
@@ -1230,7 +1263,9 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
                 sema_taint_union(tags, sema_taint_tags_of(state, argument.expr))
             }
             sema_taint_union(tags, sema_taint_source_tags(state, [String]{call.name}))
-            sema_taint_apply_callable(tags, sema_taint_bare_callable(state, call.name))
+            callable: sema_taint_bare_callable(state, call.name)
+            sema_taint_union(tags, sema_taint_callable_source_tags(state, callable))
+            sema_taint_apply_callable(tags, callable)
 
             return tags
         }
@@ -1251,7 +1286,9 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
                 destinations.push("{owner}.{method}")
             }
             sema_taint_union(tags, sema_taint_source_tags(state, destinations))
-            sema_taint_apply_callable(tags, sema_taint_method_callable(state, receiver, method))
+            callable: sema_taint_method_callable(state, receiver, method)
+            sema_taint_union(tags, sema_taint_callable_source_tags(state, callable))
+            sema_taint_apply_callable(tags, callable)
             if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(tags)
             if sema_taint_is_credential_verify(state, receiver, method) {
                 sema_taint_remove(tags, "Credential")
@@ -1432,7 +1469,7 @@ sema_taint_tags_of: fn(state: &SemaTaintFlowState, expression: Expr) -> [String]
 
 sema_taint_denied_tag: fn(graph: SemaRegistrationGraph, state: SemaTaintFlowState, tags: [String], destinations: [String]) -> String? {
     loop tag_value in tags {
-        fact: sema_taint_find_tag(state.catalog, graph, state.module_identity, tag_value) ?? next
+        fact: sema_taint_carried_tag(state.catalog, graph, state.module_identity, tag_value) ?? next
         loop deny in fact.deny {
             loop destination in destinations {
                 if sema_effect_covers(deny, destination) -> return Val(tag_value)

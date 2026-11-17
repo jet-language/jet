@@ -1,0 +1,25 @@
+# `app.save_file(suggested:, bytes:, types:)` asks the person where to save
+# a file and writes it there, in one step. On Linux the desktop portal's
+# save dialog (org.freedesktop.portal.FileChooser) asks: it gets the
+# suggested name and the kinds of file to offer, and its answer is a
+# file:// URI, decoded to the path the file is written to. With no dialog
+# to ask, nothing is saved and a notice that names the file says so.
+fixture: SaveFileWritesWhereThePersonChose.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+spawn bus: jet run bus/fake_portal.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = "saved: true\ntitle,status\nFix the gate,done\n"
+wait: bus timeout 60s
+exit: 0
+file: heard.txt = "Hello AddMatch SaveFile\nSave File | handle_token | jet3 | current_name | board.csv | filters | a(sa(us)) | CSV | *.csv | text/csv | current_filter | (sa(us)) | CSV | *.csv | text/csv\n"
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+exit: 0
+stdout: ~ "saved: false" # no dialog to ask, so nothing is written
+stdout: ~ "notice: Couldn't save board.csv:" # the notice names the file

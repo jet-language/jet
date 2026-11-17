@@ -24,7 +24,7 @@ use {
         PROVIDER_FIELD_REGISTRY,
         syntax_is_ui_capability,
     ]
-    jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_root, effect_scope_argument_valid, effect_scope_split]
+    jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_package_effect, authority_root, effect_scope_argument_valid, effect_scope_split]
 }
 
 TrustDecision: enum {
@@ -338,10 +338,12 @@ pkg_parse_grants: fn(body: String) -> [PackageGrant] PackageParseError! {
 // takes: `FS.Read("data/")` grants reads of that folder alone, and
 // `Net("api.example.com")` that one host. `FFI.C("c")` names one C library,
 // and `Mem.Alloc(above: 65536)`, a memory bound, belongs in a deny list only.
+// `ledger.Ledger` names the effect root `Ledger` the dependency `ledger`
+// declares (authority_package_effect).
 pkg_parse_effect_list: fn(field: String, value: String) -> [String] PackageParseError! {
     names: pkg_parse_string_list(value) ?? return Err(PackageParseError.BadEffectsBlock("`{field}:` must be a list like `[DB, Net]`"))
     loop name in names {
-        if !pkg_effect_root_known(authority_root(name)) {
+        if !pkg_effect_root_known(authority_root(name)) && !authority_package_effect(name) {
             return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
         }
         if name.contains("(") {
