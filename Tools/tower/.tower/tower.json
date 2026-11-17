@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111715,
+    "rev": 111723,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86350,12 +86350,12 @@
         },
         {
           "n": 9,
-          "text": "Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location through a capture input or getUserMedia and the Geolocation API (from #6803 c1), and native.location_updates and the motion sensors as typed streams that stop with their scope and leave no listener (from #6803 c2); the web E-APP-TARGET-FEATURE refusals are removed. Proof: the NativeApp cases ask_gives_a_typed_grant_on_every_target, camera_and_location_give_typed_values_after_a_grant and sensor_streams_stop_with_their_scope on the web.",
+          "text": "Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location through a capture input or getUserMedia and the Geolocation API (from #6803 c1), native.location_updates and the motion sensors as typed streams that stop with their scope and leave no listener (from #6803 c2), native.open_file and native.drop_files as PickedFile values backed by a browser File, with import_tasks importing the same CSV as on Linux (from #6802 c1), and folder access that survives a restart through a stored FileSystemDirectoryHandle that asks for permission again (from #6802 c3); the web E-APP-TARGET-FEATURE refusals are removed. Proof: the NativeApp cases ask_gives_a_typed_grant_on_every_target, camera_and_location_give_typed_values_after_a_grant, sensor_streams_stop_with_their_scope, picked_file_reads_the_same_bytes_on_linux_and_the_web and folder_access_survives_a_restart on the web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-17T01:40:51.628Z"
+          "at": "2026-11-17T05:23:36.643Z"
         }
       ],
       "refs": [],
@@ -86367,7 +86367,7 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:34.688Z",
-      "updated": "2026-11-17T01:43:28.171Z",
+      "updated": "2026-11-17T05:23:36.643Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -99287,11 +99287,11 @@
         {
           "n": 1,
           "text": "The tray from examples/tray.jet stays after the last window closes on Linux (the StatusNotifierItem tray). Its menu lists the caller's projects and is rebuilt when my_projects changes. Proof: `jet test Compiler --profile cases --filter NativeApp/tray_menu_follows_the_live_project_list` on Linux (the host driver reads the menu model before and after a project is added).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:52:05.836Z"
+          "evidence": "dev 5627109956 (case race fix) on features 4d33867924 + 2eb76269b8: jet test Compiler --profile cases --filter NativeApp/tray_menu_follows_the_live_project_list PASS 3 runs in a row on the p247 batch compiler (StatusNotifierItem tray, menu rebuilt when the project list changes).",
+          "at": "2026-11-17T05:55:25.022Z"
         },
         {
           "n": 2,
@@ -99325,7 +99325,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-17T01:45:49.623Z",
+      "updated": "2026-11-17T05:55:25.022Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -99522,12 +99522,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. It is backed by a path on the Linux desktop (through the XDG desktop portal file chooser) and a File in the browser. import_tasks in examples/files.jet imports the same CSV on Linux and in the browser.",
+          "text": "native.open_file gives native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path through the XDG desktop portal file chooser; import_tasks in the Crewboard example imports a CSV through it. On a web build native.open_file and native.drop_files are an E-APP-TARGET-FEATURE compile error until #6556 c9.  proof: jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T21:52:55.432Z",
+          "at": "2026-11-17T06:02:17.850Z",
           "proof": {
             "profile": "cases",
             "filter": "NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web"
@@ -99536,20 +99536,30 @@
         {
           "n": 2,
           "text": "native.save_file writes where the person chose: through the portal save dialog on the Linux desktop, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose` on Linux and the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:52:58.841Z"
+          "evidence": "dev 27b11f1656 (case: one XDG_DATA_HOME per step) on features 859c89d9a6 (Linux portal SaveFile), 7fe33590c1 (web runtime export) and c208da3722 (web App.jet caller): jet test Compiler --profile cases --filter NativeApp/save_file_writes_where_the_person_chose PASS on the p248 batch compiler (Linux portal steps and the node web download steps).",
+          "at": "2026-11-17T05:59:14.583Z"
         },
         {
           "n": 3,
-          "text": "Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox; in the browser through a stored FileSystemDirectoryHandle that asks for permission again. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart` on Linux and the web.",
+          "text": "Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox. On a web build it is an E-APP-TARGET-FEATURE compile error until #6556 c9. Proof: `jet test Compiler --profile cases --filter NativeApp/folder_access_survives_a_restart` on Linux and the web refusal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T21:53:01.053Z"
+          "at": "2026-11-17T05:23:35.685Z"
+        },
+        {
+          "n": 4,
+          "text": "On the Linux desktop, native.drop_files delivers files dropped on its body to on_drop as path-backed native.PickedFile values (Wayland wl_data_device drag and drop, text/uri-list), once a native host renders ui.Node screens (#4951). Proof: jet test Compiler --profile cases --filter NativeApp/drop_files_gives_picked_files_on_linux",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T06:02:20.664Z",
+          "blockedBy": "#4951"
         }
       ],
       "refs": [],
@@ -99557,9 +99567,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-17T01:45:57.647Z",
+      "updated": "2026-11-17T06:02:20.664Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c097myt8",
@@ -102256,12 +102266,12 @@
         },
         {
           "n": 3,
-          "text": "Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait or Any value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported when no other member has that leaf; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
+          "text": "Under D-PRIM-ANY1=C (no Any value; type arms over unions and trait values): member arms accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reaches else. A trait value holding a view of a local, returned from its function, fails with the provenance diagnostic. Proof: cases rows plus a UI snapshot for the escape (found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201; probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g6, q1). The same spelling holds over union and trait-value subjects. It separates two instances of one generic: over Box<Int> | Box<String>, the arms are .Box<Int>(b) and .Box<String>(b) (qualified: .geo.Box<Int>(b)). The bare .Box(b) is E0305 'names more than one member' and offers both arms, and a table of both arms needs no else (review 9 probes f01-f01d). Over a union with one instance of a generic, Int \\| Box<Int>, the bare .Box(b) names that instance, whether Box is local or imported when no other member has that leaf; today both are E0305 'doesn't belong' (v05; k04 in $JET_SCRATCH_ROOT/lanes/AnyReview10/probes/fm). Over a trait value a generic arm always spells its arguments. In an arm, .Name< opens type arguments; as an expression it would be a direction-changing chain, E0333 (t04).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T08:52:00.364Z"
+          "at": "2026-11-17T05:28:49.600Z"
         },
         {
           "n": 4,
@@ -102300,7 +102310,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T23:01:38.012Z",
-      "updated": "2026-11-17T05:18:33.641Z",
+      "updated": "2026-11-17T05:28:49.600Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -220434,6 +220444,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T06:02:20.664Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mq8xwu",
+      "note": "#4 On the Linux desktop, native.drop_files delivers files dropp (blocked by #4951)"
+    },
+    {
+      "at": "2026-11-17T06:02:17.850Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mq8xwu",
+      "note": "#1: Native drop delivery needs a Linux host that renders ui.Node screens, which doesn't exist yet; it moves to its own criterion on this card, blocked by #4951.; was: native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path th"
+    },
+    {
+      "at": "2026-11-17T05:59:14.583Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mq8xwu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T05:55:25.022Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0prey1k",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T05:28:49.600Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0reo0hk",
+      "note": "#3: D-PRIM-ANY1 was ratified C: there is no Any value, so c3's Any subject is a union or trait-value subject.; was: Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reach"
+    },
+    {
+      "at": "2026-11-17T05:23:36.643Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tjjr66",
+      "note": "#9: Takes the browser halves of #6802 c1 and c3, which need a promise-waiting page runtime.; was: Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location "
+    },
+    {
+      "at": "2026-11-17T05:23:35.685Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mq8xwu",
+      "note": "#3: The stored FileSystemDirectoryHandle permission request is promise-based; it moves to #6556 c9.; was: Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox; in the browser through a stored FileSystemDirectoryHandle that asks for permission "
+    },
+    {
+      "at": "2026-11-17T05:23:34.735Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mq8xwu",
+      "note": "#1: The browser half needs the page runtime to wait on a promise (a file input, File.arrayBuffer); the synchronous wasm seam can't. That belongs to #6556 c9, like the moved #6806 and #6803 browser halves.; was: native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. It is backed by a path on the Linux desktop (t"
+    },
     {
       "at": "2026-11-17T05:18:33.641Z",
       "by": "Main",
