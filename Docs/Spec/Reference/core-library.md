@@ -522,7 +522,11 @@ answer's type is the stage's:
 | `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
 
 The hook runs as a compile-time value, under the same rules. A row outside its
-block, or a token of an unknown kind, is left out.
+block, or a token of an unknown kind, is left out. `jet fmt` compiles a file's
+hooks only when a source of its package or of a dependency declares a
+`fmt.block` hook for the marker of one of the file's blocks. It reads those
+sources once per package per run, with a parse and no check, so a file whose
+blocks no hook reads compiles nothing.
 
 ```jet
 use compiler: core.compiler

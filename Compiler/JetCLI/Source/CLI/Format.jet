@@ -15,7 +15,8 @@ jet_cli_format_diagnostics: fn(path: String, source: String, diagnostics: [Diagn
 jet_cli_format_stdin: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOutput {
     source: cli_term.read_all_input() ?? return jet_cli_report_output("", "E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", request.color, JET_DRIVER_EXIT_USAGE)
     label: request.stdin_path ?? "<stdin>"
-    file: jet_cli_fmt_one(label, source, request)
+    hooks := jet_cli_tool_stage_memo()
+    file: jet_cli_fmt_one(label, source, request, hooks)
     if file.report == .Val(report) {
         return JetDriverVerbOutput{stdout: "", stderr: report, exit_code: JET_DRIVER_EXIT_USAGE}
     }
@@ -53,12 +54,14 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     }
     if files.len() == 0 -> return jet_cli_external_fmt_ok(json)
     results := [JetCLIFmtFile]{}
+    // One run learns each package's block hooks once.
+    hooks := jet_cli_tool_stage_memo()
     loop path in files {
         source: cli_files.read(path) ?? {
             results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
             next
         }
-        results.push(jet_cli_fmt_one(path, source, request))
+        results.push(jet_cli_fmt_one(path, source, request, hooks))
     }
     // The preflight keeps the run atomic: a source that can't be read, parsed or
     // migrated stops every write. A package.jet the package model can't read is
