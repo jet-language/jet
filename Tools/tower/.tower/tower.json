@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111225,
+    "rev": 111250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,7 +23,6 @@
         "radar:e10",
         "radar:e13",
         "radar:e9",
-        "radar:e16",
         "radar:e17",
         "radar:e14",
         "radar:e11",
@@ -93461,7 +93460,7 @@
       "body": "Found by SqliteLead on the b6c compiler (#6695 slice 8). A generic call `fn<H: Host>` to a trait method declared `-[]> T? Never!` loses the optional, and the backend rejects it: `ir.build unlowered: ... binder got of type ?[U8] bound to a value of type [U8]`. The smallest repro is the trait `Src{grab -[]> [U8]? Never!; grab2 -> Int? Never!}`, called generically. It works without `Never!`. That breaks I2 (a backend rejection of checked code must not happen) and the one-mechanism promise for effect rows. A workaround is in core.db: VdbeAux.jet Host.vtab_take_errmsg is declared without `Never!`; remove it once fixed. Criteria: a regression case in tests/cases compiles and runs on O0/O1/O2; the workaround is removed.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -93500,7 +93499,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T06:30:13.586Z",
-      "updated": "2026-11-16T13:03:45.740Z",
+      "updated": "2026-11-17T01:44:36.335Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -93645,7 +93644,7 @@
       "body": "Owner order (2026-11-09): the whole seed-cut process (preflight, self-host chain, packs, the golden/ui/cases gates, tag and publish) takes at most 10 minutes of wall-clock time. Today a fresh cut takes about 37 minutes: chain ~3, packs ~2, golden ~10.6, ui ~2, cases ~20 (the suites run one after another with 4 shards x --jobs; the baseline side and the retries add more). Speed it up without weakening the gate. Every row still runs or is soundly reused by content identity; no dropped rows, no easier tier, I9 parity is kept, and timeouts are not hidden as flakes.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -93734,8 +93733,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T12:32:41.154Z",
-      "updated": "2026-11-15T05:35:32.073Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:44:38.863Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -93745,7 +93744,7 @@
       "body": "Owner 2026-11-09: 'we should be the fastest renderer especially since we have top to bottom full control over the whole language stack.' Today a 900x600 frame (a full gradient, ~15 shapes, ~7 text lines) takes ~140 ms at O0 and ~55 ms at O2. Under the AGENTS.md performance gate, core.ui's rasterizer (Core/Ui/Draw.jet and the font rasterizer) gets required cells in the GUI-applications area. For each workload, Jet/peer must be below 1.00 against every matched CPU 2D renderer (Blend2D, Skia's raster backend, tiny-skia, cairo/pixman), and Jet/ceiling at most 1.00 against a hand-written SIMD reference (asm-parity) doing the same work, on every tier (O0 included, since  is what users run) and in both cycles and bytes. The workloads: solid and gradient fills, anti-aliased paths and shapes (rects, rounded rects, circles, polygons), alpha blending (straight and premultiplied), anti-aliased glyph text, image blits and scaling, and full-frame redraw at 1080p and 4K. Use the whole stack: SIMD in the runtime or Core through vetted internals, compiler codegen (bounds-check elimination, vectorizing span loops) and data layout. Fix compiler-side gaps at their root in the compiler, not by hand-unrolled Jet. Semantics and pixels are identical on every tier.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -93818,7 +93817,7 @@
       "parentId": "c0l39twq",
       "needsAcceptance": false,
       "created": "2026-11-09T12:47:48.165Z",
-      "updated": "2026-11-16T13:03:48.984Z",
+      "updated": "2026-11-17T01:44:41.287Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -93829,7 +93828,7 @@
       "body": "Found by WaylandLead3 while speeding up the core.ui rasterizer (#6718); the renderer lane's Micro.jet repro is gone, so the proofs are cases and the pixel-loops gauntlet entry. (1) The O2 fill leaf doesn't fire for stores through a &struct field place: 1.15 ns/B vs 0.07 ns/B for a local. (2) U64 arithmetic takes ~10 ns/iteration even at O2, no faster than O0. (3) An O0 indexed store costs ~3 ns/element, so per-pixel Jet code can't redraw 1080p in a few ms at O0 (jet run). Fix each at its root in the compiler (IR/backend), not with library workarounds. The same semantics on every tier (I9).",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -93883,7 +93882,7 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T13:21:28.909Z",
-      "updated": "2026-11-16T13:03:49.941Z",
+      "updated": "2026-11-17T01:44:43.925Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -93960,7 +93959,7 @@
       "body": "Owner 2026-11-09, on the Showcase: 'it would also be excellent if it can be gpu accelerated - again with native jet support, not some additional dsl or sub language, but native jet', and 'we want this to look the same whether it is running in a native app or in a browser'. Standing direction: one unified GPU language built into core Jet (ratified markers: #Shader for graphics, D-GPU-SHADER-SURFACE1=B; Kernel for compute, D-GPU-COMPUTE-LAUNCH1), working on any GPU out of the box, with no per-vendor or per-OS DSLs. Conflict: D-GPU-UI1=A keeps desktop defaults on software (a static single file, no driver loading), so a GPU default on desktop needs a new owner ballot that revises it, tied to the linking-model ballot #c0ba141x (GPU drivers need the platform loader). Open technical questions for the ballot: GPU rasterization isn't bit-identical across vendors, so 'same look' must be defined (bit-identical through the software path vs perceptually identical through the GPU), and how a static musl binary reaches the system Vulkan/WebGPU driver.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -94008,7 +94007,7 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T14:01:03.460Z",
-      "updated": "2026-11-16T13:03:52.763Z",
+      "updated": "2026-11-17T01:44:47.401Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -94145,7 +94144,7 @@
       "body": "ReplMem (2026-11-09): a trait-value row (Compiler/JetIR BuildTypes.jet:286) is a Pointer row with no drop and no clone, so a boxed trait value has no drop glue and its payload leaks. A strong_count probe leaks one per binding. In the compiler, Pipeline.jet's compiler_queries (a JetEvalCompilerQueryHost trait value) holds a Shared context whose eval_config.native keeps the whole JetEvalNativeSession (about 3.25 MB image plus the child) alive on every compile: the REPL residual of about 12 MB per turn. The fix gives trait values drop glue that dispatches on the payload's implementer, keeping today's observable copy and alias semantics as the spec states them, and handles move-receiver dynamic calls.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -94254,7 +94253,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T14:54:36.252Z",
-      "updated": "2026-11-16T13:03:55.698Z",
+      "updated": "2026-11-17T01:44:49.984Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -94690,7 +94689,7 @@
       "body": "OWNER HARD REQUIREMENT (2026-11-09): acronyms are all caps in types AND file names, Title Case otherwise (Core/Net/TLS.jet, not Core/Net/Tls.jet). S66 and D-ONCE-CASE1 already require this for type names (E0358) and name the lexicon for file names, but nothing enforces file names. A census of dev (lexicon Compiler/JetFoundation/Data/Syntax/Acronyms.jet) finds 156 distinct file and folder names with a word-cased acronym (642 path hits), e.g. Ast.jet, Cbor.jet, Cli/, Db/, Http/, Tls.jet, CanonicalJson.jet. Greenfield cutover: rename every one and migrate every import, module path mapping, reference, generated artifact and doc in one commit stack; no aliases.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -94791,7 +94790,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:40.028Z",
-      "updated": "2026-11-16T15:20:06.137Z",
+      "updated": "2026-11-17T01:44:53.243Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -94802,7 +94801,7 @@
       "body": "OWNER HARD REQUIREMENTS (2026-11-09): (1) The owner hates all-lowercase text in readouts, UI and anything a user sees (CLI output such as jet --version's 'release status: prerelease', HUD labels, reports, help). User-visible labels and readouts use Title Case or sentence case; acronyms in caps. Identifiers, paths, flags, code and machine formats (JSON keys) keep their spelling. (2) American English everywhere, never British: behavior not behaviour, color not colour, initialize not initialise, license not licence, and so on. A census of dev finds 129 files with British spellings.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -94859,7 +94858,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:56:53.397Z",
-      "updated": "2026-11-16T13:03:59.611Z",
+      "updated": "2026-11-17T01:44:55.352Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -94870,7 +94869,7 @@
       "body": "Moved from #6688, #6694, #6695 and #6689. Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -94970,7 +94969,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:58:54.754Z",
-      "updated": "2026-11-16T13:04:05.424Z",
+      "updated": "2026-11-17T01:44:57.624Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -94981,7 +94980,7 @@
       "body": "Moved from #6694 c7 (owner ruling 2026-11-08, Q11 B). Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -95011,7 +95010,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:59:02.674Z",
-      "updated": "2026-11-16T13:04:06.411Z",
+      "updated": "2026-11-17T01:44:59.787Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -95084,7 +95083,7 @@
       "body": "Owner ruling 2026-11-09: keep the mbedtls translation (#6694) for now, then rewrite it from scratch, preserving the module boundaries, so that it can be MIT. Work from the RFCs, FIPS and SP 800 documents, never from mbedtls or another non-MIT source. Starts after G1.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -95202,7 +95201,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:49:47.742Z",
-      "updated": "2026-11-16T04:40:17.783Z",
+      "updated": "2026-11-17T01:45:03.126Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -95213,7 +95212,7 @@
       "body": "Found by WaylandLead3 on a0_042. owned: Box{..}; child: task &&owned { consume(owned) } with consume(b: &&Box) reports 'owned was consumed by consume, so it can't be used here' at the capture mark, with no later use. The same happens for 'mine: owned' and 'owned :=' inside the body. The capture hands ownership into the task, so a move inside the body is the task's own last use. Repro: $JET_SCRATCH_ROOT-style scratch file a.jet (copied into the card's case when fixed).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -95261,7 +95260,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:58:53.917Z",
-      "updated": "2026-11-16T13:04:08.309Z",
+      "updated": "2026-11-17T01:45:06.663Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -95338,7 +95337,7 @@
       "body": "I4 says every diagnostic has a registered code, what/why/fix text and a UI snapshot; without the snapshot it isn't done.\n\nA sweep on 2026-11-11 (G8Scope-3, seed-b8, dev fe4c65249b) found 977 codes registered in Compiler/Prelude/Diagnostics.jet. 582 are carried by a tests/ui or tests/ui_lint snapshot ([Exxxx] or /e/Exxxx). 397 are carried by none.\n\nThe list is $JET_SCRATCH_ROOT/lanes/G8Scope/ecodes/missing.txt and the sweep script is lanes/G8Scope/ecodes.sh.\n\nBy range: E00 60, E01 8, E02 4, E03 28, E04 17, E06 4, E07 3, E08 1, E09 37, E11 5, E12 81, E13 32, E14 4, E18 4, E20 2, E21 13, E22 6, E23 9, E24 8, E26 11, E27 5, E28 4, E29 14, E30 3, E31 3, E32 4, E33 7, E34 3, E35 2, E36 12, E42 3.\n\nGreenfield: a registered code that no compiler, runtime or tool path emits is removed from the registry in one cutover, not given a snapshot.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -95521,7 +95520,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:02:07.487Z",
-      "updated": "2026-11-16T13:04:22.252Z",
+      "updated": "2026-11-17T01:45:08.471Z",
       "updatedBy": "Main",
       "criteriaLastN": 17
     },
@@ -95724,7 +95723,7 @@
       "body": "Owner order 2026-11-11 late. A Jet program must be faster and use less peak memory than the same program in any other language. Only highly optimized hand-written machine code is exempt, and Jet aims as close to it as it can. A loss to any peer on wall time or peak memory is a codegen, runtime or Core failure. It is fixed generally, structurally and robustly in the mechanism every program uses, never per cell, so that the result holds for programs nobody measured. The machine ceiling stays the hill-climbing stage (G13): its ratio is reported, but it holds no cell until the owner opens it.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -95814,7 +95813,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T02:32:29.173Z",
-      "updated": "2026-11-16T13:04:24.176Z",
+      "updated": "2026-11-17T01:45:11.469Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -95905,7 +95904,7 @@
       "body": "Measured by G4Ports-1, 2026-11-11, on seed-b9, from the #5072 port twins (PortBars runs each twin from source, so every case pays a cold compile). jetc-trace, a 148-line file: jet run 1063 ms, against a 3 ms run of the built binary and node's 24 ms. Its phases: comptime.bodies 0.29 s (4 comptime programs built and run), load 0.26, sema.finalize 0.19, register 0.07, ir.build+opt+x64 0.07, link about 0.01. run-cold-context: jet run -- --help takes 4108 ms against node's 40 ms. Its phases: comptime.bodies 1.26 s (31 programs, 381 functions), sema.finalize 0.80, load 0.60, ir.opt 0.40, register 0.23, ir.build 0.08, x64 0.08. The port bar measures exactly what the 30M lines/s cold-compile target is about: the cost is general compile cost, not twin code.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -96335,7 +96334,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-16T13:04:32.788Z",
+      "updated": "2026-11-17T01:45:14.882Z",
       "updatedBy": "Main",
       "criteriaLastN": 24
     },
@@ -96346,7 +96345,7 @@
       "body": "Found by Lander5 in the b10 merged cases run, 2026-11-11: 36 case rows end in ERROR, an internal compiler error with exit 101. Every encoding stream case is hit (corelib cbor, csv, xml, json and jsonl streams, corelib_parts_encoding_streams, corelib_parts_encoding_surface xml, encoding_hostile_io, encoding_parity, encoding_cause_is_a_failure_domain). The fault: runtime route jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dencoding_c_c_encoding_cause, and jet_rt_record_get_..._encoding_cause_kind, which the Jet runtime does not export (it exports jet_rt_handle_drop_encoding_cause). Bisect: jet build of the text_and_file_readers_keep_distinct_checked_layouts fixture gives rc 0 on seed-b7 and seed-b8 (776b3d1191), and rc 101 on seed-b9 (c805093fd9) and seed-b10. The only b8..b9 commit touching EncodingCause is 892727fd3a (TlsLead #6615 S13: EncodingCause becomes an error type, with #[Error, Equatable] and a JET_CORE_ERROR_TYPES row). Its own deferred lines were rc 1 on b9 and b10. A backend rejection of checked code is an I2 internal error.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -96409,7 +96408,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:55:11.076Z",
-      "updated": "2026-11-16T13:04:33.711Z",
+      "updated": "2026-11-17T01:45:16.847Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -96460,7 +96459,7 @@
       "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. jet run at O0, O1, O2 and default passes. The built binary (jet build --optimize=full, then run it) exits 70: 'Stop [E3001]: panic: last use: peak grew 97536 kB, more than 1.5 strings of 50000000 bytes' at main.jet:31 in measure. Drop at last use holds when run from memory but not in the built artifact: one meaning across tiers (I9) is broken. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -96565,8 +96564,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-15T04:46:17.470Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:45:20.347Z",
+      "updatedBy": "Main",
       "criteriaLastN": 8
     },
     {
@@ -96616,7 +96615,7 @@
       "body": "Owner, 2026-11-12: a test that fails under load, rather than passing more slowly, is a reliability defect. In the a0.0.45 admit of dev 2844b04984 (run beside a train build, landings and probes), about 200 rows across candidate chunks 2-5 and 8 were TIMEOUT or ERROR. 82 golden, 20 ui and 59 cases rows passed only on retry. Five browser_bidi and web_app rows ERRORed with an empty 'free-port probe failed', because the probe's own wall-clock timeout was reported without its reason. The root: JetTestKit gives every step a 60 s wall-clock timeout (Compiler/JetTestKit/Source/Exec.jet KitOptions timeout: 60, process.cmd(...).timeout), so a loaded host's slowness is judged as failure. The admit retry masks it instead of fixing it.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -96706,7 +96705,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-16T23:34:01.760Z",
+      "updated": "2026-11-17T01:45:23.596Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -96915,8 +96914,8 @@
       "title": "A lambda that moves a capture runs the move on every call",
       "body": "Found by G9Web-1-2 (#6779 work, dev 46855ae09a, seed-b14). Sema accepts a lambda whose body moves a captured owner, even when the lambda is passed to a per-item callback. `[1,2,3].map(x -> consume(s.move()) + x).sum()` prints 33 and fold prints 27: the same owner is moved three times, a use after move (I1). Probe: $JET_SCRATCH_ROOT/lanes/G9Web/probe6779/mapmove/main.jet. The safe fix needs no new syntax: refuse the move. A call-at-most-once parameter mark that would allow it for one-shot callbacks is a language choice and goes to a ballot.",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -96975,7 +96974,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-16T13:04:36.887Z",
+      "updated": "2026-11-17T01:45:25.352Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -97033,8 +97032,8 @@
       "title": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list",
       "body": "ir_route_can_stop (JetIR) is a hand-kept list of runtime routes that skip the stop poll after a call. Its generated twin RUNTIME_STOP_EXPORTS has no callers. The poll catches a stop that the callee published, so the sound set is the runtime closure of routes that can publish one, with fatal traps (allocation failure, capacity panic, invalid layout) declared fatal rather than stops. Plan (G11Speed-5, 2026-11-13): build a stops receipt from the runtime IR at library build, as the .threads receipt is built (BuildLibrary → Request → RuntimePack → Host), and prune stop points after the build from it. G11Speed-c29j1 extends the list by hand for now.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -97064,8 +97063,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T10:15:23.686Z",
-      "updated": "2026-11-15T11:38:12.538Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-17T01:45:28.819Z",
+      "updatedBy": "Main",
       "criteriaLastN": 1
     },
     {
@@ -97445,8 +97444,8 @@
       "title": "Data-oriented compiler core: interned u32 ids, flat columns, per-phase arenas, no RC, under 1 GB",
       "body": "Owner order (2026-11-13): \"i want one slot working the data oriented core immediately. this should be done carefully, systemically, and cleanly. it should be a fast intelligent cutover.\" This card is the work home for #5479 plan step 3 (#5479 c7) and the memory half of #5910. #5479 c7 and #5910 stay as the gates and are met from this card's evidence.\n\nWhat it is: every compiler name, symbol, type and function becomes an interned u32 id, with no String-keyed maps. The AST, types and IR become flat struct-of-arrays columns instead of per-node heap objects. Compiler data lives in per-phase arenas freed in bulk and carries no reference counts. Peak memory falls under 1 GB.\n\nWhy: G11Speed-5's 2026-11-13 profile (check RunColdContext on the core-b1 jet) has no symbol above 2.3% self time. The cost is spread across allocation, RC, string keys and copies, which this work removes. From today's numbers (8,510 lines/s on the c1 cell, about 5 of 32 threads busy, so roughly 590 µs CPU per line), the c7 gate of 5 µs per line is about a 100× CPU cut. The parallel pipeline (its own card) needs this card's arenas and ids to scale.\n\nHow: one slot (G11Speed-5). Design and census first, then slices in dependency order. Each slice is a whole cutover (greenfield: no parallel representation, no adapter layer, no flag) whose proof is identical output: the self-host chain fixed point plus goldens, ui and cases. The worker writes code and submits; Lander5 builds, runs the chain and lands. A slice that cannot be cut over whole is split by package boundary, never by keeping two representations.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -97546,7 +97545,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-16T13:04:37.825Z",
+      "updated": "2026-11-17T01:45:31.854Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -97556,8 +97555,8 @@
       "title": "Parallel compiler pipeline: streaming modules, parallel comptime, wait-free queues, per-thread arenas (24 of 32 threads)",
       "body": "Owner order (2026-11-13): the parallel pipeline is tracked as its own card so it cannot be lost. This card is the work home for #5479 plan step 2 (#5479 c6), which stays as the gate and is met from this card's evidence. It is not staffed today: the data-oriented core (#6793) takes the speed slot, and this card starts once #6793's interning and per-phase arenas have landed. Lock-free per-thread allocation and contention-free scaling depend on them.\n\nWhat it is: modules stream through the pipeline as soon as their dependencies are checked, with no phase-wide barriers. Comptime runs in parallel. Work queues are wait-free. Each thread allocates from its own arena and takes no global lock.\n\nProjected ceiling (from today's numbers, not measured): about 5 to 24 busy threads, so at most about 5× wall time on its own with CPU per line unchanged. Its 400K lines/s gate needs #6793's CPU cut as well.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97605,7 +97604,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:25.288Z",
-      "updated": "2026-11-16T13:04:38.743Z",
+      "updated": "2026-11-17T01:45:33.472Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98244,7 +98243,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98253,6 +98252,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met (c1 p237, c3 p238 dev 5bea729463); the web halves of the device work live on #6556."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -98287,9 +98291,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-17T01:44:22.564Z",
+      "updated": "2026-11-17T01:44:46.144Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T01:44:46.144Z"
     },
     {
       "id": "c0fqrrpk",
@@ -100545,7 +100550,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -100556,6 +100561,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met; c3 one codec owner on p238 (dev 5bea729463)."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -100605,9 +100615,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:37.165Z",
-      "updated": "2026-11-17T01:44:23.604Z",
+      "updated": "2026-11-17T01:44:51.672Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T01:44:51.672Z"
     },
     {
       "id": "c0pv78gy",
@@ -217891,6 +217902,174 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:45:33.472Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hkdzht",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:31.854Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:28.819Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g4h3r9",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:25.352Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08zzpo5",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:23.596Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gy2j07",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:20.347Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xphd0i",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:16.847Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0on083p",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:14.883Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:11.469Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ef6eb1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:08.471Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pmy5fy",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:06.663Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j93bm1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:03.126Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0miof6j",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:59.788Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qnrbr0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:57.624Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03obxd3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:55.352Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cnf5w8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:53.243Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07k91t6",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:51.672Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0exjsbx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:44:49.985Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j3st66",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:47.401Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0leoyxb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:46.144Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0unyp7q",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:44:43.926Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qoe1b9",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:41.287Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f9brds",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:38.863Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qyk2os",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:44:36.335Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01xp5ri",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:44:32.975Z",
       "by": "Main",
