@@ -56,26 +56,37 @@ Every change to the package's sources rebuilds it; a failed rebuild prints its
 report and keeps the last good build served. A full-stack
 `App` entry is a server, and `jet dev` runs it natively. Under node the host
 file system is the program's; a page has none, so file calls fail with
-ENOSYS. The host runs one thread: the build refuses a `task.group` with
-`E-WEB-UNSUPPORTED`, and a program that starts any other `task` stops with
-E3001 (`tasks are not available on the web target yet`).
+ENOSYS. The build refuses a `task.group` with `E-WEB-UNSUPPORTED`.
 
 A program that waits does not block the page. Where the JavaScript engine
 has promise integration (`WebAssembly.Suspending` and
-`WebAssembly.promising`), a timed wait on the program's thread, such as
-`time.sleep`, suspends the program on a promise the host settles at the
-wait's deadline, and the page goes on meanwhile: its timers, its rendering
-and its other scripts run. The program's run, each click and each drop is
-one entry, and entries take turns: a click or drop that arrives while one
-is suspended runs once that one has ended. A device request the browser
-answers later (`app.ask`, `app.take_photo`, `app.location`, the reads of
-a photo the page keeps, and each reading `app.location_updates`,
-`app.orientation_updates` and `app.heading_updates` give, through the
-page's UI provider) suspends the program the same way until the browser's
-promise settles. Without promise integration the program can neither
-suspend nor hold the page, so its first such wait or request stops it with
-E3001, naming the missing `WebAssembly.Suspending` and
-`WebAssembly.promising`; it never runs on past the wait out of order.
+`WebAssembly.promising`), a wait, such as `time.sleep`, a lock or a
+channel, suspends the waiting thread on a promise the host settles at the
+wake or the deadline, and the page goes on meanwhile: its timers, its
+rendering and its other scripts run. The program's run, each click and
+each drop is one entry, and entries take turns: a click or drop that
+arrives while one is suspended runs once that one has ended. A device
+request the browser answers later (`app.ask`, `app.take_photo`,
+`app.location`, the reads of a photo the page keeps, and each reading
+`app.location_updates`, `app.orientation_updates` and
+`app.heading_updates` give, through the page's UI provider) suspends the
+program the same way until the browser's promise settles.
+
+Tasks run as they do natively, with the same scheduler: its threads and
+its tasks' fibers are coroutines on the page's one JavaScript thread, each
+on its own stack in the program's memory. One runs at a time, until it
+waits, switches fibers or ends; then the next one due runs. A task that
+computes without waiting holds the page until it does. A generator's
+producer is such a task, so a generator runs on the page as it does
+natively.
+
+Without promise integration the program can neither suspend nor hold the
+page, so its first such wait or request stops it with E3001, naming the
+missing `WebAssembly.Suspending` and `WebAssembly.promising`; it never runs
+on past the wait out of order. Its first task start stops it the same way,
+after the host prints `jet: this web host can't run tasks: it has no
+JavaScript Promise Integration (WebAssembly.Suspending and
+WebAssembly.promising)`.
 
 When the page has a `document`, the host shows what the program's `core.ui`
 backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)

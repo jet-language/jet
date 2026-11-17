@@ -728,9 +728,9 @@ thread_join: fn(handle: I64, result: I64) -> I64 {
     loop {
         tid: sync_load(word)
         if (tid == I64{0}) { break }
-        #Unsafe("the kernel's CHILD_CLEARTID clears this live word and wakes a shared futex; the recheck covers exit before the wait and EINTR") {
-            _ := os_syscall_i64(I64{202}, word, I64{0}, tid, I64{0}, I64{0}, I64{0})
-        }
+        // The kernel's CHILD_CLEARTID clears this live word and wakes a
+        // shared futex; the recheck covers exit before the wait and EINTR.
+        _ := sync_futex_wait_shared(word, tid)
     }
     if (result != I64{0}) { sync_store(result, sync_load(wrapping(handle + I64{32}))) }
     thread_release(handle)

@@ -719,16 +719,31 @@ class Host {
     this.tls = new WebAssembly.Global({ value: "i64", mutable: true }, 0n);
     this.edx = new WebAssembly.Global({ value: "i32", mutable: true }, 0);
     this.unmapped = [];
-    // The host runs one thread: the first refused thread start (clone) says
-    // why before the runtime stops with E3001.
+    // Without JSPI the host runs one thread: the first refused thread start
+    // (clone) says why before the runtime stops with E3001.
     this.threadsRefused = false;
     this.files = new Map();
     this.lines = ["", "", ""];
     this.outcome = null;
-    // The running entry may wait (Host.waitable), and it is waiting now
-    // (Host.wait).
+    // Without JSPI, the running entry would wait (waitableCall) but can't.
     this.waitable = false;
-    this.waiting = false;
+    // With JSPI the program's threads and fibers, and each entry, are
+    // coroutines on the page's event loop that take turns (step): the one
+    // whose registers the globals hold now (`running`), the ones due to run
+    // next (`ready`), the entries under way (`entries`), the futex waits by
+    // address (`waiters`), the contexts fiber switches left by token
+    // (`switched`), the waits' timers, and the registers of the thread that
+    // runs the page's plain calls (`home`).
+    this.running = null;
+    this.ready = [];
+    this.stepping = false;
+    this.entries = new Set();
+    this.waiters = new Map();
+    this.switched = new Map();
+    this.timers = new Set();
+    this.tokens = 0n;
+    this.home = null;
+    this.nextTid = (nodeProcess?.pid ?? 1) + 1;
     this.dom = false;
     // The scene's open context menu (openMenu), null for none.
     this.menu = null;
@@ -774,6 +789,13 @@ class Host {
       env: { memory: this.memory, table: this.table, sp: this.sp, tls: this.tls, edx: this.edx },
       host: {
         syscall: (n, a, b, c, d, e, f) => BigInt(this.syscall(Number(n), Number(a), Number(b), Number(c), Number(d), Number(e), Number(f)) ?? 0),
+        // A fiber switch (JetWeb Leaf.jet os_fiber_switch_i64): only
+        // carriers switch, and without JSPI no carrier starts.
+        switch: JSPI
+          ? new WebAssembly.Suspending((save, target) => this.fiberSwitch(save, target))
+          : () => {
+              throw new Error("a fiber switch needs JavaScript Promise Integration");
+            },
       },
       c: this.cLibrary(),
       ...extra,
@@ -833,16 +855,36 @@ class Host {
   }
 
   // An entry's failure: an exit records its status; anything else is a
-  // trap, recorded and thrown on as JetHostWasmError.
+  // trap, recorded and thrown on as JetHostWasmError. A trap or a nonzero
+  // exit ends the program's threads with it (end).
   fail(error) {
     this.flushLines();
     if (error instanceof JetHostExit) {
       this.outcome = error.status;
+      if (this.outcome !== 0) this.end();
       return;
     }
     this.outcome = TRAP_STATUS;
+    this.end();
     this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
     throw this.error;
+  }
+
+  // A program that trapped or exited nonzero is over: no thread of it runs
+  // again, as the native process exit takes every thread with it, and no
+  // wait's timer holds the page. One whose run returned 0 lives on with its
+  // threads, since its clicks still run (click).
+  end() {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
+    this.waiters.clear();
+    this.switched.clear();
+    this.ready.length = 0;
+  }
+
+  // Whether the program is over (end).
+  over() {
+    return this.outcome !== null && this.outcome !== 0;
   }
 
   // Runs the async `body`, one of the program's entries, once every entry
@@ -861,20 +903,28 @@ class Host {
   }
 
   // The wasm export `call` with `args`, called where it may wait (wait): a
-  // promise of its result. Without JSPI it runs straight through, and a
-  // wait in it stops the program (jet_rt_host_can_wait), since it could
-  // neither suspend nor block the page's event loop.
-  async waitableCall(call, ...args) {
+  // promise of its result. Under JSPI it is a coroutine on the page's
+  // thread, whose stack is the page's own (home). Without JSPI it runs
+  // straight through, and a wait in it stops the program
+  // (jet_rt_host_can_wait), since it could neither suspend nor block the
+  // page's event loop.
+  waitableCall(call, ...args) {
+    if (JSPI) {
+      return new Promise((resolve, reject) => this.launch({ fn: call, args, tid: nodeProcess?.pid ?? 1, settle: { resolve, reject } }));
+    }
     this.waitable = true;
     try {
-      return JSPI ? await WebAssembly.promising(call)(...args) : call(...args);
+      return Promise.resolve(call(...args));
+    } catch (error) {
+      return Promise.reject(error);
     } finally {
       this.waitable = false;
     }
   }
 
   // The program's run, as the native process runs main and then exits: a
-  // promise of its exit status.
+  // promise of its exit status. After 0 its threads live on for its clicks;
+  // otherwise they end with it.
   run() {
     return this.turn(async () => {
       if (this.outcome !== null) return;
@@ -882,8 +932,127 @@ class Host {
       this.rt.jet_web_fini();
       this.flushLines();
       this.outcome = status;
+      if (status !== 0) this.end();
       this.paintScene();
     }).then(() => this.outcome);
+  }
+
+  // Coroutines (JSPI). A record: the wasm function `fn` it runs with `args`,
+  // its registers while it is not running (`sp`, `tls`, `edx`; an entry
+  // starts on the page thread's, home), its thread id (`tid`, gettid), the
+  // word its end clears and wakes (`clearTid`, as the kernel's
+  // CLONE_CHILD_CLEARTID), an entry's promise (`settle`), and once it has
+  // started, the resolver its suspension resumes (`resume`) with `value`.
+  // Exactly one runs at a time: it holds the globals from the moment `step`
+  // hands them over until it suspends (park) or ends (finish), and nothing
+  // else is resumed meanwhile, so a resumption queued as a microtask can't
+  // find another one's registers.
+
+  // Starts coroutine `record` once the running one, if any, suspends.
+  launch(record) {
+    record.started = false;
+    record.edx ??= 0;
+    record.clearTid ??= 0;
+    if (record.settle) this.entries.add(record);
+    this.wake(record);
+  }
+
+  // Makes `record` due to run, resumed with `value`; `first` puts it
+  // ahead of the others, as a fiber switch hands over to the context it
+  // names.
+  wake(record, value = 0n, first = false) {
+    record.value = value;
+    if (first) this.ready.unshift(record);
+    else this.ready.push(record);
+    this.schedule();
+  }
+
+  // A `step` as a microtask, once the code under way returns.
+  schedule() {
+    if (this.stepping) return;
+    this.stepping = true;
+    queueMicrotask(() => {
+      this.stepping = false;
+      this.step();
+    });
+  }
+
+  // Hands the globals to the next due coroutine and runs or resumes it; with
+  // none due, back to the page's thread (home), whose registers they held
+  // before the first coroutine ran.
+  step() {
+    if (this.running !== null) return;
+    if (this.over()) {
+      this.ready.length = 0;
+      return;
+    }
+    this.home ??= { sp: this.sp.value, tls: this.tls.value };
+    const next = this.ready.shift();
+    if (next === undefined) {
+      this.sp.value = this.home.sp;
+      this.tls.value = this.home.tls;
+      return;
+    }
+    this.running = next;
+    this.sp.value = next.sp ?? this.home.sp;
+    this.tls.value = next.tls ?? this.home.tls;
+    this.edx.value = next.edx;
+    if (next.started) {
+      next.resume(next.value);
+      return;
+    }
+    next.started = true;
+    let result;
+    try {
+      result = WebAssembly.promising(next.fn)(...next.args);
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+    result.then(
+      (value) => this.finish(next, value, null),
+      (error) => this.finish(next, null, error),
+    );
+  }
+
+  // Suspends the running coroutine: its registers are kept, `arm` sets up
+  // what wakes it, and the next due one runs. A promise of the value its
+  // wake gives, which resumes it.
+  park(arm) {
+    const record = this.running;
+    record.sp = this.sp.value;
+    record.tls = this.tls.value;
+    record.edx = this.edx.value;
+    // A suspended entry's frames are live on the page's stack: plain calls
+    // run below them.
+    if (record.settle) this.home = { sp: record.sp, tls: record.tls };
+    this.running = null;
+    const resumed = new Promise((resolve) => (record.resume = resolve));
+    arm(record);
+    this.schedule();
+    return resumed;
+  }
+
+  // A coroutine's end: its result or failure. An entry answers its promise;
+  // a thread clears and wakes its id word. A thread's failure (a trap, or
+  // the process exit it called) is the program's: it fails the entries
+  // under way, whose turns record it (fail), else it fails here.
+  finish(record, value, error) {
+    this.running = null;
+    if (record.settle) {
+      this.entries.delete(record);
+      this.home = { sp: this.sp.value, tls: this.tls.value };
+      if (error === null) record.settle.resolve(value);
+      else record.settle.reject(error);
+    } else if (error !== null) {
+      this.end();
+      if (this.entries.size === 0) this.fail(error);
+      for (const entry of this.entries) entry.settle.reject(error);
+      this.entries.clear();
+    } else if (record.clearTid !== 0) {
+      this.view().setInt32(record.clearTid, 0, true);
+      this.futexWake(record.clearTid, Infinity);
+    }
+    this.schedule();
   }
 
   // The scene the runtime's last core.ui paint recorded (UiBackends.jet), as
@@ -1332,19 +1501,111 @@ class Host {
     return 0;
   }
 
-  // The timed futex wait of an entry that can wait (JetRuntime Sync.jet
+  // The futex wait of the running coroutine (JetRuntime Sync.jet
   // jet_rt_host_wait): -EAGAIN at once when the word at `address` is not
-  // `expected`, else a promise of -ETIMEDOUT once the monotonic clock
-  // reaches `deadline`, in nanoseconds. The program stays suspended until
-  // then while the page's event loop runs; the next entry waits its turn.
+  // `expected`, else a promise of 0 once a futex wake (futexWake) reaches
+  // it, or of -ETIMEDOUT once the monotonic clock reaches `deadline`, in
+  // nanoseconds (-1: never). It stays suspended until then while the page's
+  // event loop and the program's other threads run; the next entry waits
+  // its turn.
   wait(address, expected, deadline) {
-    if (this.view().getInt32(Number(address), true) !== Number(BigInt.asIntN(32, expected))) return BigInt(-E.AGAIN);
-    const milliseconds = Math.max(0, Math.ceil(Number(deadline - nowNanoseconds(1)) / 1000000));
-    this.waiting = true;
-    return new Promise((resolve) => setTimeout(resolve, milliseconds)).then(() => {
-      this.waiting = false;
-      return BigInt(-E.TIMEDOUT);
+    const at = Number(address);
+    if (this.view().getInt32(at, true) !== Number(BigInt.asIntN(32, expected))) return BigInt(-E.AGAIN);
+    return this.park((record) => {
+      const waiter = { record, timer: null };
+      const queue = this.waiters.get(at) ?? [];
+      queue.push(waiter);
+      this.waiters.set(at, queue);
+      if (deadline < 0n) return;
+      const milliseconds = Math.max(0, Math.ceil(Number(deadline - nowNanoseconds(1)) / 1000000));
+      waiter.timer = this.later(milliseconds, () => {
+        const left = this.waiters.get(at) ?? [];
+        const index = left.indexOf(waiter);
+        if (index < 0) return;
+        left.splice(index, 1);
+        if (left.length === 0) this.waiters.delete(at);
+        this.wake(record, BigInt(-E.TIMEDOUT));
+      });
     });
+  }
+
+  // `body` after `milliseconds`, unless the program ends first (end).
+  later(milliseconds, body) {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      body();
+    }, milliseconds);
+    this.timers.add(timer);
+    return timer;
+  }
+
+  // A futex wake: resumes up to `count` of the coroutines waiting on
+  // `address`, longest waiting first; how many it resumed.
+  futexWake(address, count) {
+    const queue = this.waiters.get(address) ?? [];
+    let woken = 0;
+    while (queue.length > 0 && woken < count) {
+      const waiter = queue.shift();
+      if (waiter.timer !== null) {
+        clearTimeout(waiter.timer);
+        this.timers.delete(waiter.timer);
+      }
+      this.wake(waiter.record);
+      woken += 1;
+    }
+    if (queue.length === 0) this.waiters.delete(address);
+    return woken;
+  }
+
+  // A fiber switch (JetRuntime Fiber.jet fiber_run and fiber_switch_out,
+  // through JetWeb Leaf.jet os_fiber_switch_i64): the running coroutine
+  // leaves at `save` a token a later switch to it names and suspends, and
+  // the context `target` names runs next on the same thread: the coroutine
+  // a switch left there, else a fresh fiber, whose seed (Fiber.jet
+  // fiber_new) holds the function jet_rt_fiber_entry at `target` and starts
+  // with its stack pointer there and the switching thread's registers.
+  // Tokens lie past 32 bits, so none is a seed's address.
+  fiberSwitch(save, target) {
+    this.tokens += 1n;
+    const token = (1n << 32n) + this.tokens;
+    this.view().setBigUint64(Number(save), token, true);
+    return this.park((record) => {
+      this.switched.set(token, record);
+      const left = this.switched.get(target);
+      if (left !== undefined) {
+        this.switched.delete(target);
+        left.tid = record.tid;
+        this.wake(left, 0n, true);
+        return;
+      }
+      const entry = this.view().getBigUint64(Number(target), true);
+      const fiber = { fn: this.table.get(Number(entry)), args: [0n], sp: target, tls: record.tls, edx: 0, tid: record.tid, clearTid: 0, started: false };
+      this.wake(fiber, 0n, true);
+    });
+  }
+
+  // A thread start (clone, JetRuntime Thread.jet thread_spawn): under JSPI
+  // a coroutine on its own stack `stack`, which holds the function
+  // jet_rt_thread_entry and its start record; it starts with the starting
+  // thread's thread pointer, as a clone without CLONE_SETTLS does, once the
+  // running coroutine suspends. CLONE_PARENT_SETTID stores its id at
+  // `parentTid`; CLONE_CHILD_CLEARTID has its end clear `childTid` and wake
+  // it (finish). Without JSPI the host runs one thread and refuses.
+  clone(flags, stack, parentTid, childTid) {
+    if (!JSPI) {
+      if (!this.threadsRefused) console.error("jet: this web host can't run tasks: it has no JavaScript Promise Integration (WebAssembly.Suspending and WebAssembly.promising)");
+      this.threadsRefused = true;
+      return -E.AGAIN;
+    }
+    const view = this.view();
+    const tid = this.nextTid;
+    this.nextTid += 1;
+    if ((flags & 0x100000) !== 0) view.setInt32(parentTid, tid, true);
+    if ((flags & 0x1000000) !== 0) view.setInt32(childTid, tid, true);
+    const entry = view.getBigUint64(stack, true);
+    const start = view.getBigUint64(stack + 8, true);
+    this.launch({ fn: this.table.get(Number(entry)), args: [start], sp: BigInt(stack), tls: this.tls.value, tid, clearTid: (flags & 0x200000) !== 0 ? childTid : 0 });
+    return tid;
   }
 
   terminate(signal) {
@@ -1387,18 +1648,13 @@ class Host {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
       },
-      // The provider's later answer, staged once it came; the entry stays
-      // suspended meanwhile, as in wait.
+      // The provider's later answer, staged once the asking thread runs
+      // again; it stays suspended meanwhile, as in wait.
       jet_ui_provider_settle: JSPI
-        ? new WebAssembly.Suspending(async () => {
+        ? new WebAssembly.Suspending(() => {
             const answer = pending;
             pending = null;
-            host.waiting = true;
-            try {
-              return stage(await answer);
-            } finally {
-              host.waiting = false;
-            }
+            return host.park((record) => answer.then((value) => host.wake(record, value ?? null))).then(stage);
           })
         : () => -1n,
       // The calling chain (trace): up to `capacity` bytes of its lines at
@@ -1408,14 +1664,14 @@ class Host {
         if (capacity > 0n) host.u8().set(lines.subarray(0, Math.min(lines.length, Number(capacity))), Number(buffer));
         return BigInt(lines.length);
       },
-      // The wait seam (wait): an entry can wait while it runs under JSPI
-      // (waitableCall) and is not already suspended. Without JSPI it can't,
-      // so its wait stops the program (jet_rt_host_wait_refused) in place of
-      // an answer.
+      // The wait seam (wait): under JSPI the running coroutine (an entry
+      // under waitableCall, or a thread) can wait, and a plain call of the
+      // page can't. Without JSPI an entry would wait and can't, so its wait
+      // stops the program (jet_rt_host_wait_refused) in place of an answer.
       jet_rt_host_can_wait: () => {
-        if (!host.waitable || host.waiting) return 0n;
-        if (!JSPI) host.rt.jet_rt_host_wait_refused();
-        return 1n;
+        if (JSPI) return host.running !== null ? 1n : 0n;
+        if (host.waitable) host.rt.jet_rt_host_wait_refused();
+        return 0n;
       },
       jet_rt_host_wait: JSPI ? new WebAssembly.Suspending((address, expected, deadline) => host.wait(address, expected, deadline)) : () => BigInt(-E.NOSYS),
       getauxval: (type) => {
@@ -1487,11 +1743,7 @@ const SYSCALLS = {
   },
   35: (h, request) => h.sleepUntil(request, false, 1),
   39: () => nodeProcess?.pid ?? 1,
-  56: (h) => {
-    if (!h.threadsRefused) console.error("jet: tasks are not available on the web target yet");
-    h.threadsRefused = true;
-    return -E.AGAIN;
-  },
+  56: (h, flags, stack, parentTid, childTid) => h.clone(flags, stack, parentTid, childTid),
   60: (h, status) => {
     h.flushLines();
     throw new JetHostExit(status & 255);
@@ -1577,7 +1829,7 @@ const SYSCALLS = {
     }
     return -E.INVAL;
   },
-  186: () => nodeProcess?.pid ?? 1,
+  186: (h) => h.running?.tid ?? nodeProcess?.pid ?? 1,
   192: () => -E.NOTSUP,
   201: (h, at) => {
     const seconds = Math.floor(Date.now() / 1000);
@@ -1592,6 +1844,7 @@ const SYSCALLS = {
       h.sleepUntil(timeout, command === 9, 1);
       return -E.TIMEDOUT;
     }
+    if (command === 1) return h.futexWake(address, value);
     return 0;
   },
   204: (h, pid, size, mask) => {
