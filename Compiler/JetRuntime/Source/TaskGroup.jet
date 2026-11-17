@@ -252,7 +252,8 @@ task_group_close: fn(group: I64) {
         if (at >= sync_load(header)) { break }
         child: sync_load(wrapping(sync_load(wrapping(header + I64{16})) + at * I64{8}))
         sync_mutex_unlock(wrapping(group + I64{8}))
-        if cancel_children -> task_cancel_once(child)
+        // A close joins each child: one no carrier has started runs here.
+        if cancel_children -> task_cancel_once(child) else -> task_run_stolen(child)
         task_drain(child)
         at += I64{1}
     }

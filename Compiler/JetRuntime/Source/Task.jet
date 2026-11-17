@@ -2,20 +2,28 @@
 // refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
 // env64 invoke72 release80 queueNext88 stack96 completionPark104
 // completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
-// typedDeadline184 ownedWorld192 liveNext200 livePrev208, then the task's
-// Context record (Context.jet) at TASK_CONTEXT. Result initializes only after
-// Propagate == 0. stack is the stack size of the fiber the task runs on
+// typedDeadline184 ownedWorld192 liveNext200 livePrev208 start216, then the
+// task's Context record (Context.jet) at TASK_CONTEXT. Result initializes only
+// after Propagate == 0. stack is the stack size of the fiber the task runs on
 // (Fiber.jet fiber_stack_class; 0, the default size): its group's, else the
 // starting task's. liveNext/livePrev link the state into the live tasks
 // (task_live_link) from task_state_new until its last ref drops. queueNext88
-// holds TASK_DEFERRED until a deferred task is claimed (task_claim).
-TASK_CONTEXT: I64{216}
+// holds TASK_DEFERRED until a deferred task is claimed (task_claim). start216
+// is 0 until the task starts, TASK_STOLEN once a join took it from the run
+// queue (task_steal) and TASK_STARTED once a run began (task_start).
+TASK_START: I64{216}
+
+TASK_CONTEXT: I64{224}
 
 // A grouped task its handle's join follows at once
 // (jet_rt_native_group_spawn_joined) is not submitted: the join runs it on
 // the joining thread (task_run_joined), so a program whose only task is so
 // joined starts no carrier. Any other wait for it, a drain, submits it.
 TASK_DEFERRED: I64{-1}
+
+TASK_STOLEN: I64{1}
+
+TASK_STARTED: I64{2}
 
 task_state_bytes: fn() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
 
@@ -247,7 +255,14 @@ task_spawn_refused: fn(state: I64, permit: I64, env: I64, release: I64) {
 
 #Export(c) jet_rt_native_task_drop: fn(child: I64) { task_drop(child) }
 
+// The run that starts the task (task_start) runs it; a run that finds it
+// started is its run queue entry's, after a join ran the task (task_steal),
+// and drops only that entry's ref.
 task_run: fn(child: I64) {
+    if !task_start(child) {
+        task_drop(child)
+        return
+    }
     control: sync_load(wrapping(child + I64{8}))
     base: thread_base()
     saved_control: sync_load(wrapping(base + I64{16}))
@@ -344,24 +359,68 @@ task_claim: fn(child: I64) -> Bool {
     sync_cas(wrapping(child + I64{88}), TASK_DEFERRED, I64{0}) == TASK_DEFERRED
 }
 
-// Runs a deferred task its join claimed on the joining thread, which
-// carries the task's fiber (its own stack size, guard page and overflow stop)
-// as a carrier would (Fiber.jet fiber_run), through a carrier record of its
-// own; a joining fiber carries it the same way. The joiner's cancel reaches
-// the task (Scheduler.jet scheduler_control_inline) unless the joiner is
-// shielded or a root, whose join would not cancel it either. A task that
-// parks is woken onto the carriers, the first of which starts then if none
-// has, and the join waits for it as for any; one that yields goes to them at
-// once. A thread with no TCB, or no fiber stack to map, submits the task
-// instead.
-task_run_joined: fn(child: I64) {
+// Takes a submitted task no carrier has started yet for its join to run;
+// false once a run began or another join took it. The task stays queued: the
+// carrier that pops it finds it started (task_run) unless the join leaves it.
+task_steal: fn(child: I64) -> Bool {
+    sync_cas(wrapping(child + TASK_START), I64{0}, TASK_STOLEN) == I64{0}
+}
+
+// Begins a run: the first run of a task never started, or the run of one a
+// join took (task_steal). A carrier popping a stolen task's entry may begin
+// it before the join's run does; then the join's run finds it started.
+task_start: fn(child: I64) -> Bool {
+    word: wrapping(child + TASK_START)
+    prior: sync_cas(word, I64{0}, TASK_STARTED)
+    prior == I64{0} || (prior == TASK_STOLEN && sync_cas(word, TASK_STOLEN, TASK_STARTED) == TASK_STOLEN)
+}
+
+// A join on a child no carrier has started runs it on the joining thread
+// instead of waiting for a carrier, so joins nested past the carriers'
+// count never wait on work no carrier is left to take. The run queue keeps
+// its entry, and the entry its ref, so the join runs the task under one of
+// its own (task_run drops it). The run takes a fiber (task_run_joined); with
+// none to take a plain thread runs the task on its own stack, as a carrier
+// does, and a fiber leaves it to the carrier that pops it, since its park
+// frees its carrier. A thread with no TCB, or a joiner already stopping,
+// leaves it queued.
+task_run_stolen: fn(child: I64) {
+    if (thread_base() == I64{0} || jet_scheduler_native_propagate() != I64{0} || !task_steal(child)) {
+        return
+    }
+    task_retain(child)
+    if task_run_joined(child) {
+        return
+    }
+    if (fiber_current() != I64{0}) {
+        task_drop(child)
+        return
+    }
+    root: scheduler_root_required()
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    sync_thread_unlock(root)
+    task_run(child)
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
+    sync_thread_unlock(root)
+}
+
+// Runs a task its join claimed (task_claim) or took (task_steal) on the
+// joining thread, which carries the task's fiber (its own stack size, guard
+// page and overflow stop) as a carrier would (Fiber.jet fiber_run), through a
+// carrier record of its own; a joining fiber carries it the same way. The
+// joiner's cancel reaches the task (Scheduler.jet scheduler_control_inline)
+// unless the joiner is shielded or a root, whose join would not cancel it
+// either. A task that parks is woken onto the carriers, the first of which
+// starts then if none has, and the join waits for it as for any; one that
+// yields goes to them at once. False, the task not run, on a thread with no
+// TCB or no fiber stack to map.
+task_run_joined: fn(child: I64) -> Bool {
     base: thread_base()
     root: scheduler_root_required()
     fiber: if (base == I64{0}) -> I64{0} else -> fiber_take(root, scheduler_job_stack(child))
-    if (fiber == I64{0}) {
-        scheduler_submit(child)
-        return
-    }
+    if (fiber == I64{0}) { return false }
     record: jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8})
     thread_zero(record, SCHEDULER_CARRIER_BYTES)
     sync_store(record, root)
@@ -382,6 +441,7 @@ task_run_joined: fn(child: I64) {
         fiber_ready_take(root, taker)
     }
     jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
+    true
 }
 
 // A typed child whose own deadline is no later than the joiner's ends by
@@ -545,12 +605,15 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
 }
 
 // A deferred task its join claims runs here, unless the joiner is already
-// stopping, whose join cancels and drains it on a carrier.
+// stopping, whose join cancels and drains it on a carrier. A submitted one no
+// carrier has started runs here too (task_run_stolen).
 #Export(c) jet_rt_native_task_join: fn(child: I64, flatten: I64, out: I64) -> I64 {
-    if (child != I64{0} && task_claim(child)) {
-        if (jet_scheduler_native_propagate() == I64{0}) { task_run_joined(child) } else {
-            scheduler_submit(child)
-        }
+    if (child != I64{0}) {
+        if task_claim(child) {
+            if (jet_scheduler_native_propagate() != I64{0} || !task_run_joined(child)) {
+                scheduler_submit(child)
+            }
+        } else { task_run_stolen(child) }
     }
     if (task_join_wait(child) != I64{0}) {
         scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
