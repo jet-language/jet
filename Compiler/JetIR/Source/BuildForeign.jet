@@ -244,6 +244,14 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
         if param.variadic || written != arg.mut_borrow || arg.spread {
             return ir_fail_slot(b, span, "foreign C import has a variadic or mismatched access convention")
         }
+        // A function parameter is a C callback: C gets code it calls with
+        // its own arguments (ir_c_callback).
+        if ir_untag(param.ty) == .Fn(_, _, _, _, _, _) {
+            code: ir_c_callback(m, p, b, param.ty, arg, span)
+            if ir_failed(b) -> return -1
+            lowered.push(code)
+            next
+        }
         row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
         if ir_option_inline(m, row) {
             return ir_fail_slot(b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshaling")
@@ -405,6 +413,91 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
     }
 
     dst
+}
+
+// A C callback argument: the address of code that C calls with its own
+// arguments and no closure box. A named function is that code itself: an
+// infallible top-level function of C primitives already is a C function, as
+// an export is (ir_export_signature_problems). A capture-free lambda's
+// function takes its box first (ir_build_lambda), so an adapter with the
+// callback's parameters calls it with a null box, which a lambda without
+// captures never reads. Sema admits no other callback argument (E3203,
+// E2104).
+ir_c_callback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, arg: BodyCallArg, span: Span) -> Int Never! {
+    if arg.fn_coerce != None {
+        return ir_fail_slot(b, span, "C callback argument needs a function coercion")
+    }
+    pointer_row: ir_pointer_row(m)
+    node: ir_body_node(p, b, arg.value)
+    if node.kind == .ConstRef(symbol) {
+        key: ir_body_symbol_key(p, b, symbol)
+        row: ir_function_row(p, key) ?? return ir_fail_slot(b, span, "C callback {key} is not a named function")
+        function: p.functions[row]
+        if !ir_infallible(function) || ir_export_signature_problems(function).len() > 0 {
+            return ir_fail_slot(b, span, "C callback {function.name} is not a C function of primitives")
+        }
+        target: ir_function_id(m, p, key, [Type]{}) ?? return ir_fail_slot(b, span, "C callback {function.name} has no body")
+        code: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.FunctionAddress, code, target, -1, -1, b.line)
+        return code
+    }
+    if node.kind == .Lambda(lambda) -> return ir_c_callback_lambda(m, p, b, ty, lambda, span)
+    ir_fail_slot(b, span, "C callback argument is neither a named function nor a lambda")
+}
+
+// ir_c_callback of a capture-free lambda: an adapter that calls its function
+// with a null box.
+ir_c_callback_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, span: Span) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    if lambda.captures.len() > 0 {
+        return ir_fail_slot(b, span, "C callback lambda captures a local")
+    }
+    if lambda.failure_carrier != .Infallible {
+        return ir_fail_slot(b, span, "C callback lambda can fail")
+    }
+    params := [Type]{}
+    returned := Type?{None}
+    if ir_untag(ty) == .Fn(fn_params, fn_ret, _, _, _, _) {
+        params = fn_params
+        returned = fn_ret
+    }
+    rows := [Int]{}
+    loop param in params {
+        if ir_export_native_type(param) == .Val(problem) {
+            return ir_fail_slot(b, span, "C callback parameter: {problem}")
+        }
+        param_row: ir_value_type(m, p, param) ?? return ir_type_fail(b, span, param)
+        rows.push(param_row)
+    }
+    result_row := -1
+    if returned == .Val(ret) {
+        if !ir_unit_type(ret) {
+            if ir_export_native_type(ret) == .Val(problem) {
+                return ir_fail_slot(b, span, "C callback result: {problem}")
+            }
+            result_row = ir_value_type(m, p, ret) ?? return ir_type_fail(b, span, ret)
+        }
+    }
+    start: lambda.source_span.start
+    target: ir_lambda_function(m, b, lambda, [IRCaptureSlot]{}, false)
+    a := ir_builder_new(ir_hashed_function("{b.f.name}.c_callback@{start}", ir_closure_key(b, "c_callback"), "{b.f.symbol}__c_callback_", b.f.source_file, b.line))
+    a.line = b.line
+    box: ir_temp(m, a, pointer_row)
+    ir_emit(a.f, IROp.Const, box, 0, -1, -1, a.line)
+    arguments := [Int]{box}
+    loop (index, param_row) in rows {
+        arguments.push(ir_new_slot(a, param_row, IRSlotKind.Param, ir_intern_name(m, "_{index}")))
+    }
+    a.f.result = result_row
+    dst: if result_row >= 0 -> ir_temp(m, a, result_row) else -> -1
+    operands: ir_args(a.f, arguments)
+    ir_emit(a.f, IROp.Call, dst, target, operands, arguments.len(), a.line)
+    ir_emit(a.f, IROp.Return, -1, dst, -1, -1, a.line)
+    adapter: m.functions.len()
+    m.functions.push(a.f.move())
+    code: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.FunctionAddress, code, adapter, -1, -1, b.line)
+    code
 }
 
 // The bytes one element of type row `row` takes in a C array: a machine
