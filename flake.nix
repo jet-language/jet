@@ -115,6 +115,15 @@
         jetVite = pkgs.vitejs.override {
           fetchPnpmDeps = args: pkgs.fetchPnpmDeps (args // { pnpm = pkgs.pnpm_10; });
         };
+        # A page's program waits through JSPI (WebAssembly.Suspending and
+        # promising). The pinned node 24 keeps it behind a flag, which this
+        # `node` always passes, so a web build waits under node as in a page.
+        jetNode = pkgs.symlinkJoin {
+          name = "nodejs-jspi-${pkgs.nodejs_24.version}";
+          paths = [ pkgs.nodejs_24 ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postBuild = "wrapProgram $out/bin/node --add-flags --experimental-wasm-jspi";
+        };
 
         # The gauntlet's Lua and LuaJIT peers use the ecosystem's standard
         # modules where Lua's standard library stops: LuaSocket (sockets),
@@ -177,7 +186,7 @@
             pkgs.lld
             # D-DBG3/D-DX-DEBUGBACK1: `jet debug` steps and records through LLDB.
             pkgs.lldb
-            pkgs.nodejs_22
+            jetNode
             pkgs.bun
             jetVite
             pkgs.nodemon
@@ -279,7 +288,7 @@
             # Compiler freestanding smoke tests execute aarch64 output under
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu
-            pkgs.nodejs_22
+            jetNode
             pkgs.bun
             jetVite
             pkgs.nodemon
