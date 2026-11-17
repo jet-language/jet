@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 use {
-    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_carrier_identity_grouped, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
+    jet_foundation.[CORE_ENUM_CASE_ROWS, IRRuntimeHandle, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_record_layout_names, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_carrier_identity_grouped, type_name, type_table_intern, type_union_member_payload, type_union_member_tag, type_union_member_tag_in]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -643,46 +643,25 @@ ir_instance_identity: fn(key: String, args: [Type]) -> String Never! {
 }
 
 // The runtime type behind a handle of nominal type `name`: the default Err is
-// the runtime's JetErr; a Core declaration the handle table does not name by
-// its key is named by its own name, unless the table pins that runtime to
-// another Core declaration's key (a bare `Reader` is core.term's JetReader,
-// not the private __core_crypto_jetc Reader struct) or the runtime is the
-// task group's, which no Core declaration carries.
+// the runtime's JetErr; any other type is the handle table's row for that
+// spelling, a declaration's key or a bare name alike. A declaration carried
+// by a runtime handle has a row under its own key, so no rule reads whether
+// the declaration is Core.
 ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
-    runtime := ir_runtime_handle(name)
     if ir_type_def(p, name) == .Val(row) {
-        definition: p.types[row]
-        if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
-            runtime = ir_runtime_handle("Err")
-        } else if runtime == None && module_is_core(definition.module_identity) {
-            runtime = ir_core_bare_handle(definition.key, definition.name)
+        if p.types[row].compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
+            return ir_runtime_handle("Err")
         }
     }
-    runtime
-}
-
-// The task group handle is only ever the bare `Group` sema gives a
-// `task.group` binding; a Core struct spelled `Group` (core.data's carrier,
-// core.ui.xkb's key group) is its own declaration and lays out as itself.
-// Another Core identity of the same name on the bare row's runtime pins the
-// bare spelling to that declaration; identities of other names sharing the
-// runtime (the math frame points on JetCoord2) pin nothing.
-ir_core_bare_handle: fn(key: String, name: String) -> IRRuntimeHandle? Never! {
-    bare: ir_runtime_handle(name) ?? return None
-    if bare.runtime == "JetTaskGroup" -> return None
-    loop index in 0..<IR_RUNTIME_HANDLES.len() {
-        pinned: IR_RUNTIME_HANDLES[index].jet_name != key && IR_RUNTIME_HANDLES[index].jet_name.ends_with("::{name}")
-        if pinned && IR_RUNTIME_HANDLES[index].runtime == bare.runtime -> return None
-    }
-    Val(bare)
+    ir_runtime_handle(name)
 }
 
 // The row of a runtime-owned value behind an owned handle of nominal type
-// `name`: the default Err (the runtime's JetErr), a Core type the runtime
-// handle table names that has no Jet declaration, or whose Core declaration
-// has no record schema or native shape; None for any type the program lays
-// out itself. It rests on `name` alone (the row interns under its runtime's
-// key), so it is kept in m.handle_rows.
+// `name`: the default Err (the runtime's JetErr), a type the runtime handle
+// table names that has no Jet declaration, or a declaration the table
+// carries under its key that has no record schema or native shape; None for
+// any type the program lays out itself. It rests on `name` alone (the row
+// interns under its runtime's key), so it is kept in m.handle_rows.
 ir_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
     known: name_rows_value(m.handle_rows, name) ?? -2
     if known >= 0 -> return Val(known)
@@ -708,11 +687,13 @@ ir_handle_row_laid: fn(m: &IRModule, p: IRProgram, ty: Type, name: String) -> In
         // canonical Dyn enum is the exception: it is declared in place and
         // routes convert it to the runtime tree.
         if ir_dyn_def(p, ty) != None -> return None
-        core: module_is_core(definition.module_identity) || definition.key == definition.name
-        // A bare spelling of a Core declaration is that declaration: both
+        // The table carries a declaration, Core's or a package's alike, by a
+        // row under the declaration's own key.
+        carried: ir_runtime_handle(definition.key) != None || definition.key == definition.name
+        // A bare spelling of a carried declaration is that declaration: both
         // spellings take the row its key does.
         owned_shape: ir_record_schema(handle) || ir_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (ir_native_type(definition.key) != None || core_source_owns_type(definition.key)))
-        if !native && (!core || owned_shape) -> return None
+        if !native && (!carried || owned_shape) -> return None
     }
     atom: runtime_abi_atom(handle.runtime)
     clone: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
@@ -5409,20 +5390,4 @@ ir_numeric_op_name: fn(operation: TNumericOp) -> String Never! {
         text = parts[0]
     }
     text
-}
-
-#Test("a Core struct spelled Group is its own declaration, not the task group handle") {
-    assert(ir_core_bare_handle("<corelib>/core.ui.xkb::Group", "Group") == None)
-    assert(ir_core_bare_handle("<corelib>/core.data::Group", "Group") == None)
-    assert(ir_core_bare_handle("<corelib>/core.sys::Group", "Group") == None)
-    group: ir_runtime_handle("Group") ?? panic("the bare task group spelling lost its handle")
-    assert_eq(group.runtime, "JetTaskGroup")
-    // A pin still decides between two Core declarations of one bare name.
-    assert(ir_core_bare_handle("<corelib>/__core_crypto_jetc::Reader", "Reader") == None)
-    reader: ir_core_bare_handle("<corelib>/core.term::Reader", "Reader") ?? panic("core.term's Reader lost its handle")
-    assert_eq(reader.runtime, "JetReader")
-    // Identities of other names on the same runtime pin nothing: the frame
-    // points share JetCoord2 with the generic Point2.
-    point: ir_core_bare_handle("<corelib>/core.math::Point2", "Point2") ?? panic("core.math's Point2 lost its handle")
-    assert_eq(point.runtime, "JetCoord2")
 }
