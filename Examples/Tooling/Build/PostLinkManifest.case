@@ -1,0 +1,19 @@
+# The `shipped` profile's post-link step embeds Manifest.txt in the
+# executable `jet build` writes, through the typed `BuildAction` its
+# `#On(build.before_write)` hook returns, run in the build sandbox. The
+# executable runs as before, and readelf reads the manifest back from its
+# section. The build is the profile's own, the same on every tier, so the
+# oracle is the one tier-independent run.
+requires: tool:bwrap
+requires: tool:objcopy
+requires: tool:readelf
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --profile=shipped --allow=Exec,FS run.jet
+exit: 0
+file: .jet/build/link/run/post_link/run.0 exists # the linked file the step read
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "shipped with its manifest\n" # the executable still runs
+step: readelf -p .jet_manifest {work}/.jet/build/run
+exit: 0

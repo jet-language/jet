@@ -1,0 +1,15 @@
+use {
+    build: core.build
+    compiler: core.compiler
+}
+
+// The post-link step `post_link: [tools.embed_manifest]` names. `jet build`
+// calls it on each executable it links: `artifact.path` is the linked file
+// and `artifact.next` the file the step writes, here the executable itself.
+// The `BuildAction` it returns runs in the build sandbox, reading only its
+// inputs and writing only its outputs: objcopy copies the executable and
+// adds Manifest.txt to it as the `.jet_manifest` section, which the loader
+// never maps and a release tool reads back.
+#On(build.before_write) embed_manifest: fn(artifact: compiler.Artifact) -> build.BuildAction {
+    build.action("embed manifest", run: ["objcopy", "--add-section", ".jet_manifest=Manifest.txt", artifact.path, artifact.next], inputs: [artifact.path, "Manifest.txt"], outputs: [artifact.next], allow: [.Exec, .FS])
+}
