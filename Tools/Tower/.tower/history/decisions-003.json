@@ -35874,6 +35874,393 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-06",
       "retiredAt": "2026-11-17T13:18:45.700Z"
+    },
+    {
+      "id": "D-SURFACE-BUDGET1",
+      "cardId": "c0bs5inj",
+      "group": "tooling",
+      "title": "A counted surface budget: new words must pay for themselves",
+      "situation": "Lua stays small because its authors make each new feature replace several old ones. Jet already requires one mechanism per meaning, but nothing counts how many words, marks, markers and commands a learner faces. The official keyword list has even drifted: it names nine markers and misses five real words. This vote decides whether a test counts Jet's language surface on every change and stops growth that no owner decision approved. Library functions are counted and shown, never gated.",
+      "gist": "Should a test count Jet's keywords, marks, markers and commands, failing growth no owner decision approved?",
+      "lesson": "The language surface is what a user types or runs that the language itself defines: keywords, marks like # and $, markers, commands. Jet registers each in one place, so counting is cheap. A ceiling that only an owner decision can raise makes growth visible. Library functions are counted but never gated. Whichever option wins, the stale keyword list gets fixed.",
+      "explainer": "Under A, the syntax registry computes counts: live keywords, marks, live markers, fact rows and top-level commands. A checked-in ceiling file records the current numbers. A guard test fails when one of these counts rises, unless the change names the owner decision that raised that ceiling. Retiring something lowers the ceiling automatically, so the budget only tightens by default.\n\nPublic Core functions per module are counted and shown with their trend, but never gated. Adding a library function under an approved library contract is routine work, not an owner choice, and gating it would turn every new function into a ballot. `jet self devtools surface` prints every count, and every ballot that adds language surface shows the before and after numbers.\n\nToday's numbers: 49 live keywords after D-MARKER-DECL1 retired two, 43 lexical-ledger rows, 83 live markers (110 rows, 27 retired), 49 fact rows, 61 top-level commands (counted 2026-10-05). For scale: Lua 22 keywords, Go 25, Python 35 plus 4 soft, Rust 38 strict, Zig 49 plus about 120 builtins.\n\nBeginner path: unaffected; they see a smaller, stable surface. Expert path: a ballot that adds a word must say what it costs and, where possible, what it retires.",
+      "story": "Three teams each add a marker in the same month for nearly the same job. Nobody notices until a learner asks why #Track, #Persist and #Reactive all seem to watch values.",
+      "inWild": "-- Lua 5.4: 22 reserved words (lua.org/manual/5.4/manual.html, section 3.1)\nand break do else elseif end false for function goto if in\nlocal nil not or repeat return then true until while",
+      "detail": "Revision by OptionQuality1, 2026-10-07. The posted A also put public Core functions under the owner-raised ceiling. Every new library function would then have needed an owner decision, although the ballot rules say routine work under an approved contract is not a ballot. A now gates the language surface only and reports library counts.\n\nCounts are refreshed: D-MARKER-DECL1=A retired two keywords (51 to 49), and owner directive 21 removed `pub`, so the old count of 2,419 `pub fn` no longer measures anything. The guard's example no longer names a Rust test runner (directive 19). Options, letters and the recommendation are otherwise unchanged.\n\nCode facts, checked 2026-10-05. Keyword list drift: crates/jet-foundation/src/Syntax/package_files.rs:464-551 JET_KEYWORD_LIST (55 entries) is documented as the single source for LSP, formatter and grammar. It includes nine marker names (Unsafe, Impure, Context, Transact, Job, Test, Todo, State, Transition) and the literal None. It omits five live words: prep (Syntax.rs:67), next (math_layout.rs:408), fact (effects_surface.rs:143), yield (core_surface.rs:514) and rust (math_layout.rs:571). Card c0bs5inj already tracks keyword-table consistency.\n\nRegistry location. AGENTS.md I7 names crates/jet-foundation/src/Syntax.rs as the registry of every keyword and sigil today. Under owner directive 19 that registry moves into Jet with the rest of the toolchain; the guard reads whichever registry is canonical, so the choice here does not depend on the move.\n\nCounts: LEXICAL_LEDGER 43 rows (Syntax.rs:20-64). Prelude/Markers.jet 110 marker rows, 27 carry $retired. Prelude/Facts.jet 49 fact rows. CLI COMMANDS 61 top-level. Corpus marker usage: 1,854 #Name uses, 113 distinct names, 56.4 per 10k lines.\n\nPeers: Lua 5.4 manual 3.1 (22). Go spec Keywords (25). Python 3.12 keyword.kwlist 35 and softkwlist 4. Rust Reference Keywords (38 strict, 14 reserved). Zig language reference (49 keywords, builtins listed separately). Swift Lexical Structure about 95-100 counting context-sensitive and # keywords [approximate].\n\nResearch. Ierusalimschy et al., \"The Evolution of Lua\" (HOPL III, 2007) and \"Passing a Language through the Eye of a Needle\" (ACM Queue, 2011). Lua adds a feature only when it is a general mechanism and removes features in major versions (module() deprecated in 5.2). Go's Go 1 compatibility promise plus a high bar for keywords kept it at 25 for over a decade; generics (1.18) added zero keywords.\n\nWhy library functions are reported, not gated. Lua and Go keep their languages small while their libraries grow freely. A library function adds no grammar and is found through completion and docs. Jet's one-mechanism rule (I8) and the library laws already review library growth.\n\nJet precedent: D-ONCE-LAW1 (say it once, with a guard) and the existing copy and unsafe count guards in Tools/agent (copy-ratchet.mjs, check-unsafe-ratchet.mjs) show count guards work here.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Counted ceilings an owner raises",
+          "detail": "Registry-computed counts of keywords, marks, markers, fact rows and commands, a checked-in ceiling, and a guard test; ballots show before/after counts. Library function counts are reported, not gated.",
+          "technical": "Counts derive from the canonical syntax registry (Syntax.rs today), Markers.jet, Facts.jet and the CLI command table. Ceiling rows carry the decision ID that set them. Retired rows lower counts. JET_KEYWORD_LIST is regenerated from the registry so it cannot drift. Public Core functions per module are printed with their trend and never fail the guard.",
+          "code": "surface guard: keywords 50 > ceiling 49\n  added: `when` with no raising decision\n  fix: cite the owner decision in surface-ceiling.json\n\n// a new Core function: counted in the report, never fails"
+        },
+        {
+          "key": "B",
+          "name": "Report counts only",
+          "detail": "A report and dashboard, no gate.",
+          "technical": "Same counting code, no guard test.",
+          "code": "$ jet self devtools surface\nkeywords 49  markers 83  commands 61"
+        },
+        {
+          "key": "C",
+          "name": "Fixed hard caps",
+          "detail": "Fixed caps written into the spec.",
+          "technical": "Guard compares against constants, not decisions.",
+          "code": "// error: 49 keywords exceed the fixed cap of 40"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Generics arrived in Go 1.18 with zero new keywords (go.dev/ref/spec#Keywords).",
+          "code": "func Max[T cmp.Ordered](a, b T) T { ... }  // still 25 keywords"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Counting is free in Jet. Owner-raised ceilings on the language surface keep growth deliberate and catch drift like the stale list, while libraries grow as routine work.",
+        "gains": [
+          "Every language-surface addition is an owner choice.",
+          "Retirements tighten the budget.",
+          "Library work never waits on a ballot."
+        ],
+        "losses": [
+          {
+            "loss": "A ratified addition also edits one ceiling line.",
+            "mitigation": "The guard's fix line prints the exact entry to add, with the decision ID."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Counts without a gate drift; the keyword list already did."
+          },
+          {
+            "key": "C",
+            "reason": "A fixed number forces cuts or overloaded glyphs to fit an arbitrary limit."
+          }
+        ],
+        "tradeoff": "One extra line per ratified addition for a language surface that never grows by accident."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Drafted by FeedbackMechanisms on 2026-10-05 from the owner feedback of that day; revised by OptionQuality1 on 2026-10-07 (library functions reported, not gated; counts refreshed). No Tower writes. Under A: regenerate JET_KEYWORD_LIST from the registry, add the counting function and ceiling file, add the guard test, and have ballot tooling show before/after counts. Check that adding a public Core function changes the report and never fails the guard. The keyword-list fix belongs to card c0bs5inj whichever option wins.",
+      "surface": {
+        "gist": "Should a test count Jet's keywords, marks, markers and commands, failing growth no owner decision approved?",
+        "lesson": "The language surface is what a user types or runs that the language defines: keywords, marks like # and $, markers, commands. Counting is cheap. A ceiling only an owner decision can raise makes growth visible. Library functions are counted, never gated. Whichever option wins, the stale keyword list gets fixed.",
+        "trio": {
+          "current": {
+            "note": "Today: no count; the official keyword list has drifted.",
+            "code": "// JET_KEYWORD_LIST, the official keyword list\n// lists: Unsafe, Job, Test (markers)\n// misses: prep, next, fact, yield, rust"
+          },
+          "wild": {
+            "lang": "Lua 5.4",
+            "note": "22 reserved words; features are added as general mechanisms (manual 3.1).",
+            "code": "and break do else elseif end false for\nfunction goto if in local nil not or\nrepeat return then true until while"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Counted ceilings an owner raises",
+            "gist": "A test fails when a language count grows without a named decision; library counts are only shown.",
+            "gains": [
+              "Growth is always a visible owner choice.",
+              "Retirements tighten the ceiling automatically.",
+              "Fixes the stale keyword list."
+            ],
+            "losses": [
+              "Adding a ratified word also edits the ceiling file."
+            ],
+            "proposed": {
+              "code": "// surface-ceiling.json\n{ \"keywords\": 49, \"markers\": 83, \"commands\": 61 }\n// a new keyword without a decision:\n// error: keywords 50 > ceiling 49\n// fix: name the decision that raises it\n// a new Core function: shown in the report, never fails"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Report counts only",
+            "gist": "Print the numbers; no test fails.",
+            "gains": [
+              "Visibility without friction."
+            ],
+            "losses": [
+              "Counts drift unnoticed, as the keyword list did."
+            ],
+            "proposed": {
+              "code": "$ jet self devtools surface\nkeywords 49  markers 83  commands 61"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Fixed hard caps",
+            "gist": "Pick fixed maximums, such as 40 keywords, and never exceed them.",
+            "gains": [
+              "A simple promise."
+            ],
+            "losses": [
+              "Forces cuts or glyph overloading to fit a number.",
+              "The number itself is arbitrary."
+            ],
+            "proposed": {
+              "code": "// language law: at most 40 keywords, 60 markers\n// today: 49 keywords -> 9 must go first"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Counting is free in Jet. Owner-raised ceilings keep language growth deliberate and catch drift like the stale list; libraries still grow as routine work.",
+          "gains": [
+            "Every language addition is an owner choice.",
+            "Retirements tighten the budget."
+          ],
+          "losses": [
+            {
+              "loss": "A ratified addition also edits one ceiling line.",
+              "mitigation": "The guard's fix line prints the exact entry to add, with the decision ID."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Counts without a gate drift; the keyword list already did."
+            },
+            {
+              "key": "C",
+              "reason": "A fixed number forces cuts or overloaded glyphs to fit an arbitrary limit."
+            }
+          ],
+          "tradeoff": "One extra line per ratified addition for a language that never grows by accident."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A gate could slow legitimate additions.",
+          "attempts": [
+            "The ceiling rises with the same decision that ratifies the word."
+          ],
+          "result": "Negligible: one line, printed by the guard."
+        },
+        {
+          "loss": "Gating library functions would make every new Core function an owner ballot.",
+          "attempts": [
+            "Gate only the language surface: keywords, marks, markers, fact rows and commands.",
+            "Report library function counts and their trend without failing."
+          ],
+          "result": "Removed."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T01:22:06.361Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-07",
+      "retiredAt": "2026-11-17T13:46:01.769Z"
+    },
+    {
+      "id": "D-MARKER-DECL1",
+      "cardId": "c0bs5inj",
+      "group": "mechanisms",
+      "title": "Everything applied with # is declared with marker",
+      "situation": "Jet code attaches rules to code with a # tag, such as #PII on a field or #Policy(audit(\"users\")) on a function. Three different words declare those tags today: marker, tag, and policy with a wrap block. A test run also found that a policy wrapper is skipped when its function is called directly; that bug gets fixed whichever option wins. This vote decides whether tag and policy fold into marker, so one word declares everything you apply with #.",
+      "gist": "Should tag and policy declarations fold into marker, so one word declares everything applied with #?",
+      "lesson": "A marker is a # tag on code; its declaration says where it attaches and what it does. Labels on data (tags, such as #PII for private data) and call wrappers (policies) are applied with # but declared with their own words. Whichever option wins, #Policy keeps its scoped compiler settings such as #Policy(gc).",
+      "explainer": "A tag is a label on data. #PII marks private data, and a declaration such as deny: [Log, Net] stops a labeled value from reaching logs or the network. PII is built in; you declare your own labels, such as CardNumber. A policy wraps a function: inside wrap(call) { ... }, call() runs the original function and returns its result.\n\nJet already ruled that a user-written marker has the same power as a compiler marker: no body records a fact, a body adds code. So tags, policies and markers are one mechanism with three declaration words.\n\nUnder A, `tag CardNumber { deny: [Log, Net] }` becomes `marker CardNumber { deny: [Log, Net] }`. `pub policy audit(topic: String) { wrap(call) { ... } }` becomes `pub marker Audit(topic: String) { wrap(call) { ... } }`, applied as `#Audit(\"users\")`; marker names are PascalCase, so audit becomes Audit. The body tells the compiler where the marker may go: deny/from means values and types, wrap means functions and methods. An explicit sites list still overrides.\n\nThe skipped-wrapper bug is fixed under A and B alike: the wrapper becomes part of the function's definition, so direct calls and method values run it. Under A, apply() itself retires. A call site can then no longer swap or drop a function's wrappers. Code that needs the bare body keeps it in an unmarked function and marks a one-line front.\n\nThe built-in retry and trace policies become built-in markers, #Retry and #Trace. Stacked markers wrap outermost first: in `#[Retry(3), Audit(\"users\")]`, Retry runs around Audit. Under A, #Policy keeps exactly one meaning: scoped compiler settings (gc, copies, sentries, the escape ladder).\n\nBeginner path: nothing changes until they declare their own label; then there is one word to learn. Expert path: one declaration form, one reflection table, one audit grep (`marker`).",
+      "story": "Priya writes a billing audit wrapper as a policy, marks charge() with it, and ships. In production nothing is logged, because direct calls skip the wrapper and only apply() runs it.",
+      "inWild": "# Python (PEP 318): one decorator mechanism; the declaration is an ordinary function\ndef audit(topic):\n    def wrap(fn):\n        def inner(*a):\n            log(topic)\n            return fn(*a)\n        return inner\n    return wrap\n\n@audit(\"users\")\ndef load_user(): return 7",
+      "detail": "Code facts, checked 2026-10-05 on the main checkout and dev release dev-05ea86f65.\n\nDeclaration words: crates/jet-foundation/src/Syntax/math_layout.rs:707 KW_TAG (D-QUAL2), Syntax/core_surface.rs:481-483 KW_POLICY and KW_WRAP (D-STRUCT-POLICY1), Syntax/effects_surface.rs:138 KW_MARKER (D-META-NAME1). D-QUAL2 text: \"A tag is a marker that erases at runtime and carries no methods.\" D-META-USER1=A: \"A rule with no body records a fact. A rule with a body adds code.\n\nThis is the same power the compiler has.\" D-STRUCT-POLICY1=A says a package declares a policy setting the way it declares a marker, reusing the D-META-USER1 machinery.\n\nProbe (dev-05ea86f65, $JET_STATE_ROOT/scratch/OwnerFeedback/mech-probes/policy_apply.jet): `#Policy(audit(\"users.load\")) fn load_user()` called directly prints 7 with no audit line. `apply(audit(\"users.load\"), load_user)()` prints the audit line. The shipped examples (Examples/features/callable/user_policies.jet, callable_policies.jet) only exercise apply(), so no golden catches this.\n\n#Policy double meaning. D-CALLPOLICY2=C said #Policy means wrappers only, yet #Policy(gc), #Policy(copies: .Explicit) and #Policy(sentries: .Off) are live scoped settings (Compiler/JetParser/Source/Parser/Declarations/Policies.jet:1-5, D-MARK-SCOPE1, D-AUTHORITY-MEM1, D-ONCE-GATE1). Under A the wrapper half moves to user markers and #Policy keeps settings only.\n\nCorpus impact (Examples + Core + Compiler, 1,660 files, 328,724 lines). 7 `tag` declarations (Examples/features/types/*, reflection/fact_reads.jet, suites/finite_state.jet), 2 `policy` declarations (both callable examples). 4 apply() calls: callable_policies.jet:14-16 and user_policies.jet:11. Prelude: 0 tag or policy declarations. Keyword list: 51 live words drop to 49.\n\nAdversarial findings. D-CALLPOLICY1=E gives apply() two powers: apply(chain, f) replaces a function's wrapper chain at one call site, and apply(f) selects the bare function. Under A both go, which the recommendation now lists as a loss. retry(3) and trace(...) in callable_policies.jet are built-in callable policies, so A must give them marker spellings. PII is a built-in tag (Syntax/effects_surface.rs:87 BUILTIN_TAGS), so the examples declare CardNumber instead.\n\nResearch. Python decorators (PEP 318) and C# attributes use one application syntax with one declaration form. Python keeps the bare function reachable through functools.wraps and __wrapped__. Rust has one attribute syntax but four declaration kinds (derive, attribute, function-like proc macros, built-in attributes), a common learner complaint. TypeScript decorators went through two incompatible designs (experimentalDecorators, then TC39 stage 3 in TS 5.0) because wrapping and metadata were specified separately. Lesson: one declaration form for everything applied with one glyph.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One word: marker",
+          "detail": "tag and policy retire as declaration words. A deny/from body declares a value label; a wrap(call) body declares a call wrapper. Applying the marker to a function wraps its definition, so direct calls and method values run it. apply() retires. #Policy keeps only scoped settings.",
+          "technical": "Remove KW_TAG and KW_POLICY from JET_KEYWORD_LIST; keep `wrap(call)` as a marker-body statement beside `add`. Sites are inferred from the body kind unless `$sites:` is written. Retired-word teaching errors (E0003 family) rewrite `tag X {` to `marker X {` and `policy x(` to `marker X(`.\n\nThe built-in callable policies retry and trace become Prelude markers Retry and Trace. apply() retires with a teaching error pointing at the marker, an unmarked inner function, or ordinary function composition. E0731 becomes \"a label marker is used where a trait is needed\". Wrapper lowering moves to the definition site, fixing the direct-call defect on every tier (I9).",
+          "code": "marker CardNumber { deny: [Log, Net] }\n\npub marker Audit(topic: String) {\n    wrap(call) {\n        log.info(\"audit {topic}\")\n        return call()\n    }\n}\n\n// Retry: the built-in retry policy, now a built-in marker\n#[Retry(3), Audit(\"users\")] fn load_user() -> Int { 7 }\n// load_user() logs \"audit users\" and returns 7; Retry re-runs it only on failure\n\ntag CardNumber { deny: [Log] }\n// error: `tag` was folded into `marker`\n// fix: marker CardNumber { deny: [Log] }"
+        },
+        {
+          "key": "B",
+          "name": "Keep three words, fix the wrapper",
+          "detail": "Keep tag, policy and marker. Fix lowering so #Policy(audit(...)) wraps the definition.",
+          "technical": "Bug fix only; registry unchanged. #Policy keeps wrapper chains and scoped settings in one argument list.",
+          "code": "tag CardNumber { deny: [Log, Net] }\npub policy audit(topic: String) {\n    wrap(call) { return call() }\n}\n#Policy(audit(\"users\"), gc) fn load_user() -> Int { 7 }"
+        },
+        {
+          "key": "C",
+          "name": "Also fold fact into marker",
+          "detail": "Everything in A, and the fact declaration word also retires. fact is written only in the Prelude, Jet's built-in library file, to declare compiler-owned labels such as planes, rights and build facts; they become bodiless markers with a $holds column.",
+          "technical": "Amends D-FACTDECL1. 49 rows in Prelude/Facts.jet change spelling; no user corpus writes `fact`.",
+          "code": "marker Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw, wrapping])\nmarker Rights($holds: .Scope, $safe: .Shrink)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C#",
+          "note": "Every attribute is a class deriving from Attribute; one declaration form (learn.microsoft.com, Attributes).",
+          "code": "[AttributeUsage(AttributeTargets.Method)]\nclass AuditAttribute : Attribute { public AuditAttribute(string topic) {} }\n[Audit(\"users\")] int LoadUser() => 7;"
+        },
+        {
+          "lang": "Rust",
+          "note": "One #[...] application syntax, but four declaration kinds; a frequent learner complaint.",
+          "code": "#[derive(Debug)]          // derive macro\n#[tracing::instrument]   // attribute proc macro\n#[inline]                // built-in attribute"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Tags, policies and markers are already one mechanism by ratified rule. One declaration word removes two keywords and gives #Policy one meaning; the skipped-wrapper bug is fixed under A or B.",
+        "gains": [
+          "One word declares every # tag.",
+          "#Policy means scoped settings only."
+        ],
+        "losses": [
+          {
+            "loss": "Nine tag and policy declarations in examples are rewritten.",
+            "mitigation": "The retired-word error shows the exact marker line, and the formatter applies it."
+          },
+          {
+            "loss": "apply() retires, so a call site can no longer swap or drop a function's wrappers; its four example calls are rewritten.",
+            "mitigation": "Only two teaching examples use it. Code that needs the bare body keeps it in an unmarked function and marks a one-line front, as Python code reaches __wrapped__."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps three words and a two-meaning #Policy for one mechanism."
+          },
+          {
+            "key": "C",
+            "reason": "fact is written only in the Prelude, so folding it helps no learner and blurs build facts."
+          }
+        ],
+        "tradeoff": "A familiar short word (tag) gives way to one word for every # tag."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: ReadB3. Skill: rli5. Author model family: claude-opus; beginner model family: claude-opus; predict failed because tag, deny, call() and Retry were untaught and the surface implied only A fixes the skipped wrapper, which B also fixes. The revision defines them, says both fix the bug, corrects the retry comment, defines fact and Prelude for C, and lists apply()'s retirement as a mitigated loss.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-opus. Fresh agent: ReadA3. The adversarial review attacked the examples, apply()'s retirement and the built-in policies against spec law and the callable examples. It swapped the built-in PII for CardNumber, listed the lost per-call wrapper swap, counted four apply() calls and named #Retry and #Trace; A holds with two mitigated losses."
+      },
+      "checkInstructions": "Drafted by FeedbackMechanisms on 2026-10-05 from the owner feedback of that day. This ballot touches the keyword and marker registry. No Tower writes. Under A, retire KW_TAG and KW_POLICY with teaching errors. Migrate the 7 tag and 2 policy declarations and the 4 apply() calls, and turn the built-in retry and trace policies into Prelude markers. Move wrapper lowering to the definition, and add a golden that proves a direct call runs the wrapper on O0, O1 and O2.\n\nRecord the direct-call defect on a card whichever option wins.",
+      "surface": {
+        "gist": "Should tag and policy declarations fold into marker, so one word declares everything applied with #?",
+        "lesson": "A marker is a # tag on code; its declaration says where it attaches and what it does. Labels on data (tags, such as #PII for private data) and call wrappers (policies) are applied with # but declared with their own words. Under A or B, a wrapper runs on every call.",
+        "trio": {
+          "current": {
+            "note": "Today: three words; the wrapper is skipped on direct calls (probe). A and B both fix that.",
+            "code": "tag CardNumber { deny: [Log, Net] }\npub policy audit(topic: String) {\n    wrap(call) { return call() }\n}\n#Policy(audit(\"users\")) fn load_user() -> Int { 7 }\n// load_user() runs without the wrapper"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "One decorator form declares and applies wrappers (PEP 318).",
+            "code": "def audit(topic):\n    def wrap(fn): ...\n    return wrap\n\n@audit(\"users\")\ndef load_user(): return 7"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One word: marker",
+            "gist": "Tags and wrappers are both declared with marker.",
+            "gains": [
+              "One word declares every # tag.",
+              "#Policy keeps one meaning."
+            ],
+            "losses": [
+              "Nine declarations are rewritten.",
+              "apply() retires, so wrappers cannot be swapped per call."
+            ],
+            "proposed": {
+              "code": "marker CardNumber { deny: [Log, Net] }\npub marker Audit(topic: String) {\n    wrap(call) { return call() }\n}\n#Audit(\"users\") fn load_user() -> Int { 7 }\n// every load_user() call runs the wrapper"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep three words, fix the wrapper",
+            "gist": "Status quo words; #Policy wrappers run on direct calls.",
+            "gains": [
+              "No rewrite of existing declarations."
+            ],
+            "losses": [
+              "Three words for one mechanism.",
+              "#Policy keeps two meanings."
+            ],
+            "proposed": {
+              "code": "tag CardNumber { deny: [Log, Net] }\npub policy audit(topic: String) {\n    wrap(call) { return call() }\n}\n#Policy(audit(\"users\")) fn load_user() -> Int { 7 }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Also fold fact into marker",
+            "gist": "A, plus the fact word, used only by Jet's built-in library, becomes marker.",
+            "gains": [
+              "One declaration word for the whole registry."
+            ],
+            "losses": [
+              "Renames 49 Prelude rows nobody else writes.",
+              "A build fact called a marker reads oddly."
+            ],
+            "proposed": {
+              "code": "marker CardNumber { deny: [Log, Net] }\nmarker Exactness($holds: .Value, $safe: .Gain)\n// was: fact Exactness($holds: .Value, ...)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "They are one mechanism already. One word removes two keywords and gives #Policy one meaning.",
+          "gains": [
+            "One word declares every # tag.",
+            "#Policy means scoped settings only."
+          ],
+          "losses": [
+            {
+              "loss": "Nine tag and policy declarations in examples are rewritten.",
+              "mitigation": "The retired-word error shows the exact marker line, and the formatter applies it."
+            },
+            {
+              "loss": "apply() retires, so wrappers cannot be swapped per call.",
+              "mitigation": "Only two examples use it; keep a bare body in an unmarked function."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It keeps three words and a two-meaning #Policy for one mechanism."
+            },
+            {
+              "key": "C",
+              "reason": "fact is written only in the Prelude, so folding it helps no learner and blurs build facts."
+            }
+          ],
+          "tradeoff": "A familiar short word (tag) gives way to one word for every # tag."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Beginners may find `marker CardNumber` less obvious than `tag CardNumber`.",
+          "attempts": [
+            "Kept the body shape identical to today (deny/from).",
+            "Diagnostics and docs call it a label marker."
+          ],
+          "result": "Negligible: the declaration line keeps its length and meaning."
+        },
+        {
+          "loss": "apply() disappears, so a call site cannot swap or drop a function's wrappers.",
+          "attempts": [
+            "Corpus has 4 apply() calls, all in the two callable teaching examples.",
+            "Keep apply() over marker values. Rejected: a marker is not a value, and keeping it would preserve a second wrapper path beside the definition."
+          ],
+          "result": "Negligible: an unmarked inner function gives the bare body, and higher-order functions cover choosing a wrapper at run time."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T01:40:57.686Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-06",
+      "retiredAt": "2026-11-17T13:46:01.769Z"
     }
   ]
 }

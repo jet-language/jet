@@ -106830,6 +106830,344 @@
       "completedAt": "2026-11-14T13:12:18.780Z",
       "questions": [],
       "retiredAt": "2026-11-17T13:18:45.700Z"
+    },
+    {
+      "id": "c0bs5inj",
+      "num": 4020,
+      "title": "Elegance audit fixes: diagnostic registry and keyword table consistency",
+      "body": "Folds five small findings from Docs/audits/elegance-audit-2026-09-30.md into one session-sized card. Each member card's body holds its evidence and exact sites; the member cards are closed into this one.\n\nMembers (closed into this card): #3988, #3990, #3992, #4017, #4018. Read each member's body and log for repros, sites and evidence. Board prep 2026-10-01 (plan by TowerPrep, applied by TowerCloser); estimate 1.5 sessions.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-SURFACE-BUDGET1=A\nDerive active counts from canonical syntax/marker/fact/CLI rows; only owner decision raises language-surface ceilings; retirement lowers counts; keyword list regenerated rather than copied; ballot reports before/after; public Core functions reported by module/trend, NEVER hard-gated; guard mutation and generation fixtures prove these distinctions.\nPaths: Tools/agent surface counting/guard and ballot before-after report; Jet syntax registry/keyword list; Prelude/{Markers,Facts}.jet; Compiler/JetFoundation/Source/Registry/CLICommands.jet; public Core function inventory trends\nRegistry/spec/UI/goldens: Legacy crates/jet-foundation/src/Syntax.rs LEXICAL_LEDGER and Syntax/package_files.rs JET_KEYWORD_LIST are reference; Jetpack/Foundation/Source/Syntax.jet keyword list currently stale (pub/tag/policy/marker names/None). Canonical Jet registry projection, ceiling rows carry approved decision IDs, D-SURFACE-BUDGET1=A. No second hand-maintained table.; Docs/spec/syntax-decisions.md ceiling decision rows; keyword reference/editor grammar generation; AGENTS I7/counted surface guard; dated owner-feedback proposal records final report-only Core count; No new user diagnostic mandated; guard fixture failures for unauthorized +1 surface count and keyword drift; generated CLI/editor registry snapshots; Count before/after keyword/sigil/built-in marker/fact/CLI addition/retirement; adding public Core fn changes report only and never fails gate; regenerate actual keyword list and editor consumers\nTiming: TOOLS/JET REGISTRY PORT NOW; preserve one canonical registry through handover, derive real active counts. Minimal registry port seam may be mirrored only if needed for port consumers under #29 and tracked dies-at-cutover. #28 Sol author/Opus review.\nOpen prerequisite/conflict: Posted old proposal gated library functions: ratified revision explicitly removes that restriction. Historic 43/49/61 counts stale after marker/pub/Learn retirements: derive actual counts, do not pin old numbers. alias retained under B; no alias keyword decrement.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 3 criteria from archived #545: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "2026-10-28 Main: re-verified on 2330880e36 (CardVerify2): PARTIAL; met and unmet criteria with commands and outputs in $JET_SCRATCH_ROOT/lanes/Main/q/ts/looks-done-verdicts.md, section 4020."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Audit 2026-10-28 (LANG-04): the keyword table and the parser disagree both ways: `take`, `mut`, `copy` block identifiers but `take` is unlisted; `pub` and `rust` are listed though removed; `add`, `remove`, `change`, `check`, `state`, `it`, `tag` are listed but compile as names."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-SURFACE-BUDGET1=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned (RustLedger1 parked owns Rust-exit ratchet, not language-surface budget). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3986, #3991, #4019; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3986, #3991, #4019; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "pip-elegance",
+          "text": "Jet-compiler check (pip-elegance, 2026-10-01): #3988 E0038, #4017 yield keyword list, and #4018 E2303 are NOT present in Compiler/ (Jet registry already retires E0038/E2303 and emits E1102; Jet lexer/parser handle yield) - those rows are Rust-only. #3992: core.text.string is an owner-private part (Compiler/JetCli/Source/Cli/CoreSources.jet:95-99,125); only combinators is unregistered."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "TowerCloser 2026-10-01 (freeze scope confirmed by Main: comment, registry-data and stale-exemption edits are allowed). Row 2 (#3990) met: crates/jet-foundation/src/AST/types.rs doc comments now describe T? and T E!. Row 5 (#4018) partly done: E2303 is retired in crates/jet-codegen/src/Prelude/Diagnostics.jet ('*Retired: reported as E1102*', What/Why/Fix kept), Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet regenerated (generate-diagnostic-rows.mjs), and its exemption in tests/diagnostics_coverage.rs:2069 now reads 'retired' instead of the stale 'staged #1164'. Still open on row 5: 14 more exemptions name done cards (E2403 #1542, E2410/E2412 #1830, E2701 #1495, E2801-E2804 #17, E2902 #1530, E2940 #240, E0342 #1606, E1109 #1220, E2407 #1330, E0859/E3626 #521); several are runtime-message codes (FieldError, net/TLS/HTTP) that the emission scan may simply not see, so each needs a check before it is retired, reserved or re-pointed at a live card. Proof queued: cargo test --test diagnostics_coverage (tc_4020_coverage)."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports. Each row is fixed in the Jet compiler and its tables; on the Rust side only deletions (for example removing a retired code emission) remain allowed."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Batch applied 2026-10-01: all 5 members (#3988 #3990 #3992 #4017 #4018) are closed into this card; its criteria rows carry their open obligations."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Group card created from 5 small cards (#3988 #3990 #3992 #4017 #4018); each member closes into this card with a log naming it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "#3988: Sema emits `E0038`, which the diagnostic registry marks retired (2 criteria carried over)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev abd4b7e21e (checked by Main): E0038 is RetiredForeignFileOpen with status .Retired in Compiler/Prelude/Diagnostics.jet:633, and `git grep -n E0038 -- Compiler/JetSema Compiler/JetParser` finds no emitter.",
+          "at": "2026-11-14T06:46:23.940Z"
+        },
+        {
+          "n": 2,
+          "text": "#3990: no comment or explanation still describes the retired prefix type marks `?T`, `!E` and `T !E` as current. Today, on dev abd4b7e21e, compiler comments (JetFoundation Data/Syntax CoreSurface.jet:430, MathLayout.jet:814 and 819, PackageFiles.jet:83, 84 and 530; JetSema Derives.jet:600, PreludeDerives.jet:177, Statements.jet:8077, 8143, 8172, 8425, 8463 and 8465; Prelude Errors.jet:27) and Docs/spec (spec.md \"Failure contracts and propagation\" and about 25 lines, core-library.md about 291, stdlib-api-laws.md 7, cli.md 2, encoding-decisions.md 2, release-policy.md 1) still spell them. Every one moves to the suffix forms `T?`, `T E!`, `E!` and `(E1 | E2)!`; syntax-decisions.md`s decision history stays. Proof: a git grep for the prefix forms over Compiler and Docs/spec (excluding syntax-decisions.md and the retired-code rows) is empty.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e500f9f58b (the last live prefix output: the JetSemIndex conversion signatures now print T E!), gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): cases --filter semindex/numeric_destination_conversions_and_parse_are_cataloged -> PASS 1. On dev 99aa698189, git grep -nE '(->|:)[[:space:]]*\\?[A-Z]\\w*|-> [A-Z][^ ]* ![A-Z]\\w*' -- Compiler Docs/spec ':!Docs/spec/syntax-decisions.md' hits only Compiler/JetParser/Tests/SelfHost.jet's 2 retirement rows.",
+          "at": "2026-11-14T13:36:41.282Z"
+        },
+        {
+          "n": 3,
+          "text": "#3992: `core.text.combinators` and `core.text.string` are parsed but missing from the Core module registry (1 criteria carried over)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ca03d0b441 (G5DevX-comb4020c3, Lander5 directq on seed-b14). The unregistered Core/Text/Combinators.jet is deleted (registering it would be new public API, and audit api-composition-2026-10-30 named its take_while(predicate: String) a defect). ! git grep text.combinators -- Core Compiler is empty. Case text_parser_helpers_preserve_optional_failure_across_tiers and ui private_string_source_path_is_not_importable each give PASS 1. core.text.string is private by its documented header. CoreCoverage --check gives ratchet OK, and jet check --keep-going Core has no problems.",
+          "at": "2026-11-13T07:35:48.565Z"
+        },
+        {
+          "n": 5,
+          "text": "#4018: `E2303` is an active diagnostic that is never emitted; its coverage exemption cites done card #1164 (1 criteria carried over)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev abd4b7e21e (checked by Main): E2303 is RetiredViewCrossing with status .Retired (\"Retired: reported as E1102\") in Compiler/Prelude/Diagnostics.jet:16386, so it is not an active never-emitted row, and `git grep -n E2303 -- Compiler/JetSema Compiler/JetParser` finds no emitter.",
+          "at": "2026-11-14T06:46:25.014Z"
+        },
+        {
+          "n": 6,
+          "text": "[#3986]  • Every accepted, described, reflected or inferred effect comes from Effects.jet. A test fails on any stray effect name. • Panic and Mem grants are still refused. `core.compiler.lang.Effect` follows D-EFFECT-ENUM1. • The E0119 snapshot and effect examples are unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "37eb3726e2 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: the effect_names guard tests pass (the run's one failure was the unrelated decision-ID guard on Calls/Data.jet:1556, fixed by a2e4e9a8be); cases panic_and_mem_grants_are_refused 1/0; ui --filter e0119 4/0 (the E0119 snapshot is unchanged).",
+          "at": "2026-11-14T06:44:47.456Z"
+        },
+        {
+          "n": 7,
+          "text": "[#3991]  • Code checks accept exactly the spec shapes. Every code registered after D-REPORT-SEV1 has the letter that matches its severity (E blocking, L advisory; area and topic digits), and `jet Tools/agent/DiagnosticRows.jet --check` refuses a new mismatch. The legacy mismatches (on dev: E2818, E2930, E2931 and E2934 as lints, and L1101 as blocking) sit in a frozen allowlist the check can only shrink. Positive and negative tests in `jet test Tools/agent/DiagnosticRows.jet`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0f41dd417c (G5DevX-letter4020c7): DiagnosticRows --check enforces the code-letter law with a frozen shrink-only exception list, with positive and negative tests; landed by Lander5 from fold g5-fold6, each member passing its own SUB proof lines (tests file) with the fold jet; whole ui reds all also red on dev.",
+          "at": "2026-11-13T11:18:30.430Z"
+        },
+        {
+          "n": 8,
+          "text": "[#4019] no active row uses the placeholder Why or Fix templates, enforced by a test. Error pages and snapshots are regenerated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7503968d93 (G5DevX-fixph4020c8): the row generator refuses an active row whose Fix is the placeholder, with the stack that rewrote every placeholder Why and Fix; landed by Lander5 from fold g5-fold6, each member passing its own SUB proof lines (tests file) with the fold jet; whole ui reds all also red on dev.",
+          "at": "2026-11-13T11:18:29.318Z"
+        },
+        {
+          "n": 9,
+          "text": "D-SURFACE-BUDGET1=A: Derive active counts from canonical syntax/marker/fact/CLI rows; only owner decision raises language-surface ceilings; retirement lowers counts; keyword list regenerated rather than copied; ballot reports before/after; public Core functions reported by module/trend, NEVER hard-gated; guard mutation and generation fixtures prove these distinctions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev fd72bf4d8d (G5DevX-sb4020c9; Lander5 directq on seed-b14). The language surface is counted from its canonical rows against a ceiling ledger gated by decisions. jet test Tools/agent/SurfaceBudget.jet gives 6 passed, and --check reports every count equal to its ceiling. --ballot against the base reports keywords 25, lexical forms 72, markers 75, facts 52, CLI commands 60 and Core public functions 9064, each before and after. It is listed in Land.jet ratchets.",
+          "at": "2026-11-13T09:11:37.382Z"
+        },
+        {
+          "n": 10,
+          "text": "A two-way test: every word in the keyword table is refused as an identifier, and every word the parser refuses is in the table; the table and `jet inspect reserved` are generated from the parser's keyword set.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a5d2be59e1 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler/JetParser/Tests` 257/0, including the two-way KeywordTable tests (every table word is refused as an identifier, and every word the parser refuses is in the table).",
+          "at": "2026-11-14T06:44:49.013Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #545 c1) Registry comments use canonical PascalCase marker spellings; no lowercase #layout or #grant examples remain in Compiler/JetFoundation/Data/Syntax.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 09dfaea308 (Main ran it): git grep -nE \"#(layout|grant)\\b\" -- Compiler/JetFoundation/Data/Syntax prints nothing (rc 1). The registry comments spell #Layout(c, align(N)) and #Layout(columnar) in PascalCase (PackageFiles.jet, MathLayout.jet, Spellings.jet). Found by G5DevX-1.",
+          "at": "2026-11-13T07:23:32.019Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #545 c3) diagnostics.md explains W0410 as a frozen historical exception and states the current L-prefix warning law; no diagnostic code is renumbered [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev cf32e72ca9 (G5DevX-w0410, Lander5 directq on seed-b14): Docs/spec/diagnostics.md:38 states the L-prefix warning law (D-REPORT-SEV1), and :41 explains W0410 as the frozen historical exception. git diff --stat e7ec019814 -- Compiler/Prelude/Diagnostics.jet and the DiagnosticRows sources is empty, so no code is renumbered.",
+          "at": "2026-11-13T07:33:57.483Z"
+        },
+        {
+          "n": 14,
+          "text": "Single-source census F25 (Docs/audits/2026-11-05-single-source-census.md): Jetpack's copy of the syntax registry. One hand-written home: `JetFoundation/Data/Syntax` (I7). Fix: derive: Jetpack imports jet_foundation, or the shared part is generated. Drift check: Generator `--check`. Drifted on 2026-11-05: Not drifted: 374 of 381 have the same name and value; none differ Effort M. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 93eac18caa (G5DevX-jpsyntax4020c14, Lander5 directq on seed-b14). Jetpack's syntax registry is generated from Compiler/JetFoundation/Data/Syntax, and the third keyword copy in GeneratedNames is deleted. jet test Tools/agent/JetpackSyntax.jet gives 6 passed. JetpackSyntax --check reports up to date, and it is listed in Land.jet ratchets (the drift check is in the gate). The guards closed-list test passes, jet check Jetpack/Foundation is ok, Jetpack/Bootstrap/Check.jet gives JETPACK CHECK OK, and jet check Compiler/JetCli is ok.",
+          "at": "2026-11-13T08:28:14.056Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "elegance-audit",
+        "retargeted",
+        "audit-2026-10-28",
+        "wayfinder:task"
+      ],
+      "parentId": "c0xnvmrf",
+      "needsAcceptance": false,
+      "created": "2026-10-01T12:12:23.832Z",
+      "updated": "2026-11-14T13:37:12.446Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-14T13:37:12.446Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:46:01.768Z"
+    },
+    {
+      "id": "c018v880",
+      "num": 6710,
+      "title": "FFI attribute accepts and ignores unknown arguments",
+      "body": "The seed accepts `#FFI(c, concurrent)` and silently ignores the unknown argument `concurrent` (found by BallotLead-2 while probing the #6689 thread ballots). Sema must reject every FFI argument it does not define, with a registered diagnostic (what/why/fix and a UI snapshot), so a misspelt or unsupported option never compiles silently.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#FFI` refuses any argument other than its one `language` with E0930 jet.MarkerArgumentMismatch. Proof: jet test Compiler --profile ui --filter ffi_unknown_argument -> PASS 1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 7d964bb2b8, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile ui --filter ffi_unknown_argument -> PASS 1/FAIL 0.",
+          "at": "2026-11-14T13:36:29.643Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T05:57:03.965Z",
+      "updated": "2026-11-14T13:37:05.185Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:37:05.185Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:46:01.770Z"
+    },
+    {
+      "id": "c04vlsgk",
+      "num": 6712,
+      "title": "jet build --os=web of checked FFI.C code exits 101 (web host lacks the inline FFI symbol) instead of a checked refusal",
+      "body": "Found by the fresh adversarial review of the #6689 ballots (FFIReview, 2026-11-09). `jet build --os=web --allow=FFI.C main.jet` on the carrier example passes checking and then exits 101, because the web host lacks jet_inline_jet_ffi_digits. That breaks I2 and I3: sema must refuse a C import on a target without C (a registered diagnostic with what/why/fix and a UI snapshot), so codegen never meets it. Repro: $JET_SCRATCH_ROOT/lanes/FFIReview/2026-11-09-ffi-ballots-review.md. Criteria: the web build refuses with a registered diagnostic, a UI snapshot exists, no exit 101, and the native build is unchanged.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet build --os=web of checked inline FFI.C code is refused by the checker with a registered diagnostic (jet.TargetDeniedEffect, E1123, UI snapshot tests/ui/target_denied_effect_e1123), never exit 101, and the native build is unchanged. Proof: jet test Compiler --profile cases --filter cross/web_build_refuses_inline_c_before_codegen -> PASS 1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e56755ec85, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile cases --filter cross/web_build_refuses_inline_c_before_codegen -> PASS 1/FAIL 0 (refused since 95ae5a3980 with E1123; the case pins the C path).",
+          "at": "2026-11-14T13:36:54.260Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T06:34:39.331Z",
+      "updated": "2026-11-14T13:37:07.451Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:37:07.451Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:46:01.770Z"
+    },
+    {
+      "id": "c0qwfnnb",
+      "num": 6726,
+      "title": "The repository root tracks 209 .jet/ run artifacts (evidence, stamps, state/jobs.db, perf traces, proofs)",
+      "body": "dev tracks .jet/evidence (190 binary JETEVID records), .jet/stamps, .jet/state/jobs.db, .jet/perf/*.jettrace, .jet/fuzz, .jet/proofs, .jet/secrets-audit and secrets-plan, .jet/priors/check, the core-conformance files and .jet/bindings/fortran/matrix.jet. .gitignore ignores .jet/evidence but says 'evidence already tracked at the repository root stays tracked'. AGENTS.md forbids committed run artifacts and machine information, and the binary records may hold machine paths that the personal-info guard doesn't scan. Decide per path what any tool or case actually reads from the committed copy, untrack the rest, add /.jet/ to .gitignore and extend the personal-info guard to binary records.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The repository root tracks no .jet/ run artifacts, and .gitignore ignores /.jet/. Proof: git ls-tree -r --name-only origin/dev -- .jet is empty.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8c3789d2dd: on dev 99aa698189, git ls-tree -r --name-only origin/dev -- .jet lists 0 files, and .gitignore has /.jet/.",
+          "at": "2026-11-14T13:36:55.389Z"
+        },
+        {
+          "n": 2,
+          "text": "The personal-information guard scans binary records too. Proof: jet test Tools/agent/LaneCheck.jet --filter personal-information passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8c3789d2dd, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Tools/agent/LaneCheck.jet --filter personal-information -> 2 passed, 0 failed.",
+          "at": "2026-11-14T13:36:56.707Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:50:17.686Z",
+      "updated": "2026-11-14T13:37:09.528Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T13:37:09.528Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:46:01.770Z"
     }
   ]
 }
