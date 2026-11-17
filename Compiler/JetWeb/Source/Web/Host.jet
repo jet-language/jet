@@ -214,8 +214,8 @@ function providerRecord(fields) {
 // name, which the browser keeps in its downloads folder or where the person
 // says when it asks. The file dialogs that answer a path (dialogRequest) and
 // font shaping are absent: a page gives no filesystem path. A device request,
-// the app's file chooser and the files dropped on it among them, is answered
-// the browser's way (deviceRequest).
+// the app's file chooser, the files dropped on it and the folders it is given
+// among them, is answered the browser's way (deviceRequest).
 const UI_QUEUE = 256;
 
 // How long a location request waits for the person: then it is refused, as
@@ -335,6 +335,124 @@ function pickFile(doc, accept) {
     input.addEventListener("cancel", () => picked(null));
     input.click();
   });
+}
+
+// The folder the person picks in the browser's directory picker, for the
+// page to read and write: a promise of its record, the grant and, when
+// picked, the number `kept` holds its handle under and its name (holdFolder).
+// Closing the picker is `granted` with no folder. A browser without the
+// picker is `restricted`, a picker asked for outside the person's gesture
+// `gesture`, and any other refusal `denied`.
+async function pickFolder(kept) {
+  if (!globalThis.showDirectoryPicker) return providerRecord(["restricted"]);
+  try {
+    return providerRecord(["granted", ...holdFolder(kept, await globalThis.showDirectoryPicker({ mode: "readwrite" }))]);
+  } catch (error) {
+    if (error?.name === "AbortError") return providerRecord(["granted"]);
+    return providerRecord([error?.name === "SecurityError" ? "gesture" : "denied"]);
+  }
+}
+
+// The fields a record gives for the folder handle `folder`, which `kept`
+// now holds: the number it holds it under and its name.
+function holdFolder(kept, folder) {
+  return [String(kept.push(folder) - 1), folder.name];
+}
+
+// The record of the files directly in the folder `kept` holds under
+// `number`, in name order: `listed`, then each file's number in `kept`, size
+// and name (keptFile). Null when `kept` holds no folder there, or the
+// browser refuses to list it.
+async function listFolder(kept, number) {
+  const folder = kept[number];
+  if (folder?.kind !== "directory") return null;
+  try {
+    const files = [];
+    for await (const entry of folder.values()) {
+      if (entry.kind === "file") files.push(await entry.getFile());
+    }
+    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return providerRecord(["listed", ...files.flatMap((file) => keptFile(kept, file))]);
+  } catch {
+    return null;
+  }
+}
+
+// Writes the bytes `request` gives in base64 as the file it names, in the
+// folder `kept` holds under its number (`<number> <base64> <name>`). The
+// browser writes them to a new copy and replaces the file only when it
+// closes, so a failed write leaves it as it was: `written`, or null when the
+// write failed.
+async function writeToFolder(kept, request) {
+  const [number, encoded] = request.split(" ", 2);
+  const name = request.slice(number.length + encoded.length + 2);
+  const folder = kept[Number(number)];
+  if (folder?.kind !== "directory") return null;
+  let writable = null;
+  try {
+    writable = await (await folder.getFileHandle(name, { create: true })).createWritable();
+    await writable.write(Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0)));
+    await writable.close();
+    return "written";
+  } catch {
+    await writable?.abort().catch(() => {});
+    return null;
+  }
+}
+
+// `ask` asked of the page's store of kept folders: IndexedDB's
+// `jet-app-folders` database, whose `folders` store keeps each folder's
+// handle under its key. A promise of the request's result once its
+// transaction completes, null when the browser has no IndexedDB or the
+// request fails.
+async function folderStore(mode, ask) {
+  const opening = globalThis.indexedDB?.open("jet-app-folders", 1);
+  if (!opening) return null;
+  const db = await new Promise((resolve) => {
+    opening.onupgradeneeded = () => opening.result.createObjectStore("folders");
+    opening.onsuccess = () => resolve(opening.result);
+    opening.onerror = () => resolve(null);
+  });
+  if (db === null) return null;
+  try {
+    return await new Promise((resolve) => {
+      const transaction = db.transaction("folders", mode);
+      const request = ask(transaction.objectStore("folders"));
+      transaction.oncomplete = () => resolve(request.result ?? null);
+      transaction.onerror = () => resolve(null);
+      transaction.onabort = () => resolve(null);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+// Keeps the folder `kept` holds under the number `request` starts with in
+// the store of kept folders, under the key that follows (`<number> <key>`),
+// for keptFolder in a later visit: `kept`, or null when there is no such
+// folder or no store.
+async function keepFolder(kept, request) {
+  const space = request.indexOf(" ");
+  const folder = kept[Number(request.slice(0, space))];
+  if (space < 0 || folder?.kind !== "directory") return null;
+  return (await folderStore("readwrite", (store) => store.put(folder, request.slice(space + 1)))) === null ? null : "kept";
+}
+
+// The record of the folder kept under `key` in the store of kept folders:
+// the grant and, when given, the number `kept` now holds its handle under
+// and its name (holdFolder). A browser asks the person again before a page
+// in a later visit reaches a folder (requestPermission, which needs the
+// person's gesture); a refusal is `denied`. No folder kept is null.
+async function keptFolder(kept, key) {
+  const folder = await folderStore("readonly", (store) => store.get(key));
+  if (folder?.kind !== "directory") return null;
+  try {
+    let state = (await folder.queryPermission?.({ mode: "readwrite" })) ?? "granted";
+    if (state === "prompt") state = await folder.requestPermission({ mode: "readwrite" });
+    return providerRecord(state === "granted" ? ["granted", ...holdFolder(kept, folder)] : ["denied"]);
+  } catch {
+    return providerRecord(["denied"]);
+  }
 }
 
 // How long a sensor stream waits for its sensor's first reading: a browser
@@ -509,9 +627,15 @@ function shareLink(url) {
 // number, 7 the clipboard's text (pasteText), 8 a share of the link
 // `request` (shareLink), 9 the record of the file the person picks in the
 // browser's file chooser, which offers `request` (pickFile: its grant and,
-// when picked, its number, size and name) and 10 the record of the files
+// when picked, its number, size and name), 10 the record of the files
 // the page's last drop on a body that takes them gave (filesDropped: each
-// one's number, size and name), null for none. An answer may be a promise.
+// one's number, size and name), 11 the record of the folder the person
+// picks in the browser's directory picker (pickFolder), 12 the record of
+// the files in the kept folder number `request` (listFolder), 13 a write of
+// a file to a kept folder (writeToFolder), 14 the keeping of a kept folder
+// for later visits (keepFolder) and 15 the record of the folder kept for
+// them under the key `request` (keptFolder), null for none. An answer may
+// be a promise.
 function deviceRequest(doc, kept, watches, drops, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
@@ -543,6 +667,11 @@ function deviceRequest(doc, kept, watches, drops, kind, request) {
     const files = drops.shift();
     return files === undefined ? null : providerRecord(files.flatMap((file) => keptFile(kept, file)));
   }
+  if (kind === 11) return pickFolder(kept);
+  if (kind === 12) return listFolder(kept, Number(request));
+  if (kind === 13) return writeToFolder(kept, request);
+  if (kind === 14) return keepFolder(kept, request);
+  if (kind === 15) return keptFolder(kept, request);
   return null;
 }
 
@@ -555,10 +684,11 @@ function defaultUiProvider(doc) {
   const queues = [[], [], []];
   const claims = new Set();
   let clipboard = null;
-  // The files the app was given (a photo, a picked or dropped file), by
-  // number; each lives as long as the page. The files of each drop on a body
-  // that takes them, until the app takes them. The sensors its streams
-  // follow, by number, until each stops.
+  // The files and folders the app was given (a photo, a picked or dropped
+  // file, a picked or kept folder's handle), by number; each lives as long
+  // as the page. The files of each drop on a body that takes them, until
+  // the app takes them. The sensors its streams follow, by number, until
+  // each stops.
   const kept = [];
   const drops = [];
   const watches = { count: 0, held: new Map() };

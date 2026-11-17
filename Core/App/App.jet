@@ -13,6 +13,7 @@ package: {
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
     auth: core.auth
+    base64: core.encoding.base64
     unicode: core.text
     http: core.http
     crypto: core.crypto
@@ -4876,7 +4877,7 @@ PickedFile: struct {
     }
 }
 
-// Where a picked file's bytes are: a path on this device, or a file a page's
+// Where a picked file or folder is: a path on this device, or one a page's
 // browser holds for the app, under the number its UI provider gave it.
 priv PickedSource: enum {
     Path(String),
@@ -4933,6 +4934,16 @@ priv WEB_DEVICE_SHARE: 8
 priv WEB_DEVICE_OPEN: 9
 
 priv WEB_DEVICE_DROPPED: 10
+
+priv WEB_DEVICE_FOLDER: 11
+
+priv WEB_DEVICE_LIST: 12
+
+priv WEB_DEVICE_WRITE: 13
+
+priv WEB_DEVICE_KEEP: 14
+
+priv WEB_DEVICE_KEPT: 15
 
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
@@ -5000,7 +5011,59 @@ priv app_page_reading: fn(watch: String) -> [String]? Never! {
 // Stops the page following the sensor under `watch`.
 priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STOP, watch) }
 
-#Test("a page's answers read as a grant, a place, a file and a sensor's reading, and a page's file reads only in its page") {
+// The folder a page's answer holds from its field `from` on: the number
+// the page keeps its handle under and its name. None when it has none.
+priv app_page_folder: fn(fields: [String], from: Int) -> PickedFolder? Never! {
+    if fields.len() < from + 2 -> return None
+    number: Int.parse(fields[from]) ?? return None
+    Val(PickedFolder{name: fields[from + 1].copy(), source: .Page(number)})
+}
+
+// The files directly in the folder a page keeps under `number` (`name`),
+// in name order, each one the page then keeps as a picked file's. A folder
+// the page no longer holds, or one the browser no longer lets it list, is
+// an error.
+priv app_page_listed: fn(number: Int, name: String) -> [PickedFile] IOError! {
+    fields: app_page_answer(WEB_DEVICE_LIST, "{number}")
+    if app_page_first(fields) != .Val("listed") {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the browser no longer lets the page list the folder")}))
+    }
+    found := [PickedFile]{}
+    at := 1
+    loop at + 3 <= fields.len() {
+        found.push(app_page_file(fields, at) ?? return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the page listed a file without its number and size")})))
+        at += 3
+    }
+    Ok(found)
+}
+
+// Writes `bytes` as the file `file` in the folder a page keeps under
+// `number` (`name`): the browser writes them all to a new copy of the file
+// and only then replaces it, so a failed write leaves the file as it was.
+priv app_page_write: fn(number: Int, name: String, file: String, bytes: [U8]) IOError! {
+    said: ui_rt.device(WEB_DEVICE_WRITE, "{number} {base64.encode(bytes)} {file}") ?? ""
+    if said != "written" {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(file), os_code: None, cause: Val("the browser did not let the page write to {name}")}))
+    }
+    Ok()
+}
+
+// Has the page's browser keep the folder it holds under `number` under
+// `key`, for `kept_folder` in a later visit.
+priv app_page_keep: fn(number: Int, key: String) Never! {
+    _: ui_rt.device(WEB_DEVICE_KEEP, "{number} {key}")
+}
+
+// `kept_folder` in a page: the folder whose handle the browser keeps under
+// `key`. The browser may ask the person again before the page reaches it;
+// a refusal, or no folder kept under `key`, is `None`.
+priv app_page_kept_folder: fn(key: String) -> PickedFolder? Never! {
+    fields: app_page_answer(WEB_DEVICE_KEPT, key)
+    if app_page_first(fields) != .Val("granted") -> return None
+    app_page_folder(fields, 1)
+}
+
+#Test("a page's answers read as a grant, a place, a file, a folder and a sensor's reading, and a page's file and folder are reached only in their page") {
     assert_eq(app_page_first([String]{}), None)
     assert_eq(app_page_first([String]{"denied"}), Val("denied"))
     assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}, 1), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
@@ -5027,6 +5090,18 @@ priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STO
     if photo.read() == {
         .Ok(_) -> { panic("a page's file reads only in its page") }
         .Err(_) -> {}
+    }
+    if app_page_folder([String]{"granted", "3", "exports"}, 1) == .Val(folder) {
+        assert_eq(folder.name, "exports")
+    } else { panic("an answer with a folder gives it") }
+    if app_page_folder([String]{"granted"}, 1) == .Val(_) {
+        panic("an answer without a folder gives none")
+    }
+    assert(app_page_kept_folder("exports") == PickedFolder?{None}, "with no page, no folder is kept")
+    held: PickedFolder{name: "exports", source: .Page(3)}
+    if held.files() == .Ok(_) -> panic("a page's folder lists only in its page")
+    if held.write("board.csv", [U8]{}) == .Ok(_) {
+        panic("a page's folder is written only in its page")
     }
 }
 
@@ -5138,16 +5213,14 @@ priv app_chosen_path: fn(uri: String) -> String? Never! {
 // (`kept_folder`).
 PickedFolder: struct {
     name: String,
-    priv path: String,
+    priv source: PickedSource,
 
     // The files directly in the folder, each a PickedFile, in name order.
     files: fn(self) -[FS.Read]> [PickedFile] IOError! {
-        found := [PickedFile]{}
-        loop entry in files.list_dir(self.path) ?? return Err(err) {
-            if entry.is_dir -> next
-            found.push(app_picked(entry.path) ?? return Err(err))
+        if self.source == {
+            .Path(path) -> app_folder_files(path)
+            .Page(number) -> app_page_listed(number, self.name)
         }
-        Ok(found)
     }
 
     // Writes `bytes` as the file `name` in the folder, all at once, so a
@@ -5157,53 +5230,90 @@ PickedFolder: struct {
         if name == "" || name == "." || name == ".." || name.contains("/") {
             return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("a file in a folder is named without a `/`, and is not `.` or `..`")}))
         }
-        files.write_atomic("{self.path}/{name}", bytes)
+        if self.source == {
+            .Path(path) -> { files.write_atomic("{path}/{name}", bytes) }
+            .Page(number) -> app_page_write(number, self.name, name, bytes)
+        }
     }
 
-    // Keeps access to the folder under `key` in the device store
-    // (`device_cell_load`): `kept_folder(key)` gives it back in this run and
-    // every later one, until another folder is kept under `key`. It keeps
-    // the folder's path or, for one the document portal shares into a
-    // sandbox, its document portal ID (`app_folder_form`).
+    // Keeps access to the folder under `key`: `kept_folder(key)` gives it
+    // back in this run and every later one, until another folder is kept
+    // under `key`. On this device the device store (`device_cell_load`)
+    // keeps the folder's path or, for one the document portal shares into a
+    // sandbox, its document portal ID (`app_folder_form`). A page's browser
+    // keeps the folder's handle (`app_page_keep`).
     keep: fn(self, key: String) -[Env]> Never! {
-        form: app_folder_form(self.path, sys.get("XDG_RUNTIME_DIR") ?? "")
-        loop {
-            seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
-            listed: live_fields(seen) ?? [String]{}
-            kept := [U8]{}
-            at := 0
-            loop at + 1 < listed.len() {
-                if listed[at] != key {
-                    live_put(kept, listed[at])
-                    live_put(kept, listed[at + 1])
-                }
-                at += 2
-            }
-            live_put(kept, key)
-            live_put(kept, form)
-            if device_cell_replace(FOLDER_STORE, FOLDER_CELL, seen, kept) {
-                return
-            }
+        if self.source == {
+            .Path(path) -> { app_keep_folder(key, path) }
+            .Page(number) -> app_page_keep(number, key)
         }
     }
 }
 
-// The folders `keep` kept, as length-prefixed fields: each key, then its
-// folder's form (`app_folder_form`).
+// The files directly in the folder at `path`, in name order.
+priv app_folder_files: fn(path: String) -[FS.Read]> [PickedFile] IOError! {
+    found := [PickedFile]{}
+    loop entry in files.list_dir(path) ?? return Err(err) {
+        if entry.is_dir -> next
+        found.push(app_picked(entry.path) ?? return Err(err))
+    }
+    Ok(found)
+}
+
+// Keeps the folder at `path` under `key` in the device store
+// (`PickedFolder.keep`).
+priv app_keep_folder: fn(key: String, path: String) -[Env]> Never! {
+    form: app_folder_form(path, sys.get("XDG_RUNTIME_DIR") ?? "")
+    loop {
+        seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
+        listed: live_fields(seen) ?? [String]{}
+        kept := [U8]{}
+        at := 0
+        loop at + 1 < listed.len() {
+            if listed[at] != key {
+                live_put(kept, listed[at])
+                live_put(kept, listed[at + 1])
+            }
+            at += 2
+        }
+        live_put(kept, key)
+        live_put(kept, form)
+        if device_cell_replace(FOLDER_STORE, FOLDER_CELL, seen, kept) {
+            return
+        }
+    }
+}
+
+// The folders `keep` kept on this device, as length-prefixed fields: each
+// key, then its folder's form (`app_folder_form`).
 priv FOLDER_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 priv FOLDER_STORE: "app.folders"
 
 // The folder kept under `key` (`PickedFolder.keep`), in this run or an
-// earlier one; `None` when none is, or it is no longer a folder.
+// earlier one; `None` when none is, or it is no longer a folder. A page
+// asks its browser (`app_page_kept_folder`), which may ask the person
+// again for access to it.
 kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? {
+    #if #build.target.os == {
+        .Linux -> { return app_kept_folder(key) }
+        .MacOS -> { return app_kept_folder(key) }
+        .Windows -> { return app_kept_folder(key) }
+        .Web -> { return app_page_kept_folder(key) }
+        .Wasm -> { return app_kept_folder(key) }
+        .Freestanding -> { return app_kept_folder(key) }
+    }
+}
+
+// `kept_folder` on this device: the folder's form in the device store.
+priv app_kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? Never! {
     listed: live_fields(device_cell_load(FOLDER_STORE, FOLDER_CELL)) ?? return None
     at := 0
     loop at + 1 < listed.len() {
         if listed[at] == key {
             path: app_folder_path(listed[at + 1], sys.get("XDG_RUNTIME_DIR") ?? "") ?? return None
             if !files.is_dir(path) -> return None
-            return Val(PickedFolder{name: files.basename(path), path: path})
+            return Val(PickedFolder{name: files.basename(path), source: .Path(path)})
         }
         at += 2
     }
@@ -5235,16 +5345,34 @@ priv app_folder_path: fn(form: String, runtime: String) -> String? Never! {
 // Asks the person for a folder and gives it, or `None` when they cancel.
 // No dialog to ask with, or a choice that is not a local folder, is `None`
 // with a notice. On Linux the desktop portal's open dialog asks for a
-// directory (org.freedesktop.portal.FileChooser); the other native targets
+// directory (org.freedesktop.portal.FileChooser); in a page the browser's
+// directory picker asks (`app_open_folder_web`); the other native targets
 // keep that notice.
 open_folder: fn() -[Env, FS.Read, Net, Time]> PickedFolder? {
     #if #build.target.os == {
         .Linux -> { return app_open_folder_linux() }
         .MacOS -> { return app_no_folder(OPEN_UNBUILT) }
         .Windows -> { return app_no_folder(OPEN_UNBUILT) }
-        .Web -> { return app_no_folder(OPEN_UNBUILT) }
+        .Web -> { return app_open_folder_web() }
         .Wasm -> { return app_no_folder(OPEN_UNBUILT) }
         .Freestanding -> { return app_no_folder(OPEN_UNBUILT) }
+    }
+}
+
+// `open_folder` in a page: the browser's directory picker asks for a
+// folder the page may read and write, and the page keeps its handle, which
+// the folder's files, writes and `keep` go through. The person closing the
+// picker is `None`. A browser without a directory picker, a picker it
+// opens only inside the person's gesture, one it refuses, or no page to
+// ask in keeps the notice of why.
+priv app_open_folder_web: fn() -> PickedFolder? Never! {
+    fields: app_page_answer(WEB_DEVICE_FOLDER, "")
+    grant: app_page_first(fields) ?? return app_no_folder("there is no page to ask in")
+    if grant == {
+        "granted" -> app_page_folder(fields, 1)
+        "restricted" -> app_no_folder("this browser gives a page no folder to pick")
+        "gesture" -> app_no_folder("the browser opens its folder picker only inside a click or a key press")
+        else -> app_no_folder("the browser refused the page a folder")
     }
 }
 
@@ -5261,7 +5389,7 @@ priv app_open_folder_linux: fn() -[Env, FS.Read, Net, Time]> PickedFolder? Never
     if !files.is_dir(path) {
         return app_no_folder("the dialog chose {files.basename(path)}, which is not a folder")
     }
-    Val(PickedFolder{name: files.basename(path), path: path})
+    Val(PickedFolder{name: files.basename(path), source: .Path(path)})
 }
 
 // Keeps the notice that no folder was opened, and why; gives `None`.
@@ -7285,7 +7413,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     folder: "{sys.temp_dir()}/jet-folder-{sys.getpid()}"
     files.create_dir_all("{folder}/Exports") ?? panic("folder: {err}")
     assert(kept_folder("exports") == PickedFolder?{None}, "nothing is kept under a new key")
-    PickedFolder{name: "Exports", path: "{folder}/Exports"}.keep("exports")
+    PickedFolder{name: "Exports", source: .Path("{folder}/Exports")}.keep("exports")
     kept: kept_folder("exports") ?? panic("the folder kept as `exports` is found")
     assert_eq(kept.name, "Exports")
     kept.write("board.csv", "title\nFix the gate\n".bytes()) ?? panic("write: {err}")

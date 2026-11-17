@@ -6629,16 +6629,21 @@ than a file outside the folder. The person canceling is `None` with no
 notice. No dialog to ask with is `None`, and a notice in the app's notice
 list says why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser), asked for a directory, chooses it.
-The other native targets keep that notice. `folder.keep(key)` keeps access
-to the folder under `key` in the device store, and `app.kept_folder(key)`
-gives it back in that run and every later one. A folder the document
-portal shares into a sandbox, under `$XDG_RUNTIME_DIR/doc/`, is kept by its
-document portal ID, so a later run finds it under its own runtime
-directory. Any other folder is kept by its path. A key with no folder kept,
-or a folder that is gone, is `None`. A browser gives a page the files the
-person picks, never a folder it can list or keep, so `app.open_folder` and
-`app.kept_folder` in code whose target is the web output are a compile
-error, E-APP-TARGET-FEATURE.
+In a page the browser's directory picker (`showDirectoryPicker`, asked for
+reading and writing) chooses it, and the page keeps its handle: `files()`
+lists it through the browser and `write` writes a new copy of the file
+that replaces the old one only once it is whole. The picker opens only
+inside the person's click or key press, and a browser without it, or one
+that refuses it, is `None` with a notice. The other native targets keep
+that notice. `folder.keep(key)` keeps access to the folder under `key` in
+the device store, and `app.kept_folder(key)` gives it back in that run and
+every later one. A folder the document portal shares into a sandbox, under
+`$XDG_RUNTIME_DIR/doc/`, is kept by its document portal ID, so a later run
+finds it under its own runtime directory. Any other folder is kept by its
+path. A key with no folder kept, or a folder that is gone, is `None`. A
+page's browser keeps the folder's handle in the page's IndexedDB
+(`jet-app-folders`); in a later visit the browser asks the person again
+before `kept_folder` gives the folder, and their refusal is `None`.
 
 `app.drop_files(body, types:, on_drop:)` gives `body` back, taking the files
 the person drops on it: each one of a kind in `types` goes to `on_drop` as a
