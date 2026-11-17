@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111950,
+    "rev": 111954,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -68256,11 +68256,11 @@
         {
           "n": 1,
           "text": "D-CORE-TARGET1=A is built: on a machine with no heap, the existing -[!Mem.Alloc]> proof runs from the program's start and follows calls into Core and packages alike, with no exemption by name (the `module_is_core` test in sema_scope_environment_no_os, Compiler/JetSema/Source/Sema/Scopes.jet, is gone); a heap use inside Core or a package is reported on the program's call, with a note showing each step and the line that allocates. Proof: `git grep -n 'module_is_core(environment.module_identity)' -- Compiler/JetSema/Source/Sema/Scopes.jet` prints nothing and `jet test Compiler --profile ui --filter no_heap_target_core_path`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:48:03.352Z"
+          "evidence": "Holds on dev dbf05f4ced (landed 4315716f03): `git grep -n module_is_core(environment.module_identity) -- Compiler/JetSema/Source/Sema/Scopes.jet` prints nothing, and in the p276 suite `jet test Compiler --profile ui --filter no_heap_target_core_path` passes, as do freestanding_e3301 and cases TargetMachines/no_os_board_check_refuses_core_files_call.",
+          "at": "2026-11-17T21:05:58.875Z"
         },
         {
           "n": 3,
@@ -68286,7 +68286,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-17T16:49:06.481Z",
+      "updated": "2026-11-17T21:05:58.875Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -82800,8 +82800,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "dev 48aa519ddf + 732af2563f: jet test Compiler --profile ui --filter PackageMarkerOwnDiagnostic PASS on the p249 batch compiler; --profile cases --filter explain_package_diagnostic PASS on p248.",
-          "at": "2026-11-17T06:34:39.156Z"
+          "evidence": "Holds on dev dbf05f4ced (landed 335a07be11): in the p276 suite, cases UIFixes/jet_fix_inlines_deprecated_replacement passes. jet fix inlines the #Deprecated replacement body at the call.",
+          "at": "2026-11-17T21:06:00.906Z"
         },
         {
           "n": 9,
@@ -82825,7 +82825,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-17T19:38:11.837Z",
+      "updated": "2026-11-17T21:06:00.906Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -108951,11 +108951,11 @@
         {
           "n": 2,
           "text": "`plugin.load(..., limits: plugin.Limits{...})` caps fuel and time per call (refilled before each call) and memory and tables for the component's life, each field defaulting to today's number; exhausting each limit gives its typed failure (D-CORE-PLUGINLIMITS1=A, D-PLUGIN-FAILURE1=A).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:10:58.158Z",
+          "evidence": "Holds on dev dbf05f4ced (landed 4315716f03): in the p276 suite, cases Plugin/limits_cap_each_budget_on_all_hosted_tiers passes, and so do the Authority/plugin_ budget cases (time budget, table growth cap, linear memory cap, wire budget, non-terminating component).",
+          "at": "2026-11-17T21:05:59.908Z",
           "proof": {
             "profile": "cases",
             "filter": "Plugin/limits_"
@@ -108971,7 +108971,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:40:23.429Z",
-      "updated": "2026-11-17T16:52:15.100Z",
+      "updated": "2026-11-17T21:05:59.908Z",
       "updatedBy": "Main"
     },
     {
@@ -111729,7 +111729,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -111737,7 +111737,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All criteria met on dev dbf05f4ced (p276)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -111779,8 +111785,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:31.841Z",
-      "updated": "2026-11-17T21:05:55.469Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T21:05:57.861Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T21:05:57.861Z"
     },
     {
       "id": "c0yhga63",
@@ -215845,6 +215852,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T21:06:00.906Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fymc7l",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T21:05:59.908Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yuouhx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T21:05:58.875Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0q31aks",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T21:05:57.861Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hicd7a",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-11-17T21:05:55.469Z",
       "by": "Main",
