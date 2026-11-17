@@ -14,8 +14,8 @@ import { loadEntries, mergeEarlierResult, probeAxisTools, runToolEntry, stageEnt
 const scratchRoot = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const parallelGrepDir = path.join(repoRoot, "Tools", "gauntlet", "entries", "parallel-grep", "jet");
-const envRunner = path.join(repoRoot, "Tools", "agent", "JetEnv.jet");
+const parallelGrepDir = path.join(repoRoot, "Tools", "Gauntlet", "Entries", "ParallelGrep", "Jet");
+const envRunner = path.join(repoRoot, "Tools", "Agent", "JetEnv.jet");
 const stagedEntryTestOptions = { timeout: 120_000 };
 
 async function withScratch(name, callback) {
@@ -87,10 +87,10 @@ function fakeJetSource({ expected, peerPort = null, stateful = false, failOn = n
 
 async function writeEntry(root, name, { expected, spec = {}, fakeJet }) {
   const entryDir = path.join(root, "entry");
-  await fs.mkdir(path.join(entryDir, "jet"), { recursive: true });
+  await fs.mkdir(path.join(entryDir, "Jet"), { recursive: true });
   await fs.writeFile(path.join(entryDir, "entry.json"), JSON.stringify({ name, mode: spec.mode ?? "batch", languages: ["jet"], spec }));
   await fs.writeFile(path.join(entryDir, "expected.out"), expected);
-  await fs.writeFile(path.join(entryDir, "jet", "run.jet"), "// behavior fixture\n");
+  await fs.writeFile(path.join(entryDir, "Jet", "run.jet"), "// behavior fixture\n");
   const jetBin = path.join(root, "fake-jet");
   await fs.writeFile(jetBin, fakeJet);
   chmodSync(jetBin, 0o755);
@@ -200,7 +200,7 @@ test("peer fixture stops when a Jet tier fails", stagedEntryTestOptions, async (
 test("a service row's startup is the median of one fresh-process sample per run", stagedEntryTestOptions, async () => {
   await withScratch("service-startup", async (root) => {
     const launcher = path.join(root, "launch");
-    await execFileAsync("cc", ["-O2", "-o", launcher, path.join(repoRoot, "Tools", "gauntlet", "harness", "launch.c")]);
+    await execFileAsync("cc", ["-O2", "-o", launcher, path.join(repoRoot, "Tools", "Gauntlet", "Harness", "launch.c")]);
     const fixtures = path.join(repoRoot, "Tools", "Gauntlet", "Entries", "RunStageEntry", "Fixtures");
     const jetBin = path.join(root, "jet");
     await fs.copyFile(path.join(fixtures, "fake-jet.txt"), jetBin);
@@ -280,7 +280,7 @@ async function writeToolEntry(root, { twinOutput }) {
   await fs.writeFile(path.join(entryDir, "expected", "lines.out"), "3\n");
   const entry = { name: "count", mode: "tool", tool: { original: "Tools/count/count.mjs", jet: "Tools/count/Count.jet", fixtures: "fixtures", cases: [{ args: ["input.txt"], expected: "expected/lines.out" }] } };
   await fs.writeFile(path.join(entryDir, "entry.json"), JSON.stringify(entry));
-  await fs.mkdir(path.join(root, "entries", "sum", "jet"), { recursive: true });
+  await fs.mkdir(path.join(root, "entries", "sum", "Jet"), { recursive: true });
   await fs.writeFile(path.join(root, "entries", "sum", "entry.json"), JSON.stringify({ name: "sum", mode: "batch", languages: ["jet"] }));
   const jetBin = path.join(root, "fake-jet");
   await fs.writeFile(jetBin, `#!/bin/sh\nprintf ${JSON.stringify(twinOutput)}\n`);
@@ -411,8 +411,8 @@ test("the jet a tool case's scripts run is the --jet-bin compiler", stagedEntryT
 // An entry with a Jet row and a Node twin, both printing `expected`.
 async function writeNodePeerEntry(root, name, expected) {
   const files = await writeEntry(root, name, { expected, fakeJet: fakeJetSource({ expected }) });
-  await fs.mkdir(path.join(files.entryDir, "node"), { recursive: true });
-  await fs.writeFile(path.join(files.entryDir, "node", "main.mjs"), `process.stdout.write(${JSON.stringify(expected)});\n`);
+  await fs.mkdir(path.join(files.entryDir, "Node"), { recursive: true });
+  await fs.writeFile(path.join(files.entryDir, "Node", "main.mjs"), `process.stdout.write(${JSON.stringify(expected)});\n`);
   return { ...files, entry: { name, mode: "batch", languages: ["jet", "node"], spec: { args: [] } } };
 }
 
@@ -455,7 +455,7 @@ test("a merge carries no row whose program changed since the earlier run, and a 
     assert.deepEqual(Object.keys(carried.jet_tiers), Object.keys(earlier.jet_tiers));
     assert.ok(Object.values(carried.jet_tiers).every((tier) => tier.carried_from === "earlier-run" && tier.status === "ok"));
 
-    await fs.appendFile(path.join(entryDir, "node", "main.mjs"), "// edited after the earlier run\n");
+    await fs.appendFile(path.join(entryDir, "Node", "main.mjs"), "// edited after the earlier run\n");
     const jetOnly = await stageEntry(entryDir, entry, path.join(root, "jet-only"), jetBin, 1, true, null, new Set(["jet"]));
     const stale = mergeEarlierResult(jetOnly, earlier, { run_id: "earlier-run" });
     assert.equal(stale.rows.node.status, "unavailable");
@@ -472,12 +472,12 @@ test("the bun standings row runs the entry's node program under bun", stagedEntr
   await withScratch("bun-row", async (root) => {
     const { entryDir, jetBin, entry } = await writeNodePeerEntry(root, "bun-row-fixture", "ok\n");
     // The program answers only under bun, so a pass proves bun ran it.
-    await fs.writeFile(path.join(entryDir, "node", "main.mjs"), "process.stdout.write(typeof Bun === 'undefined' ? 'node\\n' : 'ok\\n');\n");
+    await fs.writeFile(path.join(entryDir, "Node", "main.mjs"), "process.stdout.write(typeof Bun === 'undefined' ? 'node\\n' : 'ok\\n');\n");
     const result = await stageEntry(entryDir, { ...entry, languages: ["jet"] }, path.join(root, "run"), jetBin, 1, true, { peers: ["bun"], ceiling: null });
     const bun = result.standings_rows.bun;
     assert.equal(bun.status, "ok", bun.reason);
     assert.deepEqual(bun.command, ["bun", "main.mjs"]);
-    assert.equal(bun.provenance.source, "node/main.mjs");
+    assert.equal(bun.provenance.source, "Node/main.mjs");
     assert.equal(bun.provenance.base_language, "bun");
   });
 });

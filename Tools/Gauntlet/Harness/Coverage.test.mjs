@@ -95,7 +95,7 @@ test("the CLI fails when the repository corpus has no readings and names every u
   const dir = mkdtempSync(path.join(os.tmpdir(), "coverage-cli-"));
   writeFileSync(path.join(dir, "report.json"), JSON.stringify({ entries: [] }));
   writeFileSync(path.join(dir, "cells.tsv"), `${HEADER}\n`);
-  const run = spawnSync(process.execPath, [path.join(here, "coverage.mjs"), "--gauntlet", path.join(dir, "report.json"), "--scriptbench", dir, "--out", path.join(dir, "census.json")], { encoding: "utf8" });
+  const run = spawnSync(process.execPath, [path.join(here, "Coverage.mjs"), "--gauntlet", path.join(dir, "report.json"), "--scriptbench", dir, "--out", path.join(dir, "census.json")], { encoding: "utf8" });
   assert.equal(run.status, 1, run.stderr);
   assert.match(run.stdout, /^uncovered\tgauntlet\/binparse\t/m);
   assert.match(run.stdout, /^uncovered\tscriptbench\//m);

@@ -52,47 +52,54 @@ SkippedEntry: struct {
 }
 
 // The entries of a directory: the measured ones, the tool ones and those left
-// out, each in directory-name order.
+// out, each in folder-name order.
 EntryCatalog: struct {
     loaded: [LoadedEntry],
     tools: [ToolEntry],
     skipped: [SkippedEntry],
 }
 
-// The entries under `entries_dir` (only `selected`'s when it names one): each
-// subdirectory's entry.json, its `name` filled from the directory when it
-// has none. An entry whose mode is neither a measured mode nor the tool
-// mode, and one whose entry.json cannot be read or is not a JSON object or
-// array, is skipped with a warning on stderr.
+// The entries under `entries_dir` (only the one whose entry.json names
+// `selected`, when given: an entry is known by its name, not its TitleCase
+// folder): each subdirectory's entry.json, its `name` filled from the
+// folder when it has none. An entry whose mode is neither a measured mode
+// nor the tool mode, and one whose entry.json cannot be read or is not a
+// JSON object or array, is skipped with a warning on stderr; under
+// `selected` an unreadable entry.json names no entry and is passed over.
 load_entries: fn(entries_dir: String, selected: String?) -[FS, IO]> EntryCatalog {
     catalog := EntryCatalog{loaded: [LoadedEntry]{}, tools: [ToolEntry]{}, skipped: [SkippedEntry]{}}
     if !files.exists(entries_dir) -> return catalog
     listed: files.list_dir(entries_dir) ?? return catalog
     names := listed.filter(fn(item) { item.is_dir }).map(fn(item) { item.name.copy() })
     names.sort()
+    picking: selected != None
     loop name in names {
-        if selected == .Val(only) {
-            if name != only -> next
-        }
         dir: files.join(entries_dir, name)
         text: files.read(files.join(dir, "entry.json")) ?? {
-            skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            if !picking -> skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
             next
         }
         entry := json.parse(text) ?? {
-            skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            if !picking -> skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
             next
         }
         if entry == .Array(_) {
+            // An array declares no name, so it goes by its folder's.
+            if selected == .Val(only) {
+                if name != only -> next
+            }
             skip_entry(catalog, name, "mode missing", "mode missing is not batch")
             next
         }
         if !(entry == .Object(_)) {
-            skip_entry(catalog, name, "invalid entry.json: it is not an object", "invalid entry.json: it is not an object")
+            if !picking -> skip_entry(catalog, name, "invalid entry.json: it is not an object", "invalid entry.json: it is not an object")
             next
         }
         name_declared: value_at(entry, "name") != None
         if member(entry, "name") == None -> entry["name"] = Dyn.Text(name.copy())
+        if selected == .Val(only) {
+            if text_at(entry, "name") != Val(only) -> next
+        }
         mode: member(entry, "mode")
         if {
             text_at(entry, "mode") == Val(TOOL_MODE) -> {
@@ -125,9 +132,8 @@ entry_shape_issues: fn(item: LoadedEntry, matrix: Dyn) -> [String] {
     name: js_text(entry_name(entry))
     issues := http_service_probe_issues(entry)
     if !item.name_declared -> issues.push("{item.directory_name}: entry.json must declare name")
-    if text_at(entry, "name") != Val(item.directory_name) {
-        issues.push("{item.directory_name}: entry.name is {json.stringify(entry_name(entry))}")
-    }
+    named: if text_at(entry, "name") == .Val(text) -> text.len() > 0 else -> false
+    if !named -> issues.push("{item.directory_name}: entry.name is {json.stringify(entry_name(entry))}")
     mode: member(entry, "mode")
     if !is_entry_mode(mode) {
         issues.push("{name}: unsupported mode {if mode == .Val(found) -> js_text(found) else -> "missing"}")
@@ -362,12 +368,13 @@ js_text: fn(value: Dyn) -> String {
     matrix: json.parse("{{\"cells\": [{{\"id\": \"text.kernel\"}}]}}")
     authored: "{{\"author\": \"a\", \"notes\": \"\", \"turns\": 1, \"retries\": 0, \"diagnosticsHit\": []}}"
     good: json.parse("{{\"name\": \"wc\", \"mode\": \"batch\", \"languages\": [\"jet\", \"rust\"], \"cells\": [\"text.kernel\"], \"authoring\": {{\"jet\": {authored}, \"rust\": {authored}}}}}")
-    assert_eq(entry_shape_issues(LoadedEntry{dir: "wc", entry: good, directory_name: "wc", name_declared: true}, matrix), [String]{})
+    assert_eq(entry_shape_issues(LoadedEntry{dir: "Wc", entry: good, directory_name: "Wc", name_declared: true}, matrix), [String]{})
+    empty: json.parse("{{\"name\": \"\", \"mode\": \"batch\", \"languages\": [\"jet\", \"rust\"], \"cells\": [\"text.kernel\"], \"authoring\": {{\"jet\": {authored}, \"rust\": {authored}}}}}")
+    assert_eq(entry_shape_issues(LoadedEntry{dir: "Empty", entry: empty, directory_name: "Empty", name_declared: true}, matrix), ["Empty: entry.name is \"\""])
     bad: json.parse("{{\"name\": \"wc\", \"mode\": \"batch\", \"languages\": [\"rust\", \"rust\"], \"cells\": [\"text.other\"], \"non_applicable\": {{\"jet\": {{\"basis\": \"taste\"}}}}}}")
     assert_eq(
-        entry_shape_issues(LoadedEntry{dir: "wc2", entry: bad, directory_name: "wc2", name_declared: true}, matrix),
+        entry_shape_issues(LoadedEntry{dir: "Wc2", entry: bad, directory_name: "Wc2", name_declared: true}, matrix),
         [
-            "wc2: entry.name is \"wc\"",
             "wc: duplicate language declaration",
             "wc: missing default Jet rail",
             "wc/jet: non_applicable language is not declared",

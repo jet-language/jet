@@ -31,7 +31,7 @@ use {
     sys: core.sys
     text: core.text
     time: core.time
-    jet_gauntlet_kit.[all_distinct, command_text, dyn_at, items_at, js_text, member, node_arch, number_at, object_or_empty, parse_json, put_present, signal_or_null, text_at, text_or_empty, texts_at, truthy_at, value_at]
+    jet_gauntlet_kit.[all_distinct, command_text, dyn_at, items_at, js_text, language_source_dir, member, node_arch, number_at, object_or_empty, parse_json, put_present, signal_or_null, text_at, text_or_empty, texts_at, truthy_at, value_at]
 }
 
 USAGE: "usage: optimization.mjs [plan|execute|report] [--manifest path] [--output path] [--raw path] [--scratch path] [--jet-bin path] [--runs n] [--timeout-ms n]"
@@ -488,21 +488,24 @@ harness_entry: fn(family: Family, variant: Variant, entry_dir: String) -> Dyn {
 }
 
 // Every variant staged under `scratch`/entries as a gauntlet entry: its
-// source as jet/run.jet, each required peer's source, the expected output
-// and entry.json. The entries directory.
+// source as Jet/run.jet, each required peer's source in the folder the
+// harness reads it from, the expected output and entry.json. The entries
+// directory.
 stage_entries: fn(context: Context, scratch: String) -[FS]> String Err! {
     entries: files.join(scratch, "entries")
     files.create_dir_all(entries) ?? return Err("{err}")
     loop family in context.families {
         loop variant in family.variants {
             entry_dir: files.join(entries, "{family.id}--{variant.id}")
-            files.create_dir_all(files.join(entry_dir, "jet")) ?? return Err("{err}")
-            files.copy(variant.source_path, files.join(entry_dir, "jet/run.jet")) ?? return Err("{err}")
+            jet_dir: files.join(entry_dir, language_source_dir("jet"))
+            files.create_dir_all(jet_dir) ?? return Err("{err}")
+            files.copy(variant.source_path, files.join(jet_dir, "run.jet")) ?? return Err("{err}")
             loop peer in family.peer_paths {
                 language: peer.language.copy()
                 staged: PEER_FILES.find(fn(row) { row.language == language }) ?? return Err("{family.id}: no staged file name for peer {peer.language}")
-                files.create_dir_all(files.join(entry_dir, peer.language)) ?? return Err("{err}")
-                files.copy(peer.path, files.join_all([entry_dir, peer.language, staged.file])) ?? return Err("{err}")
+                peer_dir: files.join(entry_dir, language_source_dir(peer.language))
+                files.create_dir_all(peer_dir) ?? return Err("{err}")
+                files.copy(peer.path, files.join(peer_dir, staged.file)) ?? return Err("{err}")
             }
             files.copy(family.expected_path, files.join(entry_dir, "expected.out")) ?? return Err("{err}")
             files.write(files.join(entry_dir, "entry.json"), "{json.stringify(harness_entry(family, variant, entry_dir), 2)}\n") ?? return Err("{err}")

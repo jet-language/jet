@@ -152,7 +152,7 @@ export function planEntry(entry, policy, { programs = {}, references = [], toolc
   } else if (names.length > 1) {
     peers[ceiling] = { role: "ceiling", plan: "failed", reason: `references ${names.join(", ")} all name this entry; one entry has one ceiling`, program: null, reference: null };
   } else {
-    const program = programs[ceiling] ?? { path: `Tools/Perf/AsmParity/${names[0]}/ref.S`, exists: true };
+    const program = programs[ceiling] ?? { path: `Tools/Perf/AsmParity/${references[0].dir}/ref.S`, exists: true };
     peers[ceiling] = !program.exists
       ? { role: "ceiling", plan: "uncovered", reason: `reference ${names[0]} has no ${program.path}`, program: program.path, reference: names[0] }
       : toolchains[ceiling] && toolchains[ceiling].status !== "ok"

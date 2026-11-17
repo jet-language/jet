@@ -153,22 +153,39 @@ read_manifest: fn(repo: String, path: String) -> Dyn CoverageError! {
     Ok(tree)
 }
 
+// The directory of the entry of `catalog` whose entry.json names `name`.
+corpus_entry_dir: fn(catalog: EntryCatalog, name: String) -> String? {
+    loop item in catalog.loaded {
+        if text_at(item.entry, "name") == .Val(text) {
+            if text == name -> return Val(item.dir.copy())
+        }
+    }
+    loop item in catalog.tools {
+        if text_at(item.entry, "name") == .Val(text) {
+            if text == name -> return Val(item.dir.copy())
+        }
+    }
+    None
+}
+
 // The corpus under `repo`: one program per gauntlet corpus entry (each peer's
 // twin in its source directory: LuaJIT runs the Lua twin), then one per
-// ScriptBench workload.
-load_corpus: fn(repo: String) -[FS]> [CoverageProgram] CoverageError! {
+// ScriptBench workload. A corpus entry is named by its entry.json name and
+// found in whichever entry folder declares it (load_entries).
+load_corpus: fn(repo: String) -[FS, IO]> [CoverageProgram] CoverageError! {
     manifest: read_manifest(repo, "Tools/Gauntlet/measurement-manifest.json")
     bench: read_manifest(repo, "Tools/Perf/Scriptbench/manifest.json")
+    catalog: load_entries(files.join(repo, "Tools/Gauntlet/Entries"), None)
     programs := [CoverageProgram]{}
     loop name in texts_at(manifest, "corpus/entry_names") {
-        dir: "Tools/Gauntlet/Entries/{name}"
-        entry: read_manifest(repo, "{dir}/entry.json")
+        dir: corpus_entry_dir(catalog, name) ?? return Err(CoverageError{message: "the coverage corpus names no entry: {name}"})
+        entry: read_manifest(dir, "entry.json")
         peers := [Twin]{}
         loop language in texts_at(entry, "languages") {
             if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") {
                 next
             }
-            peers.push(Twin{peer: language, path: Val(files.join(repo, "{dir}/{language_source_dir(language)}"))})
+            peers.push(Twin{peer: language, path: Val(files.join(dir, language_source_dir(language)))})
         }
         owners := [OwnerCard]{}
         if member(manifest, "loss_owners/{name}") == .Val(.Object(rows)) {

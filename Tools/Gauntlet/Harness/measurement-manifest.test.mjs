@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, metricApplicability, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
+import { buildScoreboard, CEILING_POLICY, ceilingReferenceIssues, comparisons, httpProbe, LANGUAGE_SOURCE_DIRS, metricApplicability, probeMatches, publicationState, ratioVerdict, STRICT_PERFORMANCE_POLICY, strictPerformancePolicyIssues, validateEntryShape, validateResultShape } from "./run.mjs";
 import { liveReloadInternals, processTreeRssKb } from "./live-reload.mjs";
 import { compileThroughputContractIssues } from "./compile-throughput.mjs";
 import { BUILD_SYSTEM_CELLS, buildSystemContractIssues } from "./BuildSystem.mjs";
@@ -13,7 +13,7 @@ import { EDIT_FILES, generate as generateBuildSystemProject } from "../Axes/Buil
 
 const gauntletDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = path.resolve(gauntletDir, "../..");
-const entriesDir = path.join(gauntletDir, "entries");
+const entriesDir = path.join(gauntletDir, "Entries");
 const manifestPath = path.join(gauntletDir, "measurement-manifest.json");
 const matrixPath = path.join(gauntletDir, "matrix.json");
 
@@ -907,20 +907,21 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   // Tool entries ("mode": "tool") pair a repository script with its Jet twin;
   // PortBars judges them (AGENTS.md, Tooling in other languages) and they never
   // join the matrix denominator (run.mjs loadEntries), so the manifest covers
-  // every other entry.
-  const directories = [];
+  // every other entry. An entry is known by its entry.json name; its folder is
+  // TitleCase.
+  const entryDirs = new Map();
   for (const item of await fs.readdir(entriesDir, { withFileTypes: true })) {
     if (!item.isDirectory()) continue;
     const entry = JSON.parse(await fs.readFile(path.join(entriesDir, item.name, "entry.json"), "utf8"));
-    if (entry.mode !== "tool") directories.push(item.name);
+    if (entry.mode !== "tool") entryDirs.set(entry.name, path.join(entriesDir, item.name));
   }
-  assert.deepEqual([...names].sort(), [...directories].sort());
+  assert.deepEqual([...names].sort(), [...entryDirs.keys()].sort());
 
   const cellOwners = new Map();
   for (const row of rows) {
     assert.equal(typeof row.name, "string");
     assert.equal(Object.hasOwn(row, "python"), true);
-    const entryDir = path.join(entriesDir, row.name);
+    const entryDir = entryDirs.get(row.name);
     const entry = JSON.parse(await fs.readFile(path.join(entryDir, "entry.json"), "utf8"));
     assert.equal(entry.name, row.name);
     assert.equal(entry.languages.includes("jet"), true);
@@ -929,7 +930,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     assert.equal(row.python !== null, entry.languages.includes("python") && !entry.non_applicable?.python, row.name);
     assert.equal(await exists(sourcePath(entryDir, row.jet)), true, `${row.name}: missing Jet source`);
 
-    const pythonDefault = path.join(entryDir, "python", "main.py");
+    const pythonDefault = path.join(entryDir, LANGUAGE_SOURCE_DIRS.python, "main.py");
     if (row.python === null) {
       assert.equal(await exists(pythonDefault), false, `${row.name}: unlisted Python source`);
     } else {

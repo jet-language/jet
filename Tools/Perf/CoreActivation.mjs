@@ -36,7 +36,7 @@ function parseArgs(argv) {
   const args = {
     jet: join(stateRoot(), "safe-jet.sh"),
     out: join(scratchRoot(), "core-activation.json"),
-    work: join(stateRoot(), "CoreActivation"),
+    work: join(stateRoot(), "core-activation"),
     samples: 20,
     batteries: Object.keys(BATTERIES),
   };
