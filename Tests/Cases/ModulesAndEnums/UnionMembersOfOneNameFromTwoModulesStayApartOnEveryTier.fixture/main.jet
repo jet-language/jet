@@ -13,12 +13,13 @@ pick: fn(index: Int) -> geo2.Point | map2.Point {
     geo2.Point{x: 3, y: 4}
 }
 
-// A wider union takes each member as its own case; only the `else` reaches
-// the two members named `Point`.
+// A wider union takes each member as its own case, and each `Point` member
+// has its own arm, named through its module.
 widen: fn(item: geo2.Point | map2.Point | Int) {
     if item == {
-        .Int(n) -> print("int {n}")
-        else -> print(item)
+        .Int(n) -> { print("int {n}") }
+        .geo2.Point(p) -> { print(p) }
+        .map2.Point(q) -> print(q)
     }
 }
 
