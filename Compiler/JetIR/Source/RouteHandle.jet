@@ -194,60 +194,16 @@ ir_handle_event_route: fn(receiver: Type, method: String, carrier: TFailureCarri
     Val(ir_handle_route(true, "core.event", method, symbol, mask, None))
 }
 
-ir_handle_is_geometry_type: fn(name: String) -> Bool Never! {
-    if name == {
-        "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta" -> true
-        else -> false
-    }
-}
-
-ir_handle_math_route: fn(type_name: String, method: String) -> IRHandleRoute? {
-    suffix := ""
-    if {
-        ir_handle_is_geometry_type(type_name) -> {
-            if method == {
-                "add" | "sub" | "then" | "ray" | "inverse" | "point" | "point_at_depth" -> suffix = method
-                else -> return None
-            }
-        }
-        type_name == "Vec2" || type_name == "Vec3" || type_name == "Vec4" -> {
-            if method == {
-                "to_array" | "length" | "normalize" | "dot" -> suffix = method
-                else -> {
-                    if {
-                        type_name == "Vec3" && method == "cross" -> { suffix = "cross" }
-                        else -> { return None }
-                    }
-                }
-            }
-        }
-        type_name == "Mat3" || type_name == "Mat4" -> {
-            if method == {
-                "to_array" | "transpose" | "matmul" | "transform" -> suffix = method
-                else -> return None
-            }
-        }
-        else -> { return None }
-    }
-    arity := if {
-        suffix == "point_at_depth" -> 3
-        suffix == "dot" || suffix == "cross" || suffix == "matmul" || suffix == "transform" || suffix == "add" || suffix == "sub" || suffix == "then" || suffix == "ray" || suffix == "point" -> 2
-        else -> 1
-    }
-    mask := if {
-        arity == 1 -> [Bool]{true}
-        arity == 2 -> [Bool]{true, false}
-        else -> [Bool]{true, false, false}
-    }
-    if ir_handle_is_geometry_type(type_name) {
-        return Val(ir_handle_route(false, "core.math", "geometry.{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
-    }
-    Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
-}
-
 ir_handle_dynamic_route: fn(operation: BodyHandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
     if operation == {
-        .MathMethod(type_name, method) -> return ir_handle_math_route(type_name, method)
+        .MathMethod(type_name, method) -> {
+            // Sema (Calls/Geometry.jet sema_call_try_geometry) checked the
+            // Transform method's name and arity; the receiver is the one
+            // borrowed argument.
+            mask := [Bool]{true}
+            loop _ in 0..<argument_count -> mask.push(false)
+            return Val(ir_handle_route(false, "core.math", "geometry.{type_name}.{method}", "jet_math_{type_name}_{method}", mask, None))
+        }
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
         .ProcessSpecMethod(method, declared_count) -> {
             if declared_count != argument_count -> return None

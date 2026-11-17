@@ -598,7 +598,11 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             else -> None
         }
         "core.plugin" -> Val("Exec")
-        "core.ui" | "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
+        // core.ui's leaves are the window host's, shared by the web page and a
+        // native window (a web page's scene, a click or a drop slot's
+        // handler), so they need no `Browser`: one would pull every Core
+        // helper a native window shares with a paint into the page.
+        "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")
             else -> None
@@ -623,7 +627,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
     if module_name == {
         "core.net" -> if member == {
             "gethostname" -> Val("FS.Read")
-            "socket_addr" | "socket_addrs" | "__tcp_accept" | "__tcp_connect" | "__tcp_connect_addr" | "__tcp_connect_timeout" | "__tcp_connect_happy" | "__tcp_reply" | "__udp_send_to" | "__udp_recv_from" | "__udp_send_bytes_to" | "__udp_receive" | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw" | "__unix_connect_host" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup" | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
+            "socket_addr" | "socket_addrs" | "__tcp_accept" | "__tcp_connect" | "__tcp_connect_addr" | "__tcp_connect_timeout" | "__tcp_connect_happy" | "__tcp_reply" | "__udp_send_to" | "__udp_recv_from" | "__udp_send_bytes_to" | "__udp_receive" | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw" | "__unix_wait_wake_raw" | "__unix_connect_host" | "__unix_connect_deadline_host" | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_happy" | "tcp_read" | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text" | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive" | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes" | "unix_send" | "unix_receive" | "unix_wait" | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv" | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close" | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup" | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
             else -> None
         }
         "core.sys" -> if member == {

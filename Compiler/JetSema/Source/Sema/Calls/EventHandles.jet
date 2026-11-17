@@ -32,14 +32,21 @@ sema_event_handle_family: fn(ty: Type) -> String? {
 
 // The built-in handle family of a receiver. These are compiler-known types
 // with no source declaration (the lowering's `lower_event_repr` guard): a
-// visible user nominal of the same name shadows them, as a user
+// visible nominal of the same name shadows them, as a user
 // `Sender`/`Receiver` shadows the channel endpoints (StreamHandles.jet
-// `sema_stream_handle_is_canonical`).
+// `sema_stream_handle_is_canonical`). Visible means the caller's module
+// declares or imports that name. A same-named nominal of another module
+// (a user module's or `core.compiler::Event`) is another type, keyed by its
+// owner path: the bare-name fallback that finds it only because its module
+// is loaded does not make it shadow the handle.
 sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
     if program.registration_graph == .Val(graph) {
-        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None {
-            return None
+        caller: sema_type_module_row(graph, environment.module_identity)
+        if sema_type_resolve_nominal_row_at(graph, ty, caller) != None {
+            if caller < 0 || sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, owner) != None {
+                return None
+            }
         }
     }
     Val(owner)

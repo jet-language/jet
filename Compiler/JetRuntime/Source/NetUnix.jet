@@ -498,16 +498,37 @@ net_unix_peer_field: fn(stream: I64, offset: I64, output: I64, error: I64) -> I6
 // waits here for its compositor, so a frame callback or an input event wakes
 // it straight away.
 #Export(c) jet_net_unix_wait_raw: fn(stream: I64, timeout: I64, output: I64, error: I64) -> I64 {
+    net_unix_wait(stream, I64{-1}, host_native_int(timeout), output, error)
+}
+
+// jet_net_unix_wait_raw's wait, which the descriptor of the token `wake`
+// (a negative token for none) also ends once it is readable: a pipe another
+// task writes to wake a window loop that hears nothing from its
+// compositor. The result's bit 1 says the stream is readable and bit 2 the
+// wake descriptor; 0 says the time ran out. A token that names nothing
+// fails with EBADF.
+#Export(c) jet_net_unix_wait_wake_raw: fn(stream: I64, wake: I64, timeout: I64, output: I64, error: I64) -> I64 {
+    token: host_native_int(wake)
+    descriptor: if (token < I64{0}) -> I64{-1} else -> host_descriptor_number(token)
+    if (token >= I64{0} && descriptor < I64{0}) {
+        return net_route_errno(rt_static_text("unix wait"), I64{0}, I64{9}, error)
+    }
+    net_unix_wait(stream, descriptor, host_native_int(timeout), output, error)
+}
+
+// The two waits' one ppoll loop, over the stream and the descriptor `wake`
+// (-1 for none, which ppoll skips).
+net_unix_wait: fn(stream: I64, wake: I64, limit: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("unix wait")
-    limit: host_native_int(timeout)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if !net_tcp_direction_open(stream, true, operation, error) -> return I64{0}
-    // pollfd at 0, timespec at 8, clock sample at 24.
-    scratch: jet_rt_alloc(I64{40}, I64{8})
+    // The stream's pollfd at 0, the wake's at 8, timespec at 16, clock
+    // sample at 32.
+    scratch: jet_rt_alloc(I64{48}, I64{8})
     end := I64{-1}
     if (limit >= I64{0}) {
-        sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
-        now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
+        sync_clock_read(I64{1}, wrapping(scratch + I64{32}))
+        now: net_word(scratch, I64{32}) * I64{1000000000} + net_word(scratch, I64{40})
         end = if (limit > I64{9223372036854775807} - now) -> I64{9223372036854775807} else -> now + limit
     }
     state: jet_socket_stream_fd_raw(stream)
@@ -515,19 +536,20 @@ net_unix_peer_field: fn(stream: I64, offset: I64, output: I64, error: I64) -> I6
     loop {
         left := I64{-1}
         if (end >= I64{0}) {
-            sync_clock_read(I64{1}, wrapping(scratch + I64{24}))
-            now: net_word(scratch, I64{24}) * I64{1000000000} + net_word(scratch, I64{32})
+            sync_clock_read(I64{1}, wrapping(scratch + I64{32}))
+            now: net_word(scratch, I64{32}) * I64{1000000000} + net_word(scratch, I64{40})
             left = if (end > now) -> end - now else -> I64{0}
-            net_put(scratch, I64{8}, left /% I64{1000000000})
-            net_put(scratch, I64{16}, left %% I64{1000000000})
+            net_put(scratch, I64{16}, left /% I64{1000000000})
+            net_put(scratch, I64{24}, left %% I64{1000000000})
         }
         fd_lock(state)
         ready := I64{-9}
         if (fd_word(state, I64{16}) == I64{0}) {
-            // struct pollfd {fd, events: POLLIN} with revents cleared.
+            // Each struct pollfd {fd, events: POLLIN} with revents cleared.
             net_put(scratch, I64{0}, fd_word(state, I64{8}) & I64{4294967295} | I64{1} << I64{32})
-            #Unsafe("the FD72 lock keeps the descriptor live and unreused for the whole ppoll; scratch lends the pollfd and timespec") {
-                ready = os_syscall_i64(I64{271}, scratch, I64{1}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{8}), I64{0}, I64{8}, I64{0})
+            net_put(scratch, I64{8}, wake & I64{4294967295} | I64{1} << I64{32})
+            #Unsafe("the FD72 lock keeps the stream's descriptor live and unreused for the whole ppoll; the caller's Fd keeps the wake descriptor open; scratch lends the pollfds and timespec") {
+                ready = os_syscall_i64(I64{271}, scratch, I64{2}, if (left < I64{0}) -> I64{0} else -> wrapping(scratch + I64{16}), I64{0}, I64{8}, I64{0})
             }
         }
         fd_unlock(state)
@@ -536,10 +558,13 @@ net_unix_peer_field: fn(stream: I64, offset: I64, output: I64, error: I64) -> I6
             result = net_route_errno(operation, I64{0}, -ready, error)
             break
         }
-        rt_text_store(output, jet_int_owned_from_i64(if (ready > I64{0}) -> I64{1} else -> I64{0}))
+        // A pollfd's revents is its top 16 bits.
+        readable: if ((net_word(scratch, I64{0}) >> I64{48} & I64{65535}) != I64{0}) -> I64{1} else -> I64{0}
+        woken: if ((net_word(scratch, I64{8}) >> I64{48} & I64{65535}) != I64{0}) -> I64{2} else -> I64{0}
+        rt_text_store(output, jet_int_owned_from_i64(if (ready > I64{0}) -> readable | woken else -> I64{0}))
         result = I64{1}
         break
     }
-    jet_rt_free(scratch, I64{40}, I64{8})
+    jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
