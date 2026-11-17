@@ -72,10 +72,10 @@ answers later (`app.ask`, `app.take_photo`, `app.location`, the reads of
 a photo the page keeps, and each reading `app.location_updates`,
 `app.orientation_updates` and `app.heading_updates` give, through the
 page's UI provider) suspends the program the same way until the browser's
-promise settles. Without promise integration the wait holds the thread
-until its deadline, as a native thread's does, and such a request has no
-answer (`app.ask` is `.Restricted`, the photo and the place are `None`,
-and the three updates give nothing).
+promise settles. Without promise integration the program can neither
+suspend nor hold the page, so its first such wait or request stops it with
+E3001, naming the missing `WebAssembly.Suspending` and
+`WebAssembly.promising`; it never runs on past the wait out of order.
 
 When the page has a `document`, the host shows what the program's `core.ui`
 backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)

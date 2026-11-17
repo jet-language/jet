@@ -108,6 +108,15 @@ sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
 
 #Export(c) jet_rt_host_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 { I64{-38} }
 
+// The stop of a wait the host can't make. A web page whose JavaScript
+// engine has no JavaScript Promise Integration can neither suspend the
+// program nor block its event loop, so its jet_rt_host_can_wait calls this
+// in place of answering, and the program stops with E3001 naming what the
+// engine lacks. Only that host calls it: no runtime wait reaches a stop.
+#Export(c) jet_rt_host_wait_refused: fn() {
+    host_refused(rt_static_text("this web host can't suspend a waiting program: it has no JavaScript Promise Integration (WebAssembly.Suspending and WebAssembly.promising)"))
+}
+
 // The kernel's vDSO clock_gettime reads its time page in user space; a raw
 // syscall 228 enters the kernel on every clock read. 0 until resolved, then
 // the code address, or 1 for none (no vDSO image or symbol).

@@ -1,0 +1,24 @@
+# A page whose JavaScript engine has no JavaScript Promise Integration can
+# neither suspend a waiting program nor block its own event loop, so a wait
+# there never runs the program out of order: the program stops at its first
+# wait with E3001 naming what the engine lacks, from a JS-bucket function and
+# from a Wasm-bucket one alike, and never prints its next line.
+requires: tool:node
+fixture: WebWaitWithoutJSPIStopsTheProgram.fixture
+env: NO_COLOR=1
+step: jet build --target web js/main.jet
+exit: 0
+copy: harness.mjs js/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: js/.jet/build
+exit: 70
+stdout: = "before the wait\n"
+stderr: ~ "Stop [E3001]: `panic: this web host can't suspend a waiting program: it has no JavaScript Promise Integration (WebAssembly.Suspending and WebAssembly.promising)`" # the refusal names the missing feature
+step: jet build --target web wasm/main.jet
+exit: 0
+copy: harness.mjs wasm/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: wasm/.jet/build
+exit: 70
+stdout: = "before the wait\n"
+stderr: ~ "Stop [E3001]: `panic: this web host can't suspend a waiting program: it has no JavaScript Promise Integration (WebAssembly.Suspending and WebAssembly.promising)`" # the refusal names the missing feature

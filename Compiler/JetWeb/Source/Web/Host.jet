@@ -862,12 +862,12 @@ class Host {
 
   // The wasm export `call` with `args`, called where it may wait (wait): a
   // promise of its result. Without JSPI it runs straight through, and a
-  // wait blocks as a native thread's does.
+  // wait in it stops the program (jet_rt_host_can_wait), since it could
+  // neither suspend nor block the page's event loop.
   async waitableCall(call, ...args) {
-    if (!JSPI) return call(...args);
     this.waitable = true;
     try {
-      return await WebAssembly.promising(call)(...args);
+      return JSPI ? await WebAssembly.promising(call)(...args) : call(...args);
     } finally {
       this.waitable = false;
     }
@@ -1409,8 +1409,14 @@ class Host {
         return BigInt(lines.length);
       },
       // The wait seam (wait): an entry can wait while it runs under JSPI
-      // (waitableCall) and is not already suspended.
-      jet_rt_host_can_wait: () => (host.waitable && !host.waiting ? 1n : 0n),
+      // (waitableCall) and is not already suspended. Without JSPI it can't,
+      // so its wait stops the program (jet_rt_host_wait_refused) in place of
+      // an answer.
+      jet_rt_host_can_wait: () => {
+        if (!host.waitable || host.waiting) return 0n;
+        if (!JSPI) host.rt.jet_rt_host_wait_refused();
+        return 1n;
+      },
       jet_rt_host_wait: JSPI ? new WebAssembly.Suspending((address, expected, deadline) => host.wait(address, expected, deadline)) : () => BigInt(-E.NOSYS),
       getauxval: (type) => {
         if (type === 6n) return 4096n;
