@@ -5718,6 +5718,7 @@ tasks never read or change the process registry. The module source is
 | `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window. See below. |
 | `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland). See below. |
 | `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none. Delivered by the Linux app window (Wayland). See below. |
+| `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, copies it and says so. Delivered by the Linux app window (Wayland). See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6485,6 +6486,18 @@ clipboard is not built yet. A browser lets a page reach the clipboard only
 inside the person's gesture, which the page runtime can't run the call in
 yet, so `app.copy_text` or `app.paste_text` in code whose target is the web
 output is a compile error, E-APP-TARGET-FEATURE.
+
+`app.share(url)` hands `url` to the system's share sheet. Linux has none,
+so there the app's window copies `url` to the clipboard, as
+`app.copy_text` does, and then adds a notice to `app.notices()` saying it
+copied the link, which the window shows, for the person to paste it where
+they would share it; a copy that fails adds its own notice instead, and a
+share while the app has no window adds a notice saying so. The other
+native targets keep a notice saying their share sheet is not built yet. A
+browser opens its share sheet (the Web Share API) only inside the person's
+gesture, which the page runtime can't run the call in yet, so `app.share`
+in code whose target is the web output is a compile error,
+E-APP-TARGET-FEATURE.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

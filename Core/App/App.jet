@@ -4218,6 +4218,30 @@ priv app_no_paste: fn() -> String? Never! {
     None
 }
 
+// Shares `url` through the system's share sheet. On Linux, which has none,
+// the app's window copies `url` to the clipboard, as `copy_text` does, and
+// then keeps a notice that says so, for the person to paste the link where
+// they would share it; a copy that fails keeps its own notice instead. The
+// other native targets keep a notice that says their share sheet is not
+// built yet. A browser's Web Share API runs only inside the person's
+// gesture, which the page runtime can't run the call in yet, so a call in
+// code whose target is the web output is a compile error.
+share: fn(url: String) Never! {
+    #if #build.target.os == {
+        .Linux -> { app_window_share(url) }
+        .MacOS -> { app_no_share() }
+        .Windows -> { app_no_share() }
+        .Web -> { app_no_share() }
+        .Wasm -> { app_no_share() }
+        .Freestanding -> { app_no_share() }
+    }
+}
+
+// Keeps the notice that this target has no share sheet yet.
+priv app_no_share: fn() Never! {
+    __keep_notice(Notice{text: "Couldn't share: this system's share sheet is not built yet"})
+}
+
 // `body`, taking the files a person drops on it: each one of a kind in
 // `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
 // with shows beside `body`, as a button's does. A native target delivers
@@ -5005,7 +5029,11 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         loop chosen in woken.acts {
             if app_window_choose(window, frame, tree, focused, chosen) -> stale = true
         }
-        if woken.copied == .Val(text) -> _: app_window_put_copy(window, text)
+        if woken.copied == .Val(text) {
+            if app_window_put_copy(window, text) && woken.shared {
+                __keep_notice(Notice{text: "Copied the link to share it: {text}"})
+            }
+        }
         loop asked in woken.pastes { asked.send(app_window_clipboard(window)) ?? next }
         if woken.noticed -> stale = true
         now: app_graph_current()
@@ -5193,23 +5221,24 @@ priv app_window_lost: fn(why: String) Never! {
 // binding of the screen it shows changed since it last opened the screen,
 // whether the app kept a notice since its last frame, the menu bar's items
 // chosen for it to act on since that frame, the newest text the app copied
-// since then (`copy_text`), and the pastes other tasks wait on
-// (`paste_text`), all taken by `app_window_take`; whether a wake waits for
-// that frame; and the window itself and the task its frames run in
-// (`app_window_keep`).
+// since then (`copy_text`) and whether it shared that text (`share`), and
+// the pastes other tasks wait on (`paste_text`), all taken by
+// `app_window_take`; whether a wake waits for that frame; and the window
+// itself and the task its frames run in (`app_window_keep`).
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
     noticed: Bool,
     acts: [MenuItem],
     copied: String?,
+    shared: Bool,
     pastes: [Sender<String?>],
     woken: Bool,
     window: ui.Window?,
     task: TaskID?,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, pastes: [Sender<String?>]{}, woken: false, window: None, task: None}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, woken: false, window: None, task: None}}
 
 // Keeps `window`, whose frames run in this task, for the clipboard
 // (`copy_text`, `paste_text`).
@@ -5245,22 +5274,24 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
 // What woke the window since the last call: whether a live binding of the
 // screen it shows changed, so it opens the screen again, whether the app
 // kept a notice, so it draws the frame again, the menu bar's items chosen
-// for it to act on, in order, the newest text the app copied, and the
-// pastes other tasks wait on.
-priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, pastes: [Sender<String?>]} Never! {
+// for it to act on, in order, the newest text the app copied and whether
+// it shared it, and the pastes other tasks wait on.
+priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, shared: Bool, pastes: [Sender<String?>]} Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
     noticed: held.value.noticed
     acts: held.value.acts.copy()
     copied: held.value.copied.copy()
+    shared: held.value.shared
     pastes: held.value.pastes.copy()
     held.value.stale = false
     held.value.noticed = false
     held.value.acts = [MenuItem]{}
     held.value.copied = None
+    held.value.shared = false
     held.value.pastes = [Sender<String?>]{}
     held.value.woken = false
-    {stale: stale, noticed: noticed, acts: acts, copied: copied, pastes: pastes}
+    {stale: stale, noticed: noticed, acts: acts, copied: copied, shared: shared, pastes: pastes}
 }
 
 // Wakes the window's frames to draw the notice the app just kept
@@ -5279,16 +5310,27 @@ priv app_window_noticed: fn() Never! {
 // clipboard, replacing a copy that waits for them. Without a window it
 // keeps a notice.
 priv app_window_copy: fn(text: String) Never! {
-    if !app_window_copied(text) {
+    if !app_window_copied(text, false) {
         __keep_notice(Notice{text: "Couldn't copy: the app has no window open"})
     }
 }
 
-// Whether the window takes `text` to copy; false without one.
-priv app_window_copied: fn(text: String) -> Bool Never! {
+// `share` on Linux, which has no share sheet: wakes the window's frames to
+// copy `url` as `copy_text` does, and to keep a notice that they copied it
+// once they have. Without a window it keeps a notice.
+priv app_window_share: fn(url: String) Never! {
+    if !app_window_copied(url, true) {
+        __keep_notice(Notice{text: "Couldn't share: the app has no window open"})
+    }
+}
+
+// Whether the window takes `text` to copy, `shared` or not; false without
+// one.
+priv app_window_copied: fn(text: String, shared: Bool) -> Bool Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     if held.value.wakes.len() == 0 -> return false
     held.value.copied = Val(text.copy())
+    held.value.shared = shared
     app_window_rouse(held.value)
     true
 }

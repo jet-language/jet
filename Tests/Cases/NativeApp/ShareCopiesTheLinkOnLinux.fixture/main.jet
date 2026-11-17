@@ -1,0 +1,39 @@
+// Crewboard in a Linux window: the board's Share button shares the board's
+// link (`app.share`). Linux has no share sheet, so the window copies the
+// link and shows a notice that says so. The compositor pastes the window's
+// copy, and closes the window once the notice shows, which ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+LINK: "https://crewboard.example/board/7"
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    ui.box(
+        [
+            ui.node_color("", 200.0, 30.0, Color{r: 51, g: 102, b: 255, a: 255}),
+            ui.button(
+                "Share",
+                fn() {
+                    app.share(LINK)
+                },
+            ),
+        ],
+    )
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100)
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    print("the window stayed open")
+}
