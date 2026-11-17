@@ -81,7 +81,7 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         graph: projected.graph ?? return Val(jet_driver_build_host_failure(session, span, "checked graph projection did not return a graph"))
         return Val(JetEvalBuildReply.Value{value: jet_eval_build_graph_value(graph)})
     }
-    if member.starts_with("BuildAction.") || member.starts_with("BuildFile.") {
+    if member.starts_with("BuildStepHandle.") || member.starts_with("BuildFile.") {
         return Val(jet_driver_build_step_call(session, inputs, base_dir, member, args, span))
     }
     if member == "Code.pasted" -> return Val(jet_driver_code_pasted(session, args, span))
@@ -189,13 +189,13 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
     loop arg in args {
         values.push(jet_eval_build_session_input(arg) ?? return jet_driver_build_host_failure(session, span, "step call received a non-data argument"))
     }
-    if member == "BuildAction.arg" && inputs == .Val(host) && values.len() == 2 && values[1] == .Text(text) {
+    if member == "BuildStepHandle.arg" && inputs == .Val(host) && values.len() == 2 && values[1] == .Text(text) {
         if jet_driver_build_names_file(host, base_dir, text) {
             refused: BuildSessionDiagnostic{code: "E3502", what: "`.arg(\"{text}\")` names the package file `{text}`", why: "a step reads only the files it declares, so its cached result can't go stale", fix: "pass it with `.input(\"{text}\")` so the step declares it", start: span.start, end: span.end}
             return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(refused)}
         }
     }
-    method: if member.starts_with("BuildFile.") -> "file.{member.removeprefix("BuildFile.")}" else -> "action.{member.removeprefix("BuildAction.")}"
+    method: if member.starts_with("BuildFile.") -> "file.{member.removeprefix("BuildFile.")}" else -> "action.{member.removeprefix("BuildStepHandle.")}"
     reply: build_session_call(session, method, values, None, false, span.start, span.end)
     if reply == {
         .Value(value) -> JetEvalBuildReply.Value{value: jet_eval_build_session_output(value)}

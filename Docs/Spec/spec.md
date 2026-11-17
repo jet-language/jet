@@ -7024,7 +7024,7 @@ dependency's function is rewritten only after the root writes
 fails the build (E3514). The consent names the dependency the build loads at
 its locked version, and the rewrite changes only this build's copy of it.
 
-`b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
+`b.run(name, tool, caps)` declares one step and returns its `BuildStepHandle`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
 probe finds, and a step's `.output(path)` is a file that step makes, so one
 step can build the tool the next one runs. `b.host(target)` is the executable

@@ -17,7 +17,7 @@ sema_build_result: fn(name: String) -> Type Never! {
 
 sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildContextMethodContract? {
     strings: Type.List{element: Type.String}
-    action: Type.Named{name: "BuildAction"}
+    action: Type.Named{name: "BuildStepHandle"}
     target: Type.Named{name: "BuildTarget"}
     toolchain: Type.Named{name: "BuildToolchain"}
     signing: Type.Named{name: "BuildSigningIdentity"}
@@ -36,7 +36,7 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
         method == "contribute" && arity == 2 -> parameters = [Type]{Type.String}
         method == "run" && arity == 3 -> {
             parameters = [Type]{Type.String, Type.Named{name: "BuildFile"}, strings}
-            result = sema_build_result("BuildAction")
+            result = sema_build_result("BuildStepHandle")
         }
         method == "found" && arity == 1 -> {
             parameters = [Type]{Type.Named{name: "BuildProbe"}}
@@ -1321,7 +1321,7 @@ sema_build_generate_splice_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// The calls on a `b.run` step (BuildAction) and on a BuildFile: each file
+// The calls on a `b.run` step (BuildStepHandle) and on a BuildFile: each file
 // call declares the file and passes its path to the tool at once, and
 // `flag:` puts a prefix such as `"--in="` before that path in one argument.
 // `kept: true` on an output keeps the file it makes in git.
@@ -1361,7 +1361,7 @@ sema_build_step_contract: fn(owner: String, method: String) -> SemaBuildStepCont
 
 sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner: if {
-        receiver_value.ty == (Type.Named{name: "BuildAction"}) -> "BuildAction"
+        receiver_value.ty == (Type.Named{name: "BuildStepHandle"}) -> "BuildStepHandle"
         receiver_value.ty == (Type.Named{name: "BuildFile"}) -> "BuildFile"
         else -> {
             return SemaMethodSpecialCheck{handled: false, value: None}
