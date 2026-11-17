@@ -35,7 +35,7 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     store := ArtifactStore?{None}
     key := ""
     if result.internal_problem == .None && result.complete {
-        if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) {
+        if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
             return JetCLIStoredBuild.Failed{output: refused}
         }
         if BUILD_REUSE_SAVED_WORK {

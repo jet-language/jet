@@ -1,7 +1,7 @@
 // #4843 gate-law predicates. E3415 text as `jet inspect gates main.jet
 // --force --json` reports it (exit 1).
 use {
-    jet_pkg_model.[PackageGateError, pkg_check_invocation_flags, pkg_gate_refusal]
+    jet_pkg_model.[PackageGateError, pkg_check_invocation_flags, pkg_check_project_gate, pkg_gate_refusal]
     jet_foundation.[
         Diagnostic,
         PolicyDeclaration,
@@ -82,5 +82,22 @@ pkg_gate_test_refusal: fn(error: PackageGateError, key: String, site: String, po
         }
     }
     assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
+    files.remove_all(root).drop("test cleanup")
+}
+
+#Test("an entry file's inline Package policy forbids a gate the directory has no carrier for") {
+    root: pkg_gate_test_dir("inline-entry")
+    entry: files.join(root, "tool.jet")
+    files.write(entry, "package: {{ name: \"law\", policy: {{ check_removal: .Forbid }} }}\n\nrun: fn() {{}}\n") ?? panic("inline policy")
+    site: "command line (--bounds=off)"
+    if pkg_check_project_gate(entry, PolicyKey.CheckRemoval, site) == {
+        .Ok(_) -> { panic("the entry's own policy was not read") }
+        .Err(error) -> {
+            assert_eq(error.diagnostics.len(), 1)
+            assert_eq(error.diagnostics[0].code, "E3415")
+            assert(error.diagnostics[0].what.starts_with("The `check_removal` gate at `{site}` is forbidden by"))
+        }
+    }
+    pkg_check_project_gate(root, PolicyKey.CheckRemoval, site) ?? panic("a directory with no carrier has no package policy")
     files.remove_all(root).drop("test cleanup")
 }

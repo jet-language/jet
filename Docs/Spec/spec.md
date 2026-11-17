@@ -5805,7 +5805,8 @@ the built package's own code; dependencies and Core keep their fatal checks.
 gate (see One audited-gate law): the command prints a `note:` naming it
 (`--quiet` drops it), `jet inspect gates FILE --bounds=off` lists it, and a
 package or organization `policy: { check_removal: .Forbid }` refuses it with
-E3415 before the native program is built. Jai's `null` and `casts` checks have no row: a
+E3415 before the native program is built; a single file's inline `package:`
+block is that package's policy too. Jai's `null` and `casts` checks have no row: a
 reference is never null and a raw pointer's validity is the `#Unsafe` author's
 obligation (I1), and a conversion is total or returns an Optional
 (D-SHAPE-CONVERT1), so there is no check to switch. A profile field, flag or

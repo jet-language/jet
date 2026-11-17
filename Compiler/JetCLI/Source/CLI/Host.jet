@@ -1990,19 +1990,24 @@ jet_cli_release_job_summary: fn(inputs: JetDriverLoweringInputs?, options: Build
 }
 
 // A resolved build option value that removes a runtime check
-// (build_options_check_removals) is a `check_removal` gate of the package at
-// `root`, and resolved `link_args` (build_options_link_override) its
-// `link_override` gate; E3415 when its organization or
-// package policy forbids one (pkg_check_project_gate, the writer every
-// external gate shares).
-jet_cli_build_option_gate_refusal: fn(root: String, options: BuildOptions, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+// (build_options_check_removals) is a `check_removal` gate of the package
+// `file` compiled under, and resolved `link_args`
+// (build_options_link_override) its `link_override` gate; E3415 when its
+// organization or package policy forbids one (pkg_check_project_gate, the
+// writer every external gate shares). The policy is read from the entry file
+// when the compile's Package is declared inline (its `package:` block, or a
+// stock entry's it inherits), else from the source root `root`.
+jet_cli_build_option_gate_refusal: fn(file: String, root: String, result: JetDriverCompileResult, options: BuildOptions, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+    inline := false
+    if result.authority_policy == .Val(policy) -> inline = policy.inline_package && file.ends_with(".jet")
+    gate_root: if inline -> file else -> root
     loop choice in build_options_check_removals(options) {
-        if jet_cli_build_option_policy(root, PolicyKey.CheckRemoval, choice, color) == .Val(refused) {
+        if jet_cli_build_option_policy(gate_root, PolicyKey.CheckRemoval, choice, color) == .Val(refused) {
             return Val(refused)
         }
     }
     if build_options_link_override(options) == .Val(choice) {
-        return jet_cli_build_option_policy(root, PolicyKey.LinkOverride, choice, color)
+        return jet_cli_build_option_policy(gate_root, PolicyKey.LinkOverride, choice, color)
     }
     None
 }
@@ -2038,7 +2043,7 @@ jet_cli_build_binary: fn(file: String, name: String, command: String, color: Boo
     if !result.complete {
         return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler stopped before finishing `{file}`")}
     }
-    if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) {
+    if jet_cli_build_option_gate_refusal(file, snapshot.roots[0].canonical_path, result, options, color) == .Val(refused) {
         return JetCLIBuilt.Failed{output: refused}
     }
     checked := inputs.move() ?? return JetCLIBuilt.Failed{output: jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")}
@@ -2795,7 +2800,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
     }
     root: snapshot.roots[0].canonical_path
-    if jet_cli_build_option_gate_refusal(root, options.build, color) == .Val(refused) {
+    if jet_cli_build_option_gate_refusal(file, root, result, options.build, color) == .Val(refused) {
         return refused
     }
     // A member that lowers its Package root's claims floor stops before the
