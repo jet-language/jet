@@ -3802,6 +3802,30 @@ PickedFile: struct {
 
     // The file's bytes.
     read: fn(self) -[FS.Read]> [U8] IOError! { files.read_bytes(self.path) }
+
+    // The file's text; an error when its bytes are not UTF-8.
+    text: fn(self) -[FS.Read]> String IOError! { files.read(self.path) }
+
+    // The file's bytes a part at a time, for a file too big to hold whole.
+    stream: fn(self) -[FS.Read]> PickedStream IOError! {
+        Ok(PickedStream{file: files.open(self.path)})
+    }
+}
+
+// A picked file's bytes as a `Reader`, from its first byte to its last.
+#[!Equatable, !Comparable]
+PickedStream: struct {
+    priv file: files.FileReader,
+
+    impl Reader {
+        read_bytes: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
+            self.file.read_bytes(limit)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! {
+            self.file.read_into(buffer, limit)
+        }
+    }
 }
 
 // A place on Earth: degrees north and east, and how far off it may be, in
@@ -3812,11 +3836,71 @@ Place: struct {
     accuracy_m: Float,
 }
 
-// A kind of file `save_file` offers to save as.
+// A kind of file `open_file` and `save_file` offer.
 FileType: enum {
     CSV,
     JSON,
     Image,
+}
+
+// Asks the person for a file to open and gives it, or `None` when they
+// cancel. The dialog offers the kinds in `types`, the first one chosen. A
+// file that can't be read, or no dialog to ask with, is `None` with a
+// notice. On Linux the desktop portal's open dialog asks
+// (org.freedesktop.portal.FileChooser); the other native targets keep that
+// notice.
+open_file: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? {
+    #if #build.target.os == {
+        .Linux -> { return app_open_linux(types) }
+        .MacOS -> { return app_unopened(OPEN_UNBUILT) }
+        .Windows -> { return app_unopened(OPEN_UNBUILT) }
+        .Web -> { return app_unopened(OPEN_UNBUILT) }
+        .Wasm -> { return app_unopened(OPEN_UNBUILT) }
+        .Freestanding -> { return app_unopened(OPEN_UNBUILT) }
+    }
+}
+
+priv OPEN_UNBUILT: "this system's open dialog is not built yet"
+
+// `open_file` on Linux: the portal's dialog, then the chosen file's size
+// and what its first bytes show it holds.
+priv app_open_linux: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_unopened("{err}")
+    filters := [dbus.FileFilter]{}
+    loop kind in types -> filters.push(app_file_filter(kind))
+    uri: if dbus.portal_open_file(bus, "Open File", filters, ASK_WAIT_NS) == {
+        .Err(err) -> {
+            return app_unopened("{err}")
+        }
+        .Ok(chosen) -> chosen ?? return None
+    }
+    path: app_chosen_path(uri) ?? return app_unopened("the dialog chose {uri}, which is not a local file")
+    if app_picked(path) == {
+        .Ok(file) -> Val(file)
+        .Err(err) -> app_unopened("{err}")
+    }
+}
+
+// The file at `path` as a PickedFile: its name, its size, and its media
+// as its first bytes show (`blob_type`), as a kept blob's is.
+priv app_picked: fn(path: String) -[FS.Read]> PickedFile IOError! {
+    size: files.stat(path).size
+    head: files.read_at(path, 0, BLOB_HEAD)
+    Ok(PickedFile{name: files.basename(path), bytes: size, media: blob_media(blob_type(head, size)), path: path})
+}
+
+// Keeps the notice that no file was opened, and why; gives `None`.
+priv app_unopened: fn(why: String) -> PickedFile? Never! {
+    __keep_notice(Notice{text: "Couldn't open a file: {why}"})
+    None
+}
+
+// The path of the local file a file dialog chose, given as a `file://`
+// URI; `None` for any other URI.
+priv app_chosen_path: fn(uri: String) -> String? Never! {
+    if !uri.starts_with("file://") -> return None
+    path: url.percent_decode(uri.removeprefix("file://")) ?? return None
+    Val(path)
 }
 
 // Asks the person where to save a file and writes `bytes` there, all at
@@ -3852,10 +3936,7 @@ priv app_save_linux: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env
         }
         .Ok(chosen) -> chosen ?? return false
     }
-    if !uri.starts_with("file://") {
-        return app_unsaved(suggested, "the dialog chose {uri}, which is not a local file")
-    }
-    path: url.percent_decode(uri.removeprefix("file://")) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a file path")
+    path: app_chosen_path(uri) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a local file")
     files.write_atomic(path, bytes) ?? return app_unsaved(suggested, "{err}")
     true
 }
@@ -3887,7 +3968,7 @@ priv app_save_media: fn(suggested: String, types: [FileType]) -> String Never! {
     app_file_filter(types[0]).media[0].copy()
 }
 
-// What the save dialog shows and matches for `kind`.
+// What a file dialog shows and matches for `kind`.
 priv app_file_filter: fn(kind: FileType) -> dbus.FileFilter Never! {
     if kind == {
         .CSV -> dbus.FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
@@ -4288,6 +4369,26 @@ priv app_tray_lost: fn(why: String) Never! {
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "The board is offline")
+}
+
+#Test("a picked file has its name, size and media, and reads whole, as text and a part at a time") {
+    folder: "{sys.temp_dir()}/jet-picked-{sys.getpid()}"
+    files.create_dir_all(folder) ?? panic("folder: {err}")
+    path: "{folder}/tasks 1.csv"
+    files.write(path, "title,notes\nGate repair,hinge\n") ?? panic("write: {err}")
+    assert_eq(app_chosen_path("file://{folder}/tasks%201.csv"), Val(path.copy()))
+    assert_eq(app_chosen_path("https://example.com/tasks.csv"), String?{None})
+    file: app_picked(path) ?? panic("picked: {err}")
+    assert_eq(file.name, "tasks 1.csv")
+    assert_eq(file.bytes, 30)
+    assert_eq(file.media, Val(Media.Text))
+    assert_eq(file.text() ?? panic("text: {err}"), "title,notes\nGate repair,hinge\n")
+    assert_eq(file.read() ?? panic("read: {err}"), "title,notes\nGate repair,hinge\n".bytes())
+    parts := file.stream() ?? panic("stream: {err}")
+    assert_eq(parts.read_bytes(12) ?? panic("part: {err}"), "title,notes\n".bytes())
+    assert_eq(parts.read_bytes(100) ?? panic("rest: {err}"), "Gate repair,hinge\n".bytes())
+    assert_eq(parts.read_bytes(100) ?? panic("end: {err}"), [U8]{})
+    files.remove_all(folder) ?? panic("clean: {err}")
 }
 
 // A photo from the camera through PipeWire, kept in a directory of this

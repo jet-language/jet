@@ -5658,12 +5658,15 @@ tasks never read or change the process registry. The module source is
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `take_photo() -[Env, Exec, FS, Net, Time]> PickedFile?` | photo | Take a photo with the device's camera once the person allows it; `None` when they do not, or no photo came. See below. |
+| `open_file(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile?` | file | Ask the person for a file to open and give it; `None` when they cancel or it can't be read. See below. |
 | `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
 | `heading_updates() -[Env, Net, Time]> Stream<Float>` | headings | Where the device points, in degrees clockwise from north, each time that changes, until the loop reading it ends. See below. |
-| `photo.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `photo`. |
+| `file.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `file`. |
+| `file.text() -[FS.Read]> String IOError!` | text | The text of the `PickedFile` `file`; an error when its bytes are not UTF-8. |
+| `file.stream() -[FS.Read]> PickedStream IOError!` | reader | The bytes of the `PickedFile` `file` a part at a time, as a `Reader`. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -6296,6 +6299,18 @@ and each sensor stream gives its sensor back to the sensor proxy
 (iio-sensor-proxy, on the system bus), then each closes its bus
 connection. A device with no such sensor, or no bus to ask, gives an empty
 stream, as the other native targets do.
+
+`app.open_file(types:)` asks the person for a file to open and gives it as
+a `PickedFile`: its `name`, its size in `bytes`, its `media` as its first
+bytes show (as a kept `Blob`'s, `None` for none of those media), and
+`read()`, `text()` and `stream()` for its bytes. The dialog offers the kinds
+of file in `types`, each a `FileType`, with the first one chosen. The
+person cancelling is `None` with no notice. A file that can't be read, or
+no dialog to ask with, is `None`, and a notice in the app's notice list says
+why. On Linux the desktop portal's open dialog
+(org.freedesktop.portal.FileChooser) asks, and the file is the path of the
+file:// URI it answers with. The other targets keep that notice: their
+open dialogs are not built yet.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

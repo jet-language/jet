@@ -1612,15 +1612,31 @@ FileFilter: struct {
     media: [String],
 }
 
+// Shows the portal's open dialog, titled `title`, offering `filters` (the
+// first one chosen), and waits at most `timeout_ns` for the person. Gives
+// the `file://` URI of the file they chose, for the caller to read, or None
+// when they cancelled or chose nothing in time.
+portal_open_file: fn(c: &DbusConnection, title: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+    file_dialog(c, "OpenFile", title, [DbusValue]{}, filters, timeout_ns)
+}
+
 // Shows the portal's save dialog, titled `title`, with the file name
 // `suggested` filled in and `filters` offered (the first one chosen), and
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of
 // the file they chose, for the caller to write, or None when they
 // cancelled or chose nothing in time.
 portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+    file_dialog(c, "SaveFile", title, [DbusValue]{entry_of("current_name", DbusValue.Text(suggested))}, filters, timeout_ns)
+}
+
+// Shows the FileChooser dialog `member` with the options `named` beside
+// its handle token and `filters`, and gives the URI of the one file the
+// person chose, or None when they chose none in time.
+file_dialog: fn(c: &DbusConnection, member: String, title: String, named: [DbusValue], filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     deadline: now() + timeout_ns
     watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
-    options := [DbusValue]{entry_of("handle_token", DbusValue.Text(request_token(c))), entry_of("current_name", DbusValue.Text(suggested))}
+    options := [DbusValue]{entry_of("handle_token", DbusValue.Text(request_token(c)))}
+    loop option in named -> options.push(option.copy())
     if filters.len() > 0 {
         offered := [DbusValue]{}
         loop filter in filters -> offered.push(filter_value(filter))
@@ -1628,8 +1644,8 @@ portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filte
         options.push(entry_of("current_filter", filter_value(filters[0])))
     }
     // No parent window: the dialog stands on its own.
-    asked: call_until(c, PORTAL_NAME, PORTAL_PATH, FILE_CHOOSER, "SaveFile", [DbusValue]{DbusValue.Text(""), DbusValue.Text(title), options_of(options)}, deadline) ?? return Err(err)
-    request: answered_path(asked, "SaveFile") ?? return Err(err)
+    asked: call_until(c, PORTAL_NAME, PORTAL_PATH, FILE_CHOOSER, member, [DbusValue]{DbusValue.Text(""), DbusValue.Text(title), options_of(options)}, deadline) ?? return Err(err)
+    request: answered_path(asked, member) ?? return Err(err)
     answered: reply(c, request, deadline) ?? return Err(err)
     if answered.answer != .Allowed -> return Ok(None)
     if option_value(answered.results, "uris") == .Val(uris) {
@@ -1639,7 +1655,7 @@ portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filte
             }
         }
     }
-    Err(DbusError.Protocol("SaveFile's response named no file"))
+    Err(DbusError.Protocol("{member}'s response named no file"))
 }
 
 // A filter as the portal reads it: its name, then each glob pattern (kind
@@ -2626,6 +2642,40 @@ repeat: fn(text: String, times: Int) -> String {
     options: messages_heard(cancelled.server)[2].body[2]
     assert_eq(option_value(options, "filters"), DbusValue?{None})
     assert_eq(option_value(options, "current_name"), Val(DbusValue.Text("notes.txt")))
+}
+
+#Test("the portal's open dialog offers the file kinds and gives the file the person chose") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    csv: FileFilter{name: "CSV", globs: [String]{"*.csv"}, media: [String]{"text/csv"}}
+    chosen: "file:///home/crew/tasks.csv"
+    bus := test_bus("open")
+    request: "{PORTAL_PATH}/request/1_55/jet3"
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.55")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
+    append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), options_of([DbusValue]{entry_of("uris", texts([String]{chosen}))})}), 4))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(found_text(portal_open_file(c, "Open", [FileFilter]{csv.copy()}, 1000000000)), Val(chosen))
+    heard: messages_heard(bus.server)
+    assert_eq(heard.len(), 3)
+    assert_eq("{heard[2].interface}.{heard[2].member}", "org.freedesktop.portal.FileChooser.OpenFile")
+    sent: heard[2].body
+    assert_eq(sent[1], DbusValue.Text("Open"))
+    assert_eq(option_value(sent[2], "handle_token"), Val(DbusValue.Text("jet3")))
+    assert_eq(option_value(sent[2], "current_name"), DbusValue?{None})
+    assert_eq(option_value(sent[2], "current_filter"), Val(filter_value(csv)))
+    // The portal answers without a file: that is a protocol failure.
+    empty := test_bus("open-empty")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.56")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
+    append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), options_of([DbusValue]{})}), 4))
+    bus_says(empty.server, script)
+    d := start(empty.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert(portal_open_file(d, "Open", [FileFilter]{}, 1000000000) == .Err(DbusError.Protocol("OpenFile's response named no file")))
 }
 
 #Test("a tray serves its item and menu, says when the menu changes and hears what the person chose") {
