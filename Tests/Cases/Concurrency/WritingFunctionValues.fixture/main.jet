@@ -1,0 +1,57 @@
+// A function value whose body writes what it captured runs one call at a
+// time: two `task.group` children and their owner call the same value
+// thousands of times, and every call sees the state the one before it left.
+// Each call answers how many calls the state has counted, so the answers are
+// 1 to N, each once, whatever order the calls ran in.
+
+make_counter: fn() -> fn(Int) -> Int {
+    seen := [Int]{}
+    fn(value: Int) -> Int {
+        seen.push(value)
+        seen.len()
+    }
+}
+
+// The sum of the counts `counter` answers over `rounds` calls.
+hammer: fn(counter: fn(Int) -> Int, rounds: Int) -> Int {
+    total := 0
+    loop turn in 0..<rounds -> total += counter(turn)
+    total
+}
+
+// Two children share a lambda the caller passes, which writes the caller's
+// own local through its capture.
+tally: fn(step: fn(Int) -> Int, rounds: Int) -> Int {
+    total := 0
+    task.group group {
+        first: task hammer(step, rounds)
+        second: task hammer(step, rounds)
+        total = (first.join() ?? 0) + (second.join() ?? 0)
+    }
+    total
+}
+
+run: fn() {
+    rounds: 2000
+    counter: make_counter()
+    total := 0
+    task.group group {
+        first: task hammer(counter, rounds)
+        second: task hammer(counter, rounds)
+        total += hammer(counter, rounds)
+        total += (first.join() ?? 0) + (second.join() ?? 0)
+    }
+    print(total)
+    print(counter(-1))
+    count := 0
+    print(
+        tally(
+            fn(value: Int) -> Int {
+                count += 1
+                count
+            },
+            rounds,
+        ),
+    )
+    print(count)
+}

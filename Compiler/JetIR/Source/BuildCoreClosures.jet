@@ -128,6 +128,15 @@ ir_closure_slot: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
 // the release helper ends them. A task box's captures start after it.
 IR_TASK_STARTED: 24
 
+// The word of the box of a lambda that writes its captures (its capture
+// facts' needs_fn_mut): its invocation lock, the runtime word mutex every
+// call holds while the lambda's body runs (ir_build_lambda), so concurrent
+// calls of one function value (two `task.group` children, or a child and
+// its owner) take turns on the state the lambda writes. A lambda that only
+// reads its captures needs none, and a task body runs once. A locked box's
+// captures start after it.
+IR_CLOSURE_LOCK: 24
+
 // A new box of `bytes` bytes (row `row`) holding one owner and the release
 // helper of its capture shape; the caller stores the code at 8 and the
 // captures (`captures`: by value, or a held place's address). A box whose

@@ -1677,8 +1677,13 @@ callee, may write it. The old `take(...)` prefix is rejected with
 **E0057**. An escaping lambda that writes a captured local (by assignment or a
 `&self` method call) writes its own copy, so the scope that makes it can no
 longer use that local (**E0204**); a write parameter it captures is the
-caller's storage and is written in place. Self-recursion through the lambda's
-own binding is **E0804**; calling a non-function is **E0803** (S47).
+caller's storage and is written in place. A lambda that writes what it
+captures runs one call at a time: `task.group` children and their owner that
+call the same function value take turns under its invocation lock, so each
+call sees the state the one before it left. A task takes a function value it
+captures, which has no copy to give, so a later use is **E0121**.
+Self-recursion through the lambda's own binding is **E0804**; calling a
+non-function is **E0803** (S47).
 [`ClosureCaptureModes`](../../Examples/Basics/Functions/ClosureCaptureModes.jet)
 shows each capture mode with its output.
 

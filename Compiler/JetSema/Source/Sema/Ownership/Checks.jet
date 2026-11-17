@@ -2735,17 +2735,23 @@ sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: 
 // E0121 names the consumer every move recorder supplies and points a labeled
 // caret at the move site, so the reader sees both where the value went and
 // the later use. The reuse stays the primary span. A one-pass source has no
-// copy to give, so a note names its materializer or a fresh source instead.
+// copy to give, so a note names its materializer or a fresh source instead;
+// a function value has none either, so its fix names a `task.group` child,
+// which borrows the value, when a task took it.
 sema_ownership_diag_moved: fn(place: String, origin: SemaOwnershipMoveOrigin, span: Span) -> Diagnostic {
     consumer: origin.consumer
     same_site: origin.span.start == span.start && origin.span.end == span.end
     label: if same_site -> "`{place}` moved to {consumer} here on an earlier loop iteration" else -> "`{place}` moved to {consumer} here"
+    fix := "Stop using `{place}` after the move, or give {consumer} a copy with `{place}.copy()` where it moved."
+    if origin.moved_ty == .Val(.Fn(_, _, _, _, _, _)) {
+        fix = if consumer == "a task that captures it" -> "Stop using `{place}` after the move, or spawn the task in a `task.group`, whose child borrows `{place}` until the join: a function value has no copy to give." else -> "Stop using `{place}` after the move: a function value has no copy to give, so make another one for {consumer}."
+    }
     diagnostic: sema_error(
         "E0121",
         span,
         "`{place}` was consumed by {consumer}, so it can't be used here",
         "After a value moves somewhere else, its old name no longer gives access to it",
-        "Stop using `{place}` after the move, or give {consumer} a copy with `{place}.copy()` where it moved.",
+        fix,
     )
     labeled: diagnostic_with_label(diagnostic, origin.label_span ?? origin.span, label)
     if origin.moved_ty == .Val(ty) && sema_call_reflection_one_pass(ty) {
