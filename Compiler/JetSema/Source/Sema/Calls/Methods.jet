@@ -1558,11 +1558,11 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
     ""
 }
 
-// The App checks of a device call (`app.ask`, `app.open_settings`,
-// `app.take_photo`, `app.location`): the web output has none of them
-// (sema_call_app_device_target), and a call that may ask for a permission
-// needs its purpose (sema_call_app_permission_purpose): `ask` the ones its
-// argument names, `take_photo` the camera's and `location` the location's.
+// The App checks of a device call (`app.ask`, `app.open_settings`, the
+// photo, the location and the sensor streams): the web output has none of
+// them (sema_call_app_device_target), and one that may ask for a
+// permission needs its purpose (sema_call_app_permission_purpose): `ask`
+// those its argument names, the photo the camera's, the location's calls its.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
@@ -1578,11 +1578,11 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Camera"), span, program, diagnostics)
         }
-        "location" -> {
+        "location" | "location_updates" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "open_settings" -> {
+        "open_settings" | "orientation_updates" | "heading_updates" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         else -> {}

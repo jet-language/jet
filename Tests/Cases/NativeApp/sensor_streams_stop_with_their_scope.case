@@ -1,0 +1,35 @@
+# `app.location_updates`, `app.orientation_updates` and `app.heading_updates`
+# are typed streams: a Place each time the device moves, how the device is
+# held, and where it points. Each stops when the loop reading it ends, and
+# leaves nothing listening: on Linux the location stream closes its portal
+# session and the sensor streams give their sensor back to the sensor
+# proxy (iio-sensor-proxy), each over its own bus connection that it then
+# closes. The fake buses here take one connection at a time and a line in
+# heard.txt for each means the app closed it; the next stream could not
+# start before. The location's answer is the location ask's, so `app.ask`
+# prompts nobody again. The web output has none of these streams, so the
+# same app built for it is an E-APP-TARGET-FEATURE compile error at each
+# call.
+fixture: SensorStreamsStopWithTheirScope.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+spawn portal: jet run portal/fake_portal.jet
+stdout: file portal.stdout
+stderr: file portal.stderr
+await: file bus.ready timeout 120s every 10ms # the fake buses listen
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+env: DBUS_SYSTEM_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = "place: 52.52 13.405 within 20.0 m\nplace: 52.5201 13.4051 within 10.0 m\nheld: upright\nheld: left side up\nheading: 90.0\nheading: 180.5\nstopped, asked: true\n"
+wait: portal timeout 60s
+exit: 0
+file: heard.txt = "Hello AddMatch AddMatch CreateSession Start Close\nHello Get AddMatch ClaimAccelerometer Get ReleaseAccelerometer\nHello Get AddMatch ClaimCompass Get ReleaseCompass\n" # each stream closed its session or gave its sensor back, then its connection
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.location_updates` needs target `native`, but the resolved target is `Web`." # not answered for the browser
+stderr: ~ "main.jet:16:" # at the location stream
+stderr: ~ "App feature `.orientation_updates` needs target `native`, but the resolved target is `Web`." # nor the accelerometer
+stderr: ~ "main.jet:22:" # at the orientation stream
+stderr: ~ "App feature `.heading_updates` needs target `native`, but the resolved target is `Web`." # nor the compass
+stderr: ~ "main.jet:27:" # at the heading stream

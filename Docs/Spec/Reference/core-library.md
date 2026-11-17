@@ -5632,6 +5632,9 @@ tasks never read or change the process registry. The module source is
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `take_photo() -[Env, Exec, FS, Net, Time]> PickedFile?` | photo | Take a photo with the device's camera once the person allows it; `None` when they do not, or no photo came. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
+| `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
+| `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
+| `heading_updates() -[Env, Net, Time]> Stream<Float>` | headings | Where the device points, in degrees clockwise from north, each time that changes, until the loop reading it ends. See below. |
 | `photo.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `photo`. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
@@ -6195,8 +6198,8 @@ value is non-empty quoted text. `jet check` refuses a call that may ask for
 a permission with no line, E-APP-PERMISSION-PURPOSE: `app.ask` at its
 argument, where a literal permission (`.Camera`, `app.Permission.Camera`)
 needs its own line and a permission chosen at run time needs a line for
-every permission, and `app.take_photo` and `app.location` at the call, for
-the camera's and the location's.
+every permission, and `app.take_photo`, `app.location` and
+`app.location_updates` at the call, for the camera's and the location's.
 
 `app.open_settings()` opens the system's settings page for the app, where
 the person changes an answer they gave `app.ask`, and is true when one
@@ -6224,11 +6227,26 @@ seconds. The location is the first one the portal's location session
 reports (GeoClue finds it) after the person allows it, within five minutes
 of the ask. On the other native targets both are `None`.
 
+`app.location_updates()` is a stream of places: the first as the device is
+located, then one each time it moves. It asks as `app.location()` does, and
+it is empty after an answer other than `.Granted`.
+`app.orientation_updates()` is a stream of `Orientation`s, how the device is
+held (`.Upright`, `.UpsideDown`, `.LeftUp` or `.RightUp`), and
+`app.heading_updates()` a stream of headings, in degrees clockwise from
+north: each starts with the reading of the moment, then gives one each time
+it changes. These sensors need no permission. Each stream stops when the
+loop reading it ends, by `break`, `return` or a failure, and leaves nothing
+listening: on Linux the location stream closes its portal location session
+and each sensor stream gives its sensor back to the sensor proxy
+(iio-sensor-proxy, on the system bus), then each closes its bus
+connection. A device with no such sensor, or no bus to ask, gives an empty
+stream, as the other native targets do.
+
 A browser asks for a device permission itself, when a page first uses the
 device, and keeps no settings page of the app's, so `app.ask`,
-`app.open_settings`, `app.take_photo` and `app.location` in code whose
-target is the web output are a compile error, E-APP-TARGET-FEATURE, never a
-made-up answer.
+`app.open_settings`, `app.take_photo`, `app.location` and the three streams
+in code whose target is the web output are a compile error,
+E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

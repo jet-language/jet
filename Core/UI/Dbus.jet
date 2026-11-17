@@ -179,6 +179,25 @@ session: fn(timeout_ns: Int) -[Env, Net, Time]> DbusConnection DbusError! {
     address: sys.get("DBUS_SESSION_BUS_ADDRESS") ?? ""
     runtime: sys.get("XDG_RUNTIME_DIR") ?? ""
     path: session_path(address, runtime) ?? return Err(err)
+    connect(path, timeout_ns)
+}
+
+// Where the system bus listens when DBUS_SYSTEM_BUS_ADDRESS is not set.
+SYSTEM_BUS: "/run/dbus/system_bus_socket"
+
+// Connects to the system bus, where system services such as the sensor
+// proxy are, as `session` does to the session bus: the first `unix:path=`
+// address in DBUS_SYSTEM_BUS_ADDRESS, else the standard socket.
+system: fn(timeout_ns: Int) -[Env, Net, Time]> DbusConnection DbusError! {
+    address: sys.get("DBUS_SYSTEM_BUS_ADDRESS") ?? ""
+    if address == "" -> return connect(SYSTEM_BUS, timeout_ns)
+    path: session_path(address, "") ?? return Err(err)
+    connect(path, timeout_ns)
+}
+
+// Connects to the bus listening at `path`, authenticates as this process's
+// user and says Hello.
+connect: fn(path: String, timeout_ns: Int) -[Env, Net, Time]> DbusConnection DbusError! {
     stream: net.unix_connect(path) ?? return Err(DbusError.Connect("{path}: {err}"))
     start(stream, sys.getuid(), timeout_ns)
 }
@@ -1161,7 +1180,7 @@ portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswe
     if present.body.len() != 1 || present.body[0] != DbusValue.Variant(DbusValue.Bool(true)) {
         return Ok(PortalAnswer.Absent)
     }
-    watch(c, REQUEST, "Response", deadline) ?? return Err(err)
+    watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
     token: request_token(c)
     asked: call_until(c, PORTAL_NAME, PORTAL_PATH, CAMERA, "AccessCamera", [DbusValue]{string_option("handle_token", token)}, deadline) ?? return Err(err)
     request: answered_path(asked, "AccessCamera") ?? return Err(err)
@@ -1200,8 +1219,36 @@ portal_place: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalFix Db
 
 located: fn(c: &DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]> PortalFix DbusError! {
     deadline: now() + timeout_ns
-    watch(c, REQUEST, "Response", deadline) ?? return Err(err)
-    if wants_place -> watch(c, LOCATION, "LocationUpdated", deadline) ?? return Err(err)
+    opened: open_location(c, wants_place, timeout_ns) ?? return Err(err)
+    place := PortalPlace?{None}
+    if wants_place && opened.answer == .Allowed {
+        place = if next_place(c, opened.path, deadline - now()) == {
+            .Err(err) -> {
+                return Err(err)
+            }
+            .Ok(found) -> found
+        }
+    }
+    close_location(c, opened.path)
+    Ok(PortalFix{answer: opened.answer, place: place})
+}
+
+// A location session the portal made, open until `close_location` closes
+// it, and the person's answer to it.
+PortalSession: struct {
+    answer: PortalAnswer,
+    path: String,
+}
+
+// Makes and starts a location session, which is when the person is asked,
+// and waits at most `timeout_ns` for their answer. The session stays open:
+// once the person allows it, it reports where the device is each time it
+// moves, until `close_location` closes it. With `follows`, the bus is
+// asked for those reports first.
+open_location: fn(c: &DbusConnection, follows: Bool, timeout_ns: Int) -[Net, Time]> PortalSession DbusError! {
+    deadline: now() + timeout_ns
+    watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
+    if follows -> watch(c, LOCATION, "LocationUpdated", "", deadline) ?? return Err(err)
     session_token: request_token(c)
     made: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "CreateSession", [DbusValue]{string_option("session_handle_token", session_token)}, deadline) ?? return Err(err)
     session: answered_path(made, "CreateSession") ?? return Err(err)
@@ -1209,42 +1256,63 @@ located: fn(c: &DbusConnection, timeout_ns: Int, wants_place: Bool) -[Net, Time]
     started: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "Start", start_body, deadline) ?? return Err(err)
     request: answered_path(started, "Start") ?? return Err(err)
     answer: response(c, request, deadline) ?? return Err(err)
-    place := PortalPlace?{None}
-    if wants_place && answer == .Allowed {
-        place = if first_place(c, session, deadline) == {
-            .Err(err) -> {
-                return Err(err)
-            }
-            .Ok(found) -> found
-        }
-    }
-    _: call(c, PORTAL_NAME, session, SESSION, "Close", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
-    Ok(PortalFix{answer: answer, place: place})
+    Ok(PortalSession{answer: answer, path: session})
 }
 
-// How long closing a location session may take.
+// Closes the location session at `session`, so the portal stops locating
+// the device for it. The bus drops the connection's match rules when the
+// connection closes.
+close_location: fn(c: &DbusConnection, session: String) -[Net, Time]> {
+    _: call(c, PORTAL_NAME, session, SESSION, "Close", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
+}
+
+// How long closing a location session, or giving a sensor back, may take.
 CLOSE_WAIT_NS: 1000000000
 
-// Asks the bus for every signal `member` of `interface`; the portal sends
-// each request's Response and each location session's LocationUpdated to
-// the caller, and the reader picks out its own.
-watch: fn(c: &DbusConnection, interface: String, member: String, deadline: Int) -[Net, Time]> DbusError! {
+// Asks the bus for every signal `member` of `interface` from the object at
+// `path`, or from any when it is "": the portal sends each request's
+// Response and each location session's LocationUpdated to the caller, and
+// the reader picks out its own.
+watch: fn(c: &DbusConnection, interface: String, member: String, path: String, deadline: Int) -[Net, Time]> DbusError! {
     q: ascii(39)
-    rule: "type={q}signal{q},interface={q}{interface}{q},member={q}{member}{q}"
+    from: if path == "" -> "" else -> ",path={q}{path}{q}"
+    rule: "type={q}signal{q},interface={q}{interface}{q},member={q}{member}{q}{from}"
     _: call_until(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, deadline) ?? return Err(err)
     Ok()
 }
 
-// The first LocationUpdated signal of the session at `session` that is
-// here or arrives by `deadline`, read as a place.
-first_place: fn(c: &DbusConnection, session: String, deadline: Int) -[Net, Time]> PortalPlace? DbusError! {
+// The next LocationUpdated signal of the session at `session` that is here
+// or arrives within `timeout_ns`, read as a place; `None` when none came.
+next_place: fn(c: &DbusConnection, session: String, timeout_ns: Int) -[Net, Time]> PortalPlace? DbusError! {
+    found: if next_signal(c, LOCATION, "LocationUpdated", "", DbusValue.Path(session), timeout_ns) == {
+        .Err(err) -> {
+            return Err(err)
+        }
+        .Ok(got) -> got
+    }
+    if found == .Val(m) {
+        if m.body.len() == 2 -> return Ok(place_of(m.body[1]))
+    }
+    Ok(None)
+}
+
+// The first signal `member` of `interface` from the object at `path` (any,
+// when it is "") whose first argument is `first`, here or arriving within
+// `timeout_ns`. The signals before it go; those after it stay queued, in
+// order, for the next read.
+next_signal: fn(c: &DbusConnection, interface: String, member: String, path: String, first: DbusValue, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
+    deadline: now() + timeout_ns
     wait := 0
     loop {
         got: signals(c, wait) ?? return Err(err)
-        loop m in got {
-            if m.interface == LOCATION && m.member == "LocationUpdated" && m.body.len() == 2 && m.body[0] == DbusValue.Path(session) {
-                return Ok(place_of(m.body[1]))
+        loop i in 0..<got.len() {
+            if got[i].interface != interface || got[i].member != member || got[i].body.len() == 0 {
+                next
             }
+            if path != "" && got[i].path != path -> next
+            if got[i].body[0] != first -> next
+            loop later in got[(i + 1)..<got.len()] -> c.queued.push(later.copy())
+            return Ok(Val(got[i].copy()))
         }
         wait = deadline - now()
         if wait <= 0 -> return Ok(None)
@@ -1255,26 +1323,111 @@ first_place: fn(c: &DbusConnection, session: String, deadline: Int) -[Net, Time]
 // The place a LocationUpdated signal's options give, when they name both
 // coordinates.
 place_of: fn(options: DbusValue) -> PortalPlace? {
-    latitude := Float?{None}
-    longitude := Float?{None}
-    accuracy := Float{0.0}
+    north: option_double(options, "Latitude") ?? return None
+    east: option_double(options, "Longitude") ?? return None
+    Val(PortalPlace{latitude: north, longitude: east, accuracy: option_double(options, "Accuracy") ?? Float{0.0}})
+}
+
+// The number `options` gives `name`, when it gives one.
+option_double: fn(options: DbusValue, name: String) -> Float? {
+    if option_value(options, name) == .Val(value) {
+        if value == .Double(f) -> return Val(f)
+    }
+    None
+}
+
+// The value that `options`, an `a{sv}` dictionary, gives `name`, when it
+// names it.
+option_value: fn(options: DbusValue, name: String) -> DbusValue? {
     if options == .Array(_, entries) {
         loop entry in entries {
             if entry == .Entry(key, value) {
-                if value == .Variant(inner) {
-                    if inner == .Double(f) {
-                        name: string_of(key)
-                        if name == "Latitude" -> latitude = Val(f)
-                        if name == "Longitude" -> longitude = Val(f)
-                        if name == "Accuracy" -> accuracy = f
-                    }
-                }
+                if string_of(key) != name -> next
+                if value == .Variant(inner) -> return Val(inner.copy())
             }
         }
     }
-    north: latitude ?? return None
-    east: longitude ?? return None
-    Val(PortalPlace{latitude: north, longitude: east, accuracy: accuracy})
+    None
+}
+
+SENSOR_PROXY: "net.hadess.SensorProxy"
+
+SENSOR_PATH: "/net/hadess/SensorProxy"
+
+COMPASS: "net.hadess.SensorProxy.Compass"
+
+COMPASS_PATH: "/net/hadess/SensorProxy/Compass"
+
+// A sensor the sensor proxy (iio-sensor-proxy) reads for its clients on the
+// system bus: the accelerometer, which tells how the device is held, and
+// the compass, which tells where it points.
+Sensor: enum {
+    Accelerometer,
+    Compass,
+}
+
+// Where the proxy keeps a sensor: its object and interface, the name its
+// Has, Claim and Release members end with, and the property it reports.
+SensorSite: struct {
+    path: String,
+    interface: String,
+    name: String,
+    reading: String,
+}
+
+sensor_site: fn(sensor: Sensor) -> SensorSite {
+    if sensor == {
+        .Accelerometer -> SensorSite{path: SENSOR_PATH, interface: SENSOR_PROXY, name: "Accelerometer", reading: "AccelerometerOrientation"}
+        .Compass -> SensorSite{path: COMPASS_PATH, interface: COMPASS, name: "Compass", reading: "CompassHeading"}
+    }
+}
+
+// Claims `sensor` from the proxy, so it reads the sensor for this
+// connection, and gives its reading now, waiting at most `timeout_ns`;
+// `None`, with nothing claimed, when the device has no such sensor. Each
+// change after comes in a PropertiesChanged signal, which `sensor_change`
+// reads, until `release_sensor` gives the sensor back.
+claim_sensor: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
+    deadline: now() + timeout_ns
+    site: sensor_site(sensor)
+    has: call_until(c, SENSOR_PROXY, site.path, PROPERTIES, "Get", [DbusValue]{DbusValue.Text(site.interface), DbusValue.Text("Has{site.name}")}, deadline) ?? return Err(err)
+    if has.body.len() != 1 || has.body[0] != DbusValue.Variant(DbusValue.Bool(true)) {
+        return Ok(None)
+    }
+    watch(c, PROPERTIES, "PropertiesChanged", site.path, deadline) ?? return Err(err)
+    _: call_until(c, SENSOR_PROXY, site.path, site.interface, "Claim{site.name}", [DbusValue]{}, deadline) ?? return Err(err)
+    current: call_until(c, SENSOR_PROXY, site.path, PROPERTIES, "Get", [DbusValue]{DbusValue.Text(site.interface), DbusValue.Text(site.reading)}, deadline) ?? return Err(err)
+    if current.body.len() == 1 {
+        if current.body[0] == .Variant(inner) -> return Ok(Val(inner.copy()))
+    }
+    Err(DbusError.Protocol("Get {site.reading} answered {current.signature}, not a variant"))
+}
+
+// The next reading of the claimed `sensor` that is here or arrives within
+// `timeout_ns`: the new value of its property in a PropertiesChanged
+// signal of the proxy's; `None` when none came.
+sensor_change: fn(c: &DbusConnection, sensor: Sensor, timeout_ns: Int) -[Net, Time]> DbusValue? DbusError! {
+    deadline: now() + timeout_ns
+    site: sensor_site(sensor)
+    loop {
+        found: if next_signal(c, PROPERTIES, "PropertiesChanged", site.path, DbusValue.Text(site.interface), deadline - now()) == {
+            .Err(err) -> {
+                return Err(err)
+            }
+            .Ok(got) -> got
+        }
+        m: found ?? return Ok(None)
+        if m.body.len() < 2 -> next
+        if option_value(m.body[1], site.reading) == .Val(value) -> return Ok(Val(value.copy()))
+    }
+    Ok(None)
+}
+
+// Gives `sensor` back to the proxy, so it stops reading it for this
+// connection.
+release_sensor: fn(c: &DbusConnection, sensor: Sensor) -[Net, Time]> {
+    site: sensor_site(sensor)
+    _: call(c, SENSOR_PROXY, site.path, site.interface, "Release{site.name}", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
 }
 
 // A token for the next request's object path, unique on this connection.
@@ -1831,6 +1984,85 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(none.place, None)
 }
 
+#Test("a location session reports each place until it is closed") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
+    bus := test_bus("places")
+    session: "{PORTAL_PATH}/session/1_48/jet4"
+    started: "{PORTAL_PATH}/request/1_48/jet5"
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.48")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(session)}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Path(started)}), 5))
+    append(script, wire(signal(started, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), no_options.copy()}), 6))
+    append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path(session), place_options([Float]{Float{52.52}, Float{13.405}, Float{20.0}})}), 7))
+    // Another session's report is not this one's.
+    append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path("{PORTAL_PATH}/session/1_48/other"), place_options([Float]{Float{1.0}, Float{2.0}, Float{3.0}})}), 8))
+    append(script, wire(signal(PORTAL_PATH, LOCATION, "LocationUpdated", [DbusValue]{DbusValue.Path(session), place_options([Float]{Float{52.5201}, Float{13.4051}, Float{10.0}})}), 9))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    opened: open_location(c, true, 1000000000) ?? panic("open: {err}")
+    assert_eq(opened.answer, PortalAnswer.Allowed)
+    assert_eq(opened.path, session)
+    assert_eq(found_place(next_place(c, opened.path, 1000000000)), Val(PortalPlace{latitude: Float{52.52}, longitude: Float{13.405}, accuracy: Float{20.0}}))
+    assert_eq(found_place(next_place(c, opened.path, 1000000000)), Val(PortalPlace{latitude: Float{52.5201}, longitude: Float{13.4051}, accuracy: Float{10.0}}))
+    assert_eq(found_place(next_place(c, opened.path, 0)), PortalPlace?{None})
+    bus_says(bus.server, wire(reply_to(6, [DbusValue]{}), 10))
+    close_location(c, opened.path)
+    asked: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.portal.Location.CreateSession",
+        "org.freedesktop.portal.Location.Start",
+        "org.freedesktop.portal.Session.Close",
+    }
+    assert_eq(calls_heard(bus.server), asked)
+}
+
+#Test("a sensor is claimed, read as it changes and given back") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    bus := test_bus("accelerometer")
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.49")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Variant(DbusValue.Text("normal"))}), 5))
+    // Another interface's change, and a change of another property, are
+    // not the orientation's.
+    append(script, wire(sensor_changed(SENSOR_PATH, "net.hadess.Other", "AccelerometerOrientation", DbusValue.Text("bottom-up")), 6))
+    append(script, wire(sensor_changed(SENSOR_PATH, SENSOR_PROXY, "LightLevel", DbusValue.Double(Float{3.0})), 7))
+    append(script, wire(sensor_changed(SENSOR_PATH, SENSOR_PROXY, "AccelerometerOrientation", DbusValue.Text("left-up")), 8))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(found_value(claim_sensor(c, Sensor.Accelerometer, 1000000000)), Val(DbusValue.Text("normal")))
+    assert_eq(found_value(sensor_change(c, Sensor.Accelerometer, 1000000000)), Val(DbusValue.Text("left-up")))
+    assert_eq(found_value(sensor_change(c, Sensor.Accelerometer, 0)), DbusValue?{None})
+    bus_says(bus.server, wire(reply_to(6, [DbusValue]{}), 9))
+    release_sensor(c, Sensor.Accelerometer)
+    asked: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.Properties.Get",
+        "org.freedesktop.DBus.AddMatch",
+        "net.hadess.SensorProxy.ClaimAccelerometer",
+        "org.freedesktop.DBus.Properties.Get",
+        "net.hadess.SensorProxy.ReleaseAccelerometer",
+    }
+    assert_eq(calls_heard(bus.server), asked)
+    // A device with no compass: nothing is claimed.
+    none := test_bus("no-compass")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.50")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(false))}), 2))
+    bus_says(none.server, script)
+    d := start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(found_value(claim_sensor(d, Sensor.Compass, 1000000000)), DbusValue?{None})
+    assert_eq(calls_heard(none.server), [String]{"org.freedesktop.DBus.Hello", "org.freedesktop.DBus.Properties.Get"})
+}
+
 // A LocationUpdated signal's options: latitude, longitude and accuracy.
 place_options: fn(values: [Float]) -> DbusValue {
     names: [String]{"Latitude", "Longitude", "Accuracy"}
@@ -1839,6 +2071,29 @@ place_options: fn(values: [Float]) -> DbusValue {
         items.push(DbusValue.Entry{key: DbusValue.Text(names[i]), value: DbusValue.Variant(DbusValue.Double(values[i]))})
     }
     DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: items}
+}
+
+// A PropertiesChanged signal from the object at `path`: `property` of
+// `interface` changed to `value`.
+sensor_changed: fn(path: String, interface: String, property: String, value: DbusValue) -> DbusMessage {
+    changed: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{DbusValue.Entry{key: DbusValue.Text(property), value: DbusValue.Variant(value)}}}
+    signal(path, PROPERTIES, "PropertiesChanged", [DbusValue]{DbusValue.Text(interface), changed, DbusValue.Array{signature: "s", items: [DbusValue]{}}})
+}
+
+// The place a read gave, or the test fails with its error.
+found_place: fn(got: PortalPlace? DbusError!) -> PortalPlace? {
+    if got == {
+        .Err(err) -> panic("place: {err}")
+        .Ok(found) -> found
+    }
+}
+
+// The value a read gave, or the test fails with its error.
+found_value: fn(got: DbusValue? DbusError!) -> DbusValue? {
+    if got == {
+        .Err(err) -> panic("value: {err}")
+        .Ok(found) -> found
+    }
 }
 
 // The interface and member of each call the client made after it
