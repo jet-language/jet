@@ -1446,6 +1446,22 @@ evaluated once: `slots: [Int?#3].filled(None)`. A list type with no length
 has no static methods. `[Int?].filled(3, None)` is **E0311**, and the fix is
 the list literal `[Int?]{…}` or the fixed list `[Int?#N].filled(value)`.
 
+When `T` is a number type and `N` is a literal, `[T#N]` takes the operators
+`+ - * / /% % %% pow`, and for integer `T` also `& | ~ << >>`, slot by slot,
+with another `[T#N]` or with one value of type `T` on either side, and unary
+`-` and (for integers) `~`. `a + b` means
+`[T#N]{a[0] + b[0], …, a[N-1] + b[N-1]}` with each operand evaluated once, so
+each slot keeps the scalar operator's meaning, including its overflow and
+zero-divisor stops and `Int / Int` making a Fraction. A number literal beside
+the array is read as an element. `==` and `!=` still compare whole lists. Two
+arrays of different lengths or element types, or a value that is not an
+element, are **E0446**.
+
+```jet
+gains: [Float#3]{0.5, 1.0, 2.0}
+print(gains * 2 + gains)  // [1.5, 3.0, 6.0]
+```
+
 A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
 and `clear` on a fixed-size list are **E0964**. A literal index outside
 `0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer

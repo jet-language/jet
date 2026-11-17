@@ -1,0 +1,29 @@
+Error [jet.FixedArrayElementwiseMismatch]: `+` needs two arrays of one length, but these are `[Int#3]` and `[Int#4]`
+  --> Tests/UI/fixed_array_elementwise_mismatch.jet:9:11
+    |
+  9 |     print(three + four)
+    |           ^^^^^^^^^^^^
+ Why: An operator on two fixed arrays pairs each slot of one with the same slot of the other, so every slot needs a partner
+ Fix: Make both arrays the same length, or take a slice of the longer one
+More: jet-lang.dev/e/E0446
+
+Error [jet.FixedArrayElementwiseMismatch]: `*` needs two arrays of one element type, but these are `[Int#3]` and `[Float#3]`
+  --> Tests/UI/fixed_array_elementwise_mismatch.jet:10:11
+    |
+ 10 |     print(three * floats)
+    |           ^^^^^^^^^^^^^^
+ Why: Each slot is the scalar `*` on two elements, and that needs one number type on both sides
+ Fix: Convert one array's elements to the other's type first
+More: jet-lang.dev/e/E0446
+
+Error [jet.FixedArrayElementwiseMismatch]: `*` combines `[Int#3]` with another `[Int#3]` or with one `Int`, but this is `Float`
+  --> Tests/UI/fixed_array_elementwise_mismatch.jet:11:11
+    |
+ 11 |     print(three * scale)
+    |           ^^^^^^^^^^^^^
+ Why: A value beside a fixed array is applied to every slot, so it needs the slots' type
+ Fix: Convert the value to `Int`, or make it an array of the same shape
+More: jet-lang.dev/e/E0446
+
+3 problems found
+run `jet explain E0446` to learn more

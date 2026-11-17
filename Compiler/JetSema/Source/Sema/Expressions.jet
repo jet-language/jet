@@ -5379,6 +5379,9 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
         float_literal || integer_complement -> operand_expected = expected.copy()
     }
     value: sema_check_expression(operand, operand_expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if sema_expr_fixed_unary_applies(op, value.ty) {
+        return sema_expr_check_fixed_unary(op, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if op == UnOp.Neg {
         if value.ty == {
             .IntN(signed, bits) -> {
@@ -6186,6 +6189,11 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     lifted_lhs := if equality && lifted_rhs == None -> sema_expr_optional_lift(checked_lhs, checked_rhs.ty, checked_lhs.ty, environment, program) else -> None
     lhs: lifted_lhs ?? checked_lhs
     rhs: lifted_rhs ?? checked_rhs
+    // `a + b`, `a * 2` on fixed arrays of numbers: slot by slot
+    // (Expressions/FixedArithmetic.jet).
+    if sema_expr_fixed_elementwise_applies(op, lhs.ty, rhs.ty) {
+        return sema_expr_check_fixed_binary(op, left, right, lhs, rhs, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if op == BinOp.Pow && sema_expr_pow_widths_mixed(lhs.ty, rhs.ty) {
         diagnostics.push(sema_expr_pow_width_mismatch(span))
         return None
