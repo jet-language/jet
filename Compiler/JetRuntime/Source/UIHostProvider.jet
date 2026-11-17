@@ -1,8 +1,9 @@
 // The UI host provider seam (core.ui.host): primitives only. Core owns every
-// rule, queue, registry and UIHostError; a provider answers five questions:
+// rule, queue, registry and UIHostError; a provider answers six questions:
 // is a capability present, the clipboard's text (get and set), the next raw
-// event of a queue, a dialog's request and result, and whether it claimed a
-// key for the shortcut queue.
+// event of a queue, a dialog's request and result, whether it claimed a key
+// for the shortcut queue, and whether it handed a file's bytes to the person
+// to save (app.save_file).
 //
 // The leaves below are C functions. This native runtime defines them headless:
 // no capability is present and every service declines. A web build's host
@@ -28,6 +29,11 @@
 #Export(c) jet_ui_provider_dialog_result: fn(token: I64) -> I64 { I64{-1} }
 
 #Export(c) jet_ui_provider_key_claim: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
+
+// The file's name, media type and bytes, each as its pointer and length.
+#Export(c) jet_ui_provider_save_file: fn(name: I64, name_length: I64, media: I64, media_length: I64, bytes: I64, length: I64) -> I64 {
+    I64{-1}
+}
 
 #Export(c) jet_ui_provider_take: fn(buffer: I64) {}
 
@@ -63,6 +69,10 @@ ui_host_take_into: fn(length: I64, some: I64) -> I64 {
 
 #Export(c) jet_ui_host_key_claim: fn(claim: I64) -> Bool {
     jet_ui_provider_key_claim(rt_text_data(claim), rt_text_len(claim)) == I64{0}
+}
+
+#Export(c) jet_ui_host_save_file: fn(name: I64, media: I64, bytes: I64, length: I64) -> Bool {
+    jet_ui_provider_save_file(rt_text_data(name), rt_text_len(name), rt_text_data(media), rt_text_len(media), bytes, length) == I64{0}
 }
 
 #Export(c) jet_ui_host_dialog_request: fn(kind: I64, request: I64) -> I64 {

@@ -1,13 +1,14 @@
 // `jet.runtime.ui` (#6615): the UI host provider's primitives (core.ui.host),
 // in Jet types. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
-// (UiHostProvider.jet). Each is `priv`: only core.ui.host calls them, and the
-// core.ui.host function that reaches a capability's service carries its
-// `UI.<capability>` requirement (Compiler/Prelude/Core.rows
-// `.with_ui_capabilities`, E2937). Each reads or writes the provider's live
-// state, so each is run-time only (RUNTIME_ONLY_READS): the compiler never
-// computes one while building, where its answer would stand in for every
-// run's clipboard, events and dialogs.
+// (UiHostProvider.jet). Each is `priv`: only core.ui.host calls them, but for
+// `save_file`, which app.save_file calls, and the core.ui.host function that
+// reaches a capability's service carries its `UI.<capability>` requirement
+// (Compiler/Prelude/Core.rows `.with_ui_capabilities`, E2937). Each reads or
+// writes the provider's live state, so each is run-time only
+// (RUNTIME_ONLY_READS): the compiler never computes one while building, where
+// its answer would stand in for every run's clipboard, events, dialogs and
+// saved files.
 ui: module {
     // Whether the provider has the capability with code `code`
     // (core.ui.host UICapability order).
@@ -30,4 +31,9 @@ ui: module {
     #Import(c) priv dialog_request: fn(kind: Int, request: String) -> Int = "jet_ui_host_dialog_request"
 
     #Import(c) priv dialog_result: fn(token: Int) -> String? = "jet_ui_host_dialog_result"
+
+    // Whether the provider handed the file `name`, of media type `media`
+    // and holding `bytes`, to the person to save: a page downloads it. Only
+    // app.save_file calls it.
+    #Import(c) priv save_file: fn(name: String, media: String, bytes: [U8]) -> Bool = "jet_ui_host_save_file"
 }

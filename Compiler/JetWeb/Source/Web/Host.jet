@@ -203,7 +203,9 @@ function providerRecord(fields) {
 // and every other key keeps its default. The clipboard is the text this page last
 // observed through a paste, copy or cut, or its own write: a browser lends the
 // live clipboard only to a user gesture, and a write's later refusal by the
-// browser is not seen. File dialogs and font shaping are absent: a file input
+// browser is not seen. A saved file is a download of its bytes under its
+// name, which the browser keeps in its downloads folder or where the person
+// says when it asks. File dialogs and font shaping are absent: a file input
 // answers later than the synchronous seam and gives no filesystem path.
 const UI_QUEUE = 256;
 
@@ -273,6 +275,20 @@ function defaultUiProvider(doc) {
     dialogResult: () => null,
     keyClaim: (claim) => {
       claims.add(claim);
+      return true;
+    },
+    saveFile: (name, media, bytes) => {
+      const urls = globalThis.URL;
+      if (!urls?.createObjectURL || !doc.createElement) return false;
+      const link = doc.createElement("a");
+      const address = urls.createObjectURL(new Blob([bytes], { type: media }));
+      link.href = address;
+      link.download = name;
+      (doc.body ?? doc.documentElement).append(link);
+      link.click();
+      link.remove();
+      // The download reads the bytes after this call returns.
+      setTimeout(() => urls.revokeObjectURL(address), 60000);
       return true;
     },
   };
@@ -950,6 +966,8 @@ class Host {
       jet_ui_provider_dialog_request: (kind, bytes, length) => BigInt(provider()?.dialogRequest(Number(kind), textAt(bytes, length)) ?? -1),
       jet_ui_provider_dialog_result: (token) => stage(provider()?.dialogResult(Number(token))),
       jet_ui_provider_key_claim: (bytes, length) => (provider()?.keyClaim(textAt(bytes, length)) ? 0n : -1n),
+      jet_ui_provider_save_file: (name, nameLength, media, mediaLength, bytes, length) =>
+        (provider()?.saveFile?.(textAt(name, nameLength), textAt(media, mediaLength), host.u8().slice(Number(bytes), Number(bytes) + Number(length))) ? 0n : -1n),
       jet_ui_provider_take: (buffer) => {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
