@@ -38,15 +38,26 @@ step: jet fetch
 env: HOME={work}/home
 exit: 0
 json: file .jet/lock toml $.package[?name = "mylib"][0].locked.rev != null
-capture: cache_url = sole-entry home/.jet/git-cache kind dir
-capture: cache_revision = sole-entry {cap:cache_url} kind dir
-write: {cap:cache_revision}/mylib.jet compromised.template
+# A tampered dependency view is not what a locked fetch reads: it verifies
+# the store entry the lock names and passes.
 write: .jet/build/deps/mylib/mylib.jet compromised.template
 step: jet fetch --locked
 env: HOME={work}/home
-exit: nonzero
-stderr.after_first("Error ["): ^= "jet.StoreEntryTampered]" # original first_diag_code predicate
-step: jet build --locked run.jet
+exit: 0
+stdout: ~ "Lock verified"
+# A fetch swaps the stale view for a verified copy of the store entry, and
+# the tampered bytes are gone.
+step: jet fetch
+env: HOME={work}/home
+exit: 0
+stdout: ~ "Replaced the stale dependency view `mylib` with a verified copy of its store entry"
+file: .jet/build/deps/mylib/mylib.jet !~ "compromised" # the tampered view is replaced
+file: .jet/build/deps/mylib/mylib.jet ~ "return 42" # by the locked source
+# A tampered store entry is not the locked code: a locked fetch refuses it.
+capture: entry = sole-entry store kind dir name ^= "mylib-0.1.0-"
+write: {cap:entry}/mylib.jet compromised.template
+step: jet fetch --locked
+env: HOME={work}/home
 exit: nonzero
 stderr.after_first("Error ["): ^= "jet.StoreEntryTampered]" # original first_diag_code predicate
 # Initial typed LockFile pin returned by Fetch is checked through the actual written lock; no constructed lock/cache.
