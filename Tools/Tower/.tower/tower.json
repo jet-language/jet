@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111963,
+    "rev": 111973,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54059,7 +54059,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-17T16:05:36.630Z",
+      "updated": "2026-11-17T21:40:32.560Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -69048,7 +69048,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-17T21:36:33.828Z",
+      "updated": "2026-11-17T21:40:28.059Z",
       "updatedBy": "Main",
       "criteriaLastN": 17
     },
@@ -73928,7 +73928,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-17T11:43:24.889Z",
+      "updated": "2026-11-17T21:40:16.752Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -90787,7 +90787,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -90796,6 +90796,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All 6 criteria met; c4 rows pass on p277 (112b577445)."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -90863,11 +90868,11 @@
         {
           "n": 4,
           "text": "Remaining rows PASS, with stale fixtures updated to the current grammar where the case predates it: control_and_data/discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, corelib/game_run_needs_mutable_scene_lvalue, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets.pty, solve_solver_type_name_is_reserved, ice_regressions/b3_map_get_through_object_pattern. Proof: `jet test Compiler --profile cases --filter <each named row>` passes, with no row left in Tests/known-failing.tsv naming #6661.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:01.375Z"
+          "evidence": "Holds on dev 112b577445 (batch compiler p277). `jet test Compiler --profile cases --filter <row>` PASS for: discarded_if_does_not_unify_mixed_tail_values, value_block_tails_report_unit_and_lint_old_arm_table_shape, generated_internal_tagged_enum_round_trips_every_variant_shape, io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets (.case and .pty.case), solve_solver_type_name_is_reserved, ice_regressions b3_map_get_through_object_pattern, and game_run_needs_mutable_scene_lvalue, which is ported as CoreLib/game_run_runs_a_mutable_scene_binding. Tests/known-failing.tsv has no row naming #6661.",
+          "at": "2026-11-17T21:39:24.922Z"
         },
         {
           "n": 5,
@@ -90893,9 +90898,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-17T15:58:30.276Z",
+      "updated": "2026-11-17T21:39:26.931Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-17T21:39:26.931Z"
     },
     {
       "id": "c0b4rnem",
@@ -103001,7 +103007,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-17T21:36:00.814Z",
+      "updated": "2026-11-17T21:41:02.023Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -202528,140 +202534,145 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "syntax",
-      "title": "Keep enum guards free and make table fallbacks intentional",
-      "situation": "Jet accepts ordinary enum guards but rejects else in a table over a closed enum, even when the remaining cases deliberately share a fallback. The enum research distinguishes those common uses from exhaustive dispatch and finds that long rest lists often add no useful behavior. We recommend accepting else in enum tables while keeping missing-case checks when no fallback is present. Teams can choose stricter audits through the existing lint policy, not a new branch syntax.",
-      "gist": "Allow intentional enum-table fallback without turning ordinary guards into exhaustive dispatch.",
-      "lesson": "An exhaustive table asks every new case to be reviewed. An explicit fallback intentionally accepts future cases. Neither contract should be inferred from chain length.",
-      "explainer": "Beginner: use ordinary if for a guard, or else in a table when the same fallback really applies. Expert: omit else when enum growth must force a review; use a declared opt-in audit where a team wants fallback review. This does not add a second wildcard spelling or classify a chain by how many branches it contains.",
-      "story": "Nora computes area for two shapes and returns zero for non-area shapes. She wants that explicit fallback, while her serialization table must still reject unhandled new cases.",
-      "inWild": "match shape {\n    Shape::Circle { radius } => radius * radius,\n    _ => 0,\n}",
-      "detail": "gate-p260 probes/enums.jet runs separate Circle and Square guards and prints 9 and 0 for Square and Dot. probes/enum-table.jet rejects the corresponding enum table's else with E0641 and suggests .Line | .Dot. These are separate current facts: accepting early-return guards does not establish accepted else in tables.\n\nRead Docs/Research/2026-11-16-enum-branching-in-real-code.md in full. Its regex-and-brace scan is heuristic, not a semantic corpus proof; its counts were not independently reproduced here and are not advertised as prevalence measurements. Its useful distinction is between guards, exhaustive dispatch and deliberate fallback, with long explicit rest lists often hiding a simple default. The old recommendation treated that distinction unfairly and introduced a new wildcard marker without solving a new meaning.\n\nD-NO-WARNINGS1 already ratifies tidy policy: selected tidy findings block check/build, stay out of the ordinary run/dev/test path, and appear through advice. This ballot reuses that contract; it does not invent another severity tier or claim it is fully implemented. A catchall audit must resolve a stable enum subject, ignore ordinary independent guards, and offer an explicit-case fix only when mechanically safe. Rust's reference documents that non_exhaustive forces downstream wildcard coverage; that is a different library-evolution contract, not a reason to ban Jet fallback generally.",
+      "title": "Single-case checks stay free; wider enum decisions require named cases or #Rest",
+      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in.",
+      "gist": "Should wider enum decisions require named cases or an explicit #Rest fallback?",
+      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #Rest deliberately accepts future cases too.",
+      "explainer": "One case stays easy. Two or more distinct cases require complete coverage, or a marked fallback; this is a hard error before execution, not a tidy check reserved for shipping.",
+      "story": "Area handles circles and squares and deliberately returns zero for every other shape. Saving must handle each shape by name. Adding Triangle must stop saving, but may use area's explicitly marked fallback.",
+      "inWild": "Odin documents #partial switch as an explicit escape from exhaustive enum checking. That is a precedent for explicit intent, not identical placement or semantics.",
+      "detail": "r2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #Rest ->' nor a post-body #Rest is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #Rest'. Register Rest with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
       "options": [
         {
           "key": "A",
-          "name": "Allow explicit fallback; retain exhaustive tables",
-          "detail": "Accept else in enum tables. Missing-case checking remains mandatory for tables without a fallback. Ordinary guards and chains stay ordinary control flow.",
-          "technical": "Use the existing else syntax with the existing first-matching-arm semantics. A table with else intentionally includes cases introduced later; a closed table without else must cover all cases, including payload patterns and nested alternatives under the existing exhaustiveness rules. Do not convert a two- or three-test chain into an exhaustive construct by heuristic. Preserve diagnostics for unreachable arms and invalid patterns separately.\n\nA team may opt into a declared enum-fallback audit using the already ratified lint and tidy mechanism. Such an audit is not a default type error and does not change runtime behavior. It must distinguish explicit fallback from accidental omission, show concrete uncovered cases, and respect the existing scoped suppression-with-reason policy. No .. token, #Open enum marker, special strict command, or new warning channel is introduced. Add implementation proofs for payloads, nested patterns, imported enums, independent mutable subjects and early-return chains.",
-          "code": "area: if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> 0\n}"
+          "name": "Free single checks; explicit wider fallbacks",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Rest. An unmarked incomplete decision is a hard error, even when only one case remains.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Rest or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Rest for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Rest lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Rest\n}"
         },
         {
           "key": "B",
-          "name": "Require explicit remainder cases in closed tables",
-          "detail": "Keep today's table restriction and leave ordinary guards unrestricted. Every enum addition forces explicit table edits.",
-          "technical": "This is strongest when every new enum case must be considered by every dispatch site. Editors can generate the explicit remainder list without changing behavior, but tooling cannot remove the resulting source churn. Ordinary early-return chains are not secretly covered by this guarantee. Do not market this choice as exhaustive checking of all enum control flow.",
-          "code": "area: if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
+          "name": "Always name every case",
+          "detail": "Keep the table's strict named-case rule and extend it consistently to wider chains. This exposes future additions without a marker escape, but even a one-case table must list its remainder.",
+          "technical": "Strongest benefit: every exhaustive table is reviewed after enum growth and there is no new marker. Single-case ordinary if checks remain ordinary control flow, but tables retain today's E0641 restriction. This does not meet the owner's requested free one-case table and deliberate inclusive fallback.",
+          "code": "// Existing named-case form; executed in probes/e2fix.jet.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
         }
       ],
       "comparisons": [
         {
-          "lang": "Rust",
-          "note": "A wildcard is ordinary fallback; non_exhaustive separately requires downstream fallback for future variants.",
-          "code": "match shape { Shape::Dot => 0, _ => 1 }",
-          "source": "https://doc.rust-lang.org/reference/attributes/type_system.html#the-non_exhaustive-attribute"
+          "lang": "Odin",
+          "note": "Explicit #partial switch relaxes enum exhaustiveness; it is not Jet's marker grammar.",
+          "source": "https://odin-lang.org/docs/overview/#partial-switch"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It matches the research's distinction and existing guard behavior. Exhaustive tables remain available without forcing long rest lists everywhere.",
+        "why": "It implements the latest owner direction without converting a semantic error into optional tidiness.",
         "gains": [
-          "One existing fallback spelling.",
-          "Enum growth review remains explicit where required."
+          "Single-case checks stay free; alternatives cannot bypass the wider-case rule.",
+          "Named cases force review; one registered marker expresses deliberate future fallback."
         ],
         "losses": [
           {
-            "loss": "A fallback can hide a new case needing special behavior.",
-            "mitigation": "Omit else for mandatory growth review, or enable the declared fallback audit for selected code."
+            "loss": "A wider inclusive fallback needs a visible marker.",
+            "mitigation": "One selectable local edit adds it; named repair is the default. No repeated guards or subject evaluation are introduced."
+          },
+          {
+            "loss": "#Rest gives up future-case review at that site, by design.",
+            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #Rest lists every case it covers today."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "It is valuable for mandatory growth review, but imposing it on every deliberate fallback causes redundant rest lists and does not cover guard chains."
+            "reason": "Strong audit guarantee, but cannot express the owner's deliberate inclusive fallback and retains noisy one-case tables."
           }
         ],
-        "tradeoff": "Explicit fallback accepts future cases by contract; exhaustive tables require future review by contract."
+        "tradeoff": "#Rest deliberately forgoes future-case review at that site; it must never be inserted without choosing that intent."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI GPT. Fresh agent: BallotRework. Executed separate guards and the rejected table fallback, then removed chain heuristics, duplicate wildcard syntax and an already-ratified tidy tier. A now follows the research's guard/fallback distinction without presenting heuristic counts as verified prevalence; future-case acceptance remains explicit."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as a proposed contract with a hard error, post-body #Rest and named-case default repair, not an implemented feature."
       },
-      "checkInstructions": "Replay enums.jet and enum-table.jet on gate-p260. Implementation acceptance: explicit fallback, missing cases without fallback, payload patterns, unreachable arms, imported enums, mutable subjects and early-return guards. Verify lint command behavior against D-NO-WARNINGS1 instead of adding a severity channel. Option snippets show proposed table behavior.",
+      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #Rest on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
       "surface": {
-        "gist": "Should deliberate enum-table fallback be allowed while tables without fallback remain exhaustive?",
-        "lesson": "Guards test a condition. Exhaustive tables demand review of every case. An explicit else deliberately gives remaining and future cases one behavior.",
+        "gist": "Should wider enum decisions require named cases or an explicit #Rest fallback?",
+        "lesson": "An enum has named cases. A one-case check stays free. Testing two or more distinct cases requires complete coverage; a marked fallback deliberately accepts future cases too.",
         "trio": {
           "current": {
-            "note": "Separate guards work; the equivalent table fallback is rejected today.",
-            "code": "if shape == .Circle(r) -> return 3 * r * r\nif shape == .Square(s) -> return s * s\n0"
+            "note": "Executed: a one-case enum table with else fails E0641; an equivalent chain runs.",
+            "code": "// probes/review-single.jet and review-chain.jet"
           },
           "wild": {
-            "lang": "Rust",
-            "note": "Wildcard fallback and exhaustive dispatch express different intentions.",
-            "code": "match shape { Shape::Dot => 0, _ => 1 }"
+            "lang": "Odin",
+            "note": "#partial switch explicitly relaxes enum coverage.",
+            "code": "#partial switch f {\ncase .A: fmt.println(\"A\")\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Allow intentional else",
-            "gist": "Keep existing fallback syntax and optional stricter lint policy.",
+            "name": "Free single checks; explicit rest",
+            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
             "gains": [
-              "No long rest lists for a shared fallback.",
-              "No new wildcard or chain-length rule."
+              "Names force review after enum growth.",
+              "#Rest deliberately accepts future cases."
             ],
             "losses": [
-              "Fallback intentionally accepts future cases."
+              "Inclusive wider fallbacks need one marker; a selectable edit supplies it."
             ],
             "proposed": {
-              "code": "area: if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> 0\n}"
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Rest"
             }
           },
           {
             "key": "B",
-            "name": "List all remainder cases",
-            "gist": "Keep today's closed-table restriction; ordinary guards remain unrestricted.",
+            "name": "Always name every case",
+            "gist": "Keep strict named tables; no inclusive marker escape.",
             "gains": [
-              "Enum additions force table review."
+              "Every new case forces review."
             ],
             "losses": [
-              "Shared fallback requires source churn."
+              "No deliberate future fallback; one-case tables remain noisy."
             ],
             "proposed": {
-              "code": "area: if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
+              "code": ".Line | .Dot -> 0"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It follows the research without weakening tables that deliberately omit fallback.",
+          "why": "Matches the owner's latest direction exactly: free single checks, ERROR by default, two explicit repairs.",
           "gains": [
-            "One fallback mechanism; explicit exhaustive intent."
+            "Same rule for tables and wider chains; no adjacency guesses."
           ],
           "losses": [
             {
-              "loss": "New cases can enter fallback unnoticed.",
-              "mitigation": "Omit else where growth needs review, or enable the declared fallback audit."
+              "loss": "#Rest gives up future-case review at that site, by design.",
+              "mitigation": "Naming cases stays the default repair; #Rest appears only where a writer chose it, and hover lists the cases it covers."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Useful selectively, but redundant rest lists should not be universal."
+              "reason": "Cannot express the requested deliberate fallback."
             }
           ],
-          "tradeoff": "Choose fallback acceptance or mandatory growth review explicitly."
+          "tradeoff": "Choose named cases for review, #Rest for an inclusive fallback."
         }
       },
       "draft": false,
       "status": "open",
       "created": "2026-11-13T06:10:18.821Z",
       "designAway": [
-        "Removed a second wildcard mechanism and unverified chain heuristics.",
-        "Reused existing lint policy rather than adding a severity tier.",
-        "Kept future-case acceptance visible instead of claiming fallback eliminates semantic review."
+        "Never downgrade the required default error to a lint.",
+        "Reuse the registered marker mechanism and post-body Arm position; do not pretend Rest already parses.",
+        "Count discriminants and preserve nested residual coverage.",
+        "Check chains without changing repeated reads or grouping separate guards.",
+        "Hover on #Rest lists the cases it covers; jet fix defaults to naming them."
       ]
     },
     {
@@ -209482,172 +209493,138 @@
       "id": "D-ARRAY-CONVERT1",
       "cardId": "c05gn07n",
       "group": "syntax",
-      "title": "Use the existing From trait for aggregate brace conversions",
-      "situation": "Jet can already call a user conversion through braces, but a fixed array cannot yet convert another fixed array that way. The owner wants braces to accept a conversion argument without losing ordinary literal construction. We recommend extending the existing From trait to aggregates, with explicit precedence and unchanged scalar exactness. The matrix resizing ballot uses this same mechanism, not another cast family.",
-      "gist": "Let a brace head convert an aggregate through the existing From trait.",
-      "lesson": "Braces can build elements or convert one source. Literal intent wins; conversion never silently flattens nesting or rounds numbers.",
-      "explainer": "Beginner: [F32#4]{counts} converts four elements and retains four slots. [[Int]]{counts} still builds one nested element. Expert: define one destination From(Source) implementation; a structured source can carry conversion policy. There is no new Convert trait, implicit conversion chain, or source-specific aggregate method family.",
-      "story": "Lena converts tile counts for a shader. She keeps their fixed length and sees an explicit failure if a count cannot be represented exactly.",
-      "inWild": "a := [4]u32{1, 2, 3, 4}\nb := cast([4]f32)a",
-      "detail": "Verified on gate-p260: probes/from.jet executes a user Celsius.From(Int) through Celsius{reading} and prints 12.0. Compiler/Prelude/Traits.jet:163-172 declares this exact existing mechanism, including its source type and fallible return. probes/arrays.jet executes indexed F32 construction, scalar conversion inside map, and .copy(); probes/missing.jet rejects [Float#4]{counts} with E0963. No claim is made about the inferred result type of today's map.\n\nprobes/narrow.jet prints 16777216.0, then stops with E3010 for Int 16777217 to F32; aggregate checked conversion below is proposed, not an existing feature.\n\nThe existing one-expression head rule in Docs/Spec/syntax-decisions.md:1679-1699 preserves whole-value acceptance, scalar conversions, and nested elements. This proposal extends aggregate coverage under that rule. It replaces source-named aggregate conversion recommendations rather than adding aliases beside them. Ordinary explicit map remains useful for an arbitrary transformation, not a rival conversion protocol.\n\nOdin's documented array casts recurse through equal-depth nested fixed arrays. Rust's TryFrom exposes failure explicitly. Jet should borrow shape preservation and explicit failure, but reuse From rather than add Rust's second trait. Exactness is a deliberate Jet difference: the Odin sample is not evidence of Jet narrowing behavior. Sources were read; no comparative speed result is claimed.",
+      "title": "Braces convert whole arrays through the existing From mechanism",
+      "situation": "A shader wants four F32 values, but the application has four Int counts. Explicit scalar construction works; passing the whole fixed array to its destination constructor fails. The owner wants braces to construct or convert one supplied value, rather than a second source-named conversion family. This vote decides aggregate conversion while retaining literal and nested-element meanings.",
+      "gist": "Should a whole array convert through destination braces and From?",
+      "lesson": "Braces construct a destination from the information supplied. A whole value or one nested element keeps its existing meaning; otherwise a single applicable From converts. Element conversion remains exact unless a named policy explicitly requests loss.",
+      "explainer": "Answer to q0xqu5fn: yes, [F32#4]{counts} is a whole-array conversion, not a literal containing one incorrectly typed element. It uses the same From system as scalar conversion.",
+      "story": "A tile engine converts counts for a shader without writing four scalar conversions or a new method name for every source type.",
+      "inWild": "The useful competing design is an ordinary element map: it can transform, validate or selectively handle each element rather than only convert a type.",
+      "detail": "Replayed gate-p275 probes/a1.jet: explicit scalar conversions print 4.0, nested-list construction prints 1, and existing matrix helpers run. probes/a2.jet fails E0963 for [F32#4]{counts} and E0303 for Mat4{m}. The latter is important: today's parser treats a bare identifier as shorthand even when it is not the matrix's field name.\n\nr1's claim that only a local named lanes collides was false. The proposal changes this failing dispatch path; it is not already supported. probes/f2.jet also establishes two scalar From keys, not aggregate From support.\n\nD-CONVERT-TRAIT1 supplies one From mechanism, exact braces, label-only policy options and source/destination-module ownership. D-DOTCTOR3's earlier literal-only description must be read with that amendment. D-IMPL-COND1 forbids concrete specialization and overlapping conditional impls: r1's implied blanket plus customizable aggregate override is not legal. D-LANES1 and D-ARRAY-WINDOW1 govern lane sizes and input windows. D-COPY-WORD1 requires .copy(), not ~.\n\nA is retained. B is the strong existing map alternative, not a second conversion mechanism merely because it writes a function. r1 C's new source-named conversion system is removed: it contradicts the ratified single-From choice and is not an ordinary eligible option. Ratified specialized APIs such as from_complex are not silently removed by this ballot. No comparative speed, allocation-count or general in-place-conversion claim remains.",
       "options": [
         {
           "key": "A",
-          "name": "Aggregate braces through From",
-          "detail": "Add standard From implementations for equal-shape arrays and lane adapters. Literal construction retains priority; a single non-element source selects conversion.",
-          "technical": "Resolution order: named fields and valid field shorthand, multiple expressions, spreads, and inferred heads remain literals. For one unlabelled expression, ordinary whole-value acceptance wins, then ordinary element acceptance, then one applicable destination From(Source). Preserve the existing scalar head conversion path. No speculative flattening, recursive search for conversion chains, or implicit element conversion during overload selection is allowed. Diagnose ambiguity and suggest explicit named fields or the existing Target.from(source) dispatch, not a new semantic mechanism.\n\nFixed arrays require equal lengths at each corresponding nesting level, including zero. Recursion invokes the same element conversion; a nested source accepted as one element stays one element. Lane conversions delegate to their element arrays without allocating an intermediate growable list. Evaluate the source once, then elements in increasing index order. Consume an owned source or read a borrowed source according to the ordinary From signature; no implicit deep copy.\n\nNumeric elements keep scalar range, exactness, special-value and explicit rounding rules. An unrepresentable numeric head has the same stop as the scalar head. Extend the existing checked numeric operation to checked([F32#4]{counts}), returning an optional complete result; the first failed conversion yields absence and destroys partial output.\n\nThis extension catches only conversion failure, not failures evaluating the source. A user From returning an ordinary typed error still returns that error; checked does not swallow arbitrary user errors. Nested numeric aggregate conversion follows the same rule. Matrix conversions use this identical dispatch and failure protocol.",
-          "code": "weights: [F32#4]{counts}\nnested: [[F32#2]#2]{integer_rows}\none_row: [[Int]]{counts}\nmaybe: checked([F32#4]{counts})"
+          "name": "Whole-value braces through From",
+          "detail": "When a supplied value is neither the destination nor one accepted element, convert the aggregate through From. Equal nesting and fixed extents stay intact.",
+          "technical": "Dispatch Head{e}: retain labelled fields, spreads and multiple-element literals. For one unlabelled expression, first preserve valid existing field shorthand, then a whole value of Head, then one accepted element. Otherwise select exactly one Head.From(type-of-e); do not search conversion chains. A bare identifier that does not name a field must reach this path instead of today's E0303. A name that does name a field keeps shorthand and its normal field-type diagnostic; its explicit conversion repair is Head.from(name). Do not silently reinterpret a failing real field initializer.\n\nProvide one generic structural From row per corresponding family, conditional on the scalar T.From(S). The rows are [T#N] from [S#N], an owned [T] result from [S] input, and sized Lanes<T,N> from Lanes<S,N>. These are the sole structural rows, not blankets plus concrete overrides.\n\nResolve and reject overlap under ordinary coherence before use; no override precedence, trait-disjointness guess or concrete specialization. Recursive element selection handles equally nested arrays; a source fitting as one destination element remains one element rather than being flattened. Fixed length mismatch is a compile-time error at the relevant nesting level, including zero. Native sizeless lanes retain D-LANES1 restrictions.\n\nEvaluate e once, traverse in index order and write each converted element directly into destination storage. Fixed arrays and sized lanes require no extra heap container; their elements may themselves allocate or fail. Different element widths generally require distinct destination storage, not in-place rewriting of the source.\n\nAn owned list result reserves for the known length without repeated container growth; do not promise one allocator call for arbitrary element conversions. Ownership follows the selected From parameter: ordinary read parameters borrow, consuming parameters move, and .copy() is explicit duplication. A borrowed source is never overwritten.\n\nExact numeric checks and scalar typed failures retain their existing meaning. checked around the aggregate catches exactly the same numeric-check failures as checked around scalar braces; it does not swallow a user From error or AllocError.\n\nOn any failure drop the initialized destination prefix exactly once, preserve borrowed input, and clean moved input exactly once according to its ownership. Labelled rounding/overflow options on .from apply to each scalar conversion, evaluated once before traversal. Reject a policy not supported by the selected scalar impl. No hidden deep copy or implicit lossy conversion.",
+          "code": "// PROPOSED aggregate conversions\nweights: [F32#4]{counts}\ngrid: [[F32#2]#2]{integer_rows}\nmaybe: checked([F32#4]{counts})\nnear: [Int#4].from(speeds, rounding: .NearestEven)"
         },
         {
           "key": "B",
           "name": "Explicit element map",
-          "detail": "Keep aggregate heads literal-only. Finish fixed-length map and use scalar heads in its callback; lane values use array adapters.",
-          "technical": "Map retains the fixed length and requires no heap list. It is excellent for arbitrary per-element logic and local error handling. It leaves the owner's aggregate conversion direction unmet and makes nested or lane conversion require repeated adapters. It must not be sold as a different scalar exactness policy.",
-          "code": "weights: counts.map(fn(n: Int) { F32{n} })\nmaybe: counts.map(fn(n: Int) { checked(F32{n}) })"
-        },
-        {
-          "key": "C",
-          "name": "Named destination conversions only",
-          "detail": "Reserve aggregate braces for literals and expose one destination-owned conversion method per source family.",
-          "technical": "This makes conversion intent conspicuous and gives policy parameters a familiar home. It requires a separate aggregate naming convention beside existing From dispatch. If chosen, do not additionally offer converting braces or method aliases for the same aggregate conversion.",
-          "code": "weights: [F32#4].from_int_array(counts)\nnested: [[F32#2]#2].from_int_rows(integer_rows)"
+          "detail": "Keep aggregate braces literal-only and convert with a scalar constructor inside map. Mapping is more general and allows per-element recovery or transformation.",
+          "technical": "A shape-preserving fixed-array/lane map must be specified rather than falsely claimed demonstrated here. Each nested level maps separately. A map returning optional elements is not the same as checked whole-array conversion: the former keeps per-element outcomes, the latter yields one absent aggregate on the first numeric failure. Scalar exactness, typed errors and allocation failure remain unchanged. This alternative avoids aggregate dispatch work but does not follow the owner's requested direct conversion syntax.",
+          "code": "// PROPOSED fixed-shape mapping contract\nweights: counts.map(fn(n) { F32{n} })"
         }
       ],
       "comparisons": [
         {
-          "lang": "Odin",
-          "note": "Fixed array casts preserve length and recurse at matching nesting depth.",
-          "code": "b := cast([4]f32)a",
-          "source": "https://odin-lang.org/docs/overview/#array-casts"
-        },
-        {
-          "lang": "Rust",
-          "note": "TryFrom makes conversion failure explicit through its associated error; Jet already has fallible From.",
-          "code": "let small = i32::try_from(large)?;",
-          "source": "https://doc.rust-lang.org/std/convert/trait.TryFrom.html"
+          "lang": "Element mapping",
+          "note": "Stronger than type conversion for arbitrary transforms and per-element recovery; not an illegitimate competing conversion trait."
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It implements the owner's brace direction with the trait Jet already executes. Literal priority protects nesting; scalar rules protect exactness.",
+        "why": "Directly answers the owner and extends the ratified conversion mechanism without a parallel family of names.",
         "gains": [
-          "One conversion mechanism for arrays, lanes and matrices.",
-          "No hidden flattening, rounding or growable intermediate."
+          "Destination braces express whole-array conversion.",
+          "Nested elements, ownership and failures keep one defined dispatch order."
         ],
         "losses": [
           {
-            "loss": "A single-expression head needs resolution rules.",
-            "mitigation": "Preserve literal priority and show the selected From implementation in editor information."
+            "loss": "A lone source identifier can coincide with a real field name.",
+            "mitigation": "Keep genuine shorthand priority and offer explicit Head.from(name); do not reinterpret a field initializer."
+          },
+          {
+            "loss": "An element conversion that allocates or fails does so inside the array too.",
+            "mitigation": "Fixed arrays of numbers write straight into the destination with no heap. Any failure is the element conversion's own declared failure, so the aggregate adds no new failure."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Map is useful but makes conversion boilerplate the default and does not meet the owner's direction."
-          },
-          {
-            "key": "C",
-            "reason": "A separate source-naming family duplicates the conversion mechanism already available through From."
+            "reason": "Flexible and familiar, but adds a map at each nesting level and withholds the direct whole-value conversion the owner requested."
           }
         ],
-        "tradeoff": "A precise head-resolution rule replaces repeated conversion adapters. Numeric failure remains observable rather than silently rounded."
+        "tradeoff": "Conversion is concise; arbitrary transformation still belongs in map."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI GPT. Fresh agent: BallotRework. Executed existing From dispatch and scalar exactness, rejecting a second trait and unsupported fixed-map claims. A now follows the owner's brace direction with literal precedence, nesting, single evaluation, cleanup and explicit proposed checked behavior shared with matrices."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as an aggregate From proposal that keeps literal and field precedence, with no blanket no-heap or speed claim."
       },
-      "checkInstructions": "Run the named gate-p260 probes. Implementation acceptance: zero length, nested element priority, labelled fields, identity, ambiguous impls, no chaining, source evaluated once, first failure cleanup, typed From errors, exactness boundary, checked failure and lane allocation inspection. Proposed snippets are not claims of current compiler support.",
+      "checkInstructions": "Implementation acceptance covers dispatch precedence, including real and nonfield identifier collisions, and fixed or nested length errors. It also covers one coherent generic row per family, zero extents, and the exact, checked, user-error and AllocError distinction. Further cases: borrowed and moved inputs, prefix cleanup, list reservation, and no extra container allocation for fixed arrays of nonallocating elements. No implementation or performance gate was run here.",
       "surface": {
-        "gist": "Should aggregate brace heads convert through Jet's existing From trait?",
-        "lesson": "Literal construction wins when its element or fields already fit. Otherwise one source can select a conversion. Numbers retain scalar exactness.",
+        "gist": "Should a whole array convert through destination braces and From?",
+        "lesson": "Braces can construct or convert. Existing whole-value, field and nested-element meanings keep priority; otherwise one From handles conversion.",
         "trio": {
           "current": {
-            "note": "Indexed scalar construction works today; converting the whole array does not.",
-            "code": "weights: [F32#4]{F32{counts[0]}, F32{counts[1]},\n    F32{counts[2]}, F32{counts[3]}}"
+            "note": "Executed: four explicit scalar conversions work; whole [F32#4]{counts} fails E0963.",
+            "code": "// probes/a1.jet and a2.jet"
           },
           "wild": {
-            "lang": "Odin",
-            "note": "A fixed array cast converts each element.",
-            "code": "b := cast([4]f32)a"
+            "lang": "Rust",
+            "note": "Rust converts a fixed array element by element with map.",
+            "code": "let counts: [i32; 4] = [1, 2, 3, 4];\nlet weights: [f32; 4] = counts.map(|n| n as f32);"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Use From through braces",
-            "gist": "Convert one aggregate without changing ordinary literal precedence.",
+            "name": "Whole-value braces",
+            "gist": "Use the destination type and one source value.",
             "gains": [
-              "One trait across arrays, lanes and matrices.",
-              "Length and scalar exactness stay explicit."
+              "One conversion system; nesting stays intact."
             ],
             "losses": [
-              "Single-expression heads need a resolution rule."
+              "A genuine field-name collision needs explicit .from."
             ],
             "proposed": {
-              "code": "weights: [F32#4]{counts}\nmaybe: checked([F32#4]{counts})"
+              "code": "// PROPOSED\nweights: [F32#4]{counts}"
             }
           },
           {
             "key": "B",
-            "name": "Map each element",
-            "gist": "Keep aggregate heads literal-only and write scalar conversions in map.",
+            "name": "Element map",
+            "gist": "Write a scalar conversion in a shape-preserving map.",
             "gains": [
-              "Arbitrary transformations fit naturally."
+              "Arbitrary transforms and per-element recovery."
             ],
             "losses": [
-              "Nested conversions need repeated mapping and adapters."
+              "More syntax at every nested level; fixed-shape mapping needs delivery too."
             ],
             "proposed": {
-              "code": "weights: counts.map(fn(n: Int) { F32{n} })"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Name every source conversion",
-            "gist": "Use destination-owned methods instead of aggregate converting heads.",
-            "gains": [
-              "Conversion intent is visible in its name."
-            ],
-            "losses": [
-              "Adds an aggregate naming family beside From."
-            ],
-            "proposed": {
-              "code": "weights: [F32#4].from_int_array(counts)"
+              "code": "// PROPOSED fixed-shape result\nweights: counts.map(fn(n) { F32{n} })"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It follows the owner's direction without another conversion trait. Literal priority protects existing nesting.",
+          "why": "Follows q0xqu5fn with the existing From mechanism.",
           "gains": [
-            "Shared matrix and array conversion."
+            "No source-named parallel API."
           ],
           "losses": [
             {
-              "loss": "Head resolution needs explanation.",
-              "mitigation": "Preserve literal priority and show the selected conversion in the editor."
+              "loss": "An element conversion that allocates or fails does so inside the array too.",
+              "mitigation": "Fixed numeric arrays need no heap; any failure is the element's own declared failure, never a new one."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Useful for custom logic, but unnecessarily verbose for conversion."
-            },
-            {
-              "key": "C",
-              "reason": "Introduces another conversion naming system."
+              "reason": "Keep map for transformations, not as the only way to convert a whole aggregate."
             }
           ],
-          "tradeoff": "One precise rule replaces adapter chains."
+          "tradeoff": "Exact conversion does not mean free conversion."
         }
       },
       "designAway": [
-        "Reused the existing From trait instead of proposing Convert or TryConvert.",
-        "Preserved nested literals before aggregate conversion lookup.",
-        "Kept numeric stops, checked absence and typed user errors distinct under existing scalar/error rules."
+        "One coherence-checked structural row, no specialized overrides.",
+        "Direct destination construction, not assumed in-place rewriting.",
+        "Keep literal precedence and exact/typed failure distinctions."
       ],
       "draft": false,
       "status": "open",
@@ -209861,181 +209838,168 @@
       "id": "D-ARRAY-MATRESIZE1",
       "cardId": "c05gn07n",
       "group": "syntax",
-      "title": "Resize and reshape matrices through the existing brace conversion",
-      "situation": "Jet currently has fixed Float matrices and array adapters, but matrix-to-matrix brace conversion and reshape are missing. The owner wants direct Matrix<2,8>{grown}, not an array adapter chain, and .copy() for an explicit copy. We recommend standard matrix From implementations under the same brace rule as array conversion. Shape, storage layout and copying remain separate concepts.",
-      "gist": "Use one brace conversion for matrix resizing, reshaping and policy-carrying inputs.",
-      "lesson": "Resizing preserves coordinates; reshaping preserves a logical sequence. Physical storage order must not silently change either meaning.",
-      "explainer": "Beginner: Mat4{basis} extends a square transform with identity cells; Mat3{grown} crops its common corner. Matrix<2,8>{grown} reshapes sixteen cells in logical column order. Expert: a typed ResizeInput or ReshapeInput carries a nondefault fill or traversal order through the very same From trait. These source records are conversion arguments, not extra cast operations.",
-      "story": "Ravi extends a 3D transform, then sends its sixteen cells to a two-row computation. He writes the destination shape once and does not expose a temporary array.",
-      "inWild": "mat4 grown = mat4(basis);\nmat3 cropped = mat3(grown);",
-      "detail": "gate-p260 probes/matrices.jet executes Mat3.new, Mat2.identity().determinant(), Mat4.identity().inverse(), transpose, from_array and to_array. Its transpose changes the logical sequence as expected; its inverse example succeeds. probes/missing.jet rejects Mat4{m} with E0303 and m.reshape with E0102. Thus the old claim that identity, determinant and inverse were absent is stale. Core/Math/Math.jet:39471-39742 defines Mat2-4 and their Float arrays; Mat3.to_array at 39555 explicitly uses .copy(). No generic Matrix conversion is claimed implemented.\n\nCompiler/Prelude/Traits.jet:163-172 and the successful probes/from.jet establish existing brace dispatch through From. This ballot and D-ARRAY-CONVERT1 extend that mechanism together. D-MATRIX-INDEX1's archived copy examples used an obsolete sigil: this proposal uses .copy() only. Existing matrix-matrix multiplication stays composition; reshaping is not multiplication or transpose.\n\nGLSL's specification section 5.4.2 preserves corresponding matrix coordinates and fills missing coordinates from identity. NumPy reshape separates logical traversal order from physical layout and documents that some reshapes need copying. We adopt the useful distinction, not a false zero-copy promise. A shape-changing owned destination may require moving all cells; borrowed views have independent lifetime and stride rules.",
+      "title": "Direct matrix conversion, with explicit cropping and defined reshape order",
+      "situation": "The owner wants Matrix<2,8>{grown}, not a matrix-to-array-to-matrix adapter chain. Matrix conversion needs a clear distinction between preserving coordinates, reshaping all cells and discarding cells. Existing Mat3/Mat4 helpers already provide useful operations, so their absence is not the reason for this vote. The remaining question is which shape changes destination braces choose by default.",
+      "gist": "Should matrix braces grow coordinates or reshape equal cell counts, with cropping explicit?",
+      "lesson": "Growth preserves coordinates; reshape preserves a stated traversal; cropping discards cells. All alternatives use From for conversion and .copy() for explicit duplication. A window makes discarded coordinates visible.",
+      "explainer": "Answer to q13p1rdp: direct Matrix<2,8>{grown} is part of A. No array adapters are required, and ~ is never copy syntax. This proposal deliberately rejects silent cropping, rather than claiming scalar conversion law already decides matrix shape policy.",
+      "story": "Grow a 3x3 rotation to a 4x4 transform, then reshape its sixteen cells to two rows. Extracting a 3x3 region is a visible window before conversion.",
+      "inWild": "Eigen offers layout parameters and storage-order-aware operations. Traversal order and physical representation are separate questions; neither makes all reshapes free.",
+      "detail": "A remains A. B is repaired to be a coherent named-operation alternative; C requires explicit .from policies for every shape change. r1 incorrectly treated D-CONVERT-TRAIT1's exact scalar rule as already forbidding matrix cropping. The no-silent-crop rule here is a proposed shape policy and its rationale must stand on its own. It also incorrectly called an equal-count reshape a free storage move. Inline values may require byte movement, borrowed sources require a new owned result, and element type or layout changes may require work.\n\nReplayed gate-p275 probes/a1.jet: existing Mat3.new/from_array/to_array/transpose and Mat4.identity().determinant execute; probes/a2.jet rejects Mat4{m} with E0303. These probes establish current helpers and the brace-dispatch gap, not generic Matrix implementation or no-copy performance. Source inspected in Core/Math/Math.jet includes Mat2's fixed lanes and Numeric's zero/one requirements in Compiler/Prelude/Traits.jet.\n\nRatified: D-ARRAY-MATOPS1 already selects Matrix<R,C,T=Float,Layout=.ColumnMajor>; D-ARRAY-MAT21's small names remain aliases under that family. D-MATRIX-INDEX1=E defines coordinate indexing and matrix windows. D-CONVERT-TRAIT1 provides the one From conversion mechanism and labelled options; D-COPY-WORD1 fixes .copy(). The aggregate dispatch/failure rules are shared with D-ARRAY-CONVERT1, including actual field shorthand priority. The old answer's implied Mat3{grown} contraction is superseded by explicit Mat3{grown[0..<3,0..<3]}; direct equal-count Matrix<2,8>{grown} is retained exactly. This is explained rather than hidden in a footnote.",
       "options": [
         {
           "key": "A",
-          "name": "Direct brace conversion with typed policy inputs",
-          "detail": "Use existing From dispatch for default square resize and equal-count reshape. Supply other choices in typed source records.",
-          "technical": "Adopt Matrix<R,C,T=Float,Layout=.ColumnMajor>, with Mat2-4 aliases and the same optional layout contract as D-ARRAY-ROWMAJOR1. Apply D-ARRAY-CONVERT1's complete literal, nesting, failure, narrowing and checked precedence unchanged. A matrix is not silently flattened during literal element matching.\n\nUnchanged shape preserves logical coordinates, including cross-layout conversion. Changed shape with equal cell count reshapes the logical column-major sequence. Otherwise two square shapes copy their common upper-left corner and fill missing coordinates from identity. Other unequal-count changes require ResizeInput{source:m,fill:x}. ReshapeInput{source:m,order:.Rows} requests row-order logical traversal and requires equal counts. These descriptors use ordinary From implementations, not a second conversion trait or method family.\n\nZero extents are legal; equal zero counts produce an empty result, never an invented diagonal. Evaluate the source once. Build an owned destination without a heap array intermediate; do not promise a free view or free reordering. Coordinate conversion uses the same scalar rules, including exactness stops, typed From errors and proposed checked numeric absence.\n\nFor square growth, zero and one must be constructible in T; otherwise require an explicit typed fill descriptor. A failed element conversion drops partial output exactly once and leaves borrowed input unchanged. Cropping is intentional information loss made visible by destination dimensions. A sliced window remains a view; append .copy() when independent ownership is wanted.\n\nDo not keep the proposed resize/reshape method aliases from earlier drafts. Existing from_array/to_array remain genuine array representation adapters used by other programs, not a mandatory bridge for matrix conversion. Any aggregate source-named conversion API introduced for this feature must migrate to From in the same change.",
-          "code": "grown: Mat4{basis}\ncropped: Mat3{grown}\nflat_shape: Matrix<2,8>{grown}\nrows: Matrix<2,8>{ReshapeInput{source: grown, order: .Rows}}\nfilled: Matrix<2,5>{ResizeInput{source: basis, fill: 0.0}}\nowned: (grown[0..<3, 0..<3]).copy()"
+          "name": "Direct growth and equal-count reshape",
+          "detail": "Braces preserve coordinates at the same shape, reshape equal cell counts in logical column order, or grow both axes with identity fill. Cropping must first name a window.",
+          "technical": "Precedence has four steps. First, an identical shape preserves coordinates while converting element type or layout. Second, a different shape with an equal total cell count reshapes the logical column traversal. Third, when every destination extent is at least the source extent, source coordinates stay at the top left and new coordinates fill from identity. Fourth, anything else is rejected with a window-first repair. This ordering settles mixed shrinking/growing equal-count shapes: they reshape, not crop/pad. Shape multiplication must be checked at compile time without overflow.\n\nDefault identity fill requires the element type's zero and one through the existing Numeric contract. A nonnumeric element type needs explicit .from(source, fill: value), evaluated once and reused only under ordinary copyability rules; do not duplicate a move-only fill value. For move-only cells use an explicit fill function taking row and column, invoked once per new coordinate. Reuse the existing array from_fn callback convention rather than inventing an identity sentinel in the cell type. Reject unavailable defaults with the explicit-fill repair.\n\n.from(source, order: .Rows) selects logical row traversal for equal-count reshape; order on other shape changes is rejected as irrelevant. .from(source, fill: value) or fill_fn: changes only growth fill. Labels follow the existing From options rule; no second conversion trait. Cropping remains a window under every alternative, not an option that silently drops cells. Preserve logical coordinates independently of physical layout.\n\nEqual zero counts reshape to an empty matrix. Zero-axis growth preserves no source cells and generates only coordinates inside the target. Same-shape empty conversion does not invoke element conversion or fill. Evaluate source/options once; exact scalar checks, checked, typed errors, AllocError and prefix cleanup follow aggregate From rules. Borrowed sources stay unchanged; ownership follows the selected parameter.\n\nStorage: construct directly in final destination, without an intermediate array. When count, element representation, alignment and physical sequence match and ownership permits last-use reuse, no cell permutation is needed; byte moves or allocation behavior still follow ordinary value representation. A live borrowed source requires copying its values into the owned result.\n\nChanged traversal/layout/type may require visiting every cell; write once into final storage rather than allocating a repacking buffer. No universal zero-copy/no-heap assertion: element operations can allocate. Window .copy() creates an owned matrix under the ratified view rule. Genuine shorthand names retain priority; a nonfield bare identifier must reach From, repairing today's broader E0303 path.",
+          "code": "// PROPOSED; basis is 3x3 and grown is 4x4.\ngrown: Mat4{basis}\nflat: Matrix<2,8>{grown}\ntop: Mat3{grown[0..<3, 0..<3]}\nrows: Matrix<2,8>.from(grown, order: .Rows)"
         },
         {
           "key": "B",
-          "name": "Named shape operations",
-          "detail": "Use explicit resize and reshape methods, retaining literal-only matrix braces.",
-          "technical": "Keep the same coordinate, fill, traversal, scalar failure and aliasing rules as A, but expose resize<R,C>(fill:) and reshape<R,C>(order:). This makes operation intent visible at the call site and avoids shape-dependent brace selection. It does not meet the owner's request that the destination head accept its conversion argument; do not add braces as an alias if choosing this alternative.",
-          "code": "grown: basis.resize<4,4>(fill: .Identity)\ncropped: grown.resize<3,3>(fill: .Identity)\nflat_shape: grown.reshape<2,8>(order: .Columns)"
+          "name": "Named resize and reshape",
+          "detail": "Use explicit resize/reshape operations rather than matrix-to-matrix braces. The two names advertise coordinate preservation versus traversal.",
+          "technical": "Same shape, failure, ownership and explicit-crop semantics as A. resize permits growth, not implicit cropping; reshape requires equal cell counts and names traversal. These operations replace the corresponding brace conversion rather than coexist as conversion aliases. This is a genuine readability advantage, but declines the owner's requested direct destination constructor.",
+          "code": "// PROPOSED alternative, not current helpers.\ngrown: basis.resize<4,4>()\nflat: grown.reshape<2,8>(order: .Columns)"
         },
         {
           "key": "C",
-          "name": "Require an explicit policy in every brace conversion",
-          "detail": "Keep From dispatch but require ResizeInput or ReshapeInput whenever the shape changes.",
-          "technical": "There is no shape-dependent default and no separate conversion mechanism. Identical-shape cross-layout conversion still accepts the source directly. The explicit descriptor makes review easier where silent cropping is unacceptable, but ordinary graphics growth and direct Matrix<2,8>{grown} require extra syntax.",
-          "code": "grown: Mat4{ResizeInput{source: basis, fill: .Identity}}\nflat_shape: Matrix<2,8>{ReshapeInput{source: grown, order: .Columns}}"
+          "name": "Name every shape-change policy",
+          "detail": "Braces convert only identical shapes; .from must name order for reshaping or fill for growth. This keeps one From mechanism but makes every shape change explicit.",
+          "technical": "Use the same rules as A with no inferred identity-fill or column-traversal default. Use the existing Numeric identity operation through an explicit fill function, not an invented .Identity cell value. Same-count source/destination shape changes always require order:. Cropping is still an explicit window.",
+          "code": "// PROPOSED; reshape policy always explicit.\nflat: Matrix<2,8>.from(grown, order: .Columns)"
         }
       ],
       "comparisons": [
         {
-          "lang": "GLSL",
-          "note": "Matrix constructors preserve shared coordinates and fill new coordinates from identity.",
-          "code": "mat4 grown = mat4(basis);",
-          "source": "https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html#vector-and-matrix-constructors"
-        },
-        {
-          "lang": "NumPy",
-          "note": "Reshape traversal order is independent of physical storage; copying can be necessary.",
-          "code": "np.reshape(a, (2, 8), order='F')",
-          "source": "https://numpy.org/doc/stable/reference/generated/numpy.reshape.html"
+          "lang": "Eigen",
+          "note": "Optional storage order exists; changing storage order may reorder cells, and performance depends on traversal.",
+          "source": "https://libeigen.gitlab.io/eigen/docs-nightly/group__TopicStorageOrders.html"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It gives the owner direct destination-shaped conversion, shares existing From, and makes exceptional policies ordinary typed arguments.",
+        "why": "Provides the owner's direct constructor without an array round trip, while separating coordinate growth, traversal and explicit data loss.",
         "gains": [
-          "No from_array/to_array chain or hidden heap intermediate.",
-          "Copying, logical shape and physical layout stay distinct."
+          "Matrix<2,8>{grown} is direct.",
+          "One From/ownership/failure protocol; no silent cropping."
         ],
         "losses": [
           {
-            "loss": "Shape changes can discard or reorder cells.",
-            "mitigation": "Show source and destination dimensions in editor information; require typed descriptors for nondefault traversal or nonsquare resizing."
+            "loss": "A nondefault traversal or fill needs a label.",
+            "mitigation": "Defaults cover column traversal and numeric identity growth; labels are local and evaluated once."
           },
           {
-            "loss": "Owned reordering can require touching every cell.",
-            "mitigation": "Specialize direct writes into the destination and use borrowed windows when independent storage is unnecessary."
+            "loss": "Owned results from borrowed or differently ordered sources need cell work.",
+            "mitigation": "Each cell is written once, straight into final storage, with no intermediate array or repacking buffer. A last-use source with matching layout needs no cell reordering."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Explicit verbs are clear but abandon the requested converting head."
+            "reason": "Names explain the operation well, but withhold the direct destination conversion the owner asked for."
           },
           {
             "key": "C",
-            "reason": "It shares the mechanism, but makes the owner's direct common examples unnecessarily ceremonial."
+            "reason": "Maximum local explicitness, but repeats the same default policy at every ordinary growth or reshape."
           }
         ],
-        "tradeoff": "Concise defaults have defined shape rules; actual data movement remains an honest cost."
+        "tradeoff": "A fixes deterministic defaults; it does not promise every reshape is a zero-copy operation."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI GPT. Fresh agent: BallotRework. Corrected stale matrix absence claims with executed APIs, replaced adapter chains and obsolete copying, and reused From with the array ballot's exact rules. A adds direct destination-shaped conversion, typed policies, zero shapes and honest movement/cropping costs without claiming free reshapes."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as a deterministic shape policy with direct Matrix<2,8>{grown}, explicit cropping windows and .copy(), not as a performance claim."
       },
-      "checkInstructions": "Replay probes/matrices.jet, missing.jet and from.jet on gate-p260. Implementation acceptance: square crop/growth, same-count rectangular reshape, zero extents, cross-layout coordinate preservation, row-order descriptor, unequal-count rejection without fill, exactness/checked failure, partial destruction and nonaliasing .copy(). All option snippets are proposed.",
+      "checkInstructions": "Implementation acceptance: ordered shape dispatch, equal-count mixed extents, zero/overflow extents, numeric and nonnumeric fills, move-only fill functions, explicit cropping, borrowed ownership, element/AllocError cleanup and direct construction. Inspect physical movement separately; no universal no-copy test.",
       "surface": {
-        "gist": "Should matrix braces resize and reshape directly through the existing From trait?",
-        "lesson": "Square growth fills identity; equal-count shape changes preserve logical column order. Other policies travel inside a typed conversion argument.",
+        "gist": "Should matrix braces grow coordinates or reshape equal cell counts, with cropping explicit?",
+        "lesson": "Growth keeps coordinates; reshape uses a traversal; cropping discards cells. Direct conversion uses From. Explicit copies use .copy(), never ~.",
         "trio": {
           "current": {
-            "note": "Array adapters work today; direct matrix conversion is missing.",
-            "code": "cells: basis.to_array()\nrebuilt: math.Mat3.from_array(cells)"
+            "note": "Executed: Mat3 helpers work; Mat4{m} fails E0303.",
+            "code": "// probes/a1.jet and a2.jet"
           },
           "wild": {
-            "lang": "GLSL",
-            "note": "A matrix constructor can grow a transform with identity cells.",
-            "code": "mat4 grown = mat4(basis);"
+            "lang": "Eigen",
+            "note": "Eigen grows into an identity, reshapes in column order, and crops by naming a block.",
+            "code": "Eigen::Matrix4f grown = Eigen::Matrix4f::Identity();\ngrown.topLeftCorner<3,3>() = basis;\nauto flat = grown.reshaped(2, 8);\nEigen::Matrix3f top = grown.topLeftCorner<3,3>();"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Direct braces, optional policy",
-            "gist": "Use common defaults and typed arguments for exceptions.",
+            "name": "Direct braces with defaults",
+            "gist": "Identity growth or equal-count column reshape; crop a window first.",
             "gains": [
-              "One conversion trait for matrices and arrays.",
-              "No adapter chain or obsolete copy sigil."
+              "No matrix/array adapter chain."
             ],
             "losses": [
-              "Shape rules need explanation.",
-              "Owned reordering can touch every cell."
+              "Nondefault traversal/fill needs a label."
             ],
             "proposed": {
-              "code": "grown: Mat4{basis}\nflat_shape: Matrix<2,8>{grown}\nowned: (grown[0..<3, 0..<3]).copy()"
+              "code": "// PROPOSED\ngrown: Mat4{basis}\nflat: Matrix<2,8>{grown}\ntop: Mat3{grown[0..<3, 0..<3]}"
             }
           },
           {
             "key": "B",
-            "name": "Named resize and reshape",
-            "gist": "Make each operation explicit with a method.",
+            "name": "Named operations",
+            "gist": "Use resize and reshape instead of conversion braces.",
             "gains": [
-              "Intent appears in the operation name."
+              "The verb explains shape intent."
             ],
             "losses": [
-              "Does not provide the requested converting head."
+              "Rejects the requested direct destination spelling."
             ],
             "proposed": {
-              "code": "grown: basis.resize<4,4>(fill: .Identity)\nflat_shape: grown.reshape<2,8>(order: .Columns)"
+              "code": "// PROPOSED\nflat: grown.reshape<2,8>(order: .Columns)"
             }
           },
           {
             "key": "C",
-            "name": "Always pass a policy record",
-            "gist": "Use From, but require explicit policy for every shape change.",
+            "name": "Always explicit policy",
+            "gist": "Every shape change uses labelled .from.",
             "gains": [
-              "No shape-dependent default."
+              "No inferred shape policy."
             ],
             "losses": [
-              "Common conversions need extra syntax."
+              "Repeats ordinary default choices."
             ],
             "proposed": {
-              "code": "flat_shape: Matrix<2,8>{ReshapeInput{source: grown, order: .Columns}}"
+              "code": "// PROPOSED\nflat: Matrix<2,8>.from(grown, order: .Columns)"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It implements direct brace conversion while keeping unusual policies explicit and copying separate.",
+          "why": "Directly answers q13p1rdp with clear, deterministic shape rules.",
           "gains": [
-            "One mechanism; no array bridge."
+            "Cropping stays visible."
           ],
           "losses": [
             {
-              "loss": "Cropping loses cells.",
-              "mitigation": "Show both shapes and require explicit descriptors for nondefault policies."
-            },
-            {
-              "loss": "Owned reordering costs data movement.",
-              "mitigation": "Write directly into the destination or borrow a window instead."
+              "loss": "A new layout or element type visits each cell once.",
+              "mitigation": "Each cell is written once, straight into the result; a matching last-use source needs no reordering."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Replaces the requested head with verbs."
+              "reason": "No direct brace conversion."
             },
             {
               "key": "C",
-              "reason": "Makes ordinary conversions unnecessarily verbose."
+              "reason": "Needlessly repeats defaults."
             }
           ],
-          "tradeoff": "Defined defaults, not free copying."
+          "tradeoff": "No cell permutation is not the same as no byte copying."
         }
       },
       "designAway": [
-        "All conversion dispatch, checked behavior and literal priority are shared with D-ARRAY-CONVERT1.",
-        "Typed descriptors carry policy through From; no second cast mechanism is added.",
-        "Removed copy sigils and mandatory array adapters; retained honest movement and cropping costs."
+        "One direct From construction, no adapter chain.",
+        "Explicit windows for discarded cells.",
+        "Describe physical work honestly; direct destination removes avoidable intermediate storage."
       ],
       "draft": false,
       "status": "open",
@@ -210472,577 +210436,646 @@
       "id": "D-HOOK-POINT1",
       "cardId": "c0gmf0y4",
       "group": "hooks",
-      "title": "Declare library hook points as typed identities",
-      "situation": "Libraries need named hook points with both static attachments and scoped runtime handlers. Jet already has typed event values, while its approved hook design requires one shared identity and ordering contract. This vote chooses how a module declares that identity without adding another dispatcher. We recommend an uppercase typed point declaration; lowercase function-like syntax is an alternative, not a prerequisite for usable hooks.",
-      "gist": "How should a module declare a shared hook point?",
-      "lesson": "Declaration syntax must preserve the same static and dynamic handlers. An uppercase value avoids a new naming exception.",
-      "explainer": "Beginner: declare a typed point, attach handlers and invoke its ordinary operation. Expert: the declaration has one stable point identity, shared by #On and scoped .on; constructor evaluation is a new declaration-time rule.",
-      "story": "Sam publishes a request hook. A package attaches statically and a temporary test attaches dynamically to the same point.",
-      "inWild": "const hook = new SyncHook([\"value\"]);\nhook.tap(\"log\", value => console.log(value));\nhook.call(7);",
-      "detail": "Card #5009 c5 asks for library hook declarations. Ratified D-HOOK-ONE1=A requires Event<T>, Hook<T,R> and DecisionHook<T,E>, static #On, scoped .on and shared ordering. It specifies Continue, Transform, Cancel without a payload, and Fail(E). Web early replies belong to Fail(reply), not Cancel(reply). This vote cannot replace that contract with static-only functions.\n\nCore/Event/Event.jet:61-75 supplies runtime constructors including decision_hook(policy:). On gate-p261, probes2/event.jet registers a scoped Event<Int> handler and emits 7. probes2/point.jet rejects a bodyless marked function with E0081; it does not isolate marker recognition. Neither declaration-time decision_point nor callable point sugar is implemented by that probe.\n\nTapable is a closer comparison than WIT resource methods: it has explicit hook values, registration, ordering, synchronous/asynchronous variants and specialized generated dispatch. Jet's proposed static elimination is not a unique optimization, nor a benchmark result. Tapable does not establish Jet's scope-lifetime or typed failure guarantees. The uppercase value option needs no lowercase-constant exception; the original draft unfairly treated that exception as unavoidable.",
+      "title": "Static point identities are typed values, not disguised ordinary functions",
+      "situation": "Jet already has Event, Hook and DecisionHook, and ratified #On attachments take point values. Constructing an Event as a module constant fails on the tested compiler, so a library needs a static identity rather than a compile-time runtime allocation. A function-shaped declaration hides important differences between handler types and dispatch calls. This vote chooses how to declare identity without creating another hook engine.",
+      "gist": "Should libraries declare static point identities as typed values or marked handler signatures?",
+      "lesson": "A handler returns a result or HookDecision. Dispatch may instead return HookOutcome, stop early, or require another argument. Typed point values expose those real operations rather than pretend to be ordinary functions.",
+      "explainer": "A uses symbolic point constructors in module constants. #On(point), point.on(scope,f), emit and run retain their existing meanings. Static identity construction is different from runtime event.new: one names a declaration, the other creates an instance when called.",
+      "story": "A package publishes a request decision point. Authentication can cancel the pipeline; transformed input reaches later handlers only while dispatch continues.",
+      "inWild": "Tapable uses hook values and distinct dispatch policies, including bail behavior. It is a strong precedent for explicit point types, not a benchmark for Jet.",
+      "detail": "r2 changes the recommendation completely: r1 B's value direction becomes A, and r1 A's marked signature becomes B. The original dismissal of values rested too heavily on uppercase spelling and the failure of a runtime constructor at build time. Neither proves that a symbolic typed identity is inferior. A exposes the actual carrier and dispatch contract without a new function-shaped declaration, callable alias or fallback-body mechanism.\n\nReplayed gate-p275 h1.jet: uppercase REQUEST initialized by event.new<Int>() fails E0643; h2.jet also reports E0357 for lowercase constant casing. These establish the tested constructor problem, not impossibility of every library declaration. Added probes/review-dispatch.jet: 60, 23, seen 4, done.\n\nA Hook constructed with 50 but run with fallback 60 returns the call's fallback when empty, then the last handler result 23. Transform makes the next handler see 4; Cancel prevents the third handler. The first probe revision also caught Hook.run's required TWO arguments, unlike DecisionHook.run. A point declaration must not hide that distinction.\n\nInspected Core/Event/Event.jet:35-38, :61-73; Compiler/JetSema/Source/Sema/Calls/EventHandles.jet:53-75, :121-152; Compiler/JetRuntime/Source/EventHooks.jet:83-120, :155-221. DecisionHook handlers return HookDecision, dispatch returns HookOutcome, and Cancel/Fail stop subsequent handlers. Hook has construction state and an explicit per-call fallback. These are existing semantics, not inferred from the proposed declarations.\n\nD-HOOK-ONE1 fixes #On, dynamic registration and priority/package/declaration order, with dynamic handlers after static at equal priority. D-HOOK-RUNTIME1 keeps narrowed points and watch-only events. D-HOOK-STAGES1/D-JAI-EVENTS1 govern compiler stages through their compile-time runner, not core.event runtime allocations. Owner question q012d3pt is already answered by D-LINK-STEP1: link hooks return BuildAction, selected per output. Do not reopen linking with the superseded direct-Artifact return.\n\nD-CORE-BUILTINS1 supplies the single admitted door for compiler-only operations. Symbolic identity needs an operation there, not compiler tests of the library constructor's name. Neither alternative is free compiler support. Tapable's README was read; no performance superiority is asserted.",
       "options": [
         {
           "key": "A",
-          "name": "Uppercase typed point identity",
-          "detail": "Declare an immutable module identity with an approved point constructor and normal constant casing.",
-          "technical": "Add declaration-time constructors for Event, Hook and DecisionHook. They produce stable declaration identities, not arbitrary runtime global initialization. Event uses emit and preserves EventTrace; Hook and DecisionHook use their approved run operation. Hook requires a typed fallback; DecisionHook requires its policy and yields Continue when empty. Escaped values preserve identity across packages and do not clone independent attachment sets.\n\n#On and point.on(scope,f) target that same identity. Retain priority/package/declaration ordering, with dynamic attachments after static ones at equal priority. Key projection and path-prefix filters use the approved point contract, never a web-only dispatcher. Evaluate invocation arguments once before projection. Both options cover the same routing and attachment workload.\n\nGenerate inspection metadata for declaration, payload, fallback, policy, key and attachment order. Scope destruction removes dynamic registrations according to existing dispatch rules. Eliminate empty dispatch only when no live dynamic attachment is possible; otherwise retain runtime storage/dispatch costs. A declaration-time initializer must be a checked point constructor, not a general mutable global or hidden package load hook.",
-          "code": "REQUEST: event.decision_point<Request,Response>(\n    policy: .FirstCancelElseTransform)\nanswer: REQUEST.run(input)"
+          "name": "Typed symbolic point values",
+          "detail": "A module constant uses a static point constructor returning the existing Event, Hook or DecisionHook type. The value names one declaration, without materializing a runtime listener object during compilation.",
+          "technical": "Proposed Core constructors are event.point<T>(), event.hook_point<T,R>(fallback: R) and event.decision_point<T,E>(policy: HookPolicy). They invoke one typed jet_builtins symbolic-identity operation, with carrier kind/type arguments and the same construction options as the runtime counterpart. They are valid only as a module's declared identity initializer; reject local/dynamic calls rather than silently create a new lifetime rule.\n\nRecord the defining module item SymbolID and generic instantiation as canonical identity, independent of import path. Two declarations are distinct even with identical type/options; all imports of one declaration share identity. Runtime event.new/hook/decision_hook retain instance construction and are not aliases of these declaration constructors.\n\nExtend the compiler's compile-time value representation with a typed symbolic point identity. It contains no runtime listener allocation or build-time handle. Lower references to the same existing static attachment table and, if reachable dynamic registration needs it, one runtime listener state initialized under existing rules. Do not exempt arbitrary Event objects from E0643, or implement recognition by matching event.point's name.\n\nThe typed builtin operation and its admission belong to the existing kernel registry. Ordinary constant syntax stays; the semantic symbolic-point category may use lowercase names uniformly in every package, matching ratified published point names without a Core-only casing exemption. Register that classification/casing rule and diagnostics; uppercase constants remain valid too.\n\nThe resulting type is the existing carrier, so handler checking and effects/failures are exactly those its type/subsystem supports. Do not promise arbitrary identity-specific effect rows that would disappear when passed as Event<T>. #On and .on(scope,f) use the same identity and existing scope/removal/snapshot/reentry/order rules. Compiler-stage points retain their separate ratified compile-time runner and payload authority, not a runtime Event allocation.\n\nEvent uses emit(payload) and returns its trace. Hook uses run(payload, fallback) with the existing explicit per-call fallback as well as construction state. DecisionHook uses run(payload) returning HookOutcome; handlers return HookDecision, Transform changes subsequent payload, Cancel/Fail short-circuit. No ordinary point(payload) alias, fn conversion, lazy fallback body or changed policy. Static-only/empty lowering follows the already ratified hook contract; do not elide reachable dynamic registration or claim all points cost zero code.",
+          "code": "// PROPOSED symbolic identities, not runtime objects at build time.\nrequest: event.decision_point<Request, Response>(.FirstCancelElseTransform)\npage_size: event.hook_point<Request, Int>(fallback: 50)\nresult: request.run(input)\nsize: page_size.run(input, 60)"
         },
         {
           "key": "B",
-          "name": "Callable bodyless point declaration",
-          "detail": "Add #Point to a function-like signature denoting the same typed identity.",
-          "technical": "This is declaration sugar over A's identity, attachments, routing and ordering, not a second dispatcher. It needs rules for callable values, method operations, overload resolution and editor display because the name is not an ordinary function. A decision signature declares its explicit policy; ordinary-return hooks declare a typed fallback. Reject bodies and invalid signatures. Do not silently discard EventTrace merely because a point looks unit-returning.\n\nIts benefit is lowercase ordinary-call ergonomics, not better dispatch performance. Escaped callable handles must still invoke dynamic handlers. A callable point cannot satisfy an ordinary function type by losing its identity or effects. Show its point type and attachment inspection in editor information. This option requires the same declaration-time identity work as A.",
-          "code": "#Point(policy: .FirstCancelElseTransform)\nrequest: fn(value: Request) -> HookDecision<Request,Response>\nanswer: request(input)"
+          "name": "A marked handler signature",
+          "detail": "#Point declares a typed point using a function-shaped handler signature. It provides a compact description of handlers but is not an ordinary callable function.",
+          "technical": "Register Point and a point-declaration classification before ordinary bodyless-function checking. Unit selects Event, HookDecision<T,E> selects DecisionHook<T,E>, another result selects Hook<T,R>. Validate payload agreement and construction options; reject bodies rather than add a second lazy fallback mechanism. Multiple signature parameters must pack into one record carrier payload.\n\nHover must show the actual point type and dispatch call, including Hook's extra per-call fallback and DecisionHook's HookOutcome result. Preserve the same symbolic identity, ordinary carrier contracts and attachment/order rules as A. Do not claim ordinary fn conversion or request(input) while its actual dispatch type/arity differs. This is a genuine concise handler-declaration alternative, but needs a new marker and item interpretation for information the typed value already carries.",
+          "code": "// PROPOSED handler contract, NOT an ordinary function.\n#Point\nrequest: fn(req: Request) -> HookDecision<Request, Response>\nresult: request.run(input)"
         }
       ],
       "comparisons": [
         {
-          "lang": "JavaScript/Tapable",
-          "note": "Explicit hook values support registration, ordered sync/async dispatch and specialized generated calls.",
-          "code": "const hook = new SyncHook([\"value\"]);\nhook.tap(\"log\", value => console.log(value));\nhook.call(7);",
+          "lang": "JavaScript / Tapable",
+          "note": "Value-based hook kinds expose different ordered/bail dispatch policies.",
           "source": "https://github.com/webpack/tapable"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Typed values match the approved point model without new function/value rules or a casing exception. Both spellings retain the same hooks.",
+        "why": "Expose the real point type instead of disguising handler metadata as an ordinary function signature.",
         "gains": [
-          "One visible point identity.",
-          "No extra callable-declaration mechanism."
+          "One existing attachment/dispatch mechanism.",
+          "No new Point marker, callable alias or fallback-body semantics."
         ],
         "losses": [
           {
-            "loss": "Invocation keeps emit/run rather than ordinary function-call spelling.",
-            "mitigation": "Provide completion and generated point documentation; keep construction, policy and attachment inspection explicit."
+            "loss": "Symbolic identities need compiler representation distinct from runtime Event allocation.",
+            "mitigation": "One typed kernel operation and one canonical declaration identity, shared by every package and import. Do not add per-library-name routing or arbitrary compile-time handles."
           },
           {
-            "loss": "Declaration-time identity and live dynamic dispatch need implementation.",
-            "mitigation": "Restrict initialization to checked point constructors and share the existing dispatch/storage contract."
+            "loss": "Static point identities need one new compiler operation.",
+            "mitigation": "One typed jet_builtins operation serves Event, Hook and DecisionHook for every package. Other module values keep E0643, so no general exemption is added."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Cleaner ordinary calls, but adds function/value interaction rules without removing declaration-time identity work."
+            "reason": "Concise handler signature, but extra marker/item machinery and a misleading ordinary-function shape when actual calls differ."
           }
         ],
-        "tradeoff": "Explicit values over an additional callable spelling."
+        "tradeoff": "Both need static identity support. A keeps actual carrier operations explicit; naming is not a reason to prefer B."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Added the uppercase value option and changed the recommendation because lowercase casing exceptions are unnecessary. Replaced the weak WIT comparison with Tapable and named identity, tooling and dynamic-dispatch costs."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post with typed symbolic point values as A through one kernel identity operation, keeping real dispatch calls, and no claim that it compiles today."
       },
-      "checkInstructions": "Reviewed the ratified hook decision and Event source; gate-p261 event probe emitted 7. The #Point probe rejected a missing body, not specifically an unknown marker. Both options are proposals. Acceptance covers static/dynamic identity, scoped destruction, reentrant dispatch, equal-priority order, escaped values, empty dispatch, fallback, Fail versus Cancel, key routing and cross-package declarations.",
+      "checkInstructions": "Implementation acceptance covers the typed symbolic kernel operation and canonical identity across imports and generics. It keeps runtime construction separate, and static initializer and casing diagnostics stay uniform across packages. It checks real carrier, handler and dispatch types, Hook's per-call fallback, and transform, cancel and fail. It also covers scope, reentry and order, source-based definition and inspect output, and elision only when dynamic registration is unreachable. Existing local dispatch was probed; no new-identity implementation or suite was run.",
       "surface": {
-        "gist": "Should modules declare uppercase typed hook values or callable bodyless points?",
-        "lesson": "Both choices keep the same static and scoped handlers. Uppercase values need no naming exception or second dispatcher.",
+        "gist": "Should libraries declare static point identities as typed values or marked handler signatures?",
+        "lesson": "Handler signatures and dispatch calls differ. A DecisionHook returns an outcome; Hook.run also needs a per-call fallback. Keep actual point types visible.",
         "trio": {
           "current": {
-            "note": "Typed events and scoped runtime attachment execute.",
-            "code": "point: event.new<Int>()\nscope: event.scope()\npoint.on(scope, fn(value: Int) { print(value) })\n_: point.emit(7)"
+            "note": "Executed: module event.new fails E0643. Local dispatch prints 60, 23, seen 4, done, confirming fallback, transformation and cancellation.",
+            "code": "// probes/h1.jet and review-dispatch.jet"
           },
           "wild": {
             "lang": "Tapable",
-            "note": "Hook values support ordered handlers and specialized dispatch.",
-            "code": "const hook = new SyncHook([\"value\"]);\nhook.tap(\"log\", console.log);\nhook.call(7);"
+            "note": "webpack's Tapable declares a typed hook value; a bail hook stops at the first answer.",
+            "code": "const request = new SyncBailHook([\"req\"]);\nrequest.tap(\"auth\", req => req.session ? undefined : redirect(\"/login\"));\nconst reply = request.call(input);"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Typed point value",
-            "gist": "Create a stable module identity with ordinary constant casing.",
+            "name": "Typed symbolic values",
+            "gist": "A constructor names one module identity, not a runtime allocation.",
             "gains": [
-              "Explicit identity; existing invocation operations."
+              "Actual carrier operations stay explicit.",
+              "No new marker or callable alias."
             ],
             "losses": [
-              "Declaration-time constructors are new work."
+              "Needs one typed symbolic-identity kernel operation."
             ],
             "proposed": {
-              "code": "REQUEST: event.decision_point<Request,Response>(\n    policy: .FirstCancelElseTransform)\nanswer: REQUEST.run(input)"
+              "code": "// PROPOSED\nrequest: event.decision_point<Request, Response>(.FirstCancelElseTransform)\nresult: request.run(input)"
             }
           },
           {
             "key": "B",
-            "name": "Callable #Point",
-            "gist": "Give the same typed identity a function-like declaration and call.",
+            "name": "Marked handler signature",
+            "gist": "A function-shaped declaration describes handlers, not an ordinary function.",
             "gains": [
-              "Lowercase ordinary calls."
+              "Compact handler contract."
             ],
             "losses": [
-              "New function/value rules and the same identity work."
+              "New marker/item machinery; actual call type and arity still need explanation."
             ],
             "proposed": {
-              "code": "#Point(policy: .FirstCancelElseTransform)\nrequest: fn(value: Request) -> HookDecision<Request,Response>\nanswer: request(input)"
+              "code": "// PROPOSED\n#Point\nrequest: fn(req: Request) -> HookDecision<Request, Response>"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Keep the approved value model without another callable spelling or casing exception.",
+          "why": "Typed values are clearer than a function-shaped item that is not a function.",
           "gains": [
-            "One static/runtime attachment identity."
+            "Same attachment, scope, order and dispatch rules."
           ],
           "losses": [
             {
-              "loss": "Calls retain emit/run.",
-              "mitigation": "Provide completion and generated point documentation."
-            },
-            {
-              "loss": "Live dynamic handlers still cost runtime storage and dispatch.",
-              "mitigation": "Share existing dispatch; eliminate it only with proof that dynamic attachment cannot exist."
+              "loss": "Static point identities need one new compiler operation.",
+              "mitigation": "One jet_builtins operation serves all three point kinds and every package; other module values keep E0643."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Nicer calls, but introduces extra language rules."
+              "reason": "Adds a declaration interpretation without simplifying actual dispatch."
             }
           ],
-          "tradeoff": "Explicit values, unchanged hook capability."
+          "tradeoff": "Link replacement is already settled by D-LINK-STEP1."
         }
       },
       "draftedBy": "Main",
       "reviewedBy": "BallotReview2",
       "draft": false,
       "status": "open",
-      "created": "2026-11-17T12:30:29.445Z"
+      "created": "2026-11-17T12:30:29.445Z",
+      "designAway": [
+        "Use a typed symbolic kernel identity, not compile-time runtime allocation or library-name routing.",
+        "Preserve actual call arities, outcome types and cancellation.",
+        "No second fallback-body, callable alias or erased effect contract."
+      ]
     },
     {
       "id": "D-ITERATOR-FAIL1",
       "cardId": "c0sdz4q0",
       "group": "language",
-      "title": "Let the existing Iterator protocol report a typed failure",
-      "situation": "Reading the next line can fail, but Jet's public iterator signature permits only an item or end of input. The compiler also has special line-reader routing that package iterators cannot reproduce through that signature alone. This vote chooses one general failure contract for loops. We recommend extending Iterator with a typed error rather than adding a second fallible iterator trait.",
-      "gist": "How should an iterator distinguish end of input from a read failure?",
-      "lesson": "End, item and failure are three outcomes. A failure must not become silent end-of-input or a successful empty result.",
-      "explainer": "Beginner: ordinary list loops stay unchanged; a failing line loop propagates its declared error through the enclosing function's normal error handling. Expert: implement the same Iterator protocol with an Error type, and let the checked next call carry effects and ownership normally.",
-      "story": "Rae reads a log and encounters a damaged input halfway through. She needs the failure reported, not a successful report containing only the first half.",
-      "inWild": "for line in reader.lines() {\n    let line = line?;\n}",
-      "detail": "Compiler/Prelude/Traits.jet:300-310 declares Iterator.next as Item? Never! and Iterable.iter as infallible. Compiler/JetIR/Source/CoreReach.jet:279-300 routes named reader families through Core helpers. On gate-p261, probes2/iterable.jet implements both public traits and prints 1 and 2; probes2/iterator-step.jet prints 1, 2 and null. These establish working authored iteration, not a general failure channel.\n\nprobes2/reader-step.jet declares IOError! and prints 2 for two successful read_line calls. probes2/reader-display.jet prints alpha and beta. Neither injects a midstream error, so neither proves that current reader loops propagate one. probes2/iterator-error.jet rejects the proposed associated default; Error: type{Never} is new language work, not current associated-type syntax.\n\nRust's public Iterator returns Option<Item>; fallible producers can place Result inside Item. That supports per-item recovery and its adapter ecosystem, not just propagation. Jet should acknowledge that strength rather than invent a second error carrier solely to imitate it. Explicit stepping already fits Jet's function-failure model, while making the loop protocol itself fallible requires generic error and effect checking.",
+      "title": "Iterator next propagates failure; results() keeps per-item recovery",
+      "situation": "The tested file-lines loop stops the program on invalid UTF-8 even inside a function that returns IOError, while explicit read_line returns the error normally. The Iterator trait currently requires an infallible next. Directory and HTTP cursor sources instead declare failure inside their items. This vote chooses one predictable fallible-iteration boundary without losing deliberate per-item recovery.",
+      "gist": "Should a failing next propagate from the loop header, with results() for per-item recovery?",
+      "lesson": "End means no item; failure means the next operation failed. They are different outcomes. A propagating loop stops at failure; results() yields that failure as an item so the body may decide what to do.",
+      "explainer": "Ordinary loops propagate next's error like an ordinary call. results() explicitly requests error-as-data. Fusion concerns None exhaustion, not whether an iterator may continue after an error.",
+      "story": "A damaged log must not be reported as a complete successful read. A repair tool may instead handle each damaged record and keep advancing when its source supports that behavior.",
+      "inWild": "Rust BufRead::lines returns Result items. A loop can use ? to propagate, handle each Result, collect them, or pass them onward; it does not necessarily unwrap in every body.",
+      "detail": "A remains A. r1 removed associated-type default syntax but incorrectly suggested that deriving Error from next adds no machinery. It is a new conformance-inference rule, specified below. B is repaired to remove stop/silent-end behavior rather than offer it as acceptable. C is the strong Rust-style error-as-data option, not a straw man that every consumer must unwrap.\n\nExecuted on gate-p275: probes/review-lines.jet prints 'loop got alpha', then exits 70 with E3001 and the invalid-UTF-8 read message. The second function in that program cannot run after the stop. Isolated probes/review-steps.jet prints 'step got alpha', then 'steps err invalid input during read ... stream did not contain valid UTF-8', exiting 0. These are the independently reproduced current behaviors. The author's it1/it2 sources referenced another scratch path, so this review created self-contained probes using this folder's bad.txt.\n\nCompiler/Prelude/Traits.jet:299-310 declares Iterator.next -> Item? Never! and infallible Iterable.iter. Compiler/JetIR/Source/CoreReach.jet:279-310 contains named reader routing. Core/Process/Process.jet:887-896 was inspected: read_bytes is handled with ?? [U8]{} and empty pieces set done. No actual failing process pipe was injected, so this review does not claim an observed pipe-failure result. Core/Files/Files.jet:2066 and Core/HTTP/HTTP.jet:548 declare cursor items carrying failure; those declarations, not a live HTTP/walk failure, were inspected.\n\nD-ITER-FUSED1 concerns permanent None, not post-Err continuation; r1's citation for resumability was wrong. D-ITER-BORROW1 distinguishes borrowed and owned cursors: leaving a loop must not close an externally owned borrowed resource. D-ITER-SELECTION1 and D-ITER-COLLECT1 preserve errors through adapters/collection, and D-ITER-SIZE1's bounds do not predict future success. D-ALLOC-FAIL1 governs adapter allocations. D-LANG-MIGRATE1 forbids calling intentional panic-to-error behavior changes Safe rewrites. The Rust BufRead documentation was read; no comparative speed claim is made.",
       "options": [
         {
           "key": "A",
-          "name": "Typed failure in Iterator",
-          "detail": "Extend the existing protocol with an associated Error type, defaulting to Never, and ordinary typed failure from next.",
-          "technical": "Error: type{Never} is proposed default syntax, not supported today. Add checked associated-type defaults and dependent next failure typing; omitted defaults must preserve existing infallible implementations. Keep one Iterator/Iterable protocol, not TryIterator or a second registration table. A function unable to carry the selected next error gets the ordinary handle-or-declare diagnostic.\n\nResolve Iterable.iter once and then the checked Iterator.next call for each step. Effects must come from the resolved implementation and remain visible in the enclosing loop, including filesystem/network reads. Existing iter remains an infallible cursor view; fallible resource acquisition happens explicitly before entering the loop, just as opening a reader does. Do not move acquisition failures into false empty input.\n\nEnd, item and ordinary typed error remain distinct. Stop at first unhandled failure; never call next again in that loop after end or error. Release cursor/borrows exactly once on end, break, return or failure. Preserve partial items already delivered, without claiming rollback of user side effects. Explicit next calls remain available for deliberate recovery; implementations document whether they can resume after a handled error.\n\nMigrate every existing iterator consumer and adapter to preserve errors and effects. Adapters with fallible callbacks use normal checked error composition, retaining distinct upstream/callback error cases. Infallible Never implementations need no runtime failure branch. Remove named reader routing in the same cutover, including dependency reachability and cleanup. Do not claim today's list helpers already provide a general adapter ecosystem for authored iterators.",
-          "code": "// Proposed associated-default syntax, not current support.\nIterator: trait {\n    Item: type,\n    Error: type{Never},\n    next: fn(&self) -> Item? Error!,\n}"
+          "name": "Propagate from next; adapt errors into items",
+          "detail": "Allow next to fail and propagate that failure from the loop header. results() turns failures into items for explicit recovery without changing the underlying source.",
+          "technical": "Proposed Iterator has associated Item and Error, with next returning Item? Error! and carrying its ordinary declared effects. Error is explicit or inferred from the implementation's declared/inferred next failure channel, Never for an actually infallible next. Infer before conformance checking; do not invent default associated-type syntax or claim this inference already exists. An explicit Error and next signature must agree under ordinary failure conversion rules. Existing infallible implementations retain Error=Never; they do not acquire a new runtime failure branch merely to satisfy the trait.\n\nThe loop header is the next call site: propagate by ordinary function failure/effect rules and From conversions. If the surrounding contract cannot carry the error, use the ordinary propagation diagnostic with two manual choices: widen/convert the error channel or select results(). Do not assume a particular diagnostic number without a fixture. No further next call occurs in that propagating loop after failure. Clean up loop-owned iterators and temporaries on every exit; borrowed iterators/resources remain under their owner's scope and may be used again when loans permit.\n\nresults() has Item equal to the ordinary result type carrying the source Item or Error and has Error=Never for next itself; it retains the source's effects. Each source success becomes Ok(item), each source error becomes Err(error), and None stays None. It does NOT latch errors as exhaustion or invent a resumability marker: a later adapter next calls source next again.\n\nA terminal source must update its own state so its next call ends; a recoverable source may advance after an error. Normal loops still stop at None; only the separately ratified fuse behavior latches None. An endlessly failing source can yield endless Err items, just as any iterator may be infinite; results() must not silently discard or stop them.\n\nMap/filter/collection propagate upstream failures through the same channel as ordinary calls and preserve selected error-as-data items. Callback failures require an ordinary common declared error conversion, not a newly invented implicit union; reject incompatible channels with a conversion diagnostic. results() wraps state without duplicating elements or imposing a heap allocation. Iterable.iter stays infallible: opening/constructing a potentially failing source is an explicit call before iteration.\n\nMigrate file/stdin/process lines and chunks, directory walk and HTTP chunks to ordinary Core iterators with failure in next. Delete equivalent named-reader routing only when those paths are covered. Preserve old Result-item clients by adding results() at their sources before retaining their existing bodies.\n\nNever remove recovery code based on a guess. A current panic/silent-end to returned-error change is an intentional behavior correction, not a Safe fix; surface it explicitly and require a selected migration. Only mechanically equivalent rewrites qualify as Safe. Resource-close and error-construction paths must remain valid under allocation failure.",
+          "code": "// PROPOSED fallible iteration; files is core.files.\ncount: fn(path: String) -[FS.Read]> Int IOError! {\n    reader := files.open(path)\n    n := 0\n    loop line in reader.lines() -> n += 1\n    n\n}"
         },
         {
           "key": "B",
-          "name": "Keep the protocol; step readers explicitly",
-          "detail": "Keep infallible Iterator and call ordinary fallible reader methods in an explicit loop.",
-          "technical": "Core/Files/Files.jet:358 declares read_line returning String? IOError!. The gate-p261 stepping probe executes this model. Failure propagates in a compatible function; exiting on None narrows the remaining value to String. A Rust-style trailing question mark is not needed.\n\nThis supports per-step handling and reusable stepping helpers without associated-default or loop-lowering changes. It does not offer failing producers through ordinary for syntax. Do not claim it prevents all reusable adapters: libraries can build reader helpers. Rust's Result-as-item model offers more composable recovery, but choosing that for Jet would also require a deliberate public value-carrier design, not a silent second meaning for ordinary typed function failure.",
-          "code": "loop {\n    line: handle.read_line()\n    if line == None -> break\n    print(line)\n}"
+          "name": "Explicit stepping for fallible sources",
+          "detail": "Keep Iterator infallible; remove infallible adapters over sources that can fail. Call read_line/read_bytes explicitly in an ordinary loop.",
+          "technical": "This is the smallest trait change and matches the isolated successful read_line error probe. It must not retain silent truncation or panic as the default failure protocol. Existing error-as-data cursor families can still use C's ordinary Item mechanism, but callers who want automatic propagation must step explicitly. Source-specific stepping methods remain API surface to learn.",
+          "code": "// Existing stepping pattern, executed in review-steps.jet.\nloop {\n    line: h.read_line()\n    if line == None -> break\n    n += 1\n}"
+        },
+        {
+          "key": "C",
+          "name": "Failures are Result items",
+          "detail": "Keep next infallible and make every fallible source yield Result items. Consumers choose propagation, recovery, collection or forwarding.",
+          "technical": "No new associated Error or failure inference. This is a strong compositional choice and already appears in inspected Core cursor declarations. Ordinary map sees a Result item; success-only adapters must explicitly preserve and pass errors rather than silently dropping them. A propagating consumer needs an error-aware boundary, but a consumer retaining outcomes need not unwrap each item. Migrate line/process adapters to the same model instead of retaining panic/end behavior.",
+          "code": "// PROPOSED consumer of Result items; body forwards outcomes.\nloop outcome in reader.lines() {\n    outcomes.push(outcome)\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Iterator.next returns Option<Item>; Item can itself be Result and the body propagates its error.",
-          "code": "for line in reader.lines() { let line = line?; }",
-          "source": "https://doc.rust-lang.org/std/iter/trait.Iterator.html"
+          "note": "BufRead::lines yields io::Result<String>; callers may propagate, recover, collect or forward outcomes.",
+          "source": "https://doc.rust-lang.org/std/io/trait.BufRead.html#method.lines"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One protocol can use Jet's ordinary typed failure model for both package and Core producers, without a second fallible-iterator trait.",
+        "why": "Ordinary failure propagation should not change merely because repeated calls are expressed as a loop; results() keeps deliberate error-as-data processing.",
         "gains": [
-          "Generic loops preserve end versus error.",
-          "No owner-name reader dispatch."
+          "No panic/end conflation for fallible next.",
+          "Per-item recovery remains explicit without changing the source type's error contract."
         ],
         "losses": [
           {
-            "loss": "Associated defaults, dependent error/effect checking and adapter migration are substantial new work.",
-            "mitigation": "Make them one complete cutover with default-preservation and error-propagation cases; do not claim existing syntax support."
+            "loss": "The trait gains associated failure inference and adapter plumbing.",
+            "mitigation": "One failure channel follows existing call/conversion rules; Never implementations erase it. No new default syntax, implicit error union or resumability capability."
           },
           {
-            "loss": "Implicit propagation stops the loop rather than offering Rust-style per-item recovery.",
-            "mitigation": "Keep explicit next handling for deliberate recovery; document resumability and preserve already delivered items."
+            "loss": "Loops that crashed or ended early on bad input now return the error.",
+            "mitigation": "The migrator lists every loop whose crash or early end becomes a returned error. Each needs a selected edit, and .results() keeps per-item handling where wanted."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A working smaller design with explicit recovery, but failing producers remain outside ordinary for syntax."
+            "reason": "Simple and correct, but fallible sources lose ordinary adapter/loop composition."
+          },
+          {
+            "key": "C",
+            "reason": "Strong for outcome-processing pipelines; propagation-first consumers need explicit handling at an error-aware boundary."
           }
         ],
-        "tradeoff": "More general loops at a real protocol/checker migration cost."
+        "tradeoff": "A makes propagation the default and error-as-data explicit; C makes the opposite default."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Probed the unsupported associated default and removed claims that successful reads prove midstream failure handling or generic adapter support. Named checker/migration costs, acquisition and recovery semantics, and Rust's stronger per-item recovery."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post with propagation-first A and results() for per-item recovery, as a failure-boundary design, not an implemented trait change."
       },
-      "checkInstructions": "Gate-p261 observations are recorded in probes2 for authored iteration, explicit next, reader stepping/display and the rejected associated default. These successful reads are not fault-injection evidence. Implementation acceptance requires a deterministic midstream failure, dependent errors/effects, default compatibility, fallible adapters, partial side effects, cleanup and no further next call after an unhandled failure.",
+      "checkInstructions": "Implementation acceptance covers associated-error inference and mismatch, inferred and explicit Never, and loop-header propagation and effects. It covers resumable Err, terminal Err then None, and fused None separately. It checks borrowed owner lifetime, no extra next after a propagating failure, and error-aware adapters and collection. Every migrated source runs with injected failures, and explicit migration is told apart from Safe migration. No suite was run.",
       "surface": {
-        "gist": "Should Iterator carry typed failure, or should failing readers use explicit stepping?",
-        "lesson": "Successful reads prove neither error propagation nor recovery. End, item and failure must remain distinct.",
+        "gist": "Should a failing next propagate from the loop header, with results() for per-item recovery?",
+        "lesson": "Failure is not end. Fusion concerns None, not Err. Borrowed resources remain owned by their caller.",
         "trio": {
           "current": {
-            "note": "Authored loops work; the public next signature cannot fail.",
-            "code": "next: fn(&self) -> Item? Never!"
+            "note": "Executed: invalid UTF-8 stops a lines loop with E3001/70; explicit read_line returns the error and exits 0.",
+            "code": "// probes/review-lines.jet and review-steps.jet"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Result items support per-item recovery as well as propagation.",
-            "code": "for line in reader.lines() { let line = line?; }"
+            "note": "Rust lines yields Result items; ? propagates, and other bodies may recover or forward.",
+            "code": "for line in reader.lines() {\n    let line = line?;\n    n += 1;\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Extend existing Iterator",
-            "gist": "Give next a typed error, with a proposed Never default.",
+            "name": "Propagate from next",
+            "gist": "Loop headers propagate; results() exposes errors as items.",
             "gains": [
-              "One protocol for ordinary failing loops."
+              "Ordinary call failure rules; per-item recovery retained."
             ],
             "losses": [
-              "New default/error checking and a complete consumer migration."
+              "Associated failure inference and adapter changes are real work."
             ],
             "proposed": {
-              "code": "// Proposed, not accepted today:\nError: type{Never}\nnext: fn(&self) -> Item? Error!"
+              "code": "// PROPOSED\nloop line in reader.lines() -> n += 1"
             }
           },
           {
             "key": "B",
-            "name": "Explicit stepping",
-            "gist": "Keep Iterator unchanged; handle read_line in an ordinary loop.",
+            "name": "Step explicitly",
+            "gist": "Keep fallible sources outside infallible adapters.",
             "gains": [
-              "Works without new protocol features; explicit recovery."
+              "No trait failure extension."
             ],
             "losses": [
-              "Failing readers stay outside ordinary for syntax."
+              "Less adapter composition."
             ],
             "proposed": {
-              "code": "loop {\n    line: handle.read_line()\n    if line == None -> break\n    print(line)\n}"
+              "code": "line: reader.read_line()"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Result items",
+            "gist": "next stays infallible; failures travel as data.",
+            "gains": [
+              "Strong outcome-processing pipelines."
+            ],
+            "losses": [
+              "Propagation needs an error-aware consumer boundary."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nloop outcome in reader.lines() -> outcomes.push(outcome)"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Reuse ordinary typed failure in one protocol instead of adding another fallible iterator.",
+          "why": "Repeated calls should use ordinary failure propagation.",
           "gains": [
-            "Package and Core producers share checking."
+            "results() retains deliberate recovery."
           ],
           "losses": [
             {
-              "loss": "Protocol and adapter migration is substantial.",
-              "mitigation": "Require default, error, effect and cleanup cases in one cutover."
-            },
-            {
-              "loss": "Propagation stops instead of recovering per item.",
-              "mitigation": "Retain explicit next handling and document whether a cursor can resume."
+              "loss": "Loops that crashed or ended early on bad input now return the error.",
+              "mitigation": "The migrator lists every such loop and requires a selected edit, so nothing changes silently."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Smaller and working, but omits ordinary failing for loops."
+              "reason": "Loses ordinary composition."
+            },
+            {
+              "key": "C",
+              "reason": "Opposite default, best for outcome-as-data work."
             }
           ],
-          "tradeoff": "General loops, not a free syntax extension."
+          "tradeoff": "No speed advantage is asserted."
         }
       },
       "draftedBy": "Main",
       "reviewedBy": "BallotReview2",
       "draft": false,
       "status": "open",
-      "created": "2026-11-17T12:30:44.989Z"
+      "created": "2026-11-17T12:30:44.989Z",
+      "designAway": [
+        "Define results() behavior after each Err; do not borrow a resumability rule from fusion.",
+        "Distinguish borrowed lifetime from cleanup of a loop-owned cursor.",
+        "Keep errors in ordinary channels and keep migration safety honest.",
+        "The migrator lists every loop whose crash or early end becomes a returned error; none changes silently."
+      ]
     },
     {
       "id": "D-FORMAT-TRAIT1",
       "cardId": "c0sdz4q0",
       "group": "language",
-      "title": "Resolve interpolation through public selector-family traits",
-      "situation": "Jet formats integers as hexadecimal, but rejects the same selector on an ordinary package wrapper. Compiler rules currently select supported types and standard-library helper names. This vote chooses how package types support requested styles without duplicating Display or Debug. We recommend ordinary traits per selector family, writing into the interpolation buffer rather than forcing a temporary String per formatted value.",
-      "gist": "How should package types support interpolation selectors?",
-      "lesson": "A style is a checked capability, not a runtime switch. Formatting into the destination avoids mandatory per-value strings.",
-      "explainer": "Beginner: implement only the formatting families your type supports. Expert: each selector resolves one ordinary checked trait method; default Display and Debug remain unchanged, and unsupported styles remain type errors.",
-      "story": "Nora wraps a numeric identifier in a type. She wants hexadecimal output without unwrapping that type at every display site.",
-      "inWild": "impl std::fmt::LowerHex for Id {\n    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {\n        std::fmt::LowerHex::fmt(&self.0, f)\n    }\n}",
-      "detail": "On gate-p261, probes2/format-basic.jet prints 001f for Int 31 with Hex(4); probes2/format.jet rejects a Distance wrapper with E0112. Compiler/JetSema/Source/Sema/Expressions.jet:2863-2925 gates styles by type. Compiler/JetIR/Source/CoreReach.jet:52-84 maps them to named helpers. Compiler/Prelude/Traits.jet:218-235 already defines Display and Debug. D-DECODE-SOURCE1=A is separate and must not be reopened here.\n\nThe original recommendation claimed Format(fmt.Hex) was an existing associated-type implementation pattern. probes2/style-impl.jet rejects it with E0003: only selected operator/conversion traits accept an operand argument. An associated Style alone does not allow multiple Format implementations for one receiver. A general style-keyed alternative therefore requires a new conformance key, coherence and resolution rules.\n\nRust LowerHex is the stronger existing design: separate style traits receive a formatter with options and write into a sink. Its Result reports sink failure, not arbitrary formatting refusal. A return-String protocol would lose that direct-write advantage. probes2/buffer-trait.jet prints id=001f using an ordinary local HexFormat trait and &String output. That proves the direct method shape, not interpolation integration or absence of allocations inside its implementation.",
+      "title": "Package formatting returns String, with ordinary style traits",
+      "situation": "Jet prints built-in numbers with selectors such as :Hex(4), but rejects the same selector on a package wrapper. The owner rejected a public output argument, and ratified law requires returning newly produced text. Both alternatives therefore return String and use the existing String execution contract. The remaining choice is ordinary traits for the existing style families or extending keyed-trait dispatch.",
+      "gist": "Should package styles use ordinary per-style traits or extend keyed-trait dispatch?",
+      "lesson": "A selector chooses how a value becomes text. Implement only the styles your type actually supports. Both options return String: no output argument, public writer, builder type or separate streaming trait.",
+      "explainer": "Answer to q5xewxmx: the output argument is gone from every alternative. A HexFormat method returns the hexadecimal text. Allocation and destination handling follow the already ratified String rules, not a new promise about hidden return storage.",
+      "story": "A package wraps an integer ID. It deliberately implements hexadecimal formatting by delegating to its integer field, without exposing that field at each call site.",
+      "inWild": "Rust's LowerHex is one trait for hexadecimal and writes to Formatter; Python's __format__ returns str and interprets a style specification. They demonstrate two real extension designs, not equivalent allocation costs.",
+      "detail": "r2 changes the recommendation, so r1 B (ordinary traits) becomes A and r1 A (keyed Format) becomes B. The owner chose no output argument, not a keyed trait. r1 correctly removed the public writer but incorrectly called keyed support existing general machinery: probes/f3.jet rejects an arbitrary Styled(Int), listing only Add/Sub/Mul/Div/From.\n\nReusing those special cases is compiler work, not proof that an arbitrary style key and its coherence/bounds already work. Ordinary traits are the stronger low-mechanism alternative and should not be dismissed as seven implementations every user must write. A user implements only the desired family.\n\nExecuted on gate-p275. The probe f1.jet prints 21.5, 31 m and 001f. The probe f2.jet executes two From source keys and prints 24.5 and 9. The probe f3.jet fails E0003 for a user keyed trait.\n\nThe probes f4.jet and f5.jet fail E0112 for Hex on a distinct Printable ID and a struct wrapper. These establish current built-in selectors and the extension gap, not either proposed trait's implementation. Compiler/Prelude/Traits.jet:218-235 declares current String-returning Display/Debug; Core/Text/Fmt.jet contains String-returning numeric helpers.\n\nD-OUTPUT-RETURNS1 requires the public result signature. D-EFF-FORMAT-WRITER1 already specifies which String-building bodies and immediate destinations avoid a whole-result temporary, and explicitly retains an ordinary wrapper for saved values and unlisted bodies. A hidden return pointer alone does not eliminate a String's backing allocation.\n\nReuse that exact closed rule, including alias, effect, padding, failure and separate-compilation behavior; do not replace it with 'every return appends to the caller'. D-ALLOC-FAIL1=C requires recoverable allocation failure, including implicit text allocation; neither new trait may assert Never! merely because today's Fmt helpers do. No allocator-call count or performance superiority was measured.\n\nD-PRINTSTYLE1's inherited print settings remain separate from per-type style implementations. Distinct #Printable currently supplies default text, not Hex; neither option silently re-exposes all numeric styles on semantic wrappers. Explicit impls let a units type reject a misleading style. The comparison sources were read: Rust std::fmt::LowerHex and Python's datamodel __format__ (which must return str).",
       "options": [
         {
           "key": "A",
-          "name": "Ordinary selector-family traits",
-          "detail": "Expose HexFormat, FixedFormat and other existing families as ordinary public traits that append to the destination String.",
-          "technical": "Each family has one method with its checked selector arguments and an output &String parameter, returning Never!. For Hex the method is hex(self,width:Int,out:&String). Interpolation evaluates receiver and selector arguments once, then calls the resolved method on its existing output buffer. Direct calls use that same implementation. Scalar renderers must append directly rather than allocate avoidable per-value temporary Strings; user implementations remain ordinary checked code.\n\nOnly supported families require implementations. Missing styles are type errors, never default-Display fallback or runtime Unsupported. Display and Debug remain the default/debug contracts, without parallel registries. Keep existing Debug/Pretty behavior; padding composes rendered text with the current alignment/count rules. Unit formatting stays attached to quantity/unit declarations. Do not invent numeric conversions while exposing selector dispatch.\n\nPreserve scalar outputs for signed values, widths, precision, negative counts, special floating values and unit/padding combinations. Root every selected body through normal checked calls in every mode. Migrate Core style bodies and delete helper-name routing in one cutover. Generate selector-to-trait documentation, completion and missing-implementation diagnostics. Trait-family names are public API, but the number of existing selector families is finite.\n\nThis contract targets String interpolation, not an arbitrary fallible I/O sink. Streaming to Writer uses ordinary output handling after rendering and can require a full buffer. That is a real limitation relative to Rust's Formatter, not a zero-allocation streaming claim. Do not add an independent formatting trait for the same selector to hide it.",
-          "code": "HexFormat: trait {\n    hex: fn(self, width: Int, out: &String) Never!,\n}\nimpl Distance.HexFormat {\n    hex: fn(self, width: Int, out: &String) Never! {\n        out += \"{self.meters:Hex(width)}\"\n    }\n}"
+          "name": "Ordinary traits for the existing style families",
+          "detail": "HexFormat, BinFormat, OctFormat, FixedFormat, GroupedFormat, SciFormat and PercentFormat each return String. A package implements the families it supports; Core numbers use those same traits.",
+          "technical": "Declare ordinary Prelude traits with distinct methods hex, bin, oct, fixed, grouped, sci and percent. Hex and decimal-style methods take the existing selector's Int count; Bin and Oct have no count. Preserve each selector's current argument validation and numeric behavior. New traits' effect/failure contracts permit the allocation route required by D-ALLOC-FAIL1; implementations may narrow it when proven. No output-only parameter and no public writer trait.\n\nResolve each existing numeric selector to its ordinary trait requirement. Evaluate the value once, then its selector arguments once in source order. A missing implementation is E0112 naming the requirement and showing a manual impl template; never silently use Display or fail at runtime. Generic code uses ordinary single-trait bounds.\n\nConcrete calls resolve statically; trait-value calls use the normal trait call path. No extra style-key column, trait parser exception or per-style compiler helper-name routing survives. Register the selector-to-trait mapping in the existing owned selector registry rather than a second hidden list. This ballot covers the seven existing families, not arbitrary new selector syntax.\n\nDisplay, Debug, Pretty, padding, Unit and computed selector counts keep their own existing meanings. Padding wraps produced text; it is not a numeric style conformance. Distinct wrappers and structs both opt into each supported style explicitly, following ordinary trait coherence and visibility. Default #Printable does not authorize all base styles.\n\nCore migration is one cutover: move existing numeric behavior behind these same traits, delete equivalent type gates/helper dispatch, preserve signs, widths, zero/negative counts, nonfinite values and padding byte for byte. Use D-EFF-FORMAT-WRITER1's existing String lowering and fallbacks, including preserved effect/error order. A saved result remains an ordinary String and may allocate. No universal no-allocation or one-allocator-call guarantee is added.\n\nStyle-polymorphic code needs no keyed trait. A function bound by one style trait names it directly. A function choosing the style at run time takes `fn(T) -> String`, and each style fits it, such as `fn(x: T) -> String { x.hex(4) }`. Function values of that shape work today: probes/fmt-fnvalue.jet passes `fn(x: Int) -> String { \"{x:Hex(4)}\" }` and prints 001f on gate-p277.",
+          "code": "// PROPOSED; the trait permits ordinary allocation failure.\nimpl UserID.HexFormat {\n    hex: fn(self, digits: Int) -> String {\n        \"{self.value:Hex(digits)}\"\n    }\n}"
         },
         {
           "key": "B",
-          "name": "General style-keyed Format trait",
-          "detail": "Add a generic conformance key so one receiver can implement Format independently for several style types.",
-          "technical": "This is a proposed general trait-system extension, not current associated-type syntax. Index conformance by receiver and style; define overlap, inference and dependency identity checks for every such implementation. It shares A's destination-buffer, effect, ownership and unsupported-style rules, so there is no invented runtime penalty.\n\nTyped style records consolidate method naming and support new style families without new trait names. They become public API, and every style still needs a distinct implementation. An unindexed associated Style cannot provide this model. The general trait-system change must land with formatting rather than being deferred or smuggled in as syntactic sugar.",
-          "code": "// Proposed general style-indexed conformance:\nimpl Distance.Format(fmt.Hex) {\n    format: fn(self, style: fmt.Hex, out: &String) Never! {\n        out += \"{self.meters:Hex(style.width)}\"\n    }\n}"
+          "name": "One trait keyed by a style type",
+          "detail": "Format(fmt.Hex) and Format(fmt.Fixed) share a method returning String. Typed style values bundle options and generic code can abstract over the style key.",
+          "technical": "This is a genuine alternative, especially for generic style-polymorphic libraries. It must extend keyed-trait parsing, conformance identity, orphan checks, bounds, diagnostics and dynamic dispatch to Format rather than calling the existing From/arithmetic exceptions general support.\n\nEach concrete pair of value type and style type has one impl; selectors construct the corresponding typed option value and resolve exactly that pair. The same ordinary String failure and lowering contract as A applies. No independent per-style writer API. This ballot does not claim generic keyed traits already compile, or that adding a style metadata flag is cost-free.",
+          "code": "// PROPOSED, not accepted by today's generic trait parser.\nimpl UserID.Format(fmt.Hex) {\n    format: fn(self, style: fmt.Hex) -> String {\n        \"{self.value:Hex(style.digits)}\"\n    }\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "LowerHex is independently implementable and receives the selected formatting options.",
-          "code": "std::fmt::LowerHex::fmt(&self.0, f)",
+          "note": "LowerHex is a separate style trait and writes to Formatter; its no-temporary path is a strong design, but the owner rejected that public signature for Jet.",
           "source": "https://doc.rust-lang.org/std/fmt/trait.LowerHex.html"
+        },
+        {
+          "lang": "Python",
+          "note": "__format__ returns str. Its open string specification is flexible but does not statically prove a type supports a style.",
+          "source": "https://docs.python.org/3/reference/datamodel.html#object.__format__"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Ordinary family traits already express independent capabilities. They avoid adding generalized trait indexing just to expose existing selectors.",
+        "why": "Use ordinary traits for today's distinct style families; do not add keyed conformance merely to avoid several trait names.",
         "gains": [
-          "Package and Core types share checked dispatch.",
-          "No mandatory per-value String return."
+          "Direct answer to the owner: returns text, never an output argument.",
+          "Package and Core formatting use the same trait path and existing String execution law."
         ],
         "losses": [
           {
-            "loss": "Each selector family needs a public trait and migration documentation.",
-            "mitigation": "Generate family documentation/completion from the selector mapping and migrate all scalar bodies with output-compatibility cases."
+            "loss": "Several named style traits instead of one style-polymorphic key.",
+            "mitigation": "Completion lists only the selected family's requirement; implement only supported styles. Generic code requesting Hex needs one ordinary bound, not all seven."
           },
           {
-            "loss": "The destination is String, not a general fallible streaming sink.",
-            "mitigation": "Write directly into interpolation's buffer; use ordinary Writer error handling when delivering the completed text."
+            "loss": "Generic code cannot take any style as one type parameter.",
+            "mitigation": "Code that must choose a style at run time takes a text function such as fn(x: T) -> String { x.hex(4) }. Every style fits that one shape, with no new trait machinery."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A coherent extensible model, but requires general conformance indexing and coherence rules that do not exist today."
+            "reason": "Useful for style-polymorphic code, but requires extending specialized keyed dispatch; the probe does not establish that machinery for arbitrary traits."
           }
         ],
-        "tradeoff": "More trait names instead of a larger trait-system feature."
+        "tradeoff": "B offers more generic style abstraction; A minimizes new conformance machinery. Neither makes allocating String results free."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Rejected the claimed existing style-indexed implementation pattern with a probe and changed the recommendation to ordinary family traits. Added direct buffer output, Rust's sink advantage, streaming limitations and full selector migration costs."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post with ordinary per-style traits as A, returning String with no output argument, and with no performance or implementation-success claim."
       },
-      "checkInstructions": "Gate-p261 probes cover scalar/custom selector behavior, rejected style-indexed conformance and a working local family trait writing &String. Interpolation integration remains proposed. Acceptance covers missing implementations, evaluation order, mutable output borrowing, scalar output compatibility, signed/special values, counts, Debug/Pretty, padding, units, reachability and removal of helper-name routes.",
+      "checkInstructions": "Implementation acceptance: same byte output for every old numeric selector, ordinary trait bounds and visibility, missing-style diagnostics, distinct-wrapper opt-in, argument/effect/error order, all D-EFF-FORMAT-WRITER1 closed-rule cases and allocation-failure injection. Do not use a blanket no-allocation test as a substitute for that contract.",
       "surface": {
-        "gist": "Should selectors use ordinary family traits or a new style-indexed trait mechanism?",
-        "lesson": "The proposed indexed syntax is not supported today. Both designs should append to interpolation's buffer, not require per-value String returns.",
+        "gist": "Should package styles use ordinary per-style traits or extend keyed-trait dispatch?",
+        "lesson": "Selectors choose how a value becomes text. Both choices return String. No output argument, public writer, builder type or second streaming trait.",
         "trio": {
           "current": {
-            "note": "Integer Hex works; the selector rejects an ordinary wrapper.",
-            "code": "n: Int{31}\nprint(\"{n:Hex(4)}\")"
+            "note": "Executed: Int 31 prints 001f with Hex(4); a package wrapper fails E0112.",
+            "code": "// probes/f1.jet, f4.jet and f5.jet"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Independent LowerHex implementations receive options and a writable sink.",
-            "code": "std::fmt::LowerHex::fmt(&self.0, f)"
+            "note": "Rust has one trait per style, such as LowerHex, writing into a Formatter.",
+            "code": "impl fmt::LowerHex for UserId {\n    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {\n        fmt::LowerHex::fmt(&self.0, f)\n    }\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Selector-family traits",
-            "gist": "Implement ordinary traits only for supported families; append to the output buffer.",
+            "name": "Ordinary style traits",
+            "gist": "Implement HexFormat, or only the other families your type supports.",
             "gains": [
-              "Existing trait mechanism; no mandatory temporary result."
+              "Ordinary conformance, bounds and dispatch.",
+              "Core numbers use exactly the same route."
             ],
             "losses": [
-              "Public trait names and a complete selector migration."
+              "Several trait names; completion selects the one family needed."
             ],
             "proposed": {
-              "code": "HexFormat: trait {\n    hex: fn(self, width: Int, out: &String) Never!,\n}"
+              "code": "// PROPOSED\nimpl UserID.HexFormat {\n    hex: fn(self, digits: Int) -> String {\n        \"{self.value:Hex(digits)}\"\n    }\n}"
             }
           },
           {
             "key": "B",
-            "name": "Style-indexed Format",
-            "gist": "Authorize a new conformance key for receiver and style.",
+            "name": "One keyed Format trait",
+            "gist": "Format(fmt.Hex) takes a typed style value.",
             "gains": [
-              "Uniform naming and independent typed styles."
+              "Generic code can abstract over a style type."
             ],
             "losses": [
-              "New trait indexing, inference and coherence rules."
+              "Requires extending today's specialized keyed dispatch."
             ],
             "proposed": {
-              "code": "// Proposed, not current syntax:\nimpl Distance.Format(fmt.Hex) {\n    format: fn(self, style: fmt.Hex, out: &String) Never! {\n        out += \"{self.meters:Hex(style.width)}\"\n    }\n}"
+              "code": "// PROPOSED conformance head\nimpl UserID.Format(fmt.Hex)"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Existing family traits solve selector extensibility without a general trait-system extension.",
+          "why": "Simpler machinery for the existing families. The owner chose no output argument, not a keyed trait.",
           "gains": [
-            "One checked dispatch mechanism."
+            "Returns text under the existing String lowering and recoverable-allocation rules."
           ],
           "losses": [
             {
-              "loss": "More public trait names.",
-              "mitigation": "Generate selector documentation and completion; migrate scalar implementations together."
-            },
-            {
-              "loss": "String output is not arbitrary streaming.",
-              "mitigation": "Reuse the interpolation buffer; handle Writer failures when delivering completed text."
+              "loss": "Generic code cannot take any style as one type parameter.",
+              "mitigation": "Such code takes a text function, like fn(x: T) -> String { x.hex(4) }; every style fits it."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Powerful, but requires new conformance rules rather than existing associated types."
+              "reason": "A real stronger generic option, but not existing general trait support."
             }
           ],
-          "tradeoff": "A finite trait family over a new language mechanism."
+          "tradeoff": "Saved text may allocate; hidden return storage alone cannot prevent that."
         }
       },
       "draftedBy": "Main",
       "reviewedBy": "BallotReview2",
       "draft": false,
       "status": "open",
-      "created": "2026-11-17T12:30:50.538Z"
+      "created": "2026-11-17T12:30:50.538Z",
+      "designAway": [
+        "Remove output parameters from every option.",
+        "Reuse the ratified String lowering instead of inventing another writer or promising universal allocation elimination.",
+        "Use ordinary conformance for distinct style meanings; no compiler-only style dispatch privilege for Core.",
+        "Style-polymorphic code takes a text function, so A needs no keyed trait machinery."
+      ]
     },
     {
       "id": "D-BUILTIN-METHOD1",
       "cardId": "c0sdz4q0",
       "group": "language",
-      "title": "Use normal declaration ownership for methods on built-in types",
-      "situation": "String and collection methods can call library code, but the compiler still selects some method bodies through private tables. An ordinary package cannot add the same inherent implementation because built-in receiver types are rejected. This vote chooses where built-in methods are owned and how other packages extend them. We recommend normal ownership and trait rules, not a privileged source-directory exception.",
-      "gist": "How should library methods on built-in types be declared?",
-      "lesson": "A built-in type still needs one owner for inherent methods. Other packages should extend it through ordinary traits, not competing global method tables.",
-      "explainer": "Beginner: existing text and list method calls keep their spelling. Expert: method resolution reaches a checked declaration in the type's owning package; user extensions follow the same trait coherence and ambiguity rules as other types.",
-      "story": "Ivo moves a text method into a library module. Its call should follow the declaration, not depend on a compiler entry spelling that module's old path.",
-      "inWild": "impl Color {\n    pub const WHITE: Color = Color(255, 255, 255);\n}",
-      "detail": "On gate-p261, probes2/builtin-impl.jet rejects inherent impl String with E0301. probes2/builtin-trait.jet defines a local TextMeasure trait on String and prints 8. Thus ordinary trait extension already works; the gate is inherent ownership and removal of private library-body routing, not permission for all builtin extension.\n\nCompiler/JetFoundation/Source/Registry/BuiltinMethods.jet:50 names CoreSource(owner,member); :192-196 routes first_lines and related library methods. probes2/builtin-library.jet calls first_lines(1) and prints [alpha]. String.len at :85 is instead a real intrinsic, so its successful execution cannot establish a library-body route. Compiler/JetSema/Source/Sema/Registration/Items.jet:3018-3045 explicitly permits local traits on builtin receivers.\n\nRust's implementation reference separates same-crate inherent ownership from trait extension and rejects overlapping implementations. It does not demonstrate inherent impl String for an external Rust crate. Jet's primitive-family ownership would be a new type fact, not a Core pathname privilege. Generic lists, fixed arrays, Bytes and byte lists need distinct receiver identities and ordinary bounds; equal-looking method names do not make those types interchangeable.",
+      "title": "Library-written built-in methods use ordinary Core traits, not hidden routing",
+      "situation": "Package traits can already add methods to String, while a plain impl String is rejected. Some built-in method rows route to library bodies by compiler-known module/member names. Simply saying Core owns String does not supply an ordinary declaration or prove ownership from its bundle location. The remaining choice is ordinary traits for library-written methods, authentic declaration ownership, or scoped open extensions.",
+      "gist": "Should Core use ordinary traits for library-written methods on built-in types?",
+      "lesson": "Machine primitives stay behind the ratified jet_builtins boundary. Library-written methods should use the same declaration, lookup and conflict rules as package methods. Keeping a method's name and body does not by itself preserve its lookup behavior.",
+      "explainer": "A moves Core's library methods onto the trait route that package code already uses. Existing call spellings remain through Prelude imports. A duplicate name is a real conflict, not a special built-in tidy warning that still runs.",
+      "story": "A library helper moves between source modules without editing a compiler routing row. A package method with the same name is diagnosed using the same conflict rule as an ordinary user type.",
+      "inWild": "Rust separates owner-only inherent implementations from trait implementations. Inherent ownership is based on a real defining crate, not merely two modules shipping in the same distribution.",
+      "detail": "r2 changes the recommendation completely: r1 B (traits for everyone) becomes A; r1 A (Core-owner inherent methods) becomes B; C remains scoped open extensions. The fresh review disagrees with the claim that A's ownership problem was already engineered away. D-CORE-BUILTINS1 says jet_builtins ships in the Core bundle and declares compiler-provided operations/storage.\n\nIt does not establish that every built-in surface type has an ordinary nominal declaration owned by the Core package. Registering 'Core owns these names' would recreate a privileged compiler list. The ordinary trait route is the strongest demonstrated alternative and needs neither that assertion nor a new ownership binding.\n\nReplayed gate-p275 probes/bm1.jet prints 8 and [alpha] using a String trait and the existing helper. bm2.jet rejects plain impl String with E0301, whose repair does not teach traits. bm4.jet prints [a]: the package trait's first_lines is silently shadowed by the built-in method. bm3.jet reports E0105 and E0772 for the analogous user-type collision. These observations disprove r1's assertion that keeping names/bodies guarantees unchanged lookup.\n\nInspected Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet, including CoreSource routes in the string/regex rows. This ballot does not rely on an unverified census or claim that every other row is intrinsically unexpressible. Inspected Sema/Registration/Items.jet:2785-2812, :2921-2937 and :3087-3135: nominal owner identity and package-member attachment are explicit, while unregistered builtin impl targets have special refusal teaching. Sema/Registration/BuiltinOwners.jet describes Task/Receiver/Sender identity facts, explicitly not invented source nominal declarations; it does not establish ordinary String ownership.\n\nD-EXTEND-ARCH1 requires library extension through ordinary declarations, not hidden library-name powers. D-CORE-BUILTINS1 keeps genuinely compiler-provided operations at one typed kernel door; D-CORE-SOURCE-AUTHORITY1 keeps expressible behavior in source. D-TEXT-FIXED1's public String verbs and D-BOUND-METHOD1's expected-function-type rule must survive lookup migration. D-NO-WARNINGS1 does not justify a built-in-only ambiguity severity: r1's tidy conflict preserves precisely the unequal lookup mechanism this cutover should remove. Rust's implementation reference was read; no Rust cost or Jet speed-equivalence claim is made.",
       "options": [
         {
           "key": "A",
-          "name": "Normal owned inherent implementations",
-          "detail": "Allow builtin inherent methods in their canonical owning package; preserve ordinary trait extension elsewhere.",
-          "technical": "Assign each intrinsic family an unforgeable owning-package identity alongside its type identity. User annotations cannot claim ownership. Apply the same inherent ownership check to nominal and intrinsic types, not a Core directory/name exception. Moving a module inside its owning package preserves ownership; moving across packages is an explicit ownership/API migration.\n\nSupport bounded generic list and fixed-array family declarations with checked receiver borrowing and ordinary overlap rules. Their exact declaration spelling is proposed, not proved by the String probe. Keep Bytes distinct where the language does. Existing local-trait extension remains available outside the owning package. Reject competing inherent declarations, overlap and attempted primitive overrides with both declaration locations.\n\nMigrate every library-bodied CoreSource row to checked declarations and remove its backend route. Preserve current public method spelling, effects, errors and lookup precedence. True representation operations remain declared intrinsics; do not rewrite memory primitives as Jet loops. Root methods through ordinary dependency reachability in every mode. Editor completion, go-to-definition and docs must point to the owning declaration. New inherent names can conflict with extension traits; diagnose ambiguity rather than silently changing an existing call target.",
-          "code": "// Proposed: canonical owning package only.\nimpl String {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+          "name": "Ordinary traits for Core library methods",
+          "detail": "Core declares traits for its library-written built-in methods, implements them normally and re-exports them through the Prelude. Package traits use the same lookup path; no CoreSource routing remains.",
+          "technical": "Group related library methods into ordinary public Core traits; do not create a trait per individual method without a semantic reason. The declaring Core module owns each trait and can implement it for a built-in type under the local-trait rule demonstrated for String. Prelude supplies the traits so existing call spellings need no extra imports. Genuine primitive operations remain typed jet_builtins operations; source methods call them through the ratified boundary. Do not keep a hidden compiler method alias beside the trait.\n\nString support is demonstrated, not every generic family. For lists and fixed arrays, extend the ordinary impl target reader to structural type heads: proposed impl [T].SequenceTools and impl [T#N].SequenceTools. The canonical built-in family declares its parameter roles/order (T is a type, N a compile-time extent); these names bind in the target exactly as parameters of a nominal conditional impl. Bounds attach to those parameters under D-IMPL-COND1; concrete-head specialization and overlapping impls remain illegal.\n\nThis is public, registered impl-target grammar available to any local trait owner, not a Core-only owner list or a claim that structural impls already parse. Sized lanes and other canonical families use their existing type-head parameter order; native sizeless restrictions remain in force. Register structural targets and fixture every supported family before removing its library route. Bytes retains its own type identity, never silently becomes a list alias.\n\nMigrate every CoreSource method with its exact parameter/result/effect/failure/default and visibility contract, then delete that enum case and each backend/reachability routing branch. Audit other rows by source-expressibility under the existing source-authority law rather than assuming not-CoreSource means machine-only. The remaining kernel list may describe machine operations, not destinations in Core library code. Root ordinary trait bodies through ordinary reachability in every tier; docs and definition links point at the source declaration.\n\nUse the ordinary user-type duplicate/ambiguous-member rule for all built-in and user methods. Report both declarations before execution; no built-in-only tidy severity, silent builtin precedence or second suppression mechanism. Resolve conflicts by explicit source changes such as renaming the local trait method; do not advertise an unverified qualified-call spelling. Existing ambiguous programs need an explicit migration decision.\n\nToday the built-in method wins, so renaming the shadowed package trait method and its references preserves every current call. The migrator offers that rename as one selectable edit. Matching names/bodies are insufficient: fixtures must pin receiver resolution, defaults, imports, generic bounds and bound-method values. Safe edits fix only a proven equivalent resolution, never guess intended behavior.\n\nE0301 for a package's plain impl builtin explains the local-trait path and offers a named-trait conversion as a selectable rewrite only after collision checks and preserving method contracts. Public helper trait names become API and need stable documentation. No claim that generated calls are byte-for-byte identical or that metadata costs zero bytes; concrete dispatch follows ordinary trait rules and delivery compares actual outputs, effects and emitted footprint.",
+          "code": "// Existing String trait mechanism; probes/bm1.jet.\nTextMeasure: trait { double_len: fn(self) -> Int Never!, }\nimpl String.TextMeasure {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
         },
         {
           "key": "B",
-          "name": "Trait extensions only",
-          "detail": "Keep inherent methods as true intrinsics; move library-bodied methods to ordinary public traits.",
-          "technical": "Local-trait implementation on String is already supported, as the executable probe shows. Use that ordinary conformance/coherence mechanism for library methods, including generic bounds. Common traits may be exported through the ordinary prelude, so callers need not always add imports. There is no necessary runtime dispatch or allocation penalty: statically resolved traits can use direct calls.\n\nMigrate every CoreSource route and root the checked method body just as A does. More public capability names and possible trait-name collisions are real costs, not mandatory per-call ceremony. Use ordinary qualified calls and ambiguity diagnostics; never add a file-path-based automatic trait inventory.",
-          "code": "TextMeasure: trait { double_len: fn(self) -> Int Never!, }\nimpl String.TextMeasure {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+          "name": "Authentic owner declarations and inherent methods",
+          "detail": "Bind each built-in surface type to an actual source owner, then use ordinary owner-only inherent methods. Packages still use traits.",
+          "technical": "Strongest benefit: inherent library methods require no additional public helper traits and look like ordinary methods of a source type. But the owner must be a real declaration/identity in the resolved graph, not 'belongs to Core because bundled'. Kernel storage in jet_builtins and a public facade are different roles; a complete typed declaration binding must preserve primitive representation, generic families, exports and ownership without a name whitelist.\n\nThis is additional design/implementation, not established by the current E0301 probe. No independently maintained owner list or per-method routing may survive. Same hard conflict rule and migration requirements as A. Until such declarations exist, do not describe impl String inside arbitrary Core modules as ordinary code that already works.",
+          "code": "// PROPOSED, requires a genuine owner declaration first.\nimpl String {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Scoped open extensions",
+          "detail": "Any package may extend an imported type; imported extensions are considered at calls. This avoids Core ownership privilege and can be pleasant for local helpers.",
+          "technical": "Would amend the present builtin impl restriction. Define extension visibility by explicit imports; diagnose multiple matching members before execution using the same ambiguity mechanism. Needs a concrete disambiguation/migration design before selection, not a vague promise that qualification will solve every collision. It is not recommended here because ordinary local traits already support extensions while giving them an explicit semantic contract.",
+          "code": "// PROPOSED scoped open impl, not accepted today.\nimpl String {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "Inherent implementations belong to the type's crate; traits provide checked extension.",
-          "code": "impl Color { pub const WHITE: Color = Color(255, 255, 255); }",
-          "source": "https://doc.rust-lang.org/reference/items/implementations.html#inherent-implementations"
+          "note": "Owner-only inherent impls and trait impls are distinct; source ownership must actually exist.",
+          "source": "https://doc.rust-lang.org/reference/items/implementations.html"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Basic library methods can follow the type's ordinary ownership without creating public extension traits solely to replace private routing rows.",
+        "why": "Use the ordinary extension mechanism that is demonstrated to work, rather than invent an ownership fact from a bundle path.",
         "gains": [
-          "Checked declarations own library bodies.",
-          "External extensions retain ordinary traits."
+          "Core and packages share trait lookup and conflict handling.",
+          "Library destinations disappear from the compiler's method-routing table."
         ],
         "losses": [
           {
-            "loss": "Intrinsic families need explicit ownership and family-implementation support.",
-            "mitigation": "Store ownership with type identity and require bounded generic/overlap cases before deleting routing rows."
+            "loss": "Core helper trait names become public API.",
+            "mitigation": "Group by real contracts, re-export through Prelude to preserve calls, and document stable traits rather than expose a second hidden dispatch path."
           },
           {
-            "loss": "Method migration can change lookup or collide with extension traits.",
-            "mitigation": "Preserve resolved targets during cutover and diagnose conflicts with both source locations; update callers and tooling together."
+            "loss": "Existing silent builtin/trait collisions become hard errors.",
+            "mitigation": "The error names both declarations, with the same rule for all types. Renaming the shadowed package method keeps today's resolution, so the migrator offers it as one selectable edit."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Already works for local traits and can avoid imports through the prelude, but adds public capability names for basic library methods."
+            "reason": "Attractive once authentic owner declarations exist; current evidence does not establish them and a bundle is not a declaration."
+          },
+          {
+            "key": "C",
+            "reason": "Convenient local syntax, but adds import-sensitive open-member resolution when ordinary traits already provide extensions."
           }
         ],
-        "tradeoff": "New primitive ownership facts rather than additional public extension traits."
+        "tradeoff": "A adds explicit helper contracts; B needs genuine type ownership. Neither earns a free lookup-preservation claim."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Proved local-trait extension already works and distinguished a running CoreSource method from intrinsic len. Removed mandatory import/runtime penalties from the trait alternative and named generic-family, lookup, tooling and migration costs."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post with Prelude-imported Core traits as A and hard, uniform collisions, as a lookup cutover, not a binary-cost win."
       },
-      "checkInstructions": "Gate-p261 probes cover inherent rejection, successful local-trait extension, a routed library method and intrinsic lengths. Proposed inherent-family ownership is not current support. Acceptance covers same-owner moves, cross-owner rejection, generic lists/fixed arrays, distinct Bytes identity, overlap, trait ambiguity, effect/borrow contracts, preserved lookup, go-to-definition and reachability in every mode.",
+      "checkInstructions": "Implementation acceptance pins every migrated member's result, effects, failure, defaults and import behavior. Conflicts are hard and identical to user types. It covers ordinary trait bounds, bound-method values, all tiers and source definition links. It also requires deletion of CoreSource routing, honest primitive and source classification, and an emitted-footprint comparison. No build or suite was run.",
       "surface": {
-        "gist": "Should builtin library methods use ordinary owned inherent declarations or public traits?",
-        "lesson": "Local-trait extension already works on String. The missing part is inherent ownership and replacing private library-body routes.",
+        "gist": "Should Core use ordinary traits for library-written methods on built-in types?",
+        "lesson": "Library code should use ordinary declarations and conflicts. A bundle location does not establish a type's owner; names and bodies alone do not preserve lookup.",
         "trio": {
           "current": {
-            "note": "The library-routed method runs; inherent impl String is rejected.",
-            "code": "print(\"alpha\\nbeta\".first_lines(1))\n// impl String produces E0301."
+            "note": "Executed: String trait methods work; plain impl String fails; builtin collisions silently shadow while user-type collisions error.",
+            "code": "// probes/bm1.jet through bm4.jet"
           },
           "wild": {
             "lang": "Rust",
-            "note": "Inherent ownership and trait extension are distinct checked rules.",
-            "code": "impl Color { pub const WHITE: Color = Color(255, 255, 255); }"
+            "note": "Rust adds methods to String only through a trait; inherent impls need the defining crate.",
+            "code": "trait TextMeasure { fn double_len(&self) -> usize; }\nimpl TextMeasure for String {\n    fn double_len(&self) -> usize { self.len() * 2 }\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Owned inherent methods",
-            "gist": "Give intrinsic families canonical owners and use normal method ownership.",
+            "name": "Core traits too",
+            "gist": "Prelude imports ordinary helper traits; remove hidden library routing.",
             "gains": [
-              "No Core-path privilege or extra public capability names."
+              "Same demonstrated extension/lookup path as packages."
             ],
             "losses": [
-              "New family ownership and generic declaration support."
+              "Stable public helper trait names; group related methods and preserve call spellings."
             ],
             "proposed": {
-              "code": "// Proposed: owning package only.\nimpl String {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+              "code": "TextMeasure: trait { double_len: fn(self) -> Int Never!, }\nimpl String.TextMeasure {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
             }
           },
           {
             "key": "B",
-            "name": "Ordinary public traits",
-            "gist": "Use the already working local-trait extension route for library methods.",
+            "name": "Genuine owners, then inherent impls",
+            "gist": "Needs actual source declarations, not a Core-name whitelist.",
             "gains": [
-              "No new inherent ownership; prelude can avoid caller imports."
+              "No helper traits for owned methods."
             ],
             "losses": [
-              "More public trait names and potential ambiguities."
+              "Ownership/primitive binding is not established by today's probe."
             ],
             "proposed": {
-              "code": "TextMeasure: trait { double_len: fn(self) -> Int Never!, }\nimpl String.TextMeasure {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+              "code": "// PROPOSED after authentic ownership exists\nimpl String {\n    double_len: fn(self) -> Int Never! { self.len() * 2 }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Scoped open extensions",
+            "gist": "Import-visible direct impls from any package.",
+            "gains": [
+              "Convenient local extension syntax."
+            ],
+            "losses": [
+              "New import-sensitive ambiguity contract."
+            ],
+            "proposed": {
+              "code": "// PROPOSED; same method body as B."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Make library bodies ordinary owned methods, without inventing public traits solely to replace routing rows.",
+          "why": "Prefer ordinary demonstrated traits to a fabricated ownership fact.",
           "gains": [
-            "One ownership rule."
+            "One hard conflict mechanism for all types."
           ],
           "losses": [
             {
-              "loss": "New ownership facts need support.",
-              "mitigation": "Bind them to type identity; cover generic families and overlap."
-            },
-            {
-              "loss": "Cutover risks lookup changes.",
-              "mitigation": "Preserve resolved targets, diagnose collisions and update tooling together."
+              "loss": "Programs whose package method was silently shadowed now fail to compile.",
+              "mitigation": "The error names both methods; renaming the shadowed package method keeps today's calls and is offered as one edit."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Strong and already usable, but introduces additional public capability names."
+              "reason": "Real owner declarations remain prerequisite."
+            },
+            {
+              "key": "C",
+              "reason": "Adds a member-resolution mechanism."
             }
           ],
-          "tradeoff": "Ownership work instead of more extension traits."
+          "tradeoff": "No compiler library-name routing, no promised zero-byte migration."
         }
       },
       "draftedBy": "Main",
       "reviewedBy": "BallotReview2",
       "draft": false,
       "status": "open",
-      "created": "2026-11-17T12:30:56.457Z"
+      "created": "2026-11-17T12:30:56.457Z",
+      "designAway": [
+        "Use existing local traits rather than a privileged built-in owner list.",
+        "Delete equivalent hidden routing in one cutover.",
+        "Make conflicts hard and uniform; no built-in-specific tidy escape.",
+        "Preserve resolved behavior with migration fixtures, not a names-and-bodies argument.",
+        "Renaming the shadowed package method preserves today's calls, so each collision gets a one-step migration."
+      ]
     },
     {
       "id": "D-COMPTIME-HOST1",
@@ -214674,9 +214707,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Why the fuck do you have an output as a function argument. This isn’t c++,",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-17T13:28:10.518Z"
+      "status": "answered",
+      "answer": "You're right; the output argument is gone. D-FORMAT-TRAIT1's recommendation is now one Core trait, Format(Style), keyed like From, whose method returns a String: format: fn(self, style: fmt.Hex) -> String. That follows ratified D-OUTPUT-RETURNS1. Interpolation such as \"{d:Hex(4)}\" writes straight into the string being built, so no temporary String is made, and no user ever writes or sees an out-parameter. Generic code that needs to be style-agnostic takes an ordinary text function, fn(x: T) -> String { x.hex(4) }, so it needs no second trait. The ballot has been redone and passed a fresh adversarial review.",
+      "created": "2026-11-17T13:28:10.518Z",
+      "answeredAt": "2026-11-17",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -215509,6 +215544,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T21:41:02.023Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q5xewxmx",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:40.787Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-BUILTIN-METHOD1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:37.008Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ITERATOR-FAIL1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:32.560Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-HOOK-POINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:28.059Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ARRAY-MATRESIZE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:24.923Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-ARRAY-CONVERT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:20.627Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-FORMAT-TRAIT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:40:16.752Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-17T21:39:26.931Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T21:39:24.922Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m4deiq",
+      "note": "#4"
+    },
     {
       "at": "2026-11-17T21:36:33.828Z",
       "by": "Main",
