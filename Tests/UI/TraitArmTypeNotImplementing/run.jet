@@ -1,0 +1,26 @@
+// E0305: `Rect` never opted into `Shape`, so a `Shape` value can never
+// hold one and the arm could never match.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Square: struct {
+    side: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Rect: struct {
+    w: Int,
+}
+
+describe: fn(s: Shape) {
+    if s == {
+        .Rect(_) -> print("a rect")
+        else -> print("area {s.area()}")
+    }
+}
+
+run: fn() { describe(Square{side: 2}) }

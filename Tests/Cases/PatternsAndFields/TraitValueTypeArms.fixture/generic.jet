@@ -1,0 +1,30 @@
+// An arm over a trait value spells a generic type's arguments as type
+// position does: `.Box<Int>(b)` binds `b` as a `Box<Int>`. A generic
+// owner's implementation of a trait serves each instance a trait value
+// holds: a call through the trait value runs it for that instance, and the
+// last owner drops the instance's payload.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Box: struct<T> {
+    value: T,
+
+    impl Shape {
+        area: fn(self) -> Int { 1 }
+    }
+}
+
+size: fn(s: Shape) -> Int {
+    if s == {
+        .Box<Int>(b) -> b.value + 1
+        else -> s.area()
+    }
+}
+
+run: fn() {
+    print(size(Box<Int>{value: 3}))
+    print(size(Box<String>{value: "a"}))
+    shapes: [Shape]{Box<String>{value: "b"}, Box<Int>{value: 4}}
+    loop s in shapes -> print(s.area() + size(s))
+}

@@ -1,0 +1,27 @@
+// A package's own marker and the diagnostic it refuses code with. `#Served`
+// takes the route a function answers; a route that doesn't start at the site
+// root is refused with `BadPath`, whose texts are the package's own.
+BadPath: struct {
+    name: String,
+    path: String,
+
+    impl Diagnostic {
+        what: fn(self) -> String { "`{self.name}` serves `{self.path}`, not an absolute path" }
+
+        why: fn(self) -> String { "a route path starts at the site root" }
+
+        fix: fn(self) -> String { "write `{self.name}`'s route with a leading `/`" }
+    }
+}
+
+Served: struct {
+    path: String,
+
+    impl Marker {
+        sites: [.Function],
+
+        expand: fn(self, target: Target) {
+            if !self.path.starts_with("/") -> reject(BadPath{name: target.name, path: self.path})
+        }
+    }
+}

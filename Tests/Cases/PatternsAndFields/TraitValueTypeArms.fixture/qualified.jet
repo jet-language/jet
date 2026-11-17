@@ -1,0 +1,21 @@
+// An arm names another module's type through that module, as type position
+// does: `.geo.Point(p)` is geo's Point, beside this module's own `Point`.
+use geo
+
+Point: struct {
+    z: Int,
+}
+
+show: fn(item: geo.Named) {
+    if item == {
+        .geo.Point(p) -> print("geo point {p.x}")
+        else -> print("other {item.name()}")
+    }
+}
+
+run: fn() {
+    show(geo.Point{x: 7})
+    show(geo.Line{length: 2})
+    mine: Point{z: 1}
+    print(mine.z)
+}

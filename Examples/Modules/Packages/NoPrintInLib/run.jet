@@ -1,0 +1,34 @@
+// A package lint is checked code that listens to the compiler. The `lints`
+// package declares the finding `NoPrintInLib` and the group that reports
+// it; this library, `textkit`, opts in from its own build, once. The group's
+// call watch hears calls of the resolved `print` function written in
+// textkit's own source, so of the three calls spelled `print` below only
+// `trace`'s is a finding. `pretty.print` is another function, and `banner`'s
+// own `print` belongs to that package, which never opted in. The finding is
+// Tidy: a run (the o0 tier) never stops for it, and a build (o1, o2) fails
+// with that one report.
+use {
+    banner
+    lints
+}
+
+pretty: module {
+    print: fn(text: String) -> String { "[ {text} ]" }
+}
+
+boxed: fn(text: String) -> String { pretty.print(text) }
+
+announce: fn(text: String) { banner.shout(text) }
+
+trace: fn(text: String) { print("textkit: {text}") }
+
+build: fn(b: Build) {
+    app: b.add_executable("textkit", ["run.jet"], [])
+    lints.install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() {
+    trace(boxed("ready"))
+    announce("done")
+}

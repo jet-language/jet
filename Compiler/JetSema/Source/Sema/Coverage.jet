@@ -462,6 +462,17 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
         }
     }
     subject_ty: sema_pattern_unwrap_tags(table.subject.ty)
+    // A trait value may hold any type that implements its trait, and a
+    // module can always add one, so no list of type arms covers it.
+    if subject_ty == .TraitObject(bounds) {
+        shown: bounds.join(" + ")
+        if multi_head {
+            diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every `{shown}` value — it needs a head that takes any `{shown}`", "a `{shown}` value may hold any type that implements `{shown}`, so type heads can't list them all", "add a head that binds the `{shown}` value without testing its type"))
+            return
+        }
+        diagnostics.push(sema_error("E0307", span, "this `if` over a `{shown}` value has no `else` arm", "a `{shown}` value may hold any type that implements `{shown}`, so type arms can't list them all", "add `else -> {{ … }}` after the last arm"))
+        return
+    }
     matrix := false
     loop shape in table.shapes {
         if sema_pattern_matrix_needed(shape) -> matrix = true

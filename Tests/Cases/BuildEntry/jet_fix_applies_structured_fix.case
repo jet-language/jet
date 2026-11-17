@@ -1,0 +1,33 @@
+# A Diagnostic's `tier` and `structured_fix` are two values, and `fix` stays
+# the help text. The `.Tidy` finding fails `jet build` but not `jet run`, and
+# its `fix` text is printed as written. Plain `jet fix` leaves the
+# behaviour-changing rewrite for review. `jet fix --all` applies the
+# `syntax.rewrite` at each reported call: the call calls `note` and keeps its
+# argument subtree as written. The fixed file builds without the finding.
+fixture: JetFixAppliesStructuredFix.fixture
+env: NO_COLOR=1
+step: jet build main.jet
+exit: nonzero
+stderr: ~ "Error [mypkg.NoPrintInLib]: Library code prints to the terminal" # the package code
+stderr: ~ "Fix: Write the message to stderr with `note`" # the literal help text
+stderr: ~ "2 problems found" # one finding per print call
+step: jet run main.jet
+exit: 0
+stdout: = "hello, ADA\nada x3\n" # a Tidy finding never stops a run
+step: jet fix main.jet
+exit: 0
+stderr: ~ "no changes made (2 suggestions need review)" # a rewrite changes behaviour, so it waits for --all
+file: main.jet ~ "    print(greet(name.to_upper()))" # untouched
+step: jet fix --all main.jet
+exit: 0
+stderr: ~ "applied 2 fixes" # one edit per reported call
+file: main.jet ~ "    note(greet(name.to_upper()))" # the nested argument is kept as written
+file: main.jet ~ "    note(\"{name} x{times + 1}\")" # and so is the interpolated one
+file: main.jet !~ "    print(" # no reported call is left
+step: jet build main.jet
+exit: 0
+stderr: !~ "mypkg.NoPrintInLib" # the fixed file raises no finding
+step: jet run main.jet
+exit: 0
+stdout: = ""
+stderr: = "hello, ADA\nada x3\n" # the output now goes through `note`

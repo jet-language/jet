@@ -1,14 +1,14 @@
 // Two modules declare `Point` and none is in scope, so `Point` names no
 // type here; over each union the arm names that union's one member with
 // that leaf, geo's in the first test and geo2's in the second.
-use geo
-use geo2
+use {
+    geo
+    geo2
+}
 
 both: fn(a: Int | geo.Point, b: Int | geo2.Point) {
     if a == .Point(p) -> print("first arm binds {p}")
     if b == .Point(p) -> print("second arm binds {p}")
 }
 
-run: fn() {
-    both(geo.Point{x: 1}, geo2.Point{x: 2, y: 3})
-}
+run: fn() { both(geo.Point{x: 1}, geo2.Point{x: 2, y: 3}) }

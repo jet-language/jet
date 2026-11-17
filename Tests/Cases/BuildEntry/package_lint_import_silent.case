@@ -1,0 +1,29 @@
+# Importing a package never turns its lints on, and a lint costs the program
+# nothing. `app`'s root build enables the `lints` group once
+# (`lints.install(meta)`), so `jet build` reports the one `print` in app's
+# own source. `quiet` imports `lints` and calls `print` too, but never enables
+# the group: its build is silent. In both programs `greet`'s print is a direct
+# write, with no hook dispatch: the IR carries no part of the group (its
+# install, handler or finding) and no event dispatch.
+fixture: MetaLintGroupEnabledOnce.fixture
+env: NO_COLOR=1
+step: jet build app/main.jet
+exit: nonzero
+stderr: ~ "Error [lints.NoPrintInLib]" # the root enabled the group
+stderr: ~ "main.jet:3" # at app's own print
+stderr: ~ "1 problem found" # once: the dependency's own print is not heard
+step: jet build quiet/main.jet
+exit: 0
+stderr: !~ "NoPrintInLib" # importing the package left its group off
+step: jet emit --ir quiet/main.jet
+exit: 0
+stdout: ~ "call_runtime jet_term_write_stdout_line" # greet's print writes directly
+stdout: !~ "lints.jet::install" # no lint group code
+stdout: !~ "NoPrintInLib" # and no finding
+stdout: !~ "event" # and no hook dispatch
+step: jet emit --ir app/main.jet
+exit: 0
+stdout: ~ "call_runtime jet_term_write_stdout_line" # the enabled lint changes no call either
+stdout: !~ "lints.jet::install" # its group runs while compiling, not in the program
+stdout: !~ "NoPrintInLib" # no finding value is built
+stdout: !~ "event" # no hook dispatch

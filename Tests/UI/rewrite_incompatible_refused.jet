@@ -1,0 +1,54 @@
+// @programmable_build
+// @cli_build
+// `syntax.rewrite` checks its replacement against the resolved callee where
+// the finding is reported. A call keeps its arguments and its use of the
+// result, so a replacement must take what `print` takes and return what it
+// returns: `count` takes an Int, and `tally` returns one. The build refuses
+// both rewrites (E1135) and raises neither finding.
+PrintsNumbers: struct {
+    impl Diagnostic {
+        code: "mypkg.PrintsNumbers",
+        tier: .Tidy,
+        structured_fix: syntax.rewrite(callee: print, replacement: count),
+
+        what: fn(self) -> String { "library code prints to the terminal" }
+
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
+        fix: fn(self) -> String { "count the message instead" }
+    }
+}
+
+PrintsTallies: struct {
+    impl Diagnostic {
+        code: "mypkg.PrintsTallies",
+        tier: .Tidy,
+        structured_fix: syntax.rewrite(callee: print, replacement: tally),
+
+        what: fn(self) -> String { "library code prints to the terminal" }
+
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
+        fix: fn(self) -> String { "tally the message instead" }
+    }
+}
+
+count: fn(n: Int) -> Int { n + 1 }
+
+tally: fn(text: String) -> Int { text.count_bytes() }
+
+shout: fn(text: String) { print(text) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["rewrite_incompatible_refused.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, fn(event) {
+        if event == .Checked(.Call(c)) {
+            meta.report(PrintsNumbers{}, at: c)
+            meta.report(PrintsTallies{}, at: c)
+        }
+    })
+    b.default(app)
+}
+
+run: fn() { shout("hi") }

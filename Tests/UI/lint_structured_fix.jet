@@ -1,0 +1,37 @@
+// @programmable_build
+// @cli_build
+// A package lint is a Diagnostic value: its nested `impl Diagnostic`
+// gives the package code, the `.Tidy` tier and a `structured_fix` beside the
+// literal what, why and fix texts. The root build's `print` watch raises it
+// at each resolved `print` call. A Tidy finding fails `jet build`, and its
+// Fix line is the `fix` text as written; the `syntax.rewrite` edit is a
+// separate value that `jet fix --all` applies (jet_fix_applies_structured_fix).
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "mypkg.NoPrintInLib",
+        tier: .Tidy,
+        structured_fix: syntax.rewrite(callee: print, replacement: note),
+
+        what: fn(self) -> String { "library code prints to the terminal" }
+
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
+        fix: fn(self) -> String { "write the message to stderr with `note`" }
+    }
+}
+
+// Library output: a line on stderr, which the caller can redirect.
+note: fn(text: String) { eprint(text) }
+
+shout: fn(text: String) { print("{text}!") }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["lint_structured_fix.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, fn(event) {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout("hi") }

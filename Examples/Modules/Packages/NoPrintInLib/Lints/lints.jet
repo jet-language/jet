@@ -1,0 +1,22 @@
+// A package lint group. A root build enables it once with
+// `lints.install(meta)`; its call watch hears each checked call of the
+// resolved `print` in that root package's own source and reports the Tidy
+// finding there, which fails `jet build` and never stops a run.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "lints.NoPrintInLib",
+        tier: .Tidy,
+
+        what: fn(self) -> String { "library code prints to the terminal" }
+
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+
+        fix: fn(self) -> String { "return the text, or write it to stderr" }
+    }
+}
+
+install: fn(meta: Compiler) {
+    meta.events(watch: .Calls{to: print}, fn(event) {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+}
