@@ -346,6 +346,12 @@ IRFunction: struct {
     // body (Build.jet ir_entry_check), -1 for none. ir_recursion_checks
     // keeps that check only in a recursive body and resets this to -1.
     entry_check: Int{-1},
+    // Whether x86-64 selection starts the body with the stack check that
+    // grows the stack onto a new segment (X64Select.jet ir_x64_stack_check,
+    // JetRuntime StackSegment.jet): set by ir_recursion_checks for a body on
+    // a call cycle (through a function value's call too), in a module with
+    // stop points.
+    stack_check: Bool{false},
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into

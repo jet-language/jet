@@ -182,6 +182,12 @@ dwarf_cfa_offset: fn(cfi: &[U8], reg: Int, factored: Int) Never! {
     dwarf_uleb(cfi, factored)
 }
 
+// `reg` holds its caller's value (DW_CFA_same_value).
+dwarf_cfa_same_value: fn(cfi: &[U8], reg: Int) Never! {
+    dwarf_u8(cfi, 0x08)
+    dwarf_uleb(cfi, reg)
+}
+
 dwarf_cfa_remember_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0a) }
 
 dwarf_cfa_restore_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0b) }

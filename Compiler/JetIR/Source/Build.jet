@@ -3046,7 +3046,14 @@ ir_entry_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 // A call through a function value (CallIndirect) counts as a call of every
 // function whose address the module takes (FunctionAddress), through one
 // extra node after the functions. Every other body's entry check goes
-// before any pass reads the module, and every body's index is reset. Each
+// before any pass reads the module, and every body's index is reset. In a
+// module with stop points (whose bodies run on threads the runtime attached)
+// the same cycles mark the bodies that start with the stack check
+// (IRFunction.stack_check): only the bodies on a cycle, so a leaf, a body
+// that only calls the runtime, and one that calls through a function value
+// whose callees never call back take none. Every function value's callee
+// is taken here: closures, adapters, release helpers and runners all store
+// a FunctionAddress, and static data holds no function's address. Each
 // body's calls and, once the cycles are known, its removal read only its
 // own instructions, so the functions split into consecutive parts
 // (compiler_threads_partition by size), at most `workers` of at least
@@ -3070,7 +3077,7 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
         if f.entry_check >= 0 -> checked = true
         weights.push(1 + f.op.len())
     }
-    if !checked {
+    if !checked && !m.stop_points {
         return
     }
     bounds: compiler_threads_partition(weights, workers)
@@ -3084,7 +3091,7 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
             rows.push(row)
         }
         rows.reverse()
-        parts.push(IRRecursionPart{functions: rows.move(), start: bounds[part], calls: [Int]{}, ends: [Int]{}, taken: [Int]{}})
+        parts.push(IRRecursionPart{functions: rows.move(), start: bounds[part], stacks: m.stop_points, calls: [Int]{}, ends: [Int]{}, taken: [Int]{}})
         part -= 1
     }
     parts.reverse()
@@ -3112,13 +3119,15 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
 }
 
 // One thread's functions of ir_recursion_checks, in order, from function
-// `start`: per function the functions it calls (calls[ends[row - 1]..<
-// ends[row]], from 0 for the first; the module's function count stands for
-// a call through a function value), and the functions whose address any of
-// them takes.
+// `start`, and whether they take stack checks (the module's stop points):
+// per function the functions it calls (calls[ends[row - 1]..<ends[row]],
+// from 0 for the first; the module's function count stands for a call
+// through a function value), and the functions whose address any of them
+// takes.
 IRRecursionPart: struct {
     functions: [IRFunction],
     start: Int,
+    stacks: Bool,
     calls: [Int],
     ends: [Int],
     taken: [Int],
@@ -3143,7 +3152,7 @@ ir_recursion_walks: fn(count: Int, recursive: [Bool], parts: &&[IRRecursionPart]
 }
 
 // One part's walk: its functions' calls while `recursive` is empty, else
-// the removal of their entry checks.
+// their stack checks and the removal of their entry checks.
 ir_recursion_part: fn(count: Int, recursive: [Bool], part: &&IRRecursionPart) -> IRRecursionPart Never! {
     walked := part.move()
     start: walked.start
@@ -3154,7 +3163,7 @@ ir_recursion_part: fn(count: Int, recursive: [Bool], part: &&IRRecursionPart) ->
             walked.ends.push(walked.calls.len())
             next
         }
-        ir_recursion_entry(walked.functions[row], recursive, start + row)
+        ir_recursion_entry(walked.functions[row], recursive, start + row, walked.stacks)
     }
     walked
 }
@@ -3174,9 +3183,11 @@ ir_recursion_calls: fn(f: IRFunction, count: Int, calls: &[Int], taken: &[Int]) 
     if indirect -> calls.push(count)
 }
 
-// Resets the entry check index of `f`, function `id`, and removes its check
-// unless `recursive` marks it.
-ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int) Never! {
+// Marks the stack check of `f`, function `id`, when `stacks` holds and
+// `recursive` marks it; resets its entry check index and removes that
+// check unless `recursive` marks it.
+ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool) Never! {
+    if stacks -> f.stack_check = recursive[id]
     at: f.entry_check
     if at < 0 {
         return
@@ -3192,35 +3203,57 @@ ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int) Never! {
 
 // f0 calls itself; f1 calls f2, which calls through a function value and
 // takes f1's address, so the two are a cycle; f3 calls f0; f4 is the poll.
-// Each entry check is the poll's call, an If and its End.
+// Each entry check is the poll's call, an If and its End. With stop points
+// the bodies on a cycle take stack checks.
 #Test("recursion checks keep the entry checks of recursive bodies only, on any number of parts") {
-    loop workers in 1..<5 {
-        m := ir_module_new()
-        loop id in 0..<5 {
-            f := ir_function_new("f{id}", "test:recursion.jet::f{id}", "f{id}", "recursion.jet", 1)
-            if id < 4 {
-                f.entry_check = ir_emit(f, IROp.Call, 0, 4, -1, 0, 1)
-                _: ir_emit(f, IROp.If, -1, 0, -1, 2, 1)
-                _: ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
-            }
-            if id == {
-                0 | 3 -> { _: ir_emit(f, IROp.Call, -1, 0, -1, 0, 1) }
-                1 -> { _: ir_emit(f, IROp.Call, -1, 2, -1, 0, 1) }
-                2 -> {
-                    _: ir_emit(f, IROp.FunctionAddress, 1, 1, -1, -1, 1)
-                    _: ir_emit(f, IROp.CallIndirect, -1, 1, -1, 0, 1)
+    loop stops in ([Bool]{false, true}) {
+        loop workers in 1..<5 {
+            m := ir_module_new()
+            m.stop_points = stops
+            loop id in 0..<5 {
+                f := ir_function_new("f{id}", "test:recursion.jet::f{id}", "f{id}", "recursion.jet", 1)
+                if id < 4 {
+                    f.entry_check = ir_emit(f, IROp.Call, 0, 4, -1, 0, 1)
+                    _: ir_emit(f, IROp.If, -1, 0, -1, 2, 1)
+                    _: ir_emit(f, IROp.End, -1, 1, -1, -1, 1)
                 }
-                else -> {}
+                if id == {
+                    0 | 3 -> { _: ir_emit(f, IROp.Call, -1, 0, -1, 0, 1) }
+                    1 -> { _: ir_emit(f, IROp.Call, -1, 2, -1, 0, 1) }
+                    2 -> {
+                        _: ir_emit(f, IROp.FunctionAddress, 1, 1, -1, -1, 1)
+                        _: ir_emit(f, IROp.CallIndirect, -1, 1, -1, 0, 1)
+                    }
+                    else -> {}
+                }
+                m.functions.push(f)
             }
-            m.functions.push(f)
+            ir_recursion_checks_parted(m, workers)
+            sizes: loop f in m.functions -> f.op.len()
+            assert_eq(sizes, [Int]{4, 4, 5, 1, 0})
+            loop f in m.functions -> assert_eq(f.entry_check, -1)
+            assert_eq(m.functions[3].op[0], IROp.Call)
+            assert_eq(m.functions[3].a[0], 0)
+            checks: loop f in m.functions -> f.stack_check
+            assert_eq(checks, [Bool]{stops, stops, stops, false, false})
         }
-        ir_recursion_checks_parted(m, workers)
-        sizes: loop f in m.functions -> f.op.len()
-        assert_eq(sizes, [Int]{4, 4, 5, 1, 0})
-        loop f in m.functions -> assert_eq(f.entry_check, -1)
-        assert_eq(m.functions[3].op[0], IROp.Call)
-        assert_eq(m.functions[3].a[0], 0)
     }
+}
+
+// A body that calls through a function value takes no stack check when no
+// callee whose address the module takes calls back into it: `apply` calls
+// the value it takes from `leaf`, which calls nothing.
+#Test("a call through a function value takes the stack check only on a cycle") {
+    m := ir_module_new()
+    m.stop_points = true
+    caller := ir_function_new("apply", "test:apply.jet::apply", "apply", "apply.jet", 1)
+    _: ir_emit(caller, IROp.FunctionAddress, 0, 1, -1, -1, 1)
+    _: ir_emit(caller, IROp.CallIndirect, -1, 0, -1, 0, 1)
+    m.functions.push(caller)
+    m.functions.push(ir_function_new("leaf", "test:apply.jet::leaf", "leaf", "apply.jet", 1))
+    ir_recursion_checks_parted(m, 1)
+    assert(!m.functions[0].stack_check)
+    assert(!m.functions[1].stack_check)
 }
 
 // After instruction `at`, a user operation whose slow path can publish a

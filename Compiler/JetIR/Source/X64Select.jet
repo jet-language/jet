@@ -65,6 +65,7 @@ use {
         dwarf_cfa_def_cfa_offset,
         dwarf_cfa_def_cfa_register,
         dwarf_cfa_offset,
+        dwarf_cfa_same_value,
         dwarf_cfa_remember_state,
         dwarf_cfa_restore_state,
         x64_alu_mi,
@@ -4764,6 +4765,148 @@ ir_x64_wrap_return: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, fast: IRX64
     x64_ret(e.code)
 }
 
+// The thread block's stack limit word (JetRuntime StackSegment.jet
+// STACK_TCB_LIMIT) and the word below a stack segment's bridge frame
+// (STACK_SEGMENT_BRIDGE).
+IR_X64_STACK_LIMIT: 1024
+
+IR_X64_STACK_BRIDGE: 7666661893975862049
+
+// A frame of at most this many bytes checks rsp itself against the limit:
+// the runtime keeps a red zone below the limit (STACK_SEGMENT_RED, 256 KiB)
+// for it and for the calls under it that reach no check. A larger frame
+// checks rsp less its size.
+IR_X64_STACK_FRAME_ROOM: 65536
+
+// The grow path's save area: the six argument registers, then xmm0-7.
+IR_X64_STACK_SAVES: 112
+
+// The stack check a body with IRFunction.stack_check starts with, before
+// its frame-free prefix: `cmp rsp, gs:[limit]` (for a frame of `frame`
+// bytes over IR_X64_STACK_FRAME_ROOM, `lea r11, [rsp - frame]; cmp r11,
+// gs:[limit]`) and `jb grow`, whose rel32 field it returns. A thread the
+// runtime never attached reads a zero limit (JetRuntime Alloc.jet's state
+// page) and never branches.
+ir_x64_stack_check: fn(e: &IRX64Emitter, frame: Int) -> Int Never! {
+    e.code.at = -1
+    // cmp rsp, gs:[limit]; the lea form compares r11
+    compare := [U8]{0x65, 0x48, 0x3b, 0x24, 0x25}
+    if frame > IR_X64_STACK_FRAME_ROOM {
+        x64_lea(e.code, X64_R11, X64_RSP, 0 - frame)
+        compare = [U8]{0x65, 0x4c, 0x3b, 0x1c, 0x25}
+    }
+    loop byte in compare -> e.code.bytes.push(byte)
+    loop shift in 0..<4 -> e.code.bytes.push(U8{(IR_X64_STACK_LIMIT >> (8 * shift)) & 255})
+    x64_jcc_rel32(e.code, X64Cond.B)
+}
+
+// The offsets of a grow path (ir_x64_stack_grow) its call frame
+// instructions mark: its start, after its `push rbp` and `mov rbp, rsp`,
+// after the `pop rbp` before its `ret`, the in-place resume, and after the
+// `pop rbp` before its jump back to the body.
+IRX64Grow: struct {
+    start: Int,
+    pushed: Int,
+    based: Int,
+    returned: Int,
+    resumed: Int,
+    left: Int,
+}
+
+// The grow path of function row `row`'s stack check, laid out last, for a
+// frame of `frame` bytes with `stacked` stack arguments. It saves the
+// argument registers and calls jet_rt_stack_grow(need, rsp). On a zero
+// result it restores them, drops its frame and jumps to `entered`, the
+// body's start after the check. Otherwise rax is the top of a fresh
+// segment (JetRuntime StackSegment.jet): below it go the caller's return
+// address and frame pointer (the bridge frame), IR_X64_STACK_BRIDGE, this
+// frame's rbp, then the stack arguments. With rsp on the arguments and rbp
+// on the bridge frame it calls the function again, which passes its check
+// there; back on this stack, it calls jet_rt_stack_shrink, keeping rax,
+// rdx (the stop flag), xmm0 and xmm1, and returns them to the caller.
+ir_x64_stack_grow: fn(e: &IRX64Emitter, row: Int, entered: Int, frame: Int, stacked: Int) -> IRX64Grow Never! {
+    e.code.at = -1
+    start: e.code.bytes.len()
+    x64_push(e.code, X64_RBP)
+    pushed: e.code.bytes.len()
+    x64_mov_rr(e.code, X64_RBP, X64_RSP)
+    based: e.code.bytes.len()
+    x64_alu_ri(e.code, X64Alu.Sub, X64_RSP, IR_X64_STACK_SAVES)
+    ir_x64_stack_save(e, X64_RBP)
+    // The bridge, the copied arguments padded to 16 bytes, and room for the
+    // call's return address and the check's own margin.
+    copied: 32 + 16 * ((stacked + 1) /% 2)
+    x64_mov_ri(e.code, X64_RDI, frame + copied + 64)
+    x64_mov_rr(e.code, X64_RSI, X64_RSP)
+    grown: x64_call_rel32(e.code)
+    e.relocs.push(X64Reloc{at: grown, target: X64RelocTarget.Runtime{symbol: "jet_rt_stack_grow"}})
+    x64_test_rr(e.code, X64_RAX, X64_RAX)
+    in_place: x64_jcc_rel32(e.code, X64Cond.E)
+    x64_load(e.code, X64_R11, X64_RBP, 8)
+    x64_store(e.code, X64_RAX, -8, X64_R11)
+    x64_load(e.code, X64_R11, X64_RBP, 0)
+    x64_store(e.code, X64_RAX, -16, X64_R11)
+    x64_mov_ri(e.code, X64_R11, IR_X64_STACK_BRIDGE)
+    x64_store(e.code, X64_RAX, -24, X64_R11)
+    x64_store(e.code, X64_RAX, -32, X64_RBP)
+    loop k in 0..<stacked {
+        x64_load(e.code, X64_R11, X64_RBP, 16 + 8 * k)
+        x64_store(e.code, X64_RAX, 8 * k - copied, X64_R11)
+    }
+    x64_mov_rr(e.code, X64_R11, X64_RBP)
+    x64_lea(e.code, X64_RSP, X64_RAX, 0 - copied)
+    x64_lea(e.code, X64_RBP, X64_RAX, -16)
+    ir_x64_stack_restore(e, X64_R11)
+    again: x64_call_rel32(e.code)
+    e.relocs.push(X64Reloc{at: again, target: X64RelocTarget.Function{id: X64FunctionID{value: row}}})
+    x64_load(e.code, X64_RBP, X64_RSP, copied - 32)
+    x64_lea(e.code, X64_RSP, X64_RBP, 0 - IR_X64_STACK_SAVES)
+    x64_store(e.code, X64_RSP, 0, X64_RAX)
+    x64_store(e.code, X64_RSP, 8, X64_RDX)
+    x64_float_store(e.code, false, X64_RSP, 16, 0)
+    x64_float_store(e.code, false, X64_RSP, 24, 1)
+    shrunk: x64_call_rel32(e.code)
+    e.relocs.push(X64Reloc{at: shrunk, target: X64RelocTarget.Runtime{symbol: "jet_rt_stack_shrink"}})
+    x64_load(e.code, X64_RAX, X64_RSP, 0)
+    x64_load(e.code, X64_RDX, X64_RSP, 8)
+    x64_float_load(e.code, false, 0, X64_RSP, 16)
+    x64_float_load(e.code, false, 1, X64_RSP, 24)
+    x64_mov_rr(e.code, X64_RSP, X64_RBP)
+    x64_pop(e.code, X64_RBP)
+    returned: e.code.bytes.len()
+    x64_ret(e.code)
+    resumed: e.code.bytes.len()
+    ir_x64_patch(e, in_place, resumed)
+    ir_x64_stack_restore(e, X64_RBP)
+    x64_mov_rr(e.code, X64_RSP, X64_RBP)
+    x64_pop(e.code, X64_RBP)
+    left: e.code.bytes.len()
+    ir_x64_jump_to(e, entered)
+    IRX64Grow{start: start, pushed: pushed, based: based, returned: returned, resumed: resumed, left: left}
+}
+
+// The argument registers into the grow path's save area below `base`: the
+// general ones, then xmm0-7, a word each.
+ir_x64_stack_save: fn(e: &IRX64Emitter, base: Int) Never! {
+    loop (k, reg) in IR_X64_ARGUMENT_REGISTERS {
+        x64_store(e.code, base, 8 * k - IR_X64_STACK_SAVES, reg)
+    }
+    loop xmm in 0..<8 -> x64_float_store(e.code, false, base, ir_x64_stack_saved_xmm(xmm), xmm)
+}
+
+// The argument registers back from the grow path's save area below `base`.
+ir_x64_stack_restore: fn(e: &IRX64Emitter, base: Int) Never! {
+    loop (k, reg) in IR_X64_ARGUMENT_REGISTERS {
+        x64_load(e.code, reg, base, 8 * k - IR_X64_STACK_SAVES)
+    }
+    loop xmm in 0..<8 -> x64_float_load(e.code, false, xmm, base, ir_x64_stack_saved_xmm(xmm))
+}
+
+// Where the grow path's save area keeps `xmm`, against its base.
+ir_x64_stack_saved_xmm: fn(xmm: Int) -> Int Never! {
+    8 * (IR_X64_ARGUMENT_REGISTERS.len() + xmm) - IR_X64_STACK_SAVES
+}
+
 // Function row `row` (`f`, borrowed from `m`). A function with a fixed slot
 // keeps its encoder's emission log for the fixed-timing check (Timing.jet).
 ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables, row: Int) -> IRX64FunctionResult Never! {
@@ -4787,11 +4930,14 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         loop k in ir_x64_select_test(m, f, al, at)..<at -> e.absorbed[k] = f.op[k] != .Nop
     }
 
-    // The frame-free prefix (ir_x64_wrap) first, in registers of its own
-    // with its parameters normalized as their imports would; a Return in it
-    // leaves at once.
+    // The stack check (ir_x64_stack_check) first, then the frame-free
+    // prefix (ir_x64_wrap), in registers of its own with its parameters
+    // normalized as their imports would; a Return in it leaves at once.
     lines := [X64LineRow]{}
     if f.line > 0 -> lines.push(X64LineRow{at: 0, line: f.line})
+    grow_site := -1
+    if f.stack_check -> grow_site = ir_x64_stack_check(e, 16 + 8 * al.saved.len() + al.frame_bytes)
+    entered: e.code.bytes.len()
     positions := [Int]{}
     fast_regs := [Int]{}
     wrap: ir_x64_wrap(e, m, f, al, fast_regs)
@@ -4943,6 +5089,11 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
         ir_x64_patch(e, site, if nth < body_returns -> epilogue else -> exit)
     }
     ir_x64_emit_colds(e, m, f, al, tables, exit)
+    grow := IRX64Grow{start: -1, pushed: -1, based: -1, returned: -1, resumed: -1, left: -1}
+    if grow_site >= 0 {
+        grow = ir_x64_stack_grow(e, row, entered, 16 + 8 * al.saved.len() + al.frame_bytes + e.below, stacked)
+        ir_x64_patch(e, grow_site, grow.start)
+    }
     // Rel8 branches where they reach, and the heads of the innermost loops
     // of the hot code (not the slow paths after the epilogue) on their
     // alignment (X64Relax.jet): every offset taken so far moves with the
@@ -5015,6 +5166,32 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
     dwarf_cfa_advance(cfi, ret_at, ret_at + 1)
     dwarf_cfa_restore_state(cfi)
+    // The grow path (ir_x64_stack_grow) runs before the body's frame: the
+    // callee-saved registers hold the caller's values, and its own `push
+    // rbp; mov rbp, rsp` frame stands until the `pop rbp` before its `ret`
+    // and before its jump back. On a segment rbp still names that frame.
+    if grow.start >= 0 {
+        offsets: [Int]{grow.start, grow.pushed, grow.based, grow.returned, grow.resumed, grow.left}
+        marks: loop offset in offsets -> ir_x64_relaxed_at(relax, offset)
+        dwarf_cfa_advance(cfi, ret_at + 1, marks[0])
+        dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
+        loop reg in al.saved -> dwarf_cfa_same_value(cfi, x64_dwarf_register(reg))
+        dwarf_cfa_advance(cfi, marks[0], marks[1])
+        dwarf_cfa_def_cfa_offset(cfi, 16)
+        dwarf_cfa_offset(cfi, x64_dwarf_register(X64_RBP), 2)
+        dwarf_cfa_advance(cfi, marks[1], marks[2])
+        dwarf_cfa_def_cfa_register(cfi, x64_dwarf_register(X64_RBP))
+        dwarf_cfa_advance(cfi, marks[2], marks[3])
+        dwarf_cfa_remember_state(cfi)
+        dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
+        dwarf_cfa_advance(cfi, marks[3], marks[4])
+        dwarf_cfa_restore_state(cfi)
+        dwarf_cfa_advance(cfi, marks[4], marks[5])
+        dwarf_cfa_def_cfa(cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_same_value(cfi, x64_dwarf_register(X64_RBP))
+    }
 
     variables := [X64DebugVariable]{}
     ranges := [X64VariableRange]{}
@@ -5064,6 +5241,38 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     assert(ir_x64_compile_function(m, tables, 0).errors.len() == 0)
     m.functions[0].frame_bound = -1
     assert(ir_x64_compile_function(m, tables, 0).errors.len() == 0)
+}
+
+// twice(x) with a stack check: `cmp rsp, gs:[limit]; jb grow` before
+// anything else, and the grow path calls jet_rt_stack_grow, writes the
+// bridge word, calls twice itself on the segment, then jet_rt_stack_shrink.
+#Test("A body with a stack check compares rsp with the thread's limit first and grows onto a segment") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("twice", "test:grow.jet::twice", "", "grow.jet", 1)
+    x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    f.result = word
+    sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Add, sum, x, x, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 2)
+    f.stack_check = true
+    m.functions.push(f)
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert_eq(compiled.errors.len(), 0)
+    code: compiled.function.code
+    assert_eq(ir_x64_code_find(code, [U8]{0x65, 0x48, 0x3b, 0x24, 0x25, 0x00, 0x04, 0x00, 0x00}, 0), 0)
+    assert(code[9] == 0x72 || (code[9] == 0x0f && code[10] == 0x82))
+    // mov r11, the bridge word
+    assert(ir_x64_code_find(code, [U8]{0x49, 0xbb, 0x21, 0x6b, 0x74, 0x73, 0x5f, 0x74, 0x65, 0x6a}, 0) > 0)
+    calls := [String]{}
+    loop reloc in compiled.function.relocs {
+        if reloc.target == {
+            .Runtime(symbol) -> { calls.push(symbol) }
+            .Function(id) -> calls.push("f{id.value}")
+            .Data(_) | .RuntimeData(_) -> {}
+        }
+    }
+    assert_eq(calls, [String]{"jet_rt_stack_grow", "f0", "jet_rt_stack_shrink"})
 }
 
 // load(data, i) is the word at data + i * 8: the product and the sum are
