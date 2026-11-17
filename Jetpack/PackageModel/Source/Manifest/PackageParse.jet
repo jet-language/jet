@@ -1,7 +1,7 @@
 // The one structural reader of `package.jet` Package and Config carriers. There
 // is no second, legacy-vocabulary parser.
 use {
-    jet_foundation.[ModuleLayer, Span, jet_ring_parse_manifest_layer, log_filter_bad_pair]
+    jet_foundation.[ModuleLayer, Span, core_enum_cases, jet_ring_parse_manifest_layer, log_filter_bad_pair]
     jet_lexer.[
         Lexed,
         TOKEN_BLOCK_COMMENT,
@@ -239,6 +239,7 @@ impl PackageFacts {
             MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
             "commands" -> self.commands = pkg_parse_command_settings(value)
             "layers" -> self.layers = pkg_parse_layers(value)
+            "purposes" -> self.purposes = pkg_parse_purposes(value)
             "services" -> self.services = pkg_parse_services(value)
             MANIFEST_BLOCK_OUTPUTS -> {
                 parsed: pkg_parse_outputs(value)
@@ -288,7 +289,7 @@ pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     Ok(
         if field == {
             "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
-            MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "test" | "suites" -> true
+            MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "purposes" | "test" | "suites" -> true
             else -> false
         },
     )
@@ -582,6 +583,39 @@ pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseErr
         out.push(ManifestEntry{key: key, value: entry.value.copy()})  // copy: the entry list is dropped here.
     }
     Ok(out)
+}
+
+// `purposes: { camera: "Attach photos to tasks." }`: why the app uses each
+// device permission it asks for. Each key is a case of the Core
+// `app.Permission` enum, lowercased (pkg_purpose_key), named once, and each
+// value a non-empty quoted text, kept unquoted.
+pkg_parse_purposes: fn(value: String) -> [ManifestEntry] PackageParseError! {
+    out := [ManifestEntry]{}
+    loop entry in pkg_record_entries(value, "purposes") {
+        key: entry.key.trim()
+        if !pkg_purpose_key(key) -> return Err(PackageParseError.UnknownField("purposes.{key}"))
+        written: pkg_binder_trim_end_matches(entry.value.trim(), ",").trim()
+        text: pkg_scalar(written)
+        if !written.starts_with("\"") || text.trim() == "" {
+            return Err(PackageParseError.InvalidValue{field: "purposes.{key}", value: entry.value})
+        }
+        loop seen in out {
+            if seen.key == key {
+                return Err(PackageParseError.Composition("`purposes.{key}` is declared more than once"))
+            }
+        }
+        out.push(ManifestEntry{key: key, value: text})
+    }
+    Ok(out)
+}
+
+// Whether `key` names a device permission: a case of the Core
+// `app.Permission` enum (CORE_ENUM_CASE_ROWS), lowercased.
+pkg_purpose_key: fn(key: String) -> Bool {
+    loop permission in core_enum_cases("Permission") ?? return false {
+        if permission.lower() == key -> return true
+    }
+    false
 }
 
 // `layers: { base: ["core.mem"], values: ["core.text"] }`: the module layer

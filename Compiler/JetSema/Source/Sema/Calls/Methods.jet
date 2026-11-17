@@ -57,6 +57,7 @@ use jet_foundation.[
     symbol_table_key,
     TTargetOS,
     target_os_name,
+    core_enum_cases,
     type_name,
     checked_symbol_local,
     foundation_byte_text,
@@ -1555,6 +1556,57 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
     web: target_os_name(TTargetOS.Web)
     if (source.default_target ?? "") == "web" || graph.build_facts.os == web -> return web
     ""
+}
+
+// `app.ask` needs the device permission its argument names, and every one
+// when the argument is not a literal `Permission` case. The system shows a
+// permission's purpose when it asks for it, so each one the call needs that
+// the package's `purposes:` doesn't name fails the build at the argument,
+// naming the call and the missing keys.
+sema_call_app_permission_purpose: fn(module_name: String, member: String, alias: String, args: [CallArg], program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if module_name != SEMA_APP_MARKER_MODULE || member != "ask" || args.len() != 1 {
+        return
+    }
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        variants: core_enum_cases("Permission") ?? return
+        named: sema_app_permission_case(args[0].expr)
+        missing := [String]{}
+        loop variant in variants {
+            if named == .Val(only) && only != variant -> next
+            key: variant.lower()
+            if !graph.build_facts.purposes.contains(key) -> missing.push(key)
+        }
+        if missing.len() == 0 {
+            return
+        }
+        listed := ""
+        loop i in 0..<missing.len() {
+            if i > 0 -> listed = if i == missing.len() - 1 -> "{listed} and " else -> "{listed}, "
+            listed = "{listed}`{missing[i]}`"
+        }
+        noun: if missing.len() == 1 -> "permission" else -> "permissions"
+        lines: loop key in missing -> "{key}: \"…\""
+        entry: diagnostic_registry_row("E-APP-PERMISSION-PURPOSE") ?? panic("E-APP-PERMISSION-PURPOSE must have a registry row")
+        what: entry.what.replace("{{call}}", "{alias}.{member}").replace("{{permissions}}", "the {listed} {noun}")
+        diagnostics.push(sema_error("E-APP-PERMISSION-PURPOSE", expr_span(args[0].expr), what, entry.why, entry.fix.replace("{{lines}}", lines.join(", "))))
+    }
+}
+
+// The `Permission` case a literal argument names (`.Camera`,
+// `app.Permission.Camera`), or None for any other expression.
+sema_app_permission_case: fn(arg: Expr) -> String? {
+    if arg == .Paren(inner, _, _) -> return sema_app_permission_case(inner)
+    if arg == .EnumLit(type_name, variant, _, payload, leading_dot, _, _) {
+        if payload.len() == 0 && (leading_dot || type_name == "Permission" || type_name.ends_with(".Permission")) {
+            return Val(variant)
+        }
+    }
+    if arg == .Field(base, member, _, _) {
+        if base == .Ident(name, _, _) && name == "Permission" -> return Val(member)
+        if base == .Field(_, owner, _, _) && owner == "Permission" -> return Val(member)
+    }
+    None
 }
 
 // `app.images` takes each setting as literal data: the image variants are

@@ -5623,6 +5623,7 @@ tasks never read or change the process registry. The module source is
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
+| `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -6154,6 +6155,37 @@ other value panics. A browser runs nothing for a page that is closed, so
 On the web, the work is a server job: a service method marked
 `#App.Every(cron: …)` runs on its schedule, and an `#App.Job` method is
 work a call queues.
+
+`app.ask(permission)` asks the person for a device permission and gives
+their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
+`Grant` is `.Granted`, `.Denied` or `.Restricted`, the last when the
+person could not answer: the device has no such hardware, or nothing on it
+can ask. A process asks once for each permission, and a later call gives
+the first answer. On Linux the desktop portal asks
+(`org.freedesktop.portal.Camera`, after it reports a camera, and
+`org.freedesktop.portal.Location`, through a location session it closes
+after the answer) and remembers the person's choice across runs. A request
+the person dismisses, or leaves unanswered for five minutes, is `.Denied`.
+Notifications need no permission there and are `.Granted`. Without a
+session bus or a portal, and on the other native targets, the answer is
+`.Restricted`.
+
+The system shows the person why the app wants a permission when it asks,
+so the package says why in its `purposes:` field, one line for each
+permission it asks for:
+
+```jet
+purposes: {
+    camera: "Attach photos to tasks.",
+    location: "Tag each task with where it was done.",
+}
+```
+
+A key is `camera`, `location` or `notifications`, named once, and its
+value is non-empty quoted text. `jet check` refuses an `app.ask` whose
+permission has no line, at its argument, E-APP-PERMISSION-PURPOSE: a
+literal permission (`.Camera`, `app.Permission.Camera`) needs its own line,
+and a permission chosen at run time needs a line for every permission.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

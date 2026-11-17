@@ -824,6 +824,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
     settings := [SemaBuildSetting]{}
     package_markers := [Marker]{}
     package_manifest := ""
+    purposes := [String]{}
     loop package in load.packages {
         if package.identity == load.package_identity {
             package_name = package.name
@@ -831,6 +832,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
             settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
             package_markers = package.markers
             package_manifest = package.manifest_path ?? ""
+            purposes = package.purposes
         }
     }
     package_name = jet_driver_package_name(package_name, request.authorized_sources.entry_path)
@@ -864,6 +866,7 @@ jet_driver_build_facts: fn(load: JetDriverLoadResult, request: JetDriverCompileR
         compiler_identity: request.host_facts.compiler_identity ?? "",
         package_markers: package_markers.move(),
         package_manifest: package_manifest,
+        purposes: purposes.move(),
     }
 }
 

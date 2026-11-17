@@ -22947,6 +22947,34 @@ AppFeatureNotOnTarget: struct {
     }
 }
 
+AppPermissionPurpose: struct {
+    call: String,
+    permissions: String,
+    lines: String,
+
+    impl Diagnostic {
+        code: "E-APP-PERMISSION-PURPOSE",
+        safety_class: .Soundness,
+        safety_reason: "The system asks the person for the permission with the package's purpose, so a call with no purpose would ask without saying why.",
+        expert_path: "none: the package gives each permission it asks for a purpose",
+        meaning: "A call needs a device permission the package gives no purpose for",
+        detail: true,
+        fix_next: "Add the permission's line to the package's `purposes:`, or remove the call.",
+
+        what: fn(self) -> String {
+            "`{self.call}` may ask for {self.permissions}, but the package's `purposes:` doesn't say why."
+        }
+
+        why: fn(self) -> String {
+            "When the app asks for a device permission, the system shows the person why the app wants it, and a phone build writes the same text into its manifest; a permission the app asks for with no purpose has nothing to show. During `jet check`, Jet reports this diagnostic."
+        }
+
+        fix: fn(self) -> String {
+            "Say why in the package's `purposes:` (for example `{self.lines}`), or remove the call."
+        }
+    }
+}
+
 DoctestMismatch: struct {
     expected: String,
     actual: String,

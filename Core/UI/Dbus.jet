@@ -21,7 +21,9 @@ use {
 // The portal half reads org.freedesktop.appearance through
 // org.freedesktop.portal.Settings (the colour scheme, the accent colour and
 // the contrast preference) and follows its SettingChanged signals and the
-// portal's restarts.
+// portal's restarts. It also asks the person for the camera and the
+// location (org.freedesktop.portal.Camera and .Location) and reads their
+// answer from the request's Response signal.
 
 // The specification's limits: a whole message, one array, and how deep
 // arrays and structs may each nest in a signature (values, variants
@@ -1129,6 +1131,110 @@ number: fn(value: DbusValue) -> Int {
     NO_VALUE
 }
 
+// ---- the portal's device permissions
+
+CAMERA: "org.freedesktop.portal.Camera"
+
+LOCATION: "org.freedesktop.portal.Location"
+
+REQUEST: "org.freedesktop.portal.Request"
+
+SESSION: "org.freedesktop.portal.Session"
+
+PROPERTIES: "org.freedesktop.DBus.Properties"
+
+// The person's answer to a portal request, from its Response signal's code
+// (0 allowed, 1 refused, 2 the request ended some other way or got no
+// answer in time), or `Absent` when the device is not there to ask for.
+PortalAnswer: enum {
+    Allowed,
+    Refused,
+    Ended,
+    Absent,
+}
+
+// Asks the portal for the camera and waits at most `timeout_ns` for the
+// person's answer. A machine with no camera is `.Absent` without asking.
+portal_camera: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
+    deadline: now() + timeout_ns
+    present: call_until(c, PORTAL_NAME, PORTAL_PATH, PROPERTIES, "Get", [DbusValue]{DbusValue.Text(CAMERA), DbusValue.Text("IsCameraPresent")}, deadline) ?? return Err(err)
+    if present.body.len() != 1 || present.body[0] != DbusValue.Variant(DbusValue.Bool(true)) {
+        return Ok(PortalAnswer.Absent)
+    }
+    watch_responses(c, deadline) ?? return Err(err)
+    token: request_token(c)
+    asked: call_until(c, PORTAL_NAME, PORTAL_PATH, CAMERA, "AccessCamera", [DbusValue]{string_option("handle_token", token)}, deadline) ?? return Err(err)
+    request: answered_path(asked, "AccessCamera") ?? return Err(err)
+    response(c, request, deadline)
+}
+
+// Asks the portal for the device's location and waits at most `timeout_ns`
+// for the person's answer: a location session is made and started, which
+// is when the person is asked, and closed once they answer.
+portal_location: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAnswer DbusError! {
+    deadline: now() + timeout_ns
+    watch_responses(c, deadline) ?? return Err(err)
+    session_token: request_token(c)
+    made: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "CreateSession", [DbusValue]{string_option("session_handle_token", session_token)}, deadline) ?? return Err(err)
+    session: answered_path(made, "CreateSession") ?? return Err(err)
+    start_body: [DbusValue]{DbusValue.Path(session.copy()), DbusValue.Text(""), string_option("handle_token", request_token(c))}
+    started: call_until(c, PORTAL_NAME, PORTAL_PATH, LOCATION, "Start", start_body, deadline) ?? return Err(err)
+    request: answered_path(started, "Start") ?? return Err(err)
+    answer: response(c, request, deadline) ?? return Err(err)
+    _: call(c, PORTAL_NAME, session, SESSION, "Close", [DbusValue]{}, CLOSE_WAIT_NS) ?? blank(DbusKind.Return)
+    Ok(answer)
+}
+
+// How long closing a location session may take.
+CLOSE_WAIT_NS: 1000000000
+
+// Asks the bus for every request's Response signal; `response` picks out
+// the one it waits for.
+watch_responses: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> DbusError! {
+    q: ascii(39)
+    rule: "type={q}signal{q},interface={q}{REQUEST}{q},member={q}Response{q}"
+    _: call_until(c, BUS_NAME, BUS_PATH, BUS_NAME, "AddMatch", [DbusValue]{DbusValue.Text(rule)}, deadline) ?? return Err(err)
+    Ok()
+}
+
+// A token for the next request's object path, unique on this connection.
+request_token: fn(c: &DbusConnection) -> String { "jet{c.serial + 1}" }
+
+// A portal call's options: one string, `name`.
+string_option: fn(name: String, value: String) -> DbusValue {
+    option: DbusValue.Entry{key: DbusValue.Text(name), value: DbusValue.Variant(DbusValue.Text(value))}
+    DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{option}}
+}
+
+// The object path a portal call answered with.
+answered_path: fn(reply: DbusMessage, member: String) -> String DbusError! {
+    if reply.body.len() == 1 {
+        if reply.body[0] == .Path(path) -> return Ok(path.copy())
+    }
+    Err(DbusError.Protocol("{member} answered {reply.signature}, not an object path"))
+}
+
+// Waits until `deadline` for the Response signal of the request at
+// `request` and reads its code; no answer by then is `.Ended`.
+response: fn(c: &DbusConnection, request: String, deadline: Int) -[Net, Time]> PortalAnswer DbusError! {
+    wait := 0
+    loop {
+        got: signals(c, wait) ?? return Err(err)
+        loop m in got {
+            if m.interface == REQUEST && m.member == "Response" && m.path == request && m.body.len() > 0 {
+                if m.body[0] == .Uint32(code) {
+                    if code == 0 -> return Ok(PortalAnswer.Allowed)
+                    if code == 1 -> return Ok(PortalAnswer.Refused)
+                    return Ok(PortalAnswer.Ended)
+                }
+            }
+        }
+        wait = deadline - now()
+        if wait <= 0 -> return Ok(PortalAnswer.Ended)
+    }
+    Ok(PortalAnswer.Ended)
+}
+
 // ---- test fixtures
 
 // A connected pair of sockets: the client's end and a fake bus's.
@@ -1508,4 +1614,84 @@ repeat: fn(text: String, times: Int) -> String {
             assert_eq(err, DbusError.Failed{name: "org.freedesktop.DBus.Error.ServiceUnknown", message: "The name is not activatable"})
         }
     }
+}
+
+#Test("the portal asks for the camera and the location and reads the person's answer") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    no_options: DbusValue.Array{signature: "{ascii(123)}sv{ascii(125)}", items: [DbusValue]{}}
+    camera := test_bus("camera")
+    request: "{PORTAL_PATH}/request/1_42/jet4"
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.42")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(request)}), 4))
+    append(script, wire(signal("{PORTAL_PATH}/request/1_42/other", REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 5))
+    append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(0), no_options.copy()}), 6))
+    bus_says(camera.server, script)
+    c := start(camera.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(portal_camera(c, 1000000000) ?? panic("camera: {err}"), PortalAnswer.Allowed)
+    asked_camera: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.Properties.Get",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.portal.Camera.AccessCamera",
+    }
+    assert_eq(calls_heard(camera.server), asked_camera)
+    // No camera: nobody is asked.
+    none := test_bus("no-camera")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.43")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(false))}), 2))
+    bus_says(none.server, script)
+    d := start(none.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(portal_camera(d, 1000000000) ?? panic("no camera: {err}"), PortalAnswer.Absent)
+    assert_eq(calls_heard(none.server), [String]{"org.freedesktop.DBus.Hello", "org.freedesktop.DBus.Properties.Get"})
+    // The location: refused, and the session closed after.
+    place := test_bus("location")
+    session: "{PORTAL_PATH}/session/1_44/jet3"
+    started: "{PORTAL_PATH}/request/1_44/jet4"
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.44")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(session)}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(started)}), 4))
+    append(script, wire(signal(started, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), no_options.copy()}), 5))
+    append(script, wire(reply_to(5, [DbusValue]{}), 6))
+    bus_says(place.server, script)
+    e := start(place.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(portal_location(e, 1000000000) ?? panic("location: {err}"), PortalAnswer.Refused)
+    asked_location: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.portal.Location.CreateSession",
+        "org.freedesktop.portal.Location.Start",
+        "org.freedesktop.portal.Session.Close",
+    }
+    assert_eq(calls_heard(place.server), asked_location)
+    // A request nobody answers in time has ended.
+    quiet := test_bus("unanswered")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.45")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Variant(DbusValue.Bool(true))}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{DbusValue.Path(request)}), 4))
+    bus_says(quiet.server, script)
+    f := start(quiet.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(portal_camera(f, 50000000) ?? panic("unanswered: {err}"), PortalAnswer.Ended)
+}
+
+// The interface and member of each call the client made after it
+// authenticated as uid 1000.
+calls_heard: fn(server: &net.UnixStream) -[Net, Time]> [String] {
+    heard: bus_heard(server)
+    rest := heard[(1 + "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes().len())..<heard.len()].copy()
+    out := [String]{}
+    loop rest.len() > 0 {
+        decoded: decode(rest) ?? panic("decode: {err}")
+        if decoded.used == 0 -> break
+        if decoded.message == .Val(m) -> out.push("{m.interface}.{m.member}")
+        rest = rest[decoded.used..<rest.len()].copy()
+    }
+    out
 }

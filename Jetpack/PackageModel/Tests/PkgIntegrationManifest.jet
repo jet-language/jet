@@ -69,6 +69,24 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     }
 }
 
+#Test("package purposes name each device permission once with its reason") {
+    raw: "{pkg_integration_min_manifest("app", "0.1.0")}purposes: {{\n    camera: \"Attach photos to tasks.\",\n    location: \"Tag where a task was done.\",\n}}\n"
+    facts: PackageFacts.parse(raw, "test") ?? panic("purposes should parse: {err}")
+    assert_eq(facts.purposes.len(), 2)
+    assert_eq(facts.purposes[0].key, "camera")
+    assert_eq(facts.purposes[0].value, "Attach photos to tasks.")
+    assert_eq(facts.purposes[1].key, "location")
+    refusals: [String]{
+        "purposes: {{ microphone: \"Record notes.\" }}",
+        "purposes: {{ camera: photos }}",
+        "purposes: {{ camera: \"\" }}",
+        "purposes: {{ camera: \"One.\", camera: \"Two.\" }}",
+    }
+    loop block in refusals {
+        _: pkg_integration_package_error("{pkg_integration_min_manifest("app", "0.1.0")}{block}\n")
+    }
+}
+
 #Test("pkg integration manifest_parse_dep_path") {
     mf: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,")) ?? panic("path dep should parse")
     dep: mf.dependencies.get("helpers") ?? panic("missing helpers dep")

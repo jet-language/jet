@@ -6696,6 +6696,25 @@ of a higher area's module. Comments and quoted text name nothing. Such a name
 still binds, so the check goes on and reports Core's body errors as well. A
 program's check reads no layer table.
 
+### Permission purposes
+
+An app package says why it asks for each device permission (`app.ask`):
+
+```text
+purposes: {
+    camera: "Attach photos to tasks.",
+    location: "Tag each task with where it was done.",
+}
+```
+
+A key is `camera`, `location` or `notifications`, the cases of
+`app.Permission`, named once; its value is non-empty quoted text, which the
+system shows when it asks the person. Another key, an unquoted or empty value,
+or a key named twice is a manifest error. `jet check` reports each `app.ask`
+whose permission has no line at its argument (E-APP-PERMISSION-PURPOSE): a
+literal permission needs its own line, and one chosen at run time needs a line
+for every permission.
+
 ## Inline script dependencies
 
 A manifest-less `.jet` script may begin with an inline dependency:

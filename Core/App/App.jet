@@ -30,6 +30,7 @@ use {
     world_rt: jet.runtime.testing
     log_rt: jet.runtime.log
     push_wire: __core_app_push
+    dbus: __core_ui_dbus
     url: core.net.url
     markup: core.text.html
     files: core.files
@@ -3579,6 +3580,106 @@ priv app_mimeapps_with: fn(text: String, schemes: [String], id: String) -> Strin
         loop handler in handlers -> out.push(handler.copy())
     }
     "{out.join("\n")}\n"
+}
+
+// A device permission the app asks the person for with `ask`. The package
+// says why it wants each one it asks for in its `purposes:` (`camera`,
+// `location`, `notifications`), which the system shows when it asks, and
+// `jet check` refuses an `ask` whose permission has no purpose.
+Permission: enum {
+    Camera,
+    Location,
+    Notifications,
+}
+
+// The person's answer to `ask`. `Restricted` is an answer they could not
+// give: the device has no such hardware, or nothing on it can ask (no
+// session bus or desktop portal on Linux).
+Grant: enum {
+    Granted,
+    Denied,
+    Restricted,
+}
+
+// How long `ask` waits for the person, and for the session bus.
+priv ASK_WAIT_NS: 300000000000
+
+priv ASK_BUS_WAIT_NS: 1000000000
+
+// An answer `ask` had in this process.
+priv AppAsked: struct {
+    permission: Permission,
+    grant: Grant,
+}
+
+priv ASKED: Shared{[AppAsked]{}}
+
+// Asks the person for `permission` and gives their answer. The process asks
+// once: a later call gives the first answer. On Linux the desktop portal
+// asks (org.freedesktop.portal.Camera, org.freedesktop.portal.Location) and
+// remembers the person's choice across runs; notifications need no
+// permission there, so they are `.Granted`. A request the person dismisses,
+// or leaves unanswered for five minutes, is `.Denied`. Without a session
+// bus or a portal, and on the other native targets, the answer is
+// `.Restricted`.
+ask: fn(permission: Permission) -[Env, Net, Time]> Grant {
+    if app_asked(permission) == .Val(known) -> return known
+    grant: app_ask_system(permission)
+    app_remember(permission, grant)
+    grant
+}
+
+priv app_remember: fn(permission: Permission, grant: Grant) Never! {
+    held := ASKED.guard_edit()
+    held.value.push(AppAsked{permission: permission, grant: grant})
+}
+
+priv app_asked: fn(permission: Permission) -> Grant? Never! {
+    held: ASKED.guard_read()
+    loop asked in held.value {
+        if asked.permission == permission -> return Val(asked.grant)
+    }
+    None
+}
+
+priv app_ask_system: fn(permission: Permission) -[Env, Net, Time]> Grant Never! {
+    #if #build.target.os == {
+        .Linux -> {
+            if permission == .Notifications -> return Grant.Granted
+            bus := dbus.session(ASK_BUS_WAIT_NS) ?? return Grant.Restricted
+            said: app_portal_ask(bus, permission) ?? return Grant.Restricted
+            return app_grant(said)
+        }
+        .MacOS -> { return Grant.Restricted }
+        .Windows -> { return Grant.Restricted }
+        .Web -> { return Grant.Restricted }
+        .Wasm -> { return Grant.Restricted }
+        .Freestanding -> { return Grant.Restricted }
+    }
+}
+
+priv app_portal_ask: fn(bus: &dbus.DbusConnection, permission: Permission) -[Net, Time]> dbus.PortalAnswer dbus.DbusError! {
+    if permission == .Camera -> return dbus.portal_camera(bus, ASK_WAIT_NS)
+    dbus.portal_location(bus, ASK_WAIT_NS)
+}
+
+// The grant a portal's answer gives.
+priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
+    if said == {
+        .Allowed -> Grant.Granted
+        .Refused -> Grant.Denied
+        .Ended -> Grant.Denied
+        .Absent -> Grant.Restricted
+    }
+}
+
+#Test("ask asks once per process and reads the portal's answer as a grant") {
+    assert_eq(app_grant(dbus.PortalAnswer.Allowed), Grant.Granted)
+    assert_eq(app_grant(dbus.PortalAnswer.Refused), Grant.Denied)
+    assert_eq(app_grant(dbus.PortalAnswer.Ended), Grant.Denied)
+    assert_eq(app_grant(dbus.PortalAnswer.Absent), Grant.Restricted)
+    app_remember(Permission.Location, Grant.Denied)
+    assert_eq(ask(Permission.Location), Grant.Denied)
 }
 
 // One remote call of the endpoint at `path` of a service the app graph
