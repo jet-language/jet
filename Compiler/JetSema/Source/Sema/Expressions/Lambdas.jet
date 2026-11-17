@@ -2703,6 +2703,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             sema_ownership_release_loans_from(lambda_state, lambda_parent_state.scope_depth + 1)
             found_capture_keys := [SymbolID]{}
             index = 0
+            copied_writes := [String]{}
             // Only a capture key can match; a capture-free lambda skips the table walk.
             loop capture_keys.len() > 0 && index < lambda_scopes.bindings.len() {
                 binding: lambda_scopes.bindings[index]
@@ -2726,6 +2727,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     explicit_move := sema_expression_lambda_name_contains(lambda_work.meta.moved_captures, binding.symbol.name)
                     is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
                     borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move
+                    // An escaping lambda writes its own copy of a captured
+                    // name, except a write parameter's, whose caller's
+                    // storage it holds by address (ir_lambda_box).
+                    if escapes && !task_body && !(borrowed && binding.access == AccessConvention.Write) && sema_expression_lambda_name_contains(lambda_work.meta.mut_captures, binding.symbol.name) {
+                        sema_expression_lambda_append_name(copied_writes, binding.symbol.name)
+                    }
                     atomic_walk := [String]{}
                     if {
                         // Escaping captures: a task group may flow only through a
@@ -2828,6 +2835,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 diagnostics.push(sema_error("E0924", lambda.span, "this bound `&self` method value would change a copy of `{receiver}`", "stored or passed on, a function value keeps a copy of `{receiver}`, so the method's changes would land on that copy and never reach `{receiver}`", "call the method where the change is needed, or pass the value straight to the call that runs it"))
                 return None
             }
+            // The enclosing scope can no longer use a name the lambda changes
+            // a copy of.
+            sema_ownership_bind_lambda_write_borrows(state, copied_writes)
         }
     }
 

@@ -1,0 +1,57 @@
+// A lambda's write lands where the lambda can reach it: one only called
+// where it is bound borrows the local and writes it; a stored one (in a
+// struct field or a list) counts in its own copy, which each call sees; and
+// a stored one over a write parameter writes the caller's value.
+Holder: struct {
+    action: fn() -[]> Int,
+}
+
+counter: fn() -> Holder {
+    n := 0
+    Holder{
+        action: fn() {
+            n += 1
+            n
+        },
+    }
+}
+
+counters: fn() -> [fn() -[]> Int] {
+    n := 100
+    [fn() -[]> Int]{
+        fn() {
+            n += 1
+            n
+        },
+    }
+}
+
+fill: fn(values: &[Int]) {
+    h: Holder{
+        action: fn() {
+            values.push(values.len())
+            values.len()
+        },
+    }
+    loop _ in 0..<10 -> _ := h.action()
+}
+
+run: fn() {
+    k := 0
+    bump: fn() { k += 1 }
+    loop _ in 0..<10 -> bump()
+    print(k)
+    h: counter()
+    last := 0
+    loop _ in 0..<10 -> last = h.action()
+    print(last)
+    list: counters()
+    loop _ in 0..<10 {
+        act: list[0]
+        last = act()
+    }
+    print(last)
+    values := [Int]{}
+    fill(values)
+    print(values.len())
+}

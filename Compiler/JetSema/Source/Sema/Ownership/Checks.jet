@@ -3053,6 +3053,12 @@ sema_ownership_check_use: fn(state: &SemaOwnershipState, expr: Expr, scopes: Sem
     if places.len() == 0 -> return true
     if sema_ownership_report_own_place_moved(state, expr, scopes, diagnostics) -> return false
     loop place in places {
+        // A stored lambda changes its own copy of the name (spec "Captures
+        // and escaping lambdas"): this use would never see those changes.
+        if sema_ownership_lambda_write_borrow_active(state, place.root) {
+            diagnostics.push(sema_ownership_diag_stored_lambda_write(place.root, expr_span(expr)))
+            return false
+        }
         if sema_ownership_place_moved(state, place) == .Val(origin) {
             sema_ownership_report_moved(state, origin, place, expr_span(expr), diagnostics)
             return false
@@ -4272,13 +4278,18 @@ sema_ownership_check_closure_write_views: fn(state: &SemaOwnershipState, name: S
     }
 }
 
-// An escaping lambda bound in this scope writes the captured `names`: it
-// holds their write access while the scope lasts, so assigning one of them
-// directly is E0204 (Rust `lambda_mut_borrow_stack`).
+// An escaping lambda that writes the captured `names` changes its own copy of
+// each (ir_lambda_box): it holds their write access while the scope it is
+// made in lasts, so using one of them directly there is E0204, never a silent
+// read or write of a value the lambda no longer reaches.
 sema_ownership_bind_lambda_write_borrows: fn(state: &SemaOwnershipState, names: [String]) Never! {
     loop name in names {
         state.lambda_write_borrows.push(SemaOwnershipLambdaWriteBorrow{name: name, scope_depth: state.scope_depth})
     }
+}
+
+sema_ownership_diag_stored_lambda_write: fn(name: String, span: Span) -[]> Diagnostic {
+    sema_error("E0204", span, "`{name}` is changed by a stored lambda that holds its own copy, so it can't be used here", "a stored lambda owns its captures: its writes land on its copy of `{name}` and never reach `{name}` itself", "call the lambda only where it is bound so it borrows `{name}`, or keep the value in a `Shared` or `Cell` the lambda and this code both reach")
 }
 
 // Rust `lambda_mut_borrow_active`.

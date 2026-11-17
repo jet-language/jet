@@ -52,3 +52,75 @@ run: fn() {
 `
     assert_eq(fn_lambda_errors(accepted).join("; "), "")
 }
+
+#Test("a stored lambda that writes a captured local refuses that local's later use") {
+    holder: `Holder: struct {
+    action: fn() -[]>,
+}
+`
+    in_field: `run: fn() {
+    k := 0
+    h: Holder{action: fn() { k += 1 }}
+    h.action()
+    print(k)
+}
+`
+    in_list: `run: fn() {
+    j := 0
+    list: [fn() -[]>]{fn() { j += 1 }}
+    act: list[0]
+    act()
+    print(j)
+}
+`
+    by_method: `run: fn() {
+    items := [Int]{}
+    h: Holder{action: fn() { items.push(1) }}
+    h.action()
+    print(items.len())
+}
+`
+    assigned_later: `run: fn() {
+    n := 0
+    stored: fn() { n += 1 }
+    kept: [stored]
+    act: kept[0]
+    act()
+    n = 5
+}
+`
+    loop body in [in_field, in_list, by_method, assigned_later] {
+        source: "{holder}{body}"
+        found: fn_lambda_errors(source)
+        assert(found.len() == 1 && found[0].starts_with("E0204") && found[0].contains("stored lambda"), "{found.join("; ")}: {source}")
+    }
+    accepted: `counter: fn() -> fn() -> Int {
+    n := 0
+    fn() {
+        n += 1
+        n
+    }
+}
+fill: fn(values: &[Int]) {
+    h: Holder{action: fn() { values.push(1) }}
+    h.action()
+    print(values.len())
+}
+run: fn() {
+    k := 0
+    bump: fn(n: Int) { k += n }
+    bump(2)
+    print(k)
+    tick: counter()
+    print(tick())
+    values := [Int]{}
+    fill(values)
+    base := 10
+    reads: [fn() -[]> Int]{fn() { base + 1 }}
+    base = 20
+    read: reads[0]
+    print(read() + base)
+}
+`
+    assert_eq(fn_lambda_errors("{holder}{accepted}").join("; "), "")
+}
