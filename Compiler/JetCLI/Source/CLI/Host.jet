@@ -1944,6 +1944,9 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     // A release build erases `#Off(.Release)` code: the
     // `release` and `hardened` profiles, and a custom profile named release.
     checks.release = release || options.profile == "hardened"
+    // An image with debug information keeps every DebugView implementation,
+    // which `jet debug` calls to show a value of its type.
+    checks.debug_views = build_options_value(options, "debug_info") != "false"
     // `--deep-checks` keeps the `#On(.Deep)` bodies of the functions it
     // selects, in every profile.
     loop key in inputs.deep_checks -> checks.deep[key.copy()] = true  // copy: the checks outlive the lowering inputs.

@@ -4,7 +4,7 @@
 // callback.
 use {
     debug_snapshot_math: core.math
-    jet_foundation.[ast_expr, sha256_hex, Record, Variant]
+    jet_foundation.[Type, ast_expr, foundation_named_type, sha256_hex, Record, Variant]
 }
 
 // Rust ValueSnapshot: one value captured at a real paused source statement.
@@ -232,7 +232,7 @@ debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
     Err(debug_evaluation_error("local `{value.name}` has a value shape the safe debugger cannot publish"))
 }
 
-// Rust debug_value's type-name arms, in the same exact spellings.
+// The scalar a published type name holds.
 DebugScalarClass: enum {
     Bool
     Int
@@ -242,14 +242,18 @@ DebugScalarClass: enum {
     Other
 }
 
+// The class of `type_name`, read from the language's own primitive
+// spellings (foundation_named_type), the names the image's debug types use:
+// the debugger keeps no list of scalar names of its own.
 debug_scalar_class: fn(type_name: String) -> DebugScalarClass Never! {
-    if type_name == {
-        "Bool" | "bool" -> DebugScalarClass.Bool
-        "Int" | "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "u8" | "u16" | "u32" | "u64" | "usize" | "u128" | "unsigned" | "unsigned long" | "unsigned long long" | "long" | "long long" -> DebugScalarClass.Int
-        "Float" | "f32" | "f64" -> DebugScalarClass.Float
-        "Unit" | "()" -> DebugScalarClass.Unit
-        "String" | "str" | "&str" | "Char" | "char" -> DebugScalarClass.Text
-        else -> DebugScalarClass.Other
+    ty: foundation_named_type(type_name)
+    if ty == {
+        .Bool -> DebugScalarClass.Bool
+        .Int | .IntN(_, _) -> DebugScalarClass.Int
+        .Float | .Float32 -> DebugScalarClass.Float
+        .String | .Char -> DebugScalarClass.Text
+        .Named(_) -> if ty == (Type.Named{name: "Unit"}) -> DebugScalarClass.Unit else -> DebugScalarClass.Other
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> DebugScalarClass.Other
     }
 }
 

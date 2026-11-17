@@ -105,6 +105,21 @@ SourceLocation: struct {
     }
 }
 
+// What a debugger shows for a value of a type that implements it, in place
+// of the type's fields: one item a row, each a label and its value's text. A
+// ring buffer lists its items in order rather than its storage and indices.
+// A build with debug information keeps every implementation, so `jet debug`
+// calls it on the stopped program's own value.
+DebugView: trait {
+    debug_view: fn(self) -> [DebugItem]
+}
+
+// One row of a DebugView: the text before the colon, and the text after it.
+DebugItem: struct {
+    label: String
+    value: String
+}
+
 // A type as a value. Where a `Type` is expected a type name is one
 // (`counts[Position] = 2`, `if t == { Position -> … }`); `Type{Rock}` names
 // one explicitly, and `type_of(p)` is the static type of a name or field

@@ -4960,6 +4960,31 @@ A file that no `name: module` declaration reaches sits at the package root.
 The compiler fills `module` at every `#here` and `#caller` site; its `""`
 default only covers a record built by hand. `core.log` filters records by it.
 
+`DebugView` is the trait a type implements to choose what `jet debug` shows
+for its values: `debug_view: fn(self) -> [DebugItem]`, one `DebugItem` (a
+`label` and a `value`, both text) a row. A ring buffer lists its items oldest
+first instead of its slots and start index:
+
+```jet
+Ring: struct {
+    slots: [Int]
+    start: Int
+    count: Int
+
+    impl DebugView {
+        debug_view: fn(self) -> [DebugItem] {
+            loop k in 0..<self.count -> DebugItem{label: "{k}", value: "{self.slots[(self.start + k) % self.slots.len()]}"}
+        }
+    }
+}
+```
+
+`print` and `locals` then show a `Ring` as `Ring{0: 3, 1: 4, 2: 5}`. A build
+with debug information keeps every implementation on a non-generic struct,
+called or not, and the debugger runs it in the stopped program on a copy of
+the value; a view that does not return (a breakpoint or a trap inside it)
+leaves the value shown by its fields.
+
 ### `core.testing` — deterministic test helpers
 
 `core.testing` provides deterministic values and comparison helpers for tests;

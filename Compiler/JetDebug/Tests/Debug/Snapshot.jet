@@ -151,15 +151,17 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
 
 #Test("debug_values_parse_bool_and_i64_exactly") {
     assert_eq(debug_snapshot_test_value("Bool", "true"), DebugValue.Bool{value: true})
-    assert_eq(debug_snapshot_test_value(" bool ", " false "), DebugValue.Bool{value: false})
+    assert_eq(debug_snapshot_test_value(" Bool ", " false "), DebugValue.Bool{value: false})
     assert_eq(debug_snapshot_test_value_error("Bool", "True"), "local `probe` has an invalid Bool value")
     assert_eq(debug_snapshot_test_value_error("Bool", "1"), "local `probe` has an invalid Bool value")
-    assert_eq(debug_snapshot_test_value("i64", "-9223372036854775808"), DebugValue.Int{value: -9223372036854775808})
-    assert_eq(debug_snapshot_test_value("unsigned long long", "9223372036854775807"), DebugValue.Int{value: 9223372036854775807})
-    assert_eq(debug_snapshot_test_value("u8", "+7"), DebugValue.Int{value: 7})
-    assert_eq(debug_snapshot_test_value("long", "007"), DebugValue.Int{value: 7})
+    assert_eq(debug_snapshot_test_value("I64", "-9223372036854775808"), DebugValue.Int{value: -9223372036854775808})
+    assert_eq(debug_snapshot_test_value("U64", "9223372036854775807"), DebugValue.Int{value: 9223372036854775807})
+    assert_eq(debug_snapshot_test_value("U8", "+7"), DebugValue.Int{value: 7})
+    assert_eq(debug_snapshot_test_value("I32", "007"), DebugValue.Int{value: 7})
+    // The scalar names are the language's own: a host spelling is no scalar.
+    assert_eq(debug_snapshot_test_value_error("i64", "7"), "local `probe` has a value shape the safe debugger cannot publish")
     unavailable: "local `probe` has an unavailable Int value"
-    assert_eq(debug_snapshot_test_value_error("u64", "18446744073709551615"), unavailable)
+    assert_eq(debug_snapshot_test_value_error("U64", "18446744073709551615"), unavailable)
     assert_eq(debug_snapshot_test_value_error("Int", "9223372036854775808"), unavailable)
     assert_eq(debug_snapshot_test_value_error("Int", "1.0"), unavailable)
     assert_eq(debug_snapshot_test_value_error("Int", "0x10"), unavailable)
@@ -169,26 +171,26 @@ debug_snapshot_test_value_error: fn(type_name: String, value: String) -> String 
 #Test("debug_values_publish_exact_finite_float_bits") {
     assert_eq(debug_snapshot_test_value("Float", "1.5"), DebugValue.FloatBits{bits: 4609434218613702656})
     // Negative values keep the full u64 sign-bit pattern.
-    assert_eq(debug_snapshot_test_value("f64", "-2.5"), DebugValue.FloatBits{bits: 13836183955189006336})
+    assert_eq(debug_snapshot_test_value("F64", "-2.5"), DebugValue.FloatBits{bits: 13836183955189006336})
     unavailable: "local `probe` has an unavailable Float value"
     rejected: [String]{"inf", "-inf", "NaN", "1e400", "one"}
-    loop raw in rejected { assert_eq(debug_snapshot_test_value_error("f32", raw), unavailable) }
+    loop raw in rejected { assert_eq(debug_snapshot_test_value_error("F32", raw), unavailable) }
 }
 
 #Test("debug_values_unit_text_and_unit_shape_fallthrough") {
     assert_eq(debug_snapshot_test_value("Unit", ""), DebugValue.Unit)
-    assert_eq(debug_snapshot_test_value("()", "()"), DebugValue.Unit)
+    assert_eq(debug_snapshot_test_value("Unit", "()"), DebugValue.Unit)
     // A Unit type with other text falls through to the shape arms.
     assert_eq(debug_snapshot_test_value("Unit", "[1]"), DebugValue.Aggregate{kind: DebugAggregateKind.List, length: 1})
     assert_eq(debug_snapshot_test_value_error("Unit", "nothing"), "local `probe` has a value shape the safe debugger cannot publish")
     assert_eq(debug_snapshot_test_value("String", "plain"), DebugValue.Text{text: "plain"})
     cr: debug_snapshot_test_text([U8]{U8{13}})
-    assert_eq(debug_snapshot_test_value("&str", "\"a\\nb\\tc\\rd\\\\e\\\"f\""), DebugValue.Text{text: "a\nb\tc{cr}d\\e\"f"})
+    assert_eq(debug_snapshot_test_value("String", "\"a\\nb\\tc\\rd\\\\e\\\"f\""), DebugValue.Text{text: "a\nb\tc{cr}d\\e\"f"})
     // Unknown escapes drop the backslash; a dangling one is kept.
-    assert_eq(debug_snapshot_test_value("char", "\"\\é\\q\""), DebugValue.Text{text: "éq"})
+    assert_eq(debug_snapshot_test_value("Char", "\"\\é\\q\""), DebugValue.Text{text: "éq"})
     assert_eq(debug_snapshot_test_value("Char", "\"x\\\""), DebugValue.Text{text: "x\\"})
     // A lone quote is not a quoted pair.
-    assert_eq(debug_snapshot_test_value("str", "\""), DebugValue.Text{text: "\""})
+    assert_eq(debug_snapshot_test_value("String", "\""), DebugValue.Text{text: "\""})
     assert_eq(debug_snapshot_test_value("String", "\"\""), DebugValue.Text{text: ""})
 }
 

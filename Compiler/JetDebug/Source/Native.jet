@@ -8,8 +8,8 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
-    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_from_registry, diagnostic_registry_row]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
+    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
 #Error
@@ -238,13 +238,92 @@ NativeSession: struct {
         Ok(shown)
     }
 
-    // The selected frame's parameters and locals, rendered as Jet values.
+    // The selected frame's parameters and locals, rendered as Jet values; a
+    // struct whose type implements DebugView shows as its view (view).
     locals: fn(&self) -> [NativeLocal] NativeDebugError! {
         frames: self.unwind() ?? return Err(err)
         if frames.len() == 0 -> return Ok([NativeLocal]{})
         index: if self.selected < frames.len() -> self.selected else -> 0
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        Ok(native_frame_locals(self.image, memory, frames[index], if index == 0 -> frames[index].pc else -> frames[index].pc - 1))
+        lookup: if index == 0 -> frames[index].pc else -> frames[index].pc - 1
+        shown := native_frame_locals(self.image, memory, frames[index], lookup)
+        function: native_function_at(self.image, lookup) ?? return Ok(shown)
+        // The variables native_frame_locals shows, in its order.
+        at := 0
+        loop variable in function.variables {
+            located := NativeRange?{None}
+            if variable.list >= 0 {
+                located = native_variable_covering(self.image, variable, lookup)
+                if located == None -> next
+            }
+            local: at
+            at += 1
+            range: located ?? next
+            view: native_debug_view_at(self.image, variable.ty) ?? next
+            bytes: native_place_bytes(memory, frames[index], self.image.loclists, range.from, range.to, native_type_size(self.image, variable.ty)) ?? next
+            if self.view(view, variable.ty, bytes) == {
+                .Ok(viewed) -> {
+                    if viewed == .Val(text) -> shown[local].value = text
+                }
+                .Err(failure) -> return Err(failure)
+            }
+            if !self.alive() -> break
+        }
+        Ok(shown)
+    }
+
+    // The value whose bytes are `value`, of struct type `ty`, as its
+    // DebugView shows it: the stopped program runs the view at address
+    // `view` on a copy of the value, below the stack it holds, then its
+    // registers are put back. None when the view does not return (a trap,
+    // a breakpoint or the program's end stops it first) or its items can't
+    // be read.
+    view: fn(&self, view: Int, ty: Int, value: [U8]) -> String? NativeDebugError! {
+        saved: self.registers() ?? return Err(err)
+        back: saved[X64_TRACE_RIP]
+        // Past the red zone: the [DebugItem] header the view returns through
+        // its hidden result pointer, the value it borrows as `self`, then the
+        // return address, the stack 16-byte aligned at the call.
+        below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - 32
+        result: below - below % 16
+        copied: result - value.len() - (result - value.len()) % 16
+        entry: copied - 16 - 8
+        if !self.poke_bytes(copied, value) || !self.poke_bytes(entry, native_word_bytes(back)) {
+            return Ok(None)
+        }
+        temporary: !self.has_site(back)
+        if temporary && !self.plant(back) -> return Ok(None)
+        registers := self.registers() ?? return Err(err)
+        registers[X64_TRACE_RIP] = view
+        registers[X64_TRACE_RSP] = entry
+        registers[X64_TRACE_RDI] = result
+        registers[X64_TRACE_RSI] = copied
+        if !x64_trace_set_registers(self.trace, registers) {
+            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+        }
+        event: self.resume(X64TraceResume.Run) ?? return Err(err)
+        if event.kind != NativeStopKind.Paused -> return Ok(None)
+        after: self.registers() ?? return Err(err)
+        shown := String?{None}
+        if after[X64_TRACE_RIP] - 1 == back && after[X64_TRACE_RSP] == entry + 8 {
+            shown = native_debug_view_shown(self.image, NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}, ty, result)
+        }
+        if !x64_trace_set_registers(self.trace, saved) {
+            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+        }
+        if temporary -> self.lift(back)
+        Ok(shown)
+    }
+
+    // Write `bytes` at `address` of the stopped program a word at a time,
+    // the last word padded with zeros; false when it can't be written.
+    poke_bytes: fn(self, address: Int, bytes: [U8]) -> Bool Never! {
+        loop word in 0..<((bytes.len() + 7) >> 3) {
+            if !x64_trace_poke(self.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
+                return false
+            }
+        }
+        true
     }
 
     // Select frame `index` of the current thread (0 is innermost).
@@ -996,6 +1075,15 @@ NATIVE_DEBUG_SHOWN_ITEMS: 16
 
 NATIVE_DEBUG_SHOWN_BYTES: 256
 
+// The method a DebugView implements, and the type of the items it returns.
+NATIVE_DEBUG_VIEW: "debug_view"
+
+NATIVE_DEBUG_VIEW_ITEM: "DebugItem"
+
+// The bytes below the stack pointer a function may use without moving it
+// (the System V red zone): an inferior call leaves them alone.
+NATIVE_DEBUG_RED_ZONE: 128
+
 // How deep a readout follows a value's members and elements.
 NATIVE_DEBUG_SHOWN_DEPTH: 4
 
@@ -1083,17 +1171,19 @@ native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeU
             locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
             next
         }
-        covering := NativeRange?{None}
-        loop range in native_ranges(image, variable.list, variable.base) {
-            if lookup >= range.start && lookup < range.end && covering == None {
-                covering = Val(range)
-            }
-        }
-        located: covering ?? next
+        located: native_variable_covering(image, variable, lookup) ?? next
         value: native_variable_value(image, memory, frame, located, variable.ty) ?? NATIVE_DEBUG_UNAVAILABLE
         locals.push(NativeLocal{name: variable.name, type_name: type_name, value: value})
     }
     locals
+}
+
+// The first range of `variable`'s location list that covers `lookup`.
+native_variable_covering: fn(image: NativeImage, variable: NativeVariable, lookup: Int) -> NativeRange? Never! {
+    loop range in native_ranges(image, variable.list, variable.base) {
+        if lookup >= range.start && lookup < range.end -> return Val(range)
+    }
+    None
 }
 
 // The value of type `ty` the location expression of `range` names in
@@ -1230,14 +1320,16 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
     if depth > NATIVE_DEBUG_SHOWN_DEPTH -> return Val("…")
     word: native_number(bytes, at, if bytes.len() - at < 8 -> bytes.len() - at else -> 8, X64DebugEncoding.Signed)
     if {
-        found.tag == NATIVE_TAG_TYPEDEF -> if found.name == {
-            "Int" -> {
+        // A typedef names a language type (foundation_named_type, the one
+        // source of the scalar spellings) or a precise number's handle.
+        found.tag == NATIVE_TAG_TYPEDEF -> if foundation_named_type(found.name) == {
+            .Int -> {
                 value: native_debug_int(word, memory) ?? return None
                 Val("{value}")
             }
-            "String" -> native_debug_string(word, memory)
-            "Decimal" | "Fraction" -> native_debug_precise(found.name, word, memory)
-            else -> native_render(image, memory, found.target, bytes, at, depth)
+            .String -> native_debug_string(word, memory)
+            .Named(_) -> if found.name == "Decimal" || found.name == "Fraction" -> native_debug_precise(found.name, word, memory) else -> native_render(image, memory, found.target, bytes, at, depth)
+            .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> native_render(image, memory, found.target, bytes, at, depth)
         }
         found.tag == NATIVE_TAG_BASE -> if found.encoding == {
             .Bool -> Val(if word & 255 != 0 -> "true" else -> "false")
@@ -1347,15 +1439,97 @@ native_debug_int: fn(word: Int, memory: NativeMemory) -> Int? Never! {
 // The String whose header [data, byte length, cap] is at `address`, quoted,
 // its first NATIVE_DEBUG_SHOWN_BYTES bytes shown.
 native_debug_string: fn(address: Int, memory: NativeMemory) -> String? Never! {
+    native_debug_text(address, memory, true)
+}
+
+// The String whose header is at `address`, as a Jet string literal when
+// `quoted`, else as its own text: its first NATIVE_DEBUG_SHOWN_BYTES bytes,
+// then its length when it has more.
+native_debug_text: fn(address: Int, memory: NativeMemory, quoted: Bool) -> String? Never! {
     header: native_debug_read(memory, address, 8, 2) ?? return None
     length: header[1]
     if length < 0 -> return None
     shown: if length > NATIVE_DEBUG_SHOWN_BYTES -> NATIVE_DEBUG_SHOWN_BYTES else -> length
-    if shown == 0 -> return Val("\"\"")
-    bytes: native_debug_bytes(memory, header[0], shown) ?? return None
-    text: native_debug_text_literal(String.from_bytes_lossy(bytes))
+    bytes: if shown == 0 -> [U8]{} else -> native_debug_bytes(memory, header[0], shown) ?? return None
+    lossy: String.from_bytes_lossy(bytes)
+    text: if quoted -> native_debug_text_literal(lossy) else -> lossy
     if length > shown -> return Val("{text}… ({length} bytes)")
     Val(text)
+}
+
+// The code address of the `debug_view` the image keeps for the struct type
+// `ty`: the subprogram of that name whose one parameter, `self`, is of that
+// type. A struct goes to a call as its address, so the debugger can call
+// the view on a copy of a value (NativeSession.view).
+native_debug_view_at: fn(image: NativeImage, ty: Int) -> Int? Never! {
+    found: image.types.get(ty) ?? return None
+    if found.tag != NATIVE_TAG_STRUCT || found.name.starts_with("[") -> return None
+    loop function in image.functions {
+        if function.name != NATIVE_DEBUG_VIEW -> next
+        parameters := 0
+        matched := false
+        loop variable in function.variables {
+            if variable.role != NativeVariableRole.Parameter -> next
+            parameters += 1
+            typed: image.types.get(variable.ty) ?? next
+            if variable.name == "self" && typed.name == found.name -> matched = true
+        }
+        if parameters == 1 && matched -> return Val(function.low)
+    }
+    None
+}
+
+// A value of type `ty` as its view shows it, from the [DebugItem] list
+// header its `debug_view` wrote at `address`: `Name{label: value, …}`, the
+// first NATIVE_DEBUG_SHOWN_ITEMS items, each label and value as its text.
+native_debug_view_shown: fn(image: NativeImage, memory: NativeMemory, ty: Int, address: Int) -> String? Never! {
+    list: native_debug_view_list(image) ?? return None
+    header: native_debug_bytes(memory, address, native_type_size(image, list)) ?? return None
+    length := -1
+    data := 0
+    item := -1
+    loop member in image.members[(image.types.get(list) ?? return None).group] {
+        if member.name == "len" {
+            length = native_number(header, member.offset, 8, X64DebugEncoding.Signed)
+        }
+        if member.name == "data" {
+            data = native_number(header, member.offset, 8, X64DebugEncoding.Signed)
+            item = (image.types.get(member.ty) ?? return None).target
+        }
+    }
+    found: image.types.get(item) ?? return None
+    size: native_type_size(image, item)
+    if length < 0 || size <= 0 || found.group < 0 -> return None
+    shown: if length > NATIVE_DEBUG_SHOWN_ITEMS -> NATIVE_DEBUG_SHOWN_ITEMS else -> length
+    stored: if shown == 0 -> [U8]{} else -> native_debug_bytes(memory, data, size * shown) ?? return None
+    items := [String]{}
+    loop k in 0..<shown {
+        label := NATIVE_DEBUG_UNAVAILABLE
+        value := NATIVE_DEBUG_UNAVAILABLE
+        loop member in image.members[found.group] {
+            text: native_debug_text(native_number(stored, k * size + member.offset, 8, X64DebugEncoding.Signed), memory, false) ?? NATIVE_DEBUG_UNAVAILABLE
+            if member.name == "label" -> label = text
+            if member.name == "value" -> value = text
+        }
+        items.push("{label}: {value}")
+    }
+    if length > shown -> items.push("… {length - shown} more")
+    Val("{native_type_name(image, ty)}{{{items.join(", ")}}}")
+}
+
+// The image's [DebugItem] list type, the one every `debug_view` returns.
+native_debug_view_list: fn(image: NativeImage) -> Int? Never! {
+    loop (offset, found) in image.types {
+        if found.tag != NATIVE_TAG_STRUCT || found.group < 0 || !found.name.starts_with("[") -> next
+        loop member in image.members[found.group] {
+            if member.name != "data" -> next
+            pointer: image.types.get(member.ty) ?? next
+            if pointer.tag == NATIVE_TAG_POINTER && native_type_name(image, pointer.target) == NATIVE_DEBUG_VIEW_ITEM {
+                return Val(offset)
+            }
+        }
+    }
+    None
 }
 
 // `text` as a Jet string literal.

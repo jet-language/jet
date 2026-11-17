@@ -77,11 +77,11 @@ native_test_toolchain_root: fn() -> String Never! {
     }
 }
 
-// A session over `NATIVE_TEST_PROGRAM` built at -O0 in `root`.
-native_test_session: fn(root: String) -> NativeSession {
+// A session over `program`, written to prog.jet and built at -O0 in `root`.
+native_test_session: fn(root: String, program: String) -> NativeSession {
     jet: native_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
     source: native_test_files.join(root, "prog.jet")
-    native_test_files.write(source, NATIVE_TEST_PROGRAM) ?? panic("source: {err}")
+    native_test_files.write(source, program) ?? panic("source: {err}")
     out: native_test_files.join(root, "out")
     built: native_test_process.cmd([String]{jet, "build", "-O0", "--output-dir={out}", source}).env("JET_TOOLCHAIN_ROOT", native_test_toolchain_root()).stdout(.Capture).stderr(.Capture).run() ?? panic("jet build: {err}")
     if !built.success -> panic("jet build failed: {built.output}{built.errors}")
@@ -90,10 +90,36 @@ native_test_session: fn(root: String) -> NativeSession {
 
 NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
 
+// A ring buffer whose view lists its items in order. The program calls the
+// view itself, so the image has it whether or not the build keeps views.
+NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String\n    value: String\n}}\n\nRing: struct {{\n    items: [Int]\n    start: Int\n    count: Int\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
+
+#Test("a_struct_with_a_debug_view_shows_its_items") {
+    scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_RING)
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list()) ?? panic("run_to: {err.detail}")
+    assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
+    locals: session.locals() ?? panic("locals: {err.detail}")
+    shown := ""
+    loop local in locals {
+        if local.name == "ring" -> shown = local.value
+    }
+    assert_eq(shown, "Ring{{0: 3, 1: 4, 2: 5}}")
+    // The view ran in the program, which goes on where it stopped.
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    finished: session.continue_run() ?? panic("continue: {err.detail}")
+    assert(finished.kind == NativeStopKind.Exited)
+    assert_eq(finished.code, 0)
+    assert_eq(session.take_output(), "items 3\n")
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
 #Test("a_session_pauses_steps_and_reads_the_native_image") {
     scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root)
+    session := native_test_session(root, NATIVE_TEST_PROGRAM)
     resolved := -1
     if session.break_at("prog.jet", 2) == {
         .Ok(number) -> { resolved = number ?? -1 }
@@ -124,7 +150,7 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 #Test("run_to_stops_first_at_the_first_breakpoint_reached") {
     scratch: native_test_files.temp_dir("jet-debug-run-to") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root)
+    session := native_test_session(root, NATIVE_TEST_PROGRAM)
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 40}, {file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("No code on prog.jet:40\n"))
@@ -140,7 +166,7 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 #Test("step_enters_a_call_finish_leaves_it_and_next_runs_over_it") {
     scratch: native_test_files.temp_dir("jet-debug-steps") ?? panic("scratch: {err}")
     root: scratch.path
-    session := native_test_session(root)
+    session := native_test_session(root, NATIVE_TEST_PROGRAM)
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
     first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
