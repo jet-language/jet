@@ -160,8 +160,9 @@ use {
         deep_checks_selects,
         deep_checks_unselected,
         deep_checks_unselected_report,
-        PolicyKey,
-        policy_gate_allows,
+        authority_covers_any,
+        authority_expert_answer,
+        AuthorityVerdict,
         CompilerThreads,
         compiler_threads_admit,
         compiler_threads_failure_text,
@@ -2988,7 +2989,7 @@ jet_driver_comptime_flush: fn(
         }
         item_config := jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file), Val(compiler_queries))
         item_config.impure = source.impure
-        item_config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
+        item_config.host_held = jet_driver_comptime_host_module(graph, source.module_identity)
         item_config.effect_call = comptime_request.effect_call
         eval_result: jet_eval_native_run(native, item, [TComptimeValue]{}, item_config, comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
@@ -5526,6 +5527,40 @@ jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load:
     }
 }
 
+// The expert effect that lets compile-time code reach the host: the file
+// calls of an `#Impure` block a `#run` value makes.
+JET_DRIVER_META_HOST: "Meta.Host"
+
+// The packages of `policies` whose compile-time code may reach the host;
+// `main` is the main package's identity. A package may when its expert
+// entries (jet_driver_expert_policies) hold `Meta.Host` and no `deny` row
+// that binds it covers it: its own, the main package's or the
+// organization's. Deny wins.
+jet_driver_comptime_host_packages: fn(policies: [SemaRegistrationPackagePolicy], main: String) -> [String] Never! {
+    out := [String]{}
+    loop root in policies {
+        if root.package_identity != main -> next
+        if authority_covers_any(root.authority_deny ?? [String]{}, JET_DRIVER_META_HOST) || authority_covers_any(root.organization_deny, JET_DRIVER_META_HOST) {
+            return out
+        }
+        loop policy in policies {
+            denied: authority_covers_any(policy.authority_deny ?? [String]{}, JET_DRIVER_META_HOST)
+            if authority_expert_answer(policy.expert_held, denied, JET_DRIVER_META_HOST) == AuthorityVerdict.Allowed {
+                out.push(policy.package_identity)
+            }
+        }
+    }
+    out
+}
+
+// Whether the compile-time code of the module `module_identity` of `graph`
+// may reach the host: its package is one of the graph's
+// comptime_host_packages.
+jet_driver_comptime_host_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool Never! {
+    index: sema_registration_module_index(graph, module_identity) ?? return false
+    graph.comptime_host_packages.contains(graph.modules[index].package_identity)
+}
+
 // One finalization of the comptime run's `graph`: the bodies, the local
 // values landed before the whole-program half (jet_driver_land_local_values),
 // the Core demand rounds with the landings between them, and the
@@ -5715,6 +5750,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         sema_trait_laws_add(registration_graph)
     }
     registration_graph.plugin_facts = plugin_facts
+    registration_graph.comptime_host_packages = jet_driver_comptime_host_packages(package_policies, load.package_identity)
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if request.mode == JetDriverCompileMode.Program -> registration_graph.check_root_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc {

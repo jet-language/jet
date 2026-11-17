@@ -522,7 +522,11 @@ answer's type is the stage's:
 | `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
 
 The hook runs as a compile-time value, under the same rules. A row outside its
-block, or a token of an unknown kind, is left out.
+block, or a token of an unknown kind, is left out. `jet fmt` compiles a file's
+hooks only when a source of its package or of a dependency declares a
+`fmt.block` hook for the marker of one of the file's blocks. It reads those
+sources once per package per run, with a parse and no check, so a file whose
+blocks no hook reads compiles nothing.
 
 ```jet
 use compiler: core.compiler
@@ -3493,6 +3497,15 @@ by the lane count, an integer division for integer lanes. Operands of
 different lane types are error E2511, and a `reduce` argument that is not a
 `ReduceOp` value is error E2510.
 
+Integer lane types also take the bit operators `&`, `|`, `~` (exclusive or)
+and the shifts `<<` and `>>` lane by lane, and prefix `~` complements every
+lane. The right side is another value of the same lane type or one integer
+of the lane type (a number literal reads as one); a shift count may be any
+integer. Each lane is the scalar operator, so `>>` is arithmetic on signed
+lanes and logical on unsigned ones, and a shift by the lane width or more
+stops as the scalar shift does. Two different lane types, or a scalar of
+another type, are error E0446. Float lanes have no bit operators (E0109).
+
 ### `core.units` — measured quantities
 
 `core.units` supplies named SI and binary-unit scales over
@@ -5632,6 +5645,9 @@ tasks never read or change the process registry. The module source is
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `take_photo() -[Env, Exec, FS, Net, Time]> PickedFile?` | photo | Take a photo with the device's camera once the person allows it; `None` when they do not, or no photo came. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
+| `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
+| `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
+| `heading_updates() -[Env, Net, Time]> Stream<Float>` | headings | Where the device points, in degrees clockwise from north, each time that changes, until the loop reading it ends. See below. |
 | `photo.read() -[FS.Read]> [U8] IOError!` | bytes | The bytes of the `PickedFile` `photo`. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
@@ -6000,6 +6016,17 @@ Push's `Topic` header and the notification's `tag`. So a retried run sends
 each push with the key it had before, whatever order its query gives the
 rows in, and the repeat replaces the earlier copy; two pushes of one run
 never share a key.
+`app.notify(title:, body:, open: state)`, written without `to:`, shows a
+notification on this device with no server. On Linux the desktop's
+notification service (org.freedesktop.Notifications on the session bus)
+shows it, with the body escaped where the service reads markup, and while
+the app runs a click on it opens `state` through the graph's route set, as
+the link `url_of(state)` does. The package must give `purposes:` a
+`notifications` purpose (E-APP-PERMISSION-PURPOSE). A notification the
+desktop can't show adds a notice to `app.notices()`; it is never dropped.
+The web output has no notification of its own for a page, so this form is
+E-APP-TARGET-FEATURE there; a server's `app.notify(to:, …)` reaches the
+browser through Web Push.
 `app.current<BoardView>()` gives the current screen's state, made back from
 its address, when it is a `BoardView`, and None otherwise or before a
 screen opens. A value that is no struct declared outside Core is E2821
@@ -6195,8 +6222,8 @@ value is non-empty quoted text. `jet check` refuses a call that may ask for
 a permission with no line, E-APP-PERMISSION-PURPOSE: `app.ask` at its
 argument, where a literal permission (`.Camera`, `app.Permission.Camera`)
 needs its own line and a permission chosen at run time needs a line for
-every permission, and `app.take_photo` and `app.location` at the call, for
-the camera's and the location's.
+every permission, and `app.take_photo`, `app.location` and
+`app.location_updates` at the call, for the camera's and the location's.
 
 `app.open_settings()` opens the system's settings page for the app, where
 the person changes an answer they gave `app.ask`, and is true when one
@@ -6224,11 +6251,26 @@ seconds. The location is the first one the portal's location session
 reports (GeoClue finds it) after the person allows it, within five minutes
 of the ask. On the other native targets both are `None`.
 
+`app.location_updates()` is a stream of places: the first as the device is
+located, then one each time it moves. It asks as `app.location()` does, and
+it is empty after an answer other than `.Granted`.
+`app.orientation_updates()` is a stream of `Orientation`s, how the device is
+held (`.Upright`, `.UpsideDown`, `.LeftUp` or `.RightUp`), and
+`app.heading_updates()` a stream of headings, in degrees clockwise from
+north: each starts with the reading of the moment, then gives one each time
+it changes. These sensors need no permission. Each stream stops when the
+loop reading it ends, by `break`, `return` or a failure, and leaves nothing
+listening: on Linux the location stream closes its portal location session
+and each sensor stream gives its sensor back to the sensor proxy
+(iio-sensor-proxy, on the system bus), then each closes its bus
+connection. A device with no such sensor, or no bus to ask, gives an empty
+stream, as the other native targets do.
+
 A browser asks for a device permission itself, when a page first uses the
 device, and keeps no settings page of the app's, so `app.ask`,
-`app.open_settings`, `app.take_photo` and `app.location` in code whose
-target is the web output are a compile error, E-APP-TARGET-FEATURE, never a
-made-up answer.
+`app.open_settings`, `app.take_photo`, `app.location` and the three streams
+in code whose target is the web output are a compile error,
+E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

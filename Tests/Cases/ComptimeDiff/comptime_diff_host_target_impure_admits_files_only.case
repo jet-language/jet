@@ -1,5 +1,5 @@
 # Native execution while building doesn't inherit the compiler's authority.
-# Under `--gate impure=allow`, the `#Impure` block of `build: fn` runs the
+# When the package holds `Meta.Host`, the `#Impure` block of `build: fn` runs the
 # program's own helpers in the compile-time child, which admits their file
 # calls only: a file read runs and the build writes what it read. An
 # environment read is refused (E3401), never answered None where the program
@@ -8,7 +8,7 @@
 fixture: ComptimeDiffHostTargetImpureAdmitsFilesOnly.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/store
-step: jet build --gate impure=allow
+step: jet build
 cwd: files
 exit: 0
 file: files/build-note.txt = "read while building"
@@ -16,12 +16,12 @@ step: {work}/files/.jet/build/app
 cwd: files
 exit: 0
 stdout: = "read while building\n"
-step: jet build --gate impure=allow
+step: jet build
 cwd: env
 exit: 1
 stderr: ~ "`reading or changing the environment` inside `#Impure` is a Tier-2 comptime effect the compile-time child doesn't admit" # E3401, not a None
 file: env/build-home.txt absent
-step: jet build --gate impure=allow
+step: jet build
 cwd: process
 exit: 1
 stderr: ~ "`launching a process` inside `#Impure` is a Tier-2 comptime effect the compile-time child doesn't admit" # E3401 names the launch

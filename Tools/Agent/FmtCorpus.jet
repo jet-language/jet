@@ -45,6 +45,9 @@
 //   on purpose, and the fixture's bytes are the lesson;
 // - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
 //
+// The formatter runs over the corpus in batches of BATCH sources, FMT_JOBS
+// batches at once.
+//
 // One bad source never stalls a run: each formatter run has a time limit
 // (FMT_LIMIT_BASE_MS, plus FMT_LIMIT_PER_SOURCE_MS per source), and a run
 // that passes it, dies on a signal or fails without naming a refused source
@@ -140,11 +143,17 @@ GENERATED_HEAD_LINES: 5
 // Sources per formatter run.
 BATCH: 400
 
-// A formatter run may take FMT_LIMIT_BASE_MS plus FMT_LIMIT_PER_SOURCE_MS for
-// each source it formats; past that, it hangs.
-FMT_LIMIT_BASE_MS: 10000
+// Formatter runs at once, at most one per processor; few enough that a case
+// beside others in a suite leaves them room.
+FMT_JOBS: 4
 
-FMT_LIMIT_PER_SOURCE_MS: 100
+// A formatter run may take FMT_LIMIT_BASE_MS plus FMT_LIMIT_PER_SOURCE_MS for
+// each source it formats; past that, it hangs. The limit is wall time, so it
+// leaves room for a machine busy with other runs: a run that passes it is
+// split and run again, which only adds to the load.
+FMT_LIMIT_BASE_MS: 30000
+
+FMT_LIMIT_PER_SOURCE_MS: 1000
 
 // Where `jet fmt` respelled a few bytes, the non-blank bytes either side may
 // skip (ALIGN_REACH) before ALIGN_WINDOW of them agree again.
@@ -903,12 +912,27 @@ fmt_meaning_change: fn(errors: String) -> String? Never! {
 // aside as failed. Returns the number of formatter runs.
 run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     if sources.len() == 0 -> return Ok(0)
-    checking: formatter.flags.contains("--check")
+    receipt: fmt_spec(formatter, sources).run() ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+    fmt_receipt(formatter, sources, receipt, outcome)
+}
+
+// The formatter run of `sources`, with its time limit.
+fmt_spec: fn(formatter: Formatter, sources: [String]) -> ProcessSpec Never! {
     argv := [String]{formatter.jet.copy(), "fmt"}
     loop flag in formatter.flags -> argv.push(flag.copy())
     loop source in sources -> argv.push(source.copy())
-    limit_ms: FMT_LIMIT_BASE_MS + FMT_LIMIT_PER_SOURCE_MS * sources.len()
-    receipt: process.cmd(argv).cwd(formatter.root).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(limit_ms)).run() ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+    process.cmd(argv).cwd(formatter.root).env("NO_COLOR", "1").stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(fmt_limit_ms(sources)))
+}
+
+fmt_limit_ms: fn(sources: [String]) -> Int Never! {
+    FMT_LIMIT_BASE_MS + FMT_LIMIT_PER_SOURCE_MS * sources.len()
+}
+
+// What the formatter run of `sources` that gave `receipt` said, into
+// `outcome`, as run_fmt describes; a run that failed runs again in parts.
+fmt_receipt: fn(formatter: Formatter, sources: [String], receipt: ProcessReceipt, outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
+    checking: formatter.flags.contains("--check")
+    limit_ms: fmt_limit_ms(sources)
     // Under `--check`, exit 1 means a source would change.
     finished: if checking -> [Int]{0, 1} else -> [Int]{0}
     failure: if receipt.timed_out -> "hang: `jet fmt` ran past {limit_ms} ms" else -> fmt_crash(receipt.signal, receipt.code, finished, receipt.errors)
@@ -973,18 +997,28 @@ first_line: fn(text: String) -> String Never! {
     "(no message)"
 }
 
-// `run_fmt` over `sources` in batches of BATCH.
-fmt_corpus: fn(formatter: Formatter, sources: [String]) -[Exec, Time.Wait]> FmtOutcome CorpusError! {
+// `run_fmt` over `sources` in batches of BATCH, up to FMT_JOBS (no more than
+// the processors) at once. Each batch's outcome joins in batch order, so the
+// report is the one a run of one batch after another gives.
+fmt_corpus: fn(formatter: Formatter, sources: [String]) -[Env, Exec, Time.Wait]> FmtOutcome CorpusError! {
     outcome := FmtOutcome{dirty: [String]{}, unparsed: [String]{}, failed: [FmtFailure]{}, changed: [FmtFailure]{}}
+    batches := [[String]]{}
     batch := [String]{}
     loop source in sources {
         batch.push(source.copy())
         if batch.len() == BATCH {
-            _: run_fmt(formatter, batch, outcome) ?? return Err(err)
+            batches.push(batch)
             batch = [String]{}
         }
     }
-    _: run_fmt(formatter, batch, outcome) ?? return Err(err)
+    if batch.len() > 0 -> batches.push(batch)
+    specs: loop part in batches -> fmt_spec(formatter, part)
+    jobs: if sys.cpu_count() < FMT_JOBS -> sys.cpu_count() else -> FMT_JOBS
+    ran: process.run_all(specs, jobs) ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+    loop (at, part) in batches {
+        receipt: ran[at] ?? return Err(CorpusError{message: "cannot run {formatter.jet} fmt: {err}"})
+        _: fmt_receipt(formatter, part, receipt, outcome) ?? return Err(err)
+    }
     Ok(outcome)
 }
 

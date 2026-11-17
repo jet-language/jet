@@ -1,8 +1,8 @@
-Error [jet.ImpureGateNotAllowed]: `greeting()` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed
+Error [jet.ImpureGateNotAllowed]: `greeting()` inside `#Impure` is a Tier-2 comptime effect, but its package doesn't hold `Meta.Host`
   --> Tests/UI/impure_helper_read_needs_the_gate.jet:15:22
     |
  15 |         text: #run { greeting("greeting.txt") }
     |                      ^^^^^^^^
- Why: The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host.
- Fix: Add `--gate impure=allow` to your `jet build` / `jet run` invocation.
+ Why: The `#Impure` block opts in to ambient I/O, but reaching the host while compiling is also the expert effect `Meta.Host`, which no package holds by default: the main package holds it by naming it, and lends it to a dependency with `authority.grants`, so the package file shows every build that touches the host.
+ Fix: Add `Meta.Host` to the main package's `authority: { allow: [...] }` row; for a dependency, add `Meta.Host` to the main package's `authority: { grants: { "name": [...] } }` line for it.
 More: jet-lang.dev/e/E3411

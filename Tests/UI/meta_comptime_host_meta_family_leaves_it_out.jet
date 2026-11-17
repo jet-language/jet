@@ -1,0 +1,13 @@
+// E3411: `allow: [Meta]` holds `Meta.Generate` and `Meta.Include` but none of
+// the expert effects under `Meta`, so reaching the host while compiling still
+// needs `Meta.Host` named in the row.
+package: { name: "main", authority: { allow: [Meta] } }
+
+use fs: core.files
+
+run: fn() {
+    #Impure("probe a file while compiling") {
+        found: #run fs.exists("meta_comptime_host_meta_family_leaves_it_out.jet")
+        print("{found}")
+    }
+}

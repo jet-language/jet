@@ -429,8 +429,9 @@ jet_cli_new_app_run: fn(request: JetCLINewApp) -[Env, Exec, Exec.Args, FFI.Asm, 
         version = jet_cli_new_app_next_version(root) ?? return jet_cli_new_failed("E2105", err.message, fix_io, color)
     }
     files := [JetCLINewAppFile]{}
+    hooks := jet_cli_tool_stage_memo()
     loop source in jet_cli_new_app_sources(request, version) {
-        formatted: jet_cli_fmt_format_source(source.text, source.path, false, false, false, color) ?? return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
+        formatted: jet_cli_fmt_format_source(source.text, source.path, false, false, false, color, hooks) ?? return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
         if formatted.report != None || formatted.diagnostics.len() > 0 {
             return jet_cli_ice("the `jet new {request.kind}` template for `{source.path}` does not format")
         }

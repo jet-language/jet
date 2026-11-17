@@ -1024,6 +1024,12 @@ SemaRegistrationGraph: struct {
     // as under `jet check`, so a body `jet test` refuses is refused here too
     // (sema_check_module_tests). E2104 still applies.
     check_root_tests: Bool{false},
+    // The packages whose compile-time code may reach the host, set by the
+    // driver: each holds the expert effect `Meta.Host` and no `deny` row that
+    // binds it covers it. The file calls of an `#Impure` block a `#run` value
+    // of one of their modules makes run natively; any other package's are
+    // refused (E3411).
+    comptime_host_packages: [String]{[String]{}},
     // `#run use` (ComptimeUse.jet): "{module}\n{target}" -> the
     // `#run ` prefix of the import that brings `target` into `module`
     // for compile-time code only, so a runtime read of a value of its types

@@ -152,7 +152,7 @@ to `U64x4`).
 | S9 | `simd.select(mask, a, b)` | `m.select(a, b)` | E0102 (no mask) | MISSING | D-ARRAY-LANESCMP1=C (the `Lanes<Bool, N>` mask) |
 | S10 | lane-wise conversion, `cast(#simd[4]i32)a` | `a.to_i32x4()` | E0102 | MISSING | D-ARRAY-CONVERT1 (section 9, B1, with A15) |
 | S11 | `swizzle` and `simd.shuffle` on lanes | `a.wzyx` on `F32x4` | `[4.0, 3.0, 2.0, 1.0]`; not on integer lanes | PARTIAL | #6177 c3 |
-| S12 | shifts and bit operators on integer lanes | `a << 1` on `I32x4` | E0109 | MISSING | #6177 c6 |
+| S12 | shifts and bit operators on integer lanes | `a << 1`, `a >> b`, `a & 0xF`, `~a` on `I32x4`; `u >> 4` on `U32x4` | lane by lane, with a lane or one integer; `>>` is arithmetic on signed lanes and logical on unsigned ones (Examples/LowLevel/IntegerLaneBits.jet) | PASS | — |
 | S13 | unary minus on lanes and vectors | `-a` on `F32x4`, `-v` on `Vec3` | E0109 | MISSING | #6177 c2 (no new spelling: see section 9) |
 | S14 | lane-wise `/` on vectors | `a / b` on `Vec3` | E2511 | MISSING | #6177 c2 (no new spelling: see section 9) |
 | S15 | any power-of-two width up to 64; integer, float, Bool or rawptr lanes | `F32x16.splat(1.0)` | E0107; a fixed family, no Bool lanes, nothing wider than 32 lanes | PARTIAL | #4167 (D-LANES1) |
@@ -197,7 +197,7 @@ lanes, which D-VECARITH1 already allows for this family. They belong in a
 
 ## 10. Counts
 
-Of the 83 rows: 30 PASS, 13 PARTIAL, 39 MISSING and 1 NOT ADOPTED. The card
+Of the 83 rows: 31 PASS, 13 PARTIAL, 38 MISSING and 1 NOT ADOPTED. The card
 log of 2026-10-29 recorded swizzle writes as failing on every tier. They now
 run (W3, S5).
 
@@ -253,7 +253,6 @@ to an owner ballot before it is built.
 | S9 | decision | D-ARRAY-LANESCMP1 |
 | S10 | card | #6177 (ballot B1, D-ARRAY-CONVERT1) |
 | S11 | card | #6177 |
-| S12 | card | #6177 |
 | S13 | card | #6177 |
 | S14 | card | #6177 |
 | S15 | card | #4167 |

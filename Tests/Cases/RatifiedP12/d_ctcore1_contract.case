@@ -2,8 +2,8 @@
 # a list of allowed functions. Pure code runs: a user function and Core text
 # methods. A recorded input runs: `embed_file` reads the file, at module level
 # or in a function, and the build locks each file's SHA-256. Code with an
-# effect runs only inside `#Impure` and only under `--gate impure=allow`;
-# outside `#Impure` the call is E3410, and without the gate it is E3411.
+# effect runs only inside `#Impure` and only when its package holds `Meta.Host`;
+# outside `#Impure` the call is E3410, and without `Meta.Host` it is E3411.
 fixture: DCtcore1Contract.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/store
@@ -27,8 +27,9 @@ stderr: ~ ":12:9" # at the call
 stderr: ~ "jet-lang.dev/e/E3410" # one registered code
 step closed: jet run impure/main.jet
 exit: 1
-stderr: ~ "but `--gate impure=allow` was not passed" # `#Impure` alone does not open the gate
+stderr: ~ "but its package doesn't hold `Meta.Host`" # `#Impure` alone does not open the gate
 stderr: ~ "jet-lang.dev/e/E3411" # one registered code
-step open: jet run --gate impure=allow impure/main.jet
+write: impure/package.jet = "name: \"d_ctcore1_impure\"\nversion: \"0.1.0\"\nauthority: {\n    allow: [IO, FS, Meta.Host]\n}\n"
+step open: jet run impure/main.jet
 exit: 0
 stdout: = "hello from the file\nhello from the file\n"

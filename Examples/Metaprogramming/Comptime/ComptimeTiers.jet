@@ -8,7 +8,7 @@
 //
 // Tier 2 — ambient: reads the host filesystem, environment, etc.
 //           Requires BOTH a `#Impure("reason") { … }` gate AND
-//           `--gate impure=allow` on the build command.
+//           `Meta.Host` in the package's `authority: { allow: [...] }` row.
 use math: core.math
 
 // Tier 0: pure math — always evaluates at compile time.
@@ -34,9 +34,9 @@ GREETING: #run "hello"
 run: fn() {
     print("{GREETING}, world")
     print("pi × 10^4 ≈ {DIGITS_OF_PI}")
-    // Tier 2 gate: the block itself is fine without --gate impure=allow as
-    // long as no `#run` binding is attempted inside it. With
-    // --gate impure=allow you can add: CFG :: fs.read("config.txt")
+    // Tier 2 gate: the block itself is fine without `Meta.Host` as long as
+    // no `#run` binding is attempted inside it. With `Meta.Host` allowed
+    // you can add: CFG: #run fs.read("config.txt")
     #Impure("demonstrating the gate syntax") {
         print("inside #Impure gate (runtime block, Tier-2 comptime disabled here)")
     }

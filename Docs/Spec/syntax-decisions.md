@@ -4235,7 +4235,9 @@ empty effect set is Tier 0 and may evaluate without a gate. Recorded,
 hash-checked inputs such as `embed_file(path) -> String`,
 `embed_bytes(path) -> [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
-`#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
+`#Impure("reason")` plus the expert effect `Meta.Host`, which the package
+holds by the main package's `authority.allow` row or `authority.grants` line
+(D-JAI-EXPERT1); no `--gate` flag opens it. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
 Preparation uses the checked call's result carrier. Before AST return facts
 are materialized, a concrete Core surface signature supplies that result only
@@ -4245,7 +4247,7 @@ the default overload's result for another floating-point width.
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
-`--gate impure=allow`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
+`Meta.Host`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
 

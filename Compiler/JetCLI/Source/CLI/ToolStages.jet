@@ -13,7 +13,9 @@ use {
         jet_driver_compile,
         jet_driver_tool_stage_answers,
         jet_driver_tool_stage_blocks,
+        jet_driver_tool_stage_hooked,
         jet_driver_tool_stage_plan,
+        jet_driver_tool_stage_snapshot_markers,
     ]
     jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, foundation_byte_text]
     jet_parser.[jet_format_source, parse_source]
@@ -55,18 +57,62 @@ jet_cli_tool_stage_file: fn(document: String) -> String Never! {
     jet_cli_entry_join(jet_cli_parent(jet_cli_overlay_path(document)) ?? ".", JET_CLI_TOOL_STAGE_FILE)
 }
 
+// The hook markers of a tool stage that each package's sources declare
+// (jet_driver_tool_stage_snapshot_markers), keyed by stage and package
+// root, for one run of a tool over many files.
+JetCLIToolStageMemo: struct {
+    markers: [String:[String]],
+}
+
+jet_cli_tool_stage_memo: fn() -> JetCLIToolStageMemo Never! {
+    JetCLIToolStageMemo{markers: [String:[String]]{}}
+}
+
+// The markers of the `stage` hooks in the snapshot a compile of `document`
+// with `overlays` sees; the members of one package share it, so `memo`
+// keeps it for the rest of the run. A script or a loose file takes its own.
+jet_cli_tool_stage_markers: fn(document: String, overlays: [JetCLIOverlay], stage: String, memo: &JetCLIToolStageMemo) -[FS, Env]> [String] Never! {
+    root: jet_cli_tool_stage_package_root(document, overlays)
+    key: "{stage}\n{root}"
+    if root != "" && memo.markers.get(key) == .Val(known) -> return known
+    markers: if jet_cli_prepare_snapshot(document, document, overlays, false) == {
+        .Held(snapshot) -> jet_driver_tool_stage_snapshot_markers(snapshot, stage)
+        // A compile of the document would stop at the same refusal, so no
+        // hook would run.
+        .Refused(_) -> [String]{}
+    }
+    if root != "" -> memo.markers[key] = markers
+    markers
+}
+
+// The package root whose sources form the snapshot of every member file
+// (jet_cli_prepare_snapshot), or "" for a script or a file with no package.
+jet_cli_tool_stage_package_root: fn(document: String, overlays: [JetCLIOverlay]) -[FS, Env]> String Never! {
+    path: cli_files.realpath(document) ?? return ""
+    if jet_cli_entry_is_script(jet_cli_overlay_path(document), overlays) -> return ""
+    root: jet_cli_source_root(path)
+    if !cli_files.is_file(jet_cli_authority_path(root, "package.jet")) -> return ""
+    root
+}
+
 // `text`, a file `jet fmt` has formatted, with each marked block's body that
 // a package's `#On(fmt.block, Marker)` hook formats replaced by the hook's
 // answer; a hook answering None keeps its body, and the first hook to answer
-// for a block wins. Only a file on disk holding a marked block and importing
-// a package runs hooks: a Doc check of `text` finds them among the modules it
-// imports. Hooks that do not run, or an answer that leaves the file
-// unreadable, stop the file as written.
-jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool) -> JetCLIFmtSource {
-    if jet_driver_tool_stage_blocks(text).len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
+// for a block wins. Only a file on disk holding a marked block, importing a
+// package, and in a snapshot whose sources declare a hook for one of its
+// markers (`memo` keeps those per package) runs hooks: a Doc check of `text`
+// finds them among the modules it imports. Hooks that do not run, or an
+// answer that leaves the file unreadable, stop the file as written.
+jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool, memo: &JetCLIToolStageMemo) -> JetCLIFmtSource {
+    blocks: jet_driver_tool_stage_blocks(text)
+    if blocks.len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
         return jet_cli_fmt_formatted(text.move())
     }
     overlays := [JetCLIOverlay]{JetCLIOverlay{path: jet_cli_overlay_path(origin), source: text.move()}}
+    if !jet_driver_tool_stage_hooked(blocks, jet_cli_tool_stage_markers(origin, overlays, TOOL_STAGE_FMT_BLOCK, memo)) {
+        unhooked: overlays.pop() ?? return jet_cli_fmt_formatted("")
+        return jet_cli_fmt_formatted(unhooked.source)
+    }
     bodies := [Span]{}
     program := ""
     if jet_cli_prepare_overlays(origin, origin, overlays, false, None, JetDriverCompileMode.Doc) == {

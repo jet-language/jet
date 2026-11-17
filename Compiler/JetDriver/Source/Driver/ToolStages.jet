@@ -22,6 +22,7 @@ use {
         tool_stage_hook,
     ]
     jet_lexer.[TOKEN_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RPAREN, lex, token_text]
+    jet_parser.[parse_source]
     jet_sema.[SemaComptimeItemKind, SemaComptimeItemValue]
 }
 
@@ -104,6 +105,73 @@ jet_driver_tool_stage_blocks: fn(source: String) -> [JetDriverToolStageBlock] Ne
     }
     blocks
 }
+
+// The markers of the `stage` hooks that the `.jet` sources of `snapshot`
+// declare on their functions (`#On(fmt.block, Query)` gives `Query`), read
+// from a parse of each source that spells `#On`, with no check. The plan
+// calls only those hooks, so a document whose blocks reach none of these
+// markers (jet_driver_tool_stage_hooked) needs no compile for the stage.
+jet_driver_tool_stage_snapshot_markers: fn(snapshot: JetDriverAuthorizedSourceSnapshot, stage: String) -> [String] Never! {
+    markers := [String]{}
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if !file.relative_path.ends_with(".jet") || !jet_driver_tool_stage_spells_on(file.source) {
+                next
+            }
+            parsed: parse_source(file.source.bytes())
+            loop item in parsed.program.items {
+                if item == .Func(func) {
+                    loop marker in func.markers {
+                        hook: tool_stage_hook(marker) ?? next
+                        if hook.stage == stage && !markers.contains(hook.marker) {
+                            markers.push(hook.marker)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    markers
+}
+
+// Whether `source` may hold an `#On` marker: a `#`, any blank, then the word
+// `On`. Text that only mentions one (a comment, a string) passes too, and
+// its parse finds no hook.
+jet_driver_tool_stage_spells_on: fn(source: String) -> Bool Never! {
+    bytes: source.bytes()
+    loop at in 0..<bytes.len() {
+        if bytes[at] != (U8{35}) -> next
+        cursor := at + 1
+        loop cursor < bytes.len() && (bytes[cursor] == (U8{32}) || bytes[cursor] == (U8{9}) || bytes[cursor] == (U8{10}) || bytes[cursor] == (U8{13})) {
+            cursor += 1
+        }
+        if cursor + 1 >= bytes.len() || bytes[cursor] != (U8{79}) || bytes[cursor + 1] != (U8{110}) {
+            next
+        }
+        if cursor + 2 == bytes.len() -> return true
+        after: bytes[cursor + 2]
+        word: (after >= (U8{48}) && after <= (U8{57})) || (after >= (U8{65}) && after <= (U8{90})) || (after >= (U8{97}) && after <= (U8{122})) || after == (U8{95})
+        if !word -> return true
+    }
+    false
+}
+
+// Whether one of `blocks` may reach a hook of one of `markers`: the last
+// segments of their markers agree, as jet_driver_tool_stage_reaches needs
+// before it asks about the import.
+jet_driver_tool_stage_hooked: fn(blocks: [JetDriverToolStageBlock], markers: [String]) -> Bool Never! {
+    loop block in blocks {
+        loop marker in markers {
+            if jet_driver_tool_stage_leaf(block.marker) == jet_driver_tool_stage_leaf(marker) {
+                return true
+            }
+        }
+    }
+    false
+}
+
+// The last segment of a marker path (`Query` of `Tools.Query`).
+jet_driver_tool_stage_leaf: fn(path: String) -> String Never! { path.rpartition(".").tail }
 
 // The calls `stage` makes on the document `modules[document]`: each hook of
 // the stage that a module the document imports declares, on each block of
@@ -192,9 +260,8 @@ jet_driver_tool_stage_import: fn(imports: [ImportDecl], module_name: String) -> 
 // package the document imports as `alias`: the last segments agree, and a
 // qualified block names that import.
 jet_driver_tool_stage_reaches: fn(written: String, marker: String, alias: String) -> Bool Never! {
+    if jet_driver_tool_stage_leaf(written) != jet_driver_tool_stage_leaf(marker) -> return false
     segments: written.split(".").to_list()
-    keyed: marker.split(".").to_list()
-    if segments[segments.len() - 1] != keyed[keyed.len() - 1] -> return false
     segments.len() == 1 || (segments.len() == 2 && segments[0] == sema_casing_marker_qualifier(alias))
 }
 

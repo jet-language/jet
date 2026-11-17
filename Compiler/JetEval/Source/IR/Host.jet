@@ -76,8 +76,8 @@ jet_eval_ir_host_method_route: fn(s: &JetEvalIRState, args: [Int], dst_row: Int,
     }
     member: jet_eval_ir_text(s, args[0]) ?? return None
     // A build invocation's call inside an `#Impure` block runs between the
-    // marks Impure.enter and Impure.leave (IRProgram.invocation): under
-    // `--gate impure=allow` the child admits its file calls in between
+    // marks Impure.enter and Impure.leave (IRProgram.invocation): when the
+    // package holds `Meta.Host` the child admits its file calls in between
     // (jet_eval_native_admit), and a system call the child's filter refuses
     // there is that block's Tier-2 effect. Impure.refuse:<what> names one
     // such effect that makes no system call, refused as it is reached. A

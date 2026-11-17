@@ -2656,6 +2656,25 @@ App: struct {
             } else { push_note(false, device.service, account, outcome.reason) }
         }
     }
+
+    // A notification on this device, as the compiler lowers
+    // `app.notify(title:, body:, open:)` written without `to:`. `open_route`
+    // is the address of the state a click on it opens (`__url_of`). On a
+    // Linux desktop the desktop's notification service shows it, with no
+    // server, and while the app runs a click on it opens that state through
+    // the graph's route set (`open_link`). A notification that can't be
+    // shown is never dropped: a notice saying so joins the app's notice
+    // list (`notices`).
+    __notify_here: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+        #if #build.target.os == {
+            .Linux -> { app_notify_linux(title, body, open_route) }
+            .MacOS -> { app_notify_unshown(title, NOTIFY_UNBUILT) }
+            .Windows -> { app_notify_unshown(title, NOTIFY_UNBUILT) }
+            .Web -> { app_notify_unshown(title, "a page shows no notification of its own") }
+            .Wasm -> { app_notify_unshown(title, "a page shows no notification of its own") }
+            .Freestanding -> { app_notify_unshown(title, "there is no desktop to show it") }
+        }
+    }
 }
 
 // A field of a screen's state that the address carries after `?`:
@@ -3786,6 +3805,110 @@ location: fn() -[Env, Net, Time]> Place? {
     }
 }
 
+// How the device is held, from its accelerometer: upright, upside down, or
+// on its side with its left or its right edge up.
+Orientation: enum {
+    Upright,
+    UpsideDown,
+    LeftUp,
+    RightUp,
+}
+
+// How long a stream waits for its next reading before it waits again.
+priv UPDATE_WAIT_NS: 60000000000
+
+// Where the device is each time it moves, until the loop reading the stream
+// stops. It asks for the location as `ask(.Location)` does when this
+// process has not asked yet, and the answer counts as that ask's; after an
+// answer other than `.Granted` the stream is empty. On Linux the desktop
+// portal's location session reports each place (GeoClue finds it), and the
+// stream closes the session, and its bus connection with it, when it stops.
+// On the other native targets the stream is empty.
+location_updates: fn() -[Env, Net, Time]> Stream<Place> {
+    // One pass: each `break` ends the stream.
+    loop {
+        bus := app_location_bus() ?? break
+        session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
+        app_settle(Permission.Location, app_grant(session.answer))
+        if session.path == "" -> break
+        defer dbus.close_location(bus, session.path)
+        if session.answer != .Allowed -> break
+        loop {
+            found: if dbus.next_place(bus, session.path, UPDATE_WAIT_NS) == {
+                .Err(_) -> {
+                    break
+                }
+                .Ok(got) -> got
+            }
+            if found == .Val(at) {
+                yield Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy}
+            }
+        }
+        break
+    }
+}
+
+// How the device is held, now and each time that changes, until the loop
+// reading the stream stops. On Linux the sensor proxy (iio-sensor-proxy)
+// reads the accelerometer for the app while the stream runs; the stream
+// gives it back, and closes its system bus connection, when it stops. A
+// device with no accelerometer, and the other native targets, give an
+// empty stream.
+orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
+    // One pass: each `break` ends the stream.
+    loop {
+        bus := app_sensor_bus() ?? break
+        // No accelerometer, or no answer: nothing to give back.
+        first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
+        defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
+        reading := dbus.DbusValue?{Val(first)}
+        loop {
+            held: app_orientation(reading)
+            if held == .Val(way) {
+                yield way
+            }
+            reading = if dbus.sensor_change(bus, dbus.Sensor.Accelerometer, UPDATE_WAIT_NS) == {
+                .Err(_) -> {
+                    break
+                }
+                .Ok(got) -> got
+            }
+        }
+        break
+    }
+}
+
+// Where the device points, in degrees clockwise from north, now and each
+// time that changes, until the loop reading the stream stops. On Linux the
+// sensor proxy reads the compass for the app while the stream runs; the
+// stream gives it back, and closes its system bus connection, when it
+// stops. A device with no compass, and the other native targets, give an
+// empty stream.
+heading_updates: fn() -[Env, Net, Time]> Stream<Float> {
+    // One pass: each `break` ends the stream.
+    loop {
+        bus := app_sensor_bus() ?? break
+        // No compass, or no answer: nothing to give back.
+        first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
+        defer dbus.release_sensor(bus, dbus.Sensor.Compass)
+        reading := dbus.DbusValue?{Val(first)}
+        loop {
+            if reading == .Val(value) {
+                if value == .Double(degrees) {
+                    yield degrees
+                }
+            }
+            reading = if dbus.sensor_change(bus, dbus.Sensor.Compass, UPDATE_WAIT_NS) == {
+                .Err(_) -> {
+                    break
+                }
+                .Ok(got) -> got
+            }
+        }
+        break
+    }
+}
+
 // Keeps `grant` as this process's answer for `permission` unless it has one.
 priv app_settle: fn(permission: Permission, grant: Grant) Never! {
     if app_asked(permission) == None -> app_remember(permission, grant)
@@ -3803,6 +3926,107 @@ priv app_linux_place: fn() -[Env, Net, Time]> dbus.PortalFix Never! {
     nothing: dbus.PortalFix{answer: .Absent, place: None}
     bus := dbus.session(ASK_BUS_WAIT_NS) ?? return nothing
     dbus.portal_place(bus, ASK_WAIT_NS) ?? nothing
+}
+
+// The session bus that `location_updates` follows the location on, when
+// this process may still be allowed it: `None` after an answer other than
+// `.Granted`, and on targets other than Linux. With no session bus it is
+// `None` and the location counts as restricted, as `location` has it.
+priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
+    if app_asked(Permission.Location) == .Val(known) {
+        if known != .Granted -> return None
+    }
+    #if #build.target.os == {
+        .Linux -> {
+            bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_location_bus()
+            return Val(bus)
+        }
+        .MacOS -> { return None }
+        .Windows -> { return None }
+        .Web -> { return None }
+        .Wasm -> { return None }
+        .Freestanding -> { return None }
+    }
+}
+
+priv app_no_location_bus: fn() -> dbus.DbusConnection? Never! {
+    app_settle(Permission.Location, app_grant(dbus.PortalAnswer.Absent))
+    None
+}
+
+// The system bus the sensor proxy is on; `None` when there is none, and on
+// targets other than Linux.
+priv app_sensor_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
+    #if #build.target.os == {
+        .Linux -> {
+            bus := dbus.system(ASK_BUS_WAIT_NS) ?? return None
+            return Val(bus)
+        }
+        .MacOS -> { return None }
+        .Windows -> { return None }
+        .Web -> { return None }
+        .Wasm -> { return None }
+        .Freestanding -> { return None }
+    }
+}
+
+// How the device is held, from the sensor proxy's accelerometer reading;
+// `None` for "undefined", when it cannot tell.
+priv app_orientation: fn(reading: dbus.DbusValue?) -> Orientation? Never! {
+    if reading == .Val(value) {
+        if value == .Text(name) {
+            if name == "normal" -> return Val(Orientation.Upright)
+            if name == "bottom-up" -> return Val(Orientation.UpsideDown)
+            if name == "left-up" -> return Val(Orientation.LeftUp)
+            if name == "right-up" -> return Val(Orientation.RightUp)
+        }
+    }
+    None
+}
+
+// How long showing a notification may take.
+priv NOTIFY_WAIT_NS: 5000000000
+
+// Why a notification isn't shown on a native system whose notification
+// service the app can't reach yet.
+priv NOTIFY_UNBUILT: "this system's notifications are not built yet"
+
+// Shows a notification through the desktop's notification service on the
+// session bus (`App.__notify_here`), in a task that keeps the bus
+// connection until the person clicks the notification or it closes.
+priv app_notify_linux: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+    showing: task { app_notify_show(title, body, open_route) }
+    showing.detach()
+}
+
+// Shows the notification and waits until the person clicks it or it
+// closes; a click opens `open_route` (`open_link`).
+priv app_notify_show: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? {
+        app_notify_unshown(title, "{err}")
+        return
+    }
+    app: app_graph_title()
+    shown: dbus.notify(bus, app, app_desktop_id(app), title, body, NOTIFY_WAIT_NS) ?? {
+        app_notify_unshown(title, "{err}")
+        return
+    }
+    loop {
+        ended: if dbus.notification_end(bus, shown, UPDATE_WAIT_NS) == {
+            .Err(_) -> {
+                return
+            }
+            .Ok(got) -> got
+        }
+        clicked: ended ?? next
+        if clicked -> _: App{title: app_graph_title()}.open_link(open_route)
+        return
+    }
+}
+
+// Keeps a notice that the notification `title` couldn't be shown, and why.
+priv app_notify_unshown: fn(title: String, why: String) Never! {
+    __keep_notice(Notice{text: "Couldn't show the notification \"{title}\": {why}"})
 }
 
 // A photo from the camera through PipeWire, kept in a directory of this
@@ -3827,6 +4051,13 @@ priv app_photo: fn() -[Env, Exec, FS, Time]> PickedFile? Never! {
     assert_eq(take_photo(), None)
     app_remember(Permission.Location, Grant.Restricted)
     assert_eq(location(), None)
+}
+
+#Test("the place stream is empty once the person refused the location") {
+    app_remember(Permission.Location, Grant.Denied)
+    places := 0
+    loop _ in location_updates() -> places += 1
+    assert_eq(places, 0)
 }
 
 // One remote call of the endpoint at `path` of a service the app graph

@@ -74,6 +74,8 @@ SEMA_APP_ADDRESS_ARG: "__address_arg"
 
 SEMA_APP_NOTIFY: "__notify"
 
+SEMA_APP_NOTIFY_HERE: "__notify_here"
+
 SEMA_APP_PRESENCE: "__presence"
 
 SEMA_APP_GO: "__go"
@@ -616,12 +618,14 @@ sema_call_app_graph_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     }
 }
 
-// `alias.url_of(view)`, `alias.presence(view)`, `alias.go(view)` and
-// `alias.notify(to:, title:, body:, open: view)`, where `alias` names `app`.
+// `alias.url_of(view)`, `alias.presence(view)`, `alias.go(view)`,
+// `alias.notify(to:, title:, body:, open: view)` and, without `to:`,
+// `alias.notify(title:, body:, open: view)`, where `alias` names `app`.
 // Each argument but a bare name is evaluated once, in the order written,
 // into a hidden local; the state's address is `alias.App.__url_of<V>(key, fields, texts)`,
 // which `url_of` gives, `presence` passes to `alias.App.__presence(address)`
-// and `notify` to `alias.App.__notify(to, title, body, address)`, and `go`
+// and `notify` to `alias.App.__notify(to, title, body, address)`, or to
+// `alias.App.__notify_here(title, body, address)` without `to:`, and `go`
 // opens it: `alias.App.__go<V>(key, fields, texts)`.
 sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     rejected: SemaDirectSpecialCheck{handled: true, value: None}
@@ -630,9 +634,11 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
         diagnostics.push(sema_call_not_generic_diagnostic(member, span))
         return rejected
     }
+    // `notify` written without `to:` notifies this device.
+    here: member == "notify" && sema_app_notify_here(args)
     // The parameters in order, the state last.
-    params: if member == "notify" -> [String]{"to", "title", "body", "open"} else -> [String]{"view"}
-    shape: sema_app_address_shape(member)
+    params: if here -> [String]{"title", "body", "open"} else if member == "notify" -> [String]{"to", "title", "body", "open"} else -> [String]{"view"}
+    shape: sema_app_address_shape(member, here)
     if args.len() != params.len() {
         diagnostics.push(sema_call_arity_diagnostic(member, params.len(), args.len(), false, span))
         return rejected
@@ -710,7 +716,7 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     taken: if member == "go" -> SEMA_APP_GO else -> SEMA_APP_URL_OF
     address: sema_app_graph_call(alias, taken, [Type]{ty}, [CallArg]{sema_live_arg(sema_app_text(found.key, view_span), view_span), sema_live_arg(sema_app_strings(names, view_span), view_span), sema_live_arg(sema_app_strings(texts, view_span), view_span)}, view_span)
     lowered: if member == {
-        "notify" -> sema_app_notify_call(alias, locals, address, span)
+        "notify" -> sema_app_notify_call(alias, locals, address, here, span)
         "presence" -> sema_app_graph_call(alias, SEMA_APP_PRESENCE, [Type]{}, [CallArg]{sema_live_arg(address, span)}, span)
         else -> address
     }
@@ -725,14 +731,30 @@ sema_call_app_address: fn(member: String, alias: String, args: [CallArg], type_a
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, diagnostics)}
 }
 
-// What the address call `member` does, for its argument diagnostics.
-sema_app_address_shape: fn(member: String) -> String Never! {
+// What the address call `member` does, for its argument diagnostics; `here`
+// for a `notify` without `to:`.
+sema_app_address_shape: fn(member: String, here: Bool) -> String Never! {
+    if here {
+        return "`notify(title:, body:, open:)` shows a notification on this device that opens the state `open`"
+    }
     if member == {
         "notify" -> "`notify(to:, title:, body:, open:)` pushes to each device of `to` a notice that opens the state `open`"
         "presence" -> "`presence(view)` gives the accounts that have the state `view` open and whose last read of its data passed its policies"
         "go" -> "`go(view)` opens the screen whose state is `view`"
         else -> "`url_of(view)` gives the address of the screen whose state is `view`"
     }
+}
+
+// Whether `notify` with `args` notifies this device: three arguments, none
+// of them labelled `to`.
+sema_app_notify_here: fn(args: [CallArg]) -> Bool Never! {
+    if args.len() != 3 -> return false
+    loop argument in args {
+        if argument.label == .Val(label) {
+            if label.name == "to" -> return false
+        }
+    }
+    true
 }
 
 // `alias.current<V>()`, where `alias` names `app`: the state of the screen
@@ -771,16 +793,17 @@ sema_app_first_unpassed: fn(count: Int, slots: [Int]) -> Int Never! {
     -1
 }
 
-// `alias.App.__notify(to, title, body, address)`: `locals` are the locals
+// `alias.App.__notify(to, title, body, address)`, or with `here`
+// `alias.App.__notify_here(title, body, address)`: `locals` are the locals
 // `notify`'s arguments were bound to, in parameter order, the state last.
-sema_app_notify_call: fn(alias: String, locals: [Expr?], address: Expr, span: Span) -> Expr Never! {
+sema_app_notify_call: fn(alias: String, locals: [Expr?], address: Expr, here: Bool, span: Span) -> Expr Never! {
     sent := [CallArg]{}
     loop index in 0..<locals.len() - 1 {
         bound: locals[index] ?? panic("each argument was bound above")
         sent.push(sema_live_arg(bound, span))
     }
     sent.push(sema_live_arg(address, span))
-    sema_app_graph_call(alias, SEMA_APP_NOTIFY, [Type]{}, sent, span)
+    sema_app_graph_call(alias, if here -> SEMA_APP_NOTIFY_HERE else -> SEMA_APP_NOTIFY, [Type]{}, sent, span)
 }
 
 // `alias.App.member<type_args>(args)`: a member of the app graph's type,

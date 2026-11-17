@@ -206,3 +206,137 @@ effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effect
     assert_eq(effect_name_strays(lists, declared, [String]{"a.jet: Disk", "b.jet: Disk"}), [String]{"stale: b.jet: Disk"})
     assert(effect_name_shaped("Time.Wait") && !effect_name_shaped("time") && !effect_name_shaped("A.B.C"))
 }
+
+// The effect list guard. The spec holds one effect list, a table headed
+// EFFECT_LIST_HEADER in EFFECT_LIST_HOME: one row per root the effect
+// sources declare, in their order, each saying what the root covers. No other
+// spec page holds a second one.
+EFFECT_LIST_HOME: "Docs/Spec/spec.md"
+
+EFFECT_LIST_HEADER: "| Root | What it covers |"
+
+// A row of the effect list: the root it names and what it says it covers.
+EffectListRow: struct {
+    root: String,
+    covers: String,
+}
+
+// The roots the effect source `text` declares, in order: each top-level
+// `Name: struct {` or `Name: enum {` whose body names no `parent:` (a kind of
+// another effect is no root).
+effect_name_roots: fn(text: String, out: &[String]) -[]> {
+    name := ""
+    kind := false
+    loop line in text.lines() {
+        if name == "" {
+            if line.starts_with(" ") -> next
+            if line.ends_with(": struct {{") -> name = line.removesuffix(": struct {{")
+            if line.ends_with(": enum {{") -> name = line.removesuffix(": enum {{")
+            kind = false
+            next
+        }
+        if line.trim().starts_with("parent:") -> kind = true
+        if line == "}}" {
+            if !kind -> out.push(name)
+            name = ""
+        }
+    }
+}
+
+// The rows of the table headed EFFECT_LIST_HEADER in `text`; a row line that
+// does not start with a backquoted root is a row with no root.
+effect_list_rows: fn(text: String) -[]> [EffectListRow] {
+    rows := [EffectListRow]{}
+    inside := false
+    loop line in text.lines() {
+        if !inside {
+            if line == EFFECT_LIST_HEADER -> inside = true
+            next
+        }
+        if !line.starts_with("|") -> break
+        if line.starts_with("| ---") -> next
+        cells: line.removeprefix("| `").partition("` | ")
+        if !line.starts_with("| `") || cells.sep == "" {
+            rows.push(EffectListRow{root: "", covers: line.copy()})
+            next
+        }
+        rows.push(EffectListRow{root: cells.head.copy(), covers: cells.tail.removesuffix("|").trim().copy()})
+    }
+    rows
+}
+
+// What keeps `rows` from being the effect list of `roots`: a row with no
+// root, a row naming no declared root, a root named twice, a row that says
+// nothing, a declared root with no row, and rows out of the sources' order.
+effect_list_problems: fn(roots: [String], rows: [EffectListRow]) -[]> [String] {
+    problems := [String]{}
+    named := [String]{}
+    loop row in rows {
+        if row.root == "" {
+            problems.push("a row names no root: {row.covers}")
+            next
+        }
+        if !roots.contains(row.root) {
+            problems.push("`{row.root}` is no root an effect source declares")
+        }
+        if named.contains(row.root) -> problems.push("`{row.root}` has two rows")
+        if row.covers == "" -> problems.push("`{row.root}` says nothing about what it covers")
+        named.push(row.root.copy())
+    }
+    loop root in roots {
+        if !named.contains(root) -> problems.push("`{root}` has no row")
+    }
+    if problems.len() == 0 && named != roots {
+        problems.push("the rows run {named.join(", ")}; the sources declare {roots.join(", ")}")
+    }
+    problems
+}
+
+// The spec pages under `path` that hold a table headed EFFECT_LIST_HEADER.
+effect_list_homes: fn(path: String, out: &[String]) -[FS.Read]> {
+    kind: effect_name_files.stat(path) ?? return
+    if kind.is_dir {
+        loop child in (effect_name_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            effect_list_homes("{path}/{child.name}", out)
+        }
+        return
+    }
+    if !path.ends_with(".md") {
+        return
+    }
+    text: effect_name_files.read(path) ?? panic("read {path}: {err}")
+    loop line in text.lines() {
+        if line == EFFECT_LIST_HEADER {
+            out.push(path.copy())
+            return
+        }
+    }
+}
+
+#Test("effect_list_documents_every_root") {
+    guards_enter_root()
+    roots := [String]{}
+    loop path in EFFECT_NAME_SOURCES {
+        text: effect_name_files.read(path) ?? panic("read the effect source {path}: {err}")
+        effect_name_roots(text, roots)
+    }
+    assert(roots.contains("Net") && roots.contains("Secret") && roots.contains("Meta") && !roots.contains("MetaCode"), "the effect sources declare no Net, Secret or Meta root, or MetaCode reads as a root; the root scanner is broken")
+    homes := [String]{}
+    effect_list_homes("Docs/Spec", homes)
+    assert_eq(homes, [String]{EFFECT_LIST_HOME})
+    text: effect_name_files.read(EFFECT_LIST_HOME) ?? panic("read {EFFECT_LIST_HOME}: {err}")
+    problems: effect_list_problems(roots, effect_list_rows(text))
+    assert(problems.len() == 0, "the effect list in {EFFECT_LIST_HOME} must document every declared root, in the order of {EFFECT_NAME_SOURCES.join(", ")}:\n{problems.join("\n")}")
+}
+
+#Test("the effect list scanner reads roots and rows and finds each gap") {
+    roots := [String]{}
+    effect_name_roots("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read,\n\n    impl Effect {{}}\n}}\n\nAudit: struct {{\n    impl Effect {{\n        parent: Net,\n    }}\n}}\n", roots)
+    assert_eq(roots, [String]{"Net", "FS"})
+    rows: effect_list_rows("x\n{EFFECT_LIST_HEADER}\n| --- | --- |\n| `FS` | files |\n| `Net` | |\n| `Disk` | disks |\n| plain | row |\n\n| `IO` | after |\n")
+    assert_eq(rows.len(), 4)
+    assert_eq(effect_list_problems(roots, rows), [String]{"`Net` says nothing about what it covers", "`Disk` is no root an effect source declares", "a row names no root: | plain | row |"})
+    assert_eq(effect_list_problems(roots, [EffectListRow{root: "FS", covers: "files"}, EffectListRow{root: "Net", covers: "sockets"}]), [String]{"the rows run FS, Net; the sources declare Net, FS"})
+    assert_eq(effect_list_problems(roots, [EffectListRow{root: "Net", covers: "sockets"}]), [String]{"`FS` has no row"})
+    assert_eq(effect_list_problems(roots, [EffectListRow{root: "Net", covers: "sockets"}, EffectListRow{root: "FS", covers: "files"}]), [String]{})
+}

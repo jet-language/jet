@@ -272,7 +272,8 @@ atlas.
 
 A Tier 2 operation does not become acceptable merely because it appears in a
 compile-time expression. A compile-time ambient read needs both the source
-gate and the command-line grant:
+gate and the expert effect `Meta.Host`, which the package's `package.jet`
+names in its `authority: { allow: [Meta.Host] }` row:
 
 ```jet
 use fs: core.files
@@ -287,8 +288,15 @@ run: fn() {
 
 A runtime-only statement inside `#Impure` is an ordinary runtime block; it does
 not exercise a Tier 2 compile-time effect and does not by itself require
-`--gate impure=allow`. The compile-time `fs.read` above requires both the
-source gate and `--gate impure=allow` (E3410, E3411). With both, the call runs
+`Meta.Host`. The compile-time `fs.read` above requires both the source gate
+and `Meta.Host` held by the package whose code makes the call (E3410, E3411).
+`Meta.Host` is an expert effect, as `Meta.Code` is: no package holds it by
+default or through `allow: [Meta]`, the main package holds it by naming it in
+its `authority.allow` row, and it lends it to a dependency with an
+`authority.grants` line. A `deny` row of the package, of the main package or
+of the organization that covers `Meta` or `Meta.Host` refuses it whatever the
+grant says. No command-line flag opens it: `--gate impure=allow` is refused
+(E2104) with the line to write instead. With both, the call runs
 natively in the compile-time child, as the same call runs in the program: the
 child admits the file system calls of the `#Impure` block and of the functions
 it calls, and every other host effect stays refused. The read happens once,
@@ -1073,6 +1081,8 @@ or `Meta.Code`, in its `authority.allow` row, and a dependency holds one only
 through the main package's `authority.grants` line for it; a function that
 uses one its package doesn't hold is refused (E0777), and a `deny` row always
 wins. An expert entry sets no ceiling on the other effects a package may use.
+`Meta.Host`, which compile-time code needs to reach the host, is expert the
+same way.
 The root package's own functions need no consent. A dependency's function is
 rewritten only after the root writes `meta.allow_rewrite(package: "orm")` on
 its value, naming that dependency, which the build loads at its locked

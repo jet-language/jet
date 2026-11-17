@@ -3357,11 +3357,12 @@ jet_cli_new_failed: fn(code: String, what: String, fix: String, color: Bool) -> 
 // `jet fmt --check`; a template the formatter rejects is a compiler fault.
 jet_cli_new_project: fn(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     write_failed: "correct the named problem, then run the command again"
-    manifest: jet_cli_fmt_format_source(jet_cli_new_manifest(name, template, annotated), "{name}/package.jet", false, false, false, color)
+    hooks := jet_cli_tool_stage_memo()
+    manifest: jet_cli_fmt_format_source(jet_cli_new_manifest(name, template, annotated), "{name}/package.jet", false, false, false, color, hooks)
     if manifest.report != None || manifest.diagnostics.len() > 0 {
         return jet_cli_ice("the `jet new` package.jet template does not format")
     }
-    run_source: jet_cli_fmt_format_source(jet_cli_new_run_source(template), "{name}/run.jet", false, false, false, color)
+    run_source: jet_cli_fmt_format_source(jet_cli_new_run_source(template), "{name}/run.jet", false, false, false, color, hooks)
     if run_source.report != None || run_source.diagnostics.len() > 0 {
         return jet_cli_ice("the `jet new` run.jet template `{template}` does not format")
     }
@@ -3377,7 +3378,7 @@ jet_cli_new_project: fn(name: String, template: String, annotated: Bool, quiet: 
             extras.push(extra[0])
             next
         }
-        extra_source: jet_cli_fmt_format_source(extra[1], "{name}/{extra[0]}", false, false, false, color)
+        extra_source: jet_cli_fmt_format_source(extra[1], "{name}/{extra[0]}", false, false, false, color, hooks)
         if extra_source.report != None || extra_source.diagnostics.len() > 0 {
             return jet_cli_ice("the `jet new` {extra[0]} template does not format")
         }
@@ -3762,7 +3763,8 @@ jet_cli_fmt_add_mark: fn(marks: &[JetCLIFmtMark], edit: TextEdit, texts: [String
 // `format_source_for_fmt`: `package.jet` through the Package model, whose
 // manifest syntax is not Jet; every other source (a `Config` record too)
 // through the one Jet formatter, after optional copy and failure marks.
-jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: Bool, explicit_failures: Bool, simplify: Bool, color: Bool) -> JetCLIFmtSource {
+// `hooks` keeps what the run learned of each package's block hooks.
+jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: Bool, explicit_failures: Bool, simplify: Bool, color: Bool, hooks: &JetCLIToolStageMemo) -> JetCLIFmtSource {
     if jet_cli_fmt_is_package_manifest_file(origin) {
         return jet_cli_fmt_package_manifest(source, origin)
     }
@@ -3782,7 +3784,7 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
     if result.structure_change == .Val(change) {
         return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_fmt_structure_report(origin, change))}
     }
-    if result.ok -> return jet_cli_fmt_block_hooks(result.text, origin, color)
+    if result.ok -> return jet_cli_fmt_block_hooks(result.text, origin, color, hooks)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
     if copy_marks_inserted {
@@ -3851,8 +3853,8 @@ jet_cli_fmt_is_library_source: fn(origin: String) -> Bool {
 JET_CLI_FMT_LIBRARY_DIRECTORIES: [String]{"Core", "Compiler/Prelude"}
 
 // Format one source (`run_fmt` preflight).
-jet_cli_fmt_one: fn(path: String, source: String, request: JetCLIFmtRequest) -> JetCLIFmtFile {
-    formatted: jet_cli_fmt_format_source(source, path, request.explicit_copies, request.explicit_failures, request.simplify, request.color)
+jet_cli_fmt_one: fn(path: String, source: String, request: JetCLIFmtRequest, hooks: &JetCLIToolStageMemo) -> JetCLIFmtFile {
+    formatted: jet_cli_fmt_format_source(source, path, request.explicit_copies, request.explicit_failures, request.simplify, request.color, hooks)
     if formatted.report != None || formatted.diagnostics.len() > 0 {
         return JetCLIFmtFile{path: path, original: source, formatted: "", changed: false, io_error: None, diagnostics: formatted.diagnostics, report: formatted.report}
     }

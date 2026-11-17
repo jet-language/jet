@@ -12392,7 +12392,7 @@ ComptimeEffectWithoutImpure: struct {
         code: "E3410",
         safety_class: .Soundness,
         safety_reason: "The call touches the host at compile time, so without the gate a build would read state no cache or sandbox tracks.",
-        expert_path: "an `#Impure(reason)` gate, and `--gate impure=allow` on the run",
+        expert_path: "an `#Impure(reason)` gate, and `Meta.Host` in the main package's `authority.allow` row",
         meaning: "Tier-2 comptime effect (`core.files`/`core.sys`/`core.term`/`core.process`) called outside a `#Impure` gate",
         detail: true,
         no_fix: .Ambiguous,
@@ -12413,21 +12413,21 @@ ImpureGateNotAllowed: struct {
     impl Diagnostic {
         code: "E3411",
         safety_class: .Soundness,
-        safety_reason: "The invocation gate is how a run consents to host I/O, so without it the build reads the host unaudited.",
-        expert_path: "`--gate impure=allow` on the run",
-        meaning: "Tier-2 comptime effect inside `#Impure` gate but `--gate impure=allow` not passed",
+        safety_reason: "Holding `Meta.Host` is how a project consents to host I/O while compiling, so without it the build reads the host unaudited.",
+        expert_path: "`Meta.Host` in the main package's `authority.allow` row, or its `authority.grants` line for a dependency",
+        meaning: "Tier-2 comptime effect inside `#Impure` gate but its package doesn't hold `Meta.Host`",
         detail: true,
 
         what: fn(self) -> String {
-            "`#Impure` gate present but `--gate impure=allow` was not passed."
+            "`#Impure` gate present but its package doesn't hold `Meta.Host`."
         }
 
         why: fn(self) -> String {
-            "The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host."
+            "The `#Impure` block opts in to ambient I/O, but reaching the host while compiling is also the expert effect `Meta.Host`, which no package holds by default: the main package holds it by naming it, and lends it to a dependency with `authority.grants`, so the package file shows every build that touches the host."
         }
 
         fix: fn(self) -> String {
-            "Add `--gate impure=allow` to your `jet build` / `jet run` invocation."
+            "Add `Meta.Host` to the main package's `authority: {{ allow: [...] }}` row; for a dependency, add `Meta.Host` to the main package's `authority: {{ grants: {{ \"name\": [...] }} }}` line for it."
         }
     }
 }
@@ -21042,7 +21042,9 @@ RetiredAuditedEffectFlag: struct {
             "Audited escapes share one policy ladder, so a boolean cannot express which gate is being authorized or which organization policy may refuse it."
         }
 
-        fix: fn(self) -> String { "Use `--gate impure=allow`." }
+        fix: fn(self) -> String {
+            "Name the audited gate, as in `--gate unsafe=allow`; compile-time host access is `Meta.Host` in the main package's `authority: {{ allow: [...] }}` row."
+        }
     }
 }
 

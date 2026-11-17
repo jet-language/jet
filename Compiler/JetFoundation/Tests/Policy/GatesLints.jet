@@ -39,7 +39,10 @@ use jet_foundation.[
 
 #Test("gate parse accepts only an audited gate with allow") {
     assert((policy_gate_parse("unsafe=allow") ?? panic("unsafe gate refused")) == PolicyKey.Unsafe)
-    assert((policy_gate_parse(" impure = allow ") ?? panic("impure gate refused")) == PolicyKey.Impure)
+    if policy_gate_parse(" impure = allow ") == {
+        .Ok(_) -> { panic("an invocation opened host access while compiling") }
+        .Err(error) -> assert(error.message.contains("`Meta.Host`"))
+    }
     if policy_gate_parse("unsafe") == {
         .Ok(_) -> { panic("a gate without `=` was accepted") }
         .Err(error) -> assert_eq(error.message, "use `--gate name=allow`")
