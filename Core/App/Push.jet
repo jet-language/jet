@@ -355,33 +355,68 @@ PushSettings: struct {
 /// APNs's token-based authentication: the APNs `origin`
 /// (`https://api.push.apple.com`, `https://api.sandbox.push.apple.com`, or
 /// an `http` origin a local fake answers over h2c), the team's ID, the
-/// signing key's ID and the path of its `.p8` file, and the app's bundle
-/// ID, which is each push's `apns-topic`.
+/// signing key's ID, the text of its `.p8` file and where that text came
+/// from (`key_from`, for a reason), and the app's bundle ID, which is each
+/// push's `apns-topic`.
 PushAPNs: struct {
     origin: String,
     team_id: String,
     key_id: String,
-    key_path: String,
+    #Redact key: String,
+    key_from: String,
     topic: String,
 }
 
 /// FCM's HTTP v1 API: the FCM `origin` (`https://fcm.googleapis.com` or a
 /// local fake), the Firebase project's ID, and the service account's email,
-/// token URI and the path of its private key (PEM).
+/// token URI and private key (PEM), with where that key came from
+/// (`key_from`, for a reason).
 PushFCM: struct {
     origin: String,
     project: String,
     client_email: String,
     token_uri: String,
-    key_path: String,
+    #Redact key: String,
+    key_from: String,
 }
 
-/// Web Push: the VAPID `contact` (a `mailto:` or `https:` URI) and the path
-/// of the application server's P-256 private key (PEM), whose public key
-/// browsers subscribe with.
+/// Web Push: the VAPID `contact` (a `mailto:` or `https:` URI) and the
+/// application server's P-256 private key (PEM), whose public key browsers
+/// subscribe with, with where that key came from (`key_from`, for a
+/// reason).
 PushWeb: struct {
     contact: String,
-    key_path: String,
+    #Redact key: String,
+    key_from: String,
+}
+
+/// The APNs origin a server sends through.
+PUSH_APNS_ORIGIN: "https://api.push.apple.com"
+
+/// The FCM origin a server sends through.
+PUSH_FCM_ORIGIN: "https://fcm.googleapis.com"
+
+/// The text of a key or a service account file as a variable holds it: the
+/// file itself (PEM or JSON), or the file's base64 on one line, so a
+/// multi-line file fits any host's variables. Text that is neither stays as
+/// it is, so its parse names what is wrong.
+push_key_text: fn(held: String) -> String Never! {
+    text: held.trim()
+    if text.starts_with("-----BEGIN") || text.starts_with("{{") -> return text.copy()
+    bytes: base64.decode(text) ?? base64.decode_url(text) ?? return text.copy()
+    String.from_bytes(bytes) ?? text.copy()
+}
+
+/// FCM's settings from the text of a service account file (`account`, JSON)
+/// that came from `from`: its `project_id`, `client_email`, `token_uri` and
+/// `private_key`.
+push_fcm_account: fn(account: String, from: String) -> PushFCM PushError! {
+    tree: core.encoding.json.parse(account) ?? return Err(push_fail("{from} holds no service account file: it is no JSON"))
+    project: core.encoding.json.at<String>(tree, "project_id") ?? return Err(push_fail("{from} holds no service account file: it has no `project_id`"))
+    email: core.encoding.json.at<String>(tree, "client_email") ?? return Err(push_fail("{from} holds no service account file: it has no `client_email`"))
+    token_uri: core.encoding.json.at<String>(tree, "token_uri") ?? return Err(push_fail("{from} holds no service account file: it has no `token_uri`"))
+    key: core.encoding.json.at<String>(tree, "private_key") ?? return Err(push_fail("{from} holds no service account file: it has no `private_key`"))
+    Ok(PushFCM{origin: PUSH_FCM_ORIGIN, project: project, client_email: email, token_uri: token_uri, key: key, key_from: from.copy()})
 }
 
 /// What one push to one device came to: `reason` is "" once its service
@@ -426,27 +461,24 @@ priv PushFCMGrant: struct {
     expires_in: Int,
 }
 
-/// Sets up the services `settings` names, reading each one's key, in place
-/// of the services set up before. Fails, keeping those, when a key can't be
-/// read or is not the kind its service takes.
-push_configure: fn(settings: PushSettings) -[FS.Read, Net]> PushError! {
+/// Sets up the services `settings` names, parsing each one's key, in place
+/// of the services set up before. Fails, keeping those, when a key is not
+/// the kind its service takes; the reason names where the key came from.
+push_configure: fn(settings: PushSettings) -[Net]> PushError! {
     rng := push_rng() ?? return Err(err)
     senders := PushSenders{apns: None, apns_key: [U8]{}, apns_token: "", apns_until: 0, fcm: None, fcm_key: "", fcm_token: "", fcm_until: 0, web: None, web_key: None}
     if settings.apns == .Val(apns) {
-        text: core.files.read(apns.key_path) ?? return Err(push_fail("the APNs key {apns.key_path} can't be read: {err}"))
-        senders.apns_key = push_ec_private(text, rng) ?? return Err(push_fail("the APNs key {apns.key_path}: {err.reason}"))
+        senders.apns_key = push_ec_private(apns.key, rng) ?? return Err(push_fail("{apns.key_from} holds no APNs signing key: {err.reason}"))
         senders.apns = Val(apns.copy())
     }
     if settings.fcm == .Val(fcm) {
-        text: core.files.read(fcm.key_path) ?? return Err(push_fail("the FCM key {fcm.key_path} can't be read: {err}"))
-        _: push_fcm_token_request(fcm.client_email, fcm.token_uri, 0, text, rng) ?? return Err(push_fail("the FCM key {fcm.key_path}: {err.reason}"))
-        senders.fcm_key = text
+        _: push_fcm_token_request(fcm.client_email, fcm.token_uri, 0, fcm.key, rng) ?? return Err(push_fail("{fcm.key_from} holds no FCM service account key: {err.reason}"))
+        senders.fcm_key = fcm.key.copy()
         senders.fcm = Val(fcm.copy())
     }
     if settings.web == .Val(web) {
-        text: core.files.read(web.key_path) ?? return Err(push_fail("the Web Push key {web.key_path} can't be read: {err}"))
-        private: push_ec_private(text, rng) ?? return Err(push_fail("the Web Push key {web.key_path}: {err.reason}"))
-        senders.web_key = Val(push_key_pair(private, rng) ?? return Err(push_fail("the Web Push key {web.key_path}: {err.reason}")))
+        private: push_ec_private(web.key, rng) ?? return Err(push_fail("{web.key_from} holds no Web Push key: {err.reason}"))
+        senders.web_key = Val(push_key_pair(private, rng) ?? return Err(push_fail("{web.key_from} holds no Web Push key: {err.reason}")))
         senders.web = Val(web.copy())
     }
     held := PUSH_SENDERS.guard_edit()
@@ -1000,19 +1032,16 @@ priv push_test_has: fn(seen: String, part: String) Never! {
 }
 
 #Test("A push goes through the service its device has, and a device the service no longer knows comes back gone") {
-    dir: core.files.temp_dir("jet-push-") ?? panic("temp dir: {err}")
-    core.files.write("{dir.path}/apns.p8", push_test_apns_key()) ?? panic("write: {err}")
-    core.files.write("{dir.path}/fcm.pem", push_test_fcm_key()) ?? panic("write: {err}")
-    web_only: PushSettings{apns: None, fcm: None, web: Val(PushWeb{contact: "mailto:push@example.com", key_path: "{dir.path}/apns.p8"})}
+    web_only: PushSettings{apns: None, fcm: None, web: Val(PushWeb{contact: "mailto:push@example.com", key: push_test_apns_key(), key_from: "the test key"})}
     push_configure(web_only) ?? panic("configure: {err}")
     assert(push_configured("web"))
     assert(!push_configured("apns"))
     assert(!push_configured("fcm"))
-    unreadable: if push_configure(PushSettings{apns: None, fcm: Val(PushFCM{origin: "", project: "", client_email: "", token_uri: "", key_path: "{dir.path}/missing.pem"}), web: None}) == {
+    unparsed: if push_configure(PushSettings{apns: None, fcm: Val(PushFCM{origin: "", project: "", client_email: "", token_uri: "", key: "no key", key_from: "`FCM_ACCOUNT`"}), web: None}) == {
         .Ok(_) -> ""
         .Err(e) -> e.reason
     }
-    assert(unreadable.starts_with("the FCM key {dir.path}/missing.pem can't be read"))
+    assert_eq(unparsed, "`FCM_ACCOUNT` holds no FCM service account key: the service account's key does not parse")
     assert(push_configured("web"))
     apns_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
     apns_port: (net.listener_local_socket_addr(apns_listener) ?? panic("address: {err}")).port
@@ -1021,9 +1050,9 @@ priv push_test_has: fn(seen: String, part: String) Never! {
     web_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
     web_port: (net.listener_local_socket_addr(web_listener) ?? panic("address: {err}")).port
     all: PushSettings{
-        apns: Val(PushAPNs{origin: "http://127.0.0.1:{apns_port}", team_id: "TEAM123456", key_id: "KEY1234567", key_path: "{dir.path}/apns.p8", topic: "com.example.crew"}),
-        fcm: Val(PushFCM{origin: "http://127.0.0.1:{fcm_port}", project: "crew-test", client_email: "push@crew-test.iam.gserviceaccount.com", token_uri: "http://127.0.0.1:{fcm_port}/token", key_path: "{dir.path}/fcm.pem"}),
-        web: Val(PushWeb{contact: "mailto:push@example.com", key_path: "{dir.path}/apns.p8"}),
+        apns: Val(PushAPNs{origin: "http://127.0.0.1:{apns_port}", team_id: "TEAM123456", key_id: "KEY1234567", key: push_test_apns_key(), key_from: "the test key", topic: "com.example.crew"}),
+        fcm: Val(PushFCM{origin: "http://127.0.0.1:{fcm_port}", project: "crew-test", client_email: "push@crew-test.iam.gserviceaccount.com", token_uri: "http://127.0.0.1:{fcm_port}/token", key: push_test_fcm_key(), key_from: "the test key"}),
+        web: Val(PushWeb{contact: "mailto:push@example.com", key: push_test_apns_key(), key_from: "the test key"}),
     }
     push_configure(all) ?? panic("configure: {err}")
     apns_server: task { push_test_h2_serve(apns_listener, [Int]{200, 410}) }
@@ -1061,5 +1090,24 @@ priv push_test_has: fn(seen: String, part: String) Never! {
     push_test_has(web_seen[0], "POST /push/1 HTTP/1.1\r\n")
     push_test_has(web_seen[0], "aes128gcm")
     push_test_has(web_seen[0], "k1")
-    core.files.remove_all(dir.path).drop("the test's key files go")
+}
+
+#Test("A variable holds a key as the file itself or as its base64, and a service account file gives FCM's settings") {
+    pem: push_test_apns_key()
+    assert_eq(push_key_text(pem), pem.trim())
+    assert_eq(push_key_text(base64.encode(pem.bytes())), pem)
+    assert_eq(push_key_text(base64.encode_url(pem.bytes())), pem)
+    assert_eq(push_key_text("not a key"), "not a key")
+    account: "{{\"type\":\"service_account\",\"project_id\":\"crew-test\",\"private_key\":{push_json_text(push_test_fcm_key())},\"client_email\":\"push@crew-test.iam.gserviceaccount.com\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}}"
+    fcm: push_fcm_account(push_key_text(base64.encode(account.bytes())), "`FCM_ACCOUNT`") ?? panic("the account: {err}")
+    assert_eq(fcm.origin, PUSH_FCM_ORIGIN)
+    assert_eq(fcm.project, "crew-test")
+    assert_eq(fcm.client_email, "push@crew-test.iam.gserviceaccount.com")
+    assert_eq(fcm.token_uri, "https://oauth2.googleapis.com/token")
+    assert_eq(fcm.key, push_test_fcm_key())
+    missing: if push_fcm_account("{{\"project_id\":\"crew-test\"}}", "`FCM_ACCOUNT`") == {
+        .Ok(_) -> ""
+        .Err(e) -> e.reason
+    }
+    assert_eq(missing, "`FCM_ACCOUNT` holds no service account file: it has no `client_email`")
 }
