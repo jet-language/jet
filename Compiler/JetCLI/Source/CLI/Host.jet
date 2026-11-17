@@ -3516,23 +3516,23 @@ jet_cli_doc_undocumented_report: fn(graph: JetCLIDocGraph, modules: [JetDriverDo
 }
 
 // `jet doc <file>`: check the file, project its documentation, then report the
-// `--check` verdict, print the `--json` status, or write `docs/index.html` and
-// `docs/index.md` beside the entry. The compile traces through `trace_sink`,
-// so `--trace` (JET_TRACE_FILE) covers the runtime-library seam's lowering
-// too (Request.jet jet_cli_runtime_library).
-jet_cli_compile_doc: fn(file: String, source: String, color: Bool, json: Bool, check: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+// `--check` verdict, print the `--json` status, or write `index.html` and
+// `index.md` to the source root's `.jet/doc` (or `--out`). The compile traces
+// through `trace_sink`, so `--trace` (JET_TRACE_FILE) covers the
+// runtime-library seam's lowering too (Request.jet jet_cli_runtime_library).
+jet_cli_compile_doc: fn(file: String, source: String, color: Bool, json: Bool, request: JetCLIDocRequest, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_entry(file, color, None, JetDriverCompileMode.Doc, None, trace_sink)
     if compiled == {
         .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
-            jet_cli_finish(jet_cli_doc_result(file, source, color, json, check, result, snapshot))
+            jet_cli_finish(jet_cli_doc_result(file, source, color, json, request, result, snapshot))
         }
     }
     output
 }
 
-jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, check: Bool, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, request: JetCLIDocRequest, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     // Errors are found on the raw rows; only a failing doc presents and prints its diagnostics.
     if jet_cli_errors(result.diagnostics).len() > 0 {
         diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -3548,7 +3548,7 @@ jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, ch
         return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     graph: jet_cli_build_doc_graph(result.doc_modules, jet_cli_checked_semindex(result))
-    if check {
+    if request.check {
         if jet_cli_doc_undocumented_public(graph).len() > 0 {
             if json {
                 return JetDriverVerbOutput{stdout: jet_cli_doc_undocumented_report(graph, result.doc_modules, color, true, jet_cli_report_base(file)), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -3563,13 +3563,23 @@ jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, ch
     if json {
         return JetDriverVerbOutput{stdout: "{jet_cli_doc_status_json(graph)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    parent: jet_cli_parent(file) ?? ""
-    directory: if parent == "" -> "." else -> parent
-    output_dir: if parent == "" && file.starts_with("/") -> "/docs" else -> "{directory}/docs"
+    output_dir: request.out ?? "{snapshot.roots[0].canonical_path}/.jet/doc"
     unwritable: "correct the named problem, then run the command again"
+    pages: [String]{"index.html", "index.md"}
+    loop page in pages {
+        path: "{output_dir}/{page}"
+        if !cli_files.exists(path) -> next
+        written: cli_files.read(path) ?? ""
+        if !written.starts_with(JET_CLI_DOC_HEADER) {
+            return jet_cli_build_failed("`{path}` was not written by `jet doc`, and `jet doc` never overwrites a file it did not generate", jet_cli_why("E2105"), "move the file away, or pass `--out` a directory for the generated pages", color)
+        }
+    }
     cli_files.create_dir_all(output_dir) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
-    cli_files.write("{output_dir}/index.html", jet_cli_doc_html(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
-    cli_files.write("{output_dir}/index.md", jet_cli_doc_markdown(graph)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
+    // The links lead back from the pages to the sources, which are relative
+    // to the source root.
+    base: cli_files.relative(snapshot.roots[0].canonical_path, cli_files.realpath(output_dir) ?? output_dir)
+    cli_files.write("{output_dir}/{pages[0]}", jet_cli_doc_html(graph, base)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
+    cli_files.write("{output_dir}/{pages[1]}", jet_cli_doc_markdown(graph, base)) ?? return jet_cli_build_failed("couldn't write generated documentation in `{output_dir}`: {err}", jet_cli_why("E2105"), unwritable, color)
     JetDriverVerbOutput{stdout: "Doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -4630,8 +4640,8 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         }
         .NewApp(request) -> { output = jet_cli_new_app_run(request) }
 
-        .Doc(file, source, color, json, check) -> {
-            output = jet_cli_compile_doc(file, source, color, json, check, trace_sink)
+        .Doc(file, source, color, json, request) -> {
+            output = jet_cli_compile_doc(file, source, color, json, request, trace_sink)
         }
         .Emit(file, source, color, json, tier, function) -> {
             output = jet_cli_compile_emit(file, source, color, json, tier, function, trace_sink)

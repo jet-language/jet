@@ -100,7 +100,7 @@ JetCLIPlan: enum {
     TestProfile(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool),
     New(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool),
     NewApp(request: JetCLINewApp),
-    Doc(file: String, source: String, color: Bool, json: Bool, check: Bool),
+    Doc(file: String, source: String, color: Bool, json: Bool, request: JetCLIDocRequest),
     Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?),
     Eval(file: String, pure: Bool, color: Bool, json: Bool, notice: String),
     Fill(target: String, json: Bool, color: Bool),
@@ -452,6 +452,7 @@ JET_CLI_SEPARATE_VALUE_FLAGS: [String]{
     "--preset",
     "--set",
     "--builder",
+    "--out",
     "--output",
     "--profile",
     "--target",
@@ -502,6 +503,7 @@ JET_CLI_SEPARATE_VALUE_FLAGS: [String]{
 // `--name=value` spellings that never become positional words.
 JET_CLI_VALUE_PREFIXES: [String]{
     "--verify=",
+    "--out=",
     "--output=",
     "--where=",
     "--capture=",
@@ -1394,11 +1396,20 @@ jet_cli_check_profile: fn(jet_argv: [String], files: [String], sources: [String]
     JetCLICheckProfile.Given{profile: profile}
 }
 
-// `jet doc [<file>]`: the entry resolves as `jet check` resolves it.
+// `jet doc [--out <dir>] [<file>]`: the entry resolves as `jet check` resolves
+// it; `--out` is taken against the working directory.
 jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
+    out := String?{None}
+    if jet_argv.any(fn(item) { item == "--out" || item.starts_with("--out=") }) {
+        written: jet_cli_option_value(jet_argv, "--out") ?? ""
+        if written == "" || written.starts_with("-") {
+            return jet_cli_fail("E2104", "`jet doc --out` needs a directory", jet_cli_why("E2104"), "name the directory for the pages: `jet doc --out docs`", color, JET_DRIVER_EXIT_USAGE)
+        }
+        out = Val(jet_cli_report_path(jet_cli_report_cwd(), written))
+    }
     entry: jet_cli_check(jet_argv, args, "doc", color, quiet, None, json)
     if entry == {
-        .Check(file, source, _, _, _, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        .Check(file, source, _, _, _, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, request: JetCLIDocRequest{check: check, out: out}}
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     entry
