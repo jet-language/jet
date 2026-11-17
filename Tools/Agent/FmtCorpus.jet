@@ -30,10 +30,12 @@
 //   it, it is an FFI adaptation's `after.jet` facade, or `jet build Compiler`
 //   copies a Prelude text into it (a `target:` of PRELUDE_COPIES); its
 //   generator writes it;
-// - formatter input: Tests/Cases/Fmt*/, and the fixtures and named sources of
-//   any case that runs `jet fmt`, `jet fix`, a codemod or a migration
-//   (MIGRATION_RUNNER), whose unformatted bytes are the test (the rewritten
-//   file it pins echoes them);
+// - formatter input: Tests/Cases/Fmt*/, the machine-door corpus
+//   Tests/Fixtures/MachineDoors/ (its guard runs `jet fmt --check` on a
+//   source that is unformatted on purpose), and the fixtures and named
+//   sources of any case that runs `jet fmt`, `jet fix`, a codemod or a
+//   migration (MIGRATION_RUNNER), whose unformatted bytes are the test (the
+//   rewritten file it pins echoes them);
 // - Compiler/JetDevServer (#5931), which doesn't compile;
 // - evidence: a source a recorded run under Tools/AgentEval/ pins by line;
 //   its receipts stay as run, so their pins don't move; and the agent
@@ -125,9 +127,9 @@ UI_SNAPSHOT_SUFFIX: ".stderr"
 UI_FOLDER_SNAPSHOT: "stderr"
 
 // Trees the corpus leaves out whole, with their rule.
-EXCLUDED_TREES: [String]{"Tests/Cases/Fmt", "Compiler/JetDevServer/", "Tests/AgentWorkloads/", "Tests/Cases/AgentWorkloads/"}
+EXCLUDED_TREES: [String]{"Tests/Cases/Fmt", "Tests/Fixtures/MachineDoors/", "Compiler/JetDevServer/", "Tests/AgentWorkloads/", "Tests/Cases/AgentWorkloads/"}
 
-EXCLUDED_TREE_RULES: [String]{RULE_FORMATTER_INPUT, RULE_DEVSERVER, RULE_EVIDENCE, RULE_EVIDENCE}
+EXCLUDED_TREE_RULES: [String]{RULE_FORMATTER_INPUT, RULE_FORMATTER_INPUT, RULE_DEVSERVER, RULE_EVIDENCE, RULE_EVIDENCE}
 
 ADAPTATION_FILE: "after.jet"
 
@@ -1222,6 +1224,7 @@ run: fn() {
     assert_eq(tree_rule("Compiler/JetSema/Source/Sema/Scopes.jet"), "")
     assert_eq(tree_rule("Tests/UI/bare_error_mark_is_not_a_contract.jet"), "")
     assert_eq(tree_rule("Tests/Cases/Fmt/Project/x/main.jet"), RULE_FORMATTER_INPUT)
+    assert_eq(tree_rule("Tests/Fixtures/MachineDoors/unformatted.jet"), RULE_FORMATTER_INPUT)
     assert_eq(tree_rule("Compiler/JetDevServer/Source/Session.jet"), RULE_DEVSERVER)
     assert_eq(tree_rule("Tools/AgentEval/runs/a/main.jet"), "")
     assert_eq(tree_rule("Tests/Fixtures/FFIAdaptations/BorrowedView/after.jet"), RULE_GENERATED)
