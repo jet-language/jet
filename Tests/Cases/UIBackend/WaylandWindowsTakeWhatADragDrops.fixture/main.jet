@@ -1,0 +1,444 @@
+package: {
+    name: "wayland_windows_take_what_a_drag_drops"
+    authority: { allow: [Env, IO, Net, Time] }
+}
+
+use {
+    net: core.net
+    sys: core.sys
+    ui: core.ui
+}
+
+// A fake Wayland compositor on $WAYLAND_DISPLAY with a wl_data_device
+// drags three offers over a `ui.open` window. The first comes only as an
+// image: the window refuses it, and it is destroyed when the drag leaves.
+// The second comes as a list of URIs and as text: the window accepts it as
+// the list, as a copy, follows it to where it is dropped, and reads the
+// list through a pipe, its comment line left out. The third comes only as
+// text and drops where it entered. Each read drop is finished and
+// destroyed, and arrives as `.Drop` with its items.
+
+// The server-side ids of the three offers.
+FIRST_OFFER: 4278190080
+
+SECOND_OFFER: 4278190081
+
+THIRD_OFFER: 4278190082
+
+URIS: "file:///home/ann/crew%20tasks.csv\r\n# from the file manager\r\nfile:///home/ann/board.csv\r\n"
+
+TEXT: "Fix the gate"
+
+WAIT_NS: 2000000000
+
+Fake: struct {
+    stream: net.UnixStream,
+    inbox: [U8],
+    out: [U8],
+    registry: Int,
+    compositor: Int,
+    shm: Int,
+    wm_base: Int,
+    seat: Int,
+    manager: Int,
+    device: Int,
+    surface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
+    // Received descriptors, newest first; pools keep theirs.
+    fds: [sys.Fd],
+    pool_fds: [sys.Fd],
+    attached: Int,
+    current: Int,
+    callbacks: [Int],
+    serial: Int,
+    // The serial of each offer's enter, which its accept names.
+    enter_serials: [Int],
+    configured: Bool,
+    // 0 before the first two drags, 1 until the third, 2 until the close,
+    // 3 closed.
+    phase: Int,
+    commits: Int,
+    due_commit: Int,
+    closed: Bool,
+    records: [String],
+    failures: [String],
+}
+
+GLOBALS: [String]{"wl_compositor", "wl_shm", "xdg_wm_base", "wl_seat", "wl_data_device_manager"}
+
+fake_put: fn(out: &[U8], value: Int) {
+    v: value & 4294967295
+    out.push(U8{v & 255})
+    out.push(U8{(v >> 8) & 255})
+    out.push(U8{(v >> 16) & 255})
+    out.push(U8{(v >> 24) & 255})
+}
+
+fake_words: fn(values: [Int]) -> [U8] {
+    out := [U8]{}
+    loop value in values -> fake_put(out, value)
+    out
+}
+
+fake_u32: fn(bytes: [U8], at: Int) -> Int {
+    if at + 4 > bytes.len() -> return 0
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
+}
+
+fake_text: fn(text: String) -> [U8] {
+    out := [U8]{}
+    bytes: text.bytes()
+    fake_put(out, bytes.len() + 1)
+    loop b in bytes -> out.push(b)
+    out.push(U8{0})
+    loop out.len() %% 4 != 0 -> out.push(U8{0})
+    out
+}
+
+fake_string: fn(bytes: [U8], at: Int) -> String {
+    length: fake_u32(bytes, at)
+    if length <= 1 || at + 4 + length > bytes.len() -> return ""
+    String.from_bytes(bytes[(at + 4)..<(at + 3 + length)]) ?? ""
+}
+
+fake_event: fn(f: &Fake, object: Int, opcode: Int, args: [U8]) {
+    fake_put(f.out, object)
+    fake_put(f.out, ((args.len() + 8) << 16) + opcode)
+    loop b in args -> f.out.push(b)
+}
+
+fake_flush: fn(f: &Fake) -[Net, Time]> {
+    if f.out.len() == 0 {
+        return
+    }
+    out: f.out.copy()
+    f.out = [U8]{}
+    net.unix_send(f.stream, out, [sys.Fd]{}) ?? {
+        if !f.closed -> f.failures.push("send failed: {err}")
+        return
+    }
+}
+
+fake_fail: fn(f: &Fake, message: String) {
+    if f.failures.len() < 8 -> f.failures.push("phase {f.phase}: {message}")
+}
+
+// Writes all of `bytes` into `fd`; dropping `fd` closes the pipe and ends
+// the data.
+fake_write_all: fn(f: &Fake, fd: sys.Fd, bytes: [U8]) -[Env]> {
+    at := 0
+    loop at < bytes.len() {
+        wrote: fd.write(bytes[at..<bytes.len()].copy(), WAIT_NS) ?? {
+            fake_fail(f, "pipe write failed: {err}")
+            return
+        }
+        at += wrote
+    }
+}
+
+// A drag of `offer`, which comes as `types`, entering the window's surface
+// at (`x`, `y`) in logical units.
+fake_enter: fn(f: &Fake, offer: Int, types: [String], x: Int, y: Int) {
+    device: f.device
+    surface: f.surface
+    fake_event(f, device, 0, fake_words([Int]{offer}))
+    loop kind in types -> fake_event(f, offer, 0, fake_text(kind))
+    f.serial += 1
+    f.enter_serials[offer - FIRST_OFFER] = f.serial
+    fake_event(f, device, 1, fake_words([Int]{f.serial, surface, x * 256, y * 256, offer}))
+}
+
+fake_commit: fn(f: &Fake) -[Env, Net, Time]> {
+    f.commits += 1
+    if f.attached != 0 {
+        previous: f.current
+        f.current = f.attached
+        f.attached = 0
+        if previous != 0 && previous != f.current -> fake_event(f, previous, 0, [U8]{})
+    }
+    callbacks: f.callbacks.copy()
+    f.callbacks = [Int]{}
+    loop id in callbacks -> fake_event(f, id, 0, fake_words([Int]{f.commits}))
+    if f.current == 0 || f.commits < f.due_commit {
+        return
+    }
+    device: f.device
+    if f.phase == 0 {
+        // An image the window can't take passes over it and leaves; then
+        // a list of URIs moves to (50, 40) and drops there.
+        fake_enter(f, FIRST_OFFER, [String]{"image/png"}, 10, 20)
+        fake_event(f, device, 2, [U8]{})
+        fake_enter(f, SECOND_OFFER, [String]{"text/uri-list", "text/plain;charset=utf-8"}, 10, 20)
+        fake_event(f, device, 3, fake_words([Int]{1000, 50 * 256, 40 * 256}))
+        fake_event(f, device, 4, [U8]{})
+        f.phase = 1
+        f.due_commit = f.commits + 2
+        return
+    }
+    if f.phase == 1 {
+        // Text drops where it entered.
+        fake_enter(f, THIRD_OFFER, [String]{"text/plain;charset=utf-8"}, 30, 5)
+        fake_event(f, device, 4, [U8]{})
+        f.phase = 2
+        f.due_commit = f.commits + 2
+        return
+    }
+    if f.phase == 2 {
+        toplevel: f.toplevel
+        f.closed = true
+        fake_event(f, toplevel, 1, [U8]{})
+        f.phase = 3
+    }
+}
+
+// What the window asks of an offer: accept(serial, mime_type or none),
+// receive(mime_type, fd), destroy, finish and set_actions(dnd_actions,
+// preferred_action).
+fake_offer: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
+    which: if object == FIRST_OFFER -> "first" else if object == SECOND_OFFER -> "second" else -> "third"
+    if opcode == 0 {
+        entered: f.enter_serials[object - FIRST_OFFER]
+        if fake_u32(body, 0) != entered {
+            fake_fail(f, "{which} offer accepted at serial {fake_u32(body, 0)}, not its enter's {entered}")
+        }
+        kind: fake_string(body, 4)
+        f.records.push("{which} offer accepted as {if kind == "" -> "nothing" else -> kind}")
+    }
+    if opcode == 1 {
+        kind: fake_string(body, 0)
+        f.records.push("{which} offer received as {kind}")
+        fd: f.fds.pop() ?? {
+            fake_fail(f, "receive without a descriptor")
+            return
+        }
+        fake_write_all(f, fd, if object == SECOND_OFFER -> URIS.bytes() else -> TEXT.bytes())
+    }
+    if opcode == 2 -> f.records.push("{which} offer destroyed")
+    if opcode == 3 -> f.records.push("{which} offer finished")
+    if opcode == 4 {
+        f.records.push("{which} offer takes actions {fake_u32(body, 0)}, preferring {fake_u32(body, 4)}")
+    }
+}
+
+fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env, Net, Time]> {
+    if object == 1 && opcode == 1 {
+        f.registry = fake_u32(body, 0)
+        registry: f.registry
+        loop (index, interface) in GLOBALS {
+            args := fake_words([Int]{index + 1})
+            loop b in fake_text(interface) -> args.push(b)
+            version: if interface == "wl_compositor" -> 6 else if interface == "wl_seat" -> 5 else if interface == "xdg_wm_base" -> 2 else if interface == "wl_data_device_manager" -> 3 else -> 1
+            fake_put(args, version)
+            fake_event(f, registry, 0, args)
+        }
+        return
+    }
+    if object == 1 && opcode == 0 {
+        fake_event(f, fake_u32(body, 0), 0, fake_words([Int]{0}))
+        return
+    }
+    if object == f.registry && opcode == 0 {
+        name: fake_u32(body, 0)
+        interface: fake_string(body, 4)
+        length: fake_u32(body, 4)
+        id: fake_u32(body, 8 + ((length + 3) /% 4) * 4 + 4)
+        if name < 1 || name > GLOBALS.len() || GLOBALS[name - 1] != interface {
+            fake_fail(f, "bound global {name} as {interface}")
+        }
+        if interface == "wl_compositor" -> f.compositor = id
+        if interface == "wl_shm" {
+            f.shm = id
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "xdg_wm_base" -> f.wm_base = id
+        if interface == "wl_seat" {
+            f.seat = id
+            // capabilities: a pointer.
+            fake_event(f, id, 0, fake_words([Int]{1}))
+        }
+        if interface == "wl_data_device_manager" -> f.manager = id
+        return
+    }
+    if object == f.compositor && opcode == 0 {
+        f.surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.shm && opcode == 0 {
+        fd: f.fds.pop() ?? {
+            fake_fail(f, "create_pool without a descriptor")
+            return
+        }
+        f.pool_fds.push(fd)
+        return
+    }
+    if object == f.wm_base && opcode == 2 {
+        f.xdg_surface = fake_u32(body, 0)
+        return
+    }
+    if object == f.xdg_surface && opcode == 1 {
+        f.toplevel = fake_u32(body, 0)
+        return
+    }
+    if object == f.manager && opcode == 1 {
+        // get_data_device(id, seat).
+        f.device = fake_u32(body, 0)
+        if fake_u32(body, 4) != f.seat {
+            fake_fail(f, "a data device for object {fake_u32(body, 4)}, not the seat")
+        }
+        return
+    }
+    if object == FIRST_OFFER || object == SECOND_OFFER || object == THIRD_OFFER {
+        fake_offer(f, object, opcode, body)
+        return
+    }
+    if object == f.surface {
+        if opcode == 1 -> f.attached = fake_u32(body, 0)
+        if opcode == 3 -> f.callbacks.push(fake_u32(body, 0))
+        if opcode == 6 {
+            if !f.configured {
+                // The initial commit: the first configure, activated.
+                f.configured = true
+                f.serial += 1
+                toplevel: f.toplevel
+                xdg_surface: f.xdg_surface
+                fake_event(f, toplevel, 0, fake_words([Int]{200, 100, 4, 4}))
+                fake_event(f, xdg_surface, 0, fake_words([Int]{f.serial}))
+                return
+            }
+            fake_commit(f)
+        }
+    }
+}
+
+fake_dispatch: fn(f: &Fake) -[Env, Net, Time]> {
+    at := 0
+    loop f.inbox.len() - at >= 8 {
+        object: fake_u32(f.inbox, at)
+        word: fake_u32(f.inbox, at + 4)
+        size: word >> 16
+        if size < 8 {
+            fake_fail(f, "malformed request header")
+            f.inbox = [U8]{}
+            return
+        }
+        if f.inbox.len() - at < size -> break
+        body: f.inbox[(at + 8)..<(at + size)].copy()
+        fake_request(f, object, word & 65535, body)
+        at += size
+    }
+    if at > 0 -> f.inbox = f.inbox[at..<f.inbox.len()].copy()
+}
+
+// Accepts one window and serves it until it disconnects.
+fake_serve: fn(listener: net.UnixListener) -[Env, Net, Time, IO]> Fake {
+    stream: net.unix_accept(listener) ?? panic("accept: {err}")
+    f := Fake{
+        stream: stream,
+        inbox: [U8]{},
+        out: [U8]{},
+        registry: 0,
+        compositor: 0,
+        shm: 0,
+        wm_base: 0,
+        seat: 0,
+        manager: 0,
+        device: 0,
+        surface: 0,
+        xdg_surface: 0,
+        toplevel: 0,
+        fds: [sys.Fd]{},
+        pool_fds: [sys.Fd]{},
+        attached: 0,
+        current: 0,
+        callbacks: [Int]{},
+        serial: 0,
+        enter_serials: [Int]{-1, -1, -1},
+        configured: false,
+        phase: 0,
+        commits: 0,
+        due_commit: 0,
+        closed: false,
+        records: [String]{},
+        failures: [String]{},
+    }
+    idle := 0
+    loop idle < 40 {
+        ready: net.unix_wait(f.stream, 50000000) ?? {
+            f.failures.push("wait failed: {err}")
+            return f
+        }
+        if !ready {
+            idle += 1
+            next
+        }
+        idle = 0
+        message: net.unix_receive(f.stream, 65536) ?? {
+            if !f.closed -> f.failures.push("receive failed: {err}")
+            return f
+        }
+        if message.bytes.len() == 0 -> return f
+        loop fd in message.fds.move() { f.fds.insert(0, fd) }
+        loop b in message.bytes -> f.inbox.push(b)
+        fake_dispatch(f)
+        fake_flush(f)
+    }
+    f.failures.push("the window went quiet")
+    f
+}
+
+// Each drop shows where it fell and its items.
+client: fn() -[Env, IO, Net, Time]> {
+    window: ui.open(width: 200, height: 100, title: "drops") ?? {
+        print("open failed: {err}")
+        return
+    }
+    loop frame in window.frames() {
+        closed := false
+        loop event in frame.events() {
+            if event == .Close -> closed = true
+            if event == .Drop(x, y, items) {
+                shown := [String]{}
+                loop item in items {
+                    if item == {
+                        .URI(value) -> { shown.push("URI {value}") }
+                        .Text(value) -> { shown.push("Text {value}") }
+                        .File(value) -> shown.push("File {value.path}")
+                    }
+                }
+                print("drop at {x},{y}: {shown.join(" | ")}")
+            }
+        }
+        if closed -> break
+        pixels := [U8]{}
+        count := frame.width * frame.height * 4
+        loop count > 0 {
+            pixels.push(U8{255})
+            count -= 1
+        }
+        frame.present(pixels) ?? {
+            print("present failed: {err}")
+            return
+        }
+    }
+    if window.failure() == .Val(failure) -> print("failed: {failure}")
+    print("closed")
+}
+
+run: fn() {
+    path: sys.get("WAYLAND_DISPLAY") ?? ""
+    if !path.starts_with("/") {
+        print("WAYLAND_DISPLAY must be an absolute socket path")
+        return
+    }
+    listener: net.unix_listen(path) ?? {
+        print("listen failed: {err}")
+        return
+    }
+    server: task { fake_serve(listener) }
+    client()
+    f: server.join() ?? panic("compositor task failed")
+    if f.phase != 3 -> print("FAIL the compositor stopped in phase {f.phase}")
+    loop record in f.records -> print(record)
+    loop failure in f.failures -> print("FAIL {failure}")
+}

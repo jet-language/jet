@@ -1,0 +1,22 @@
+# Native windows take drops through the seat's wl_data_device. A fake
+# compositor on $WAYLAND_DISPLAY drags an image over the window, which
+# refuses it (accept with no type), so it is destroyed when the drag
+# leaves. A list of URIs is accepted as text/uri-list, as a copy, follows
+# the pointer and drops: the window reads it through a pipe, finishes and
+# destroys the offer, and gets `.Drop` where it fell with one URI item per
+# line, the comment line left out. Text alone drops as one text item.
+requires: os-name:linux
+fixture: WaylandWindowsTakeWhatADragDrops.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: WAYLAND_DISPLAY={work}/wl.sock
+step run: jet run main.jet
+exit: 0
+stdout: = "drop at 50,40: URI file:///home/ann/crew%20tasks.csv | URI file:///home/ann/board.csv\ndrop at 30,5: Text Fix the gate\nclosed\nfirst offer accepted as nothing\nfirst offer destroyed\nsecond offer accepted as text/uri-list\nsecond offer takes actions 1, preferring 1\nsecond offer received as text/uri-list\nsecond offer finished\nsecond offer destroyed\nthird offer accepted as text/plain;charset=utf-8\nthird offer takes actions 1, preferring 1\nthird offer received as text/plain;charset=utf-8\nthird offer finished\nthird offer destroyed\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "drop at 50,40: URI file:///home/ann/crew%20tasks.csv | URI file:///home/ann/board.csv\ndrop at 30,5: Text Fix the gate\nclosed\nfirst offer accepted as nothing\nfirst offer destroyed\nsecond offer accepted as text/uri-list\nsecond offer takes actions 1, preferring 1\nsecond offer received as text/uri-list\nsecond offer finished\nsecond offer destroyed\nthird offer accepted as text/plain;charset=utf-8\nthird offer takes actions 1, preferring 1\nthird offer received as text/plain;charset=utf-8\nthird offer finished\nthird offer destroyed\n"
+stderr: empty
