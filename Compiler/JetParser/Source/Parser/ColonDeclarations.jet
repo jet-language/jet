@@ -527,6 +527,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
     saved_heads := [Int]{}
     saved_marker_heads := [Int]{}
     saved_opened := [Bool]{}
+    saved_angles := [Int]{}
     frame := PARSER_COLON_FRAME_MODULE
     // Whether the current frame is an `impl Marker` body.
     marker_body := false
@@ -535,6 +536,9 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
     head_kind := -1
     head_marker := PARSER_COLON_MARKER_NONE
     opened := false
+    // The current statement's open `<` type-argument brackets: a comma
+    // inside them (`impl Holds<Int, [String]> {`) ends no member.
+    angles := 0
     at_start := true
     // Module instance candidates, and the names this file declares as
     // modules and as anything else.
@@ -567,10 +571,12 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             head_kind = saved_heads.pop() ?? -1
             head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
             opened = saved_opened.pop() ?? false
+            angles = saved_angles.pop() ?? 0
             closed = opens.pop() ?? -1
         }
         if at_start && frame != PARSER_COLON_FRAME_GROUP {
             at_start = false
+            angles = 0
             head: parser_colon_head_at(tokens, index)
             colon: parser_colon_head_colon(tokens, head)
             if colon >= 0 {
@@ -617,6 +623,8 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             saved_heads.push(head_kind)
             saved_marker_heads.push(head_marker)
             saved_opened.push(opened)
+            saved_angles.push(angles)
+            angles = 0
             if current == TOKEN_LBRACE {
                 body: frame != PARSER_COLON_FRAME_GROUP && (!opened || head_kind == PARSER_COLON_HEAD_COMPTIME_BLOCK)
                 frame = if body -> parser_colon_body_frame(head_kind, frame) else -> PARSER_COLON_FRAME_CODE
@@ -646,6 +654,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                 head_kind = saved_heads.pop() ?? -1
                 head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
                 opened = saved_opened.pop() ?? false
+                angles = saved_angles.pop() ?? 0
             }
             closed = opens.pop() ?? -1
             // A member's body brace ends the member, so a one-line body's
@@ -655,13 +664,18 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
                 after: parser_colon_code_at(tokens, index + 1)
                 if after >= tokens.len() || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true
             }
-        } else if (current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP) || (current == TOKEN_COMMA && (frame == PARSER_COLON_FRAME_SHAPE || frame == PARSER_COLON_FRAME_CONTAINER)) {
+        } else if (current == TOKEN_SEMI && frame != PARSER_COLON_FRAME_GROUP) || (current == TOKEN_COMMA && angles == 0 && (frame == PARSER_COLON_FRAME_SHAPE || frame == PARSER_COLON_FRAME_CONTAINER)) {
             // A line break ends a statement, and the comma after a data
             // member of a type or trait body ends that member.
             at_start = true
             head_kind = -1
             head_marker = PARSER_COLON_MARKER_NONE
             opened = false
+        } else if current == TOKEN_LT || current == TOKEN_GT || current == TOKEN_SHR {
+            // A member's head holds no comparison, so `<` and `>` there only
+            // open and close type arguments.
+            change: if current == TOKEN_LT -> 1 else if current == TOKEN_GT -> -1 else -> -2
+            angles = if angles + change > 0 -> angles + change else -> 0
         }
         previous = index
         index += 1
