@@ -1,0 +1,6 @@
+use compiler: core.compiler
+
+// A hook of the finished moment that stops every build that compiled.
+#On(compiler.finished) refuse: fn(outcome: compiler.Outcome) {
+    if outcome.ok -> panic("this package refuses every build ({outcome.errors} errors)")
+}

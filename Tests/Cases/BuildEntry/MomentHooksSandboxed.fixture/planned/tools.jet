@@ -1,0 +1,8 @@
+use {
+    compiler: core.compiler
+    files: core.files
+}
+
+// A hook of the settled build plan that reads a file of the package while
+// the build calls it. A hook runs as compile-time code, which reaches no file.
+#On(build.planned) audit: fn(_plan: compiler.Plan) -[FS.Read]> { _: files.read("main.jet") ?? "" }

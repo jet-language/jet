@@ -21,6 +21,7 @@ use {
         diagnostic_from_registry,
         diagnostic_with_edit,
         type_name,
+        type_union_sort,
         foundation_named_type,
     ]
     jet_lexer.[
@@ -258,7 +259,12 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
         members.push(next.ty)
         result.span.end = next.span.end
     }
-    if members.len() > 0 -> result.ty = Type.Union{members: members}
+    // Every union is written in canonical member order, so two spellings of
+    // one union are one Type.
+    if members.len() > 0 {
+        type_union_sort(members)
+        result.ty = Type.Union{members: members}
+    }
     result
 }
 

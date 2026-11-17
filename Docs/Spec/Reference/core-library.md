@@ -521,12 +521,14 @@ answer's type is the stage's:
 | `lsp.semantic_tokens` | `[SemanticToken]` | `at` and `length` in body bytes, `kind` a protocol token type (`keyword`, `string`, …). |
 | `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
 
-The hook runs as a compile-time value, under the same rules. A row outside its
-block, or a token of an unknown kind, is left out. `jet fmt` compiles a file's
-hooks only when a source of its package or of a dependency declares a
-`fmt.block` hook for the marker of one of the file's blocks. It reads those
-sources once per package per run, with a parse and no check, so a file whose
-blocks no hook reads compiles nothing.
+The hook runs as a compile-time value, under the same rules: a hook that
+reaches past them, such as one that reads a file (E3410), stops the tool with
+that refusal's own code, and `jet fmt` keeps the file as written. A row
+outside its block, or a token of an unknown kind, is left out. `jet fmt`
+compiles a file's hooks only when a source of its package or of a dependency
+declares a `fmt.block` hook for the marker of one of the file's blocks. It
+reads those sources once per package per run, with a parse and no check, so a
+file whose blocks no hook reads compiles nothing.
 
 ```jet
 use compiler: core.compiler
@@ -562,8 +564,15 @@ events --schema` prints the `--json` schema from them.
 `Declaration.calls` names the functions a declaration calls directly, by
 resolved name; a call through a function value is not in it. `complete` is
 false when the compiler checked only part of the declaration. `LinkInputs.default`
-is the command Jet's own link runs, so a hook that changes one argument keeps
-the rest. In `jet build --json`, the one `build.effects` status lists the
+is the step Jet's own link is, a core.build `BuildAction` with no command
+that reads the objects and libraries and makes the output; a `build.link`
+hook returns it, or another `BuildAction` that links the output (`jet build`
+runs it, spec "Output places, link inputs and targets"). A
+`build.before_write` hook returns the `BuildAction` whose command turns the
+file at the `Artifact`'s `path` into the one at its `next`; `jet build` runs
+one for each `post_link` step. In its JSON form a
+`BuildAction`'s `allow` lists effect names (`["Exec"]`). In `jet build
+--json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
 Each object follows the JSON Schema that `jet inspect events --schema` prints
@@ -576,8 +585,18 @@ order whatever the thread count (Metaprogramming reference).
 A function hooks a moment with `#On(moment)`, such as
 `#On(compiler.settled) settled: fn(round: compiler.Round) { … }`. The
 compiler checks the hook against the moment's row: an unknown moment, or a
-hook that does not take exactly the moment's payload, is E0930. Running moment
-hooks during a compile or build is not built yet.
+hook that does not take exactly the moment's payload, is E0930. `jet build`
+runs the hooks of the moments that answer nothing, each function so marked
+in the sources of the package it builds: after a compile, on each moment it
+reached, in order, then on `compiler.emitted` and `build.after_write` once
+the executable is written. A package's `build: fn` plan runs them first on
+`build.planned` and on a `build.asset` for each of the plan's files, before
+any step runs, and each target's compile then runs them as above. The hooks
+of one point run in one compile-time program, so each runs as any
+compile-time code does and reaches only what compile-time code may: a hook
+that reads a file or prints is E3410, and one that panics is E3010. Either
+stops the build with that code, naming the moment and the hook, and leaves
+no executable.
 
 ### `core.meta` — module and package metadata
 
@@ -4630,6 +4649,10 @@ run: fn() {
 Query methods filter, sort, map, extrema, joins, grouping, collection, and
 watching while retaining typed positions for errors. `Query<T>.plan()` returns
 deterministic operation names; `collect()` materializes `[T] DataError!`.
+`limit(count)` keeps the first `count` rows the query gives, in its order,
+after every step before it, and a step after it works on those rows only:
+over a guarded table's `query()` or `search()` it counts the rows the row
+policy let the caller read.
 The source `query(rows)` facade constructs the shared deferred carrier through
 the data provider, rather than rebuilding its private storage as a source
 record. Filter, sort, and grouping selectors receive an owned row value at
@@ -5722,6 +5745,8 @@ tasks never read or change the process registry. The module source is
 | `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland). See below. |
 | `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none. Delivered by the Linux app window (Wayland). See below. |
 | `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, copies it and says so. Delivered by the Linux app window (Wayland). See below. |
+| `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window. See below. |
+| `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6322,12 +6347,18 @@ itself: on Linux the app goes to the background when its window loses
 the focus and to the foreground when the window takes it again, and the
 machine goes to sleep and wakes when logind says `PrepareForSleep` on the
 system bus. Coming to the foreground or waking after the app was in the
-background or asleep is a resume, and `on_resume` runs then, in a task of
-its own, so the window never waits on it. The app does not see the other
-moments. When `on_resume` fails, its `Notice` shows on a red bar over the
-top of the window that came back, until a click on the bar dismisses it;
-with no window open it joins `app.notices()`. A desktop with no system
-bus or no logind resumes on the focus alone.
+background or asleep is a resume. A resume runs in a task of its own, so
+the window never waits on it. The app does not see the other moments.
+
+Each resume, with or without `on_resume`, first sends the writes the
+device queued (`graph.offline(.Queue)`), then re-runs every live binding
+at its next read, so the screen shows what changed while the app was
+away; the app writes no code for this. Only then does `on_resume` run. When
+`on_resume` fails, its `Notice` shows on a red bar over the top of the
+window that came back, until a click on the bar dismisses it; with no
+window open it joins `app.notices()`. An app with a window, a queue or an
+`on_resume` follows the machine's sleep. A desktop with no system bus or
+no logind resumes on the focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the
@@ -6514,6 +6545,27 @@ browser opens its share sheet (the Web Share API) only inside the person's
 gesture, which the page runtime can't run the call in yet, so `app.share`
 in code whose target is the web output is a compile error,
 E-APP-TARGET-FEATURE.
+
+`app.draggable(body, value:, label:)` gives `body` back as one a person
+drags `value` with, and `app.drop_zone<V>(body, label:, on_drop:)` gives
+`body` back taking each `V` dropped on it: `on_drop` gets the value, and a
+notice it fails with joins `app.notices()`. A drop zone takes only its own
+type: a value of another type, and a file or text another program drops on
+it, is refused with a notice and goes nowhere. The value travels encoded,
+so `draggable` needs `V: Encode` and `drop_zone` needs `V: Decode`. A press
+of the primary button on the body, moved more than 4 units and let go over
+a drop zone, drops it there. Every move also works without a drag, as WCAG
+2.2 SC 2.5.7 asks, which is why both calls take a `label:`. Tab reaches a
+dragged body: its first leaf that is neither a button nor a text input
+joins the focus ring. Space picks it up, the arrow keys step it through the
+drop zones, a bar over the top of the window naming the one shown, Enter
+drops it there and Escape puts it back. A long press, half a second let go
+where it began, opens a menu of the drop zones that take it. On Linux the
+app's window (`graph.window`) carries every move; the other native targets
+keep a notice saying their drag and drop is not built yet and give `body`
+back as it is. The page runtime can't carry the app's values in a
+browser's drag yet, so either call in code whose target is the web output
+is a compile error, E-APP-TARGET-FEATURE.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
@@ -7440,9 +7492,11 @@ subquery from another table) is refused.
 | `store.query(sql: SQL) -[DB.Read]> [[String: DBValue]] DBError!` / `store.query_one(sql: SQL) -[DB.Read]> [String: DBValue]? DBError!` | rows | Read every row `sql` reads: an opened connection has no row policy, so a script may join tables or touch none. |
 | `store.execute(sql: SQL) -[DB.Write]> Int DBError!` | count | Write through the connection, with no row policy; schema and transaction-control SQL stay with `db.migrate` and `begin`. |
 | `store.all_rows() -> DBScope` | scope | The connection as a scope with no row policy, for a helper written for scopes and for `db.migrate`. |
+| `store.statements() -> Int` | count | How many statements the connection has run: each read and write, a row policy's included, and the catalog reads that come with them, but no begin, commit or rollback. Two counts around a call give its cost. |
 | `store.with_policy(policy: RowPolicy, user: String) -[DB]> DBScope` | scope | The scope a row policy narrows to `user`. |
 | `store.table(name: String, key: fn(T) -[]> K, search: (fn(T) -[]> String)?{None}) -> Table<K, T>` | table | Name one typed table of `T` rows keyed by the pure `key` function; a pure `search` function gives the text its search index keeps. |
 | `table.get(key: K) -[DB.Read]> T? DBError!` | row | Read the row with that key, or `None`. |
+| `table.get_many(keys: [K]) -[DB.Read]> [T] DBError!` | rows | Read the rows under `keys` the caller may read, each once and in key order, in one statement per 200 keys. |
 | `table.add(row: T) -[DB.Read, DB.Write]> T DBError!` / `table.put(row: T) -[DB.Read, DB.Write]> T DBError!` | row | Insert a new row or insert-or-replace one. An `add` whose key is held is `DBError.Exists` when the caller may read the row that holds it and `DBError.Denied` when it may not. |
 | `table.delete(key: K) -[DB.Read, DB.Write]> DBError!` | — | Remove the row with that key, if any. |
 | `table.query() -[DB.Read]> Query<T> DBError!` | query | Every row the caller may read, in key order, as a `core.data` query, read when it is collected; a filter the compiler writes as SQL narrows what it reads. |
@@ -7500,8 +7554,8 @@ are one per field of the encoded key (one `key` column when `K` is a scalar),
 which together form the primary key, and a `jet_row` column holding the row's
 JSON encoding through the storage codec, so `#Secret` fields are kept there
 while the row's wire form leaves them off. The first write creates the
-table; reading a table that was never written finds no rows. `get` and
-`query` carry `DB.Read`, and `add`,
+table; reading a table that was never written finds no rows. `get`,
+`get_many` and `query` carry `DB.Read`, and `add`,
 `put` and `delete` carry `DB.Read` and `DB.Write` (a write may run the
 table's row policy, which reads), so a function that writes a table must
 allow `DB.Write` (E0740 otherwise). A `get`, or a `query` collected, while an
@@ -7559,9 +7613,24 @@ the caller may read that row; when it may not, the `add` is `Denied`, as a
 refused write is, so a key a client chose tells it nothing of a row it
 can't see. The policy runs as the system and reads through a store on the
 same connection, so it sees the transaction's earlier writes. It runs before
-the write it judges, so a write cannot vouch for itself. An `app.live`
-binding runs as the caller that made it, whoever reads it, and two callers'
-bindings of one query never share a result.
+the write it judges, so a write cannot vouch for itself. The rows a policy
+reads by key (`get`) are read once and kept: outside a transaction for the
+one read whose rows it judges, or the one write; inside one until it ends.
+Any write to a table drops what was kept of it, so a policy never sees a
+row older than the transaction's own writes, and judging a project's tasks
+reads the caller's member row once, however many tasks there are. An
+`app.live` binding runs as the caller that made it, whoever reads it, and
+two callers' bindings of one query never share a result.
+
+`get_many(keys)` loads the rows a list refers to, such as the profiles of a
+project's members, in one statement (a condition over the keys' columns, up
+to 200 keys a statement) rather than one `get` per key. Each key gives its
+row once, in key order, and a key no row holds gives nothing. The row policy
+judges each row it read as it judges a `query`'s, reading a key it looks up
+once for all of them, so the statements a page that loads its related rows
+runs, its policies' included, do not grow with the rows it shows. A
+`limit` on a guarded table's query counts only the rows the policy let the
+caller read.
 
 A table made with `search: Val(text_of)` keeps a search index: a side table
 `<name>__jet_search` holding each row's key columns and one `jet_word` row per

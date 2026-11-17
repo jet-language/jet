@@ -6074,9 +6074,50 @@ A profile writes `link: tools.relink` and `post_link: [tools.sign]`, unquoted;
 `build: fn` writes `b.link(tools.relink)` (`b.link(.Default)` for the stock)
 and `b.post_link([tools.sign])`; the flags write `--link=tools.relink` and
 one `--post-link=tools.sign` per step. A value that is no hook path, such as
-`--link=relink`, is refused with E2104. `jet run`, `jet test` and `jet dev`
-link their image in memory, and `jet build` runs no link hook yet, so every
-command refuses a hook in either row with E2104.
+`--link=relink`, is refused with E2104.
+
+`jet build` runs the link hook on each executable it writes, on every build.
+It writes the link inputs, the program object, the runtime and any C or Core
+libraries, under `.jet/build/link/<name>/`, and calls the hook on a
+`LinkInputs` holding their paths, the `link_args` words and the
+executable's name and path, each relative to the package root. The hook
+returns a `build.BuildAction`. One with no command (`inputs.default`, or
+any action whose `run` is empty) is Jet's own link, in process, over the
+action's `inputs` to its one output, the executable; it reads only relative
+paths inside the project. Any other runs as a
+build step: the program `run[0]` is found as a `find_program` probe finds
+it, the rest of `run` are its arguments, it reads `inputs`, makes `outputs`,
+which must hold the executable, and uses the effects in `allow`, which the
+package, its workspace or `--allow` must grant (E3504 names one they
+don't). It runs in the build sandbox, and the executable is the file it
+wrote. A hook path no function marked `#On(build.link)` declares, a Jet
+link input outside the project, and a step that fails or writes no
+executable are E3506, naming the executable and where `link` was written;
+Jet never links the executable another way. The hook itself runs as a
+compile-time value, so it may only use what compile-time code may: a hook
+that doesn't check, or reaches past that (a file read is E3410), stops with
+that report's own code. Examples:
+[`Tests/Cases/BuildEntry/custom_link_step.case`](../../Tests/Cases/BuildEntry/custom_link_step.case),
+[`Tests/Cases/BuildEntry/hook_stages_sandboxed.case`](../../Tests/Cases/BuildEntry/hook_stages_sandboxed.case).
+`jet run`, `jet test` and `jet dev` link their image in memory, and a web
+build writes a WebAssembly module, so each refuses a link hook with E2104.
+
+After the link, `jet build` runs each `post_link` step on the executable, in
+order, on every build. It moves the linked file to
+`.jet/build/link/<name>/post_link/<name>.0` and calls each hook on a
+core.compiler `Artifact` whose `output` is the executable's name, `path` the
+file before the step and `next` the file the step writes: the next
+`<name>.<n>` in that folder, and the executable itself for the last step.
+Each hook returns a `build.BuildAction` with a command, which runs as a link
+step's does: it reads `path`, must list `next` in its outputs, and uses the
+effects in `allow`, which the package, its workspace or `--allow` must
+grant. A hook path no function marked `#On(build.before_write)` declares,
+an action with no command, and a step that fails or writes no file are
+E3506, naming the executable and where `post_link` was written; a hook that
+doesn't run stops with its report's own code, as a link hook does. Each
+leaves no executable. Example:
+[`Tests/Cases/BuildEntry/post_link_step_signs_artifact.case`](../../Tests/Cases/BuildEntry/post_link_step_signs_artifact.case).
+Every other command, and a web build, refuses a post-link step with E2104.
 
 ### Language server
 
@@ -7056,8 +7097,15 @@ A step is also a plain value. `build.action(name, run:, inputs:, outputs:,
 allow:)` of `core.build` makes a `BuildAction`: the command `run` runs, the
 files it reads and the files it makes, and the effects it may use, as cases
 of `core.compiler.lang`'s `Effect` (`allow: [.Exec]`). Making one runs
-nothing; a function returns one for Jet to run, as a link hook does (`link`
-in Output places, link inputs and targets).
+nothing; a function returns one for Jet to run, as a link or post-link hook
+does (`link` and `post_link` in Output places, link inputs and targets).
+`b.action(step)` declares the step a `BuildAction` describes and returns its
+`BuildStepHandle`, as `b.run` declares the step it spells: the command's
+program is found as a `find_program` probe of the same name finds it, its
+other words are the step's arguments, each input is a file it reads and
+each output one it makes, and `allow` are its effects. A link or post-link
+hook's action is declared the same way. Example:
+[`Tests/Cases/BuildEntry/build_action_declares_a_step.case`](../../Tests/Cases/BuildEntry/build_action_declares_a_step.case).
 
 A step can also read a whole folder. `b.folder(path)` is the folder at `path`
 in the build's package (`.` is the package itself), `.folder(path)` on

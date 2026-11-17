@@ -1,0 +1,42 @@
+# A Linux app on a device that queues its writes (`offline(.Queue)`)
+# catches up by itself when the machine wakes. Before its window opens,
+# the phone adds a task while the server is down, so the write waits in
+# the device's queue, and the board's panel, a live read of the server's
+# task count, is blue. A fake compositor on $WAYLAND_DISPLAY sees that
+# first frame, and a fake logind on the system bus at
+# $DBUS_SYSTEM_BUS_ADDRESS puts the machine to sleep. The server comes up
+# in the meantime, and logind wakes the machine. Coming back, the app sends
+# the queued write and re-runs every live binding, with no `on_resume` of
+# its own, so the server holds the task and the panel turns green. The
+# compositor closes the window, which ends the app.
+fixture: ResumeResubscribesAndDrainsTheQueueOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+spawn bus: jet run bus/fake_logind.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake system bus listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+env: DBUS_SYSTEM_BUS_ADDRESS=unix:path={work}/system.sock
+env: CREW_PORT={free-port:crew}
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+wait: bus timeout 60s
+exit: 0
+file: queued.txt = "1" # the add waited in the queue
+file: served.txt = "ship it" # the resume sent it
+file: compositor.stdout = "board: 200x100, panel [51, 102, 255, 255]\nwrote sleep.go\nafter waking: panel [51, 153, 51, 255]\nclosed the window\n"
+file: heard.txt = "Hello AddMatch\ntype='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep',path='/org/freedesktop/login1'\n"

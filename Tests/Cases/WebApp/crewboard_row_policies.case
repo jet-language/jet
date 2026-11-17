@@ -6,7 +6,10 @@
 # so create_project makes its caller the owner in one transaction and no
 # other path does: not an outsider, not a Member, not a forged created_by,
 # and not the creator once the project has members. An outsider's search
-# and my_projects find nothing. The same lines print at O0, O1 and O2.
+# and my_projects find nothing. A project's board loads its assignees'
+# member rows in one read (Table.get_many), so it runs as many statements,
+# policies included, once launch has four members as when it had two. The
+# same lines print at O0, O1 and O2.
 fixture: CrewboardRowPolicies.fixture
 env: NO_COLOR=1
 step default: jet run main.jet

@@ -66,9 +66,9 @@ check_payload_rows: fn(text: String) -> [String] {
 }
 
 // What the schema at `at` says a payload field of row type `ty` is, against
-// the row: a JSON string, integer or boolean for String, Int or Bool, an
-// array of the item's schema for `[T]`, and a reference to the payload of
-// that name otherwise. "" when they agree.
+// the row: a JSON string, integer or boolean for String, Int or Bool, a
+// string (its name) for an Effect, an array of the item's schema for `[T]`,
+// and a reference to the payload of that name otherwise. "" when they agree.
 check_field_problem: fn(schema: Dyn, at: String, ty: String, payloads: [String]) -> String {
     if ty.starts_with("[") && ty.ends_with("]") {
         found: check_json.at<String>(schema, "{at}/type") ?? ""
@@ -76,7 +76,7 @@ check_field_problem: fn(schema: Dyn, at: String, ty: String, payloads: [String])
         return check_field_problem(schema, "{at}/items", ty.removeprefix("[").removesuffix("]"), payloads)
     }
     kind: if ty == {
-        "String" -> "string"
+        "String" | "Effect" -> "string"
         "Int" -> "integer"
         "Bool" -> "boolean"
         else -> ""

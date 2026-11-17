@@ -36,3 +36,19 @@ run: fn() {
 `
     assert(fn_lambda_errors(passed_mismatch).len() > 0, "a written result must match the expected callable type")
 }
+
+#Test("a named function that can't fail binds a callback's failure parameter to Never") {
+    accepted: `apply: fn<E>(f: fn(Int) -> Int? E!, n: Int) -> Int? E! { f(n) }
+step: fn<E>(f: fn(Int) -> Int E!, n: Int) -> Int E! { f(n) }
+run: fn() {
+    lower: fn(n: Int) -> Int? {
+        if n > 0 -> Val(n - 1) else -> None
+    }
+    a: apply(lower, 4) ?? 0
+    next: fn(n: Int) -> Int { n + 1 }
+    b: step(next, a)
+    assert(b > 0)
+}
+`
+    assert_eq(fn_lambda_errors(accepted).join("; "), "")
+}

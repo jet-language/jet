@@ -102,7 +102,16 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
     // `b.generate` sends its formatted items, then one (marker, value) pair
     // per build local the template splices (sema_build_generate_splices).
     splices := [BuildSessionValue]{}
-    loop index in 1..<args.len() {
+    // `b.action` sends one `BuildAction`, which the session takes as the
+    // five values of the step it describes.
+    first := 1
+    if method == "action" {
+        described: if args.len() == 2 -> jet_driver_build_action_of(args[1]) else -> None
+        action: described ?? return Val(jet_driver_build_host_failure(session, span, "`b.action` takes one `BuildAction`"))
+        values = jet_driver_build_action_session_args(action)
+        first = args.len()
+    }
+    loop index in first..<args.len() {
         value: jet_eval_build_session_input(args[index]) ?? return Val(jet_driver_build_host_failure(session, span, "build method received a non-data argument"))
         if method == "generate" && index == 2 {
             // copy: `generated` outlives this loop and is handed to build_session_call, while
@@ -149,6 +158,23 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
         }
         .HostRequest(service_method, _) -> return Val(jet_driver_build_host_failure(session, span, "build input service `{service_method}` is unavailable"))
     }
+}
+
+// `action` as the arguments of a build session's `action` call: its name,
+// command, inputs, outputs and effects (build_session_add_action).
+jet_driver_build_action_session_args: fn(action: JetDriverBuildAction) -> [BuildSessionValue] Never! {
+    [BuildSessionValue]{
+        BuildSessionValue.Text{value: action.name},
+        jet_driver_build_action_session_strings(action.run),
+        jet_driver_build_action_session_strings(action.inputs),
+        jet_driver_build_action_session_strings(action.outputs),
+        jet_driver_build_action_session_strings(action.allow),
+    }
+}
+
+// `values` as a session's list of strings.
+jet_driver_build_action_session_strings: fn(values: [String]) -> BuildSessionValue Never! {
+    BuildSessionValue.List{values: loop value in values -> BuildSessionValue.Text{value: value}}
 }
 
 // A `Compiler` value carries its build's checked program (the `program` of

@@ -1,0 +1,117 @@
+// Crewboard in a Linux window, on a device that queues its writes
+// (`offline(.Queue)`) and has no resume code of its own. Before the window
+// opens, the phone adds a task while the server is down, so the write
+// waits in the device's queue. The board's panel is a live read of the
+// server's task count: blue while the server can't be reached, yellow at
+// none, green once it holds one. The machine sleeps, the server comes up
+// in the meantime, and the machine wakes. Coming back, the app sends the
+// queued write and re-runs every live binding, so the panel turns green.
+// The compositor then closes the window, which ends the app.
+use {
+    app
+    files: core.files
+    net: core.net
+    sys: core.sys
+    tasks: core.tasks
+    ui: core.ui
+    web: core.web
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Unreachable(String),
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+// The titles of the tasks the server holds.
+TITLES: Shared{[String]{}}
+
+Board: struct {
+    // Adds a task titled `title`.
+    #App.Public add: fn(self, title: String) BoardError! {
+        held := TITLES.guard_edit()
+        held.value.push(title.copy())
+        Ok()
+    }
+
+    // The number of tasks.
+    #App.Public count: fn(self) -> Int BoardError! {
+        held: TITLES.guard_read()
+        Ok(held.value.len())
+    }
+}
+
+// The server's address, which `run` sets from $CREW_PORT.
+ADDRESS: Shared{""}
+
+address: fn() -> String {
+    held: ADDRESS.guard_read()
+    held.value.copy()
+}
+
+set_address: fn(port: String) {
+    held := ADDRESS.guard_edit()
+    held.value = "http://127.0.0.1:{port}/api"
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    desk: app.remote_at<Board>(address(), client: "desk")
+    color: if app.state(app.live(fn() { desk.count() })) == {
+        .Loaded(count) -> if count == 0 -> Color{r: 230, g: 180, b: 30, a: 255} else -> Color{r: 51, g: 153, b: 51, a: 255}
+        .Failed(_) | .Idle | .Loading -> Color{r: 51, g: 102, b: 255, a: 255}
+    }
+    ui.box([ui.node_color("", 200.0, 30.0, color), ui.text("Today")])
+}
+
+// The board's server, on `port`, from the moment the machine sleeps: it
+// writes server.ready once it listens, and served.txt with the titles it
+// holds once a task has come.
+serve: fn(port: String) {
+    loop _ in 0..<12000 {
+        if files.exists("asleep") -> break
+        tasks.sleep(10)
+    }
+    served: web.app().mount("/api", Board{})
+    server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")
+    files.write("server.ready", "") ?? panic("write server.ready: {err}")
+    written := false
+    loop {
+        served.serve_once(server) ?? return
+        if written -> next
+        held: TITLES.guard_read()
+        if held.value.len() == 0 -> next
+        files.write("served.txt", held.value.join("\n")) ?? panic("write served.txt: {err}")
+        written = true
+    }
+}
+
+run: fn() {
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    set_address(port)
+    graph: app.new("Crewboard").offline(.Queue).screen("/", board).window(width: 200, height: 100)
+    phone: app.remote_at<Board>(address(), client: "phone")
+    if phone.add("ship it") == .Err(failure) {
+        panic("the add failed instead of queueing: {failure}")
+    }
+    files.write("queued.txt", "{app.pending()}") ?? panic("write queued.txt: {err}")
+    serving: task { serve(port) }
+    serving.detach()
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to two minutes for that.
+    loop _ in 0..<12000 -> tasks.sleep(10)
+    print("the window stayed open")
+}

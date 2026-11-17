@@ -1,0 +1,30 @@
+# Claim: a post-link step turns the executable `jet build` linked into the
+# one it writes, on every build, through the same typed action a link step
+# returns. `post_link: [tools.sign]` names the hook `#On(build.before_write)`
+# marks; `jet build` moves the linked file under
+# `.jet/build/link/<name>/post_link/`, calls the hook on its path and the
+# executable's, and runs the `BuildAction` it returns in the build sandbox.
+# Here the step signs the executable with a line appended past its image,
+# and a second build signs it again after the executable is gone.
+fixture: PostLinkStep.fixture
+requires: tool:sh
+requires: tool:bwrap
+requires: tool:tail
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --profile=signed --allow=Exec,FS app.jet
+exit: 0
+file: .jet/build/link/app/post_link/app.0 exists # the linked file the step read
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "signed by a post-link step\n" # the signed executable still runs
+step: tail -n 1 {work}/.jet/build/app
+exit: 0
+stdout: = "JETSIG app\n" # the step wrote the executable, signed
+step: rm {work}/.jet/build/app
+exit: 0
+step: jet build --profile=signed --allow=Exec,FS app.jet
+exit: 0
+step: tail -n 1 {work}/.jet/build/app
+exit: 0
+stdout: = "JETSIG app\n" # the step ran again

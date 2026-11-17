@@ -9,7 +9,10 @@ package: {
     }
 }
 
-use query_rows.[fact_kind_refusal, program_fact, run_fact]
+use {
+    core.build.[BuildAction]
+    query_rows.[fact_kind_refusal, program_fact, run_fact]
+}
 
 lang: module
 
@@ -312,8 +315,9 @@ Round: struct {
 
 /// A file a build makes (`compiler.emitted`, `build.before_write`,
 /// `build.after_write`): the output it belongs to and the file's path. At
-/// `build.before_write`, `next` is the path the step writes the final file
-/// to; it is "" at the other moments.
+/// `build.before_write`, the moment of a `post_link` step, `next` is the path
+/// the step's `BuildAction` writes, the executable itself for the last step;
+/// it is "" at the other moments.
 Artifact: struct {
     output: String,
     path: String,
@@ -344,15 +348,16 @@ Asset: struct {
 
 /// What one output's link reads (`build.link`): the object files and
 /// libraries, the link arguments, the output's name and path, and `default`,
-/// the command Jet's own link runs, so a hook that changes one argument keeps
-/// the rest.
+/// the step Jet's own link is: a `BuildAction` with no command, reading the
+/// objects and libraries and making the output. A hook returns the step that
+/// links the output instead, or `default` itself to keep Jet's link.
 LinkInputs: struct {
     objects: [String],
     libraries: [String],
     args: [String],
     output_name: String,
     output: String,
-    default: [String],
+    default: BuildAction,
 }
 
 /// Every public moment of a compile and a build, with its payload. Hooks

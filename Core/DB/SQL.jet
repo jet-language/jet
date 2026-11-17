@@ -496,9 +496,7 @@ execute_sql_rows: fn<E>(fields: [String], row_count: U64, query: JetSQLQuery, ce
             loop at in 0..<selected.len() {
                 pieces := [String]{}
                 one: selected[at..<at + 1]  // #4500: no singleton allocation.
-                loop group in query.group_by {
-                    pieces.push(sql_group_key(one, query, group, cell))
-                }
+                loop group in query.group_by { pieces.push(sql_group_key(one, query, group, cell)) }
                 key: pieces.join("|")
                 position := 0
                 if positions.get(key) == .Val(found) -> position = found else {

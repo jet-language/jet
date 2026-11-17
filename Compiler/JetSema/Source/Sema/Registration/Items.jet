@@ -4395,9 +4395,9 @@ sema_registration_serde_struct_named: fn(ty: Type) -> Bool Never! {
     false
 }
 
-// Rust `validate_union_decode_shapes`. The Rust parser hands sema every union
-// in canonical member order (`canonicalize_union`); the native
-// parser keeps the written order, so each union is canonicalized here first.
+// Rust `validate_union_decode_shapes`. The parser writes every union in
+// canonical member order (type_union_sort); a nested union is flattened into
+// its members here first, as Rust `canonicalize_union` does.
 sema_registration_serde_union_shapes: fn(items: [Item], ty: Type, span: Span, diagnostics: &[Diagnostic]) {
     if ty == .Union(written) {
         canonical: sema_failure_union_canonical(written)

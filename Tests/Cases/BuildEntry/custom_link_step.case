@@ -1,0 +1,25 @@
+# Claim: a package's link step links the executable `jet build` writes, on
+# every build. `link: tools.relink` names the hook `#On(build.link)` marks;
+# `jet build` writes the compiler's object files and libraries under
+# `.jet/build/link/<name>/`, calls the hook on their paths, and runs the
+# `BuildAction` it returns in the build sandbox. Here the step writes, in
+# place of a linked image, a script naming the program object it read, and
+# a second build runs it again after the executable is gone.
+fixture: CustomLinkStep.fixture
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --link=tools.relink --allow=Exec,FS app.jet
+exit: 0
+file: .jet/build/link/app/app.o exists # the program object is a link input
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "relinked app from .jet/build/link/app/app.o\n"
+step: rm {work}/.jet/build/app
+exit: 0
+step: jet build --link=tools.relink --allow=Exec,FS app.jet
+exit: 0
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "relinked app from .jet/build/link/app/app.o\n" # the step ran again

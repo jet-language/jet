@@ -118,6 +118,25 @@ sema_inference_unify_optional: fn(context: SemaInferenceContext, left: Type?, ri
     sema_inference_unify_inner(context, left_ty, right_ty, bindings, source, conflict)
 }
 
+// A callback that can't fail fills a required `U E!` return: its own return
+// fills `U` (no return is Unit) and `E` is `Never`, as for a lambda that
+// can't fail (sema_call_lambda_failure_facts).
+sema_inference_unify_fn_return: fn(context: SemaInferenceContext, ret: Type?, other_ret: Type?, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -[]> Bool {
+    if ret == .Val(required) {
+        if required == .Result(ok, err) {
+            found: other_ret ?? Type.Named{name: "Unit"}
+            if found == .Result(_, _) {
+                return sema_inference_unify_inner(context, required, found, bindings, source, conflict)
+            }
+            if !sema_inference_unify_inner(context, ok, found, bindings, source, conflict) {
+                return false
+            }
+            return sema_inference_unify_inner(context, err, Type.Named{name: "Never"}, bindings, source, conflict)
+        }
+    }
+    sema_inference_unify_optional(context, ret, other_ret, bindings, source, conflict)
+}
+
 sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
     left: sema_inference_resolve_type_bindings(expected, bindings)
     right: sema_inference_resolve_type_bindings(found, bindings)
@@ -170,7 +189,7 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
                         return false
                     }
                 }
-                sema_inference_unify_optional(context, ret, other_ret, bindings, source, conflict)
+                sema_inference_unify_fn_return(context, ret, other_ret, bindings, source, conflict)
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }

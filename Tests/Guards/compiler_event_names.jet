@@ -6,10 +6,14 @@ use compiler_event_files: core.files
 // structs. The rows and the Core declaration must name the same variants,
 // in the same order, with the same payloads, and each payload struct must
 // declare the fields its row lists, in the same order and with the same
-// types.
+// types, in the module the row names as its home (core.compiler unless it
+// says otherwise).
 COMPILER_EVENT_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/CompilerEvents.jet"
 
 COMPILER_EVENT_CORE_PATH: "Core/Compiler/Compiler.jet"
+
+// The file of each Core module a payload row may name as its home.
+COMPILER_EVENT_HOME_PATHS: [String:String]{"core.compiler": COMPILER_EVENT_CORE_PATH, "core.build": "Core/Build/Build.jet"}
 
 // The packages that record and print the moments. They name a moment only
 // through its COMPILER_EVENT_ constant, never by writing its text.
@@ -42,20 +46,23 @@ compiler_event_rows: fn(text: String) -> [String] {
     rows
 }
 
-// The payload rows, as `Payload: field Type, field Type`, in row order. A
-// payload row opens with `CompilerEventPayload{`, names its struct on the
-// next `name:` line, and lists one `CompilerEventField{…}` per line.
+// The payload rows, as `Payload@home: field Type, field Type`, in row order.
+// A payload row opens with `CompilerEventPayload{`, names its struct on the
+// next `name:` line, may name its home module on a `home:` line, and lists
+// one `CompilerEventField{…}` per line.
 compiler_event_payload_rows: fn(text: String) -> [String] {
     rows := [String]{}
     current := ""
+    home := ""
     opened := false
     fields := [String]{}
     loop line in text.lines() {
         word: line.trim()
         if {
             word.starts_with("CompilerEventPayload{{") -> {
-                if current != "" -> rows.push("{current}: {fields.join(", ")}")
+                if current != "" -> rows.push("{current}@{home}: {fields.join(", ")}")
                 current = ""
+                home = "core.compiler"
                 opened = true
                 fields = [String]{}
             }
@@ -63,12 +70,15 @@ compiler_event_payload_rows: fn(text: String) -> [String] {
                 current = compiler_event_between(word, "name: \"", "\"")
                 opened = false
             }
+            current != "" && word.starts_with("home: \"") -> {
+                home = compiler_event_between(word, "home: \"", "\"")
+            }
             word.starts_with("CompilerEventField{{name: ") -> {
                 fields.push("{compiler_event_between(word, "name: \"", "\"")} {compiler_event_between(word, "ty: \"", "\"")}")
             }
         }
     }
-    if current != "" -> rows.push("{current}: {fields.join(", ")}")
+    if current != "" -> rows.push("{current}@{home}: {fields.join(", ")}")
     rows
 }
 
@@ -136,7 +146,7 @@ compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [Stri
         problems.push("the rows list {rows.len()} moments, core.compiler.Event declares {variants.len()} variants")
     }
     payload_names := [String]{}
-    loop payload in payloads -> payload_names.push((payload.split_once(":") ?? next).before)
+    loop payload in payloads -> payload_names.push((payload.split_once("@") ?? next).before)
     loop (index, row) in rows {
         words: row.split(" ").to_list()
         name: words[0]
@@ -159,13 +169,19 @@ compiler_event_spelled: fn(path: String, text: String, names: [String]) -> [Stri
     }
     loop payload in payloads {
         parts: payload.split_once(": ") ?? next
+        named: parts.before.split_once("@") ?? next
+        home_path: COMPILER_EVENT_HOME_PATHS.get(named.after) ?? {
+            problems.push("payload `{named.before}` names home `{named.after}`, which COMPILER_EVENT_HOME_PATHS doesn't list")
+            next
+        }
+        home_text: compiler_event_files.read(home_path) ?? panic("read {home_path}: {err}")
         declared := [String]{}
-        loop member in compiler_event_block(core_text, "{parts.before}: struct {{") {
+        loop member in compiler_event_block(home_text, "{named.before}: struct {{") {
             field: member.split_once(": ") ?? next
             declared.push("{field.before} {field.after}")
         }
         if declared.join(", ") != parts.after {
-            problems.push("payload `{parts.before}` lists `{parts.after}`, core.compiler declares `{declared.join(", ")}`")
+            problems.push("payload `{named.before}` lists `{parts.after}`, {named.after} declares `{declared.join(", ")}`")
         }
     }
     assert(problems.len() == 0, "the compiler event rows and core.compiler disagree:\n{problems.join("\n")}")

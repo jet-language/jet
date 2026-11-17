@@ -40,6 +40,49 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildStepHandle", session: state.id, id: id}}
 }
 
+// A step written as a value, core.build's `BuildAction` (args: its name, its
+// command, the files it reads, the files it makes and its effects), made into
+// the `b.run` step those spell: the command's program, found on the machine
+// as a find_program probe of the same name finds it, run with the rest of the
+// command as its arguments, `.reads` of each input and `.writes` of each
+// output. A command that names its inputs and outputs passes their paths as
+// plain arguments.
+build_session_add_action: fn(state: &BuildSessionState, args: [BuildSessionValue], start: Int, end: Int) -> BuildSessionReply {
+    if args.len() != 5 {
+        return build_session_fail(state, "a `BuildAction` has a name, a command, inputs, outputs and effects")
+    }
+    name: build_session_text(args, 0) ?? return build_session_fail(state, "step name must be a string")
+    run: build_session_strings(args, 1) ?? return build_session_fail(state, "a step's command must be a list of strings")
+    inputs: build_session_strings(args, 2) ?? return build_session_fail(state, "a step's inputs must be a list of paths")
+    outputs: build_session_strings(args, 3) ?? return build_session_fail(state, "a step's outputs must be a list of paths")
+    if run.len() == 0 {
+        return build_session_fail(state, "step `{name}` runs no command; name its program first in `run`")
+    }
+    probe: build_session_add_probe(state, [BuildSessionValue]{BuildSessionValue.Text{value: name}, BuildSessionValue.Text{value: "find_program"}, BuildSessionValue.Text{value: run[0]}}, true)
+    found: if probe == .Value(value) -> build_session_found(state, [BuildSessionValue]{value}) else -> {
+        return probe
+    }
+    step: if found == .Value(value) -> build_session_add_run(state, [BuildSessionValue]{BuildSessionValue.Text{value: name}, value, args[4]}, start, end) else -> {
+        return found
+    }
+    handle: if step == .Value(value) -> value else -> {
+        return step
+    }
+    loop arg in run.slice(1, run.len()) {
+        reply: build_session_step_call(state, "arg", [BuildSessionValue]{handle, BuildSessionValue.Text{value: arg}})
+        if reply != .Value(value: .Unit) -> return reply
+    }
+    loop path in inputs {
+        reply: build_session_step_call(state, "reads", [BuildSessionValue]{handle, BuildSessionValue.Text{value: path}})
+        if reply != .Value(value: .Unit) -> return reply
+    }
+    loop path in outputs {
+        reply: build_session_step_call(state, "writes", [BuildSessionValue]{handle, BuildSessionValue.Text{value: path}})
+        if reply != .Value(value: .Unit) -> return reply
+    }
+    step
+}
+
 // `b.found(probe)`: the program a find_program probe finds, which a step runs
 // as its tool or is passed with `.file`, or the folder a find_folder probe
 // chooses, which a step reads whole at `.jet/found/<probe>`.

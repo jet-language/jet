@@ -65,8 +65,8 @@ JetCLILSPChecker: struct {
                 given.push(JetCLIOverlay{path: overlay.path, source: overlay.source})
             }
             run := jet_cli_tool_stage_run(entry, given, stage, bodies, program)
-            if run.problem == .Val(problem) {
-                lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
+            if run.stop == .Val(stop) {
+                lsp_write_log("the `{stage}` hooks of `{entry}` did not run: {stop.code}: {stop.what}").drop("standard error is the log; a failed log write has nowhere to go")
             }
             run.answers
         }

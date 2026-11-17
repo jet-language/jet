@@ -1,0 +1,9 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run a step spelled as arguments") {
+        greet: b.action("greet", ["sh", "-c", "printf hello > greet.txt"])
+        app: b.add_executable("app", ["spelled.jet"], [greet])
+        b.default(app)
+    }
+}
+
+run: fn() {}

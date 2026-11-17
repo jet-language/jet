@@ -492,6 +492,11 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
         return build_session_add_run(state, args, start, end)
     }
+    if method == "action" {
+        caps: build_session_strings(args, 4) ?? return build_session_fail(state, "a step's effects must be a list of strings")
+        if caps.len() > 0 && !in_impure_gate -> return build_session_impure(state, method)
+        return build_session_add_action(state, args, start, end)
+    }
     if method == "found" -> return build_session_found(state, args)
     if method == "host" -> return build_session_host(state, args, false)
     if method == "image" -> return build_session_host(state, args, true)

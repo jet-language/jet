@@ -1,0 +1,265 @@
+// `jet build`'s custom link and post-link steps: the `link` build option
+// names a hook, a function `#On(build.link)` marks (`link: tools.relink`),
+// that links each executable `jet build` writes in place of Jet's own link,
+// and `post_link` the hooks `#On(build.before_write)` marks
+// (`post_link: [tools.sign]`) that turn the linked file into the one
+// written, in order. Jet calls each hook as a tool stage calls its hooks
+// (ToolStages.jet), in a compile of a program beside the entry. A link hook
+// gets the link inputs Jet writes to the project, a post-link hook the file
+// before it and the path its step writes the next to. Each answers a
+// core.build `BuildAction`. A link action with no command is Jet's own link,
+// run in process over the action's inputs; any other action is declared as
+// `b.action` declares one, in a build session of its own, and runs in the
+// build sandbox through the executor every build step runs in. A hook runs
+// as a compile-time value, so one that reaches past what compile-time code
+// may do (a file read is E3410) stops with that refusal's code; the action's
+// Jet link reads only paths inside the project, and its command gets only
+// the effects the build grants (E3504). The steps run on every build, and a
+// failure is E3506, naming the output, the hook and where the option was
+// written.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    jet_backend.[LINK_BASE, x64_executable_whole, x64_link_executable]
+    jet_build_session.[BuildSessionPolicy, BuildSessionValue, build_plan_execution, build_session_call, build_session_finish, build_session_new, build_session_path]
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverBuildAction,
+        JetDriverCompileResult,
+        JetDriverLinkInputs,
+        jet_driver_build_action_session_args,
+        jet_driver_link_stage_action,
+        jet_driver_link_stage_declared,
+        jet_driver_link_stage_program,
+        jet_driver_post_link_stage_program,
+    ]
+    jet_foundation.[BUILD_OPTION_HOOK_DEFAULT, BuildOptions, COMPILER_EVENT_BUILD_BEFORE_WRITE, COMPILER_EVENT_BUILD_LINK, CompilerThreads, Diagnostic, build_option_duration_ms, build_option_index, build_option_items, build_option_place, build_options_value]
+    jet_pkg_model.[OverlayPolicy]
+    jetpack_build.[build_action_failure_stderr, build_execute_actions]
+}
+
+// Whether `options` name a link hook in place of Jet's own link.
+jet_cli_link_hooked: fn(options: BuildOptions) -> Bool Never! {
+    build_options_value(options, "link") != BUILD_OPTION_HOOK_DEFAULT
+}
+
+// Whether `options` name a link or post-link step, which runs on every
+// build.
+jet_cli_link_steps: fn(options: BuildOptions) -> Bool Never! {
+    jet_cli_link_hooked(options) || build_options_value(options, "post_link") != ""
+}
+
+// Where, under the project root, `jet build` writes the link inputs of each
+// executable a link step links, and the files its post-link steps pass on:
+// one folder per executable, named after it.
+JET_CLI_LINK_INPUTS_DIR: ".jet/build/link"
+
+// The fix of a link step's E3506.
+JET_CLI_LINK_STEP_FIX: "fix the hook or the command its step runs, or write `link: default` to link with Jet"
+
+// One link or post-link step's report: its kind (`link step`), what its
+// step does to the executable (`link`), its hook, where the option names it,
+// the executable, relative to the project root, and the `BuildAction` field
+// that names the file its step makes (`inputs.output`).
+JetCLILinkStep: struct {
+    kind: String,
+    doing: String,
+    hook: String,
+    setting: String,
+    output: String,
+    root: String,
+    binary: String,
+    makes: String,
+    fix: String,
+    color: Bool,
+}
+
+// Link executable `binary` of `file` with the link step the `link` option of
+// `options` names. `names` and `bytes` are the link inputs Jet's own link
+// would read, in its order: the program object, the runtime, Core's object
+// and the C closure. Each is written under JET_CLI_LINK_INPUTS_DIR, as an
+// object or, an `ar` archive, a library; the hook gets their paths, the
+// `link_args` option and the executable's name and path, each path relative
+// to the project root, where the step runs. `invocation` grants the step's
+// effects beside the package's and the workspace's policy.
+jet_cli_link_step: fn(file: String, options: BuildOptions, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, names: [String], bytes: [[U8]], invocation: JetCLIInvocationAuthority?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIBuilt Never! {
+    root: snapshot.roots[0].canonical_path
+    step: JetCLILinkStep{kind: "link step", doing: "link", hook: build_options_value(options, "link"), setting: build_option_place(options.values[build_option_index("link")]), output: cli_files.relative(binary, root), root: root, binary: binary, makes: "inputs.output", fix: JET_CLI_LINK_STEP_FIX, color: color}
+    if jet_cli_link_step_undeclared(snapshot, step, COMPILER_EVENT_BUILD_LINK) == .Val(failed) {
+        return failed
+    }
+    name: cli_files.basename(binary)
+    folder: "{JET_CLI_LINK_INPUTS_DIR}/{name}"
+    at: jet_cli_entry_join(root, folder)
+    cli_files.remove_all(at).drop("a folder that isn't there has nothing to clear; one that can't be cleared fails the create below")
+    cli_files.create_dir_all(at) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create `{at}` for the link inputs of `{name}`: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
+    objects := [String]{}
+    libraries := [String]{}
+    taken := [String]{}
+    loop index in 0..<names.len() {
+        base: if index == 0 -> "{name}.o" else -> cli_files.basename(names[index])
+        written: if taken.contains(base) -> "{index}-{base}" else -> base
+        path: "{folder}/{written}"
+        cli_files.write_bytes(jet_cli_entry_join(root, path), bytes[index]) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't write the link input `{path}` of `{name}`: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
+        if jet_cli_link_archive(bytes[index]) -> libraries.push(path) else -> objects.push(path)
+        taken.push(written)
+    }
+    program: jet_driver_link_stage_program(step.hook, JetDriverLinkInputs{objects: objects, libraries: libraries, args: build_option_items(build_options_value(options, "link_args")), output_name: name, output: step.output})
+    ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, program)
+    if ran.stop == .Val(stop) {
+        return jet_cli_link_step_stopped(step, "{step.setting} names the link step `{step.hook}`", stop)
+    }
+    action: jet_driver_link_stage_action(ran.values.move()) ?? return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, which answered no `BuildAction`", None, "return a `build.BuildAction` from `{step.hook}`, such as `inputs.default`")
+    // The executable is the step's or none: a failed step leaves no earlier one in its place.
+    cli_files.remove(binary).drop("a missing executable is the first build's")
+    if action.run.len() == 0 -> return jet_cli_link_step_own(step, action, options, result)
+    failed: jet_cli_link_step_run(step, action, step.output, options, result, invocation)
+    if failed.move() == .Val(report) -> return report
+    image: cli_files.read_bytes(step.binary) ?? return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, which wrote no `{step.output}`", None, "write the executable at `inputs.output`, which the step lists in its outputs")
+    JetCLIBuilt.Image{executable: x64_executable_whole(image), path: step.binary}
+}
+
+// Run the `post_link` steps of `options` on the executable `binary` a link
+// wrote, in order. The linked file moves under JET_CLI_LINK_INPUTS_DIR; each
+// step gets the file before it and the path it writes the next to, and the
+// last one writes the executable, so a failed step leaves none.
+// `invocation` grants the steps' effects beside the package's and the
+// workspace's policy.
+jet_cli_post_link_steps: fn(file: String, options: BuildOptions, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, binary: String, invocation: JetCLIInvocationAuthority?, color: Bool) -[FS, Env, Exec, IO, Net, Time, Rand, FFI.Asm]> JetCLIBuilt Never! {
+    root: snapshot.roots[0].canonical_path
+    name: cli_files.basename(binary)
+    folder: "{JET_CLI_LINK_INPUTS_DIR}/{name}/post_link"
+    at: jet_cli_entry_join(root, folder)
+    cli_files.remove_all(at).drop("a folder that isn't there has nothing to clear; one that can't be cleared fails the create below")
+    cli_files.create_dir_all(at) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't create `{at}` for the post-link steps of `{name}`: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
+    path := "{folder}/{name}.0"
+    cli_files.rename(binary, jet_cli_entry_join(root, path)) ?? return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't move the linked `{name}` to `{path}` for its post-link steps: {err}", jet_cli_why("E2105"), "make `{at}` writable", color)}
+    hooks: build_option_items(build_options_value(options, "post_link"))
+    setting: build_option_place(options.values[build_option_index("post_link")])
+    output: cli_files.relative(binary, root)
+    loop (index, hook) in hooks {
+        step: JetCLILinkStep{kind: "post-link step", doing: "finish", hook: hook, setting: setting, output: output, root: root, binary: binary, makes: "artifact.next", fix: "fix the hook or the command its step runs, or drop `{hook}` from `post_link`", color: color}
+        if jet_cli_link_step_undeclared(snapshot, step, COMPILER_EVENT_BUILD_BEFORE_WRITE) == .Val(failed) {
+            return failed
+        }
+        next: if index + 1 == hooks.len() -> output else -> "{folder}/{name}.{index + 1}"
+        ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, jet_driver_post_link_stage_program(hook, name, path, next))
+        if ran.stop == .Val(stop) {
+            return jet_cli_link_step_stopped(step, "{setting} names the post-link step `{hook}`", stop)
+        }
+        action: jet_driver_link_stage_action(ran.values.move()) ?? return jet_cli_link_step_failed(step, "{setting} names the post-link step `{hook}`, which answered no `BuildAction`", None, "return a `build.BuildAction` from `{hook}` whose step reads `artifact.path` and writes `artifact.next`")
+        if action.run.len() == 0 {
+            return jet_cli_link_step_failed(step, "{setting} names the post-link step `{hook}`, whose `BuildAction` runs no command", None, "give the action the command that reads `artifact.path` and writes `artifact.next`")
+        }
+        failed: jet_cli_link_step_run(step, action, next, options, result, invocation)
+        if failed.move() == .Val(report) -> return report
+        if index + 1 == hooks.len() {
+            image: cli_files.read_bytes(binary) ?? return jet_cli_link_step_failed(step, "{setting} names the post-link step `{hook}`, which wrote no `{output}`", None, "write the executable at `artifact.next`, which the step lists in its outputs")
+            return JetCLIBuilt.Image{executable: x64_executable_whole(image), path: binary}
+        }
+        path = next
+    }
+    panic("`jet build` runs post-link steps only when `post_link` names one")
+}
+
+// The E3506 report of `step`'s hook when `snapshot` declares no function of
+// that name marked `#On(<moment>)`, else None.
+jet_cli_link_step_undeclared: fn(snapshot: JetDriverAuthorizedSourceSnapshot, step: JetCLILinkStep, moment: String) -> JetCLIBuilt? Never! {
+    if jet_driver_link_stage_declared(snapshot, step.hook, moment) -> return None
+    path: step.hook.rpartition(".")
+    marker: "`#On({moment})`"
+    Val(jet_cli_link_step_failed(step, "{step.setting} names `{step.hook}`, which is no function marked {marker}", None, "mark `{path.tail}` in module `{path.head}` with {marker}, or name a function that is"))
+}
+
+// Link `action`'s inputs with Jet's own link, in process, to its one output,
+// which must be the executable `step` links. Like a step in the build
+// sandbox, the link reads only paths inside the project.
+jet_cli_link_step_own: fn(step: JetCLILinkStep, action: JetDriverBuildAction, options: BuildOptions, result: JetDriverCompileResult) -[FS, Env]> JetCLIBuilt Never! {
+    if action.outputs.len() != 1 || action.outputs[0] != step.output {
+        return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link makes {action.outputs.len()} files, not `{step.output}` alone", None, "keep `outputs: [inputs.output]` on a `BuildAction` with no command")
+    }
+    bytes := [[U8]]{}
+    loop input in action.inputs {
+        if !build_session_path(input) {
+            return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link reads `{input}`, outside the project", None, "name only the link inputs the hook was given or files inside the project, by relative paths")
+        }
+        bytes.push(cli_files.read_bytes(jet_cli_entry_join(step.root, input)) ?? return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, which links `{input}`, a file it can't read: {err}", None, "name only the link inputs the hook was given or files the package holds"))
+    }
+    threads: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    image: x64_link_executable(action.inputs, bytes.move(), LINK_BASE, threads, build_options_value(options, "debug_info") != "false")
+    if image.errors.len() > 0 {
+        return jet_cli_link_step_failed(step, "{step.setting} names the link step `{step.hook}`, whose Jet link of `{step.output}` failed", Val(image.errors.join("\n")), JET_CLI_LINK_STEP_FIX)
+    }
+    executable: jet_cli_native_with_command(x64_executable_whole(image.bytes.move()), result.command_record)
+    if jet_cli_native_write(step.binary, executable) != None {
+        return JetCLIBuilt.Failed{output: jet_cli_build_failed("couldn't write the executable `{step.binary}`", jet_cli_why("E2105"), "make `{step.binary}` writable", step.color)}
+    }
+    JetCLIBuilt.Image{executable: executable, path: step.binary}
+}
+
+// Run `action`, a command, as the one step of a build session of its own,
+// declared as `b.action` declares it, in the build sandbox; the step must
+// make `made`. None when it ran, else the report of why not.
+jet_cli_link_step_run: fn(step: JetCLILinkStep, action: JetDriverBuildAction, made: String, options: BuildOptions, result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -[FS, Env, Exec, IO, Net, Time, Rand]> JetCLIBuilt? Never! {
+    if !action.outputs.contains(made) {
+        return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` doesn't make `{made}`", None, "list `{step.makes}` in the `outputs` of the `BuildAction` the hook returns"))
+    }
+    session := build_session_new(1, cli_files.basename(step.binary), "", BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}})
+    declared: build_session_call(session, "action", jet_driver_build_action_session_args(action), None, true, 0, 0)
+    if declared == .Failure(error) {
+        return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` is refused: {error.what}", None, error.fix))
+    }
+    finished: build_session_finish(session, BuildSessionValue.Unit)
+    plan: finished.plan ?? {
+        what: if finished.diagnostics.len() > 0 -> finished.diagnostics[0].what else -> "it has no plan"
+        return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, whose step `{action.name}` is refused: {what}", None, step.fix))
+    }
+    execution: build_plan_execution(plan)
+    action_timeout_ms: build_option_duration_ms(build_options_value(options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
+    hermetic: jet_cli_build_hermetic_plan(execution, action_timeout_ms, jet_cli_build_last(step.root).kept) ?? return Val(JetCLIBuilt.Failed{output: jet_cli_ice("the {step.kind}'s plan does not lower to the executor's graph: {err.debug_text()}")})
+    workspace := OverlayPolicy.empty()
+    refused: jet_cli_build_workspace_policy(workspace, step.root)
+    if refused.move() == .Val(what) {
+        return Val(JetCLIBuilt.Failed{output: jet_cli_build_policy_refused(what, step.color)})
+    }
+    // The session declares the step alone.
+    steps: [Int]{0}
+    granted: jet_cli_build_steps_granted(hermetic, execution, steps, [Int]{}, step.root, workspace, result.authority_policy, invocation, None, step.color)
+    if granted.move() == {
+        .Refused(output) -> Val(JetCLIBuilt.Failed{output: output})
+        .Granted(grants, probes) -> {
+            ran := build_execute_actions(hermetic, steps, step.root, None, grants, probes, cli_sys.cpu_count(), None)
+            outcome: ran.pop() ?? panic("the executor answered no outcome for the {step.kind}")
+            if outcome == .Err(error) {
+                if error == .Reported(report) {
+                    return Val(jet_cli_link_step_failed(step, "{step.setting} names the {step.kind} `{step.hook}`, which failed to {step.doing} `{step.output}`: {report.message}", build_action_failure_stderr(report), step.fix))
+                }
+                return Val(JetCLIBuilt.Failed{output: jet_cli_build_execution_error(error, None, step.color)})
+            }
+            None
+        }
+    }
+}
+
+// The E3506 report of `step`.
+jet_cli_link_step_failed: fn(step: JetCLILinkStep, what: String, detail: String?, fix: String) -> JetCLIBuilt Never! {
+    JetCLIBuilt.Failed{output: jet_cli_build_execution_failed("E3506", what, detail, fix, step.color)}
+}
+
+// The report of `step`'s hook, which `named` (where the option names it)
+// calls and `stop` kept from running: the stop's own code, such as the
+// E3410 of a hook that reads a file.
+jet_cli_link_step_stopped: fn(step: JetCLILinkStep, named: String, stop: Diagnostic) -> JetCLIBuilt Never! {
+    JetCLIBuilt.Failed{output: jet_cli_build_refusal(stop.code, "{named}, which did not run: {stop.what}", stop.why, None, stop.fix, step.color)}
+}
+
+// Whether `bytes` are an `ar` archive (`!<arch>\n`), which the link reads as
+// a library.
+jet_cli_link_archive: fn(bytes: [U8]) -> Bool Never! {
+    magic: "!<arch>\n".bytes()
+    if bytes.len() < magic.len() -> return false
+    loop index in 0..<magic.len() {
+        if bytes[index] != magic[index] -> return false
+    }
+    true
+}

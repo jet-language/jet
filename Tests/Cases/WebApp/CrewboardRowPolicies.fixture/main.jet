@@ -1,6 +1,8 @@
 // Crewboard's projects, members and tasks behind its row policies, each call
 // run as the account that makes it. The board's operations carry no checks
-// of their own, so every refusal below is a policy's.
+// of their own, so every refusal below is a policy's. A project's board
+// loads its assignees' member rows in one read, so its statements do not
+// grow with the project's members.
 use {
     app
     auth: core.auth
@@ -32,6 +34,7 @@ Task: struct {
     id: Int,
     project: Int,
     title: String,
+    assignee: auth.AccountID?,
 }
 
 mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
@@ -147,7 +150,7 @@ member_policy: fn(row: Member, op: db.Op, who: db.Who, store: db.Store) -[DB.Rea
 }
 
 // Crewboard's three tables, each behind its policy.
-Board: struct {
+Tables: struct {
     store: db.Store,
     projects: db.Table<Int, Project>,
     members: db.Table<MemberKey, Member>,
@@ -167,10 +170,10 @@ keep: fn(store: db.Store) {
     stores.value.store = Val(store.copy())
 }
 
-board: fn() -> Board {
+tables: fn() -> Tables {
     stores := STORE.guard_edit()
     store: stores.value.store ?? panic("the store is open")
-    Board{
+    Tables{
         store: store.copy(),
         projects: projects_in(store).guard(project_policy),
         members: members_in(store).guard(member_policy),
@@ -200,7 +203,7 @@ task_wrote: fn(result: Task db.DBError!) -> String {
 }
 
 member_deleted: fn(key: MemberKey) -[DB.Read, DB.Write]> String {
-    if board().members.delete(key) == {
+    if tables().members.delete(key) == {
         .Ok(_) -> "ok"
         .Err(failure) -> failure.message()
     }
@@ -212,7 +215,7 @@ member_deleted: fn(key: MemberKey) -[DB.Read, DB.Write]> String {
 // refusal undoes both.
 create_project: fn(id: Int, name: String) -[DB]> String {
     me: app.maybe_caller() ?? return "no one is signed in"
-    crew: board()
+    crew: tables()
     transaction: crew.store.begin() ?? return "the transaction did not begin"
     made: project_wrote(crew.projects.add(Project{id: id, name: name, created_by: me}))
     owned: member_wrote(crew.members.add(Member{project: id, account: me, owner: true}))
@@ -226,7 +229,7 @@ create_project: fn(id: Int, name: String) -[DB]> String {
 
 // The caller's projects, each with its number of tasks.
 my_projects: fn() -[DB.Read]> String {
-    crew: board()
+    crew: tables()
     projects: (crew.projects.query() ?? return "unreadable").collect() ?? return "uncollected"
     tasks: (crew.tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
     cards := [String]{}
@@ -242,7 +245,7 @@ my_projects: fn() -[DB.Read]> String {
 
 // The caller's tasks whose title holds `words`.
 search: fn(words: String) -[DB.Read]> String {
-    tasks: (board().tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
+    tasks: (tables().tasks.query() ?? return "unreadable").collect() ?? return "uncollected"
     found := [String]{}
     loop task in tasks {
         if task.title.contains(words) -> found.push(task.title)
@@ -251,7 +254,7 @@ search: fn(words: String) -[DB.Read]> String {
 }
 
 members_read: fn(project: Int) -[DB.Read]> String {
-    rows: (board().members.query() ?? return "unreadable").collect() ?? return "uncollected"
+    rows: (tables().members.query() ?? return "unreadable").collect() ?? return "uncollected"
     names := [String]{}
     loop row in rows {
         if row.project == project {
@@ -262,30 +265,73 @@ members_read: fn(project: Int) -[DB.Read]> String {
     "[{names.join(", ")}]"
 }
 
+// The board of `project`: its tasks, each with its assignee's place in the
+// project. One read of the members table (`Table.get_many`) loads the member
+// rows of every assignee, so the board runs as many statements whatever the
+// number of members, the policies' included.
+board: fn(project: Int) -[DB.Read]> String {
+    crew: tables()
+    query: crew.tasks.query() ?? return "unreadable"
+    tasks: query.filter(fn(row: Task) { row.project == project }).collect() ?? return "uncollected"
+    keys := [MemberKey]{}
+    loop task in tasks {
+        if task.assignee == .Val(account) {
+            keys.push(MemberKey{project: project, account: account})
+        }
+    }
+    assigned: crew.members.get_many(keys) ?? return "unreadable"
+    shown := [String]{}
+    loop task in tasks {
+        place := "unassigned"
+        loop member in assigned {
+            if task.assignee == .Val(account) && account == member.account {
+                place = if member.owner -> "{account}, owner" else -> "{account}"
+            }
+        }
+        shown.push("{task.title} ({place})")
+    }
+    "[{shown.join(", ")}]"
+}
+
+// mia's board of `project`, and the statements it ran.
+board_as_mia: fn(project: Int) -> {shown: String, statements: Int} {
+    store: tables().store
+    before: store.statements()
+    shown: app.as_caller(mia(), fn() { board(project) })
+    {shown: shown, statements: store.statements() - before}
+}
+
+// ben adds `account` to launch as a Member and a task assigned to it.
+join_launch: fn(account: auth.AccountID, task: Int, title: String) -> String {
+    joined: app.as_caller(mia(), fn() { member_wrote(tables().members.add(Member{project: 1, account: account, owner: false})) })
+    if joined != "ok" -> return joined
+    app.as_caller(ben(), fn() { task_wrote(tables().tasks.add(Task{id: task, project: 1, title: title, assignee: Val(account)})) })
+}
+
 step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
 
 run: fn() {
     keep(db.open_memory())
 
     step("mia creates launch", app.as_caller(mia(), fn() { create_project(1, "launch") }))
-    step("mia adds ben as a Member", app.as_caller(mia(), fn() { member_wrote(board().members.add(Member{project: 1, account: ben(), owner: false})) }))
-    step("ben adds a task", app.as_caller(ben(), fn() { task_wrote(board().tasks.add(Task{id: 1, project: 1, title: "ship the beta"})) }))
+    step("mia adds ben as a Member", app.as_caller(mia(), fn() { member_wrote(tables().members.add(Member{project: 1, account: ben(), owner: false})) }))
+    step("ben adds a task", app.as_caller(ben(), fn() { task_wrote(tables().tasks.add(Task{id: 1, project: 1, title: "ship the beta", assignee: Val(ben())})) }))
 
     // A Member's update of its own row to Owner, judged on the stored row.
-    step("ben makes his own row Owner", app.as_caller(ben(), fn() { member_wrote(board().members.put(Member{project: 1, account: ben(), owner: true})) }))
+    step("ben makes his own row Owner", app.as_caller(ben(), fn() { member_wrote(tables().members.put(Member{project: 1, account: ben(), owner: true})) }))
 
     // The creator rule: an Owner insert only for a project whose row names
     // the caller and that has no members.
-    step("carol adds herself as launch's Owner", app.as_caller(carol(), fn() { member_wrote(board().members.add(Member{project: 1, account: carol(), owner: true})) }))
-    step("ben, a Member, adds carol as launch's Owner", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 1, account: carol(), owner: true})) }))
-    step("carol adds a project in mia's name", app.as_caller(carol(), fn() { project_wrote(board().projects.add(Project{id: 2, name: "forged", created_by: mia()})) }))
-    step("mia adds plans without an owner", app.as_caller(mia(), fn() { project_wrote(board().projects.add(Project{id: 2, name: "plans", created_by: mia()})) }))
-    step("carol adds herself as the Owner of plans, which has no members", app.as_caller(carol(), fn() { member_wrote(board().members.add(Member{project: 2, account: carol(), owner: true})) }))
-    step("mia, plans' creator, adds herself as its Owner", app.as_caller(mia(), fn() { member_wrote(board().members.add(Member{project: 2, account: mia(), owner: true})) }))
+    step("carol adds herself as launch's Owner", app.as_caller(carol(), fn() { member_wrote(tables().members.add(Member{project: 1, account: carol(), owner: true})) }))
+    step("ben, a Member, adds carol as launch's Owner", app.as_caller(ben(), fn() { member_wrote(tables().members.add(Member{project: 1, account: carol(), owner: true})) }))
+    step("carol adds a project in mia's name", app.as_caller(carol(), fn() { project_wrote(tables().projects.add(Project{id: 2, name: "forged", created_by: mia()})) }))
+    step("mia adds plans without an owner", app.as_caller(mia(), fn() { project_wrote(tables().projects.add(Project{id: 2, name: "plans", created_by: mia()})) }))
+    step("carol adds herself as the Owner of plans, which has no members", app.as_caller(carol(), fn() { member_wrote(tables().members.add(Member{project: 2, account: carol(), owner: true})) }))
+    step("mia, plans' creator, adds herself as its Owner", app.as_caller(mia(), fn() { member_wrote(tables().members.add(Member{project: 2, account: mia(), owner: true})) }))
     step("ben creates side", app.as_caller(ben(), fn() { create_project(3, "side") }))
-    step("ben adds mia as side's Owner", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 3, account: mia(), owner: true})) }))
+    step("ben adds mia as side's Owner", app.as_caller(ben(), fn() { member_wrote(tables().members.add(Member{project: 3, account: mia(), owner: true})) }))
     step("ben leaves side", app.as_caller(ben(), fn() { member_deleted(MemberKey{project: 3, account: ben()}) }))
-    step("ben, side's creator, adds himself as its Owner while it has members", app.as_caller(ben(), fn() { member_wrote(board().members.add(Member{project: 3, account: ben(), owner: true})) }))
+    step("ben, side's creator, adds himself as its Owner while it has members", app.as_caller(ben(), fn() { member_wrote(tables().members.add(Member{project: 3, account: ben(), owner: true})) }))
     step("carol reads launch's members", app.as_caller(carol(), fn() { members_read(1) }))
     step("launch's members", app.as_system(fn() { members_read(1) }))
     step("plans' members", app.as_system(fn() { members_read(2) }))
@@ -297,4 +343,14 @@ run: fn() {
     step("mia searches", app.as_caller(mia(), fn() { search("ship") }))
     step("mia's projects", app.as_caller(mia(), fn() { my_projects() }))
     step("ben's projects", app.as_caller(ben(), fn() { my_projects() }))
+
+    // The board loads its assignees' member rows in one read, so it runs as
+    // many statements once launch has four members as when it had two.
+    two: board_as_mia(1)
+    step("mia's board of launch", two.shown)
+    step("dee joins launch", join_launch(auth.AccountID.from_string("dee"), 2, "print the flyers"))
+    step("eve joins launch", join_launch(auth.AccountID.from_string("eve"), 3, "book the hall"))
+    four: board_as_mia(1)
+    step("mia's board of launch", four.shown)
+    step("the board runs as many statements with four members as with two", "{four.statements == two.statements}")
 }

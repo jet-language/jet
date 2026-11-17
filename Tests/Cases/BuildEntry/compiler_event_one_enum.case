@@ -1,11 +1,11 @@
-# Claim: one `compiler.Event` enum names every public moment, and each surface reads it through the same registry rows. A function's `#On(moment)` names a row, such as `compiler.settled` or `build.link`, and takes the payload that the row's variant carries. A moment no row names, or a hook that takes another payload, is E0930. `jet build --json` names the settled moment `compiler.settled` with its `Round` fields, and `meta.stages()` gives the same moment as `compiler.Event.Settled`.
+# Claim: one `compiler.Event` enum names every public moment, and each surface reads it through the same registry rows. A function's `#On(moment)` names a row, such as `compiler.settled` or `build.link`, and takes the payload that the row's variant carries; a `build.link` hook also returns the `build.BuildAction` that links the output. A moment no row names, a hook that takes another payload, or a link hook that returns no step is E0930. `jet build --json` names the settled moment `compiler.settled` with its `Round` fields, and `meta.stages()` gives the same moment as `compiler.Event.Settled`.
 # Hand-derived: each program is one module with no errors, so its compile settles in one round, round 1.
 fixture: CompilerEventOneEnum.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: jet check main.jet
 cwd: hooked
-exit: 0 # a settled hook and a link hook, each taking its moment's payload
+exit: 0 # a settled hook and a link hook, each taking its moment's payload; the link hook returns a step
 step: jet check main.jet
 cwd: misspelled
 exit: nonzero
@@ -17,6 +17,11 @@ cwd: wrong_payload
 exit: nonzero
 stderr: ~ "hook takes one" # the settled moment carries a Round
 stderr: ~ "compiler.Round" # the payload the moment carries
+stderr: ~ "jet-lang.dev/e/E0930" # the hook-moment code
+step: jet check main.jet
+cwd: no_step
+exit: nonzero
+stderr: ~ "hook returns a `build.BuildAction`" # the link hook returns nothing
 stderr: ~ "jet-lang.dev/e/E0930" # the hook-moment code
 step: jet build main.jet --json
 cwd: hooked

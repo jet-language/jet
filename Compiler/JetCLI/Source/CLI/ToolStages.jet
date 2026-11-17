@@ -4,20 +4,24 @@
 // packages resolve as the document's own imports do, and each call's `#run`
 // value runs in the sealed comptime child, as a config value does
 // (ConfigEval.jet). A program that does not check answers nothing, and
-// `problem` names its first error.
+// `stop` is its first error. `jet build`'s link and post-link steps call
+// their hooks the same way (LinkStep.jet), and so does `jet build` the
+// package's moment hooks (jet_cli_moment_hooks_run).
 use {
     cli_files: core.files
     jet_driver.[
         JetDriverCompileMode,
+        JetDriverMomentHook,
         JetDriverToolStageItem,
         jet_driver_compile,
+        jet_driver_moment_plan,
         jet_driver_tool_stage_answers,
         jet_driver_tool_stage_blocks,
         jet_driver_tool_stage_hooked,
         jet_driver_tool_stage_plan,
         jet_driver_tool_stage_snapshot_markers,
     ]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, foundation_byte_text]
+    jet_foundation.[CompilerEventRecord, DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, diagnostic_from_registry, foundation_byte_text]
     jet_parser.[jet_format_source, parse_source]
 }
 
@@ -27,34 +31,84 @@ JET_CLI_TOOL_STAGE_FILE: "jet_tool_stage.jet"
 
 JetCLIToolStageRun: struct {
     answers: [[JetDriverToolStageItem]],
-    problem: String?,
+    stop: Diagnostic?,
 }
 
 jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetCLIOverlay], stage: String, bodies: [Span], program: &&String) -> JetCLIToolStageRun Never! {
     if bodies.len() == 0 {
-        return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: None}
+        return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: None}
     }
+    ran := jet_cli_tool_stage_values(document, overlays.move(), program.move())
+    if ran.stop.move() == .Val(stop) {
+        return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, stop: Val(stop)}
+    }
+    JetCLIToolStageRun{answers: jet_driver_tool_stage_answers(stage, bodies, ran.values.move()), stop: None}
+}
+
+// The compile-time values of `program` checked beside `document`, else the
+// first report that stopped it. Hooks run as compile-time values, so a hook
+// that reaches past what compile-time code may do stops here with the
+// refusal's own code (E3410, E3411); a stop that is no diagnostic of the
+// program is E2105.
+JetCLIToolStageValues: struct {
+    values: [SemaComptimeItemValue],
+    stop: Diagnostic?,
+}
+
+jet_cli_tool_stage_values: fn(document: String, overlays: &&[JetCLIOverlay], program: &&String) -> JetCLIToolStageValues Never! {
     given := overlays.move()
     given.push(JetCLIOverlay{path: jet_cli_tool_stage_file(document), source: program.move()})
     if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
-        .Refused(output) -> return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val(output.stderr.trim())}
+        .Refused(output) -> return jet_cli_tool_stage_stopped(output.stderr.trim())
         .Prepared(request, _) -> {
-            result := jet_driver_compile(request) ?? return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {err}")}
-            loop diagnostic in result.diagnostics {
+            result := jet_driver_compile(request) ?? return jet_cli_tool_stage_stopped("internal compiler error: {err}")
+            loop diagnostic in result.diagnostics.move() {
                 if diagnostic.severity == DIAGNOSTIC_ERROR {
-                    return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("{diagnostic.code}: {diagnostic.what}")}
+                    return JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, stop: Val(diagnostic)}
                 }
             }
             if result.internal_problem == .Val(problem) {
-                return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {problem}")}
+                return jet_cli_tool_stage_stopped("internal compiler error: {problem}")
             }
-            return JetCLIToolStageRun{answers: jet_driver_tool_stage_answers(stage, bodies, result.comptime_values.move()), problem: None}
+            return JetCLIToolStageValues{values: result.comptime_values.move(), stop: None}
         }
     }
 }
 
+// The E2105 stop of a hooks' program that `what` kept from running.
+jet_cli_tool_stage_stopped: fn(what: String) -> JetCLIToolStageValues Never! {
+    JetCLIToolStageValues{values: [SemaComptimeItemValue]{}, stop: Val(diagnostic_from_registry("E2105", None, what, jet_cli_why("E2105"), "fix the hook's package, then run the tool again"))}
+}
+
 jet_cli_tool_stage_file: fn(document: String) -> String Never! {
     jet_cli_entry_join(jet_cli_parent(jet_cli_overlay_path(document)) ?? ".", JET_CLI_TOOL_STAGE_FILE)
+}
+
+// Run each of `hooks`, the moment hooks of the package `file` builds
+// (jet_driver_moment_hooks), on each of `records` its moment names, in one
+// program beside `file` (jet_driver_moment_plan). The hooks run as
+// compile-time values, so a hook that reaches past what compile-time code
+// may do (E3410 for a file read) or fails (E3010 for a panic) stops the build
+// with that report's own code, naming the moment and the hook. None when
+// every call ran, or no hook hooks a moment of `records`.
+jet_cli_moment_hooks_run: fn(file: String, hooks: [JetDriverMomentHook], records: [CompilerEventRecord], color: Bool) -> JetDriverVerbOutput? Never! {
+    plan := jet_driver_moment_plan(hooks, records)
+    if plan.calls.len() == 0 -> return None
+    ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, plan.program.move())
+    if ran.stop == .Val(stop) {
+        named := "a moment hook of `{file}`"
+        if stop.span == .Val(span) && (stop.source_path ?? JET_CLI_TOOL_STAGE_FILE).ends_with(JET_CLI_TOOL_STAGE_FILE) {
+            at := -1
+            loop (index, start) in plan.starts {
+                if start <= span.start -> at = index
+            }
+            if at >= 0 {
+                named = "the `{hooks[plan.calls[at]].moment}` hook `{hooks[plan.calls[at]].hook}`"
+            }
+        }
+        return Val(jet_cli_build_refusal(stop.code, "{named} did not run: {stop.what}", stop.why, None, stop.fix, color))
+    }
+    None
 }
 
 // The hook markers of a tool stage that each package's sources declare
@@ -132,8 +186,8 @@ jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool, memo: &
     // The hooks' program needs no overlay: the file on disk parses as its
     // formatted text does.
     run := jet_cli_tool_stage_run(origin, [JetCLIOverlay]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
-    if run.problem == .Val(problem) {
-        return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_report("E2105", "a `fmt.block` hook for `{origin}` did not run: {problem}", jet_cli_why("E2105"), "fix the hook's package, then run `jet fmt` again", color))}
+    if run.stop == .Val(stop) {
+        return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_report(stop.code, "a `fmt.block` hook for `{origin}` did not run: {stop.what}", stop.why, stop.fix, color))}
     }
     // The first answer of each body, latest body first; a body inside one
     // already replaced keeps the outer answer.

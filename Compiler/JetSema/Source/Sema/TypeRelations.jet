@@ -579,13 +579,15 @@ sema_fn_return_is_never: fn(ret: Type?) -> Bool Never! {
     false
 }
 
-// A callable that cannot fail (`Never!`) fits any failure slot of the same
-// success type; the fn-value adapter supplies the slot's carrier.
+// A callable that cannot fail (`Never!`, or an optional return, which has no
+// failure slot) fits any failure slot of the same success type; the fn-value
+// adapter supplies the slot's carrier.
 sema_never_failing_return_fits: fn(required: Type, offered: Type) -> Bool Never! {
     if required == .Result(required_ok, _) {
         if offered == .Result(offered_ok, offered_err) {
             return offered_err == (Type.Named{name: "Never"}) && sema_type_carrier_compatible(required_ok, offered_ok)
         }
+        if offered == .Option(_) -> return sema_type_carrier_compatible(required_ok, offered)
     }
     false
 }
