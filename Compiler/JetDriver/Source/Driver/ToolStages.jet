@@ -1,0 +1,286 @@
+// The tool stages (JetFoundation ToolStages.jet) as a tool runs them: the
+// hooks a checked document's imports declare with `#On(stage, Marker)`, one
+// call per hook and block of its marker in the document, the compile-time
+// program that makes those calls, and the answers read back from its values.
+// A hook runs only for a document that imports its package, and a qualified
+// block (`#Tools.Query { … }`) only reaches the package its qualifier names.
+// The host compiles the program beside the document (JetCLI ToolStages.jet),
+// so the hooks run as every compile-time value does.
+use {
+    jet_foundation.[
+        ImportDecl,
+        Span,
+        TComptimeField,
+        TComptimeValue,
+        TOOL_STAGE_FMT_BLOCK,
+        TOOL_STAGE_LSP_COMPLETION,
+        TOOL_STAGE_LSP_INLAY_HINTS,
+        TOOL_STAGE_LSP_SEMANTIC_TOKENS,
+        foundation_byte_text,
+        jet_config_string_escape,
+        sema_casing_marker_qualifier,
+        tool_stage_hook,
+    ]
+    jet_lexer.[TOKEN_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RPAREN, lex, token_text]
+    jet_sema.[SemaComptimeItemKind, SemaComptimeItemValue]
+}
+
+// The name each call's value has in the program, numbered by call.
+JET_DRIVER_TOOL_STAGE_VALUE: "TOOL_STAGE_CALL"
+
+// A marked block of a document: the marker as written and the bytes between
+// its braces.
+JetDriverToolStageBlock: struct {
+    marker: String,
+    body: Span,
+}
+
+// The calls a tool stage makes on one document: each call's block body, as
+// document byte offsets, and the compile-time program whose value
+// `{JET_DRIVER_TOOL_STAGE_VALUE}_{n}` is call `n`'s answer.
+JetDriverToolStagePlan: struct {
+    bodies: [Span],
+    program: String,
+}
+
+// One row of a call's answer, at document byte offsets: a completion
+// (`label`, `detail`), a token (`at`, `length`, `kind`), a hint (`at`,
+// `label`), or a block's formatted text (`label`, over the whole body).
+JetDriverToolStageItem: struct {
+    at: Int,
+    length: Int,
+    label: String,
+    detail: String{""},
+    kind: String{""},
+}
+
+// Each `#Marker(…) { … }` block of `source` a hook may read, outermost
+// first: a capitalized marker path (so not `#run { … }`), a package's or the
+// prelude's (`#SQL(User) { … }`), directly followed by its arguments, if any,
+// and `{`.
+jet_driver_tool_stage_blocks: fn(source: String) -> [JetDriverToolStageBlock] Never! {
+    lexed: lex(source.bytes())
+    tokens: lexed.tokens
+    blocks := [JetDriverToolStageBlock]{}
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_HASH || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_IDENT {
+            next
+        }
+        path := token_text(lexed.tables, tokens[index + 1])
+        cursor := index + 2
+        loop cursor + 1 < tokens.len() && tokens[cursor].kind == TOKEN_DOT && tokens[cursor + 1].kind == TOKEN_IDENT {
+            path = "{path}.{token_text(lexed.tables, tokens[cursor + 1])}"
+            cursor += 2
+        }
+        if cursor < tokens.len() && tokens[cursor].kind == TOKEN_LPAREN {
+            depth := 0
+            loop cursor < tokens.len() {
+                if tokens[cursor].kind == TOKEN_LPAREN -> depth += 1
+                if tokens[cursor].kind == TOKEN_RPAREN -> depth -= 1
+                cursor += 1
+                if depth == 0 -> break
+            }
+        }
+        if cursor >= tokens.len() || tokens[cursor].kind != TOKEN_LBRACE -> next
+        open: tokens[cursor].span.end
+        depth := 0
+        close := -1
+        loop cursor < tokens.len() && tokens[cursor].kind != TOKEN_EOF {
+            if tokens[cursor].kind == TOKEN_LBRACE -> depth += 1
+            if tokens[cursor].kind == TOKEN_RBRACE {
+                depth -= 1
+                if depth == 0 {
+                    close = tokens[cursor].span.start
+                    break
+                }
+            }
+            cursor += 1
+        }
+        if close < open -> next
+        segments: path.split(".").to_list()
+        last: segments[segments.len() - 1].bytes()
+        if last[0] < (U8{65}) || last[0] > (U8{90}) -> next
+        blocks.push(JetDriverToolStageBlock{marker: path, body: Span{start: open, end: close}})
+    }
+    blocks
+}
+
+// The calls `stage` makes on the document `modules[document]`: each hook of
+// the stage that a module the document imports declares, on each block of
+// its marker, in hook then block order; only on the block holding byte `at`
+// when one is given. The program imports each hook module once.
+jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, stage: String, at: Int{-1}) -> JetDriverToolStagePlan Never! {
+    bodies := [Span]{}
+    if document < 0 || document >= modules.len() {
+        return JetDriverToolStagePlan{bodies: bodies, program: ""}
+    }
+    source: modules[document].source
+    imports: modules[document].imports
+    blocks: jet_driver_tool_stage_blocks(source)
+    bytes: source.bytes()
+    uses := [String]{"use {{\n    jet_tool_stage_compiler: core.compiler\n"}
+    values := [String]{}
+    loop (index, module_ref) in modules {
+        if index == document || blocks.len() == 0 -> next
+        imported: jet_driver_tool_stage_import(imports, module_ref.module_name) ?? next
+        slot := -1
+        loop item in module_ref.items {
+            if item == .Func(func) {
+                loop marker in func.markers {
+                    hook: tool_stage_hook(marker) ?? next
+                    if hook.stage != stage -> next
+                    loop block in blocks {
+                        if at >= 0 && (at < block.body.start || at > block.body.end) -> next
+                        if !jet_driver_tool_stage_reaches(block.marker, hook.marker, imports[imported].alias) {
+                            next
+                        }
+                        if slot < 0 {
+                            slot = uses.len() - 1
+                            uses.push("    jet_tool_stage_{slot}: {module_ref.module_name}\n")
+                        }
+                        start: jet_driver_tool_stage_position(bytes, block.body.start)
+                        text: jet_config_string_escape(foundation_byte_text(bytes, block.body.start, block.body.end))
+                        argument: "jet_tool_stage_compiler.MarkerBlock{{marker: \"{jet_config_string_escape(block.marker)}\", text: \"{text}\", line: {start.line}, column: {start.column}}}"
+                        values.push("\n{JET_DRIVER_TOOL_STAGE_VALUE}_{bodies.len()}: #run {{ jet_tool_stage_{slot}.{func.name}({argument}) }}\n")
+                        bodies.push(block.body)
+                    }
+                }
+            }
+        }
+    }
+    if bodies.len() == 0 -> return JetDriverToolStagePlan{bodies: bodies, program: ""}
+    JetDriverToolStagePlan{bodies: bodies, program: "{uses.join("")}}}\n{values.join("")}"}
+}
+
+// A 1-based line and byte column.
+JetDriverToolStagePosition: struct {
+    line: Int,
+    column: Int,
+}
+
+jet_driver_tool_stage_position: fn(bytes: [U8], offset: Int) -> JetDriverToolStagePosition Never! {
+    line := 1
+    column := 1
+    loop at in 0..<offset {
+        if {
+            bytes[at] == (U8{10}) -> {
+                line += 1
+                column = 1
+            }
+            else -> column += 1
+        }
+    }
+    JetDriverToolStagePosition{line: line, column: column}
+}
+
+// The document's import that reaches the package of the module
+// `module_name`, by its index in `imports`.
+jet_driver_tool_stage_import: fn(imports: [ImportDecl], module_name: String) -> Int? Never! {
+    package: module_name.partition(".").head
+    loop (index, declaration) in imports {
+        imported: if declaration.kind == {
+            .Module(name, _) -> name
+            .Unqualified(module_alias, _, _, _, _) -> module_alias
+            .File(_, _) -> ""
+        }
+        if imported != "" && imported.partition(".").head == package -> return Val(index)
+    }
+    None
+}
+
+// Whether a block written `#written` is a block of the hook's `marker` from the
+// package the document imports as `alias`: the last segments agree, and a
+// qualified block names that import.
+jet_driver_tool_stage_reaches: fn(written: String, marker: String, alias: String) -> Bool Never! {
+    segments: written.split(".").to_list()
+    keyed: marker.split(".").to_list()
+    if segments[segments.len() - 1] != keyed[keyed.len() - 1] -> return false
+    segments.len() == 1 || (segments.len() == 2 && segments[0] == sema_casing_marker_qualifier(alias))
+}
+
+// Each call's answer rows, read from the values of the program's compile, in
+// call order; a call with no readable value answers nothing.
+jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: &&[SemaComptimeItemValue]) -> [[JetDriverToolStageItem]] Never! {
+    answers := [[JetDriverToolStageItem]]{}
+    loop _ in bodies -> answers.push([JetDriverToolStageItem]{})
+    loop value in values.move() {
+        if value.kind != SemaComptimeItemKind.Constant -> next
+        loop (index, body) in bodies {
+            if !value.key.ends_with(":{JET_DRIVER_TOOL_STAGE_VALUE}_{index}") -> next
+            answers[index] = jet_driver_tool_stage_rows(stage, body, value.value.move())
+            break
+        }
+    }
+    answers
+}
+
+jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: &&TComptimeValue) -> [JetDriverToolStageItem] Never! {
+    rows := [JetDriverToolStageItem]{}
+    if stage == TOOL_STAGE_FMT_BLOCK {
+        if jet_driver_tool_stage_text(value.move()) == .Val(text) {
+            rows.push(JetDriverToolStageItem{at: body.start, length: body.end - body.start, label: text})
+        }
+        return rows
+    }
+    if value.move() == .List(elements) {
+        loop element in elements.move() {
+            if element.move() == .Struct(_, fields) {
+                if jet_driver_tool_stage_row(stage, body, fields.move()) == .Val(row) {
+                    rows.push(row)
+                }
+            }
+        }
+    }
+    rows
+}
+
+// One element of a list answer as a row, None when it is malformed or out of
+// its block.
+jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeField]) -> JetDriverToolStageItem? Never! {
+    row := JetDriverToolStageItem{at: 0, length: 0, label: ""}
+    labelled := false
+    kinded := false
+    loop field in fields.move() {
+        if field.name == "at" || field.name == "length" {
+            if field.value == .Int(number) {
+                if field.name == "at" -> row.at = number else -> row.length = number
+            }
+            next
+        }
+        if field.name == "label" {
+            row.label = jet_driver_tool_stage_text(field.value.move()) ?? next
+            labelled = true
+        } else if field.name == "detail" {
+            row.detail = jet_driver_tool_stage_text(field.value.move()) ?? next
+        } else if field.name == "kind" {
+            row.kind = jet_driver_tool_stage_text(field.value.move()) ?? next
+            kinded = true
+        }
+    }
+    if row.at < 0 || row.length < 0 || row.at + row.length > body.end - body.start -> return None
+    if stage == TOOL_STAGE_LSP_COMPLETION && labelled {
+        row.at = body.start
+        row.length = 0
+        return Val(row)
+    }
+    if stage == TOOL_STAGE_LSP_SEMANTIC_TOKENS && kinded && row.length > 0 {
+        row.at += body.start
+        return Val(row)
+    }
+    if stage == TOOL_STAGE_LSP_INLAY_HINTS && labelled {
+        row.at += body.start
+        row.length = 0
+        return Val(row)
+    }
+    None
+}
+
+// A String value, or the String an optional holds.
+jet_driver_tool_stage_text: fn(value: &&TComptimeValue) -> String? Never! {
+    if value == .Present(_) {
+        if value.move() == .Present(inner) -> return jet_driver_tool_stage_text(inner.move())
+        return None
+    }
+    if value.move() == .String(text) -> return Val(text)
+    None
+}

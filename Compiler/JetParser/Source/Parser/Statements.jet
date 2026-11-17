@@ -2195,7 +2195,9 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         parser_bump(state)
         negated = true
     }
-    name: parser_expect_name(state, "after `#` in a statement marker")
+    // A package's block marker is qualified by its import (`#Tools.Query { … }`),
+    // as at a declaration site.
+    name: parser_expect_marker_path(state, "after `#` in a statement marker")
     word: parser_value(state, name)
     // Persistence is keyed by module + name, so a local binding
     // has no stable identity across a reload.

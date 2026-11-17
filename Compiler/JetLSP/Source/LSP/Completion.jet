@@ -1,9 +1,10 @@
 // Completion from the checked symbols: after `receiver.` the receiver's
 // members (or a module's declarations), elsewhere the names in scope at the
-// cursor, the language's types and keywords included.
+// cursor, the language's types and keywords included. In a marked block the
+// `lsp.completion` hooks of its marker's package come first.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Type, foundation_byte_text, foundation_json_quote, type_name]
+    jet_foundation.[TOOL_STAGE_LSP_COMPLETION, Type, foundation_byte_text, foundation_json_quote, type_name]
     jet_semindex.[SemSymbol, SemSymbolKind, semindex_symbol_imported_module]
 }
 
@@ -127,6 +128,13 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String 
     seen := [String:Bool]{}
     items := [String]{}
     incomplete := false
+    // Inside a marked block, the `lsp.completion` hooks of its marker's
+    // package answer first.
+    loop row in server.stage_items(view, TOOL_STAGE_LSP_COMPLETION, at: offset) {
+        if !row.label.starts_with(prefix) || seen.has_key("{row.label}:1") -> next
+        seen["{row.label}:1"] = true
+        items.push("{{\"label\":{foundation_json_quote(row.label)},\"kind\":1,\"detail\":{foundation_json_quote(row.detail)}}}")
+    }
     loop symbol in view.checked.symbols {
         if !symbol.name.starts_with(prefix) -> next
         candidate: if member == .Val(scope) -> lsp_member_candidate(symbol, scope) else -> lsp_scope_candidate(symbol, view.module_path, offset)

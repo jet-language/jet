@@ -4,8 +4,8 @@
 // server reads only its result: diagnostics, the checked modules, and the
 // semantic index over them.
 use {
-    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
-    jet_driver.[JetDriverDocModule]
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
+    jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
     jet_semindex.[SemIndex, SemSymbol]
 }
 
@@ -56,9 +56,13 @@ LSPChoice: struct {
 }
 
 // A compile reads sources and may run comptime code and build programs, and
-// comptime code may reach the network and inline assembly.
+// comptime code may reach the network and inline assembly. `stage` runs a
+// tool stage's `program` (JetDriver ToolStages.jet) beside `entry` with the
+// open documents overlaid: the answer rows of the call on each of `bodies`,
+// in call order.
 LSPChecker: trait {
     check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked Never!,
+    stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never!,
 }
 
 // A quick fix a diagnostic offers: its primary edit, then each alternative.

@@ -1,10 +1,12 @@
 // Semantic tokens: the lexer classifies keywords, literals and comments; the
 // checked index classifies each name by what it names and marks the
-// declarations. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
+// declarations; a marked block's `lsp.semantic_tokens` hooks classify its
+// body. Types and modifiers index `LSP_SEMANTIC_TOKEN_TYPES` and
 // `LSP_SEMANTIC_TOKEN_MODIFIERS`.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Span]
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span, TOOL_STAGE_LSP_SEMANTIC_TOKENS]
     jet_lexer.[Token, TOKEN_IDENT, TOKEN_RAW_STRING, TOKEN_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_TRUE, TOKEN_RETURN, TOKEN_KW_FN, TOKEN_KW_MODULE]
     jet_semindex.[SemKind]
 }
@@ -107,27 +109,57 @@ lsp_token_class: fn(token: Token, classes: [Int:LSPNameClass]) -> LSPNameClass? 
     None
 }
 
+// A classified stretch of the document.
+LSPClassedSpan: struct {
+    span: Span,
+    class: LSPNameClass,
+}
+
 // The protocol's relative encoding of the classified tokens that overlap
 // `range`. A token spanning lines is one entry per line, as the protocol
-// forbids an entry that crosses a line.
-lsp_semantic_token_data: fn(view: LSPView, range: Span) -> [Int] Never! {
+// forbids an entry that crosses a line. A token a marked block's
+// `lsp.semantic_tokens` hook gives (`hooked`) takes the place of the lexer
+// tokens it overlaps; one of a kind outside `LSP_SEMANTIC_TOKEN_TYPES` is
+// left out.
+lsp_semantic_token_data: fn(view: LSPView, range: Span, hooked: [JetDriverToolStageItem]) -> [Int] Never! {
     bytes: view.doc.text.bytes()
     table: lsp_line_table_bytes(bytes)
     classes: lsp_name_classes(view)
+    given := [LSPClassedSpan]{}
+    loop row in hooked {
+        loop (kind, name) in LSP_SEMANTIC_TOKEN_TYPES {
+            if name == row.kind {
+                given.push(LSPClassedSpan{span: Span{start: row.at, end: row.at + row.length}, class: LSPNameClass{kind: kind, modifiers: 0}})
+            }
+        }
+    }
+    spans := [LSPClassedSpan]{}
+    loop token in view.lexed.tokens {
+        class: lsp_token_class(token, classes) ?? next
+        covered := false
+        loop other in given {
+            if other.span.start < token.span.end && token.span.start < other.span.end {
+                covered = true
+            }
+        }
+        if !covered -> spans.push(LSPClassedSpan{span: token.span, class: class})
+    }
+    loop other in given -> spans.push(other)
+    spans.sort_by(fn(left: LSPClassedSpan, right: LSPClassedSpan) { left.span.start <=> right.span.start })
     data := [Int]{}
     previous_line := 0
     previous_start := 0
-    loop token in view.lexed.tokens {
-        if token.span.end <= range.start -> next
-        if token.span.start >= range.end -> break
-        class: lsp_token_class(token, classes) ?? next
-        first: lsp_byte_offset_in_table(bytes, table, token.span.start)
-        last: lsp_byte_offset_in_table(bytes, table, token.span.end)
+    loop entry in spans {
+        if entry.span.end <= range.start -> next
+        if entry.span.start >= range.end -> break
+        class: entry.class
+        first: lsp_byte_offset_in_table(bytes, table, entry.span.start)
+        last: lsp_byte_offset_in_table(bytes, table, entry.span.end)
         line := first.line
         loop line <= last.line {
             content: table.lines[line]
-            start: if line == first.line -> token.span.start else -> content.start
-            end: if line == last.line -> token.span.end else -> content.end
+            start: if line == first.line -> entry.span.start else -> content.start
+            end: if line == last.line -> entry.span.end else -> content.end
             if end > start {
                 character: if line == first.line -> first.character else -> 0
                 length: lsp_utf16_length(bytes, start, end)
@@ -154,7 +186,8 @@ lsp_semantic_tokens_json: fn(data: [Int]) -> String Never! {
 
 lsp_semantic_tokens_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
     view: lsp_view(server, params) ?? return lsp_response(id, "null")
-    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: 0, end: view.doc.text.count_bytes()})))
+    hooked: server.stage_items(view, TOOL_STAGE_LSP_SEMANTIC_TOKENS)
+    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: 0, end: view.doc.text.count_bytes()}, hooked)))
 }
 
 lsp_semantic_tokens_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
@@ -164,5 +197,6 @@ lsp_semantic_tokens_range_response: fn(server: LSPServer, params: Dyn?, id: Dyn)
     table: lsp_line_table_bytes(bytes)
     start: lsp_checked_offset_bytes(table, bytes, requested.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
     end: lsp_checked_offset_bytes(table, bytes, requested.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
-    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: start, end: end})))
+    hooked: server.stage_items(view, TOOL_STAGE_LSP_SEMANTIC_TOKENS)
+    lsp_response(id, lsp_semantic_tokens_json(lsp_semantic_token_data(view, Span{start: start, end: end}, hooked)))
 }

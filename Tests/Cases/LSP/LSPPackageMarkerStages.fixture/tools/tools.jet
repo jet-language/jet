@@ -1,0 +1,38 @@
+// A block marker for query code, and what an editor shows in its blocks:
+// query keywords to complete, its capitalized words as keywords, and a hint
+// after the block.
+use compiler: core.compiler
+
+Query: struct {
+    impl Marker {
+        sites: [.Block],
+    }
+}
+
+#On(lsp.completion, Query) complete: fn(block: compiler.MarkerBlock) -> [compiler.Completion] {
+    [compiler.Completion]{
+        compiler.Completion{label: "SELECT", detail: "query keyword"},
+        compiler.Completion{label: "FROM", detail: "query keyword"},
+    }
+}
+
+#On(lsp.semantic_tokens, Query) classify: fn(block: compiler.MarkerBlock) -> [compiler.SemanticToken] {
+    tokens := [compiler.SemanticToken]{}
+    bytes: block.text.bytes()
+    start := -1
+    loop at in 0..<(bytes.len() + 1) {
+        upper: at < bytes.len() && bytes[at] >= (U8{65}) && bytes[at] <= (U8{90})
+        if upper && start < 0 -> start = at
+        if !upper && start >= 0 {
+            if at - start > 1 {
+                tokens.push(compiler.SemanticToken{at: start, length: at - start, kind: "keyword"})
+            }
+            start = -1
+        }
+    }
+    tokens
+}
+
+#On(lsp.inlay_hints, Query) hint: fn(block: compiler.MarkerBlock) -> [compiler.InlayHint] {
+    [compiler.InlayHint]{compiler.InlayHint{at: block.text.count_bytes(), label: "rows of users"}}
+}

@@ -1,0 +1,31 @@
+# A package's block marker teaches the language server through its
+# `#On(lsp.…, Query)` hooks: in a `#Tools.Query` block of a file that imports
+# the package, completion offers the hook's items, semantic tokens take the
+# hook's classes (`SELECT` and `FROM` as keywords, in place of the string
+# token) and inlay hints show the hook's label after the block.
+fixture: LSPPackageMarkerStages.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "\"inlayHintProvider\":true" # the server answers inlay hints
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use tools\\n\\nrun: fn() {\\n    #Tools.Query {\\n        print(\\\"SELECT name FROM users\\\")\\n    }\\n}\\n\"}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\"},\"position\":{\"line\":4,\"character\":8}}}"
+recv lsp
+stdout: ~ "{\"label\":\"SELECT\",\"kind\":1,\"detail\":\"query keyword\"}" # the completion hook's item, in the block
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\"},\"position\":{\"line\":2,\"character\":0}}}"
+recv lsp
+stdout: !~ "query keyword" # outside the block no hook runs
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\"}}}"
+recv lsp
+stdout: ~ "0,12,4,0,0" # `FROM`, a keyword 12 characters after `SELECT` on its line
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/inlayHint\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/app/main.jet\"},\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":7,\"character\":0}}}}"
+recv lsp
+stdout: ~ "{\"position\":{\"line\":5,\"character\":4},\"label\":\"rows of users\"}" # the hint hook's label at the block's end
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{}}"
+close lsp
+exit: any # the server's exit status after `exit` is not under test

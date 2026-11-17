@@ -505,6 +505,33 @@ SCHEMA: #run compiler.schema()
 MARKERS: #run (compiler.query(compiler.FactSource.Schema{snapshot: SCHEMA}, compiler.FactKind.Marker) ?? panic("schema")).len()
 ```
 
+#### Tool-stage hooks
+
+A package function marked `#On(stage, Marker)` answers a tool for each
+`#Marker { … }` block, the package's own marker or a prelude one such as
+`#SQL(User) { … }`, of a file that imports the package. It takes one
+`MarkerBlock { marker, text, line, column }`: the marker as written, the
+body between the braces, and the body's 1-based line and byte column. Its
+answer's type is the stage's:
+
+| Stage | Answer | Fields |
+| --- | --- | --- |
+| `fmt.block` | `String?` | The body's new text; None keeps it. |
+| `lsp.completion` | `[Completion]` | `label`, `detail` (default `""`). |
+| `lsp.semantic_tokens` | `[SemanticToken]` | `at` and `length` in body bytes, `kind` a protocol token type (`keyword`, `string`, …). |
+| `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
+
+The hook runs as a compile-time value, under the same rules. A row outside its
+block, or a token of an unknown kind, is left out.
+
+```jet
+use compiler: core.compiler
+
+#On(fmt.block, SQL) shape: fn(block: compiler.MarkerBlock) -> String? {
+    Val(" {block.text.trim()} ")
+}
+```
+
 ### `core.meta` — module and package metadata
 
 Every module has a `Module` value and every package a `Package` value, and the
@@ -4961,9 +4988,10 @@ The compiler fills `module` at every `#here` and `#caller` site; its `""`
 default only covers a record built by hand. `core.log` filters records by it.
 
 `DebugView` is the trait a type implements to choose what `jet debug` shows
-for its values: `debug_view: fn(self) -> [DebugItem]`, one `DebugItem` (a
-`label` and a `value`, both text) a row. A ring buffer lists its items oldest
-first instead of its slots and start index:
+for its values: `debug_view: fn(self) -> [DebugItem] Never!`, one `DebugItem`
+(a `label` and a `value`, both text) a row. The view can't fail: the debugger
+calls it the way the program calls any infallible method. A ring buffer lists
+its items oldest first instead of its slots and start index:
 
 ```jet
 Ring: struct {
@@ -4972,7 +5000,7 @@ Ring: struct {
     count: Int
 
     impl DebugView {
-        debug_view: fn(self) -> [DebugItem] {
+        debug_view: fn(self) -> [DebugItem] Never! {
             loop k in 0..<self.count -> DebugItem{label: "{k}", value: "{self.slots[(self.start + k) % self.slots.len()]}"}
         }
     }

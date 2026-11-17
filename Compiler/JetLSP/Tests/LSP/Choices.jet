@@ -2,7 +2,11 @@
 // the main fixture's checker, with a copies choice on `add`'s line (1-based
 // line 1, editor line 0) and a storage form choice on `run`'s (line 5,
 // editor line 4).
-use jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPServer, lsp_server]
+use {
+    jet_driver.[JetDriverToolStageItem]
+    jet_foundation.[Span]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPServer, lsp_server]
+}
 
 LSPChoicesFixtureChecker: struct {
     impl LSPChecker {
@@ -13,6 +17,10 @@ LSPChoicesFixtureChecker: struct {
             checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 5, kind: "storage form", choice: "pending: Signal<Int> synchronized for task crossing"})
             checked.choices.push(LSPChoice{module_path: "/w/other.jet", line: 1, kind: "copies", choice: "in another module"})
             checked
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            LSPFixtureChecker{}.stage(entry, overlays, stage, bodies, program)
         }
     }
 }

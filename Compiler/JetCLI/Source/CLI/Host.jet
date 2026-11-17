@@ -3759,7 +3759,7 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
     if result.structure_change == .Val(change) {
         return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_fmt_structure_report(origin, change))}
     }
-    if result.ok -> return jet_cli_fmt_formatted(result.text)
+    if result.ok -> return jet_cli_fmt_block_hooks(result.text, origin, color)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
     if copy_marks_inserted {

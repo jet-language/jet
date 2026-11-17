@@ -1,0 +1,132 @@
+// Runs a tool stage's calls for a document (JetDriver ToolStages.jet). Their
+// program is checked in `JetDriverCompileMode.Comptime` as a new source file
+// beside the document, with `overlays` in place of their files: the hooks'
+// packages resolve as the document's own imports do, and each call's `#run`
+// value runs in the sealed comptime child, as a config value does
+// (ConfigEval.jet). A program that does not check answers nothing, and
+// `problem` names its first error.
+use {
+    cli_files: core.files
+    jet_driver.[
+        JetDriverCompileMode,
+        JetDriverToolStageItem,
+        jet_driver_compile,
+        jet_driver_tool_stage_answers,
+        jet_driver_tool_stage_blocks,
+        jet_driver_tool_stage_plan,
+    ]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, foundation_byte_text]
+    jet_parser.[jet_format_source, parse_source]
+}
+
+// The program's file name beside the document; the walk reaches it, so its
+// imports resolve in the document's package.
+JET_CLI_TOOL_STAGE_FILE: "jet_tool_stage.jet"
+
+JetCLIToolStageRun: struct {
+    answers: [[JetDriverToolStageItem]],
+    problem: String?,
+}
+
+jet_cli_tool_stage_run: fn(document: String, overlays: &&[JetCLIOverlay], stage: String, bodies: [Span], program: &&String) -> JetCLIToolStageRun Never! {
+    if bodies.len() == 0 {
+        return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: None}
+    }
+    given := overlays.move()
+    given.push(JetCLIOverlay{path: jet_cli_tool_stage_file(document), source: program.move()})
+    if jet_cli_prepare_overlays(document, jet_cli_tool_stage_file(document), given, false, None, JetDriverCompileMode.Comptime) == {
+        .Refused(output) -> return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val(output.stderr.trim())}
+        .Prepared(request, _) -> {
+            result := jet_driver_compile(request) ?? return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {err}")}
+            loop diagnostic in result.diagnostics {
+                if diagnostic.severity == DIAGNOSTIC_ERROR {
+                    return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("{diagnostic.code}: {diagnostic.what}")}
+                }
+            }
+            if result.internal_problem == .Val(problem) {
+                return JetCLIToolStageRun{answers: [[JetDriverToolStageItem]]{}, problem: Val("internal compiler error: {problem}")}
+            }
+            return JetCLIToolStageRun{answers: jet_driver_tool_stage_answers(stage, bodies, result.comptime_values.move()), problem: None}
+        }
+    }
+}
+
+jet_cli_tool_stage_file: fn(document: String) -> String Never! {
+    jet_cli_entry_join(jet_cli_parent(jet_cli_overlay_path(document)) ?? ".", JET_CLI_TOOL_STAGE_FILE)
+}
+
+// `text`, a file `jet fmt` has formatted, with each marked block's body that
+// a package's `#On(fmt.block, Marker)` hook formats replaced by the hook's
+// answer; a hook answering None keeps its body, and the first hook to answer
+// for a block wins. Only a file on disk holding a marked block and importing
+// a package runs hooks: a Doc check of `text` finds them among the modules it
+// imports. Hooks that do not run, or an answer that leaves the file
+// unreadable, stop the file as written.
+jet_cli_fmt_block_hooks: fn(text: &&String, origin: String, color: Bool) -> JetCLIFmtSource {
+    if jet_driver_tool_stage_blocks(text).len() == 0 || !jet_cli_tool_stage_imports_package(text) || !cli_files.is_file(origin) {
+        return jet_cli_fmt_formatted(text.move())
+    }
+    overlays := [JetCLIOverlay]{JetCLIOverlay{path: jet_cli_overlay_path(origin), source: text.move()}}
+    bodies := [Span]{}
+    program := ""
+    if jet_cli_prepare_overlays(origin, origin, overlays, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(_) -> {}
+        .Prepared(request, _) -> {
+            modules: jet_driver_compile(request).doc_modules
+            loop (index, module_ref) in modules {
+                if module_ref.physical_path != overlays[0].path -> next
+                plan := jet_driver_tool_stage_plan(modules, index, TOOL_STAGE_FMT_BLOCK)
+                bodies = plan.bodies.move()
+                program = plan.program.move()
+            }
+        }
+    }
+    formatted: overlays.pop() ?? return jet_cli_fmt_formatted("")
+    if bodies.len() == 0 -> return jet_cli_fmt_formatted(formatted.source)
+    // The hooks' program needs no overlay: the file on disk parses as its
+    // formatted text does.
+    run := jet_cli_tool_stage_run(origin, [JetCLIOverlay]{}, TOOL_STAGE_FMT_BLOCK, bodies, program)
+    if run.problem == .Val(problem) {
+        return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_report("E2105", "a `fmt.block` hook for `{origin}` did not run: {problem}", jet_cli_why("E2105"), "fix the hook's package, then run `jet fmt` again", color))}
+    }
+    // The first answer of each body, latest body first; a body inside one
+    // already replaced keeps the outer answer.
+    answered := [JetDriverToolStageItem]{}
+    loop rows in run.answers.move() {
+        loop row in rows.move() {
+            taken := false
+            loop body in answered {
+                if body.at == row.at -> taken = true
+            }
+            if !taken -> answered.push(row)
+        }
+    }
+    answered.sort_by(fn(left: JetDriverToolStageItem, right: JetDriverToolStageItem) { right.at <=> left.at })
+    bytes: formatted.source.bytes()
+    spliced := ""
+    cursor := bytes.len()
+    loop body in answered {
+        if body.at + body.length > cursor -> next
+        spliced = "{body.label}{foundation_byte_text(bytes, body.at + body.length, cursor)}{spliced}"
+        cursor = body.at
+    }
+    spliced = "{foundation_byte_text(bytes, 0, cursor)}{spliced}"
+    checked: jet_format_source(spliced, false)
+    if !checked.ok -> return jet_cli_fmt_rejected(checked.diagnostics)
+    jet_cli_fmt_formatted(spliced)
+}
+
+// Whether `text` imports a module outside Core: only such a module holds a
+// hook, so a file without one compiles nothing for hooks.
+jet_cli_tool_stage_imports_package: fn(text: String) -> Bool Never! {
+    parsed: parse_source(text.bytes())
+    loop declaration in parsed.program.imports {
+        imported: if declaration.kind == {
+            .Module(name, _) -> name
+            .Unqualified(module_alias, _, _, _, _) -> module_alias
+            .File(_, _) -> "core"
+        }
+        if imported.partition(".").head != "core" -> return true
+    }
+    false
+}

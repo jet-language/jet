@@ -1,0 +1,11 @@
+# A package's `#On(fmt.block, SQL)` hook formats the body of a `#SQL` block in
+# a file that imports the package: `jet fmt` splices the hook's text in and
+# leaves the Jet around the block as written. The result is stable.
+fixture: FmtBlockPackageHook.fixture
+env: NO_COLOR=1
+step: jet fmt app/main.jet
+exit: 0
+file: app/main.jet = FmtBlockPackageHook.formatted.out
+step: jet fmt app/main.jet
+exit: 0
+file: app/main.jet = FmtBlockPackageHook.formatted.out

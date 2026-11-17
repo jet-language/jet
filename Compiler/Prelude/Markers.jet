@@ -633,11 +633,16 @@ Off: struct {
 // `#On(.Deep)` keeps a statement or block out of every build unless the
 // compile's `--deep-checks` request selects its function. The body is
 // type-checked in every build.
+//
+// On a function, `#On(stage, Marker)` joins a tool stage (`fmt.block`,
+// `lsp.completion`, `lsp.semantic_tokens`, `lsp.inlay_hints`): the tool hands
+// the function each `Marker` block of a file that imports its package and
+// reads its answer. The function site checks the stage, not `build`.
 On: struct {
     build: BuildCondition,
 
     impl Marker {
-        sites: [.Statement, .Block],
+        sites: [.Statement, .Block, .Function],
     }
 }
 

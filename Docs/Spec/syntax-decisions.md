@@ -3135,6 +3135,22 @@ belongs to one marker: `#Off` takes `.Release` and `#On` takes `.Deep`, so
 `#Off(.Deep)` and `#On(.Release)` are E0397. `#Off` and `#On` on one statement
 are E0344, and `#On` in expression position is E0343.
 
+**D-HOOK-STAGES1=A — Tool-stage hooks**: on a function, `#On(stage, Marker)`
+joins a tool stage. The tool hands the function each `#Marker { … }` block of
+a file that imports the function's package, as a `core.compiler.MarkerBlock`
+(the marker as written, the body's text and its 1-based line and column), and
+reads the answer. `Marker` is the package's own block marker or a prelude one
+(`#SQL(User) { … }`). A qualified block (`#Tools.Query { … }`) reaches only the
+package its qualifier names. The stages and their answers are
+`fmt.block` (`String?`: the body's new text, None to keep it), `lsp.completion`
+(`[compiler.Completion]`), `lsp.semantic_tokens` (`[compiler.SemanticToken]`,
+at byte offsets in the body, with a protocol token type as `kind`) and
+`lsp.inlay_hints` (`[compiler.InlayHint]`). `jet fmt` formats the Jet code
+first, then splices each answered body in; an answer that leaves the file
+unparseable keeps the file as written. A hook runs as a compile-time value, so
+it may only use what compile-time code may. An unknown stage, or a hook whose
+signature is not `fn(block: compiler.MarkerBlock) -> <answer>`, is E0930.
+
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
 `const`/`comptime` bindings. `category` is a non-empty plain string literal and

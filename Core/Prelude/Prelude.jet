@@ -109,9 +109,10 @@ SourceLocation: struct {
 // of the type's fields: one item a row, each a label and its value's text. A
 // ring buffer lists its items in order rather than its storage and indices.
 // A build with debug information keeps every implementation, so `jet debug`
-// calls it on the stopped program's own value.
+// calls it on the stopped program's own value. It can't fail, so the
+// debugger calls it as the program calls an infallible method.
 DebugView: trait {
-    debug_view: fn(self) -> [DebugItem]
+    debug_view: fn(self) -> [DebugItem] Never!
 }
 
 // One row of a DebugView: the text before the colon, and the text after it.
