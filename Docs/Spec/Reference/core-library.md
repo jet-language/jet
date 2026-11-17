@@ -5484,7 +5484,8 @@ observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. File dialogs and font shaping are absent there.
 The provider also answers the app's device requests (`app.ask`,
-`app.take_photo`, `app.location`, and a page's photo's bytes); one whose
+`app.take_photo`, `app.location`, a page's photo's bytes, and the sensor
+streams' readings); one whose
 answer the browser gives later, a promise, is waited for where the
 program's entry can wait ([web-backend-wasm.md](web-backend-wasm.md)), and
 is no answer elsewhere.
@@ -6523,7 +6524,14 @@ listening: on Linux the location stream closes its portal location session
 and each sensor stream gives its sensor back to the sensor proxy
 (iio-sensor-proxy, on the system bus), then each closes its bus
 connection. A device with no such sensor, or no bus to ask, gives an empty
-stream, as the other native targets do.
+stream, as the other native targets do. In a page the location stream
+follows a Geolocation position watch, and the sensor streams the browser's
+orientation events: how the device is held from its tilt, and where it
+points from an absolute orientation (Safari's compass heading where it
+gives one). A browser that asks before it gives the tilt asks the person
+when a sensor stream starts. Each stream clears its watch or removes its
+listener when it stops. A sensor stream whose browser gives no reading
+within a second is empty, as each stream is with no page to ask in.
 
 `app.open_file(types:)` asks the person for a file to open and gives it as
 a `PickedFile`: its `name`, its size in `bytes`, its `media` as its first
@@ -6656,11 +6664,6 @@ whether the person canceled the browser's dialog, so the call is true once
 the browser has the download. Run under node, with no page, it is false
 with a notice. macOS and Windows keep that notice too: their save dialogs
 are not built yet.
-
-A browser asks for a device permission itself, when a page first uses the
-device, and the page runtime can't hand a stream of device values to the
-app yet, so the three streams in code whose target is the web output are a
-compile error, E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

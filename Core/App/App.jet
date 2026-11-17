@@ -4683,6 +4683,12 @@ priv WEB_DEVICE_PHOTO: 2
 
 priv WEB_DEVICE_READ: 3
 
+priv WEB_DEVICE_WATCH: 4
+
+priv WEB_DEVICE_NEXT: 5
+
+priv WEB_DEVICE_STOP: 6
+
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
     if size == 0 -> return Ok([U8]{})
@@ -4715,22 +4721,37 @@ priv app_page_first: fn(fields: [String]) -> String? Never! {
     Val(fields[0])
 }
 
-// The place a page's location answer holds after its grant: latitude,
+// The place a page's answer holds from its field `from` on: latitude,
 // longitude and accuracy in meters. None when it has none.
-priv app_page_place: fn(fields: [String]) -> Place? Never! {
-    if fields.len() < 4 -> return None
-    latitude: Float.parse(fields[1]) ?? return None
-    longitude: Float.parse(fields[2]) ?? return None
-    accuracy: Float.parse(fields[3]) ?? return None
+priv app_page_place: fn(fields: [String], from: Int) -> Place? Never! {
+    if fields.len() < from + 3 -> return None
+    latitude: Float.parse(fields[from]) ?? return None
+    longitude: Float.parse(fields[from + 1]) ?? return None
+    accuracy: Float.parse(fields[from + 2]) ?? return None
     Val(Place{latitude: latitude, longitude: longitude, accuracy_m: accuracy})
 }
 
-#Test("a page's answers read as a grant and a place, and a page's file reads only in its page") {
+// The fields of the next reading of the sensor the page follows under
+// `watch` for a stream, once there is one; none when the page no longer
+// follows it.
+priv app_page_reading: fn(watch: String) -> [String]? Never! {
+    said: ui_rt.device(WEB_DEVICE_NEXT, watch) ?? return None
+    ui.host.provider_record_fields(said)
+}
+
+// Stops the page following the sensor under `watch`.
+priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STOP, watch) }
+
+#Test("a page's answers read as a grant, a place and a sensor's reading, and a page's file reads only in its page") {
     assert_eq(app_page_first([String]{}), None)
     assert_eq(app_page_first([String]{"denied"}), Val("denied"))
-    assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
-    assert_eq(app_page_place([String]{"granted"}), None)
-    assert_eq(app_page_place([String]{"granted", "north", "13.405", "20"}), None)
+    assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}, 1), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
+    assert_eq(app_page_place([String]{"granted"}, 1), None)
+    assert_eq(app_page_place([String]{"granted", "north", "13.405", "20"}, 1), None)
+    assert_eq(app_page_place([String]{"52.5201", "13.4051", "10"}, 0), Val(Place{latitude: 52.5201, longitude: 13.4051, accuracy_m: 10.0}))
+    assert_eq(app_orientation_named("left-up"), Val(Orientation.LeftUp))
+    assert_eq(app_orientation_named("undefined"), None)
+    assert_eq(app_page_reading("1"), None)
     empty: PickedFile{name: "empty.csv", bytes: 0, media: None, source: .Page(1)}
     assert_eq(empty.read() ?? panic("an empty file: {err}"), [U8]{})
     photo: PickedFile{name: "photo-1.jpg", bytes: 4, media: Val(Media.Image), source: .Page(0)}
@@ -5708,7 +5729,7 @@ location: fn() -[Env, Net, Time]> Place? {
         .Web -> {
             fields: app_page_answer(WEB_DEVICE_PLACE, "")
             app_settle(Permission.Location, app_grant_web(app_page_first(fields)))
-            return app_page_place(fields)
+            return app_page_place(fields, 1)
         }
         .Wasm -> { return None }
         .Freestanding -> { return None }
@@ -5733,26 +5754,49 @@ priv UPDATE_WAIT_NS: 60000000000
 // answer other than `.Granted` the stream is empty. On Linux the desktop
 // portal's location session reports each place (GeoClue finds it), and the
 // stream closes the session, and its bus connection with it, when it stops.
-// On the other native targets the stream is empty.
+// In a page the browser's position watch reports each place, and the
+// stream clears the watch when it stops. On the other native targets the
+// stream is empty.
 location_updates: fn() -[Env, Net, Time]> Stream<Place> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_location_bus() ?? break
-        session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
-        app_settle(Permission.Location, app_grant(session.answer))
-        if session.path == "" -> break
-        defer dbus.close_location(bus, session.path)
-        if session.answer != .Allowed -> break
-        loop {
-            found: if dbus.next_place(bus, session.path, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_location_bus() ?? break
+                session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
+                app_settle(Permission.Location, app_grant(session.answer))
+                if session.path == "" -> break
+                defer dbus.close_location(bus, session.path)
+                if session.answer != .Allowed -> break
+                loop {
+                    found: if dbus.next_place(bus, session.path, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
+                    if found == .Val(at) {
+                        yield Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy}
+                    }
                 }
-                .Ok(got) -> got
             }
-            if found == .Val(at) {
-                yield Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy}
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                if app_location_refused() -> break
+                started: app_page_answer(WEB_DEVICE_WATCH, "place")
+                app_settle(Permission.Location, app_grant_web(app_page_first(started)))
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    if app_page_place(reading, 0) == .Val(at) {
+                        yield at
+                    }
+                }
             }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5761,28 +5805,49 @@ location_updates: fn() -[Env, Net, Time]> Stream<Place> {
 // How the device is held, now and each time that changes, until the loop
 // reading the stream stops. On Linux the sensor proxy (iio-sensor-proxy)
 // reads the accelerometer for the app while the stream runs; the stream
-// gives it back, and closes its system bus connection, when it stops. A
-// device with no accelerometer, and the other native targets, give an
-// empty stream.
+// gives it back, and closes its system bus connection, when it stops. In a
+// page the browser's orientation events tell it, and the stream removes its
+// listener when it stops. A device with no accelerometer, and the other
+// native targets, give an empty stream.
 orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_sensor_bus() ?? break
-        // No accelerometer, or no answer: nothing to give back.
-        first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
-        defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
-        reading := dbus.DbusValue?{Val(first)}
-        loop {
-            held: app_orientation(reading)
-            if held == .Val(way) {
-                yield way
-            }
-            reading = if dbus.sensor_change(bus, dbus.Sensor.Accelerometer, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_sensor_bus() ?? break
+                // No accelerometer, or no answer: nothing to give back.
+                first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
+                defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
+                reading := dbus.DbusValue?{Val(first)}
+                loop {
+                    held: app_orientation(reading)
+                    if held == .Val(way) {
+                        yield way
+                    }
+                    reading = if dbus.sensor_change(bus, dbus.Sensor.Accelerometer, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
                 }
-                .Ok(got) -> got
             }
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                started: app_page_answer(WEB_DEVICE_WATCH, "orientation")
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    held: app_orientation_named(app_page_first(reading) ?? "")
+                    if held == .Val(way) {
+                        yield way
+                    }
+                }
+            }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5792,28 +5857,47 @@ orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
 // time that changes, until the loop reading the stream stops. On Linux the
 // sensor proxy reads the compass for the app while the stream runs; the
 // stream gives it back, and closes its system bus connection, when it
-// stops. A device with no compass, and the other native targets, give an
-// empty stream.
+// stops. In a page the browser's absolute orientation events tell it, and
+// the stream removes its listener when it stops. A device with no compass,
+// and the other native targets, give an empty stream.
 heading_updates: fn() -[Env, Net, Time]> Stream<Float> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_sensor_bus() ?? break
-        // No compass, or no answer: nothing to give back.
-        first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
-        defer dbus.release_sensor(bus, dbus.Sensor.Compass)
-        reading := dbus.DbusValue?{Val(first)}
-        loop {
-            if reading == .Val(value) {
-                if value == .Double(degrees) {
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_sensor_bus() ?? break
+                // No compass, or no answer: nothing to give back.
+                first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
+                defer dbus.release_sensor(bus, dbus.Sensor.Compass)
+                reading := dbus.DbusValue?{Val(first)}
+                loop {
+                    if reading == .Val(value) {
+                        if value == .Double(degrees) {
+                            yield degrees
+                        }
+                    }
+                    reading = if dbus.sensor_change(bus, dbus.Sensor.Compass, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
+                }
+            }
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                started: app_page_answer(WEB_DEVICE_WATCH, "heading")
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    degrees: Float.parse(app_page_first(reading) ?? "") ?? next
                     yield degrees
                 }
             }
-            reading = if dbus.sensor_change(bus, dbus.Sensor.Compass, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
-                }
-                .Ok(got) -> got
-            }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5843,9 +5927,7 @@ priv app_linux_place: fn() -[Env, Net, Time]> dbus.PortalFix Never! {
 // `.Granted`, and on targets other than Linux. With no session bus it is
 // `None` and the location counts as restricted, as `location` has it.
 priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
-    if app_asked(Permission.Location) == .Val(known) {
-        if known != .Granted -> return None
-    }
+    if app_location_refused() -> return None
     #if #build.target.os == {
         .Linux -> {
             bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_location_bus()
@@ -5857,6 +5939,12 @@ priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
         .Wasm -> { return None }
         .Freestanding -> { return None }
     }
+}
+
+// Whether this process's location ask had an answer other than `.Granted`.
+priv app_location_refused: fn() -> Bool Never! {
+    if app_asked(Permission.Location) == .Val(known) -> return known != .Granted
+    false
 }
 
 priv app_no_location_bus: fn() -> dbus.DbusConnection? Never! {
@@ -5884,13 +5972,18 @@ priv app_sensor_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
 // `None` for "undefined", when it cannot tell.
 priv app_orientation: fn(reading: dbus.DbusValue?) -> Orientation? Never! {
     if reading == .Val(value) {
-        if value == .Text(name) {
-            if name == "normal" -> return Val(Orientation.Upright)
-            if name == "bottom-up" -> return Val(Orientation.UpsideDown)
-            if name == "left-up" -> return Val(Orientation.LeftUp)
-            if name == "right-up" -> return Val(Orientation.RightUp)
-        }
+        if value == .Text(name) -> return app_orientation_named(name)
     }
+    None
+}
+
+// How the device is held, by the sensor proxy's name for it, which a page
+// gives too; `None` for "undefined" and any other name.
+priv app_orientation_named: fn(name: String) -> Orientation? Never! {
+    if name == "normal" -> return Val(Orientation.Upright)
+    if name == "bottom-up" -> return Val(Orientation.UpsideDown)
+    if name == "left-up" -> return Val(Orientation.LeftUp)
+    if name == "right-up" -> return Val(Orientation.RightUp)
     None
 }
 

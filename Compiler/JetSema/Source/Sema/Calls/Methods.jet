@@ -1564,11 +1564,11 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // The App checks of a device call (`app.ask`, the photo, the location, the
 // sensor streams, the open dialogs, a kept folder, a drop target and a
 // notification on this device): the web output has none of them but
-// `ask`, `open_settings`, the photo and the location, which a page answers
-// (sema_call_app_device_target), and one that may ask for a permission
-// needs its purpose (sema_call_app_permission_purpose): `ask` those its
-// argument names, the photo the camera's, the location's calls its, a
-// notification its own.
+// `ask`, `open_settings`, the photo, the location and the sensor streams,
+// which a page answers (sema_call_app_device_target), and one that may ask
+// for a permission needs its purpose (sema_call_app_permission_purpose):
+// `ask` those its argument names, the photo the camera's, the location's
+// calls its, a notification its own.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
@@ -1582,14 +1582,10 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
         "take_photo" -> {
             sema_call_app_permission_purpose(member, alias, Val("Camera"), span, program, diagnostics)
         }
-        "location" -> {
+        "location" | "location_updates" -> {
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "location_updates" -> {
-            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
-            sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
-        }
-        "orientation_updates" | "heading_updates" | "open_file" | "open_folder" | "kept_folder" | "drop_files" | "copy_text" | "paste_text" | "share" | "draggable" | "drop_zone" -> {
+        "open_file" | "open_folder" | "kept_folder" | "drop_files" | "copy_text" | "paste_text" | "share" | "draggable" | "drop_zone" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         "notify" -> {
@@ -1603,11 +1599,10 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
     }
 }
 
-// A browser asks for a device permission itself, when a page first uses
-// the device; it shows a page's notification only while the page is open;
-// its file chooser answers after the page's code has returned; a page's
-// drop gives its own file handles; and the page runtime carries no drag of
-// the app's and reaches no clipboard or share sheet yet. So a device call
+// A browser shows a page's notification only while the page is open; its
+// file chooser answers after the page's code has returned; a page's drop
+// gives its own file handles; and the page runtime carries no drag of the
+// app's and reaches no clipboard or share sheet yet. So such a device call
 // on an app whose resolved target is the web output is refused, never
 // dropped or answered for the browser.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
@@ -1619,8 +1614,8 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         }
         entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
         what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
-        why := "A browser asks for a device permission itself, when a page first uses the device, and the page runtime can't hand the device's values to the app yet, so the web output has no `{alias}.{member}` to run; answering for the browser would make the answer up."
-        fix := "On the web, use the device the browser's way: it asks the person when a page first uses it, and the person changes the answer in the browser's site settings. Keep `{alias}.{member}` for a native build."
+        why := "A page's drag is the browser's own, and the page runtime can't carry the app's values in it yet, so the web output has no `{alias}.{member}` to run; dropping the move would lose it."
+        fix := "On the web, offer the move as buttons in the screen, one for each place the value can go. Keep `{alias}.{member}` for a native build."
         if member == "notify" {
             why = "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
             fix = "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
@@ -1640,10 +1635,6 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         if member == "share" {
             why = "A browser opens its share sheet only inside the person's gesture, and the page runtime can't run the call there yet, so the web output has no `{alias}.share` to run; dropping the link would lose it."
             fix = "On the web, put the link in the screen as a link the person can share from the browser. Keep `{alias}.share` for a native build."
-        }
-        if member == "draggable" || member == "drop_zone" {
-            why = "A page's drag is the browser's own, and the page runtime can't carry the app's values in it yet, so the web output has no `{alias}.{member}` to run; dropping the move would lose it."
-            fix = "On the web, offer the move as buttons in the screen, one for each place the value can go. Keep `{alias}.{member}` for a native build."
         }
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
     }
