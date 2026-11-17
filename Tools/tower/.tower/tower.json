@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111250,
+    "rev": 111275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,7 +17,6 @@
         "epoch:e5",
         "radar-remaining",
         "radar:e8",
-        "radar-cards",
         "radar:e12",
         "radar:e4",
         "radar:e10",
@@ -28,7 +27,6 @@
         "radar:e11",
         "board-ideas",
         "radar:e3",
-        "radar-sq",
         "radar:e18",
         "radar:e7",
         "radar:e6",
@@ -40,7 +38,8 @@
         "radar:e22",
         "radar:e23",
         "radar:e24",
-        "radar:e25"
+        "radar:e25",
+        "radar-cards"
       ]
     },
     "completionCursor": "2026-11-17T01:37:39.804Z"
@@ -36709,7 +36708,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nThis is the epic for the owner-authorized (2026-09-27) port of Jetpack from Rust to Jet under top-level `Jetpack/`. It runs in three phases: (1) code build-out, (2) parity and bug fixing, (3) optimization. The Rust Jetpack stays the shipped implementation until the owner ratifies a cutover ballot.\n\n## Owner rules (preserved)\n- Every dispatched subagent runs Opus 5.5, set explicitly; never fall back.\n- No JetOS work of any kind.\n- Code lives in `Jetpack/<Area>/Source/…` with `Jetpack/Bootstrap/` (ordered `sources.list`/`tests.list`, `check.sh`).\n- The mapping and progress live only in Tower cards.\n- Reuse Compiler/ and never create a second copy.\n- Compiler defects and Core gaps get Tower cards and no workaround.\n- New syntax, public API or dependencies need an owner ballot. ed25519/zstd need an approved bridge (I6).\n- No `#Unsafe` without an audited reason.\n- Write idiomatic current Jet and port the tests with each module.\n\n## Current state\n- About 96k Jet lines across 12 of 13 areas (tracked plus in-flight). Foundation 2.8k, PackageModel 38.9k (32 test files), EnvModel 8.4k, NixEval 5.6k, Nix 2.4k, Store 25.0k (15), Trust 4.5k, Recipe 0.5k, Provider 4.9k (3), Environment 0.4k, Image 0.8k, CLI 2.1k. Services is empty. The area DAG is `Jetpack/Bootstrap/areas.list:9-23`.\n- Much of PackageModel/Store/EnvModel is untracked working-tree work after the rate-limit stop (963c3cb09); the slices (#3601-#3615, #3637-#3652, …) own it.\n- No differential harness and no Jetpack performance cells exist yet.\n- `check.sh` supports `--syntax`, `--area X [--deps-from-head]`, `--each` and `--tests`. It prints `JETPACK CHECK OK (check, default run, AOT test)` and a receipt with `check-unit-sha256`.\n\n## Changes (in order)\n1. Build-out (criterion 1): finish every slice card. Each one ends with `check.sh --area <Area> --deps-from-head --tests` green and a receipt.\n2. Integrated proof (criterion 2): `check.sh --each --tests` and then a whole-unit `check.sh --tests` on main. Run a `#Unsafe` audit by searching `Jetpack/` for `#Unsafe` and checking every hit for a reason.\n3. Parity (criterion 3): a differential harness under `Jetpack/Bootstrap/` that runs Rust `jetpack` and the Jet build on the root `tests/jetpack_*.rs` inputs, fixtures and real projects (JetOS excluded), and diffs stdout, stderr, exit code, store tree and lockfiles.\n4. Performance (criterion 4): warm `jetpack env`, store verification, hashing and graph-load cells in the canonical performance manifest, strict gate Jet/Rust ≤ 1.05.\n5. Stop point (criterion 5): raise the owner cutover ballot.\n\n## Proof\n- `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --each --tests` → every area prints `JETPACK CHECK OK (check, default run, AOT test)`.\n- `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests` → `JETPACK CHECK OK (check, default run, AOT test)`. Record the receipt and unit SHA.\n- The differential harness report shows 0 differences. The perf gate shows every Jetpack cell ≤ 1.05.\n\n## Batch\nbatch-jetpack-cli: CLI is the top of the area DAG, so its unit closes over every area. The epic's integrated proof is that unit.\n\n## Dependencies\n- #3661: the single-unit `jet check` is too slow, so the whole-unit check times out or hits the memory cap.\n- #3673: cross-module enums, type imports and constants, needed to split areas into packages.\n- #3676: the first ICE of the tier run.\n- The Core gap cards #3593-#3598 and the Compiler entry points #3599 stay on the slices that need them.",
       "checkSteps": null,
@@ -36723,6 +36722,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; merged criteria are recorded as duplicates of their new cards."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -38837,12 +38841,13 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-17T01:39:17.906Z",
+      "updated": "2026-11-17T01:45:37.047Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 200
+      "criteriaLastN": 200,
+      "completedAt": "2026-11-17T01:45:37.047Z"
     },
     {
       "id": "c0iiv9ft",
@@ -85350,7 +85355,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -85359,6 +85364,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; merged criteria are recorded as duplicates of their new cards."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -85483,9 +85493,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-17T01:43:34.385Z",
+      "updated": "2026-11-17T01:46:25.206Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-17T01:46:25.206Z"
     },
     {
       "id": "c0q4s6en",
@@ -97614,8 +97625,8 @@
       "title": "Copy-and-patch machine code for the O0 tier (jet run, jet dev, comptime)",
       "body": "Owner order (2026-11-13): idea 1 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. At O0, each IR operation is emitted by copying a pre-built machine-code template (stencil) and patching its holes (constants, frame offsets, jump and call targets), with no instruction selection or register allocation at O0. The stencils are built once with the toolchain, like precompiled Core, so they are toolchain, not a cache (D-EXEC2=A holds). Prior art: Xu and Kjolstad, \"Copy-and-Patch Compilation\", OOPSLA 2021; the CPython 3.13 JIT (PEP 744). O1 and O2 keep the optimizing backend. Sequenced after the data-oriented core (#6793) lands its IR ids (S6), because stencils are keyed by flat IR opcodes. Unstaffed today (speed ranks below goals).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97672,7 +97683,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:53.739Z",
-      "updated": "2026-11-16T13:04:40.628Z",
+      "updated": "2026-11-17T01:45:38.229Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -97682,8 +97693,8 @@
       "title": "Parallel lexing and parsing inside one file",
       "body": "Owner order (2026-11-13): idea 3 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. A SIMD pre-scan finds top-level declaration boundaries in a file, and chunks are lexed and parsed on separate threads, then joined in source order. This matters because the compiler itself is essentially one large module, so module-level parallelism (#6794) cannot split it. It requires that lexing can restart at a top-level boundary. If that needs a language rule (for example, no raw newline inside a string literal), the rule goes on a ballot before the build. Sequenced with #6793 S4 (flat AST) and #6794. Unstaffed today.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97749,7 +97760,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:55.197Z",
-      "updated": "2026-11-16T13:04:42.823Z",
+      "updated": "2026-11-17T01:45:41.106Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -97759,8 +97770,8 @@
       "title": "Shared generic code at O0: one compiled body per generic function, types passed as a hidden argument",
       "body": "Owner order (2026-11-13): idea 4 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. At O0, a generic function is compiled once and takes its type information (size, alignment, trait method tables) as a hidden argument, as Swift does for unspecialized generics and Go does with GC-shape stenciling and dictionaries (Go 1.18). O1 and O2 keep per-type specialization. Meaning is identical on every tier (I9): only the implementation strategy differs, and the proof is identical goldens, ui and cases on o0, o1 and o2. Per-type copies are the main compile-time cost of generics in Rust and C++. Sequenced after #6793 S5 (TypeId). Unstaffed today.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97826,7 +97837,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:56.559Z",
-      "updated": "2026-11-16T13:04:45.213Z",
+      "updated": "2026-11-17T01:45:42.741Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -97836,8 +97847,8 @@
       "title": "Cheaper compile-time execution: one warm child per compile, fast O0 code, shared-memory values",
       "body": "Owner order (2026-11-13): idea 6 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. Compile-time code runs natively in a child of the compiler (I9). Today that costs process start-up, an O0 compile and value serialization per batch. The plan: start one child per compile and keep it warm for that compile only (nothing survives the compile, so D-EXEC2=A holds); compile compile-time functions with the copy-and-patch O0 path (its own card); and pass values through a shared-memory region instead of serializing them. Related: #6759 c1 (one comptime child per compile) and the re-finalize cost measured 2026-11-13 (1.19 s of the 2.86 s RunColdContext check). Unstaffed today.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97894,7 +97905,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:02:58.056Z",
-      "updated": "2026-11-16T13:04:47.237Z",
+      "updated": "2026-11-17T01:45:46.862Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -97904,8 +97915,8 @@
       "title": "App menus, context menus and the tray on the Linux native app host",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G1).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -97959,7 +97970,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-16T21:52:15.074Z",
+      "updated": "2026-11-17T01:45:49.623Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -97969,8 +97980,8 @@
       "title": "Notifications: local notifications on the Linux desktop and Web Push from one typed server call",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G2).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98053,7 +98064,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-16T21:52:29.344Z",
+      "updated": "2026-11-17T01:45:51.225Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -98063,8 +98074,8 @@
       "title": "Background work: periodic jobs on the Linux desktop; browsers run none (server jobs and push cover the web)",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98109,7 +98120,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:42.496Z",
-      "updated": "2026-11-17T01:44:27.053Z",
+      "updated": "2026-11-17T01:45:54.655Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98119,8 +98130,8 @@
       "title": "Files: native open and save pickers on Linux, folder access that persists, and the browser's file pickers, as one typed API",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G4).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98174,7 +98185,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-16T21:53:06.437Z",
+      "updated": "2026-11-17T01:45:57.647Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98184,8 +98195,8 @@
       "title": "Camera, sensors and location as typed streams behind declared device permissions, on Linux and the web",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G5).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98230,7 +98241,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-17T01:40:50.677Z",
+      "updated": "2026-11-17T01:45:59.266Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -98240,8 +98251,8 @@
       "title": "Deep links: custom schemes and web links land on screen state on Linux and the web (D-ROUTE-ONE1)",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G6).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "done",
       "priority": "P2",
@@ -98291,7 +98302,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-17T01:44:46.144Z",
+      "updated": "2026-11-17T01:46:03.073Z",
       "updatedBy": "Main",
       "criteriaLastN": 3,
       "completedAt": "2026-11-17T01:44:46.144Z"
@@ -98302,8 +98313,8 @@
       "title": "Share, clipboard and drag and drop on Linux and the web; drop zones reach app screens from core.ui.host",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G7).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98357,7 +98368,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-16T21:54:05.611Z",
+      "updated": "2026-11-17T01:46:08.989Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98367,8 +98378,8 @@
       "title": "Device permissions: declared in package.jet, prompted at first use, with a typed denied result on Linux and the web",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G8).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98413,7 +98424,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-17T01:40:47.662Z",
+      "updated": "2026-11-17T01:46:17.672Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -98423,8 +98434,8 @@
       "title": "Accessibility build-out for D-A11Y-EXPORT1: AccessKit on Linux (AT-SPI), semantic HTML on the web, and compile-time checks",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G9).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98492,7 +98503,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:50.597Z",
-      "updated": "2026-11-16T21:54:35.622Z",
+      "updated": "2026-11-17T01:46:22.075Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -98502,8 +98513,8 @@
       "title": "Localization build-out for D-I18N1: message catalogs, plurals, number and date formats, right-to-left layout",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G10).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98551,7 +98562,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:52.050Z",
-      "updated": "2026-11-16T13:05:15.396Z",
+      "updated": "2026-11-17T01:46:28.627Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98561,8 +98572,8 @@
       "title": "App lifecycle events (start, foreground, background, suspend, terminate) and saved screen state on Linux and the web",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G11).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98616,7 +98627,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-16T21:54:54.524Z",
+      "updated": "2026-11-17T01:46:33.512Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98626,8 +98637,8 @@
       "title": "Desktop install, auto-update and signing on Linux: AppImage and Flatpak, with signed delta updates",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G12).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98780,7 +98791,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-16T21:55:19.770Z",
+      "updated": "2026-11-17T01:46:37.400Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -98852,8 +98863,8 @@
       "title": "Streaming server rendering: the page shell first, then each loading region as its data arrives",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -98905,7 +98916,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:57.804Z",
-      "updated": "2026-11-16T13:05:33.014Z",
+      "updated": "2026-11-17T01:46:41.838Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -99198,8 +99209,8 @@
       "title": "Styling system build-out for the D-WEBAPP-SHAPE1 styling options (typed styles, tokens, states, responsive values, motion, compile-time checks)",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G19).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -99280,7 +99291,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:05.205Z",
-      "updated": "2026-11-16T18:56:54.944Z",
+      "updated": "2026-11-17T01:46:47.350Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -99290,8 +99301,8 @@
       "title": "Native sessions on Linux: short access tokens, refresh tokens in the Secret Service, revocation",
       "body": "Gap card K4 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -99327,7 +99338,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:23.640Z",
-      "updated": "2026-11-16T21:55:29.224Z",
+      "updated": "2026-11-17T01:46:52.946Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -99559,8 +99570,8 @@
       "title": "kit standard views build (D-VIEW-SET1), including typed forms",
       "body": "Gap card K8 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). D-WEBAPP-SHAPE1=A (ratified 2026-11-13) governs this card; the examples/*.jet and crewboard/* paths name the programs in Docs/proposals/2026-11-13-web-app-framework-shape.md.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -99677,7 +99688,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:33.941Z",
-      "updated": "2026-11-16T22:54:22.328Z",
+      "updated": "2026-11-17T01:46:58.180Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -217902,6 +217913,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:46:58.180Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00xuadc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:52.947Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0akrada",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:47.351Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ha077m",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:41.840Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vkuef",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:37.401Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s5hn28",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:33.513Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c051j6ab",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:28.628Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fpntwa",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:25.207Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gelll3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:46:22.075Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rom5jy",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:17.672Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02inyar",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:08.990Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fqrrpk",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:46:03.073Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0unyp7q",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:59.266Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c097myt8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:57.647Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mq8xwu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:54.655Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01pk3vf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:51.225Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f4o904",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:49.623Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0prey1k",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:46.862Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zupuj4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:42.741Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0b3gyq2",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:41.106Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0okfgjw",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:38.229Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00g7rk8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:45:37.048Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "phase,logEntry"
+    },
     {
       "at": "2026-11-17T01:45:33.472Z",
       "by": "Main",
