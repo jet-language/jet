@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111150,
+    "rev": 111175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80959,7 +80959,7 @@
       "body": "binparse run builds a jet_rt_alloc(16,8) Result box around each reader route (4 per record in the loop) that never leaves run. perf on the register-return build: free_8 12.4% + alloc_8 8.8% + alloc 4.3% = 25.5% of 257M cycles (~66M). The register-return pass does not reach these boxes. Fix: escape analysis in JetIR: a function-local box used only by Load/Store at offsets, the unique test, free and Drop becomes a stack slot, and scalar replacement then puts it in registers. General: applies to every non-escaping small heap allocation. Full text: $JET_SCRATCH_ROOT/lanes/IR/IrTypes/c6328/d53/CARD-REQUEST-local-box.md.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -81005,7 +81005,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:00:46.628Z",
-      "updated": "2026-11-16T13:00:30.563Z",
+      "updated": "2026-11-17T01:42:46.333Z",
       "updatedBy": "Main"
     },
     {
@@ -81069,7 +81069,7 @@
       "body": "Runtime-routed Core leaves (jet_std_math_*) are prebuilt in the runtime pack, so OptInline never has their IR; OptInline also refuses cross-file callees holding located (stop-capable) ops because the trap site is tied to the source file. Ship the IR of small Never! runtime leaves with the runtime pack (or compile them from Core source into the module), and carry the source file per located op so an inlined cross-file op keeps its trap site. Measured motive: fft/tensormap still call Core fabs via to_bits/from_bits after the ir_leaf_route table (-9.1% instead of 12-16%). Full text: wave/16/in/Codegen-1-27.msg.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -81123,7 +81123,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:31:05.067Z",
-      "updated": "2026-11-16T13:00:32.433Z",
+      "updated": "2026-11-17T01:42:47.894Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -81134,7 +81134,7 @@
       "body": "sema_expression_typed_literal_regex (Compiler/JetSema/Source/Sema/Expressions/Constructors.jet) lowers every Regex{\"…\"} literal to a runtime core.regex.compile(pattern) on each evaluation, although the pattern is fixed and checked at compile time. With the budgeted DFA (GoldC-59, #6474) a typical compile costs ~44 µs instead of ~3 µs, so a literal inside a hot loop now pays that per iteration. Build each constant Regex once per program (comptime constant: Regex values already materialize, see comptime_diff/reusable_regex; or a once-initialized global). Proof: a loop with a Regex literal shows one compile per program in a profile; regex cases and goldens unchanged on o0/o1/o2.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -81184,7 +81184,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T22:21:58.734Z",
-      "updated": "2026-11-16T13:00:33.452Z",
+      "updated": "2026-11-17T01:42:49.467Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -81195,7 +81195,7 @@
       "body": "IrTypes-37 (floats in xmm2-15) found that a pure density spill rule wins nbody (1.65G -> 0.62G cycles) but evicts collatz hot loop variables for short temporaries (6.97G -> 10.82G instructions). The landed safe rule (evict only lighter ranges) keeps collatz exact but gives nbody only -36% (1.64G -> 1.05G). Split long live ranges around hot loops so the density rule can keep both. Proof: nbody at or under 0.62G cycles and collatz at or under 6.97G instructions in the same s2, every other ceiling cell flat or better, s2 chain + FULL cases.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -81245,7 +81245,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T23:01:49.944Z",
-      "updated": "2026-11-16T13:00:35.317Z",
+      "updated": "2026-11-17T01:42:51.024Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -81256,7 +81256,7 @@
       "body": "Owner order 2026-10-31 20:00: binary size and speed are still far from the hand-written ceilings. Profile every cell (not cherry-picked): every asm-parity ceiling cell, every gauntlet cell against every peer, and a seeded random sample of programs from the example/workload corpora with peer versions. For each, record cycles, instructions and bytes as ratios to the ceiling and to each peer, plus perf hotspots and a size breakdown by symbol and section (runtime, glue, user code). Attribute every gap to a root (e.g. startup, RC/locks, bounds checks, spills/regalloc, missing loop opts or vectorization, inlining, allocation, runtime size, dead code). Rank the roots by total gap mass across cells. Separately, compare the JetIR/backend pipeline with the LLVM O2 pipeline (SROA, GVN, LICM, InstCombine, SCCP, jump threading, loop unroll/vectorize, inliner cost model, register coalescing, shrink-wrapping, tail dup, code layout, LTO dead stripping) and list the missing ones with their expected reach. Output: a dated audit under Docs/audits with the TSV, and one Tower card per root with an owner, proof terms and the cells it moves.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -81346,7 +81346,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T23:57:46.382Z",
-      "updated": "2026-11-16T13:00:36.262Z",
+      "updated": "2026-11-17T01:42:52.549Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -81357,7 +81357,7 @@
       "body": "#CLI struct Args{n: Int} adds 163.3 KB to collatz: core_args 67 KB (cli_parse_level 37 KB, cli_unknown 8.4 KB, cli_help 6.3 KB), generated run___jet_cli_run 20 KB, glue 16.5 KB, runtime +35.6 KB (errno text, float parse, hash, logical env), plus .eh_frame/.debug/symtab. 7 of 10 asm cells pay it. Generate (via the existing metaprogramming) only the parse code the declared fields need, and make help/unknown-flag text data-driven and small. Data: AsmPar-1 size census 2026-10-31, /dev/shm/asmpar/cen/{c1,fl}/sizes.tsv (cen/Tools/perf/census/sizes.mjs); parent #6483. Proof: the asm-parity bytes column for every cell, no cell larger, no cycles cell worse.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -81437,7 +81437,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:20.054Z",
-      "updated": "2026-11-16T13:00:38.235Z",
+      "updated": "2026-11-17T01:42:54.080Z",
       "updatedBy": "Main"
     },
     {
@@ -81447,7 +81447,7 @@
       "body": "A collatz loop with no print is 116 KB vs a 27 KB floor: bignum Int ops (~30 KB), panic/scheduler/deadline/time_now (~10 KB), the full slab allocator (~10 KB), text/u64_to_string (~6 KB), +7 KB .eh_frame. Use range facts to prove no-overflow where possible; otherwise keep the promotion path cold, out of line and with a minimal closure (no scheduler/time on the overflow path). Semantics unchanged (I9). Data: AsmPar-1 size census 2026-10-31, /dev/shm/asmpar/cen/{c1,fl}/sizes.tsv (cen/Tools/perf/census/sizes.mjs); parent #6483. Proof: the asm-parity bytes column for every cell, no cell larger, no cycles cell worse.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -81537,7 +81537,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:22.472Z",
-      "updated": "2026-11-16T13:00:39.157Z",
+      "updated": "2026-11-17T01:42:55.608Z",
       "updatedBy": "Main"
     },
     {
@@ -81547,7 +81547,7 @@
       "body": "fn run(){} is 27,368 B vs a 176 B ELF minimum. The fault/stop reporter is 12.1 KB: make it lazily-linked, with a compact table-driven reporter. Link the allocator only when something allocates, and pack segments to remove page padding (1-7 KB) without changing the security layout. Data: AsmPar-1 size census 2026-10-31, /dev/shm/asmpar/cen/{c1,fl}/sizes.tsv (cen/Tools/perf/census/sizes.mjs); parent #6483. Proof: the asm-parity bytes column for every cell, no cell larger, no cycles cell worse.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -81724,7 +81724,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:45:29.538Z",
-      "updated": "2026-11-16T13:00:47.891Z",
+      "updated": "2026-11-17T01:42:57.139Z",
       "updatedBy": "Main",
       "criteriaLastN": 15
     },
@@ -81735,7 +81735,7 @@
       "body": "Owner order 2026-10-31: once every program meets the hand-written asm ceiling in cycles and bytes, the next goal is to BEAT it. Survey with sources: the Goose language (its claimed speedups over Rust and C, what mechanisms produce them, which are verified, and which fit Jet semantics and I9), whole-program specialization and monomorphization budgets, superoptimization of hot blocks, automatic data-layout transforms (AoS/SoA, field reordering, small-value packing), allocation elision and region inference, comptime evaluation of input-independent work, and cache-aware code layout without PGO. Output: Docs/research/beyond-asm-ceiling-2026-10-31.md ranking each idea by expected gain across ALL programs (not one example), implementation cost and semantic risk, with cards proposed for the top items. No claim without a source or a measurement.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -81857,7 +81857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T00:46:47.099Z",
-      "updated": "2026-11-16T13:00:51.705Z",
+      "updated": "2026-11-17T01:42:58.658Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -81868,7 +81868,7 @@
       "body": "Three complete small applications built on C libraries with no `#Unsafe`, no pointers and no binding files. Today\nJet ships a hand-written raylib module as `core.game.raylib`; under FFI v3 `use c.raylib` produces the same shape\nfrom the header plus the reviewed raylib pack. Outputs are design targets.\n\n## Simple: a notes CLI on sqlite\n\n```jet\npackage: {\n    name: \"notes\"\n    deps: { sqlite: c@system }\n}\n\nuse sql: c.sqlite3\n\nrun: fn(args: [String]) !sql.SqliteError {\n    db: sql.open(\"notes.db\")                                   // sqlite3_open_v2 / sqlite3_close as Close\n    db.exec(\"create table if not exists notes(id integer primary key, body text)\")\n    if args.len() > 0 {\n        db.prepare(\"insert into notes(body) values (?)\").bind(1, args.join(\" \")).step()\n    }\n    loop row in db.query(\"select id, body from notes order by id\") {\n        print(\"{row.int(0)}. {row.text(1)}\")\n    }\n}\n```\n\n```text\n$ jet run notes.jet buy milk\n1. buy milk\n$ jet run notes.jet call Ann\n1. buy milk\n2. call Ann\n```\n\n## Medium: a raylib window\n\n```jet\npackage: {\n    name: \"bounce\"\n    deps: { rl: c@nixpkgs:raylib }\n}\n\nuse rl: c.raylib\n\nBall: struct {\n    x: F32\n    y: F32\n    dx: F32\n    dy: F32\n}\n\nupdate: fn(ball: &Ball, w: F32, h: F32) {\n    ball.x += ball.dx\n    ball.y += ball.dy\n    if ball.x < 20.0 || ball.x > w - 20.0 -> ball.dx = -ball.dx\n    if ball.y < 20.0 || ball.y > h - 20.0 -> ball.dy = -ball.dy\n}\n\nrun: fn() {\n    rl.init_window(800, 450, \"bounce\")                          // close_window at scope end\n    rl.set_target_fps(60)\n    ball := Ball{x: 400.0, y: 225.0, dx: 4.0, dy: 3.0}\n    loop {\n        if rl.window_should_close() -> break\n        update(ball, 800.0, 450.0)\n        rl.begin_drawing()\n        rl.clear_background(rl.RAYWHITE)\n        rl.draw_circle_v(rl.Vector2{x: ball.x, y: ball.y}, 20.0, rl.MAROON)   // struct by value: layout from the header\n        rl.draw_text(\"FPS {rl.get_fps()}\", 10, 10, 20, rl.DARKGRAY)\n        rl.end_drawing()\n    }\n}\n```\n\nA window with a red ball bouncing off its edges at 60 frames per second.\n\n## Complex: a game with sqlite high scores, a worker task and audio\n\n```jet\npackage: {\n    name: \"catcher\"\n    deps: {\n        rl: c@nixpkgs:raylib\n        sqlite: c@system\n    }\n}\n\nuse rl: c.raylib\nuse sql: c.sqlite3\n\nDrop: struct {\n    x: F32\n    y: F32\n    speed: F32\n}\n\nGame: struct {\n    paddle_x: F32\n    drops: [Drop]\n    score: Int\n    lives: Int\n}\n\nsave_score: fn(name: String, score: Int) !sql.SqliteError {\n    db: sql.open(\"scores.db\")\n    db.exec(\"create table if not exists scores(name text, score integer)\")\n    db.prepare(\"insert into scores values (?, ?)\").bind(1, name).bind(2, score).step()\n}\n\ntop_scores: fn() -> [String] !sql.SqliteError {\n    db: sql.open(\"scores.db\")\n    loop row in db.query(\"select name, score from scores order by score desc limit 5\") -> \"{row.text(0)}  {row.int(1)}\"\n}\n\nstep: fn(game: &Game, dt: F32) {\n    if rl.is_key_down(.Left) -> game.paddle_x -= 400.0 * dt\n    if rl.is_key_down(.Right) -> game.paddle_x += 400.0 * dt\n    if rl.get_random_value(0, 30) == 0 {\n        game.drops.push(Drop{x: F32.from_float(Float.from_int(rl.get_random_value(10, 790))), y: 0.0, speed: 150.0})\n    }\n    kept := [Drop]{}\n    loop d in game.drops {\n        y: d.y + d.speed * dt\n        if y > 420.0 && (d.x - game.paddle_x).abs() < 50.0 {\n            game.score += 1\n            next\n        }\n        if y > 450.0 {\n            game.lives -= 1\n            next\n        }\n        kept.push(Drop{x: d.x, y: y, speed: d.speed})\n    }\n    game.drops = kept\n}\n\ndraw: fn(game: Game, best: [String]) {\n    rl.begin_drawing()\n    rl.clear_background(rl.SKYBLUE)\n    rl.draw_rectangle(Int.from_float(game.paddle_x) - 50, 430, 100, 12, rl.DARKBLUE)\n    loop d in game.drops -> rl.draw_circle(Int.from_float(d.x), Int.from_float(d.y), 8.0, rl.BLUE)\n    rl.draw_text(\"score {game.score}  lives {game.lives}\", 10, 10, 20, rl.BLACK)\n    loop i in 0..<best.len() -> rl.draw_text(best[i], 620, 10 + 22 * i, 18, rl.DARKGRAY)\n    rl.end_drawing()\n}\n\nrun: fn() !(sql.SqliteError | TaskFailure) {\n    best_task: task top_scores()                              // sqlite on a worker: the pack marks it thread-safe\n    rl.init_window(800, 450, \"catcher\")\n    rl.init_audio_device()                                      // close_audio_device at scope end\n    ding: rl.Sound.load(\"ding.wav\")                           // unload_sound as Close\n    rl.set_target_fps(60)\n\n    best: best_task.join()                                    // loaded while the window and sound opened\n    game := Game{paddle_x: 400.0, drops: [], score: 0, lives: 3}\n    loop {\n        if rl.window_should_close() || game.lives == 0 -> break\n        before: game.score\n        step(game, rl.get_frame_time())\n        if game.score > before -> rl.play_sound(ding)\n        draw(game, best)\n    }\n    save_score(\"player\", game.score)\n    print(\"final score {game.score}\")\n}\n```\n\n```text\nfinal score 23\n```\n\n`jet audit foreign catcher.jet` lists raylib and sqlite3 rows with their evidence: header facts from pinned clang,\npack facts from `c-raylib-pack@5.5.0` and `c-sqlite-pack@3.46.0` with their reviewers, and `thread .Main` guards on\nevery raylib window row. The release binary's calls into both libraries are direct calls with no wrapper frames.\n\n### Best competitor equivalent\n\n```odin\n// Odin: vendor:raylib is hand-maintained bindings shipped with the compiler; sqlite needs its own binding.\nimport rl \"vendor:raylib\"\nmain :: proc() {\n    rl.InitWindow(800, 450, \"catcher\")\n    defer rl.CloseWindow()\n    for !rl.WindowShouldClose() { rl.BeginDrawing(); rl.ClearBackground(rl.SKYBLUE); rl.EndDrawing() }\n}\n```\n",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -81941,8 +81941,8 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:21.070Z",
-      "updated": "2026-11-15T05:12:28.039Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:43:00.232Z",
+      "updatedBy": "Main",
       "criteriaLastN": 3
     },
     {
@@ -81952,7 +81952,7 @@
       "body": "Three complete programs where foreign code blocks, completes later, or must stay on one thread (D-FFI-CONCUR1).\nA `#Blocking` row runs on the runtime's blocking pool, so other tasks keep running. A foreign completion (C\ncallback, Rust future, Python coroutine, JS Promise) is a wait point through `ffi.completion<T>`. Thread facts are\nchecked statically when the foreign compiler proves them and by a one-compare guard when a pack states them.\nOutputs are design targets.\n\n## Simple: a blocking C call that does not stall other tasks\n\n```jet\npackage: {\n    name: \"lookup\"\n    deps: { resolv: c@system }\n}\n\nuse netdb: c.netdb                                 // getaddrinfo: #Blocking in the libc pack\n\nrun: fn() {\n    hosts: [\"jet-lang.dev\", \"example.com\", \"localhost\"]\n    tasks: hosts.map((h) -> task netdb.getaddrinfo(h, \"443\"))     // each runs on the blocking pool\n    ticker: task {\n        loop i in 0..<3 {\n            print(\"still responsive {i}\")\n            sleep(20ms)\n        }\n    }\n    loop t in tasks -> print(t.join().first()?.address ?? \"no address\")\n    ticker.join()\n}\n```\n\n```text\nstill responsive 0\n127.0.0.1\nstill responsive 1\n93.184.215.14\n185.199.108.153\nstill responsive 2\n```\n\nA row with no blocking fact runs inline; if it runs longer than 50 ms, debug builds print W3244 naming the row and\nthe fact that would move it to the pool.\n\n## Medium: curl multi as wait points\n\n```jet\npackage: {\n    name: \"fetcher\"\n    deps: { curl: c@nixpkgs:curl }\n}\n\nuse curl: c.curl\n\nfetch_all: fn(urls: [String]) -> [curl.Response] !curl.CurlError {\n    multi: curl.Multi.new()                            // curl_multi_init / cleanup as Close\n    pending: urls.map((u) -> multi.add(curl.Easy.get(u)))   // each add returns a completion\n    // The pack maps curl_multi_socket_action + CURLMOPT_SOCKETFUNCTION onto the runtime's poller,\n    // so waiting on a completion parks this task and the runtime drives curl's sockets.\n    pending.map((p) -> p.wait())\n}\n\nrun: fn() {\n    responses: fetch_all([\"https://jet-lang.dev\", \"https://example.com\", \"https://httpbin.org/delay/1\"])\n    loop r in responses -> print(\"{r.status} {r.url} {r.body.len()} bytes\")\n}\n```\n\n```text\n200 https://jet-lang.dev 18342 bytes\n200 https://example.com 1256 bytes\n200 https://httpbin.org/delay/1 312 bytes\n```\n\nThe binder's part, from the `curl` pack (`jet inspect bind curl --row Multi.add --expand`):\n\n```jet\nadd: fn(self, easy: &&Easy) -> ffi.Completion<Response> {\n    done: ffi.completion<Response>()\n    ffi.extern<fn(ffi.Handle<CURLM>, ffi.Handle<CURL>) -> I32>(\"curl_multi_add_handle\", PACK)\n        .call(self.h, easy.h)\n    self.waiting.insert(easy.h, done.sender())          // fired from CURLMSG_DONE in the socket callback\n    done\n}\n```\n\n## Complex: a main-thread GUI with workers\n\nWhat it shows: raylib must run on the main thread (pack fact, guarded); work runs on tasks; results come back\nthrough a channel; a misplaced call is a compile error, and a lying pack fact is a named stop.\n\n```jet\npackage: {\n    name: \"mandel\"\n    deps: { rl: c@nixpkgs:raylib }\n}\n\nuse rl: c.raylib\n\nTile: struct {\n    x: Int\n    y: Int\n    pixels: [U8]\n}\n\nmandel_byte: fn(px: Int, py: Int) -> U8 {\n    cr: Float.from_int(px) / 170.0 - 2.0\n    ci: Float.from_int(py) / 256.0 - 1.0\n    zr := 0.0\n    zi := 0.0\n    n := 0\n    loop {\n        if n == 255 || zr * zr + zi * zi > 4.0 -> break\n        next_r: zr * zr - zi * zi + cr\n        zi = 2.0 * zr * zi + ci\n        zr = next_r\n        n += 1\n    }\n    U8.from_int(n)\n}\n\nrender_tile: fn(x: Int, y: Int, size: Int) -> Tile {\n    pixels: loop i in 0..<size * size -> mandel_byte(x + i % size, y + i / size)\n    Tile{x: x, y: y, pixels: pixels}\n}\n\nrun: fn() {\n    rl.init_window(512, 512, \"mandelbrot\")              // thread .Main (pack c-raylib-pack@5.5.0)\n    canvas: rl.Image.gen_color(512, 512, rl.BLACK)\n    texture := rl.Texture.from_image(canvas)            // Close: rl.unload_texture\n    { sender: tx, receiver: rx }: channel<Tile>(capacity: 64)\n    workers: loop row in 0..<8 {\n        out: tx.copy()\n        task &&out {\n            loop col in 0..<8 -> out.send(render_tile(col * 64, row * 64, 64))\n        }\n    }\n    done := 0\n    loop {\n        if rl.window_should_close() -> break\n        if done < 64 {                                  // one tile per frame keeps the frame short\n            t: rx.receive() ?? break\n            texture.update_rect(t.x, t.y, 64, 64, t.pixels)\n            done += 1\n        }\n        rl.begin_drawing()\n        rl.draw_texture(texture, 0, 0, rl.WHITE)\n        rl.end_drawing()\n    }\n    loop w in workers -> w.join()\n}\n\nwrong_thread: fn(texture: rl.Texture) {\n    t: task { rl.draw_texture(texture, 0, 0, rl.WHITE) }\n    // Error [E3231]: `raylib.draw_texture` must run on the main thread (pack c-raylib-pack@5.5.0, row draw_texture).\n    //  Fix: Send the data to the main task with a channel, and draw in run().\n    t.join()\n}\n```\n\nThe window fills in tile by tile while the frame loop stays at 60 frames per second.\n\n### Best competitor equivalent\n\n```swift\n// Swift: @MainActor checks main-thread use, but C libraries need hand annotations; blocking C calls hold a thread.\n@MainActor func draw(_ texture: Texture2D) { DrawTexture(texture, 0, 0, WHITE) }\nTask.detached { let tile = renderTile(x, y); await MainActor.run { UpdateTextureRec(texture, rect, tile.pixels) } }\n// Kotlin/Native and C# leave thread affinity of C libraries to documentation.\n```\n",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -82106,7 +82106,7 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:23.352Z",
-      "updated": "2026-11-16T13:00:58.620Z",
+      "updated": "2026-11-17T01:43:01.746Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -82612,7 +82612,7 @@
       "body": "The registry has 874 diagnostic rows; 80 carry a structured fix and 71 a lint name (DiagnosticRows.jet). Marker names are matched by hand in the parser (Compiler/JetParser/Source/Parser/Items.jet:1593) and in sema (Compiler/JetSema/Source/Sema/MarkerRules.jet:918), and re-declared as strings (Compiler/JetFoundation/Data/Syntax/CoreSurface.jet:160). Packages cannot register codes.\n\nDone when: `impl T.Diagnostic` and `impl T.Lint` register package codes; `syntax.rewrite(pattern, template)` declares a structured fix that `jet fix` applies; the marker switches read the declared markers (D-MARKER-REFLECT1).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.11.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -82720,8 +82720,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-15T02:26:24.606Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:43:03.292Z",
+      "updatedBy": "Main",
       "criteriaLastN": 9
     },
     {
@@ -82731,7 +82731,7 @@
       "body": "Every binder in ffi-v3.md section 4 repeats the same loop: run a tool, map types with an if chain, refuse and stub, emit a template (ffi-v3.md:234-263). Add a Core kit that takes declared tables (`types`, `handles`, `errors`, `refuse`, `names`) and derives `expand`. Hand-written `expand` stays for complex binders.\n\nDone when: the libm binder from ffi-v3 section 4.2 is written as tables only; a handle row derives a close and single-use; a missing type mapping is a registered refusal; `jet inspect expand` shows the derived module.\n\nDepends on the `trait Language` card. Research: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.2.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -82782,7 +82782,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:44.432Z",
-      "updated": "2026-11-16T13:00:59.616Z",
+      "updated": "2026-11-17T01:43:04.837Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -82793,7 +82793,7 @@
       "body": "Destination: core.hw has typed chip, register, pin and interrupt values (D-HW-DECLARE1=A, ratified 2026-11-01): an SVD reader package generates a chip value from the vendor file, a board is a value built from a chip, wrong access, overlap and reused pins fail to compile, and the embedded battery's board derives its linker regions and vector table.\n\nWhy it matters: today the only board is a record of strings (Jetpack/Provider/Batteries/embedded/embedded.jet), registers are untyped U32 fields, and there is no interrupt registration seam.\n\nDecisions: D-HW-DECLARE1=A, D-TARGET-SURFACE1, D-TARGET-MEMORY1, D-TARGET-LINKER1, D-HOST-CAPS1, D-CORE-BOUNDARY1=A.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.1 (card #6513).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -82905,7 +82905,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:49.683Z",
-      "updated": "2026-11-16T23:13:58.923Z",
+      "updated": "2026-11-17T01:43:06.354Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -82916,7 +82916,7 @@
       "body": "D-FFI-LANG1=A ratified foreign languages as packages implementing the Core trait `Language`. No `.jet` file declares `trait Language` at 68c87ae07b. The language set is closed twice: `enum FFILanguage { C, Cpp, Asm }` (Core/Compiler/Lang.jet:41-45) and `enum ForeignLanguage` (Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet:22).\n\nDone when: `trait Language` is declared in Core source; the c binder implements it; both enums are gone; E1002's reserved-root list is replaced by trait lookup; a test package adds a root without a compiler change.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.2.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -82949,7 +82949,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:52.833Z",
-      "updated": "2026-11-16T13:01:06.699Z",
+      "updated": "2026-11-17T01:43:07.885Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -82960,7 +82960,7 @@
       "body": "`enum Layout { C, Columnar }` (Core/Compiler/Lang.jet:67-70); packed and first-argument align are reserved diagnostics (Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:9561-9563) although D-JAI-LAYOUT1=A ratified them. Performance markers are hints only.\n\nDone when: packed structs build at O0/O1/O2 and web with sizes as facts (D-LAYOUT-SHOW1); `#Policy(no_alloc)` and `#Policy(vectorize)` fail the build with a registered diagnostic naming the line that broke the promise.\n\nTies to #6502. Research: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.7.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -83030,7 +83030,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:55.459Z",
-      "updated": "2026-11-16T13:01:10.807Z",
+      "updated": "2026-11-17T01:43:09.428Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -83041,7 +83041,7 @@
       "body": "Licenses are `[String]?` parsed from text (Jetpack/PackageModel/Source/Manifest/Blocks/Policy.jet:101, 174-176). `PII`, `Secret` and `Credential` are a closed enum (Core/Compiler/Lang.jet:155-158) with no declared flow rule; `#Redact` exists on fields (Markers.jet:123).\n\nDone when: licenses are SPDX values with `Custom(String)`; `#Policy(classified: ...)` makes the compiler refuse a classified value reaching an unlisted sink, with a registered diagnostic.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.8.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -83094,8 +83094,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:58.350Z",
-      "updated": "2026-11-15T11:35:59.197Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-17T01:43:10.958Z",
+      "updatedBy": "Main",
       "criteriaLastN": 2
     },
     {
@@ -83105,7 +83105,7 @@
       "body": "Manifests are scanned as text by 54 `pkg_parse_*` functions (Jetpack/PackageModel/Source/Manifest; helper `pkg_strip_wrapped` at ManifestText.jet:73, used at Blocks/Policy.jet:175). Env modules use a separate evaluator (Jetpack/EnvModel/Source/ModuleEval; Jetpack/EnvModel/package.jet:4-10 depends on the parser only). Fields are re-declared in Jetpack structs such as PackagePolicySurface (Policy.jet:101-110).\n\nDone when: Core declares `Package`, `Project` and `Env` record types; Jetpack evaluates each file as a record literal of its type with the prep evaluator; a misspelled field is an ordinary type error at its line; the scanners are deleted; the existing manifest cases pass unchanged.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.3.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -83138,8 +83138,8 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:01.141Z",
-      "updated": "2026-11-15T05:12:42.988Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:43:12.488Z",
+      "updatedBy": "Main",
       "criteriaLastN": 2
     },
     {
@@ -83317,7 +83317,7 @@
       "body": "Destination: a service tree is supervised from declared data. One Service record (D-SERVICE-WORD1=A) covers the beginner run form and the expert fields; the supervisor separates start from readiness and bounds every restart and watch loop; restart policy is a field on the tree or worker line, not the `set_restart` setter (Core/Service/Service.jet); and `tasks.pipeline(source)…` builds a dataflow value whose pure stages run in parallel.\n\nWhy it matters: supervision today is a setter with a tree-wide strategy and no intensity, and Core has no pipeline value.\n\nDecisions: D-SERVICE-WORD1=A. The restart-field and pipeline spellings are on Main's ballot list (2026-11-15).\n\nResearch: Docs/research/declarative-jet-2026-10-31.md section 3.6 (card #6513).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -83421,7 +83421,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:15:06.066Z",
-      "updated": "2026-11-16T13:01:15.597Z",
+      "updated": "2026-11-17T01:43:14.043Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -83817,7 +83817,7 @@
       "body": "asm-parity on dev 45ab3b5ef5 (perf record cycles:u, $JET_SCRATCH_ROOT/lanes/Main/asmpar-45ab/hot.sh): hello's cycles are ld.so symbol binding (do_lookup_x 24%, _dl_lookup_symbol_x 23%, _dl_check_all_versions 15%) and glibc tunables init (24%). taskfile spends 14% in check_match, 13% in _nl_intern_locale_data (a setlocale/locale load), 12% in jet_rt_host_env_capture, 12% in strcmp and 12% in record_in. Every cell pays this startup cost. Within the current dynamic-libc model (static linking is the owner ballot #5088): import only the libc symbols the program reaches, avoid eager binding of unused imports, don't load locale data the program never uses, and capture the environment lazily (#6493 is in wave 22). Proof: asm-parity hello and taskfile cycles columns drop, no cell worse in bytes or cycles, and output is identical.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -83896,7 +83896,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T06:50:49.342Z",
-      "updated": "2026-11-16T13:01:19.066Z",
+      "updated": "2026-11-17T01:43:15.573Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -83907,7 +83907,7 @@
       "body": "Update 2026-11-15 (TowerKeeper-2): one golden runner remains. Tools/agent/run-feature-examples.mjs was deleted in c515c4ea10 (#6035 c3), and the examples moved to concept areas in 2c3e68a70b, so the old paths below are history. The testkit golden suite (Compiler/JetTestKit/Source/Golden.jet:318) FAILs an example with no expected stream; c1 gives each one a stream, and the Path criterion covers io/path (now Examples/Systems/Files/Path.jet).\n\nFound by AsmPar-1 on dev 163d4852ad (w22 s2), 2026-11-01. Examples goldens have two runners. Tools/agent/run-feature-examples.mjs (the wave's default-tier golden) skips an example with no expected .out or .err.out ('no native golden', line 366). Tools/testkit's golden suite FAILs the same example with 'missing expected stream' (Golden.jet:184) at every tier, o0 included: TESTKIT_ARGS='--tier o0 --filter collections/data_battery' jet test Tools/testkit 'suite golden'. The 18 examples: data_battery, job_queue, native_resource_streams, foundations/{arrays, bridges, capabilities, distributed, dsl, exact, realtime, receipts, storage, text, units}, opaque_handles, ui/battery, ui/surface, web/state_surface. Separately, Examples io/path walks the relative Path.from('Examples/features/io') (path.jet:26): it prints 'walk non-empty: true' from the repo root (run-feature-examples) and 'false' from testkit's staged directory. One meaning needs one rule. Under I5 every example needs a golden, so the likely fix is to give the 18 real goldens and remove the .mjs skip, and to make io/path independent of cwd. Lists: $JET_SCRATCH_ROOT/lanes/AsmPar/selfab/gold-r41/.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -84008,8 +84008,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-15T11:39:31.888Z",
-      "updatedBy": "TowerKeeper-2",
+      "updated": "2026-11-17T01:43:17.117Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -84123,8 +84123,8 @@
       "title": "jet repl: evaluating 1 + 2 takes 3.6 s and 691 MB peak RSS; suite REPLs reach 5 GB",
       "body": "Measured by Main 2026-11-01 08:15 EST with the wave-24 tree (a34ef0affd content), stage s2. The input file is the two lines '1 + 2' and ':quit'; run as jet repl < input with JET_COMPILER_IDENTITY set. Result: '3 : Int', 691,148 KB max RSS, 3.55 s wall. During the release cases suite, s1-built jet repl processes held 2.3-5.0 GB RSS each, and several ran at once, which pushes the 16 GB test slots into the memory-pressure kill. For comparison, jet run hello takes 0.12 s cold. Likely root (to confirm by profile): every REPL turn, or the session start, rechecks and recompiles the whole Core/prelude surface instead of reusing the checked session. Also: without JET_COMPILER_IDENTITY, the REPL's first turn fails with E0003 'The native host omitted its compiler identity', which an ordinary user would see if the variable is unset.",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -84194,7 +84194,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:11:44.323Z",
-      "updated": "2026-11-16T13:01:20.093Z",
+      "updated": "2026-11-17T01:43:18.619Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -84204,8 +84204,8 @@
       "title": "jet dev: a watched edit takes 3.7-4.9 s to rerun (a cold jet run of the same file takes 1.0 s); slower than a0_022",
       "body": "Measured by Main 2026-11-01 08:55 EST with $JET_SCRATCH_ROOT/lanes/Main/devwatch/pipe.sh. The script runs jet dev app.jet with stdout on a pipe, edits at +4 s and +8 s, and stamps each output line. The fixture is tests/cases/dev_parts_routine/watching_dev_reruns_on_jit_gap_and_recovers.\\n\\nCandidate a34ef0affd (release chain s2): first run 0.12 s; the gap edit's output arrives 4.9 s after the write; the final edit's output 3.75 s after its write.\\nSeed a0_022: first run 0.17 s; gap edit 2.9 s; final edit 0.14 s.\\nA cold jet run of the gap file takes 0.96 s (a34) and 1.10 s (a0_022), so most of the delay is in jet dev itself: watcher latency, a debounce, or rebuild work beyond one compile.\\n\\nThe two cases watching_dev_reruns_on_jit_gap_and_recovers and watching_dev_deopts_on_gap_edit_and_recovers sleep 800 ms per edit. They now fail on a34, both in the release gate (a0_024 was not released because of them) and in wave 25. Their fixed sleeps should also become readiness waits once the latency is fixed. Under testkit, a recv on the jet dev session saw no stdout for 60 s, while a plain pipe sees lines live; that difference needs explaining too.",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -84250,7 +84250,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T13:54:22.305Z",
-      "updated": "2026-11-16T13:01:22.054Z",
+      "updated": "2026-11-17T01:43:20.150Z",
       "updatedBy": "Main"
     },
     {
@@ -84259,8 +84259,8 @@
       "title": "Function-value copy: does f.copy() of an escaping closure share its captured state, give an independent copy, or get refused?",
       "body": "Question (owner/ballot): spec.md:889-905 (\"Captures and escaping lambdas\") says an escaping lambda owns its captures. Copy values are copied at closure creation, clonable values are cloned, and owned non-clonable values move. It never says what a *function value* does when it is copied (`alias: counter.copy()`) or bound twice.\n\nWitness: tests/cases/run_regressions/shared_and_closure_owner_topology_is_preserved.case, fixture tests/fixtures/shared_owner_topology.jet:82-87.\n  counter: make_counter(live)   // returns `(value: Int) -> { bucket.values.push(value) ... }` over a `:=` Bucket it owns\n  alias: counter.copy()\n  print(counter(1)); print(alias(2)); print(counter(3))\nThe ORACLE-LITERAL output (run_regressions.rs:174, never re-bless) is 102 / 202 / 302. bucket.values.len() grows 1, 2, 3 across counter and alias, so the alias **shares** the one captured environment, as a refcounted closure would.\n\nToday: sema refuses with E0211 \"`fn(Int) -> Int` can't be copied\" (360e470044).\n\nAlternatives:\n- A: A function value is a cheap handle. `.copy()` (and implicit copy) shares the captured environment, as `Shared<T>` handles do (spec.md:1426-1431). Matches the oracle 102/202/302. Needs closure env refcounting in IR/runtime and a spec sentence.\n- B: `.copy()` deep-clones the captured environment, so each copy has its own state. Requires every capture to be clonable, or E0211. The oracle would become 102/102/202 (re-blessing an ORACLE-LITERAL needs owner sign-off).\n- C: Function values that own mutable captured state are not copyable (today's E0211). The spec gains that sentence, and the case's alias line is removed with owner sign-off (oracle lines 11-12 change).\n\nAcceptance: spec.md \"Captures and escaping lambdas\" states the chosen rule. The fixture then runs on every tier with the decided output, and shared_and_closure_owner_topology_is_preserved passes (or is rewritten per C with a cited spec line).\n\nRelated fixture repairs already staged by CardClose-1 (CC-66 follow-up, not yet landed because this blocks the run):\n- bare-block scopes become helper fns (S6-R, syntax-decisions.md:3949)\n- `fn(Int) Int` becomes `fn(Int) -> Int` (spec.md:857)\n- `String!` becomes `Err!` (E2417)\n- untyped-lambda `return x` becomes the tail value\n- SharedSnapshot `.value` becomes `.value()` (Main ruling, SharedOwner.jet:429)\n- `!= .None` now type-checks (CC-66 sema fix, D-FLOWTYPE1)",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -84301,7 +84301,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T21:21:35.427Z",
-      "updated": "2026-11-16T13:01:23.041Z",
+      "updated": "2026-11-17T01:43:21.642Z",
       "updatedBy": "Main"
     },
     {
@@ -84693,8 +84693,8 @@
       "title": "Web build: Plain data that updates the screen (no signal wrappers) (D-REACT-REF1)",
       "body": "## Outcome\n\nBuild the ratified D-REACT-REF1 outcome. The design and its claimed advantage are in Docs/proposals/memory-model-foundations-2026-09-27.md, section \"Using the language level to replace stack layers\".\n\n## Gate\n\nNo implementation starts until criterion 1 is met (AGENTS.md, Adversarial design review). The ballot authorizes the direction, not the claim that it beats existing solutions.\n\n## Strongest existing solutions to judge against\n\nReact virtual DOM and memo, Solid and Svelte signals, Vue reactivity, MobX.\n\n## Attack points the review must cover at minimum\n\nfine-grained update cost versus signals, lists and keyed reordering, derived and async state, effects and cleanup, cross-component and cross-task data, data reached through collections and foreign values, devtools visibility, and compile-time cost on large apps.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -84760,11 +84760,13 @@
         "adversarial-review-required",
         "owner-paused"
       ],
-      "goals": [],
+      "goals": [
+        "G9"
+      ],
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:26.402Z",
-      "updated": "2026-11-16T13:01:25.871Z",
+      "updated": "2026-11-17T01:43:23.242Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -217875,6 +217877,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:43:23.242Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ii3d5",
+      "note": "track,epoch,goals"
+    },
+    {
+      "at": "2026-11-17T01:43:21.642Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zy9mhn",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:20.151Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0166xrw",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:18.619Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wtvbj7",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:17.118Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:15.574Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h8jjrp",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:14.043Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s9rdnu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:12.488Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0itgqr6",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:10.958Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08o25e8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:09.428Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wv2wmp",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:07.885Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pf4ki0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:06.355Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09brw5t",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:04.837Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uhfjtt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:03.292Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fymc7l",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:01.746Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mwaylu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:43:00.232Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l5a4vu",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:58.658Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0agsbqj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:57.140Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nqr80d",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:55.608Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ewbdj1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:54.080Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0awiifz",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:52.550Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cdnofm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:51.025Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f1eda4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:49.467Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wssehw",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:47.894Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02qdoro",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:46.333Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p2n50x",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:42:44.440Z",
       "by": "Main",
