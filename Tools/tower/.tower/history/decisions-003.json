@@ -34078,6 +34078,133 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-13",
       "retiredAt": "2026-11-17T08:55:08.757Z"
+    },
+    {
+      "id": "D-VERDICT-3288-1",
+      "cardId": "c0k9g7u2",
+      "group": "core",
+      "title": "One Color value that every Core library uses",
+      "situation": "Jet's terminal, game and user-interface libraries each describe a color in their own way today. A color picked for a game cannot be handed to the terminal library without copying its numbers by hand, and the interface library only takes a color as text. On 2026-10-01 the owner chose one Core color value that all three libraries use. This record writes that ruling down.",
+      "gist": "Should Core define one Color value that the terminal, game and interface libraries all use?",
+      "lesson": "A color is usually four numbers: red, green, blue and transparency, each from 0 to 255. Option A makes this one Core value with conversions to hex text, to HSL and to linear light. The terminal, game and interface libraries take that one value, and their own color types go away.",
+      "explainer": "",
+      "story": "Ana picks a brand orange for her game's menu and wants the same orange in her terminal tool. Today she copies three numbers into a second color type and types a third spelling as text. Under option A she writes the color once and passes it to both.",
+      "inWild": "use bevy::color::{Color, Srgba};\n\nlet orange = Color::srgb_u8(255, 136, 0);\nlet hex = Srgba::hex(\"#ff8800\").unwrap();\n// Bevy has one Color type with sRGB, linear and HSL forms.\n// Source: docs.rs/bevy/latest/bevy/color/enum.Color.html.",
+      "detail": "Owner answer, 2026-10-01 chat (ask question s3288): \"One core.color.Color\". The question asked, verbatim:\n\n\"#3288: tui, game and ui each define their own color struct today. Should Core define one `core.color.Color` (sRGB 8-bit + alpha, with linear/HSL/hex conversions) that all of them use?\"\n\nThe owner picked the first offered option, which was also the recommended one.\n\nToday Core/tui/tui.jet has TuiColor with Rgb(red, green, blue) as Int. Core/game/raylib.jet:19-35 has RaylibColor{r,g,b,a} clamped by clamp8. Core/ui/ui.jet:123 node_color takes the color as a String. No Core hex, HSL or linear conversion exists. The plan on #3288 lists the module, the provider migration and the golden ui/color_conversions.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One core.color.Color",
+          "detail": "Core defines one Color value: 8-bit sRGB red, green and blue plus alpha. It converts to and from hex text, HSL and linear light. The terminal, game and interface libraries take this value, and their own color types are removed.",
+          "technical": "Offered option text: \"One mechanism; providers adapt to it; per-provider structs removed.\" TuiColor.Rgb takes a Color and keeps its ANSI downgrade by profile. RaylibColor is deleted. ui.node_color takes a Color instead of a String.",
+          "code": "use core.color as color\n\nfn run() {\n    orange :: color.Color.from_hex(\"#ff8800\") ?? panic(\"bad hex\")\n    print(orange.to_hsl())\n    // tui, game and ui all take the same value.\n}"
+        },
+        {
+          "key": "B",
+          "name": "Per-provider + conversions",
+          "detail": "Each library keeps its own color type. Core adds functions that convert between them.",
+          "technical": "Offered option text: \"Keep separate structs, add conversion functions.\"",
+          "code": "use core.game.raylib as rl\nuse core.tui as tui\n\nfn run() {\n    game_orange :: rl.color(255, 136, 0, 255)\n    term_orange :: tui.color_rgb(255, 136, 0)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "One value means one way to write a color, and every library agrees on what it means.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps three color types and adds conversion code between every pair of them."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Programs that use the old color types must change.",
+            "mitigation": "The change lands in one step with every example migrated, and the new spelling is shorter."
+          }
+        ],
+        "tradeoff": "A one-time migration buys a single color value everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Core define one Color value that the terminal, game and interface libraries all use?",
+        "lesson": "A color is usually four numbers: red, green, blue and transparency. Today the terminal, game and interface libraries each have their own color type. Option A makes one Core color that converts to hex, HSL and linear light.",
+        "trio": {
+          "current": {
+            "note": "Today the same orange is written three different ways.",
+            "code": "game_orange :: rl.color(255, 136, 0, 255)\nterm_orange :: tui.color_rgb(255, 136, 0)\nnode :: ui.node_color(\"menu\", 100.0, 20.0, \"#ff8800\")"
+          },
+          "wild": {
+            "lang": "Rust (Bevy)",
+            "note": "Bevy has one Color type with sRGB, linear and HSL forms.",
+            "code": "let orange = Color::srgb_u8(255, 136, 0);\nlet hex = Srgba::hex(\"#ff8800\").unwrap();"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One core.color.Color",
+            "gist": "One Core color value that every library takes, with hex, HSL and linear conversions.",
+            "gains": [
+              "Write a color once and use it everywhere.",
+              "Hex, HSL and linear conversions in one place."
+            ],
+            "losses": [
+              "Code using the old color types must change."
+            ],
+            "proposed": {
+              "code": "orange :: color.Color.from_hex(\"#ff8800\") ?? panic(\"bad hex\")\n// The same value goes to game, tui and ui calls.\nnode :: ui.node_color(\"menu\", 100.0, 20.0, orange)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Per-provider + conversions",
+            "gist": "Each library keeps its own color type, and Core adds converters between them.",
+            "gains": [
+              "Existing code keeps working."
+            ],
+            "losses": [
+              "Three color types stay.",
+              "Converters are needed between every pair."
+            ],
+            "proposed": {
+              "code": "game_orange :: rl.color(255, 136, 0, 255)\nterm_orange :: tui.from_raylib(game_orange)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One value means one way to write a color, and every library agrees on what it means.",
+          "gains": [
+            "Colors move between libraries with no copying."
+          ],
+          "losses": [
+            {
+              "loss": "Code using the old color types must change.",
+              "mitigation": "Every example migrates in the same change, and the new spelling is shorter."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps three color types and adds converters between them."
+            }
+          ],
+          "tradeoff": "A one-time migration buys one color value everywhere."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-04T18:08:21.285Z",
+      "outcome": "A",
+      "comment": "Owner ruling 2026-10-01 in chat (ask question s3288), choosing option A \"One core.color.Color\": sRGB 8-bit plus alpha with linear/HSL/hex conversions; tui, game and ui adapt to it; per-provider color structs removed.",
+      "ratifiedAt": "2026-10-04",
+      "retiredAt": "2026-11-17T08:57:14.082Z"
     }
   ]
 }
