@@ -103,6 +103,18 @@ must be on `dev` or `master`, and a git `--tree` must be a clean checkout of it;
 `--dry-run` runs and reports without meeting. `tower lint --proofs --tree DIR`
 lists proofs whose filter matches no file under `Tests` or `Examples`.
 
+`--blocked-by '#M'|'#M cK'|D-ID` on `--add` or `--edit n` makes a row wait on a
+card, a criterion or a decision; `--unblock n [--reason "…"]` ends the wait by
+hand. When the blocker is done, settled or decided, the next load moves the ref
+to `unblockedFrom` (`--list` shows `unblocked: REF resolved`). `tower prove`
+skips blocked rows.
+
+Epoch `order` is the chain: the first epoch not `done` or `arrived` is active
+(three agents), the one after it next (one agent). `tower next` picks the
+active epoch's cards first. `tower chain [--json]` lists every epoch with its
+role and open criteria; `tower closest [--epoch E] [--limit N] [--json]` ranks
+open cards by open criteria, fewest first, with blocked rows counted apart.
+
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly
 requires it; never start a server or open a browser for the owner.

@@ -43,12 +43,17 @@ tower brief --agent me       # ONE call: card, blockers, criteria, decisions
                               # claims the card unless --no-claim (--json for
                               # machine output; a #ref picks a specific card)
 tower state                  # full projected state as JSON
-tower next [--agent me]      # what to pick up, in canonical order
+tower next [--agent me]      # what to pick up: the epoch chain first (active
+                              # epoch, then the next), then lane and workOrder
 tower next --burndown        # burndown: active epoch's epoch-track cards
                               # + every sidequest, agent lanes only (#457,
                               # D-TWR-OPS1)
 tower next --ready-across-epochs  # every unblocked card board-wide —
                               # the parallel-safe set (D-TWR-OPS2)
+tower chain [--json]         # epochs in order: active (3 agents), next (1
+                              # agent), open cards and open criteria each
+tower closest [--epoch E] [--limit N] [--json]   # open cards nearest to done:
+                              # fewest open criteria first, blocked counted apart
 tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpad
                               # (archive → Docs/archive/, hidden from Docs UI)
 tower lint [--json]          # durability sweeper over the live board; exit 1
@@ -257,7 +262,7 @@ tower prove --card '#12' --yes --dry-run --jet PATH --tree DIR --commit SHA
 tower lint --proofs --tree DIR               # proofs whose filter matches no test file
 ```
 
-`tower prove` takes the open rows with a proof on the card, or on every unfinished
+`tower prove` takes the open, unblocked rows with a proof on the card, or on every unfinished
 card of the epoch. Without `--yes` it prints the plan and runs nothing. With
 `--yes`, it runs `jet test` once per corpus profile (`cases`, `ui`, `golden`):
 it lists the profile's cases, keeps the ids that contain any row's filter, and runs
@@ -272,6 +277,42 @@ code is 1 when any row failed.
 `tower lint --proofs --tree DIR` lists every open row on an unfinished card
 whose proof filter is not a case-insensitive substring of any file path under
 `DIR/Tests` or `DIR/Examples` (rule `proof-unmatched`); exit 1 on a finding.
+
+### Blocked criteria
+
+A row can wait on another card (`#M`), another card's criterion (`#M cK`) or
+a decision (`D-ID`). `--blocked-by REF` on `--add` or `--edit n` records the
+wait; it is refused when the card is done or archived, the criterion or
+decision is already settled, the row is on that card itself, or the wait would
+close a cycle of criteria. The wait ends on its own: when the card is done, the
+criterion is met or verified, or the decision leaves `open`, the next board
+load moves the ref to `unblockedFrom` and the row reads `unblocked: REF
+resolved`. `--unblock n` ends a wait by hand (`--reason` is logged).
+
+```
+tower card criteria '#12' --add "wire the cache" --blocked-by '#40 c2' --by planner
+tower card criteria '#12' --edit 3 --blocked-by D-CACHE1 --by planner
+tower card criteria '#12' --unblock 3 --reason "cache went another way" --by planner
+```
+
+A blocked row stays open but is not workable: `tower prove` skips it, and
+`tower closest` counts it apart from the open rows.
+
+### The epoch chain
+
+Epoch `order` is the plan. The first epoch in order that is not `done` or
+`arrived` is the chain's active epoch and gets three agents; the one after it
+is next and gets one. `tower next` picks cards of the active epoch first, then
+the next epoch's, and so on, each by lane then `workOrder`; `--burndown` scopes
+to the chain's active epoch. `tower chain` lists every epoch in order with its
+role, staffing, open cards and open criteria, headed by the active epoch's
+open-criteria count and the next epoch. `tower brief` names the card's epoch
+role, and the board's epoch headers show it.
+
+`tower closest [--epoch E] [--limit N]` ranks the open (not done or frozen)
+cards that have criteria by open rows, fewest first, then blocked rows, then
+chain order; a card with no open or blocked rows left reads `ready`. The UI's
+Closest view shows the same list with the chain above it.
 
 ### Milestone review
 
@@ -534,7 +575,7 @@ GET  /api/gauntlet/standings        the one run shown: newest full or merged
                                      results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof}; move: {n, to, reason})
+POST /api/card/criteria-add|criteria-edit|criteria-unblock|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof, blockedBy}; unblock: {n, reason}; move: {n, to, reason})
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)

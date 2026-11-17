@@ -93,13 +93,14 @@ export function migrateCriterionProof(item) {
 
 // ---- tower prove ------------------------------------------------------------
 
-// The open criteria with a proof on the live cards in scope.
+// The open, unblocked criteria with a proof on the live cards in scope. A
+// blocked row waits on other work, so its proof is not run yet.
 export function proveTargets(s, { card = null, epoch = null } = {}) {
   const cards = s.cards.filter(c => c.phase !== 'done'
     && (card == null || c.id === card.id)
     && (epoch == null || c.epoch === epoch));
   return cards.flatMap(c => (c.criteria || [])
-    .filter(item => item.status === 'open' && item.proof)
+    .filter(item => item.status === 'open' && item.proof && !item.blockedBy)
     .map(item => ({ card: c, item })));
 }
 

@@ -1,6 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
-  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand, epochChain, closestCards,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -466,6 +466,7 @@ function jumpTo(it) {
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => ballotCount(), alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
+  { id: 'closest', name: 'Closest' },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
   { id: 'guidance', name: 'AGENTS.md' },
   { id: 'gauntlet', name: 'Gauntlet' },
@@ -966,6 +967,40 @@ function radarMatches(c, needle) {
 
 const showRemaining = () => isOpen('radar-remaining', false);
 
+// ---- closest: the cards nearest to done --------------------------------------
+// Fewest workable open criteria first; blocked criteria count separately, so a
+// card whose last rows wait on other work does not pose as nearly done.
+let closestEpoch = '';
+function viewClosest() {
+  const v = $('#view');
+  const chain = epochChain(S.epochs, S.cards);
+  const rows = closestCards(S.cards, S.epochs, { epoch: closestEpoch || null });
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Closest</h1>
+      <span class="viewhead__sub">cards nearest to done — fewest open criteria first</span></div>
+    <div class="chain">${chain.filter(e => e.role !== 'finished').map(e => `<span class="chain__step chain__step--${e.role}" title="${esc(e.name)}">
+        <b>${esc(e.label)}</b> ${e.role === 'later' ? '' : `${e.role} · ${e.staff} agent${e.staff === 1 ? '' : 's'} · `}${e.openCriteria} open${e.blockedCriteria ? ` · ${e.blockedCriteria} blocked` : ''}</span>`).join('<span class="chain__arrow">→</span>')}</div>
+    <div class="radar-tools">
+      <select id="closest-epoch" aria-label="Filter by epoch">
+        <option value="">All epochs</option>
+        ${chain.map(e => `<option value="${esc(e.id)}" ${closestEpoch === e.id ? 'selected' : ''}>${esc(e.label)}${e.name ? ` ${esc(e.name)}` : ''}</option>`).join('')}
+      </select>
+      <span class="viewhead__sub">${rows.length} card${rows.length === 1 ? '' : 's'}</span>
+    </div>
+    <div class="closest">${rows.map(({ card, crit }) => {
+      const e = S.epochs.find(x => x.id === card.epoch);
+      const ready = !crit.open && !crit.blocked;
+      return `<button type="button" class="closest__row${ready ? ' closest__row--ready' : ''}" data-card-id="${esc(card.id)}">
+        <span class="closest__num">#${esc(card.num)}</span>
+        <span class="closest__epoch">${esc(e ? epochTag(e) : card.epoch || '—')}</span>
+        <span class="closest__open">${ready ? 'ready to close' : `${crit.open} open`}</span>
+        <span class="closest__blocked">${crit.blocked ? `${crit.blocked} blocked` : ''}</span>
+        <span class="closest__t">${esc(card.title)}</span>
+      </button>`;
+    }).join('') || '<div class="empty"><div class="empty__glyph">—</div><div>no open cards with criteria</div></div>'}</div>`;
+  $('#closest-epoch').addEventListener('change', (ev) => { closestEpoch = ev.target.value; viewClosest(); });
+  for (const row of v.querySelectorAll('[data-card-id]')) row.addEventListener('click', () => showDetail(row.dataset.cardId));
+}
+
 function viewBoard() {
   const v = $('#view');
   const cardsMode = isOpen('radar-cards', false);
@@ -1246,8 +1281,8 @@ function radarEpochSection(r, needle, cardsMode) {
   const cards = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && (radarShowClosed || c.phase !== 'done'));
   const frozen = cards.filter(c => c.phase === 'frozen').length;
   return collapsible('radar:' + r.id, true,
-    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
-     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}${frozen ? ` · ${frozen} frozen` : ''}</span>`,
+    `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${chainBadge(r)}
+     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}${frozen ? ` · ${frozen} frozen` : ''}${criteriaLeftLabel(r)}</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
@@ -1262,6 +1297,15 @@ function radarEpochSection(r, needle, cardsMode) {
       body.appendChild(shown.length ? radarList(r.id, shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
     });
 }
+
+// The epoch's place in the chain: the active epoch and the next one carry
+// their staffing (agents to put on them).
+function chainBadge(r) {
+  if (r.role !== 'active' && r.role !== 'next') return '';
+  return `<span class="epoch__role epoch__role--${r.role}" title="${r.role === 'active' ? 'first unfinished epoch in order' : 'the epoch after the active one'}">${r.role} · ${r.staff} agent${r.staff === 1 ? '' : 's'}</span>`;
+}
+const criteriaLeftLabel = (r) => r.openCriteria || r.blockedCriteria
+  ? ` · ${r.openCriteria} open criteria${r.blockedCriteria ? `, ${r.blockedCriteria} blocked` : ''}` : '';
 
 function radarHead(r) {
   const wrap = el(`<div class="radar__head"></div>`);
@@ -1386,6 +1430,11 @@ async function showDetail(ref) {
 }
 // A card named by its number, as move links and text references cite it.
 const showCardNum = (num) => showDetail(allCards().find(c => c.num === num)?.id || `#${num}`);
+// A criterion blocker ref (`#M`, `#M cK`, `D-…`): a card ref links to the card.
+function blockerLink(ref) {
+  const num = /^#(\d+)/.exec(ref);
+  return num ? `<button class="linkbtn" data-card-num="${esc(num[1])}">${esc(ref)}</button>` : `<b>${esc(ref)}</b>`;
+}
 
 function showDetailMessage(text, retry = null) {
   detailShown = null;
@@ -1504,13 +1553,17 @@ function renderDetail(c) {
   const cb = $('#m-criteria', m);
   if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
   for (const it of (c.criteria || [])) {
-    const row = el(`<div class="critrow">
+    const row = el(`<div class="critrow${it.blockedBy && it.status === 'open' ? ' critrow--blocked' : ''}">
         <div class="critrow__head"><span class="critrow__n">#${esc(it.n)}</span>
           <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span>
-          <span style="margin-left:auto"><button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
+          ${it.blockedBy ? '<span class="critrow__badge critrow__badge--blocked">blocked</span>' : ''}
+          <span style="margin-left:auto">${it.blockedBy ? '<button class="btn btn--ghost btn--sm" data-crit-unblock>Unblock</button>' : ''}
+          <button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
           <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
         <div class="critrow__text">${esc(it.text)}</div>
         ${it.proof ? `<div class="critrow__proof"><code>${esc(proofCommand(it.proof))}</code></div>` : ''}
+        ${it.blockedBy ? `<div class="critrow__moved">waits on ${blockerLink(it.blockedBy)}</div>` : ''}
+        ${it.unblockedFrom ? `<div class="critrow__moved">unblocked: ${blockerLink(it.unblockedFrom)} resolved</div>` : ''}
         ${it.movedFrom ? `<div class="critrow__moved">← moved from <button class="linkbtn" data-card-num="${esc(it.movedFrom.card)}">#${esc(it.movedFrom.card)} c${esc(it.movedFrom.n)}</button></div>` : ''}
         ${it.movedTo ? `<div class="critrow__moved">→ moved to <button class="linkbtn" data-card-num="${esc(it.movedTo.card)}">#${esc(it.movedTo.card)} c${esc(it.movedTo.n)}</button></div>` : ''}
         ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
@@ -1538,6 +1591,8 @@ function renderDetail(c) {
       if (!confirm(`Remove criterion #${it.n}?\n\n${it.text}`)) return;
       await api('card/criteria-remove', { id, n: it.n, reason: 'removed by the owner in the Tower UI', by: 'owner' });
     });
+    $('[data-crit-unblock]', row)?.addEventListener('click', () =>
+      api('card/criteria-unblock', { id, n: it.n, reason: 'unblocked by the owner in the Tower UI', by: 'owner' }));
     cb.appendChild(row);
   }
   const critAdd = el(`<div class="qadd"><input data-keep="crit-add" placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
@@ -2626,7 +2681,7 @@ async function viewGauntlet() {
   }, 20_000);
 }
 
-const RENDER = { now: viewNow, board: viewBoard, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, closest: viewClosest, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
 function renderView() {
   try { (RENDER[VIEW] || viewNow)(); }
   catch (err) {

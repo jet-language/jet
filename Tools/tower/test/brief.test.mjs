@@ -63,7 +63,7 @@ test('packet.card carries epoch name/goal and milestone title/goal/criteria when
   assert.equal(p.card.body, 'do the thing');
   assert.equal(p.card.plan, '1. x 2. y');
   assert.equal(p.card.priority, 'P1');
-  assert.deepEqual(p.card.epoch, { id: 'e1', label: 'E1 Epoch One', name: 'Epoch One', goal: 'ship it' });
+  assert.deepEqual(p.card.epoch, { id: 'e1', label: 'E1 Epoch One', name: 'Epoch One', goal: 'ship it', role: 'active' });
   assert.deepEqual(p.card.milestone, {
     id: m.id, title: 'MVP', goal: 'usable v1', status: 'open',
     criteria: m.criteria, verification: null,
@@ -74,7 +74,7 @@ test('packet.card inherits the born-with epoch; milestone is null when unset', (
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const p = buildBrief(st.load(), '#1');
-  assert.deepEqual(p.card.epoch, { id: 'e1', label: 'E1 First epoch', name: 'First epoch', goal: '' });
+  assert.deepEqual(p.card.epoch, { id: 'e1', label: 'E1 First epoch', name: 'First epoch', goal: '', role: 'active' });
   assert.equal(p.card.milestone, null);
 });
 

@@ -72,7 +72,7 @@ test('show closed adds finished epochs that the active radar omits', () => {
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, false), radar);
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true).map(e => e.id), ['e1', 'e2']);
   assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true)[1], {
-    id: 'e2', name: 'Finished', goal: 'shipped', active: 0, done: 1,
+    id: 'e2', name: 'Finished', goal: 'shipped', role: 'finished', staff: 0, openCriteria: 0, blockedCriteria: 0, active: 0, done: 1,
     milestoneTotal: 1, milestonesMet: 1, pct: 100, burndown: [],
     milestones: [{
       id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met',
