@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111450,
+    "rev": 111475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60,7 +60,7 @@
       ]
     },
     {
-      "status": "planned",
+      "status": "done",
       "goal": "Every major language, runtime, library and tooling feature that makes Jet a daily-driver TypeScript/Swift replacement: JIT/dev loop, concurrency, derives/reflection, HTTP, stdlib, IDE tooling, reactive UI, data/compute (CPU path), and web. Excludes metaprogramming (E4), jetpack (E5), FFI/GPU backends (E6), agents/automation (E7), Canvas (E8), jetos (E9), CI/docs (E10), and bootstrapping (E11).",
       "id": "e3",
       "num": 3,
@@ -77,7 +77,7 @@
       ]
     },
     {
-      "status": "planned",
+      "status": "done",
       "goal": "Programmable builds and compile-time metaprogramming on E3 reflection/derive foundations: build-as-Jet (fn build(b: BuildContext)), gated build-time I/O, generated source modules, stdlib-only DSL syntax islands, typed build graph/actions/toolchains/cache/scheduler, and public read-only front-end APIs.",
       "id": "e4",
       "num": 4,
@@ -90,7 +90,7 @@
       ]
     },
     {
-      "status": "planned",
+      "status": "done",
       "goal": "The package-manager and environment layer on E4 programmable builds: jetpack environments replacing nix-shell, package build-from-source, registry/publish, content-addressed store, monorepo workspaces, package signing, providers, catalogs, locks, and migration importers. jetos (E9) sits on this substrate.",
       "id": "e5",
       "num": 5,
@@ -104,7 +104,7 @@
       ]
     },
     {
-      "status": "planned",
+      "status": "done",
       "goal": "Unified foreign-function and polyglot interop, plus accelerated-compute device backends (CUDA, Metal, Vulkan/WebGPU) that bind through the same FFI/provider substrate. Depends on E3 language/runtime and E5 package providers where bridges are packaged.",
       "id": "e6",
       "num": 6,
@@ -117,7 +117,7 @@
       ]
     },
     {
-      "status": "planned",
+      "status": "done",
       "goal": "Agent corpus, safe execution (policy, sandbox, audit), and the process/browser automation APIs agents share. Depends on E3 language/runtime; uses E5/E6 packaging and FFI where tools need them, without blocking those earlier epochs.",
       "id": "e7",
       "num": 7,
@@ -118176,8 +118176,8 @@
       "title": "Automatic acceleration keeps its fallback: column copies and auto-parallel loops consume checked facts and keep the serial meaning on every tier",
       "body": "Destination: transient column copies are bounded by checked nested-reuse and single-pass facts, release lowering schedules automatic parallel work through the existing bounded pool from typed acceleration facts, and both keep the original scalar or serial fallback with the same meaning on O0, O1 and O2.\n\nWhy: automatic speedups are only safe if the plain meaning is always there to fall back to and to compare against.\n\nDecisions: I9; AGENTS.md performance gate.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #2893 and #2894.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -118238,7 +118238,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:53.604Z",
-      "updated": "2026-11-16T13:19:24.303Z",
+      "updated": "2026-11-17T01:53:14.867Z",
       "updatedBy": "Main"
     },
     {
@@ -118247,8 +118247,8 @@
       "title": "Classic benchmark kernels beat C and Rust: the benchmarks-game set, tensor-map, enum dispatch, gradients and sprites, and the Doom renderer",
       "body": "Destination: nbody, spectral-norm, mandelbrot, fannkuch, binary-trees and a text workload beat C; tensor-map and the enum-union bridge beat every peer; the gradient and sprite cells beat Rust; and the Doom renderer kernels reach gcc and clang -O2.\n\nWhy: these are the programs readers use to judge a language speed claim; each loss is a codegen or runtime root.\n\nDecisions: AGENTS.md performance gate (Jet/peer below 1.00, Rust included); scoring per #6953.\n\nSource: split from #6414 (run time against hand-written assembly) on 2026-11-15 by TowerKeeper-1. The rows came from #6205, #2414 (#3135, #2778), #3736 and the 2026-11-05 Doom port investigation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -118332,7 +118332,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:41:54.524Z",
-      "updated": "2026-11-16T13:19:30.451Z",
+      "updated": "2026-11-17T01:53:18.118Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -118388,8 +118388,8 @@
       "title": "Memory kernel performance: zero cost against the plain spelling, and the machine-code ceiling for every kernel primitive",
       "body": "The memory kernel (#6842, D-MEM-CHOKEPOINT1=A) is built: one audited chokepoint for every raw memory action, with the address rule, single-use values, windows, sentry-tracked mappings and the runtime cutover proven there. Its two performance criteria move here under the owner's 2026-11-15 order that speed and size work belongs to G11 and does not block other goals. Work in flight: the inline-under-auto SUBs (kernel owner methods and from_addr inline under the default policy, constant divisors no longer stop inlining, the E0917 false positive for same-named calls) and the zero-cost paired cell (Tools/perf/ZeroCostPair.jet, 64 losses on p171). Ceiling cells measured on p160r (Jet/ceiling cycles): mapping 4.73x, allocfree 2.77x, compare 3.19x, resize 1.88x, rawword 1.35x, atomics 1.00x. Planned roots: an inlined call's Result boxes kept in the frame (landed 6595a58009), the allocator header cut from 24 B to 8 B, finer size classes.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -118430,7 +118430,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T11:21:06.022Z",
-      "updated": "2026-11-16T13:19:31.436Z",
+      "updated": "2026-11-17T01:53:23.475Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -118440,8 +118440,8 @@
       "title": "Shrink #Unsafe beyond memory: one typed syscall table, safe once-only runtime state, and no per-call regions for host leaves",
       "body": "After the memory kernel (#6842) the inventory (jet Tools/agent/UnsafeRatchet.jet --inventory, p175) shows 842 #Unsafe regions in Compiler, the runtime, Core and Jetpack, and 0 outside the kernel files perform a raw memory action. 506 are not memory actions. By a first sort: about 160 runtime call sites each spell a raw Linux syscall (os_syscall_i64) inside their own region; about 52 write process-wide runtime state during start-up ('runs before any other thread exists'); about 48 are Core calls to private runtime host leaves; about 37 manage Secret zeroizing owners; 26 call crypto expert primitives; about 200 are unclassified. About 336 are raw memory actions inside the kernel files themselves. This card cuts the non-memory regions at their roots, so each unsafe fact is stated once in an audited home instead of at every call site.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -118565,7 +118565,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T11:29:21.054Z",
-      "updated": "2026-11-16T13:19:36.464Z",
+      "updated": "2026-11-17T01:53:31.067Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -118576,7 +118576,7 @@
       "body": "Owner order 2026-11-15 ~15:30: fix the landing bottleneck and codify the efficient process durably. AGENTS.md (Delegation) now states the cycle. Until Land.jet carries it, Main runs it through scratch scripts (cycle.sh, suite.sh). The bottleneck was: two compiler builds per cycle (census build plus a separate batch build), the full suite only every three or four batch compilers (regressions found across ~50 commits and bisected by hand), generated-file conflicts returned to workers, and stages started by hand, leaving the heavy slot idle.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "building",
       "priority": "P0",
@@ -118661,11 +118661,13 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T20:27:39.035Z",
-      "updated": "2026-11-15T21:17:59.640Z",
+      "updated": "2026-11-17T01:53:34.216Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -118675,8 +118677,8 @@
       "title": "Types are interned TypeIDs: one Interner for names and hash-consed types, threaded through sema, registration and IR",
       "body": "Owner order 2026-11-15 ~20:30: the type-representation switch is G6's first step, done before G6 adds new type forms (const generics, reflection, generation) so they are written once on the new model. Moved from #5479 c7 (its S3.3 part). Groundwork landed or landing: the shared Name/TypeID model (c7-shared-ids, p198). The switch is a multi-part set (s33 parts 1..N, each clean under jet check against the parts before it); the mechanical threading of `types: &Interner` (about 740 checker signatures, about 10k Type sites) is done by a throwaway codemod whose command is in each part's message; semantic changes are hand edits. Owner: GoalsA-1-4.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -118723,7 +118725,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T01:32:51.109Z",
-      "updated": "2026-11-16T03:48:28.717Z",
+      "updated": "2026-11-17T01:53:40.055Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -118829,7 +118831,7 @@
       "body": "Owner discussion 2026-11-16 on the Goose and Lobster mining run (Docs/research/mine-for-jet-2026-10-23-goose-lobster.md once landed). Goose keeps every growable value on compiler-assigned data stacks: an address reservation with a bump pointer, freed by one store at scope exit. It pays for that with restrictions (one growable per stack, no growable array elements, restricted recursion, whole-program specialization, wasm growth checks) and its own record shows prior region systems retreating to a collector or ownership. Jet already has the explicit route (#Context(allocator:), D-ALLOC-SITE1=A), the default heap (D-ALLOC-DEFAULT1=A) and the scratch escape rule (D-REGION-ALLOC1=F). The open question is what Jet does for code that names no allocator. Ballot D-PLACE-DEFAULT1 carries it; whichever option wins, the build's first criterion is a passing adversarial review in Docs/audits.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -118862,8 +118864,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T12:27:38.913Z",
-      "updated": "2026-11-16T13:26:16.010Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-17T01:53:44.842Z",
+      "updatedBy": "Main",
       "criteriaLastN": 1
     },
     {
@@ -118873,7 +118875,7 @@
       "body": "Owner ballot for #6868 c12 (warm coverage per screen). The build must know which live reads a device keeps warm so it can fail an offline screen that reads outside them. Options: A, a warm function in .offline(.Queue, warm: fn ...) with a compile-time coverage check; B, a .warm() screen mark; C, no warm set. Recommendation A. Ballot file: decision D-WARM-SET1.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -118907,7 +118909,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T13:20:56.548Z",
-      "updated": "2026-11-16T22:53:16.189Z",
+      "updated": "2026-11-17T01:53:50.635Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -118917,8 +118919,8 @@
       "title": "App menus, context menus, the tray and the macOS menu bar on macOS, Windows and phones",
       "body": "Platform half of #6799 (owner order 2026-11-16): #6799 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: App menus, context menus, the tray and the macOS menu bar on the native app host.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -118966,7 +118968,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:51:54.417Z",
-      "updated": "2026-11-16T21:52:03.434Z",
+      "updated": "2026-11-17T01:53:55.142Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -118976,8 +118978,8 @@
       "title": "Notifications on macOS, Windows and phones: APNs, FCM and local notifications",
       "body": "Platform half of #6800 (owner order 2026-11-16): #6800 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Notifications: local notifications on desktop and phones, and push through APNs, FCM and Web Push from one typed server call.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119016,7 +119018,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:52:17.425Z",
-      "updated": "2026-11-16T21:52:21.878Z",
+      "updated": "2026-11-17T01:53:59.740Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -119026,8 +119028,8 @@
       "title": "Background work on phones and on macOS and Windows: BGTaskScheduler, WorkManager and login items",
       "body": "Platform half of #6801 (owner order 2026-11-16): #6801 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Background work: deferred and periodic jobs on phones (BGTaskScheduler, WorkManager) and desktops; browsers run none (server jobs and push cover the web).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119066,7 +119068,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:52:31.543Z",
-      "updated": "2026-11-16T21:52:36.135Z",
+      "updated": "2026-11-17T01:54:04.129Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -119076,8 +119078,8 @@
       "title": "Files on macOS, Windows and phones: native pickers, content URIs, security-scoped URLs and persisted folder access",
       "body": "Platform half of #6802 (owner order 2026-11-16): #6802 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Files: native open and save pickers, folder access that persists, and the browser's file pickers, as one typed API.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119125,7 +119127,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:52:46.455Z",
-      "updated": "2026-11-16T21:52:53.186Z",
+      "updated": "2026-11-17T01:54:08.881Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -119135,8 +119137,8 @@
       "title": "Camera, sensors and location on macOS, Windows and phones",
       "body": "Platform half of #6803 (owner order 2026-11-16): #6803 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Camera, sensors and location as typed streams behind declared device permissions.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119175,7 +119177,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:53:08.697Z",
-      "updated": "2026-11-16T21:53:15.423Z",
+      "updated": "2026-11-17T01:54:12.524Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -119185,8 +119187,8 @@
       "title": "Deep links on macOS, Windows and phones: iOS universal links, Android App Links and single instance",
       "body": "Platform half of #6804 (owner order 2026-11-16): #6804 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Deep links and app links: custom schemes, iOS universal links and Android App Links land on screen state (D-ROUTE-ONE1).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119234,7 +119236,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:53:27.399Z",
-      "updated": "2026-11-16T21:53:33.915Z",
+      "updated": "2026-11-17T01:54:18.183Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -119244,8 +119246,8 @@
       "title": "System share sheet, clipboard and drag and drop on macOS, Windows and phones",
       "body": "Platform half of #6805 (owner order 2026-11-16): #6805 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: System share sheet on phones and desktop and the Web Share API; clipboard and drag and drop reach app screens from core.ui.host.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119293,7 +119295,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:53:47.810Z",
-      "updated": "2026-11-16T21:53:54.247Z",
+      "updated": "2026-11-17T01:54:22.375Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -119303,8 +119305,8 @@
       "title": "Device permissions on macOS, Windows and phones: Info.plist, AndroidManifest and typed grants",
       "body": "Platform half of #6806 (owner order 2026-11-16): #6806 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Device permissions: declared in package.jet, prompted at first use, with a typed denied result on every target.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119343,7 +119345,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:54:07.926Z",
-      "updated": "2026-11-16T21:54:12.467Z",
+      "updated": "2026-11-17T01:54:27.839Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -119353,8 +119355,8 @@
       "title": "Accessibility on macOS, Windows and phones: UIA, NSAccessibility, UIAccessibility and AccessibilityNodeInfo",
       "body": "Platform half of #6807 (owner order 2026-11-16): #6807 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Accessibility build-out for D-A11Y-EXPORT1: AccessKit on desktop, phone providers, semantic HTML on the web, and compile-time checks.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119393,7 +119395,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:54:22.984Z",
-      "updated": "2026-11-16T21:54:27.196Z",
+      "updated": "2026-11-17T01:54:32.133Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -119403,8 +119405,8 @@
       "title": "App lifecycle and saved state on macOS, Windows and phones",
       "body": "Platform half of #6809 (owner order 2026-11-16): #6809 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: App lifecycle events (start, foreground, background, suspend, terminate) and saved screen state on every target.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119452,7 +119454,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:54:37.724Z",
-      "updated": "2026-11-16T21:54:44.266Z",
+      "updated": "2026-11-17T01:54:37.922Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -119462,8 +119464,8 @@
       "title": "Desktop install, auto-update and signing on macOS and Windows: MSIX, notarized DMG, and phone asset packaging",
       "body": "Platform half of #6810 (owner order 2026-11-16): #6810 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Desktop install, auto-update and signing: MSIX, notarized DMG, AppImage and Flatpak, with signed delta updates.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119520,7 +119522,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:54:56.739Z",
-      "updated": "2026-11-16T21:55:05.788Z",
+      "updated": "2026-11-17T01:54:43.259Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -119530,8 +119532,8 @@
       "title": "Native sessions on macOS, Windows and phones: refresh tokens in Keychain, Keystore and the Windows credential store",
       "body": "Platform half of #6818 (owner order 2026-11-16): #6818 keeps Linux and the web in G9; this card holds macOS, Windows, iOS and Android. D-WEBAPP-SHAPE1=A governs both halves, and the Linux half proves each shared API first. Original scope: Native sessions: short access tokens, refresh tokens in the system keychain, revocation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -119561,7 +119563,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-16T21:55:21.749Z",
-      "updated": "2026-11-16T21:55:23.723Z",
+      "updated": "2026-11-17T01:54:49.388Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -218020,6 +218022,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:54:49.388Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08b38mr",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:43.259Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qocvhc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:37.922Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c007r8za",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:32.133Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08flpt1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:27.839Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bemp8t",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:22.378Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02q0uvv",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:18.183Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p5qaad",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:12.525Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03vcitf",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:08.881Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w0s724",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:54:04.130Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01epn5m",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:59.740Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jxaibg",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:55.142Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zekkja",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:50.635Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozl5j4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:44.842Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0py34oh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:40.055Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05hrwee",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:34.217Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p9v5z5",
+      "note": "track,epoch,goals"
+    },
+    {
+      "at": "2026-11-17T01:53:31.067Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07py9jv",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:23.478Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssfud5",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:18.118Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g80ty3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:53:14.868Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c010rbgm",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:53:08.066Z",
       "by": "Main",
