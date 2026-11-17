@@ -24,7 +24,7 @@ Counts are `git ls-files` at `e784bb1ffe`. "Read by" names the code that gives t
 |---|---|---|---|---|
 | `package.jet` | identity, deps, outputs, profiles, settings, policy, members, and more (section 2) | 2310 | `Jetpack/PackageModel/Source/Manifest/PackageParse.jet` (one parser, 521 lines) | D-CONF-PLANE1, D-MANIFEST-ONE1 |
 | inline `package { }` block | the same fields, inside a source file (all of `Core/` uses it, e.g. `Core/Build/Build.jet:1-10`) | 604 files | same parser | D-ECO-INLINEPACKAGE1; may not coexist with `package.jet` |
-| `pkg.jet` | retired name for `package.jet`, still a project marker | 5 | `JetCli/Source/Cli/Request.jet:232`, `Entry.jet:74` | retired, still recognised |
+| `pkg.jet` | retired name for `package.jet`, still a project marker | 5 | `JetCli/Source/Cli/Request.jet:232`, `Entry.jet:74` | retired, still recognized |
 | `workspace.jet` | `module workspace { members: … }`, overlays, sometimes `fn build` or even `fn run` | 22 | `JetFoundation/Data/Syntax/JetpackConfig.jet:484`, `Entry.jet:70` | D-WORKSPACE1=B said "no workspace file"; D-MANIFEST-ONE1=A folds it into `package.jet` (not built) |
 | `env.jet` | `module env.<name> { sources: … packages: … prompt: … }`: dev tools and source aliases | 159 | `JetpackConfig.jet:469` | D-MANIFEST-ONE1=A folds it into `package.jet environments:` (not built) |
 | `config.jet` and `configs:` files | `NAME :: Config{ … }` records: deps, environments, even `outputs:` (`Examples/features/tooling/compiler_api_package/config/release.jet`) | 30 + 2 users of `configs:` | `PackageParse.jet` (E: ConfigMembers forbids members, build, settings) | D-MANIFEST-ONE1 keeps `configs:` for env-only files |
@@ -55,7 +55,7 @@ The parser's switch (`PackageParse.jet:160-215`) accepts these fields. The censu
 | `authority` | effects the package may use, grants to its deps, trust | 1494 | needs |
 | `boundaries` | which modules may import which | 7 | needs (code rules) |
 | `policy` | lints and code rules (`lints: { deny: [auto_derive] }`, `check_removal: .Forbid`, `sentries`) | 47 | needs (code rules) |
-| `allocator`, `runtime` | program allocator and runtime flavour | 5, 12 | what it **makes** |
+| `allocator`, `runtime` | program allocator and runtime flavor | 5, 12 | what it **makes** |
 | `outputs` | the things the package makes (nine kinds, D-TARGET-ONE1) | 94 | makes |
 | `packages` | an older map of output kinds (`packages: { backend: library }`) | 80 | makes (second home) |
 | `targets` | platform profiles (`targets: { machine: { profile: "hosted" } }`) | 6 | makes (and a third meaning of "target") |
@@ -102,7 +102,7 @@ The fourth kind ("how we work") is the trouble. None of these fields describe th
 | D-BUILDSCOPE1=A (07-19) | `fn build` lives in the unit's existing definition file at every rung (single file, `pkg.jet`, `workspace.jet`) | D-CONF-ENTRY1=A: any file of the package; `jet new` writes `build.jet` |
 | D-CONF-SPLIT1=A | Facts in text, actions in `fn build` | D-ENTRY-SHAPE1=A: `fn dev` sets facts in code (`d.port(8080)`); D-TARGET-ONE1=A: outputs from data and from code |
 | D-CONF-MERGE1=A | declaration < profile < workspace < environment < system < fleet < CLI | D-SETTING-ORDER1=A: stock < source marker < `package.jet` < entry code < flag; D-BUILD-REUSESET1=A adds a root layer between stock and each member |
-| D-SETTING-ORDER1=A, owner directive #4913 | every option row has a flag, a package field and a handle method | D-OPTFLAG1=A removed `--optimize`, `--opt-level` and `--inline` in favour of profiles |
+| D-SETTING-ORDER1=A, owner directive #4913 | every option row has a flag, a package field and a handle method | D-OPTFLAG1=A removed `--optimize`, `--opt-level` and `--inline` in favor of profiles |
 | D-TEST-PROFILE1=A | named test runs are data in `package.jet` (`test:`), code suites in `test.jet` | the parser rejects `test:` (probe P1); `jet new`'s `test.jet` stub still says "replace the stock default" |
 | D-LOCKFILE1=A | `<root>/jet.lock`, committed | `jet new` writes `.jet/lock` and git-ignores it (probe P4) |
 | D-MANIFEST-ONE1=A (10-30) | `package.jet` is the one project file; a root without `name:` is a virtual root | makes a `package.jet` mean "a package" or "a group" depending on one missing field; keeps `configs:` files |
@@ -137,7 +137,7 @@ Each confusion names a real file or probe. They are ordered by how often a newco
 
 **C10. Inheritance has three different rules.** Members inherit `version`, `edition` and `license` from the root (D-CORE-HEADER1), build settings from the root (D-BUILD-REUSESET1), and policy ceilings through the grant chain (D-BUILDSCOPE1). They do not inherit deps, lints or outputs. A member cannot tell what it inherits without reading three rulings.
 
-**C11. What publishes and what does not is unstated.** A library's `build:` profiles, `environments:`, `members:` and `defaults:` mean nothing to a consumer, but they sit beside `name:` and `deps:` in the file that gets published. Nothing says whether a consumer's build honours them. Cargo answers this explicitly ("Profile settings defined in dependencies will be ignored", [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html)).
+**C11. What publishes and what does not is unstated.** A library's `build:` profiles, `environments:`, `members:` and `defaults:` mean nothing to a consumer, but they sit beside `name:` and `deps:` in the file that gets published. Nothing says whether a consumer's build honors them. Cargo answers this explicitly ("Profile settings defined in dependencies will be ignored", [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html)).
 
 **C12. Command files are named by convention only, and their stubs are stale.** `jet new --template overrides` writes `build.jet`, `dev.jet` and `test.jet` stubs that say "Uncomment one `fn build` to replace the stock default" (`Host.jet:1514-1516`). D-ENTRY-SHAPE1 says entries set values and never replace the stock work. Nine file names are reserved (section 1), so a module cannot be called `test.jet` or `config.jet`.
 
@@ -161,7 +161,7 @@ Run with `JET_COMPILER_IDENTITY="jet@0.1.0#probe" JET_TOOLCHAIN_ROOT=<export of 
 
 | System | Package data | Build code | Multi-package root | Profiles and flags | Lock |
 |---|---|---|---|---|---|
-| Cargo | `Cargo.toml` `[package]`, `[dependencies]` | `build.rs`, one fixed file per package | `[workspace]` in the root `Cargo.toml`; a root without `[package]` is a "virtual manifest" | `[profile.*]` honoured only at the workspace root; `.cargo/config.toml` per machine or repo | `Cargo.lock` at the root |
+| Cargo | `Cargo.toml` `[package]`, `[dependencies]` | `build.rs`, one fixed file per package | `[workspace]` in the root `Cargo.toml`; a root without `[package]` is a "virtual manifest" | `[profile.*]` honored only at the workspace root; `.cargo/config.toml` per machine or repo | `Cargo.lock` at the root |
 | Go | `go.mod` | none; `go generate` runs by hand and its output is committed | `go.work`, a separate file, "generally inadvisable to commit" | build tags and flags only | `go.sum` |
 | Zig | `build.zig.zon`, "metadata specifically pertaining to build.zig" | `build.zig`, real Zig code that builds a step graph | none; a package is the unit | `b.standardOptimizeOption` and `-D` flags declared in `build.zig` | hashes inside `build.zig.zon` |
 | SwiftPM | `Package.swift`: Swift code that builds one declarative `Package` value | plugins (build-tool and command plugins), separate packages | none (Xcode workspaces are an IDE concept) | `swift build -c release`; `swiftSettings` per target | `Package.resolved` |

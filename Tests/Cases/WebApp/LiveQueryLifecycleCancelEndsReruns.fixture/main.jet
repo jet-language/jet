@@ -91,14 +91,14 @@ run: fn() {
     device.send_text("read") ?? panic("read")
     print("it reads again {answer(device)}, {counts()}")
 
-    // Cancelling the subscription ends its re-runs: the writes after it reach
+    // Canceling the subscription ends its re-runs: the writes after it reach
     // no one and run nothing, so the stored result stays where it was.
     device.close(1000, "") ?? panic("close")
     serving.join() ?? panic("server join")
     insert(alice, "three")
     insert(alice, "four")
     insert(alice, "five")
-    print("three writes after cancelling, {counts()}")
+    print("three writes after canceling, {counts()}")
 
     // The next read re-runs the query once for all the writes it missed.
     print("next read {titles(app.state(mine))}, {counts()}")

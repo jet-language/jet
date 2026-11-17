@@ -10,7 +10,7 @@ Every web source below was read on **2026-10-29**. The corpus measurements were
 run the same day over the dev tree at `bb9c74e522`, and the log scan over the
 agents' scratch logs. No Jet program was compiled or executed for this report.
 Measured facts and quoted opinion are kept in separate sections, and each
-opinion is labelled with its source.
+opinion is labeled with its source.
 
 ## Plain summary
 
@@ -50,7 +50,7 @@ opinion is labelled with its source.
 13. No peer-reviewed study measuring call-site write marks was found. The
     published evidence is design rationale and developer opinion.
 14. rust-analyzer underlines mutable locals and `&mut self` methods by default.
-    Jet's language server colours the `&` token but shows nothing on an
+    Jet's language server colors the `&` token but shows nothing on an
     unmarked write.
 
 ## 1. Headline: Google's output-parameter rule and its reversal
@@ -185,7 +185,7 @@ twelve years. No public report links that to a bug class.
 
 A lexical scanner read every `.jet` file under `Examples/`, `Core/`,
 `Compiler/`, `Jetpack/`, and `tests/` of dev `bb9c74e522`. It skipped symlinks,
-comments, and strings. It classed each `&` by its neighbours:
+comments, and strings. It classed each `&` by its neighbors:
 
 - **receiver**: `&place.method(…)`, where the last segment is a call;
 - **argument**: `&place` alone in a call's argument list;
@@ -590,7 +590,7 @@ This is the Mojo, D, and Ada model, and Google C++ since 2020.
 
 - **Marks removed**: 82,775. The 161 write windows (`x :: &place`) and 41
   `if &x` match writes need their own spelling decision, because there the
-  mark creates a write borrow rather than labelling one.
+  mark creates a write borrow rather than labeling one.
 - **Reader loss**: no plain-text sign that `edit(buf)` changes `buf`. This is
   the case cletus, coreytabaka, and RFC 241 each called the important one.
 - **Exclusivity**: unchanged in the checker. E0204 would point at two unmarked
@@ -632,7 +632,7 @@ The `^` take mark is outside this report. Every option above leaves it as it is.
 
 philosophy.md states three principles that pull in different directions here.
 
-- Principle 2 says "most of the time spent with code is reading". It favours
+- Principle 2 says "most of the time spent with code is reading". It favors
   marks that a reader cannot infer (philosophy.md:18).
 - Principle 3 says "the most common operations … should have the least amount
   of friction". `push` is the most common marked call (philosophy.md:19).

@@ -17,9 +17,9 @@ Arg: struct {
 
 label_all: fn(args: [Arg], name: String) -> [Arg]? {
     if args.len() == 0 -> return None
-    labelled := args
-    loop index in 0..<labelled.len() -> labelled[index].label = Val(Label{name: "{name}{index}"})
-    Val(labelled)
+    labeled := args
+    loop index in 0..<labeled.len() -> labeled[index].label = Val(Label{name: "{name}{index}"})
+    Val(labeled)
 }
 
 defaults: fn(csv: Bool) -> [Default?]? {
@@ -33,8 +33,8 @@ defaults: fn(csv: Bool) -> [Default?]? {
 
 run: fn() {
     args: [Arg]{Arg{text: "a", label: None}, Arg{text: "b", label: None}}
-    labelled: label_all(args, "arg") ?? [Arg]{}
-    loop arg in labelled -> print("{arg.text}: {arg.label?.name ?? "-"}")
+    labeled: label_all(args, "arg") ?? [Arg]{}
+    loop arg in labeled -> print("{arg.text}: {arg.label?.name ?? "-"}")
     print(label_all([Arg]{}, "none") == None)
     entries := [Default?]{}
     if defaults(true) == .Val(list) -> entries = list

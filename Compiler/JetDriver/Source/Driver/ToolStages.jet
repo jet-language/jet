@@ -305,7 +305,7 @@ jet_driver_tool_stage_rows: fn(stage: String, body: Span, value: &&TComptimeValu
 // its block.
 jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeField]) -> JetDriverToolStageItem? Never! {
     row := JetDriverToolStageItem{at: 0, length: 0, label: ""}
-    labelled := false
+    labeled := false
     kinded := false
     loop field in fields.move() {
         if field.name == "at" || field.name == "length" {
@@ -316,7 +316,7 @@ jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeFie
         }
         if field.name == "label" {
             row.label = jet_driver_tool_stage_text(field.value.move()) ?? next
-            labelled = true
+            labeled = true
         } else if field.name == "detail" {
             row.detail = jet_driver_tool_stage_text(field.value.move()) ?? next
         } else if field.name == "kind" {
@@ -325,7 +325,7 @@ jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeFie
         }
     }
     if row.at < 0 || row.length < 0 || row.at + row.length > body.end - body.start -> return None
-    if stage == TOOL_STAGE_LSP_COMPLETION && labelled {
+    if stage == TOOL_STAGE_LSP_COMPLETION && labeled {
         row.at = body.start
         row.length = 0
         return Val(row)
@@ -334,7 +334,7 @@ jet_driver_tool_stage_row: fn(stage: String, body: Span, fields: &&[TComptimeFie
         row.at += body.start
         return Val(row)
     }
-    if stage == TOOL_STAGE_LSP_INLAY_HINTS && labelled {
+    if stage == TOOL_STAGE_LSP_INLAY_HINTS && labeled {
         row.at += body.start
         row.length = 0
         return Val(row)

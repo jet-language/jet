@@ -76,7 +76,7 @@ retain logical route metadata but are excluded from native-pack emission by
 link refusal reported as E2104. The b5a331841 no-retained-Rust-Box invariant and
 the pack producer's independent rejection of Rust symbols remain enforced.
 
-### What Cranelift does today (the behaviour to match)
+### What Cranelift does today (the behavior to match)
 
 `crates/jet-jit/src/jit/runtime_host.rs` (`new_jit_module`) builds one
 `JITModule` with `opt_level=speed`, `is_pic=true` and `hotswap(true)`, and
@@ -1607,7 +1607,7 @@ panic is fatal: the child flushes output, writes its stop record and exits
 (81 runtime panic, 101 foreign/host panic). `stop_write()` writes a budget
 stop's record. Records travel on private descriptor 3 as the body's decimal
 byte length, a newline, then the body: one JSON object with `kind`
-(Cancelled, Deadline, BudgetFuel, BudgetDepth, Panic, HostFault, Trap),
+(`Cancelled`, `Deadline`, `BudgetFuel`, `BudgetDepth`, `Panic`, `HostFault`, `Trap`),
 `jct_status` (1 runtime panic, 2 fuel, 3 depth, 4 foreign/host panic),
 `owner`, `start`, `end` (null when absent) and the exact UTF-8 `message`. A
 parent controller must concurrently drain stdout/stderr and enforce a wall
@@ -2961,7 +2961,7 @@ tracked explicitly by the consistency checker.
 Lazy cursor initialization and advancement may invoke user callbacks. Both
 are can-stop MIR operations: their results are usable only on the immediately
 following Propagate poll's resume edge. Prefetched HasNext/Value operations
-remain non-stopping. A cancelled map callback must report task cancellation,
+remain non-stopping. A canceled map callback must report task cancellation,
 never return a short successful collection or silently end a for-loop.
 
 File and stdin line producers keep the three-argument native ABI
@@ -3212,7 +3212,7 @@ separately from binary64 parity.
 The same runner executes the selected passing print/format goldens against
 that pack and records a one-million-float formatting cell for native Jet and
 the Rust reference, including a digest comparison and measured timing ratio.
-The runtime-object path currently has no optimizer; its timing is labelled
+The runtime-object path currently has no optimizer; its timing is labeled
 “runtime object unoptimized” and is not an O1 performance verdict.
 These checks are behavioral proof only when executed against the composed
 runtime object and pack; corpus preparation alone is not a pass.
@@ -3911,7 +3911,7 @@ that unsubscribes itself or a later listener keeps its running closure alive
 and the skipped listener is never invoked. Dispatch snapshots the active
 listeners in priority order (highest first), registration order among equal
 priorities; a once listener is consumed before its handler runs; nested emits
-dispatch immediately (AllowDepthFirst, the sole policy). A cancelled scope
+dispatch immediately (AllowDepthFirst, the sole policy). A canceled scope
 returns an inactive Subscription and releases the handler unregistered; the
 last EventScope handle cancels, unsubscribing every tracked Subscription; the
 last Event handle releases its handlers while Subscriptions outlive it. A
@@ -3929,7 +3929,7 @@ method table (`Collections.rs` event/subscription/event_scope/event_trace
 method returns); handlers are retained `Fn(T) -> Unit` callbacks.
 `JetRuntime/Tests/EventProviderWitness.c` links the real object with
 `--wrap=jet_rt_alloc --wrap=jet_rt_free` and checks registration order,
-priority, once, unsubscribe (also mid-dispatch), cancelled-scope registration,
+priority, once, unsubscribe (also mid-dispatch), canceled-scope registration,
 scope and Event teardown, nested emit, the last Event handle dropped mid-emit
 (freed blocks are poisoned), trace text, and that every scenario
 returns to its allocation baseline. `Examples/features/concurrency/event_lifecycle.jet`

@@ -1,7 +1,7 @@
 # Storage primitive probe
 
 ## What I built
-I built a Jet package that uses the shipped filesystem, crypto, channels, tasks, and time primitives as storage-library building blocks. It implements an append-only fsync log, log-backed KV with compaction, a bounded pool, an at-least-once queue with consumer-group acknowledgements, and a content-addressed cache. A separate writer/recovery pair kills a process after a durable partial record and recovers the committed prefix.
+I built a Jet package that uses the shipped filesystem, crypto, channels, tasks, and time primitives as storage-library building blocks. It implements an append-only fsync log, log-backed KV with compaction, a bounded pool, an at-least-once queue with consumer-group acknowledgments, and a content-addressed cache. A separate writer/recovery pair kills a process after a durable partial record and recovers the committed prefix.
 
 Files: `pkg/main.jet`, `pkg/log.jet`, `pkg/kv.jet`, `pkg/pool.jet`, `pkg/queue.jet`, `pkg/cache.jet`, `pkg/storage_probe.jet`, `pkg/crash_write.jet`, `pkg/recover.jet`, `pkg/mmap_probe.jet`.
 

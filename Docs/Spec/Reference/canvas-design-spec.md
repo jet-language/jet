@@ -67,8 +67,8 @@ variable-get tint, and type chips. The design values are:
 | Struct/named | `#5b8dd9` | Steel blue. |
 | Enum/variant | `#4f9e5a` | Forest. |
 | Fn/lambda value | `#a78bfa` | Violet. |
-| Void | `#6b7280` | Grey. |
-| unknown/generic | `#8a8f98` | Grey. |
+| Void | `#6b7280` | Gray. |
+| unknown/generic | `#8a8f98` | Gray. |
 
 Wires inherit the source-pin color. Exec wires are 2.5px, data wires are
 1.8px, and hover adds 0.7px. Use Bezier curves with horizontal tangents; do not

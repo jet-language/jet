@@ -21,7 +21,7 @@ beautifully strcutured".
 
 Owner clarification relayed by Main the same day: the four named areas were
 examples, not the scope. This report therefore surveys every axis and gives one
-catalogue row per idea (section 3). Each idea that needs an owner choice has
+catalog row per idea (section 3). Each idea that needs an owner choice has
 its own ballot draft under `$JET_STATE_ROOT/ballots/READY/`.
 
 Method. Counts come from `git grep`, `wc` and file reads at the current
@@ -62,11 +62,11 @@ against the Jet compiler. Statements not observed directly are marked
    (5) chip-feature requirements inferred like effects; (6) traits that carry
    their own derivation; and (7) compiler tables that are typed Jet values
    generated from those declarations.
-4. Eight owner choices came out of the catalogue, and each has a ballot draft
+4. Eight owner choices came out of the catalog, and each has a ballot draft
    (section 11). Four were ratified A on 2026-10-05; four are open
    (D-CORE-DERIVE-HOME1, D-CORE-FEATURE-FLOW1, D-CORE-LAWS1, D-CORE-HEADER1).
    Everything else is settled by a ratified decision or is implementation
-   work, and the catalogue says which.
+   work, and the catalog says which.
 5. Compile time: every family instance, role table and builtin table is built
    when the Core bundle is built and shipped in the memory-mapped interface
    record (SP12). A user build pays a table lookup, never a compile-time
@@ -146,7 +146,7 @@ ordinary Jet that a user could have written.
 | Copies | the compiler chooses move, share or copy | D-COPY-DEFAULT1=A |
 | One inliner | shared MIR inliner for every level | D-OPT-INLINE1=A |
 
-## 3. The catalogue
+## 3. The catalog
 
 One row per idea. "Ratified" means the owner has decided this card's ballot.
 "Ballot" means an owner choice drafted for this card and still open.
@@ -270,7 +270,7 @@ the Core bundle. It declares three kinds of item and nothing else:
 2. **Storage types**: the machine value kinds the kernel owns, such as
    `Bits<prep n: Int>`, `Vector<T, prep n: Int>`, raw pointers and the exact-Int
    word. Core types wrap them; users never name them.
-3. **Compiler markers**: the markers only the compiler can honour, such as
+3. **Compiler markers**: the markers only the compiler can honor, such as
    `Role` and `Instruction`. Per D-MARKER-MODULE1 they are
    written qualified, `#builtin.Role(.Add)`, so the prefix itself shows the
    magic.
@@ -653,7 +653,7 @@ features and constants, merging only where I8 is violated. The inventory
 
 | Meaning | Today's spelling | Verdict |
 |---|---|---|
-| Effects a function may use | `-[Net]>` row; `effect` leaf declarations; `#FX(…)` scope | One mechanism already (D-EFF1..5, D-ABILITY-NAME2). Only the generated `lang.Effect` list drifts (catalogue row 15). |
+| Effects a function may use | `-[Net]>` row; `effect` leaf declarations; `#FX(…)` scope | One mechanism already (D-EFF1..5, D-ABILITY-NAME2). Only the generated `lang.Effect` list drifts (catalog row 15). |
 | Who implements a service | target `facts:`, `#Context`, `#Test(faults:)`, `testing.fake_*` | **I8 violation → D-CORE-PROVIDER1** |
 | Chip features | `#Multiversion`, `prep if $build.cpu.has`, instruction `needs:` | One mechanism once helpers have a rule → **D-CORE-FEATURE-FLOW1** |
 | Compiler magic in Core | routing rows, `__core_intrinsic`, empty shells, Rust constants | **I8 violation → D-CORE-BUILTINS1, D-CORE-ROLE1** |
@@ -663,7 +663,7 @@ features and constants, merging only where I8 is violated. The inventory
 | Constant storage | `#Static`, `#Inline` on constants | Distinct meanings (one address versus substituted value). Keep. |
 | Escapes | `#Unsafe`, `#Impure`, `#Nondeterministic`, `#allow`, `#Scrub` | One gate law (D-GATE-LAW1). Keep distinct kinds; each guards a different check. |
 | Requirements on values | `#Pre`, `#Post`, range types, trait bounds | Distinct: run-time contract, static range, static capability. Keep. |
-| Declaring words | `marker`, `fact`, `effect`, `trait`, `tag` | Ratified separately (D-META-NAME1, D-FACTDECL1, D-EFFECT-DECL1, D-QUAL2). `tag` versus fact enums is an open question in D-FACTMODEL1; catalogue row 30. |
+| Declaring words | `marker`, `fact`, `effect`, `trait`, `tag` | Ratified separately (D-META-NAME1, D-FACTDECL1, D-EFFECT-DECL1, D-QUAL2). `tag` versus fact enums is an open question in D-FACTMODEL1; catalog row 30. |
 
 What must stay distinct and why: **effects versus machine provision**
 (permission versus hardware; D-FREESTAND-FACTS1), **effects versus
@@ -705,7 +705,7 @@ value before the run versus reading what the compiler knows), and **gate kinds**
 Migration after ratification, as Tower cards: (a) declare `jet_builtins` and
 the role list, with Jet declarations for the standard traits; (b) port the
 numeric families and delete `Type::IntN`, `Type::Float32` and the hand tables;
-(c) convert Prelude row grammars to typed Jet (catalogue row 13); (d) retire
+(c) convert Prelude row grammars to typed Jet (catalog row 13); (d) retire
 routing rows module by module inside the #3690 port; (e) providers and
 feature needs; (f) trait-held derivations, which retire `Derives.jet` and the
 derive-request marker rows. Each step is one greenfield cutover with its

@@ -67,7 +67,7 @@ form) were fixed in the witness. The run results on the pinned binary are in the
 
 ## Verdict
 
-BLOCKED on the current binary for criteria 1 to 4 and 6. These are behaviour proofs that
+BLOCKED on the current binary for criteria 1 to 4 and 6. These are behavior proofs that
 need a running server, and no `core.http.server` program compiles. Criterion 5 is partly met
 by source only: the limits are enforced at read time before dispatch, and TLS is separate
 (`tls(cert, key)` / `bind(…, tls)`). The spec doc is still missing. The inventory and the

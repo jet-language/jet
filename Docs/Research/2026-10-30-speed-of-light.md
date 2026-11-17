@@ -210,7 +210,7 @@ callee to the caller's optimizations.
 **Jet today.** `fib(35)` needs 4.95 times Rust's instructions and 3.96 times
 its cycles at O2. Each call and return also costs a fetch bubble (SOG
 section 2.8.1.3.3). Jet's inliner skips any callee over 40 IR
-instructions at O1 and 60 at O2 (inventory:198), and does not honour
+instructions at O1 and 60 at O2 (inventory:198), and does not honor
 `#Inline(Always)` (P-IA, inventory:272). Every `Int` argument carries a drop
 after the call, because an `Int` may own heap digits.
 
@@ -264,7 +264,7 @@ op cache.
 | guaranteed tail calls | nightly `become` only | `.always_tail` | Clang and GCC 15 `musttail` | not checked | not checked | promised (D-DROP-ASAP1), not built |
 | SIMD | auto plus `std::arch` | `@Vector` | auto plus intrinsics | `SIMD` type | `#simd` arrays | auto plus lanes (D-SIMD3, D-LANES1) |
 | destruction | end of scope | manual, `defer` | manual | at last use | manual, `defer` | at last use (D-DROP-ASAP1) |
-| forced inlining | `#[inline(always)]` | `inline fn` | `always_inline` | `@always_inline` | `#force_inline` | `#Inline(Always)` (D-INLINE-PARAM1), not honoured |
+| forced inlining | `#[inline(always)]` | `inline fn` | `always_inline` | `@always_inline` | `#force_inline` | `#Inline(Always)` (D-INLINE-PARAM1), not honored |
 
 Sources: Cargo book profiles (doc.rust-lang.org/cargo/reference/profiles.html);
 Zig 0.15.2 documentation, Build Mode and `@call`; Clang AttributeReference,
@@ -301,7 +301,7 @@ instruction ratio is at or below 1.05.
    up to four words, and an optional of one word, return in registers with no
    heap box. Kernels: `struct_ret`, `option_ret`.
 8. **Inliner** (P-IA, D-OPT-INLINE1, D-INLINE-PARAM1). `#Inline(Always)` is
-   honoured at every level that inlines. Leaf calls in hot loops are inlined
+   honored at every level that inlines. Leaf calls in hot loops are inlined
    past the 40/60 budget when the caller's loop is hot. Kernels:
    `inline_small`, `fib`.
 9. **Jump tables.** A match on an enum or a dense integer range with five or
@@ -357,7 +357,7 @@ requires for a surface added for performance:
 1. Tail calls are not jumps on any level, against D-DROP-ASAP1=A. Repro:
    `probes/k6343/tail1.jet` stops with E3012 on O0, O1 and O2. `tail2.jet`
    stops in `is_even(10000000)`, and `tail3.jet` stops at depth 1,000,000.
-2. `#Inline(Always)` is not honoured (already tracked as P-IA,
+2. `#Inline(Always)` is not honored (already tracked as P-IA,
    inventory:272).
 3. The fixed-width `I64` loop needs more instructions than the `Int` loop
    (`probes/k6343/loop_i64.jet` against `loop_int.jet`).

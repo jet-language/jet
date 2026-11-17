@@ -1221,7 +1221,7 @@ function openLegend() {
         <div class="legend__row"><span class="prio prio-P2">P2</span><span class="legend__desc">Normal — muted</span></div>
         <div class="legend__row"><span class="prio prio-P3">P3</span><span class="legend__desc">Low — faint</span></div>
       </div>
-      <p class="prose" style="margin-top:8px">Only P0/P1 carry colour so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
+      <p class="prose" style="margin-top:8px">Only P0/P1 carry color so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
       <div class="modal__h">Action tag (bottom of a card)</div>
       <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>needs you</span> · <span class="card__lane lane-agent"><span class="pip"></span>an agent's</span> · <span class="card__lane lane-none"><span class="pip"></span>waiting / blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to implement”, “Review”).</p>
     </div></div>`;

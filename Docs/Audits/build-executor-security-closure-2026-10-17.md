@@ -34,7 +34,7 @@ below. Rows 4, 5, 6, 9, 13 and 14 are corrected accordingly, and rows 22 and
 
 Each row names the check, where it is enforced, and the fixture in
 `Jetpack/CLI/Tests/BuildExecutor.jet` that exercises the allowed case and the
-refused neighbour.
+refused neighbor.
 
 | # | Boundary | Enforced in | Allowed / refused fixture |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Findings of the independent review `BuildExecSecReview2` of commit
 | Finding | Status | Fix | Fixture |
 | --- | --- | --- | --- |
 | F1 (Medium): blocking, unbounded host reads of work-tree files | Fixed | `build_secure_read_file` checks the held parent's no-follow entry, opens non-blocking, requires the same regular inode, and reads by chunk up to its limit; `build_read_budget` applies the per-file and per-action limits; `build_publish_sandbox_outputs` reads every output before publishing any. | Rows 6 and 9. |
-| F2 (Medium): timeout and allowed-neighbour fixtures could not pass, and skipped silently | Fixed | Fixtures use Bash builtins only (`while :; do :; done`, the `SECONDS` descendant marker, `read`/`printf` copy), as the Rust tests do; a missing backend fails the fixture. | Rows 4 and 5. |
+| F2 (Medium): timeout and allowed-neighbor fixtures could not pass, and skipped silently | Fixed | Fixtures use Bash builtins only (`while :; do :; done`, the `SECONDS` descendant marker, `read`/`printf` copy), as the Rust tests do; a missing backend fails the fixture. | Rows 4 and 5. |
 | F3 (Medium): probes had no wall-clock budget | Fixed | `build_run_probe_sandboxed` takes a budget; probes pass the 30 s action budget. The status probe has a 5 s budget. | Row 5, "probe budget: …". |
 | F4 (Low–Medium): key and execution read the inputs separately | Fixed for inputs | The snapshot keeps the hashed bytes and the work tree is written from them. The executable is still hashed from one read and executed by path; `jet cc` tools sit under verified read-only Hangar mounts (`CcToolchainDescriptor.jet`), so this remains a known difference for other callers. | Row 22. |
 | F5 (Low): string mount-prefix matching let `//` escape the mount | Fixed | Component comparison and component joins in `build_canonical_tool_path`. The macOS-only argument translation `build_runtime_mount_path` keeps Rust's string join: it only rewrites argument text and Seatbelt still confines reads. | Row 14. |

@@ -15,7 +15,7 @@ Date: 2026-09-29. Card #3243 (CORE-F016). Binary: `jet-debug-snapshot14`.
 1. `Core/reactive/reactive.jet` `effect_run`: the multi-line `if … -> Effect{…}` / `else -> ~e` tail did not parse (E0003 at :95/:96). It is rewritten as `if … -> return Effect{…}` followed by `~e`, the same early-return shape as `effect_run_if`.
 2. `Core/reactive/reactive.jet` `set` and `computed_set`: removed the `if version >= 2147483646 -> return ~sig/~c` cap. It silently dropped every write after about 2^31 updates; `Int` is exact, so the cap guarded nothing and broke the no-lost-update invariant.
 
-Proof: `safe-jet.sh check Core/reactive/reactive.jet` now reports only the two `:46` `effect` errors (before the fix it reported four). **Runtime behaviour of both fixes is unexercised** until the keyword clash is resolved.
+Proof: `safe-jet.sh check Core/reactive/reactive.jet` now reports only the two `:46` `effect` errors (before the fix it reported four). **Runtime behavior of both fixes is unexercised** until the keyword clash is resolved.
 
 ## Criterion 1 — unchanged-value notification, derived updates, owner disposal
 
@@ -80,4 +80,4 @@ fn run() {
 
 - Criterion 2 is met as an accounting.
 - Criterion 3 is met by the ballot draft.
-- Criteria 1 and 4 require running behaviour and stay open.
+- Criteria 1 and 4 require running behavior and stay open.

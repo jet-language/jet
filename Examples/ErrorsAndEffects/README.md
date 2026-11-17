@@ -19,7 +19,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 ## Effects
 
 - [AuditedGateLadder](Effects/AuditedGateLadder.jet) — All audited escapes use the same policy ladder.
-- [AuthorityAllowFlag](Effects/AuthorityAllowFlag.jet) — Application authority, command-line acknowledgement: this file has no package block, so a plain run names the environment and clock reads it makes.
+- [AuthorityAllowFlag](Effects/AuthorityAllowFlag.jet) — Application authority, command-line acknowledgment: this file has no package block, so a plain run names the environment and clock reads it makes.
 - [AuthorityDenied](Effects/AuthorityDenied.jet) — Application authority, a written deny: a deny wins over every grant, including `-A`.
 - [AuthorityDenyFlag](Effects/AuthorityDenyFlag.jet) — Application authority, command-line denial: its golden runs it as `jet run -A --deny=Env authority_deny_flag.jet` (expected/effects/authority_deny_flag.case).
 - [AuthorityPackageGrant](Effects/AuthorityPackageGrant.jet) — Application authority, written grant: a leading package block adds rights under `authority`.

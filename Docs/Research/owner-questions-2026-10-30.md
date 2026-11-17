@@ -19,7 +19,7 @@ Ten questions, one section each, in card order. Each section opens with a short 
 Jet already follows most of these lessons. Probes found five real gaps: SQL and HTML injection through public fields, tasks stalled by OS waits, 192 MiB worker stacks that crash 32 trivial tasks under a 4 GB limit, a `jet fix` that breaks code, and one wrong error text.
 One owner choice remains: how `jet fix` should move callers when a deprecated function's replacement takes different arguments (ballot D-DEPRECATE-INLINE1).
 
-Full catalogue: `Docs/research/2026-10-30-language-release-notes.md`. It covers 25 languages, with a table per language: version, change, how it went in practice with its source, Jet today, and Jet's action and why.
+Full catalog: `Docs/research/2026-10-30-language-release-notes.md`. It covers 25 languages, with a table per language: version, change, how it went in practice with its source, Jet today, and Jet's action and why.
 
 ### Source and method
 
@@ -35,7 +35,7 @@ Full catalogue: `Docs/research/2026-10-30-language-release-notes.md`. It covers 
    - Jet already captures per iteration (probe r04 prints `1`) and checks bounds by default.
 2. **Breaks survive only with a mechanical fix.** Rust 2024 shipped `cargo fix`, Go 1.26 added `//go:fix inline`, and Mojo 1.0 shipped deprecated aliases and fix-its. Zig 0.15's "Writergate" broke every I/O caller with only hand migration.
    - Jet has the rule (#6068), but `jet fix` turned a compiling `double(4)` into a broken `scaled(4)` (r11).
-3. **Withdrawn features died of cost or leaks.** Java string templates were withdrawn, Dart macros cancelled, Go error syntax abandoned, V's autofree is still "avoid using it", and Python 3.14.5 reverted its new GC.
+3. **Withdrawn features died of cost or leaks.** Java string templates were withdrawn, Dart macros canceled, Go error syntax abandoned, V's autofree is still "avoid using it", and Python 3.14.5 reverted its new GC.
    - Jet already avoids these: metaprograms cannot rewrite code, there are no glob imports, and there is no `async`.
 4. **Concurrency must not punish correct code or block silently.**
    - Swift 6's checks flagged correct globals, and 6.2 changed the defaults.
@@ -71,7 +71,7 @@ Already filed, re-confirmed: #6374 (`String + String` gives a number-type error,
 The probes found four real gaps. A missing `}` gets blamed on the wrong block. A compile-time stop points at the `comptime` block, not at the failing line. A panic shows only its innermost frame. One error message suggests a spelling the compiler refuses.
 Two owner choices come from the talk's metaprogram example: whether a house rule's report can be a real error at the bad line, and whether a library error may carry its own link.
 
-Full catalogue: `Docs/research/2026-10-30-blow-error-reporting-talk.md`. It has 33 timestamped rows, each with what Jet does today and what Jet should do.
+Full catalog: `Docs/research/2026-10-30-blow-error-reporting-talk.md`. It has 33 timestamped rows, each with what Jet does today and what Jet should do.
 
 ### Source and method
 
@@ -343,7 +343,7 @@ These do not duplicate #6195, #6029, #6023, #5476, #4195, #6071 or #3600, which 
 **Plain answer.** SOLID is five rules for designing classes. Robert C. Martin
 wrote them up in 2000, and Michael Feathers coined the acronym around 2004.
 The ideas underneath are sound: keep related code together, keep interfaces
-small, make every implementation honour its contract, and depend on what a
+small, make every implementation honor its contract, and depend on what a
 thing does, not on how it is built. Jet should keep those ideas. It should
 get them from the language and from checkable API rules, not from SOLID's
 class rituals. Jet has no inheritance, small traits and effect rows, so most
@@ -391,8 +391,8 @@ Probes ran on dev `59213de00f`. The files are under the lane's
 | Principle | The sound idea | Jet today | What Jet should do |
 |---|---|---|---|
 | **S**ingle responsibility | Code that changes together lives together | The unit is the module and the API area, not the class. Core API Law 8 says "one way to mean it". Pillar 9 (#6367) splits every area into one primitives layer plus a few wrappers, so the mechanism and the convenience change for different reasons. | Apply the rule to API areas through pillar 9's checks. Do not apply it per type: "one reason to change" cannot be checked, and per-class splitting produces the fragments North describes. |
-| **O**pen–closed | You can add behaviour without editing working code | Jet picks per type. Enums are closed: `if x == { … }` must be exhaustive, so a new variant makes the compiler list every site to update. Traits are open: `[Shape]` dispatches dynamically (`s02_dyn.jet` prints `19`). Markers and derives add members without editing the type. | Keep "closed by default, open where a trait is written". It is the honest answer to the expression problem. Fix the gap below, which blocks the most common open extension. |
-| **L**iskov substitution | Every implementation keeps the contract callers rely on | Jet has no inheritance, so the rule becomes "every impl keeps the trait's contract". The effect part is checked: an impl that prints inside a `-[]>` trait method is E0742 (`s01_lsp_effect.jet`). Behaviour is not checked: nothing tests that `compare` is a total order or that `equal` is reflexive. | Keep the mechanical checks; #6281 C11 already asks impls to inherit the trait's effect row. Later, Core traits could ship law tests, such as `Comparable` being transitive. No card yet: Jet has no property-testing tool to hang them on. |
+| **O**pen–closed | You can add behavior without editing working code | Jet picks per type. Enums are closed: `if x == { … }` must be exhaustive, so a new variant makes the compiler list every site to update. Traits are open: `[Shape]` dispatches dynamically (`s02_dyn.jet` prints `19`). Markers and derives add members without editing the type. | Keep "closed by default, open where a trait is written". It is the honest answer to the expression problem. Fix the gap below, which blocks the most common open extension. |
+| **L**iskov substitution | Every implementation keeps the contract callers rely on | Jet has no inheritance, so the rule becomes "every impl keeps the trait's contract". The effect part is checked: an impl that prints inside a `-[]>` trait method is E0742 (`s01_lsp_effect.jet`). Behavior is not checked: nothing tests that `compare` is a total order or that `equal` is reflexive. | Keep the mechanical checks; #6281 C11 already asks impls to inherit the trait's effect row. Later, Core traits could ship law tests, such as `Comparable` being transitive. No card yet: Jet has no property-testing tool to hang them on. |
 | **I**nterface segregation | Callers depend only on the methods they use | Built-in traits are tiny: `Equatable` (`equal`), `Comparable` (`compare`), `Close` (`close`), `Add`/`Sub`/`Mul`/`Div` (one method each), `Encode`/`Decode`. Go makes the same choice ("Interfaces with only one or two methods are common in Go code" [GO]). | Make it a review question for new traits: "Can a caller need only part of this trait?" It fits beside pillar 9's checklist. |
 | **D**ependency inversion | High-level code depends on an abstraction, not on a concrete driver | Two Jet tools do this without frameworks. A trait parameter swaps the provider: `stamp(clock: Clock, …)` runs with a `Fixed` clock (`s04_clock_inject.jet` prints `42 hi`). Effect rows state what a function may touch, and `#Replayable` forces time and randomness through a capability (D-REPLAY1). Jet has no runtime effect handlers: "effects are checked and erased". | Keep it explicit: pass the capability or the trait value. Do not add a container or an ambient injection system; Jet's Law 4 already makes dependencies visible in signatures. |
 
@@ -431,7 +431,7 @@ Unlike SOLID, pillar 9 comes with machine checks (its rules P1–P8 and the
   (`s03_foreign_impl.jet`). The spec's orphan rule allows it, because the
   module owns the trait. Built-in operator traits on `Int` already work
   (`impl Int.Mul(Price)` in `Examples/features/operators/mixed_types.jet`).
-  Without this, the only way to give a built-in type new behaviour is a
+  Without this, the only way to give a built-in type new behavior is a
   wrapper type. That is exactly the boilerplate #6021 is trying to remove.
 
 No owner ballot is needed. The gap is a defect against the existing orphan
@@ -853,7 +853,7 @@ built-in surface:
   [Z-0.14].
 - **0.16** removed `@Type`: "in practice, it was clunky to use for common
   tasks", so it became eight builtins such as `@Int` and `@Struct`. It also
-  deprecated `@cImport` in favour of the build system [Z-0.16].
+  deprecated `@cImport` in favor of the build system [Z-0.16].
 
 The automatic rewrite is what made the renames survivable.
 

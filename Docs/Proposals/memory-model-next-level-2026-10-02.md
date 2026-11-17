@@ -74,7 +74,7 @@ addition to that ballot.
 Today there are three spellings:
 
 ```
-#Unsafe("event cancelled; the ticket admits to nothing") {
+#Unsafe("event canceled; the ticket admits to nothing") {
     consume(b)
 }
 world.remove(kai).drop("this example only needs the generation bump")
@@ -84,7 +84,7 @@ world.remove(kai).drop("this example only needs the generation bump")
 Recommended: one method for every value that owes something.
 
 ```
-ticket.drop("event cancelled; the ticket admits to nothing")
+ticket.drop("event canceled; the ticket admits to nothing")
 ```
 
 The reason string is the audit note, and `jet explain` lists every one.

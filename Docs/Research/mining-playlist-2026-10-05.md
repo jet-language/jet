@@ -119,7 +119,7 @@ Probes ran on release `jet dev-05ea86f65`.
 
 | Finding | Evidence | Outcome |
 |---|---|---|
-| Busy tasks ignore deadlines, cancellation and fairness. `task.race` drains a cancelled busy loser by blocking on it. Plugins already get Wasmtime epoch interruption, so ordinary compiled Jet is the only code a loop can hold forever. | RntfkL8lUY4 12:28–12:48 (Gleam); IxQ586TS8Gw (Riot); Go proposal 24543 (7.8% geomean loop-check cost), Wasmtime PR #3699, HotSpot loop strip mining; `TaskGroup.rs:485-498`, `Scheduler.rs:3956-3959` | D-TASK-SLICE1 on #4637 |
+| Busy tasks ignore deadlines, cancellation and fairness. `task.race` drains a canceled busy loser by blocking on it. Plugins already get Wasmtime epoch interruption, so ordinary compiled Jet is the only code a loop can hold forever. | RntfkL8lUY4 12:28–12:48 (Gleam); IxQ586TS8Gw (Riot); Go proposal 24543 (7.8% geomean loop-check cost), Wasmtime PR #3699, HotSpot loop strip mining; `TaskGroup.rs:485-498`, `Scheduler.rs:3956-3959` | D-TASK-SLICE1 on #4637 |
 | The ratified strong pause (D-TASK-PAUSE-TIER1=E) is unbuilt: `pause(mode:)` is E0764 and no engine emits the back-edge check. | languages-b probe B | #4636 |
 | `http.serve(addr, lambda)` and router serve run an older server: one unbounded thread per connection, no panic isolation, no shutdown, `exit(1)` on bind failure. Accept errors stop or spin the server. | v3-H2 B20, B21; `HTTPServer.rs:6898-6941`, `2280-2288` | #4635 (refs #3665, #3078) |
 | Every stdout write flushes, even into files and pipes, so `stdout.flush()` does nothing. The cost is unmeasured. The native image runtime prints text and newline as two syscalls. | i_wDa2AS_8w 0:43; `Term.rs:152-177`; `Runtime.jet:289-308` | #4634; note on #4013 |
@@ -184,7 +184,7 @@ operations done). Every new card carries the tag `mine-2026-10-05`.
 | #4634 | implement | Measure, then fix, the per-write stdout flush | — |
 | #4635 | implement | Lambda and router `serve` bypass the supervised server | — |
 | #4636 | implement | Build the ratified strong pause | — |
-| #4637 | decide | Busy tasks honour cancellation, deadlines and fair turns at loop turns | D-TASK-SLICE1 |
+| #4637 | decide | Busy tasks honor cancellation, deadlines and fair turns at loop turns | D-TASK-SLICE1 |
 
 The seven ballots are open. D-GAME-SCREENS1 sits on the existing card #238
 rather than a new card.
@@ -251,7 +251,7 @@ are not new work.
   `require`; comment edits that do not invalidate importers (Unison
   43:41–44:10, early cutoff); the supervised service plane (D-SERVICE1,
   delivery, snapshots, generation handoff instead of hot reload); `#Context`
-  providers instead of full effect handlers; and no async colouring.
+  providers instead of full effect handlers; and no async coloring.
 - **Systems** (systems-perf, S1, S2): atomics without memory-order arguments
   (Blow, D-ATOMIC-WIDTH1), inline assembly that names parameters, DCE-safe
   benchmarks (D-BENCH-KEEP1), declaration-driven reflection, typed time

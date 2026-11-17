@@ -53,7 +53,7 @@ static void renders(Error *e,const char *golden) {
 }
 static const char *goldens[]={
     "invalid HTTP method","invalid HTTP URL","invalid HTTP header","invalid HTTP status",
-    "HTTP body was already consumed","invalid HTTP framing","unsupported HTTP body encoding","HTTP operation cancelled",
+    "HTTP body was already consumed","invalid HTTP framing","unsupported HTTP body encoding","HTTP operation canceled",
     "HTTP body exceeds 1048576-byte limit","HTTP name resolution failed for payload","HTTP connection failed for payload",
     "HTTP TLS failed during payload","HTTP timeout during payload","HTTP proxy failed during payload",
     "HTTP redirect failed: payload","unsupported HTTP protocol payload","HTTP I/O failed during payload","payload",

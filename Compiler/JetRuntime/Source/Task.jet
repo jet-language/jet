@@ -735,13 +735,13 @@ task_live_unlink: fn(child: I64) {
 }
 
 // Whether a live task still owes its cancel: it has not finished and
-// nothing has cancelled it.
+// nothing has canceled it.
 task_live_uncancelled: fn(child: I64) -> Bool {
     sync_load(wrapping(child + I64{24})) == I64{0} && sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{16})) == I64{0}
 }
 
 // Cancels every live task that owes its cancel. The controls are taken
-// under the lock and cancelled outside it, since a cancel runs callbacks
+// under the lock and canceled outside it, since a cancel runs callbacks
 // that can start or drop tasks.
 task_live_cancel: fn(root: I64) {
     sync_mutex_lock(wrapping(root + I64{240}))
@@ -792,14 +792,14 @@ task_live_unfinished: fn(root: I64) -> I64 {
     count
 }
 
-// How long the exit waits for cancelled tasks to unwind: 1 s.
+// How long the exit waits for canceled tasks to unwind: 1 s.
 TASK_EXIT_DRAIN_NS: I64{1000000000}
 
 // The process exit's task step when run returns (Main.jet jet_rt_main):
 // cancel every live task, then let them run until none is queued, ready or
 // running, or TASK_EXIT_DRAIN_NS of monotonic time has passed. A waiting
 // task unwinds at its wait and runs its cleanup; one that reaches no wait
-// point in that time is abandoned. A task started meanwhile is cancelled on
+// point in that time is abandoned. A task started meanwhile is canceled on
 // the next pass. Returns how many tasks have not finished.
 #Export(c) jet_rt_task_exit_settle: fn(_unused: I64) -> I64 {
     root: scheduler_root_required()

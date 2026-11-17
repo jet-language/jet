@@ -4,7 +4,7 @@ Date: 2026-09-29. Card #3247 (CORE-F020). Research evidence only. This claims no
 
 ## Question
 
-For each selected baseline and library peer: what are the archived pin and the current identity, which material additions, removals and default changes lie between them (labelled stable, preview or optional), and where does each useful delta route?
+For each selected baseline and library peer: what are the archived pin and the current identity, which material additions, removals and default changes lie between them (labeled stable, preview or optional), and where does each useful delta route?
 
 ## Inputs
 
@@ -61,4 +61,4 @@ Labels: **S** means stable GA, **P** preview or release candidate, **I** incubat
 - **Criterion 4** (route, don't claim parity): met by the route column.
 - **Criterion 5** (explicit unknowns): met.
 
-Card verdict: PARTIAL, on criterion 2 only. Closing it needs a per-peer export differ, the Glaze analogue of `diff -rq include/` extended to symbols, for 13 ecosystems. That is a bounded but large follow-up. It is not re-derivable from release notes.
+Card verdict: PARTIAL, on criterion 2 only. Closing it needs a per-peer export differ, the Glaze analog of `diff -rq include/` extended to symbols, for 13 ecosystems. That is a bounded but large follow-up. It is not re-derivable from release notes.

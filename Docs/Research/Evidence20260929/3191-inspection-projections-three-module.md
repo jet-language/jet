@@ -60,7 +60,7 @@ LSP: `python3 $JET_STATE_ROOT/scratch/Closer07/lsp/drive_inspect3.py $JET_STATE_
    - `rights` labels itself well: `scope: explicit-file`, `evidence: checked_static`, `runtime_observation: not_run`, `provenance_scope: checked_semantic_index`.
    - `claims` → `ok:false`, `capability_relation.status: "unavailable"` with the reason ("hardening-manifest.json is absent").
 5. **Origins (crit 5).**
-   - `inspect types` lists `Vec3` operator rows ("Float * Vec3 -> Vec3 mirror of Vec3.Mul<Float>", …) for a program that has no `Vec3`. These are synthetic Core rows from `register_synthetic_operators` (`crates/jet-foundation/src/Traits.rs:2687-2730`, span 0..0), shown with no origin marker and labelled "explicit hook" like source rows.
+   - `inspect types` lists `Vec3` operator rows ("Float * Vec3 -> Vec3 mirror of Vec3.Mul<Float>", …) for a program that has no `Vec3`. These are synthetic Core rows from `register_synthetic_operators` (`crates/jet-foundation/src/Traits.rs:2687-2730`, span 0..0), shown with no origin marker and labeled "explicit hook" like source rows.
    - The user's own `Item` has no row.
    - `structure` includes a Core liveness fact (`Core/math/math.jet` 4822..4823 "parameter is never read") among the user's facts. It keeps a source path but has no imported/Core origin field.
 6. **Double document (crit 6).** On the signature-edit variant, `inspect structure --json` wrote two JSON documents to stdout: first `ok:true` with structure facts, then `ok:false` with the E0104 reports.

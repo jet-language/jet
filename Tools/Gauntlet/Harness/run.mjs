@@ -3145,7 +3145,7 @@ function withCaseEnv(env, argv) {
 // twin (`tool.jet`), both paths under `root` (the repository), with the
 // case's `args` and `env` (variables over the harness environment and over
 // the dev shell's, which JetEnv applies: the case's always win, and JetEnv
-// itself never sees them, so what a case proves is the program's behaviour);
+// itself never sees them, so what a case proves is the program's behavior);
 // each must exit with the case's `exit` (0 when it names none) and do the
 // job. A case with a `check` (a Jet program in the entry) proves the job:
 // after each program, `jetBin CHECK STDOUT` runs in the case directory, with

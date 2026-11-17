@@ -426,9 +426,9 @@ Matched-work definitions, result/limitation sections, receipt identity fields, l
 
 ### Package, environment, native-evaluator, and operating-system research
 
-Alternatives, reusable source/authority boundaries, native-versus-index conformance distinction, licence limits, live/model/schema/fixture completion classes, and retained product rationale. Historical commands and product states were not exercised.
+Alternatives, reusable source/authority boundaries, native-versus-index conformance distinction, license limits, live/model/schema/fixture completion classes, and retained product rationale. Historical commands and product states were not exercised.
 
-**Reusable method:** Separate a model or index from its consuming protocol; compare complete graph/output meaning rather than a convenient projection; isolate licence and product decisions from implementation evidence; show beginner and expert paths using one mechanism.
+**Reusable method:** Separate a model or index from its consuming protocol; compare complete graph/output meaning rather than a convenient projection; isolate license and product decisions from implementation evidence; show beginner and expert paths using one mechanism.
 
 **Disposition:** Research, spec compliance, first-principles, and pragmatism already own the questions. Retain unique rationale; use selected boundary examples in A2/A4.
 

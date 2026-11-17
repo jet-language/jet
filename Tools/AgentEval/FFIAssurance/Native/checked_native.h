@@ -65,7 +65,7 @@ int fa_document_close(fa_document *document);
 
 /* Deliberately non-admitted edges return a typed rejection without touching a
  * foreign pointer. This keeps raw assembly/allocator/linker paths observable
- * instead of silently labelling them safe. */
+ * instead of silently labeling them safe. */
 int fa_adversarial_case(enum fa_adversarial_case which, uint64_t *observation);
 
 /* Stable scalar/string bridge used by the safe Jet caller fixture. */

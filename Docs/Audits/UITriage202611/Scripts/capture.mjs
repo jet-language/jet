@@ -1,6 +1,6 @@
 // node capture.mjs TREE TRI.json OUTDIR : re-runs every plain/lint/project FAIL row of TRI the way testkit's
 // ui runner does (staged tests/ui + tests/ui_lint, `jet check [--verbose] PATH`, rendered-only stderr,
-// path normalisation) and writes the full actual stream to OUTDIR/<fixture>.actual, because the
+// path normalization) and writes the full actual stream to OUTDIR/<fixture>.actual, because the
 // testkit diff keeps only 37 lines. Rows with `// @directive` lines are skipped (listed as skipped).
 // Output that depends on the host (network, cargo, C toolchain) goes to <fixture>.actual.envdiff, so
 // blocks.mjs falls back to the suite diff for those rows.

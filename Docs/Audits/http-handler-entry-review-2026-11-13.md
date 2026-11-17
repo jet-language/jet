@@ -45,7 +45,7 @@ web package. Core gains four public items, each replacing a private call:
 | R4 | `Compiler/JetSema/Source/Sema/Calls/Http.jet:400-423` | The handler capture check runs on that conversion (`SemaSendCrossing.HTTPHandler`). |
 | P1 | `wrap/main.jet`, `jet run` | A list of stored route functions, wrapped in a lambda where an `HTTPHandler` is expected, answers a parsed `GET /hi` with `200`. The first two attempts were refused: E0120 (`routes` must be owned, `&&[Route]`, to be captured by a stored lambda) and E2404 (the wrapper's implicit `Err!` cannot flow into `HTTPError`; fixed with `-> HTTPHandler Never!`). |
 | P2 | `diag/main.jet`, `jet run` | A struct with `impl Diagnostic { code: "E2804" … }` words a clash; `panic` prints `Stop [E3001]: panic: error[E2804]: Two routes both match …`, then `why:` and `fix:` lines, and exits 70. |
-| P3 | `clash/main.jet`, `jet check` | Two `app.get("/a/:id", …)` rows on one `web.app()`: E2804 `Two routes both match \`GET /a/:id\``, labelled `first registered here`. |
+| P3 | `clash/main.jet`, `jet check` | Two `app.get("/a/:id", …)` rows on one `web.app()`: E2804 `Two routes both match \`GET /a/:id\``, labeled `first registered here`. |
 | P4 | `clash_computed/main.jet`, `jet check` | The same clash, with the second pattern built at run time (`pattern = "{pattern}:id"`): `ok: main.jet has no problems`. |
 | R5 | `Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:417-440` | Route registrations refuse an interpolated route literal (E2805) and check a constant pattern; a non-constant argument gets no pattern and is not checked. |
 

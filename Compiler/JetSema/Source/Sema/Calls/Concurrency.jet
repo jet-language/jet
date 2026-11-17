@@ -36,7 +36,7 @@ sema_call_concurrency_check_labels: fn(method: String, args: [CallArg], span: Sp
             .Val(value) -> value.span
             .None -> argument.span
         }
-        diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labelled `{label}`", "a label binds an argument to the parameter of that name", if method == "para_map" -> "`para_map` accepts `limit` on its optional second argument" else -> "`{method}` takes no labelled arguments"))
+        diagnostics.push(sema_error("E0764", label_span, "`{method}` has no parameter labeled `{label}`", "a label binds an argument to the parameter of that name", if method == "para_map" -> "`para_map` accepts `limit` on its optional second argument" else -> "`{method}` takes no labeled arguments"))
     }
 }
 
@@ -265,7 +265,7 @@ sema_call_concurrency_check_sender: fn(receiver: Expr, receiver_value: TExpr, ar
     }
     sema_function_reactive_note_channel(context, updated_args[0].expr, payload_ty)
     lowered := [TExpr]{payload}
-    // A refused send (the receivers are gone, or the task was cancelled
+    // A refused send (the receivers are gone, or the task was canceled
     // while it waited) fails with core.prelude's `SendError<T>`, whose
     // `value` is the payload handed back unsent.
     send_error: Type.Apply{name: sema_core_source_type_name(program, "core.prelude", "SendError"), args: [Type]{payload_ty}}

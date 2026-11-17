@@ -780,8 +780,8 @@ parser_report_unclosed: fn(state: &JetParserState, opener: Token, cutoff: String
     }
     what: if line > 0 -> "`{open}` opened on line {line} is never closed" else -> "this `{open}` is never closed"
     diagnostic: diagnostic_from_registry("E0083", Val(opener.span), what, "Every `{open}` needs a matching `{close}`, but {cutoff} came first", "Add `{close}` where the {construct} ends")
-    labelled: diagnostic_with_label(diagnostic, Span{start: at, end: at}, "{cutoff} comes before the closing `{close}`")
-    state.diagnostics.push(diagnostic_with_edit_grade(labelled, TextEdit{span: Span{start: at, end: at}, new_text: close}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
+    labeled: diagnostic_with_label(diagnostic, Span{start: at, end: at}, "{cutoff} comes before the closing `{close}`")
+    state.diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: at, end: at}, new_text: close}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
 }
 
 parser_skip_semicolons: fn(state: &JetParserState) Never! {

@@ -20,7 +20,7 @@ The plan holds the status in a `core.reactive` `Signal`. `core.reactive` does no
 - `slow_save` (sleeps 500 ms);
 - `failure_label(TaskFailure)`.
 
-`run()` exercises five sections: disabled click; duplicate click while Running (explicit guard); domain error; `task.cancel()` then join; and a `task.group` whose pending job is cancelled and joined before the group ends.
+`run()` exercises five sections: disabled click; duplicate click while Running (explicit guard); domain error; `task.cancel()` then join; and a `task.group` whose pending job is canceled and joined before the group ends.
 
 | tier | command | result |
 |---|---|---|

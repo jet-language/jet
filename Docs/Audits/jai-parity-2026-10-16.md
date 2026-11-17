@@ -100,7 +100,7 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 5. **No `#On` code.** The ratified hook stages (D-HOOK-STAGES1) have no lexer, parser or registry entries yet. The only shipped compiler hook is the `JET_COMPILER_EXTENSION` post-check plugin that D-HOOK-STAGES1 retires (#4760).
 6. **No per-scope check removal.** `#Unsafe` keeps bounds checks, and D-OOBPROOF1 elides a check only when it is proved unneeded. Jai's `#no_abc` has no Jet form; D-JAI-BUILDOPT1 proposes `#Unchecked(...)` inside `#Unsafe`.
 7. **D-HOOK-STAGES1 has no spec entry.** Tower records D-HOOK-STAGES1=A as ratified on 2026-10-07 (card #3520), but `Docs/spec/syntax-decisions.md` has no entry for it, and the 2026-10-07 metaprogramming report still calls it open. #3520 owns the spec text.
-8. **`scope.guard` already runs arbitrary end-of-block work.** `core.mem.scope.guard` ships (`Examples/features/errors/scope_guard.jet`) beside `defer close(^x)`. D-JAI-DEFER1 option A retires it in favour of general `defer`, keeping one mechanism.
+8. **`scope.guard` already runs arbitrary end-of-block work.** `core.mem.scope.guard` ships (`Examples/features/errors/scope_guard.jet`) beside `defer close(^x)`. D-JAI-DEFER1 option A retires it in favor of general `defer`, keeping one mechanism.
 9. **Five Jai conveniences already had Jet forms.** `..Any` (D-ANY-JAI1), `xx` (D-SHAPE-CONVERT1), bucket arrays (`Pool<T>`/`Id<T>`), custom entry symbols (D-TARGET-SURFACE1) and C++ methods (D-FFI-CPP1) are covered; the first ballot draft re-proposed them.
 
 ### Correction, 2026-11-10: C08 is partial, not shipped
@@ -390,7 +390,7 @@ Inside ordinary code, `#run` executes any procedure at compile time. `#insert` s
 | Bake raw bytes | `#run add_global_data(bytes, .READ_ONLY)` | Puts arbitrary bytes, such as a PNG, in a data segment and returns the slice. | The Way to Jai `book/30B:827-863`; Tsoding `8_5L8yVHcII` 00:41:03 |
 | Phase query | `#compile_time` | True while executing at compile time. | Appendix C |
 | Constant query | `is_constant(expr)` | True if the expression reduces at compile time. The compiler runs bytecode to decide, so the answer is guaranteed language semantics, not an optimizer accident. | Blow `b5ATngfKQP4` 00:16:06, 00:34:50 |
-| Compile-time assert | `#assert cond "msg";` | Fails the build. In 2014 it was introduced as "a flavour of run", so the condition can call any procedure, even an interactive game. | The Way to Jai `book/20A:72-83`; Blow `UTqZNujQOlA` 00:51:16–00:52:45 (whisper) |
+| Compile-time assert | `#assert cond "msg";` | Fails the build. In 2014 it was introduced as "a flavor of run", so the condition can call any procedure, even an interactive game. | The Way to Jai `book/20A:72-83`; Blow `UTqZNujQOlA` 00:51:16–00:52:45 (whisper) |
 | Static if | `#if cond { … } else { … }`, `ifx` | Evaluated after analysis. The false branch is parsed but not type-checked, so unknown names there are not reported. Re-evaluated per polymorph instance. | Blow `iUYZNbUKVAc` 01:16:23–01:30:00 |
 | Compile-time-only procedures | `#compiler` | Interfaces with the compiler. Calling one at runtime fails with "attempt to call compile-time procedure at runtime". | Appendix C; Tsoding `BKvQXmEmDjU` 00:43:33 |
 | Bytecode dump | `#dump` on a procedure | Prints its bytecode and basic blocks. | `book/20A:175-182` |
@@ -434,7 +434,7 @@ Blow's guidance: "use compile-time execution only for what cannot be done at run
 
 - String generation came first. "Body text" returned a string that replaced a procedure or struct body (2015–2019). Generated strings were saved to a debug file so errors and the debugger point at real lines (`2IBr0XZOPsk` 00:26:50; `59lKAlb6cRg` 01:02:14).
 - Pre-parsed tree insertion was wanted from 2016 and still on the roadmap in 2023 (`jjCfAg_gtDw` 00:04:36).
-- Constructors and destructors were tried in 2017 and removed in 2019 in favour of `defer` and macros (`4_ODvZ01CjU` 00:10:50).
+- Constructors and destructors were tried in 2017 and removed in 2019 in favor of `defer` and macros (`4_ODvZ01CjU` 00:10:50).
 
 ### 1.4 The compiler message loop
 
@@ -617,7 +617,7 @@ The complete printed set from The Way to Jai (`examples/30/30.4_build_options.ja
 | Misc | `-no_cwd`, `-version`, `-report_poly` |
 | Developer (`jai -- help`) | `import_dir`, `meta`, `-no_jobs`, `-randomize`, `-seed n`, `-extra`, `-chaos` |
 
-A file may start with `#!` and run as a script; the compiler parses its own arguments so behaviour matches across operating systems (Blow `y-d6GXNsbX4` 00:09:27–00:14:10).
+A file may start with `#!` and run as a script; the compiler parses its own arguments so behavior matches across operating systems (Blow `y-d6GXNsbX4` 00:09:27–00:14:10).
 
 ### 1.7 Context and runtime hooks
 

@@ -133,7 +133,7 @@ run: fn() {
     }
 
     // Real host calls. Result branches below preserve cancellation and failure
-    // rather than marking a cancelled service as a completed save.
+    // rather than marking a canceled service as a completed save.
     _caps: battery.host_capabilities()
     _filter: battery.text_filter()
     _rights: battery.fs_rights()
@@ -142,7 +142,7 @@ run: fn() {
     if battery.file_filter("Notes", ["jet", "md"], ["text/plain"]) == {
         .Ok(filter) -> { print("file filter ready: {filter.extensions.len()} extensions") }
         .Err(_) -> {
-            error_state: battery.mark_error(edited_state, "file filter cancelled or failed")
+            error_state: battery.mark_error(edited_state, "file filter canceled or failed")
             print("file filter outcome: {battery.status_label(error_state)}")
         }
     }
@@ -157,7 +157,7 @@ run: fn() {
                     opened_body: fs.read(opened_path.path) ?? panic("read selected note")
                     print("open dialog files: {selection.files.len()} scalars: {text.scalar_count(opened_body)}")
                 }
-                .Err(_) -> print("open dialog outcome: cancelled or failed")
+                .Err(_) -> print("open dialog outcome: canceled or failed")
             }
             if battery.save_file(save_request) == {
                 .Ok(selection) -> {
@@ -169,28 +169,28 @@ run: fn() {
                     print("editor status after save: {battery.status_label(saved_state)} ({status.get()})")
                 }
                 .Err(_) -> {
-                    error_state: battery.mark_error(edited_state, "save dialog cancelled or failed")
+                    error_state: battery.mark_error(edited_state, "save dialog canceled or failed")
                     print("save dialog outcome: {battery.status_label(error_state)}")
                 }
             }
         }
-        .Err(_) -> print("filesystem grant outcome: cancelled or failed")
+        .Err(_) -> print("filesystem grant outcome: canceled or failed")
     }
     if battery.write_clipboard(battery.selected_text(battery.body_of(edited_state), battery.selection_of(edited_state))) == {
         .Ok(receipt) -> { print("clipboard write characters: {receipt.characters}") }
-        .Err(_) -> print("clipboard write outcome: cancelled or failed")
+        .Err(_) -> print("clipboard write outcome: canceled or failed")
     }
     if battery.read_clipboard() == {
         .Ok(value) -> { print("clipboard read scalars: {text.scalar_count(value.text)}") }
-        .Err(_) -> print("clipboard read outcome: cancelled or failed")
+        .Err(_) -> print("clipboard read outcome: canceled or failed")
     }
     if battery.poll_ime() == {
         .Ok(_) -> { print("IME poll completed (event may be absent)") }
-        .Err(_) -> print("IME poll outcome: cancelled or failed")
+        .Err(_) -> print("IME poll outcome: canceled or failed")
     }
     if battery.poll_drag_drop() == {
         .Ok(_) -> { print("drag/drop poll completed (event may be absent)") }
-        .Err(_) -> print("drag/drop poll outcome: cancelled or failed")
+        .Err(_) -> print("drag/drop poll outcome: canceled or failed")
     }
     if battery.host_shortcut() == {
         .Ok(shortcut) -> {
@@ -199,17 +199,17 @@ run: fn() {
                 .Ok(binding) -> {
                     if battery.register_shortcut(binding) == {
                         .Ok(_) -> { print("shortcut registration completed") }
-                        .Err(_) -> print("shortcut registration outcome: cancelled or failed")
+                        .Err(_) -> print("shortcut registration outcome: canceled or failed")
                     }
                 }
-                .Err(_) -> print("shortcut binding outcome: cancelled or failed")
+                .Err(_) -> print("shortcut binding outcome: canceled or failed")
             }
             if battery.dispatch_shortcut(shortcut.copy()) == {
                 .Ok(_) -> { print("shortcut dispatch completed") }
-                .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
+                .Err(_) -> print("shortcut dispatch outcome: canceled or failed")
             }
         }
-        .Err(_) -> print("host shortcut outcome: cancelled or failed")
+        .Err(_) -> print("host shortcut outcome: canceled or failed")
     }
     if battery.accessibility_metadata("Editor", "Multiline note editor") == {
         .Ok(metadata) -> {
@@ -226,10 +226,10 @@ run: fn() {
             print("accessibility mount commands: {accessibility_backend.commands().len()}")
             if battery.attach_accessibility(a11y_node, metadata) == {
                 .Ok(_) -> { print("host accessibility attachment completed") }
-                .Err(_) -> print("accessibility attachment outcome: cancelled or failed")
+                .Err(_) -> print("accessibility attachment outcome: canceled or failed")
             }
         }
-        .Err(_) -> print("accessibility metadata outcome: cancelled or failed")
+        .Err(_) -> print("accessibility metadata outcome: canceled or failed")
     }
     print("menu: File > Open | Save | Quit; tray fallback is explicit in the shared tree")
     print("mobile gate: Android/iOS adapters, touch, and native IME lifecycle remain core work")

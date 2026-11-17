@@ -336,9 +336,9 @@ The current [builtin status table](https://snix.dev/docs/components/eval/builtin
 
 This supports one planning inference: evaluator semantics alone are not the main finish line. Nixpkgs fidelity, string contexts, derivation-store effects, fetchers, and differential testing are the long pole.
 
-#### Licence and reuse posture
+#### License and reuse posture
 
-Snix uses a deliberate licence split. Its [repository licence statement](https://git.snix.dev/snix/snix) says:
+Snix uses a deliberate license split. Its [repository license statement](https://git.snix.dev/snix/snix) says:
 
 - All Snix crates use GPL-3.0.
 - Protocol Buffer definitions use MIT.
@@ -382,7 +382,7 @@ The estimates below use one engineer-month as one experienced Rust/Nix engineer 
 
 **Reach.** A genuinely complete evaluator, derivation model, fetch layer, and builder can approach all pure nixpkgs expressions, arbitrary overlays, overrides, and flakes. No honest percentage applies before a whole-nixpkgs differential corpus exists. Evaluation alone does not realize uncached outputs: a native builder is also required for packages absent from substituters.
 
-**Cannot do initially.** The narrow 12-24 engineer-month slice cannot claim general nixpkgs fidelity. It will still miss evaluator/store builtins, import-from-derivation, dynamic derivations, impure inputs, some string-context behavior, and unsupported builders. Restricted sources remain subject to their licence and authentication rules.
+**Cannot do initially.** The narrow 12-24 engineer-month slice cannot claim general nixpkgs fidelity. It will still miss evaluator/store builtins, import-from-derivation, dynamic derivations, impure inputs, some string-context behavior, and unsupported builders. Restricted sources remain subject to their license and authentication rules.
 
 **Trust.** Pin the nixpkgs source revision and content hash. Treat evaluation as local computation. For substituted outputs, verify the same upstream cache signatures and NAR hashes as the index path. For local builds, Jet's recipe, sandbox, provenance, receipt, and trust policies become authoritative.
 
@@ -392,7 +392,7 @@ The estimates below use one engineer-month as one experienced Rust/Nix engineer 
 
 **Disk and binary.** Budget 15-40 MB of stripped binary growth for a broad evaluator and compatibility runtime, plus the 38.19 MB compressed nixpkgs source archive when local evaluation is used, plus package closures. A builder adds tools and sandbox assets beyond that budget.
 
-**Cost and risk.** Budget 12-24 engineer-months for a deliberately narrow repo/common-attr evaluator and 36-72 engineer-months for broad evaluator, derivation, fetcher, store-effect, and differential fidelity. A general builder is additional. Snix is the serious prior art, but its unstable APIs and GPL-3.0 crate licence prevent casual embedding. Reuse needs an owner/legal decision; the MIT protocol definitions and Snix as an external oracle are safer immediate uses.
+**Cost and risk.** Budget 12-24 engineer-months for a deliberately narrow repo/common-attr evaluator and 36-72 engineer-months for broad evaluator, derivation, fetcher, store-effect, and differential fidelity. A general builder is additional. Snix is the serious prior art, but its unstable APIs and GPL-3.0 crate license prevent casual embedding. Reuse needs an owner/legal decision; the MIT protocol definitions and Snix as an external oracle are safer immediate uses.
 
 ### 2. Signed index-driven substitution without evaluation
 
@@ -492,7 +492,7 @@ Do not mint these from this report. Proposed order and one-line scopes:
 4. **Host-store-independent Nix closure projection** — Run Hangar-backed Nix outputs with their exact loaders and libraries when `/nix/store` is absent, with Linux proof and explicit unsupported-platform behavior.
 5. **Jet repository `env.jet` no-Nix dogfood gate** — Cold-realize all 28 current selections, build/test Jet, restart offline, and reconcile exact closure disk use on a machine with no Nix.
 6. **Jet default/full shell semantic translation** — Replace repo-local wrappers, `jetR`, hooks, output selection, platform conditionals, and library-path composition with ratified Jet-native environment mechanisms; prove default then `.#full` parity.
-7. **Native Nix evaluator conformance program** — Decide Snix reuse/licence posture, expand the bounded evaluator against a whole-nixpkgs differential corpus, and publish measured coverage and unsupported semantics.
+7. **Native Nix evaluator conformance program** — Decide Snix reuse/license posture, expand the bounded evaluator against a whole-nixpkgs differential corpus, and publish measured coverage and unsupported semantics.
 8. **Native Nix derivation builder** — After evaluator demand is measured, realize uncached derivations and overlays inside Jet's sandbox with the same Hangar identity, receipts, and diagnostics.
 
 Cards 1-5 form the immediate dogfood milestone. Cards 7-8 are the long fidelity program. Card 6 may require owner ballots for user-visible environment syntax; the cache/index cards do not authorize new Jet syntax.

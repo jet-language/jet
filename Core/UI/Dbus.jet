@@ -20,7 +20,7 @@ use {
 // are negotiated, so none ride along.
 //
 // The portal half reads org.freedesktop.appearance through
-// org.freedesktop.portal.Settings (the colour scheme, the accent colour and
+// org.freedesktop.portal.Settings (the color scheme, the accent color and
 // the contrast preference) and follows its SettingChanged signals and the
 // portal's restarts. It also asks the person for the camera and the
 // location (org.freedesktop.portal.Camera and .Location) and reads their
@@ -1104,7 +1104,7 @@ hex_digit: fn(b: Int) -> Int {
 
 // ---- the portal's appearance settings
 
-// The colour scheme the desktop prefers, numbered as the portal's
+// The color scheme the desktop prefers, numbered as the portal's
 // color-scheme setting.
 #[Specified, Layout(U8)]
 PortalScheme: enum {
@@ -1289,7 +1289,7 @@ portal_location: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> PortalAns
 }
 
 // A location the portal reported: degrees north and east, and how far off
-// it may be, in metres (0 when the portal did not say).
+// it may be, in meters (0 when the portal did not say).
 PortalPlace: struct {
     latitude: Float,
     longitude: Float,
@@ -1615,14 +1615,14 @@ FileFilter: struct {
 // Shows the portal's open dialog, titled `title`, offering `filters` (the
 // first one chosen), and waits at most `timeout_ns` for the person. Gives
 // the `file://` URI of the file they chose, for the caller to read, or None
-// when they cancelled or chose nothing in time.
+// when they canceled or chose nothing in time.
 portal_open_file: fn(c: &DbusConnection, title: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "OpenFile", title, [DbusValue]{}, filters, timeout_ns)
 }
 
 // Shows the portal's open dialog, titled `title`, asking for a folder, and
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of the
-// folder they chose, or None when they cancelled or chose nothing in time.
+// folder they chose, or None when they canceled or chose nothing in time.
 portal_open_folder: fn(c: &DbusConnection, title: String, timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "OpenFile", title, [DbusValue]{entry_of("directory", DbusValue.Bool(true))}, [FileFilter]{}, timeout_ns)
 }
@@ -1631,7 +1631,7 @@ portal_open_folder: fn(c: &DbusConnection, title: String, timeout_ns: Int) -[Net
 // `suggested` filled in and `filters` offered (the first one chosen), and
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of
 // the file they chose, for the caller to write, or None when they
-// cancelled or chose nothing in time.
+// canceled or chose nothing in time.
 portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     file_dialog(c, "SaveFile", title, [DbusValue]{entry_of("current_name", DbusValue.Text(suggested))}, filters, timeout_ns)
 }
@@ -2399,7 +2399,7 @@ repeat: fn(text: String, times: Int) -> String {
     bus_says(bus.server, later)
     got: signals(c, 1000000000) ?? panic("signals: {err}")
     assert_eq(got.len(), 2)
-    assert(apply_signal(look, got[0].copy()), "the colour scheme changed")
+    assert(apply_signal(look, got[0].copy()), "the color scheme changed")
     assert_eq(look.scheme, PortalScheme.Light)
     assert(!apply_signal(look, got[0].copy()), "the same scheme again changes nothing")
     assert(!apply_signal(look, got[1].copy()), "a restart is no setting")
@@ -2857,7 +2857,7 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(layout_tree(heard[4].body[1]), "Copy[Control+c]")
 }
 
-// An entry labelled `label` the person can choose, with the shortcut keys
+// An entry labeled `label` the person can choose, with the shortcut keys
 // `shortcut`.
 menu_item: fn(label: String, shortcut: [String]) -> MenuEntry {
     MenuEntry{label: label, enabled: true, separator: false, shortcut: shortcut, children: [MenuEntry]{}}

@@ -2778,11 +2778,11 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         workflows[index].history.push("sleep:{nanos}")
         workflows[index].status = TaskStatus.Running
     } else if payload.starts_with("workflow-wait-sleep-cancelled:") {
-        run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-cancelled:"), "cancelled sleep run id")
-        if run_id < 1 -> return Err(state_error("workflow cancelled sleep run id is invalid"))
-        index: workflow_index_of(workflows, run_id, "cancelled sleep")
+        run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-cancelled:"), "canceled sleep run id")
+        if run_id < 1 -> return Err(state_error("workflow canceled sleep run id is invalid"))
+        index: workflow_index_of(workflows, run_id, "canceled sleep")
         if workflows[index].outcome != None || !workflow_last_is_sleep(workflows[index].history) {
-            return Err(state_error("workflow cancelled sleep is out of order"))
+            return Err(state_error("workflow canceled sleep is out of order"))
         }
         workflows[index].history.push("sleep-cancelled")
         workflows[index].status = TaskStatus.CancelRequested
@@ -3036,7 +3036,7 @@ workflow_find_run: fn(workflows: [TreeWorkflowState], run_id: Int) -> Int? Never
     None
 }
 
-// A recorded sleep replays its recorded end: a cancelled or deadline-blown
+// A recorded sleep replays its recorded end: a canceled or deadline-blown
 // sleep fails again without waiting.
 workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! {
     nanos: duration.ns
@@ -3048,7 +3048,7 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.CancelRequested
                 state.value.outcome = Val(TaskOutcome.Failed(.Cancelled))
-                return Err(ServiceError.Policy("workflow sleep was cancelled"))
+                return Err(ServiceError.Policy("workflow sleep was canceled"))
             }
             if state.value.history[cursor] == "sleep-deadline" {
                 state.value.replay_cursor = cursor + 1
@@ -3060,12 +3060,12 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
         return Ok()
     }
     workflow_append_handle(workflow, "workflow-wait-sleep:{workflow.run_id}:{nanos}")
-    // The wait ends in a code instead of unwinding, so a cancelled or
+    // The wait ends in a code instead of unwinding, so a canceled or
     // deadline-blown sleep is recorded before the workflow fails.
     if core.service.__host_sleep_wait_ns(nanos) == {
         1 -> {
             workflow_append_handle(workflow, "workflow-wait-sleep-cancelled:{workflow.run_id}")
-            Err(ServiceError.Policy("workflow sleep was cancelled"))
+            Err(ServiceError.Policy("workflow sleep was canceled"))
         }
         2 -> {
             workflow_append_handle(workflow, "workflow-wait-sleep-deadline:{workflow.run_id}")
@@ -4304,7 +4304,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
             return Err(ServiceError.Unavailable("cannot requeue a dead-lettered service receipt"))
         }
         if receipt.state == DeliveryState.Cancelled {
-            return Err(ServiceError.Unavailable("cannot requeue a cancelled service receipt"))
+            return Err(ServiceError.Unavailable("cannot requeue a canceled service receipt"))
         }
         if delivery_entry_expired(receipt, service_now()) {
             return Err(ServiceError.Expired("service receipt retention expired during delivery rollback"))
@@ -4344,7 +4344,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
     }
     if entry.state == DeliveryState.Cancelled {
         pending_remove_entry(runtime, entry)
-        return Err(ServiceError.Unavailable("cannot deliver a cancelled delivery"))
+        return Err(ServiceError.Unavailable("cannot deliver a canceled delivery"))
     }
     // The reservation goes before the durable marker: if the marker append
     // fails, the log stays the recovery source.
@@ -4454,10 +4454,10 @@ delivery_cancel: fn(delivery: Delivery) -> Delivery ServiceError! {
     index: delivery_entry_index(entries, delivery.id) ?? return Err(ServiceError.Unknown("delivery `{delivery.id}` is unknown"))
     entry: entries[index]
     if entry.state == DeliveryState.DeadLettered {
-        return Err(ServiceError.Unavailable("dead-lettered delivery cannot be cancelled"))
+        return Err(ServiceError.Unavailable("dead-lettered delivery cannot be canceled"))
     }
     if entry.state == DeliveryState.Delivered {
-        return Err(ServiceError.Policy("delivered work cannot be cancelled"))
+        return Err(ServiceError.Policy("delivered work cannot be canceled"))
     }
     if entry.state != DeliveryState.Cancelled {
         authority_append_event(runtime, entry, DeliveryState.Cancelled, entry.attempts, service_now())
@@ -4524,7 +4524,7 @@ runtime_retry: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Servi
     }
     if entry.dead -> return Err(ServiceError.Unavailable("cannot retry a dead-lettered delivery"))
     if entry.state == DeliveryState.Cancelled {
-        return Err(ServiceError.Policy("cancelled delivery cannot be retried"))
+        return Err(ServiceError.Policy("canceled delivery cannot be retried"))
     }
     if entry.delivered && entry.retained_until == None {
         return Ok(delivery_for_entry(runtime, entry, false))
@@ -4562,7 +4562,7 @@ runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Serv
     entry: entries[index]
     if entry.dead -> return Ok(delivery_for_entry(runtime, entry, false))
     if entry.state == DeliveryState.Cancelled {
-        return Err(ServiceError.Policy("cancelled delivery cannot be retained"))
+        return Err(ServiceError.Policy("canceled delivery cannot be retained"))
     }
     until: authority_retention_deadline(service_now(), runtime.retention_ms)
     signature: delivery_retention_signature(entry, until)

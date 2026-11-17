@@ -296,7 +296,7 @@ const answer = shouldGreet(ada);
 
 Zig favors explicit control but uses expected type for enum and record fields.
 Ordinary code can also run at compile time. Its large builtin `@name` family is
-a warning against making one sigil a catalogue of unrelated operations. See the
+a warning against making one sigil a catalog of unrelated operations. See the
 [Zig language reference](https://ziglang.org/documentation/master/).
 
 ### Ada and SPARK

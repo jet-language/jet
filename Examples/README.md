@@ -126,7 +126,7 @@ expected output.
 ## Short path first
 
 Each lesson teaches the safe default first. When the manual mechanics are
-worth keeping, place them in a clearly labelled `*Expert` sibling rather than
+worth keeping, place them in a clearly labeled `*Expert` sibling rather than
 making the long form the only path.
 
 | Teach first | Keep beside it as expert |

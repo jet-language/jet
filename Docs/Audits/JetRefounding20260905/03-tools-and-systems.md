@@ -129,7 +129,7 @@ The asynchronous route transfers ownership. `FrameFlight` retains the submitted 
 |---|---|---|
 | Read/write access and possible aliasing | Checked signature/body; audited declaration for an opaque primitive | Serialize conservatively or reject an explicit parallel demand |
 | Which resources outlive submission | Ordinary moved owners in `FrameFlight` | Reject an escaping call-local borrow |
-| Completion, device error, and cancellation acknowledgement | Actual driver event, tied to this submitted operation | Do not reuse or release the resource |
+| Completion, device error, and cancellation acknowledgment | Actual driver event, tied to this submitted operation | Do not reuse or release the resource |
 | Whether the foreign implementation obeys its declaration | Existing audited FFI/provider boundary and provider conformance evidence | Name the foreign assumption; do not call it a compiler proof |
 
 This design does not reinterpret `&` as an asynchronous loan. D-FFI-CAP1 remains exclusive-for-the-call. The frame implementation uses the existing task/completion machinery rather than adding another scheduler. Visible calls retain source semantics; scheduling is legal only where their checked contracts justify the transformation.

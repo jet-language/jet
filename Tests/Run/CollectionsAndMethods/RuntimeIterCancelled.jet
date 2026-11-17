@@ -82,10 +82,10 @@ run: fn() {
     start_rx.receive() ?? panic("worker did not reach map callback")
     worker.cancel()
     if worker.join() == {
-        .Ok(short_result) -> { panic("cancelled map returned short success: {short_result}") }
+        .Ok(short_result) -> { panic("canceled map returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
-                .Cancelled -> { print("cancelled") }
+                .Cancelled -> { print("canceled") }
                 .DeadlineBlown -> { panic("unexpected deadline") }
                 .Panicked(reason) -> panic("unexpected panic: {reason}")
             }
@@ -99,10 +99,10 @@ run: fn() {
     loop_start_rx.receive() ?? panic("loop did not reach map callback")
     loop_worker.cancel()
     if loop_worker.join() == {
-        .Ok(short_result) -> { panic("cancelled loop returned short success: {short_result}") }
+        .Ok(short_result) -> { panic("canceled loop returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
-                .Cancelled -> { print("loop cancelled") }
+                .Cancelled -> { print("loop canceled") }
                 .DeadlineBlown -> { panic("unexpected deadline") }
                 .Panicked(reason) -> panic("unexpected panic: {reason}")
             }
@@ -116,10 +116,10 @@ run: fn() {
         family_start_rx.receive() ?? panic("family did not reach callback")
         family_task.cancel()
         if family_task.join() == {
-            .Ok(result) -> { panic("cancelled family {family} returned success: {result}") }
+            .Ok(result) -> { panic("canceled family {family} returned success: {result}") }
             .Err(error) -> {
                 if error == {
-                    .Cancelled -> { print("family {family} cancelled") }
+                    .Cancelled -> { print("family {family} canceled") }
                     .DeadlineBlown -> { panic("unexpected deadline") }
                     .Panicked(reason) -> panic("unexpected panic: {reason}")
                 }

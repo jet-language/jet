@@ -92,7 +92,7 @@ display NorthEast = Diagonal.NorthEast
   `E2417 Explicit failure domain String (text) is not an Error type`. Any
   ballot must use a Core or `#Error` error type.
 
-### Known, unknown, grouped, case and rename behaviour (criterion 2)
+### Known, unknown, grouped, case and rename behavior (criterion 2)
 
 | Input | JSON route (wire names) | Hand match (spelled names) | Python `E[name]` | Python `E(value)` |
 |---|---|---|---|---|
@@ -125,12 +125,12 @@ What this shows:
     `KeyError`.
   - `Enum(value)` is a value (wire-like) lookup that raises `ValueError`.
   - Python keeps name and value lookup as two separate entry points.
-- **Java `Enum.valueOf(Class, String)`**: documented behaviour; not run here
+- **Java `Enum.valueOf(Class, String)`**: documented behavior; not run here
   because no JDK is on this machine (`which java` finds nothing).
   - It is an exact, case-sensitive match on the declared constant name.
   - Unknown text throws `IllegalArgumentException`.
   - It has no rename concept: Jackson `@JsonProperty` is a separate wire layer.
-- **.NET `Enum.Parse` / `Enum.TryParse`**: documented behaviour; not run here
+- **.NET `Enum.Parse` / `Enum.TryParse`**: documented behavior; not run here
   because no `dotnet` is on this machine.
   - Case-sensitive by default, with an `ignoreCase` overload.
   - It also accepts numeric strings and comma-joined flag names. That means
@@ -160,7 +160,7 @@ What this shows:
 ## Verdict
 
 - **Evidence: PASS.** Every row above was observed on all three tiers, and the
-  Python peer was executed. Java and .NET are documented behaviour only.
+  Python peer was executed. Java and .NET are documented behavior only.
 - **Gap confirmed:** no generated enum text parser exists. The owner-gated ballot
   below is drafted for Pip to file; this worker cannot write to Tower.
 
@@ -221,7 +221,7 @@ enum Heading {
 - C:
   - One accepted spelling for files and CLI alike.
   - But it conflates CLI text with the frozen wire, and a later `#Rename`
-    silently changes CLI behaviour.
+    silently changes CLI behavior.
 
 **Edge cases.**
 

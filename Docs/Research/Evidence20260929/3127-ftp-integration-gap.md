@@ -81,7 +81,7 @@ as the server's source file. `srv/inbox/upload.csv` =
 `31e26370…0413`, the same as `small.csv`. The resumed file is 8,388,608
 bytes.
 
-| Behaviour | Result |
+| Behavior | Result |
 |---|---|
 | Credential | Never in argv (`/proc/<pid>/cmdline` count 0 on every call) and never on disk; it is only in curl's stdin config. The server log shows `USER 'vendor' logged in`, with no password. |
 | Deadline | `ProcessSpec.timeout(1s)` interrupts the throttled 8 MiB RETR: `timed_out=true`, `code=-1`, no curl process left (`pgrep` 0). |

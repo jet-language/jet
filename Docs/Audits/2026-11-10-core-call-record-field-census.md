@@ -207,7 +207,7 @@ lookup then scans the declared markers instead of `CORE_CALLS`.
 ### `marker` (`CoreMarkerApplication`): home in `#Deprecated`
 
 Two rows set it (`CoreCallRows.jet:582-583`): the `cbor` members `encode` and
-`decode`, retired in favour of `cbor.to_bytes` and `cbor.parse`. Both have
+`decode`, retired in favor of `cbor.to_bytes` and `cbor.parse`. Both have
 `since: "2027"` and `removed_in: "2028"`.
 
 Readers:

@@ -350,7 +350,7 @@ row 6.
 
 The call looks like an ordinary call inside a task. Other tasks run while it waits.
 Cancellation crosses where the foreign side supports it: `AbortSignal`, Python `cancel()`,
-dropping the Rust future, or a declared C cancel function. Otherwise cancelling waits for
+dropping the Rust future, or a declared C cancel function. Otherwise canceling waits for
 completion. It never fakes success.
 
 Exports run the other way. A Jet function that waits becomes:
@@ -368,7 +368,7 @@ not stall other tasks.
 - A blocking C call with no fact runs inline and occupies one carrier thread while it blocks.
   The runtime notices a carrier blocked for over 50 ms and reports the row once with the fix:
   add `#Blocking`.
-- A foreign API with no cancellation cannot be cancelled. That is inherent.
+- A foreign API with no cancellation cannot be canceled. That is inherent.
 
 ## 11. Errors
 
@@ -416,7 +416,7 @@ cannot be stopped mid-way. Jet returns 0 for the remaining comparisons and raise
 **Fix (v2 §9, ballot D-FFI-TRACE1).**
 
 - **One backtrace.** It is symbolized from DWARF for C, C++ and Rust, and from Jet's own maps for
-  Jet frames. Each frame is labelled with its language, and the crossing frames are marked.
+  Jet frames. Each frame is labeled with its language, and the crossing frames are marked.
 - **Signals.** A fault inside foreign code reports the last crossing: the row, its arguments
   summarized, and the thread.
 - **Trace.** `jet perf run <app> --lens=ffi` (D-PERFSESSION1) records every crossing into the
@@ -520,7 +520,7 @@ with the row and input on any difference.
 - Rows whose Jet types depend on the target (`long`, a bare `size_t`, pointer layouts) are
   refused at comptime, because a wasm32 run could give a different answer than the target. The
   refusal names the type.
-- Undefined behaviour in the C source can still differ between wasm and native; the replay in
+- Undefined behavior in the C source can still differ between wasm and native; the replay in
   `jet test` catches it, but only for inputs the build used.
 - Closed binaries are refused, because they cannot run in the sandbox.
 

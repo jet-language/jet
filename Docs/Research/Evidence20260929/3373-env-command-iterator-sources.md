@@ -97,7 +97,7 @@ and AOT, but `get BAD: null` on `--interpret` (`print("get BAD: {bad ?? "<none>"
 Not met. `Examples/features/io/os_sources.jet` was not added to the repo:
 its AOT tier cannot build, and the interpreter lacks `vars`.
 `tests/os_sources.rs` does not exist. A cargo test encoding the current
-lossy behaviour would bless a defect.
+lossy behavior would bless a defect.
 
 ## Follow-ups (defects)
 

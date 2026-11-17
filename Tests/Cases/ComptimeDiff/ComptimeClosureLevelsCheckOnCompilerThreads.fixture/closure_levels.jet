@@ -100,12 +100,12 @@ best_span: fn(values: [Int]) -> Int {
     best_start := 0
     best_end := 0
     loop (index, value) in values {
-        // Centre each value so the span sums can turn negative.
-        centred: value - 125
+        // Center each value so the span sums can turn negative.
+        centered: value - 125
         if running <= 0 {
-            running = centred
+            running = centered
             start = index
-        } else { running += centred }
+        } else { running += centered }
         if running > best {
             best = running
             best_start = start
@@ -163,7 +163,7 @@ xor_fold: fn(values: [Int]) -> Int {
     loop (index, value) in values {
         folded ~= value * (index + 1)
         // A rotation by the index keeps equal values at different places
-        // from cancelling each other out.
+        // from canceling each other out.
         shift: index % 5
         rotated = (rotated * 2 + (value << shift)) % 1000003
     }
@@ -204,7 +204,7 @@ inversions: fn(values: [Int]) -> Int {
     loop left in 0..<values.len() {
         loop right in left + 1..<values.len() {
             // Only pairs a quarter of the range apart count, so close
-            // neighbours that swap do not dominate.
+            // neighbors that swap do not dominate.
             if values[left] > values[right] + 60 -> count += 1
         }
     }
@@ -313,7 +313,7 @@ even_odd_split: fn(values: [Int]) -> Int {
     loop (index, value) in values {
         even: value % 2 == 0
         if even -> evens += value else -> odds += value
-        // A change of parity between neighbours is one swap.
+        // A change of parity between neighbors is one swap.
         if index > 0 && even != last_even -> swaps += 1
         last_even = even
     }

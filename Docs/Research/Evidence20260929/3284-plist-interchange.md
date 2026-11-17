@@ -40,7 +40,7 @@ checked arithmetic has no resolved fixed numeric type (source bytes 0..0)
 ```
 
 So on this binary the XML kernel the plan reuses cannot be lowered at all when a
-program calls `xml.parse` (defect below); the fixture/DOCTYPE behaviour could not be
+program calls `xml.parse` (defect below); the fixture/DOCTYPE behavior could not be
 observed at runtime. By source, `xml.jet` rejects any DOCTYPE and defines no named
 entities, so a real Apple plist (which carries the DOCTYPE) would be a Syntax error
 without the card's planned exact-literal DOCTYPE strip.

@@ -114,7 +114,7 @@ Check: `Realtime.js:18` reimplements `jet_std_time_sleep_duration_ns`.
 Verdict: **fails on web today.** This is a pre-existing I9 defect that E
 neither causes nor fixes. E must not be described as giving every tier one
 runtime until the web tier runs `jet_runtime` compiled for the web or the
-JavaScript host shrinks to marshalling only.
+JavaScript host shrinks to marshaling only.
 
 ### 5. The cost is about 575 renames
 

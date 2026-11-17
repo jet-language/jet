@@ -4,11 +4,11 @@ Date: 2026-09-29. Closer02. Binary: `$JET_STATE_ROOT/scratch/jet-current` → `j
 
 ## Question
 
-What does `core.encoding.cbor` actually accept and reject today (map keys, tags, simple values, typed arrays, numeric bounds, floats, indefinite lengths), does it honour the ratified `CBOROptions` contract (Docs/spec/encoding-decisions.md:887-903, D-ENC-CBOR-SURFACE1=A), and does the result hold on every tier?
+What does `core.encoding.cbor` actually accept and reject today (map keys, tags, simple values, typed arrays, numeric bounds, floats, indefinite lengths), does it honor the ratified `CBOROptions` contract (Docs/spec/encoding-decisions.md:887-903, D-ENC-CBOR-SURFACE1=A), and does the result hold on every tier?
 
 ## Method
 
-- Read `crates/jet-codegen/src/Prelude/Core.jet:86-87`: `core.encoding.cbor` is a host module; the Jet source module owns only `reader` and `writer`. `parse`, `decode`, `to_bytes` and `to_bytes_canonical` dispatch to the host kernel (`crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:469-600`, `jet_cbor_kernel`). `Core/encoding/cbor.jet`'s own `parse`/`decode_cbor` are dead: the build lints `decode_cbor` as an unused private function (L0104), so its header comment (lines 29-37) and its hard-wired `safe_limits()` no longer describe shipped behaviour.
+- Read `crates/jet-codegen/src/Prelude/Core.jet:86-87`: `core.encoding.cbor` is a host module; the Jet source module owns only `reader` and `writer`. `parse`, `decode`, `to_bytes` and `to_bytes_canonical` dispatch to the host kernel (`crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs:469-600`, `jet_cbor_kernel`). `Core/encoding/cbor.jet`'s own `parse`/`decode_cbor` are dead: the build lints `decode_cbor` as an unused private function (L0104), so its header comment (lines 29-37) and its hard-wired `safe_limits()` no longer describe shipped behavior.
 - Scratch witnesses in `$JET_STATE_ROOT/scratch/Closer02/`: `cbor_probe2.jet` (cells), `cbor_opts.jet` (options), `cbor_err_min.jet`, `cbor_nan.jet`, `cbor_typed.jet`, `cbor_probe.jet` (tier/AOT attempt).
 - Each witness was run with `safe-jet.sh run --interpret`, `safe-jet.sh run` (JIT) and `safe-jet.sh build` (AOT).
 
@@ -69,7 +69,7 @@ max_bytes -1: rejected @0: max_bytes must be in 0..1073741824
 max_bytes 2^31: rejected @0: max_bytes must be in 0..1073741824
 ```
 
-These match the ratified ranges (1..4096, 1..1000000000, 0..1073741824) and the depth rule (root array = depth 1). On the interpreter, criterion 4's behaviour exists.
+These match the ratified ranges (1..4096, 1..1000000000, 0..1073741824) and the depth rule (root array = depth 1). On the interpreter, criterion 4's behavior exists.
 
 ## Evidence: tiers (the blocking part)
 

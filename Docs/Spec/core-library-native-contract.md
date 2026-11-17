@@ -632,7 +632,7 @@ retains its fatal layout/OOM edge and does not observe the fallible fault rail.
 System-mode blocks keep the two-word heap header. Only counted payloads own
 private bypass-policy side-table nodes; freeing a tracked payload releases its
 reservation even after switching back to system mode. Policy facts retain
-historical allocation/request/high-water counters on cancelled heap requests,
+historical allocation/request/high-water counters on canceled heap requests,
 while live bytes and tracker nodes return to zero.
 
 `jet_rt_alloc_8(size: I64) -> I64` and `jet_rt_free_8(pointer: I64, size: I64)`
@@ -930,7 +930,7 @@ operation without changing its locks. Endpoint receive retains the original
 captured channel Arc and two registry acquisitions, rather than re-looking up
 the mailbox after the gate check. Its conditional queue-depth read and receive
 retain the native queue acquisitions. Private plain transport records are
-bootstrap marshalling only, not new authority or delivery state.
+bootstrap marshaling only, not new authority or delivery state.
 Endpoint send and delivery cancel remain native and uncredited: their locks
 cover source-dependent policy and the enqueue or durable mutation, respectively.
 

@@ -30,7 +30,7 @@ dns_cause: fn(prefix: I64, code: I64) -> I64 {
 }
 
 dns_cancelled: fn(name: I64, error: I64) -> I64 {
-    dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`")))
+    dns_fail(error, dns_named(rt_static_text("network operation canceled during DNS lookup for `"), name, rt_static_text("`")))
 }
 
 // A lookup's typed timeout, which delivers the deadline in force when that
@@ -40,7 +40,7 @@ dns_timed_out: fn(name: I64, error: I64) -> I64 {
     dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`")))
 }
 
-// jet_net_dns_remaining: the remaining nanoseconds, or 0 with the cancelled
+// jet_net_dns_remaining: the remaining nanoseconds, or 0 with the canceled
 // or timed-out message.
 dns_remaining: fn(deadline: I64, name: I64, error: I64) -> I64 {
     if (scheduler_task_cancelled() && !scheduler_shielded()) { return dns_cancelled(name, error) }
@@ -1441,7 +1441,7 @@ dns_net_result: fn(status: I64, name: I64, error: I64) -> I64 {
         trap_store(error, net_error_new(NET_ERROR_DNS, jet_rt_record_new_jet_net_dns_error_not_found(name)))
         return I64{0}
     }
-    if dns_text_starts_with(message, rt_static_text("network operation cancelled")) {
+    if dns_text_starts_with(message, rt_static_text("network operation canceled")) {
         trap_store(error, net_error_new(NET_ERROR_CANCELLED, dns_net_detail_take(name, message)))
         return I64{0}
     }

@@ -55,7 +55,7 @@ typedef Context *(*Get)(Error *);
 static const Ctor ctors[]={jet_rt_record_new_io_error_invalid_input,jet_rt_record_new_io_error_not_found,jet_rt_record_new_io_error_permission_denied,jet_rt_record_new_io_error_timed_out,jet_rt_record_new_io_error_cancelled,jet_rt_record_new_io_error_closed,jet_rt_record_new_io_error_protocol,jet_rt_record_new_io_error_other,jet_rt_record_new_io_error_already_exists,jet_rt_record_new_io_error_unsupported};
 static const Get getters[]={jet_rt_record_get_io_error_invalid_input,jet_rt_record_get_io_error_not_found,jet_rt_record_get_io_error_permission_denied,jet_rt_record_get_io_error_timed_out,jet_rt_record_get_io_error_cancelled,jet_rt_record_get_io_error_closed,jet_rt_record_get_io_error_protocol,jet_rt_record_get_io_error_other,jet_rt_record_get_io_error_already_exists,jet_rt_record_get_io_error_unsupported};
 static const char *const variants[]={"InvalidInput","NotFound","PermissionDenied","TimedOut","Cancelled","Closed","Protocol","Other","AlreadyExists","Unsupported"};
-static const char *const kinds[]={"invalid input","not found","permission denied","timed out","cancelled","closed","protocol error","I/O error","I/O error","I/O error"};
+static const char *const kinds[]={"invalid input","not found","permission denied","timed out","canceled","closed","protocol error","I/O error","I/O error","I/O error"};
 static const char *const operations[]={"Read","Write","Flush","Connect","Accept","Close","Resolve","Codec"};
 static const char *const lower_ops[]={"read","write","flush","connect","accept","close","resolve","codec"};
 struct Watch { void *ptr; int64_t size,align; unsigned freed; };

@@ -78,7 +78,7 @@ for s in "$@"; do
       mode=$(git merge-file --diff3 -p "$o" "$b" "$t" | awk '
           /^<<<<<<< /{c=1; n++; next} /^\|\|\|\|\|\|\| /{if(c){inb=1}; next} /^=======$/{if(c){inb=0}; next}
           /^>>>>>>> /{c=0; inb=0; next} inb{bad=1} END{print (n && !bad) ? "union" : "none"}')
-      # Neighbouring-line edits (and name additions to one `{ a, b }` set line) merge line by line.
+      # Neighboring-line edits (and name additions to one `{ a, b }` set line) merge line by line.
       if [ "$mode" = none ] && node "$G/linemerge.mjs" "$o" "$b" "$t" > "$I/linemerge.tmp" 2>/dev/null; then mode=lines; fi
       rm -f "$b" "$o" "$t"
     fi

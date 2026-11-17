@@ -2,7 +2,7 @@
 
 ## Set the closure
 
-At activation, name the target concept or area and record its finite reachable closure. Include forms, declarations, dependencies, and direct analogues that explain that concept. Do not inventory unrelated Jet. Account for every source in the closure, including unavailable sources as `unknown` with a reason.
+At activation, name the target concept or area and record its finite reachable closure. Include forms, declarations, dependencies, and direct analogs that explain that concept. Do not inventory unrelated Jet. Account for every source in the closure, including unavailable sources as `unknown` with a reason.
 
 Search the live target surfaces in specs, examples, stdlib, the Syntax registry, and CLI. Prefer `Tools/Agent/JetEnv.jet` and repository search over memory. Source code shows implementation state; ratified decisions and domain specs show design law.
 

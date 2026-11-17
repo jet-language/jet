@@ -5,7 +5,7 @@
 // App/gauntlet-standings.mjs), filled in as the harness measures. Every comparison entry is a
 // row of the grid and Jet, every standings peer and the hand-written asm
 // ceiling are its columns. A measured cell shows its values at a glance (run
-// wall · peak RSS, then cycles · size) and is grey until Jet is measured, then
+// wall · peak RSS, then cycles · size) and is gray until Jet is measured, then
 // green where Jet beats it and red where Jet loses; an asm ceiling some peer
 // beats is flagged red, a defect in the reference. Any other cell is not
 // measured yet or the reason it cannot be (no program, not applicable, no
@@ -163,7 +163,7 @@ function ceilingBeaten(rows) {
   return beaten;
 }
 
-// A grid cell's tone: until Jet is measured every measured cell is grey; then
+// A grid cell's tone: until Jet is measured every measured cell is gray; then
 // green where Jet beats the row on every judged metric, red where it loses
 // one. A ceiling a peer beats is flagged red whether or not Jet is measured.
 function rowGrid(row, jetMeasured, beaten) {
@@ -176,7 +176,7 @@ function rowGrid(row, jetMeasured, beaten) {
     const tally = {};
     for (const cell of row.cells) if (cell.ratio !== null) tally[cell.verdict] = (tally[cell.verdict] ?? 0) + 1;
     const judged = Object.entries(tally).map(([verdict, n]) => `${n} ${verdict}`).join(' · ');
-    const tone = !jetMeasured || !judged ? 'grey' : tally.fail || tally.miss ? 'fail' : 'pass';
+    const tone = !jetMeasured || !judged ? 'gray' : tally.fail || tally.miss ? 'fail' : 'pass';
     return { head: head || 'measured', note: note || null, text: [head, note, judged].filter(Boolean).join(' · ') || 'measured', tone };
   }
   if (row.status === 'not_measured') return { ...gridText(NOT_MEASURED_YET, row.reason), tone: 'open' };
@@ -555,7 +555,7 @@ export function renderGauntletDetail(detail) {
 
 // The grid: one line per entry in two column groups, `jet build`'s Jet with
 // the compiled peers and the asm ceiling, then `jet run`'s with the
-// interpreted peers; every peer cell is coloured by how its group's Jet does
+// interpreted peers; every peer cell is colored by how its group's Jet does
 // against it. Every cell names its state, its reason beneath and in its
 // title. The title adds the full reason where the cell shortens it (the
 // ceiling's).

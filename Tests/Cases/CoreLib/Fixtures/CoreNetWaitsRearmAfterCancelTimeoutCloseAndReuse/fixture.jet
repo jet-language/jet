@@ -30,7 +30,7 @@ read_text: fn(stream: &net.TCPStream) -> String {
 
 // A wait abandoned before its descriptor became ready, by cancellation or by
 // its deadline, must not stop the next wait on that descriptor from waking.
-#Test("a wait after a cancelled or timed out wait still wakes") {
+#Test("a wait after a canceled or timed out wait still wakes") {
     socket: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     target: net.udp_local_addr(socket) ?? panic("address")
     peer: net.udp_bind("127.0.0.1:0") ?? panic("peer")
@@ -39,7 +39,7 @@ read_text: fn(stream: &net.TCPStream) -> String {
     waiter: task {
         parked_tx.send(1)
         if socket.ready(NetReadyInterest.Read, deadline: budget) == {
-            .Ok(_) -> { panic("the cancelled wait saw a datagram") }
+            .Ok(_) -> { panic("the canceled wait saw a datagram") }
             .Err(_) -> {}
         }
     }
@@ -51,9 +51,9 @@ read_text: fn(stream: &net.TCPStream) -> String {
         time.sleep(2ms)
         _sent: peer.send_to("a".bytes(), target, deadline: budget) ?? panic("send a")
     }
-    _ready: socket.ready(NetReadyInterest.Read, deadline: budget) ?? panic("ready after a cancelled wait")
+    _ready: socket.ready(NetReadyInterest.Read, deadline: budget) ?? panic("ready after a canceled wait")
     first.join() ?? panic("first send")
-    assert(net.udp_packet_data(socket.receive(16, deadline: budget) ?? panic("receive a")) == "a", "datagram after a cancelled wait")
+    assert(net.udp_packet_data(socket.receive(16, deadline: budget) ?? panic("receive a")) == "a", "datagram after a canceled wait")
     if socket.ready(NetReadyInterest.Read, deadline: Duration.milliseconds(5) ?? panic("short")) == {
         .Ok(_) -> { panic("the timed out wait saw a datagram") }
         .Err(_) -> {}

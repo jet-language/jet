@@ -3,7 +3,7 @@
 //    acquire deadline leaves the pool's queue. That is the task's DeadlineBlown,
 //    not a pool timeout, and the next acquire is admitted.
 // 2. A pool refusal crosses a task join as the pool's own error text.
-// 3. A task cancelled inside an open transaction leaves nothing written, and
+// 3. A task canceled inside an open transaction leaves nothing written, and
 //    the connection can begin a new transaction.
 package: {
     name: "shared_ops_db"
@@ -103,7 +103,7 @@ run: fn() {
         .Ok(outcome) -> { print("writer: {outcome}") }
         .Err(error) -> print("writer: {label(error)}")
     }
-    print("rows after the cancelled writer: {count(scope)}")
+    print("rows after the canceled writer: {count(scope)}")
     if scope.begin() == {
         .Ok(tx) -> {
             print("a new transaction begins: true")

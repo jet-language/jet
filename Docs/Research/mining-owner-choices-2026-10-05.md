@@ -90,7 +90,7 @@ migration; L = a subsystem or product-scope decision.
 | Order-preserving dedupe (`unique()`; v3-P2:PYB-98, learning-compilers:PY131) | D-ITER-UNIQUE1 (ratified: distinct keys in encounter order) |
 | In-place range removal (v3-P2:PYB-53) | D-ITER-DRAIN1, D-ITER-SPLICE1 |
 | Localization and message catalogs (languages-a:E80; learning-compilers:AP8, AP9) | D-CORE-CATALOG1, D-VERDICT-3307-1 |
-| Core colour type (v3-S1:DAJ-34; systems-perf-deep:SD-DA-15) | D-VERDICT-3288-1 |
+| Core color type (v3-S1:DAJ-34; systems-perf-deep:SD-DA-15) | D-VERDICT-3288-1 |
 | Multi-name declaration from a tuple (v3-P1:PYA-030) | D-TUPLE-DESTRUCT1 |
 | Busy loops and scheduler fairness (languages-b:O11; languages-a:G15, G16) | D-TASK-SLICE1 |
 | Unused-variable warnings and liveness across configurations | D-MEMBER-LIVE1, D-STRUCT-LIVE1 |
@@ -129,7 +129,7 @@ These need work, not a vote. Each names its owner.
 | Sub-condition values in failed test reports | v3-P1:PYA-105 | D-REPORT-TEST1 owner |
 | Learner-visible branch coverage and hidden boundary cases in Learn | v3-P1:PYA-059, PYA-099; v3-P2:PYB-59 | #4630 |
 | Window lifecycle: pump events while minimized, resize as a frame fact, close as an event | cpp-craft:G02, G06, G25, G26, G28 | #238 criteria 13/14 |
-| Nearest-neighbour default for pixel art, integer scaling | systems-perf-deep:SD-9H-05; cpp-craft:G04 | #3027 |
+| Nearest-neighbor default for pixel art, integer scaling | systems-perf-deep:SD-9H-05; cpp-craft:G04 | #3027 |
 | Wait attribution, inclusive time, recursion in `jet perf` | systems-perf:SP-05, SP2-KxREK-DYu70-13/14; v3-S1:DAJL-01 | #4632 |
 | Stdout flush measurement | cpp-craft:I02, R02 | #4634 (the default itself is C04) |
 | Reversed-range advisory lint | v3-P2:PYB-3 | #4629 (meaning is C01) |

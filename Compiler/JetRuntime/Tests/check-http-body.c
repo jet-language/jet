@@ -53,7 +53,7 @@ static void stop_scope_end(void) {
     jet_rt_scheduler_control_drop(stop_control);
     stop_control = 0;
 }
-// Publishes a stop of `kind` (1 cancelled .. 4) on the entered control.
+// Publishes a stop of `kind` (1 canceled .. 4) on the entered control.
 static void deliver(W kind) {
     assert(jet_rt_control_publish_stop(kind, -1, -1, -1, -1, ptr("stop"), 4, 0));
 }

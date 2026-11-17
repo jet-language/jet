@@ -198,10 +198,10 @@ services_run_authority_stop_action: fn(state: ServiceProcessState, action: StopA
         }
         .WindowsGuardianJobObject(_) -> { Err(ServicesError.new(SERVICES_GUARDIAN_UNAVAILABLE)) }
         .TestProcessGroup -> {
-            // The group is signalled by its number. The leader's identity is
+            // The group is signaled by its number. The leader's identity is
             // re-checked right before the signal: a live process with another
-            // start identity owns the PID now and is never signalled. A group
-            // whose leader already exited is still signalled. The window
+            // start identity owns the PID now and is never signaled. A group
+            // whose leader already exited is still signaled. The window
             // between this check and `kill` is the PID-reuse window Rust had.
             found: services_read_proc_stat(state.pid)
             if found == .Val(record) {

@@ -172,7 +172,7 @@ The report traces expression, function, module, program, build, execution-mode, 
 
 Existing Jet surfaces include unified FFI ownership/error/layout conversion, binder descriptors, checked overlays, native library exports, mixed-repository debugging, `jet cc`/`jet c++`, and CMake/Gradle/Bazel/MSBuild adapters. These are source/documentation observations here, not fresh execution proof.
 
-Swift, CXX, autocxx, Java FFM/jextract, .NET source-generated marshalling, and Kotlin/Native show useful pieces. Their limits matter: containers may copy, pointer extent cannot be inferred from an address, widths differ by platform, callbacks have lifetime/thread/failure rules, and signature matching does not prove native semantics.
+Swift, CXX, autocxx, Java FFM/jextract, .NET source-generated marshaling, and Kotlin/Native show useful pieces. Their limits matter: containers may copy, pointer extent cannot be inferred from an address, widths differ by platform, callbacks have lifetime/thread/failure rules, and signature matching does not prove native semantics.
 
 The existing adoption choice is sound: bind in place, convert explicit scalar/straight-line subsets, and replace modules under differential evidence. Python, Java, C#, TypeScript, JavaScript, and Go have narrow importer rows. Ada/Pascal commands and the map consistently describe binder stubs, not semantic translations. This is a capability-classification boundary, not a second observed contradiction. C/C++ source import is deliberately unavailable. Foreign source remains authoritative until replacement is accepted.
 

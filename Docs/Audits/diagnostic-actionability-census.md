@@ -398,7 +398,7 @@ Each failure includes the registered code, the exact Fix text, and the requireme
 | `E0765` | active | sema | source_edit | true | false |  |  | Pass each parameter label at most once. |
 | `E0766` | active | sema | source_edit | true | false |  |  | Provide an argument or a default for every required parameter. |
 | `E0767` | active | sema | source_edit | true | false |  |  | Pass positional-only parameters without labels. |
-| `E0768` | active | sema | source_edit | true | false |  |  | Place positional arguments before the first labelled argument. |
+| `E0768` | active | sema | source_edit | true | false |  |  | Place positional arguments before the first labeled argument. |
 | `E0769` | active | sema | source_edit | true | false |  |  | Pass the label-only parameter by name. |
 | `E0770` | active | parser | source_edit | true | false |  |  | Give each parameter a unique public call label. |
 | `E0771` | active | sema | source_edit | true | false |  |  | Match the function value's call labels and parameter zones to the expected function type. |
@@ -799,7 +799,7 @@ Each failure includes the registered code, the exact Fix text, and the requireme
 | `E2910` | active | sema | source_edit | true | false |  |  | Write `reactive.derived(() -> … )` or `reactive.effect(() -> { … })`. |
 | `E2911` | active | sema | source_edit | true | false |  |  | Drop the parameters: `reactive.{kind}(() -> { … })`. |
 | `E2912` | active | sema | source_edit | true | false |  |  | return a value from the body, or use `reactive.effect(() -> { … })` for a side effect. |
-| `E2913` | active | sema | source_edit | true | false |  |  | use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`. |
+| `E2913` | active | sema | source_edit | true | false |  |  | use a data value (number, text, list, struct, …); put behavior in `reactive.effect`. |
 | `E2914` | active | sema | source_edit | true | false |  |  | Remove the value return from the `#Reactive fn`. |
 | `E2930` | active | sema | source_edit | true | false |  |  | Pass a real label, e.g. `ui.node_role("Submit", w, h, ui.aria_role_button())`. |
 | `E2931` | active | sema | source_edit | true | false |  |  | Give each interactive node a distinct, descriptive label. |

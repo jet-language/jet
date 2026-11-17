@@ -8,7 +8,7 @@ snapshot14 → snapshot16 during the session). Scratch:
 
 Do tagged-case patterns plus `filter_map` over fallible callbacks cover the
 LINQ `OfType`/`Cast` and dynamic-filter jobs with explicit keep/drop/propagate
-behaviour, does a matched payload keep its ownership and loan, and is a checked
+behavior, does a matched payload keep its ownership and loan, and is a checked
 foreign downcast present or absent?
 
 ## Method

@@ -82,7 +82,7 @@ Wails' useful improvements are an app graph separate from window creation, indep
 | Window/app events and cleanup | Core UI has events and capabilities; GTK source currently owns one window. | App/window cleanup, callback cancellation, and resource lifetime must agree. A generic event bus is not a substitute for owned lifecycle. | #2999/#3004; existing platform service owner #2792. |
 | Development frontend integration | Jet already owns HMR state preservation (#2465), pending boundaries (#2478), and a common devtools direction (#2423). | Preserve drafts, signals, focus and scroll; stale async results must not replace the latest result; report precise causes through the same tools. | Existing owners, not duplicate ballots. |
 | `SystemTray`, `SetMenu`, `OnClick`, `Destroy` | The GUI battery's “tray fallback” is displayed text, not a tray API. | Typed actions and explicit unavailable capability; integrate lifetime with the app. Never silently substitute text for a tray service. | #3006, D-UI-TRAY1. |
-| `WebviewWindow.Print()` | No matching public Jet native document-print contract was found. | Typed document request, actual user-controlled print UI, and truthful submitted/cancelled/unavailable outcome. Submission is not proof of physical printing. | #3007, D-UI-PRINT1. |
+| `WebviewWindow.Print()` | No matching public Jet native document-print contract was found. | Typed document request, actual user-controlled print UI, and truthful submitted/canceled/unavailable outcome. Submission is not proof of physical printing. | #3007, D-UI-PRINT1. |
 | Cross-platform build and prerelease guidance | GTK/Linux source is not macOS, Windows, or mobile proof. Native widgets are already ratified; a new renderer is not this choice. | One checked source and visible target capabilities; precise platform requirements and build artifacts. | Existing #2792/#2815; #3004. Performance cells remain #2858. |
 
 **How Jet could beat Wails UX:** keep the UI tree, state, effects, data contracts, and diagnostics in one checked program; carry that program through native and web hosts; derive bindings and tool views rather than asking the developer to synchronize them. Beginners should get a working app without selecting several unrelated state systems. Experts should retain explicit platform, capability, lifecycle, generated-artifact, and performance control.
@@ -4488,7 +4488,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
   },
   {
     "topic": "no-std-io-proposal",
-    "claim": "The evidence classifies Zig’s IO surfaces as analogues and explicitly says not to propose a `std.Io` object for Jet.",
+    "claim": "The evidence classifies Zig’s IO surfaces as analogs and explicitly says not to propose a `std.Io` object for Jet.",
     "source_id": "BUX01em5eG4",
     "source_kind": "inference",
     "source_ref": "BUX01em5eG4",
@@ -4734,7 +4734,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
   },
   {
     "topic": "BUX01em5eG4-micro-api",
-    "claim": "Jet covers the Zig analogues with `task.group`, `handle.join/cancel`, `time.sleep`, `core.files.open`, and `FileWriter.flush`; only a custom public VTable is missing if an owner later wants one.",
+    "claim": "Jet covers the Zig analogs with `task.group`, `handle.join/cancel`, `time.sleep`, `core.files.open`, and `FileWriter.flush`; only a custom public VTable is missing if an owner later wants one.",
     "source_id": "BUX01em5eG4",
     "source_kind": "inference",
     "source_ref": "BUX01em5eG4",
@@ -4743,7 +4743,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "confidence": "medium",
     "stance": "supports",
     "correction": "A custom public VTable is explicitly conditional, not a current requirement.",
-    "jet_evidence": "The listed Jet APIs are cited as existing analogues.",
+    "jet_evidence": "The listed Jet APIs are cited as existing analogs.",
     "classification": "needs-measurement",
     "owner": "#2858",
     "action": "Check the named workload against current ratified mechanisms first. Do not open a duplicate ballot; any genuinely uncovered public choice requires owner approval. decide whether a concrete need justifies a custom public VTable.",
@@ -7986,7 +7986,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
     "jet_evidence": "Jet default profile routing is ratified in c0zmoznd; current default behavior and timing are unresolved here.",
     "classification": "needs-measurement",
     "owner": "#2858",
-    "action": "compare Jet defaults with a machine-readable receipt before adopting any analogue.",
+    "action": "compare Jet defaults with a machine-readable receipt before adopting any analog.",
     "micro_category": "Defaults",
     "record_id": "C0527",
     "evidence_scope": "Dated source/code evidence; runtime validity is limited to the explicitly identified receipts and execution modes.",
@@ -10592,7 +10592,7 @@ Claims are dated observations, not a live feature inventory or a replacement for
   },
   {
     "topic": "branch-conditional-mode",
-    "claim": "Model 91 hedges conditional branches by fetching target words, conditionally issuing work, then activating/cancelling it when the condition code becomes valid; short loops receive a special loop mode",
+    "claim": "Model 91 hedges conditional branches by fetching target words, conditionally issuing work, then activating/canceling it when the condition code becomes valid; short loops receive a special loop mode",
     "source_id": "hpj6r6CjJf8",
     "source_kind": "linked-source",
     "source_ref": "https://pages.cs.wisc.edu/~markhill/restricted/MKreadings2000percaitlin/ibm_jrd_1967_anderson.pdf",

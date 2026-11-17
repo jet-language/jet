@@ -894,7 +894,7 @@ is the editor demo the same way: `#Engine.Entity(version: N)` writes a
 struct's inspector rows, an `Edit` impl that sets a field by name from text,
 `diff` into a `Patch` that undo and redo replay through `Edit`, and a
 positional text `save` and `load`, all from the struct's field rows. The
-inspector leaves out a field marked `#Engine.Hidden` and greys a field equal
+inspector leaves out a field marked `#Engine.Hidden` and grays a field equal
 to the default-built value; `save` still writes a hidden field, so editor and
 file policy stay apart. `load` skips a field marked
 `#Engine.Since(version: N)` in a file older than N, which keeps it at its

@@ -1,7 +1,7 @@
 // A web app over a database pool has one lifecycle order: the pool is ready
 // before the listener binds, shutdown stops admission before the pool
 // drains, a handler still blocked when the shutdown grace runs out is
-// reported cancelled and sends nothing, and the pool closes last, once that
+// reported canceled and sends nothing, and the pool closes last, once that
 // handler gives its lease back.
 // Through it, the server's readiness reads not ready once bound, ready while
 // serving, draining from shutdown until the grace ends, and closed once it
@@ -95,7 +95,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     print("5. shutting down: readiness {listening.readiness()}, probe {probe(addr)}")
     report: stopping.join()
     serving.join()
-    print("6. admission stopped: accepted {report.accepted}, overloaded {report.overloaded}, completed {report.completed}, cancelled {report.cancelled}")
+    print("6. admission stopped: accepted {report.accepted}, overloaded {report.overloaded}, completed {report.completed}, canceled {report.cancelled}")
     print("7. reported: readiness {listening.readiness()}, probe {probe(addr)}")
 
     // The pool drains only after admission stopped; a bounded drain while the
@@ -109,7 +109,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
 
     response: read_all(client)
     answered: response.contains("200")
-    print("9. the cancelled handler's response was sent: {answered}")
+    print("9. the canceled handler's response was sent: {answered}")
 
     closed: pool.drain(deadline: 2s) ?? panic("drain")
     print("10. {closed}")

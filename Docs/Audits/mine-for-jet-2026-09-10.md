@@ -226,7 +226,7 @@ Do not benchmark every helper in isolation merely to increase counts. Link helpe
 | Networking/security boundaries | Payloads, connections, protocol states, limits, adversarial inputs and foreign calls |
 | Compute/data/graphics/media | Shape, precision, sparsity, transfers, allocation and output requirements |
 | Packages/tooling/editor workflows | Cold/warm builds, edit kind, cache validity, diagnostic latency and repair action |
-| Platform/FFI/web/embedded | Host/target, ABI, marshalling, unsupported calls, resource bounds and hardware assumptions |
+| Platform/FFI/web/embedded | Host/target, ABI, marshaling, unsupported calls, resource bounds and hardware assumptions |
 | Real applications | Web, games, CLI/scripts, data analysis, services, AI/ML, GUI and embedded workloads |
 
 A pilot validates the mechanism; it does not redefine the full acceptance scope. The remaining denominator stays explicitly uncovered until addressed.

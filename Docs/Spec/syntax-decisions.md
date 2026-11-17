@@ -752,7 +752,7 @@ function slot the same way.
 
 **S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
 D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
-**name**. A call may skip a default and write its labelled arguments in any
+**name**. A call may skip a default and write its labeled arguments in any
 order. Two zone separators split the parameter list: `/` closes the
 positional-only zone (a label there is E0767) and `*` opens the label-only
 zone (a positional argument there is E0769); parameters between them take
@@ -765,7 +765,7 @@ Supplied expressions run left to right in the order they were **written**;
 unbound defaults then run in declaration order and may read an earlier
 parameter. Diagnostics: E0763 misplaced zone separator, E0764 unknown label,
 E0765 repeated label, E0766 missing argument, E0767 label forbidden, E0768
-bare argument after a labelled one, E0769 label required. Methods,
+bare argument after a labeled one, E0769 label required. Methods,
 constructors, generic calls, variadics, and function values all bind through
 the one binder. fmt never adds nor strips labels.
 
@@ -800,14 +800,14 @@ position and never reordered.
 For an imported candidate set, steps 2–5 run independently for each body. Zero
 successful candidates keep the ordinary binding or type error. One selects that
 body. Two or more produce E0772 with every matching signature and a fully
-labelled rewrite of the first candidate; labels are the deconfliction
+labeled rewrite of the first candidate; labels are the deconfliction
 mechanism. User Jet definitions remain unique (D-CAP10), and S83 multi-head
 dispatch remains variant-driven, so this rule does not add user overloading.
 
 Corpus boundaries: `Examples/Basics/Functions/NamedArgs.jet` covers `/` and
 `*` zones, skipped defaults in `connect`, a defaulted slot and variadic tail
 in `collect`, and adjacent same-type `Float` parameters in `Rect.new`, both
-bare and labelled. `Tests/UI/call_mapping_type_boundary.jet` proves that types
+bare and labeled. `Tests/UI/call_mapping_type_boundary.jet` proves that types
 do not reroute bare arguments; `Tests/UI/wrong_arg_count.jet` covers the
 no-slot arity boundary. The `CallBinder` candidate-set tests cover one,
 zero, and multiple successful imported bodies; `Tests/UI/ambiguous_call_e0772.jet`
@@ -1552,7 +1552,7 @@ freely to `Float` from `I8 I16 I32 U8 U16 U32`, and to `F32` from
 check and trap before rounding. A numeral is checked exactly at compile time.
 Experts accept possible precision loss for one crossing with `approx(value)`.
 **D-NUMLIT-PEER1=A** *(ratified 2026-07-30)*: a bare numeral adopts a
-fixed-width peer only when a sized neighbour asks for it; with no sized peer
+fixed-width peer only when a sized neighbor asks for it; with no sized peer
 the numeral stays `Int`. Peerless `1000000 * 1000000` and `0 - 17` are therefore
 `Int` arithmetic. Destination annotations and parameters still push width
 through the expected-type channel (`take_u8(1 + 2)`).
@@ -3919,14 +3919,14 @@ everywhere. It amends D-IFGUARD1, D-CONCSELECT1, and D-CONC-CHAN1's spelling;
 `after` uses D-TYPE2-TIME1=A and cancellation follows D-CANCELMODEL1=C.
 
 **D-CANCELMODEL1 = C** *(ratified 2026-07-11, card #126; amended by
-D-TASK-SLICE1=A)*: cancellation is preemptive at wait points. A cancelled task
+D-TASK-SLICE1=A)*: cancellation is preemptive at wait points. A canceled task
 (race loser, fail-fast sibling, explicit `handle.cancel()`) unwinds at its
 next wait point — channel recv/send, sleep, join, select, I/O — running
 Drop-backed cleanup, exactly as a blown deadline (E3003) already does.
 D-TASK-SLICE1=A adds the check at each loop iteration and at each call of a
 function that can call itself, where a cancel or a passed deadline lands the
 same way, so a task that only computes stops too. A
-cancelled `task.all` member reports
+canceled `task.all` member reports
 `Cancelled`, not a completed `Value`. A scoped shielded region defers (never
 discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**
 *(ratified 2026-07-11)*: the shielded region is spelled `#Shield { … }`,
@@ -7258,7 +7258,7 @@ local UI cache ratified by D-JOS-STUDIO-STATE1.
   rollback. Backend-specific knobs live under nested profiles.
 - **D-JOS-HARDWARE1=A**: hardware scans emit `hardware.<host>` source.
   Systems import that source and may apply first-party or community hardware
-  profiles. Specialisations are named boot variants over the same host and
+  profiles. Specializations are named boot variants over the same host and
   generation, with explain output showing what changed.
 - **D-JOS-DISK1=A**: one storage tree declares disks, partitions, encryption,
   filesystems, mounts, ephemeral roots, and persistence. The installer consumes
@@ -8686,7 +8686,7 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-FENCE-GLYPH1=A** *(card #1516; spelling superseded by D-FENCE2=A)* — expression fences accept expression entries. It spelled fences `@[ … ]@`, superseding `$[ … ]$` under the D-ONCE-AT1 prefix migration; the retired `$` spelling has no compatibility path.
 - **D-FENCE-RANGE1=A** *(card #1516)* — inside an expression fence, an ascending integer-literal range `0..3` expands to the four entries `0`, `1`, `2`, and `3`. Descending ranges and ranges with non-integer-literal endpoints remain one ordinary Range value and add no diagnostic. Binding-name ranges keep their existing numbered-name rule.
 - **D-FENCE2=A** *(ratified 2026-09-28, card #3662; shipped 2026-09-28)* — the statement-expansion fence is spelled `<: … :>`: `<: t1..t8 :>: task transfer(from, to, 100)`, `print(<: "a", total(1, 2) :>)`. Statement repetition, lock-step fences, numbered names, and D-FENCE-RANGE1 are unchanged; `print(<: (0..3) :>)` prints one range. `<:` and `:>` are longest-match lexer tokens; `<`, `<=`, `<=>`, `>`, and generic `<T>` never form them. `:>` is reclaimed from the D-ARROW-RESPELL1 retired arrow: a `:>` with no opening `<:` teaches `->` through E0070. The old `@[` / `]@` digraphs teach the new spelling through E-FENCE-SPELLING with a formatting-safe edit; they are not aliases.
-- **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favour of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
+- **D-COMPILER-NS1=A / D-META-ROOT3=A / D-BUILD-FACT3=A / D-DECL-META1=A** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — compiler facts carry `$`. A fact is a `$` member of its subject (`T.$layout`, `T.$fields`, `field.$name`, `Severity.$range`, `send_report.$effects`, `value.$origin`); build facts hang off `$build` (`$build.os`, `.profile`, `.settings.*`, `.stamp.*`) and package facts off `$package` (`$package.name`, `$package.version`); `$phase` and `$program` are the other subjectless roots. Marker and fact declarations mark compiler metadata the same way: `marker Audited($sites: [.Type], $repeatable: false)`, `fact Flow($holds: .Value, $safe: .Gain, $gates: [])`, `migration … $irreversible`. `@TYPE(T)`, `@FUNCTION(f)`, `@METHOD`, `@CLOSURE` and `@VALUE(v)` are removed in favor of subject members; `@SOURCE()` and `@TYPES()` keep their registry spelling until a ballot names a `$` root. The lexer reads `$name` as one word; programs never declare a `$` name (E0003), and config surfaces read the same word as the `$NAME` environment read (D-ONCE-DOLLAR1=B). Every retired `@` fact spelling (`T.@layout`, `@build.os`, `@build.package.name`, `@sites:`, `@PHASE()`) teaches E0003 with a machine-applicable `$` respelling (retirement row `fact-mark`). Template name splices carry `$` too (D-NAME-SPLICE1=B, below); `pkg@provider#v` references are unchanged (D-AT-INFIX1=A).
 - **D-NAME-SPLICE1=B** *(ratified 2026-09-30, card #3662; shipped 2026-09-30)* — inside a derive or marker template the fact sigil also splices a template binding: `$method: fn(self)` and `impl $type_name` name a declaration from text, `self.$field` and `rhs.$field` read the member named by a loop value, `.$left` matches the variant it names, and `{$count}` or a bare `$count` reads the binding's build-time value. A `$` word that names no template binding, or that is read on a bound value (`field.$name`), stays a compiler fact. The retired `@` splice (`fn @method`, `self.@field`, `.@left`, `{@count}`) teaches E0388 with a machine-applicable `$` respelling, which completes the #3662 cutover: prefix `@` in code marks only a live link.
 - **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
@@ -9087,13 +9087,13 @@ TAINT1 names its off-switch spelling.
 - **D-BOUND-HEAD1=A — checked URL, Path, and DateTime heads**: `URL{"…"}`, `Path{"…"}`, and `DateTime{"…"}` are checked typed values, not fallible runtime constructors; an invalid head is E0155. A URL hole is percent-encoded, a Path hole is one encoded component, and a DateTime head takes no hole. Runtime strings keep their existing `parse`/`from` constructors. No amendment: the forms ride D-UNIFYLIT1, D-DOTCTOR3, and D-CORE-PATH1.
 - **D-BOUND-RAW1=A — typed head bodies own their escapes**: inside any `Type{"…"}` body a backslash is literal text owned by that head's grammar, so a checked pattern reads as written. **Amendment**: this narrows D-UNIFYLIT1's head-body lexing, and backslash handling only — quote, brace, multiline-closing, and hole rules do not move, and D-REGEX-LIT1 stays untouched, so Regex still refuses interpolation. Plain strings keep the four-entry escape table.
 - **D-BOUND-SINK1=A — retired marker contract** *(superseded by D-TEXTHEAD-TYPE1=A, card #2185)*: the former `marker Name on [.Text] { check … hole … }` route is decision history only. The ordinary nominal type and `CheckedText` implementation now own the checked-text sink; the planned sink registry remains deleted.
-- **D-BOUND-TAINT1=A — origin facts clear on typed decode**: `net.*`, `fs.read*`, `env.*`, process output, and FFI marshalling seed a `$origin.*` fact in the one ratified flow store. The fact spreads with no ceremony and clears on a successful typed decode or typed construction, because a value that just proved a schema is not raw attacker text. `SQL.raw`, `HTML.raw`, and `Sh.raw` refuse origin-marked text with E0721; `#Scrub` stays the word for a hand-written sanitizer, and `jet inspect gates` lists every gate. The fact is sema-only and is erased before every execution tier. **Off-switch**: one typed settings row on the D-CONF rail refuses seeding project-wide; the proposed spelling is `settings: { origin_facts: off }`, the final key is the owner's, and the row stays unbuilt until that spelling is ratified (I7).
-- **D-BOUND-EVOLVE1=A — published schemas keep unknown wire fields**: a `#PublishedSchema` codec keeps the fields it does not recognize and re-emits them in their original relative order, so an old binary cannot eat a new field during a rolling deploy. Plain `#Codable` keeps today's drop and `#DenyUnknownFields` keeps its refusal with E2412 — refuse, drop, preserve, one word each. This extends the D-MIGRATE1/D-MIGRATE4 bookkeeping and changes no known-field decoding, marker behaviour, or FieldError shape.
+- **D-BOUND-TAINT1=A — origin facts clear on typed decode**: `net.*`, `fs.read*`, `env.*`, process output, and FFI marshaling seed a `$origin.*` fact in the one ratified flow store. The fact spreads with no ceremony and clears on a successful typed decode or typed construction, because a value that just proved a schema is not raw attacker text. `SQL.raw`, `HTML.raw`, and `Sh.raw` refuse origin-marked text with E0721; `#Scrub` stays the word for a hand-written sanitizer, and `jet inspect gates` lists every gate. The fact is sema-only and is erased before every execution tier. **Off-switch**: one typed settings row on the D-CONF rail refuses seeding project-wide; the proposed spelling is `settings: { origin_facts: off }`, the final key is the owner's, and the row stays unbuilt until that spelling is ratified (I7).
+- **D-BOUND-EVOLVE1=A — published schemas keep unknown wire fields**: a `#PublishedSchema` codec keeps the fields it does not recognize and re-emits them in their original relative order, so an old binary cannot eat a new field during a rolling deploy. Plain `#Codable` keeps today's drop and `#DenyUnknownFields` keeps its refusal with E2412 — refuse, drop, preserve, one word each. This extends the D-MIGRATE1/D-MIGRATE4 bookkeeping and changes no known-field decoding, marker behavior, or FieldError shape.
 - **D-BOUND-BIND1=A — the binder verb reads data schemas**: `jet inspect bind json|csv|sql|xml|proto <file>` writes visible ordinary Jet source under a provenance header that records the command, the input, its `sha256`, the format, and each inference rule applied. Regeneration is explicit and nothing imports the result for you, so D-NAME-FILES1=C holds; the same verb still binds language headers.
 - **D-BOUND-UNDO1=A — a foreign call inside `#Transact` declares its undo**: the compiler cannot read a foreign body, so an `extern` call inside `#Transact` is E0746 unless its binding carries `#Undo(inverse)`; the named inverse joins the ratified rollback path and runs in reverse order with the other rollback actions. The error names the whole fix vocabulary: hoist the call out of the block, or declare the inverse. **Amendment**: this extends the D-TXN2-era irreversible set, which was exactly Net, FS, and Exec, and it rides D-ROLLBACK-TRAIT instead of adding a transaction mechanism.
 - **D-BOUND-PROV1=A — dependency provenance has one read surface and a chosen posture**: `jet inspect provenance` prints one lock-backed record per dependency — locked hash, transparency entry, publisher identity, build attestation — each marked enforced, verified, or recorded, with the same record behind the human and JSON output. Integrity stays enforced by E1204. **Amendment**: the `require: none | logged | attested` row is new vocabulary inside D-AUTHORITY-MANIFEST1's ratified trust block; `none` is the default, so an unattested dependency still resolves until a project raises its floor.
 
-I9 requires the Prelude to own the crossing behaviour — the checked-text
+I9 requires the Prelude to own the crossing behavior — the checked-text
 interpolation kernel, ordered wire merge, taint erasure, rollback hook, and
 provenance record — while AOT, Cranelift JIT, and interpreter engines call the
 same `jet_*` symbols rather than re-encoding the rules.
@@ -9159,7 +9159,7 @@ arguments fill one callable left to right when the mapping is deterministic;
 defaults fill after supplied arguments, and a final variadic slot owns the bare
 tail. Types never reroute a bound argument. Adjacent same-type parameters stay
 legal positionally. An imported call with more than one successful candidate
-binding raises E0772 and prints candidate signatures plus a labelled rewrite;
+binding raises E0772 and prints candidate signatures plus a labeled rewrite;
 always-on LSP inlay hints show the public names without requiring repeated
 typing. This adds no syntax and does not reopen S61 zones or user-definition
 uniqueness.

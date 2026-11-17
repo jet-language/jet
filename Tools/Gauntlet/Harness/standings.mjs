@@ -27,7 +27,7 @@ const METRIC_IDS = STANDINGS_METRICS.map((metric) => metric.id);
 // own words for it).
 export const PENDING_REASON = "not measured yet";
 
-export const STANDINGS_JUDGEMENT = Object.freeze({
+export const STANDINGS_JUDGMENT = Object.freeze({
   ratio: "jet / peer",
   floor: Object.freeze({ pass: "ratio < 1.00", fail: "ratio >= 1.00" }),
   ceiling: Object.freeze({ meet: "ratio <= 1.00", miss: "ratio > 1.00", gap: "ratio - 1.00" }),
@@ -402,7 +402,7 @@ export function buildStandings(entries, policy, { generated = new Date().toISOSt
     peers: [...policy.peers],
     ceiling: policy.ceiling,
     metrics: STANDINGS_METRICS,
-    judgement: STANDINGS_JUDGEMENT,
+    judgment: STANDINGS_JUDGMENT,
     not_applicable: policy.not_applicable,
     size_basis: policy.size_basis,
     runtimes,

@@ -40,7 +40,7 @@ are in
 | Parameter census | A source scanner over every `fn` header (`census.mjs`): defaults, variadics, `*` and `/` zones, external names, `Bool` parameters, arity, sibling-name families | "Public-looking" means no `priv` and no `_` prefix. Core has one `priv module` (`core.db.sql`), so nearly everything is public; the surface ledger is used where "documented" matters. |
 | Documented surface | `Compiler/Prelude/CoreSurfaceInventory.jet` `fixed_sig` rows | 1,694 rows; 1,180 without the `__` prefix |
 | Constant-forwarding wrappers | A scanner (`wrappers.mjs`) for one-line bodies that call one function with at least one literal argument, grouped by callee and checked against the ledger | 204 wrappers; 27 callees have two or more (128 wrappers); 20 of those callees are not on the ledger |
-| Behaviour probes | `jet check` / `jet run` with the published dev compiler on small programs | The repros in §6 and the language-gap rows in F5 |
+| Behavior probes | `jet check` / `jet run` with the published dev compiler on small programs | The repros in §6 and the language-gap rows in F5 |
 | Decision cross-check | `stdlib-api-laws.md`, `philosophy.md`, spec "Programmable builds", Tower decisions and cards | Items already ratified or carded are marked "settled" |
 
 The scanners read one-line headers and one-call bodies, so multi-line cases are
@@ -194,7 +194,7 @@ deletion is #5978 criterion 14. They still ship at HEAD (for example
 
 Settled elsewhere: D-DEADLINE-ONE1=A (ratified, not yet built) retires every
 per-call timeout argument and setter (`tcp_connect_timeout`,
-`session_timeout`, the `ms` of the nine `dns_*` lookups, and others) in favour
+`session_timeout`, the `ms` of the nine `dns_*` lookups, and others) in favor
 of one `#Deadline(duration)` block. It is the model of pillar 9: one composable
 mechanism instead of a timeout sibling per call.
 
@@ -202,9 +202,9 @@ mechanism instead of a timeout sibling per call.
 
 | Gap | At HEAD (probed) | Peers |
 |---|---|---|
-| Options after a variadic | `fn join_path(parts: ...String, *, sep: String{"/"})` gives `E1310 Variadic parameter 'parts' must be last` | Python keyword-only after `*args`; Swift labelled parameter after a variadic; Kotlin named arguments after `vararg` |
+| Options after a variadic | `fn join_path(parts: ...String, *, sep: String{"/"})` gives `E1310 Variadic parameter 'parts' must be last` | Python keyword-only after `*args`; Swift labeled parameter after a variadic; Kotlin named arguments after `vararg` |
 | Function values keep labels and defaults | They lose them: `E0764` (bug 1) | D-APILABEL1=A requires that they keep them |
-| Spreading a record into labelled arguments | `connect("h", ...opts)` gives `E1312 'connect' doesn't accept a spread argument`; into a `*` zone it gives `E0769` | Python `**kwargs`, JS object spread |
+| Spreading a record into labeled arguments | `connect("h", ...opts)` gives `E1312 'connect' doesn't accept a spread argument`; into a `*` zone it gives `E0769` | Python `**kwargs`, JS object spread |
 
 The first is ballot D-VARIADIC-OPTS1. The second is a bug against a ratified
 decision. The third needs research before any ballot: an options-struct
@@ -298,7 +298,7 @@ the rows above.
 7. **Build API call shape (F6, F7).** Label-only `b.action` arguments, typed
    effects and probe kinds (D4 already requires the enums), defaulted `deps`.
    Needs D-API-COMPOSE1 for the label-only zone.
-8. **Labelled options after a variadic (F5),** then the F8 variadics. Needs
+8. **Labeled options after a variadic (F5),** then the F8 variadics. Needs
    D-VARIADIC-OPTS1.
 9. **The `api` lint group and the review checklist** (proposal §5 and §6):
    `Docs/spec/contributing/api-review.md`, the six `api.*` lints with their
@@ -325,12 +325,12 @@ Each repro was run with the published dev compiler at `59213de00f`.
        print(g("Cy", punct: "~"))
    }
    ```
-   `jet check` gives `E0764 'g' has no parameter labelled 'punct'`. D-APILABEL1=A
+   `jet check` gives `E0764 'g' has no parameter labeled 'punct'`. D-APILABEL1=A
    says function values keep their labels and defaults.
 2. **An unknown label on `print` is printed as a value.**
    `print("a", "b", sep: "-")` prints `a`, `b` and `-` on three lines and exits
    0. A user variadic with the same call shape, `total(1, 2, bogus: 3)`, gives
-   `E0764 'total' has no parameter labelled 'bogus'`.
+   `E0764 'total' has no parameter labeled 'bogus'`.
 3. **L2401 is registered but never emitted.** `fn parse(text: String, strict:
    Bool)` called as `parse("abc", true)` gets only `L0102 unused_parameter`.
    L2401 is `active` in the diagnostic table and the spec says a positional

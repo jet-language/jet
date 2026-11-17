@@ -34,7 +34,7 @@ use jet_foundation.[
 
 // Built-in methods are positional (Rust `check_builtin_method_labels`). Zip
 // labels name output fields rather than parameters; `Map.merge`'s optional
-// conflict callback and `para_map`'s limit are the only labelled built-in
+// conflict callback and `para_map`'s limit are the only labeled built-in
 // method parameters.
 sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool {
     if method == "zip" || method == "zip_short" || method == "zip_pad" -> return true
@@ -43,8 +43,8 @@ sema_value_method_check_labels: fn(method: String, args: [CallArg], diagnostics:
         if argument.label == .Val(label) {
             if method == "merge" && index == 1 && label.name == "conflict" -> next
             if method == "para_map" && index == 1 && label.name == "limit" -> next
-            fix: if method == "merge" && args.len() == 2 -> "`{method}` accepts `conflict`" else -> "`{method}` takes no labelled arguments"
-            diagnostics.push(sema_error("E0764", label.span, "`{method}` has no parameter labelled `{label.name}`", "a label binds an argument to the parameter of that name", fix))
+            fix: if method == "merge" && args.len() == 2 -> "`{method}` accepts `conflict`" else -> "`{method}` takes no labeled arguments"
+            diagnostics.push(sema_error("E0764", label.span, "`{method}` has no parameter labeled `{label.name}`", "a label binds an argument to the parameter of that name", fix))
             valid = false
         }
     }

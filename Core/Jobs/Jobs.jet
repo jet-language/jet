@@ -1676,7 +1676,7 @@ queue_dead_letter_on_driver: fn(driver: &db.DBDriver, authority: String, name: S
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
     if record.state == .Completed || record.state == .Cancelled {
-        return Err(ServiceError.Policy("completed or cancelled queue work cannot be dead-lettered"))
+        return Err(ServiceError.Policy("completed or canceled queue work cannot be dead-lettered"))
     }
     if record.state == .Running && record.lease_token != lease_token {
         return Err(ServiceError.Revoked("running queue dead-lettering requires its active lease token"))

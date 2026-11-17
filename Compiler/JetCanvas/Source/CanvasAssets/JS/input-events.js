@@ -785,7 +785,7 @@
       } else if (!moved && target && target.pin_id === drag.pin.pin_id) {
         if (pendingPin && pendingPin.pin_id === target.pin_id) {
           setPendingPin(null);
-          showToast("Connection cancelled");
+          showToast("Connection canceled");
         } else {
           setPendingPin(drag.pin);
           showToast("Select destination pin");

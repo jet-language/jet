@@ -74,7 +74,7 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
     found.identity.case_id
 }
 
-#Test("comparison outcome: every outcome but matched fails, including timed-out and cancelled runs") {
+#Test("comparison outcome: every outcome but matched fails, including timed-out and canceled runs") {
     statuses: [ComparisonStatus]{.Mismatch, .Empty, .Unsupported, .Unavailable, .Timeout, .Cancelled, .InvalidOracle, .Contaminated}
     loop status in statuses {
         record: comparison_record_terminal(ObservationRelation.TypedEquality, status, "runner reported it")
@@ -83,7 +83,7 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
     }
     assert_eq(comparison_status_as_str(ComparisonStatus.Timeout), "timeout")
     assert_eq(comparison_status_as_str(ComparisonStatus.Cancelled), "cancelled")
-    // A run whose cases all matched still fails when the runner timed out or was cancelled.
+    // A run whose cases all matched still fails when the runner timed out or was canceled.
     stopped: [ComparisonStatus]{ComparisonStatus.Timeout, ComparisonStatus.Cancelled}
     loop status in stopped {
         record := testing_compare_samples(ObservationRelation.TypedEquality, [ComparisonSample]{outcome_value_sample("a", "1", "1")})

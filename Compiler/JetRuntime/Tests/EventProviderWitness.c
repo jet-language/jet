@@ -199,7 +199,7 @@ static void scope_teardown(void) {
     assert(strcmp(log, "h:1 ") == 0);
 }
 
-// A cancelled scope returns an inactive subscription and releases the handler.
+// A canceled scope returns an inactive subscription and releases the handler.
 static void cancelled_scope(void) {
     char log[64] = "";
     void *scope = jet_event_scope_new();

@@ -42,7 +42,7 @@ defect. This audit covers the rules a correct compiler applies.
 ## Owner ballots
 
 Two rules are language choices, and each goes to the owner as a ballot. The
-audit records today's behaviour; the ballot payloads carry the options.
+audit records today's behavior; the ballot payloads carry the options.
 
 - **B1 — unbounded reachable retention (D-RETAIN-BOUND1).** Three things keep
   memory reachable until exit, so no rule can free it while the program can
@@ -60,7 +60,7 @@ audit records today's behaviour; the ballot payloads carry the options.
 - **B2 — tasks still alive when `run` returns (D-EXIT-TASKS1).**
   - A detached task that is still computing runs to its end, so one that never
     ends keeps the process alive. Cancellation reaches a task only at a wait,
-    so a loop that never waits (`loop { n += 1 }`) cannot be cancelled either.
+    so a loop that never waits (`loop { n += 1 }`) cannot be canceled either.
   - A detached task that is waiting is reported with E3013 and unwound, and
     the process exits 70. A ticker that sleeps between ticks is such a task.
   - Parked tasks past the registry cap (4,096) are neither reported nor

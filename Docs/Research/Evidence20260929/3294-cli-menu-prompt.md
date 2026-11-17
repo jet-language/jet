@@ -6,7 +6,7 @@ Date: 2026-09-29. Binary: jet-debug-snapshot14 via `$JET_STATE_ROOT/safe-jet.sh`
 
 Can an ordinary interactive selection job reuse the canonical command schema
 (ArgsSpec / `#CLI` metadata) instead of a second menu tree, with explicit
-cancel/EOF/invalid/secret/accessibility behaviour and no hidden dispatch? What
+cancel/EOF/invalid/secret/accessibility behavior and no hidden dispatch? What
 exists today, and what remains to build?
 
 ## Sources read

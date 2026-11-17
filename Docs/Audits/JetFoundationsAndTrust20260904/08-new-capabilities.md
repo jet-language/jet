@@ -61,7 +61,7 @@ The model must state source bytes and source graph, values and types, stores and
 | Compile-time work | Evaluation, fuel/resources, effects, generics, and dependency/cache validity | #2938 |
 | Lowering and optimization | Each actual shared transformation preserves the allowed observations | #2939 |
 | Core and runtime | Jet-owned Prelude behavior satisfies its contracts, not merely the right symbol name | #2940 |
-| Execution adapters | AOT, JIT/dev, interpreter, and applicable web marshalling/translation correspondence | #2941 |
+| Execution adapters | AOT, JIT/dev, interpreter, and applicable web marshaling/translation correspondence | #2941 |
 | Composition | Every required stage matches the same candidate, with no uncovered Jet-controlled step | #2944 |
 
 Each accepted stage uses one of the three bindings already permitted by D-COMPILER-PROOF1:

@@ -92,7 +92,7 @@ static void unit_cases(const char *const *goldens,int64_t variants,int64_t *(*cl
 }
 static void ws_error_cases(void) {
     // Custom, not derive Debug: raw operation, signed limit.
-    const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n","websocket timed out","websocket is closed","websocket cancelled","this build target lacks websocket client connect"};
+    const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n","websocket timed out","websocket is closed","websocket canceled","this build target lacks websocket client connect"};
     for(int64_t kind=0;kind<9;++kind) {
         WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==3?INT64_MIN:0;a->operation=kind==4?text("read\"\n"):NULL;
         WsError *b=jet_rt_handle_clone_jet_ws_error(a);assert(a!=b && jet_rt_handle_eq_jet_ws_error(a,a) && jet_rt_handle_eq_jet_ws_error(a,b));

@@ -117,7 +117,7 @@ all.
 It does not yet cover borrows of map values, enum or option payload places,
 mutable iteration, reassignable `&mut` cursors, or building borrowing structs
 locally. A window into one element is a one-element slice (`pair[0][0]`);
-Rust's `&T` to a single element has no direct analogue.
+Rust's `&T` to a single element has no direct analog.
 
 ## 2. The closure false accept (#4621)
 

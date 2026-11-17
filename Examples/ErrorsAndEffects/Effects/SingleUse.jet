@@ -79,11 +79,9 @@ single_use_discard_lesson: fn() {
     a: issue("A")
     redeem(a)
     // The audited discard: this ticket is being voided on purpose — the event
-    // it admitted to was cancelled, so there is nothing left to redeem. We say
+    // it admitted to was canceled, so there is nothing left to redeem. We say
     // so in the `#Unsafe` reason, and `drop` discharges the consume duty.
     b: issue("B")
-    #Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
-        consume(b)
-    }
+    #Unsafe("event canceled; the ticket admits to nothing, so voiding it is correct") { consume(b) }
     print("ticket B voided")
 }

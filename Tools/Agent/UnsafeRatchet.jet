@@ -609,23 +609,23 @@ unsafe_arguments_at: fn(source: [U8], start: Int) -> UnsafeArguments? {
     positional := 0
     reason := String?{None}
     loop index < end - 1 {
-        labelled := false
+        labeled := false
         label_is_reason := false
         if identifier_start_at(source, index) {
             label_end: identifier_end(source, index)
             after_label: skip_layout(source, label_end)
             if byte_at(source, after_label) == COLON {
-                labelled = true
+                labeled = true
                 label_is_reason = span_text(source, index, label_end) == "reason"
                 index = skip_layout(source, after_label + 1)
             }
         }
-        if (label_is_reason || (!labelled && positional == 0)) && reason == None {
+        if (label_is_reason || (!labeled && positional == 0)) && reason == None {
             reason = quoted_reason_at(source, index)
         }
         index = skip_marker_argument(source, index)
         if byte_at(source, index) != COMMA -> break
-        if !labelled -> positional += 1
+        if !labeled -> positional += 1
         index = skip_layout(source, index + 1)
     }
     Val(UnsafeArguments{end: end, reason: reason})

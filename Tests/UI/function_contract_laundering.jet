@@ -4,12 +4,12 @@ named: fn(*, force: Bool) -> Int { 1 }
 
 erase: fn(action: &&fn(Bool) -> Int) -> fn(Bool) -> Int { action }
 
-labelled: fn(action: &&fn(*, force: Bool) -> Int) -> fn(*, force: Bool) -> Int { action }
+labeled: fn(action: &&fn(*, force: Bool) -> Int) -> fn(*, force: Bool) -> Int { action }
 
 use_label: fn(action: fn(*, force: Bool) -> Int) -> Int { action(force: true) }
 
 run: fn() {
-    _: labelled(save)
-    plain: erase(labelled(named))
+    _: labeled(save)
+    plain: erase(labeled(named))
     _: use_label(plain)
 }

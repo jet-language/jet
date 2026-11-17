@@ -6,7 +6,7 @@ hand-written assembly in cycles, with identical output).
 
 This is a plan. IrTypes-12 makes its first compiler change, the compact
 fault report (S3). Every number is either measured (marked **measured**, with
-the command) or modelled (marked **model**, with the basis). Where the
+the command) or modeled (marked **model**, with the basis). Where the
 report's location table lives is an owner ballot, D-RT-DEFECT-REPORT1, at the
 end; no printed text depends on it.
 
@@ -162,7 +162,7 @@ does not use.
 
 ### Stages for hello
 
-Modelled with `why.mjs` (section liveness of the real runtime pack and the
+Modeled with `why.mjs` (section liveness of the real runtime pack and the
 real hello binary) through `model-stages.mjs`. Each stage removes roots or
 call edges as the change would, and adds an allowance for the code the change
 adds. S0 reproduces the real binary to the byte.
@@ -288,7 +288,7 @@ Two rules for C6's 1.5–2x:
 
 ## 4. Speed: the architecture
 
-Each change, what it removes, and the modelled result. Models are counts of
+Each change, what it removes, and the modeled result. Models are counts of
 the instructions in the disassembled hot paths, measured as above, with the
 removed instructions taken out. The #6343 criterion each change belongs to
 is in brackets.

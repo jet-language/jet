@@ -3,7 +3,7 @@
 // from the struct's own field metadata, so adding or renaming a field needs no
 // registry edit:
 // - `inspect` lists each field's name, type and value, leaves out fields
-//   marked `#Engine.Hidden` and greys a field equal to the default-built value;
+//   marked `#Engine.Hidden` and grays a field equal to the default-built value;
 // - an `Edit` impl sets a field by name from text, parsed into its type;
 // - `diff` records what changed as a `Patch`, which `redo` and `undo` replay
 //   through `Edit`;
@@ -41,7 +41,7 @@ Row: struct {
     name: String,
     type: String,
     value: String,
-    grey: Bool,
+    gray: Bool,
 }
 
 Change: struct {
@@ -123,7 +123,7 @@ Entity: struct {
                     rows := [engine.Row]{}
                     #loop f in target.fields {
                         #if f.marker(Hidden) == None {
-                            rows.push(engine.Row{name: f.name, type: f.type.name, value: "{self.#{f}}", grey: self.#{f} == fresh.#{f}})
+                            rows.push(engine.Row{name: f.name, type: f.type.name, value: "{self.#{f}}", gray: self.#{f} == fresh.#{f}})
                         }
                     }
                     rows

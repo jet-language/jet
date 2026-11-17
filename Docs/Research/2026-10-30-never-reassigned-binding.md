@@ -31,7 +31,7 @@ The lint for this case is registered but has no emitter:
 - Two UI snapshots still expect it: `tests/ui_lint/arrow_loop_value_drop.warn:1-8`
   and `tests/ui_lint/busy_spin.warn:10-26`.
 
-The neighbouring lints L0529 (state loop never changes its header) and L0302
+The neighboring lints L0529 (state loop never changes its header) and L0302
 (same-enum guard table) are also rows with no emitter found by text search.
 L0153 (unreachable typestate) does fire under `--verbose`.
 
@@ -107,7 +107,7 @@ Spot checks matched the census. `Examples/features/web/ui_showcase.jet:197`
 `:=` bindings were seen; nine module bindings are never written.
 
 The rewrite is the old fix: replace the `:=` sigil with `::`. It changes no
-behaviour. A state-loop header cannot take `::` (x03), so its fix is a hoisted
+behavior. A state-loop header cannot take `::` (x03), so its fix is a hoisted
 `name :: value` before a `loop` with the test in the header.
 
 ## Other languages

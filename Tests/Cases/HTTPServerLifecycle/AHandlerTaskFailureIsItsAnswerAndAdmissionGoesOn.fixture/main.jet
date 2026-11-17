@@ -2,7 +2,7 @@
 // TaskFailure back from join, as a value. The deadline that the shared task
 // operation enforces becomes this handler's 504. A worker's panic becomes its
 // 500. Neither failure leaks into the server: the next request is admitted and
-// answered, and shutdown reports every connection completed and none cancelled.
+// answered, and shutdown reports every connection completed and none canceled.
 package: {
     name: "handler_task_failure"
     authority: { allow: [FS.Read, IO, Net, Time, Time.Wait] }
@@ -45,7 +45,7 @@ answer: fn(outcome: Int TaskFailure!) -> HTTPResponse HTTPError! {
         .Err(error) -> {
             if error == {
                 .DeadlineBlown -> return Ok(http_server.response(504, "worker deadline"))
-                .Cancelled -> return Ok(http_server.response(503, "worker cancelled"))
+                .Cancelled -> return Ok(http_server.response(503, "worker canceled"))
                 .Panicked(reason) -> return Ok(http_server.response(500, "worker panicked: {reason}"))
             }
         }
@@ -85,5 +85,5 @@ run: fn() (HTTPError | RangeError | TaskFailure)! {
     print("next: {fetch(addr, "/")}")
     report: server.shutdown(100ms) ?? panic("shutdown")
     serving.join() ?? panic("serve task")
-    print("accepted {report.accepted}, completed {report.completed}, cancelled {report.cancelled}")
+    print("accepted {report.accepted}, completed {report.completed}, canceled {report.cancelled}")
 }

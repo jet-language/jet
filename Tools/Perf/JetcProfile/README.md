@@ -43,7 +43,7 @@ from compiler locks, sleeps, subprocesses, and store synchronization.
 ## Native startup implementation pair
 
 The `native-host-shape-view` cell compares the full-program Source projection
-with the shape-only projection and cached index. It changes marshalling, not
+with the shape-only projection and cached index. It changes marshaling, not
 host-shape policy: the same Source checker still validates nominal definitions,
 Core owner identities, source-module membership and owned handle lifecycles.
 The scoped program view retains the canonical header and only four collection

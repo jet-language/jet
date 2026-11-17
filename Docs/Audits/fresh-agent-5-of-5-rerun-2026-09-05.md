@@ -44,7 +44,7 @@ the following r1 witnesses remain mandatory preflight and run checks:
 A preflight that reports any live witness stops before participant scoring. A
 preflight that clears them does not itself count as a participant result.
 
-## Fixed pass bar and unfavourable path
+## Fixed pass bar and unfavorable path
 
 The r2 result can come out against Jet. The campaign passes only if all ten
 participants complete both arms over all four tasks; every expected receipt is
@@ -95,7 +95,7 @@ For each participant, create separate disk-backed roots under
 session from an empty arm-specific build cache. The r2 operational refinement
 uses one cold implementation session per task and arm (eight isolated sessions
 per participant). This does not change the four-task set; it ensures the
-pre-registered arm order is actually honoured for each task, fixing r1 A01's
+pre-registered arm order is actually honored for each task, fixing r1 A01's
 one-session-per-arm deviation.
 
 Implementation sessions receive no campaign report, testimony table, Tower
@@ -111,7 +111,7 @@ workloads that exposed the original experience findings. Both languages receive
 the same behavior, fixture bytes, argv, exit contract, and expected bytes. Only
 the language, source filename, and compiler invocation differ.
 
-| Task | Matched real work in both arms | Controls that prevent steering; real unfavourable result |
+| Task | Matched real work in both arms | Controls that prevent steering; real unfavorable result |
 | --- | --- | --- |
 | **T1 — string-heavy configuration parsing** | Read the same `records.cfg` from argv[1]. Parse section headers, quoted `key = value` fields, and one-level `inherits`; print resolved sections in source order and fields in first-appearance order as `section.key=value`. Run the same duplicate-key fixture. A duplicate must exit non-zero, print no stdout, and name the field and section in stderr. | Freeze the fixture, argv, output bytes, and duplicate failure before either source. Keep Jet check/default/native and Rust check/debug/release commands. Do not disclose expected output before a clean check. Any wrong ordering, hardcoded output, default/native ICE, or diagnostic with no project-green receipt is a fail and remains in the denominator. |
 | **T2 — typed CLI dispatch** | Run the same vectors: `tool ls --json alpha`, `tool inspect alpha --format text`, `tool rm alpha --dry-run`, and `tool unknown alpha`. The first three must produce the frozen list/inspect/remove lines; the last must fail with no stdout. Both arms must dispatch once to a typed command value. | Pre-register all four argv vectors and outputs. Give both arms the same option order and no language-specific hint beyond the compiler command. Blind comparison sees only opaque labels after both arms stop. Unknown-command failure, missing-value failure, or a source that only handles the happy path is recorded as a failed task. |

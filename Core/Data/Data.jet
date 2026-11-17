@@ -791,7 +791,7 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     query_make<T>([String]{"stream"}, true, limits.copy(), fn() {
         reader := source.copy()
         if reader.cancelled {
-            return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+            return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
         }
         out := [T]{}
         loop {
@@ -821,7 +821,7 @@ __stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataS
 // End of input is a stable `None`; a source failure stays latched.
 __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
     if stream.cancelled {
-        return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+        return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
     }
     if stream.index < 0 -> stream.index = 0
     if stream.index < stream.items.len() {
@@ -1679,7 +1679,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
 // snapshot. Any failure is recorded in the loader status before it returns.
 snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
-        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before snapshot")))
+        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before snapshot")))
     }
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
     data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(loader, err))
@@ -3287,7 +3287,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // through it and no other FS capability.
 __read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) -[FS.Read]> DataError! {
     if loader.cancelled {
-        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was cancelled before read")))
+        return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before read")))
     }
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
     data_limits_check(loader.limits) ?? return Err(data_loader_fail<T>(loader, err))

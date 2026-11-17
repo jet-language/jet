@@ -185,7 +185,7 @@ _start:
     mov rdi, rax
     call reap
     mov eax, [r15 + STATUS]
-    test eax, 0x7f               # exited, not signalled
+    test eax, 0x7f               # exited, not signaled
     jnz 6f
     shr eax, 8
     movzx eax, al

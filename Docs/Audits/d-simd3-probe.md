@@ -13,7 +13,7 @@ signed/unsigned integer lanes at 128-bit and 256-bit widths.
 | Element-wise arithmetic | `MathTaskMem::jet_lane_ops` | `Math::zip_binop` / `zip_int_binop` | `MathLayout::zip_op` / `zip_int_op` |
 | Lane index | Prelude lane function | `Math::jet_jit_math_call` lane arm | `MathLayout::lane_at` |
 | Reductions | Prelude reduction functions | `Math::reduce_op` / `reduce_int_op` | `MathLayout::reduce_op` / `reduce_int_op` |
-| Fixed-list bridges | Prelude `from_array` / `to_array` | typed list marshalling | `MathLayout` list conversion |
+| Fixed-list bridges | Prelude `from_array` / `to_array` | typed list marshaling | `MathLayout` list conversion |
 
 The source witness is `examples/features/lowlevel/simd_wide.jet`, with its
 golden output in `examples/features/expected/lowlevel/simd_wide.out`. The

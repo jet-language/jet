@@ -77,7 +77,7 @@ not as an unchecked foreign exception.
 The worker sends shape and data through a bounded JSON protocol in column-major
 order, matching Octave and the Jet `Tensor` wire contract. Jet checks rank and
 element count before constructing the result tensor. Callers therefore declare
-`GPU` for Tensor marshalling in addition to the Octave and process effects used
+`GPU` for Tensor marshaling in addition to the Octave and process effects used
 by the session.
 
 The provenance record identifies the `jet-octave-bind-v1` schema, the exact

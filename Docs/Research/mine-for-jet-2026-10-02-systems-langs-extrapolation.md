@@ -140,7 +140,7 @@ Each section lists what to take, how Jet improves on it, what to avoid, and the 
   - Infer-only `//` parameters were declined with D-CAP8.
   - Origins are covered by inferred view provenance, which keeps lifetimes out of the beginner surface.
   - Benchmarks run through `jet perf`.
-- **Stdlib structure lessons.** One module per hardware concept. A data-type parameter on SIMD values instead of one type per width, which is D-LANES1. Layout objects that compose shape and stride, which `core.compute` views already do. Mojo puts `Int` and `Float` in the library; Jet's analogue is #4179.
+- **Stdlib structure lessons.** One module per hardware concept. A data-type parameter on SIMD values instead of one type per width, which is D-LANES1. Layout objects that compose shape and stride, which `core.compute` views already do. Mojo puts `Int` and `Float` in the library; Jet's analog is #4179.
 - **Avoid.** Python-shaped `def` versus `fn` duality. Exposing MLIR in user code.
 
 ### Skip and Hack
@@ -156,7 +156,7 @@ Each section lists what to take, how Jet improves on it, what to avoid, and the 
 ### EYG and Unison
 
 - **Take.**
-  - The host handles every effect and the shipped program is checked code: this is the model for D-PORTABLE1, whose option B is the closest Jet analogue.
+  - The host handles every effect and the shipped program is checked code: this is the model for D-PORTABLE1, whose option B is the closest Jet analog.
   - Typed holes listing valid fits extend Jet's existing `#Todo` goal (#4210).
 - **Already in Jet.** Typed executable docs (doctests). The current directory is explicit inside the `FS` and `Env` effects. Loaded libraries are refused before they run when they ask for more than the host grants (D-LIB-DYNTRUST1=A).
 - **Avoid.** Shipping code by hash to remote nodes (Unison): research value, no Jet workload needs it. Y-combinator recursion and no loops.

@@ -15,7 +15,7 @@ built with `jet build --release` from toolchain identity
 `jet@0.0.1#9c7a98e2daec`. Repository citations are to dev `e23bd7f503`.
 
 Measured facts, probe results and quoted sources are kept apart from inference.
-Inference is labelled **[INFERENCE]**.
+Inference is labeled **[INFERENCE]**.
 
 ## Plain summary
 
@@ -52,7 +52,7 @@ Inference is labelled **[INFERENCE]**.
     `NodeIx :: distinct U16(0..1023)` is a bare 2-byte integer at run time, and
     indexing a `[Node#NodeIx]` with it never checks and never stops.
 11. Self-relative `Rel<T, I32>`, already ratified for `mem.Image`, stays the tool
-    for position-independent images. For pools the measurements favour typed
+    for position-independent images. For pools the measurements favor typed
     indices (section 7).
 
 ## 1. Two kinds of small pointer

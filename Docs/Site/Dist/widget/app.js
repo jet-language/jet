@@ -765,7 +765,7 @@ function jet_fixed_list_index(base, index, file, line) {
 
 // D-CORE-EAGER1=A / D-LOOPMAP1=B: web collection adapters use the same eager
 // collection contract as the native Prelude. The web tier supplies only the
-// array marshalling; these functions own the adapter call shape.
+// array marshaling; these functions own the adapter call shape.
 function jet_list_map(xs, f) {
   if (xs && xs.__jet_iter) return xs.map(f);
   return xs.map((value) => f(value));

@@ -358,7 +358,7 @@ exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
 
 /// Cancel the process when `signal` arrives: the entry's waits end without
 /// parking (a network wait as `NetError.Cancelled`, a sleep at once) and every
-/// live task is cancelled, so a serving `HTTPServer` returns its report and
+/// live task is canceled, so a serving `HTTPServer` returns its report and
 /// the program drains to its end. `signals` takes a signal as a value instead.
 on_signal: fn(signal: ProcessSignal) -[Exec]> Never! {
     id: rt.signal_open(true)
@@ -432,7 +432,7 @@ run_all_cancelled: fn() -> IOError Never! {
             operation: .Resolve,
             resource: Val("process.run_all"),
             os_code: None,
-            cause: Val("the job was cancelled before it finished"),
+            cause: Val("the job was canceled before it finished"),
         },
     )
 }

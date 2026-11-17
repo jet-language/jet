@@ -1,6 +1,6 @@
 ---
 name: triage
-description: Move Jet requests and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs in Tower.
+description: Move Jet requests and external PRs through a state machine of triage roles — categorize, verify, grill if needed, and write agent-ready briefs in Tower.
 disable-model-invocation: true
 ---
 

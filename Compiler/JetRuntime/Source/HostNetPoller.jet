@@ -26,7 +26,7 @@ net_poller_root := I64{0}
     }
     root: jet_rt_alloc(I64{80}, I64{8})
     thread_zero(root, I64{80})
-    // One cache line per shard, so neighbouring shard locks never share one.
+    // One cache line per shard, so neighboring shard locks never share one.
     shards: jet_rt_alloc(I64{1024}, I64{64})
     states: jet_rt_alloc(I64{8192}, I64{8})
     ids: jet_rt_alloc(I64{8192}, I64{8})
@@ -286,9 +286,9 @@ net_poller_start: fn(root: I64) {
 
 // Wait until `state` is ready for `interest`; `wait_kind` (owned, dropped
 // here) names the wait to the scheduler, the observation and an E3003. A
-// cancelled process root (a delivered process.on_signal signal) never
+// canceled process root (a delivered process.on_signal signal) never
 // unwinds, so its wait ends unready as ECANCELED instead of parking, which
-// the routes report as a cancelled network operation (NetRoutes.jet
+// the routes report as a canceled network operation (NetRoutes.jet
 // net_route_errno).
 host_net_ready: fn(state: I64, interest: I64, timeout_ns: I64, wait_kind: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})

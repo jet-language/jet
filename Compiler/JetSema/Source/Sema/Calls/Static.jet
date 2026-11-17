@@ -1873,15 +1873,15 @@ sema_call_ui_shortcut_cmd_key: fn(argument: CallArg, diagnostics: &[Diagnostic])
     if sema_registration_cli_without_parens(argument.expr) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> literal = Val(text.copy())
     }
-    labelled: argument.label != None
-    if !labelled && literal == .Val(key) {
+    labeled: argument.label != None
+    if !labeled && literal == .Val(key) {
         if key.trim() != "" {
             return
         }
     }
     reason := "the key must not be empty"
     if literal == None -> reason = "the key must be one plain string literal"
-    if labelled -> reason = "the key must be positional"
+    if labeled -> reason = "the key must be positional"
     shortcut: literal ?? "<expression>"
     row: diagnostic_registry_row("E2938") ?? panic("E2938 must have a registry row")
     diagnostics.push(sema_error("E2938", argument.span, "Invalid UI shortcut literal `{shortcut}`: {reason}", row.why, row.fix))

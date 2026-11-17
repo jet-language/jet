@@ -142,7 +142,7 @@ On top of that table:
 - #6039: unified markers. [2] covers user markers on every site; [3] says
   markers, derives and `fn build` read the same reflection types; [10] covers
   struct markers and `target.marker(T)`; [12]–[14] cover the cutovers.
-- #3520: the reflection programme. [12] callable info; [13] every declaration
+- #3520: the reflection program. [12] callable info; [13] every declaration
   family; [14] typed run-time views; [15] command registry; [16] inspector,
   codecs and migrations; [17] entity buckets; [24] source location.
 - #5023: code values and insertion.
@@ -187,7 +187,7 @@ own it. "Proof" points to a proof addition in section 11.
 | C18 | names written, positional load | generated positional decode | planned #3520 [16]; proof B3; cost cell P3 |
 | C19 | VERSION constant, per-field version notes | library field marker `Since(version)` and codec migrations | planned #3520 [16]; proof B3 |
 | C20 | new struct appears with no other edit | marker uses, complete after checking | planned #3520 [17]; proof B4 |
-| C21 | grey fields equal to default | compare each field with the default-built value | planned #3520 [16]; proof B3 |
+| C21 | gray fields equal to default | compare each field with the default-built value | planned #3520 [16]; proof B3 |
 | C22 | undo, redo, cut and paste from metadata | `T.Patch`, `diff`, `merge`, codec | built (p9) |
 | C23 | `DoNotDisplay` note | typed field marker read with `f.marker(Hidden)` | planned #6039 [2],[10]; proof B6 |
 
@@ -482,10 +482,10 @@ fn undo(before: Rock, after: Rock) -> Rock {
 ```
 
 ```jet
-// ratified, not built: C21 grey the fields that equal the type's default
+// ratified, not built: C21 gray the fields that equal the type's default
 // (written in the Entity marker's expand; needs statement-level self.#{f})
 impl #{target} {
-    fn greyed(self) -> [String] {
+    fn grayed(self) -> [String] {
         base :: #{target}{}
         out := [String]{}
         comptime loop f in target.fields {
@@ -602,7 +602,7 @@ states the requirement; only the named proof is new.
   reproduces the 2017 Jai editor demo:
   - it lists the fields of any selected entity;
   - it hides fields with a library field marker;
-  - it greys fields equal to the default-built value;
+  - it grays fields equal to the default-built value;
   - it edits through an `Edit` impl that the entity marker's expand wrote;
   - it undoes through `Patch` and `diff`;
   - it saves each entity as one text file that round-trips.

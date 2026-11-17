@@ -317,7 +317,7 @@ This is where the interesting research begins. The theory of incremental queries
 
 A mouse position is measured in window pixels. A game object position is measured in world coordinates. Both may be pairs of numbers. Adding them is usually nonsense, but ordinary numeric types cannot tell.
 
-A **coordinate space** says where a position is measured from and which axes it uses. A **transform** converts a position from one space to another. A metre-versus-pixel distinction helps, but units alone do not distinguish two cameras or two world origins.
+A **coordinate space** says where a position is measured from and which axes it uses. A **transform** converts a position from one space to another. A meter-versus-pixel distinction helps, but units alone do not distinguish two cameras or two world origins.
 
 ### Existing Jet is already partway there
 
@@ -488,7 +488,7 @@ The reader's compressed bytes, decompressed bytes, row count, nesting, and retai
 
 Add an operation to a library. Its name, parameter types, result, effects, errors, and semantic implementation are one API. A maintainer should not have to remember which compiler tables, interpreter arms, JIT hosts, and web handlers need a matching entry.
 
-The source currently exposes explicit Core type/member/signature routes. The existing D-TIER-ONEIR1 ruling already requires one Core declaration, generated symbol/marshalling rows, a finite MIR operation set, and total backend consumers. **The recommendation is to finish that ruling, not create a new registration scheme.**
+The source currently exposes explicit Core type/member/signature routes. The existing D-TIER-ONEIR1 ruling already requires one Core declaration, generated symbol/marshaling rows, a finite MIR operation set, and total backend consumers. **The recommendation is to finish that ruling, not create a new registration scheme.**
 
 ### The desired authoring boundary
 
@@ -501,14 +501,14 @@ One API declaration
              /           |             \
         checking       reflection    MIR call descriptor
                                         |
-                            total marshalling adapters
+                            total marshaling adapters
 ```
 
 An ordinary helper stays an ordinary Jet or Prelude helper. A true primitive has an explicitly declared primitive boundary. Moving all code into Jet for ideological purity is not the same task; self-hosting remains its separately evaluated choice. The adopted Prelude-home ruling and I9 remain in force.
 
 ### The deletion test
 
-For a new Core operation, delete a generated row and the build must recreate it or fail its coverage check. A maintainer should not be able to add a public name while forgetting a backend's matching marshalling route. A backend cannot attach its own default or validation policy.
+For a new Core operation, delete a generated row and the build must recreate it or fail its coverage check. A maintainer should not be able to add a public name while forgetting a backend's matching marshaling route. A backend cannot attach its own default or validation policy.
 
 The ordinary `#MustUse` declaration should likewise own ignored-value obligations. The named Core exceptions in `core_must_use_type` are candidates for removal after equivalent consumer-visible behavior is established. Closed marker argument menus must follow the already-ratified ordinary-enum direction, not acquire another phantom type category.
 

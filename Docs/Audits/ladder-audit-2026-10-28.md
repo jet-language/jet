@@ -245,7 +245,7 @@ These ladders already meet pillar 4. Each needs no action beyond the name fixes 
    - B: keep module-only privacy and drop the "will come through the manifest" note until it exists.
 9. **D-CONT-OUTPUT1 — Outputs in source (L-04).**
    - Current: `defaults: { run: APP }` in `run.jet` is E0357.
-   - A: allow `defaults:` as a recognised file-level field.
+   - A: allow `defaults:` as a recognized file-level field.
    - B: move `defaults` to `package.jet` in the continuity example.
 10. **D-LOG-LADDER1 — log level rungs (L-18).**
     - Current: only `log.set_level("warn")` / `log.setup("level=warn")`.

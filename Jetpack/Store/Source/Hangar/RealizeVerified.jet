@@ -40,7 +40,7 @@ RealizeRequest: enum {
 
 // Controls a source-only independent-root reproducibility certification. A
 // retry always starts both builds in fresh roots. `cancelled` is polled
-// between build/promotion boundaries; a cancelled run never enters Hangar.
+// between build/promotion boundaries; a canceled run never enters Hangar.
 IndependentRootOptions: struct {
     retries: Int,
     cancelled: (fn() -[FS]> Bool)?,
@@ -558,7 +558,7 @@ store_certify_prepared: fn(verification: &StoreVerification, roots: HangarRoots,
     if options.cancelled == {
         .Val(cancelled) -> {
             if cancelled() {
-                return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification cancelled")))
+                return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification canceled")))
             }
         }
         .None -> {}

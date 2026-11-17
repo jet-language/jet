@@ -59,7 +59,7 @@ There is one owner choice: when a deprecated function's replacement takes differ
    - Jet has the rule (#6068: every break ships a `jet fix` rewrite), but r11 shows `jet fix` breaking code. That is card N4 and ballot D-DEPRECATE-INLINE1.
 3. **Withdrawn features were withdrawn for cost or for leaks, not for lack of interest.**
    - Java string templates went to a third preview and were then withdrawn (JEP 465, Closed/Withdrawn).
-   - Dart cancelled macros over compile-time and hot-reload cost.
+   - Dart canceled macros over compile-time and hot-reload cost.
    - Go stopped all error-syntax proposals in 2025 after three rounds.
    - V still tells users to avoid autofree.
    - Python 3.14.5 reverted the incremental GC after "significant memory pressure in production".
@@ -84,7 +84,7 @@ There is one owner choice: when a deprecated function's replacement takes differ
    - Python 3.14's t-strings return a `Template`, not a `str`, so libraries can refuse plain strings.
    - Jet's checked literal is stronger, because it is checked when compiling. But r01f and r10 show a second, unchecked door through public fields (card N1).
 
-## Per-language catalogue
+## Per-language catalog
 
 Each row gives the version, the change, how it went in practice (with its source), what Jet does today, and what Jet should do and why.
 
@@ -102,7 +102,7 @@ Each row gives the version, the change, how it went in practice (with its source
 |---|---|---|---|---|
 | C++23 | `std::expected`, `std::print`, `import std` | `import std` depends on modules, which compilers support only partly (cppreference compiler support) | Jet has error unions and `print` built in | Nothing to do. |
 | C++26 | Standard library hardening (P3471) | Google: 0.30% average cost, over 1,000 bugs found, 30% fewer segfaults (security.googleblog.com 2024-11) | Jet collections are bounds-checked by default | Keep checks on in release builds. This is the strongest measured evidence for safe defaults. |
-| C++26 | Erroneous behaviour for uninitialized reads (P2795), `[[indeterminate]]` opt-out | Turns a whole class of undefined behaviour into defined-but-wrong values | Jet has no uninitialized locals | Nothing to do. Useful evidence for open ballot D-UB-BOUNDARY1. |
+| C++26 | Erroneous behavior for uninitialized reads (P2795), `[[indeterminate]]` opt-out | Turns a whole class of undefined behavior into defined-but-wrong values | Jet has no uninitialized locals | Nothing to do. Useful evidence for open ballot D-UB-BOUNDARY1. |
 | C++26 | Static reflection (P2996) and contracts (P2900) | Herb Sutter: "more transformational than any 10 other major features" (herbsutter.com, 2025-06) | Jet has `$` facts and `prep { }` compile-time code | Nothing to do. Jet's reflection already reads facts without letting metaprograms mutate code (D-METAMUTATE1=A). |
 
 ### Rust (1.56–1.9x, editions 2021 and 2024)
@@ -110,14 +110,14 @@ Each row gives the version, the change, how it went in practice (with its source
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
 | 1.85 | Edition 2024, with `cargo fix --edition` | Migration was mostly mechanical; the fixer is conservative and leaves a few hand edits (blog.rust-lang.org, 2025-02-20) | One edition, "2026"; E2001 rejects others | Keep one edition until 1.0. When a second exists, it needs a full `jet fix` (#6068). |
-| 1.75 | `async fn` in traits | Shipped with a `Send`-bound caveat and the `trait_variant` helper crate (blog.rust-lang.org, 2023-12-21) | No `async`; tasks are M:N (D-ASYNCRT1=A) | Nothing to do. Jet avoids function colouring entirely. |
+| 1.75 | `async fn` in traits | Shipped with a `Send`-bound caveat and the `trait_variant` helper crate (blog.rust-lang.org, 2023-12-21) | No `async`; tasks are M:N (D-ASYNCRT1=A) | Nothing to do. Jet avoids function coloring entirely. |
 | 1.88 | `let` chains (edition 2024 only) | Took years because of drop-order questions | Jet's `if ... == .Val(x)` matching covers this | Nothing to do. |
 
 ### Go (1.18–1.26)
 
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
-| 1.21 | GODEBUG settings and toolchain auto-download | Behaviour changes gated per module; old behaviour selectable | D-JPK-TOOLCHAIN1 pins toolchains | Nothing to do. |
+| 1.21 | GODEBUG settings and toolchain auto-download | Behavior changes gated per module; old behavior selectable | D-JPK-TOOLCHAIN1 pins toolchains | Nothing to do. |
 | 1.22 | Per-iteration loop variables | No production problems at Google; buggy tests exposed (go.dev/blog/loopvar-preview) | Per-iteration capture (r04 prints `1`) | Nothing to do. |
 | 1.23 | Range-over-func iterators; opt-in telemetry | Iterators adopted widely; telemetry kept opt-in after pushback | Zero telemetry (D-TELEMETRY1=A) | Keep. |
 | 1.25 | Container-aware GOMAXPROCS | Fixes CPU throttling in Kubernetes | The scheduler reads cgroup quotas and affinity (`HostParallelism.jet`) | Nothing to do. |
@@ -140,7 +140,7 @@ Each row gives the version, the change, how it went in practice (with its source
 
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
-| 5.5 | async/await, actors, structured concurrency | `async` must be marked at every caller, so it spreads through APIs | M:N tasks, no colouring | Nothing to do. |
+| 5.5 | async/await, actors, structured concurrency | `async` must be marked at every caller, so it spreads through APIs | M:N tasks, no coloring | Nothing to do. |
 | 5.9 | Macros (SwiftSyntax), parameter packs, noncopyable types | Macros are separate programs built on swift-syntax; build-time cost complaints followed [INFERENCE: not in the release notes] | Checked macros (D-JAI-CODE1=A), in-compiler | Nothing to do. |
 | 6.0 | Strict concurrency checks on by default | False positives on globals; reflexive `@MainActor` everywhere (swift.org/blog/announcing-swift-6) | Module `:=` writes compile silently (r05); open ballot D-MODULE-WRITE1 | Evidence for #6332: whatever wins must not make single-task programs add annotations. |
 | 6.2 | "Approachable concurrency": main actor by default, `@concurrent`; `InlineArray`, `Span`, strict memory safety | Reverses 6.0's friction with defaults (swift.org/blog/swift-6.2-released) | — | Same evidence for #6332. |
@@ -202,7 +202,7 @@ Each row gives the version, the change, how it went in practice (with its source
 
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
-| 8.1 | Enums, readonly, fibers, `never` | Fibers enabled async libraries without colouring | — | Nothing to do. |
+| 8.1 | Enums, readonly, fibers, `never` | Fibers enabled async libraries without coloring | — | Nothing to do. |
 | 8.4 | Property hooks, asymmetric visibility, `#[\Deprecated]` | Deprecation for user code | `#Deprecated` (D-STRUCT-LIFE1=A) | Nothing to do. |
 | 8.5 | Pipe `|>`, `#[\NoDiscard]` with `(void)`, clone-with | — | D-DISCARD1=A | Nothing to do. |
 
@@ -211,7 +211,7 @@ Each row gives the version, the change, how it went in practice (with its source
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
 | 3.0 | 100% sound null safety | Took two years of opt-in migration with a tool | Non-null by default | Nothing to do. |
-| 2025-01-29 | Macros cancelled | Compile-time and hot-reload cost (dart.dev blog) | Checked macros in the compiler | Watch macro build cost; no card. |
+| 2025-01-29 | Macros canceled | Compile-time and hot-reload cost (dart.dev blog) | Checked macros in the compiler | Watch macro build cost; no card. |
 
 ### Elixir and Erlang
 
@@ -247,7 +247,7 @@ Each row gives the version, the change, how it went in practice (with its source
 | Version | Change | In practice (source) | Jet today | Jet action and why |
 |---|---|---|---|---|
 | monthly tags | No 1.0; breaking `core:os/os2` → `core:os` (2026-03); `core:sys/info` moved from globals to calls ("as little work in @(init)") | Users track monthly breaks by hand | D-CORE-GLOBAL-STATE1=A | Evidence: keep start-up work out of module init. |
-| 2024-06 | `core:odin/printer` removed in favour of OLS | Tools consolidated | One formatter | Nothing to do. |
+| 2024-06 | `core:odin/printer` removed in favor of OLS | Tools consolidated | One formatter | Nothing to do. |
 
 ### Nim (2.0–2.2)
 

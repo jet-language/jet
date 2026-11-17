@@ -242,7 +242,7 @@ Smaller points:
 
 **Second draft.** Reads and pushes continue online. Only writes are held. Held writes are flagged after 7 days, and the age can be changed. Sign-out asks before discarding. Release rebases (#6867).
 
-**Attack.** The behaviour is well defined. Rebase depends on #6867, which is listed as a precondition.
+**Attack.** The behavior is well defined. Rebase depends on #6867, which is listed as a precondition.
 
 **Verdict: holds.**
 
@@ -380,7 +380,7 @@ Gaps G1 to G35 of the first review are answered by the second draft, except thos
 | G52 | Seeded rows have UUIDv7 IDs (#6867 c6). Seeds are created per account at join, with references renumbered, or created lazily under the joined account, so two accounts never share a seed ID and two devices of one account do. Proof: a case joins two accounts and two devices of one account. |
 | G53 | An upload interrupted longer than the request-key window (24 hours, #6867 c2) resumes correctly: the server confirms an `Exists` by row ID and owning account. The note states what the local store becomes after a complete join. Proof: a case resumes after a simulated 48 hours. |
 | G54 | A service with mixed authorities states which methods run on the device; a method that touches a `.Server` and a `.Device` store in one transaction is a compile error; a `.Server` row cannot reference a `.Device` row. Proof: a diagnostic snapshot per rule. |
-| G55 | `.Device` backup rules cover Android `dataExtractionRules` (both `cloud-backup` and `device-transfer`) and `fullBackupContent` for API 30 and earlier, iOS `isExcludedFromBackup`, and state desktop behaviour. The default for an app whose every store is `.Device` is a ballot that states its cost (loss on device replacement against privacy), or includes such data by default and excludes only caches. |
+| G55 | `.Device` backup rules cover Android `dataExtractionRules` (both `cloud-backup` and `device-transfer`) and `fullBackupContent` for API 30 and earlier, iOS `isExcludedFromBackup`, and state desktop behavior. The default for an app whose every store is `.Device` is a ballot that states its cost (loss on device replacement against privacy), or includes such data by default and excludes only caches. |
 | G56 | The telemetry rule is enforceable under the chosen B4 option: under B4 B, spans and crash reports carry no argument values unless the endpoint declares them safe. |
 | G57 | A `.Device` store that fails its integrity check is never deleted: it is kept, opened read-only if possible, refused with a typed notice, and offered for export. Only cache stores are deleted and rebuilt. The failure table names where the queue lives on each platform. |
 | G58 | The failure table adds rows, each with a case: the log reader down with its slot retaining WAL (`max_slot_wal_keep_size` stated); catch-up ahead of the log reader; writes outside Jet; an app updated while offline; a web deployment without COOP and COEP; incognito or guest storage; a frozen leader tab; schedules missed while the app was closed (run once at launch or skipped, stated). |
@@ -404,7 +404,7 @@ Gaps G1 to G35 of the first review are answered by the second draft, except thos
 
 These facts come from knowledge and were not opened this round. The redesign should confirm each against its documentation:
 
-- Postgres commit-order versus visibility-order behaviour, and `max_slot_wal_keep_size`;
+- Postgres commit-order versus visibility-order behavior, and `max_slot_wal_keep_size`;
 - the Page Lifecycle freezing of background tabs;
 - PowerSync's shared-worker tab coordination;
 - Replicache CVR retraction.

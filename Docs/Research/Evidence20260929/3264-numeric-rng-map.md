@@ -51,7 +51,7 @@ rounding, overflow, NaN and conversions, on every tier? Which cells are missing 
 | Decimal div | `decimal("1").div(decimal("3"))` | ICE (same file) | `1/3` | `1/3` | exact: the quotient renders as a ratio, not a scaled decimal |
 | Decimal scale | `decimal("1.10").mul(decimal("2.0"))` | ICE | `2.20` | `2.20` | scale kept from the operands |
 | Decimal equality | `decimal("1.10") == decimal("1.1")` via `.equal` | ICE | `true` | `true` | numeric equality ignores trailing zeros |
-| Fraction construct | `math.fraction(6,-8)`, `(1,0)`, `(1,3)` | **`None` for all three**, then ICE `JIT drop Fraction<>? value is not a result` | E0956 `Native Fraction route requires a Fraction carrier` | `-0.75`, `None`, `0.3333333333333333` | zero denominator → `None`; sign normalised; AOT only |
+| Fraction construct | `math.fraction(6,-8)`, `(1,0)`, `(1,3)` | **`None` for all three**, then ICE `JIT drop Fraction<>? value is not a result` | E0956 `Native Fraction route requires a Fraction carrier` | `-0.75`, `None`, `0.3333333333333333` | zero denominator → `None`; sign normalized; AOT only |
 | `1 / 3 * 3 == 1` | | `true` | same | same | exact rational literal arithmetic |
 | Seeded RNG replay | `random.seed(42); random.int(0,1000000)` ×2, then reseed and compare | **hangs** (300 s timeout, nothing after the header) | E0956 `MIR execution exhausted its fuel` | **rustc ICE** (`jet_rng_int` expects `&mut Rng`/`i64`, gets `&Rng`/`JetInt`) | not demonstrable on any tier |
 | `Rng` split replay | `random.rng(99)`, `&r.split()` | not reached | not reached | not reached | unknown |

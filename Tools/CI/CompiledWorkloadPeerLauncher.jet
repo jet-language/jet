@@ -651,12 +651,12 @@ sweep_namespace: fn(signal: Int) -[FS, Env]> LaunchError! {
     loop entry in entries {
         pid: digits_value(entry.name) ?? next
         if pid <= 1 || pid == own -> next
-        signalled := true
+        signaled := true
         #Unsafe("posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command") {
-            if sys.kill(pid, signal) == .Err(_) -> signalled = false
+            if sys.kill(pid, signal) == .Err(_) -> signaled = false
         }
         // A process that exited since the listing is already closed.
-        if !signalled && files.exists("/proc/{pid}") {
+        if !signaled && files.exists("/proc/{pid}") {
             return Err(launch_error("Linux peer process tree signal failed for pid {pid}"))
         }
     }

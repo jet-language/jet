@@ -55,7 +55,7 @@ Tailwind grew usage faster than ever in 2025 and lost ~80% of revenue; it laid o
 
 ### The villain line (empirical, ranked by damage)
 
-1. **Retroactive terms on shipped work.** Unity's per-install Runtime Fee: CEO fired, fee cancelled inside 12 months, revenue −17% the next year, market cap $57B → $6B. Unrecoverable.
+1. **Retroactive terms on shipped work.** Unity's per-install Runtime Fee: CEO fired, fee canceled inside 12 months, revenue −17% the next year, market cap $57B → $6B. Unrecoverable.
 2. **Relicensing anything compiled into other people's builds.** Akka → BSL produced the Apache Pekko fork within weeks and destroyed Lightbend's standing; Redis → SSPL produced Valkey (funded by AWS, Google, Oracle) and Redis lost most external contributors in 12 months; Terraform → BSL produced OpenTofu under the Linux Foundation.
 3. **Unauditable metering** (Unity's self-reported installs).
 4. **Moving an existing free feature behind payment** (Puppet under Perforce, 2025 → OpenVox fork).

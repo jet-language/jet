@@ -545,7 +545,7 @@ its type as `f: fn(x: Int{0})`. The braces hold one value of that type; an
 empty `T{}`, as in `xs: [Int]{}`, is the empty value `T{}` names in an
 expression, for parameter, field and trait constant defaults alike. A call-site
 label binds by the public parameter
-name, so `f(x: 1)` may omit a default and labelled arguments may be supplied in
+name, so `f(x: 1)` may omit a default and labeled arguments may be supplied in
 any order. `/` closes the positional-only zone; `*` opens the label-only zone;
 `timeout seconds: Int` publishes `timeout` while the body reads `seconds`.
 Expressions supplied by the caller run left to right; unbound defaults run in
@@ -4160,19 +4160,19 @@ check. Every loop iteration starts with a check, and so does every call of a
 function that can call itself, directly, through other functions or through
 a function value. The return from a call that can stop is also a check. Every
 engine and optimization level lowers the check from the same rule. Until
-some task is stopped from outside, interrupted, cancelled, given a deadline,
+some task is stopped from outside, interrupted, canceled, given a deadline,
 strongly paused or asked for its turn, the native check that starts an
 iteration or a call costs one load and one branch.
 
 Cancellation is preemptive at wait points and at checks (D-CANCELMODEL1=C,
 amended by D-TASK-SLICE1=A). The wait points are channel send and receive,
-`time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at
+`time.sleep`, task join, a select arm, and I/O. A canceled task unwinds at
 the next wait point or check, whichever comes first, and runs Drop-backed
 cleanup, so a loop or a recursion that only computes stops at its next
-iteration or call. A cancelled
+iteration or call. A canceled
 receive unwinds instead of returning `Closed`. A busy race loser stops at its
-next iteration, so `task.race` returns once its winner does. A cancelled
-`task.all` member reports `Cancelled`. Cancelling a task also cancels every
+next iteration, so `task.race` returns once its winner does. A canceled
+`task.all` member reports `Cancelled`. Canceling a task also cancels every
 unfinished child of each `task.group` it has open outside `#Shield`, and
 through their own groups every unfinished descendant, even when the cancel
 arrives while the task waits at a group's closing brace (D-GROUP-CANCEL1=A).
@@ -4198,7 +4198,7 @@ normal exit. Outside a task it is a transparent block; at comptime it has no
 scheduler effect. Cleanup reached during an unwind completes its wait normally
 rather than starting a second unwind; a failure already propagating is not
 replaced. Generator completion notification still runs while its producer is
-cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
+canceled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 
 ### Channels
 
@@ -4215,7 +4215,7 @@ A second sender is made with `tx.copy()`; there is no combined channel value fro
 which to fetch one. `send` moves its value into the channel, and
 `receive() -> T Closed!` waits until a value arrives or all senders close.
 A send the channel refuses, because every receiver has closed or the waiting
-sender was cancelled, fails with core.prelude's `SendError<T> { value: T }`,
+sender was canceled, fails with core.prelude's `SendError<T> { value: T }`,
 which hands the unsent value back: `tx.send(job) ?? retry(err.value)`. A bare
 send propagates it, and it converts to the default `Err` as
 `send on a closed channel` (D-SEND-ERROR1=A).
@@ -5341,7 +5341,7 @@ The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `facts` read values and bounded lifecycle facts. `mark_stale(q)` marks a
 query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
 `retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
-in-flight operation was cancelled. `mutate` checks the key and optional
+in-flight operation was canceled. `mutate` checks the key and optional
 expected value, applies the mutation, and returns a `WebMutationState`;
 `mutate_with_invalidations` additionally validates target keys.
 
@@ -6609,7 +6609,7 @@ has a valid built-in-only schema. Metadata failures are E2103
 ## Editions and compatibility
 
 A package may pin an edition with `edition: "2026"` in `package.jet`. The one
-supported edition is `2026`, and it carries no edition-gated behaviour; a
+supported edition is `2026`, and it carries no edition-gated behavior; a
 missing field uses that edition, as does a single-file `jet run file.jet`,
 which has no edition marker. Any other edition is E2001 (7bef65ccd4). The
 durable compatibility contract for patch, minor, major,

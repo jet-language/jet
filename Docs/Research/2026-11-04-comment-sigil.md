@@ -274,7 +274,7 @@ German layouts].
   starts lines with markers (`#Test(…)`, `#Inline`, `#Unsafe(…) {`), and 829
   comments already start with `#4828`-style card refs. Under `##` these become
   `## #4828: …` beside `#Test("…")`. Comments and markers stop being visually
-  distinct without colour, which matters in diffs, terminals, review tools and
+  distinct without color, which matters in diffs, terminals, review tools and
   GitHub. Linguist has no `.jet` entry (checked `languages.yml`, 2026-11-04),
   so GitHub shows Jet as plain text.
 - `//` reads as "not code" to readers of the C family, the larger group by

@@ -375,9 +375,9 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
             diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add` doesn't take this argument", "`meta.add` takes one `Code` value or source text and the `scope:` module it joins", "write `{shape}`"))
             return failed
         }
-        unlabelled := argument.copy()
-        unlabelled.label = None
-        if label == "scope" -> scope = Val(unlabelled) else -> code = Val(unlabelled)
+        unlabeled := argument.copy()
+        unlabeled.label = None
+        if label == "scope" -> scope = Val(unlabeled) else -> code = Val(unlabeled)
     }
     code_arg: code ?? {
         diagnostics.push(sema_error("E0104", span, "`Compiler.add` expects a `Code` value or source text", "`meta.add` adds the items of one `Code` value or of source text", "write `{shape}`"))
@@ -462,9 +462,9 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
             diagnostics.push(sema_error("E0764", argument.span, "`Compiler.add_struct` doesn't take this argument", "`meta.add_struct` takes the struct's name, its fields and the `scope:` module it joins", "write `{shape}`"))
             return failed
         }
-        unlabelled := argument.copy()
-        unlabelled.label = None
-        if label == "scope" -> scope = Val(unlabelled) else -> positional.push(unlabelled)
+        unlabeled := argument.copy()
+        unlabeled.label = None
+        if label == "scope" -> scope = Val(unlabeled) else -> positional.push(unlabeled)
     }
     if positional.len() != 2 {
         diagnostics.push(sema_error("E0104", span, "`Compiler.add_struct` expects a name and a list of fields", "`meta.add_struct` declares one struct of the fields `meta.field` makes", "write `{shape}`"))
@@ -647,10 +647,10 @@ sema_call_compiler_allow_rewrite: fn(receiver: Expr, receiver_value: TExpr, args
         diagnostics.push(sema_error("E0764", span, "`Compiler.allow_rewrite` takes one `package:` name", "`meta.allow_rewrite` names the one dependency whose functions the value may rewrite", "write `{shape}`"))
         return failed
     }
-    unlabelled := args[0].copy()
-    unlabelled.label = None
-    ordinary := [CallArg]{unlabelled}
-    value: sema_check_expression(unlabelled.expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    unlabeled := args[0].copy()
+    unlabeled.label = None
+    ordinary := [CallArg]{unlabeled}
+    value: sema_check_expression(unlabeled.expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     named: sema_plugin_literal_text(value) ?? {
         diagnostics.push(sema_error("E0764", args[0].span, "`meta.allow_rewrite` needs the package's name written out", "the consent is one line a reviewer reads, so it names its package as a string literal", "write `{shape}`"))
         return failed
@@ -1424,12 +1424,12 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
         // then `flag:`'s String, then `kept:`'s Bool.
         checked := positional.move()
         required_types := contract.parameters.copy()
-        if flag == .Val(labelled) {
-            checked.push(labelled.copy())
+        if flag == .Val(labeled) {
+            checked.push(labeled.copy())
             required_types.push(Type.String)
         }
-        if kept == .Val(labelled) {
-            checked.push(labelled.copy())
+        if kept == .Val(labeled) {
+            checked.push(labeled.copy())
             required_types.push(Type.Bool)
         }
         loop (index, argument) in checked {
@@ -1442,9 +1442,9 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
             }
             values.push(value.copy())
             params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
-            unlabelled := argument.copy()
-            unlabelled.label = None
-            ordinary.push(unlabelled)
+            unlabeled := argument.copy()
+            unlabeled.label = None
+            ordinary.push(unlabeled)
         }
     }
     ownership: sema_ownership_check_method_call(state, "{owner}.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)

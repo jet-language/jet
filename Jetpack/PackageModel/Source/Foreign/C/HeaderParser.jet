@@ -16,7 +16,7 @@ CProto: struct {
 
 // A complete C struct that can be represented by a checked `#Layout(c)` Jet
 // struct. Unsupported fields make the whole record unavailable; a partial
-// record would change its native stride and make array marshalling unsound.
+// record would change its native stride and make array marshaling unsound.
 // C unions stay overlay-only.
 CStructDef: struct {
     jet_name: String,
@@ -317,7 +317,7 @@ pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [{name
     Val(fields)
 }
 
-// Remove comments, preprocessor directives (honouring `\` continuations), and
+// Remove comments, preprocessor directives (honoring `\` continuations), and
 // standard C++ linkage wrappers. Declarations and record bodies stay verbatim.
 pkg_cbind_strip_comments_and_directives: fn(src: String) -> String Never! {
     pkg_cbind_strip_extern_c_wrappers(pkg_opaque_strip_comments_and_directives(src))

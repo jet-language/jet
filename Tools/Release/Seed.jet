@@ -226,8 +226,8 @@ logged_argv: fn(argv: [String], seconds: Int) -[Env]> [String] Never! {
     out
 }
 
-finished_of: fn(code: Int, signalled: Bool, seconds: Int, wall: Int) -> Finished Never! {
-    rc: if signalled -> 128 else -> code
+finished_of: fn(code: Int, signaled: Bool, seconds: Int, wall: Int) -> Finished Never! {
+    rc: if signaled -> 128 else -> code
     Finished{rc: rc, timed_out: seconds > 0 && (rc == 124 || rc == 137) && wall >= seconds, wall: wall}
 }
 

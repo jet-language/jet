@@ -956,7 +956,7 @@ preferred interoperable CBOR; `to_bytes_canonical` selects RFC 8949 section
 enum or flag: one hash/signature spelling has one byte law. `Dyn`
 satisfies `Codable`, so both byte verbs accept it without another overload or
 encoder. There is no CBOR `to_string`; binary `parse` and `to_bytes` are the
-analogues of text `parse` and `to_string`. (D-ENC-CBOR-SURFACE1=A; I8)
+analogs of text `parse` and `to_string`. (D-ENC-CBOR-SURFACE1=A; I8)
 
 Map Codable `[U8]` to CBOR major type 2 and decode it back; never degrade it to
 an integer array. Other Codable lists use major type 4, structs/maps use major

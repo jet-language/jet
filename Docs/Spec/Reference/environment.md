@@ -25,7 +25,7 @@ and the verification defaults are in
 
 Public Jet controls use `JET_<AREA>_<SETTING>` in uppercase ASCII with words
 separated by underscores. A boolean uses `1` unless its row names another
-value. Paths are native filesystem paths. Variables labelled **internal** are
+value. Paths are native filesystem paths. Variables labeled **internal** are
 compiler-to-child transport or fault-injection hooks: users must not set them,
 and they carry no compatibility promise. Tests should use a public control when
 one exists instead of adding another spelling for the same job.

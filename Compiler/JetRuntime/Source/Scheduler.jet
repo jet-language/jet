@@ -385,7 +385,7 @@ scheduler_control_leave: fn(save: I64) {
     scheduler_control_drop(control)
 }
 
-// The process root task control. Process signals cancel it; a cancelled (or
+// The process root task control. Process signals cancel it; a canceled (or
 // absent) root is replaced by a fresh root control at the next lookup, which
 // the running entry does not adopt. The slot owns one reference and is guarded
 // by the scheduler root mutex.
@@ -433,7 +433,7 @@ scheduler_control_is_root: fn(control: I64) -> Bool {
 }
 
 // jet_task_deliver_cancel: only a task unwinds a delivered cancellation. A
-// cancelled root has no catch frame: its wait points observe the flag and
+// canceled root has no catch frame: its wait points observe the flag and
 // return their cooperative fallback without publishing a stop.
 scheduler_root_cancel_observed: fn() -> Bool {
     control: scheduler_control_current()
@@ -581,7 +581,7 @@ scheduler_stop_new: fn(kind: I64, message: I64) -> I64 {
 }
 
 // Takes the record, including on rejection. First stop wins, except Deadline
-// supersedes Cancelled. Record precedes release status.
+// supersedes `Cancelled`. Record precedes release status.
 scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     kind: sync_load(record)
     // A root never unwinds a cancellation (scheduler_root_cancel_observed).
@@ -877,7 +877,7 @@ scheduler_control_cancel: fn(control: I64) {
         sync_park_wake(sync_load(wrapping(waiter + I64{8})))
         waiter = sync_load(waiter)
     }
-    // A task this one runs inline (scheduler_control_inline) is cancelled
+    // A task this one runs inline (scheduler_control_inline) is canceled
     // with it, as its join would cancel it on waking.
     forwarded: sync_load(wrapping(control + I64{96}))
     scheduler_control_retain(forwarded)
@@ -924,7 +924,7 @@ scheduler_control_inline: fn(control: I64, target: I64) {
 }
 
 // A cancel the task has consumed into its own result (an AsyncEvent entry's
-// Cancelled report): no later wait point or shield exit delivers it again.
+// `Cancelled` report): no later wait point or shield exit delivers it again.
 scheduler_control_cancel_consume: fn(control: I64) {
     sync_store(wrapping(control + I64{16}), I64{0})
 }
@@ -959,7 +959,7 @@ scheduler_control_resume: fn(control: I64) {
     sync_park_wake(sync_load(wrapping(control + I64{64})))
 }
 
-// Parks the current task while it is paused and not cancelled. False when
+// Parks the current task while it is paused and not canceled. False when
 // its deadline passed meanwhile, which delivered the deadline stop.
 scheduler_park_while_paused: fn(control: I64) -> Bool {
     loop sync_load(wrapping(control + (I64{8}))) != (I64{0}) && sync_load(wrapping(control + (I64{16}))) == (I64{0}) {
@@ -1068,7 +1068,7 @@ scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
 // `deadline` holds: a join of a typed task its own deadline already bounds
 // waits for that task's result instead.
 scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline: Bool) -> I64 {
-    // A cancelled root wait point returns its fallback without parking.
+    // A canceled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
     world: world_current()
     if (world != I64{0} && scheduler_control_current() != I64{0}) { world_begin_wait(world, slot) }

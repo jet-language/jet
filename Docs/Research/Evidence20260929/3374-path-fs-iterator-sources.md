@@ -27,7 +27,7 @@ a//b/ parts=[a, , b, ] parents=[a/] drive= root= anchor= empty=false
 ```
 
 Peer (executed, Python 3.13.13 `PureWindowsPath`; the module treats `\` as a
-separator and `X:` as a drive, so the Windows flavour is the matching law):
+separator and `X:` as a drive, so the Windows flavor is the matching law):
 
 | input | parts | parents | drive | root | anchor |
 | --- | --- | --- | --- | --- | --- |

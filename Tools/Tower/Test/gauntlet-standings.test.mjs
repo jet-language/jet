@@ -136,7 +136,7 @@ test('a peers-only run shows every peer value as a bar, the asm ceiling marked, 
   const projected = view(PEERS_FIXTURE);
   assert.equal(projected.jetMeasured, false);
   assert.deepEqual(projected.entries[0].jet, { status: 'not_measured', reason: 'not measured: this run measures rust, c, zig, go, python, node, bun, vite, lua, luajit only', measured: false, provenance: null, runs: null });
-  assert.deepEqual(projected.entries[0].grid.filter((cell) => ['rust', 'c', 'python', 'bun', 'asm'].includes(cell.peer)).map((cell) => cell.tone), ['grey', 'grey', 'grey', 'grey', 'grey'], 'until Jet is measured every measured cell is grey');
+  assert.deepEqual(projected.entries[0].grid.filter((cell) => ['rust', 'c', 'python', 'bun', 'asm'].includes(cell.peer)).map((cell) => cell.tone), ['gray', 'gray', 'gray', 'gray', 'gray'], 'until Jet is measured every measured cell is gray');
   assert.deepEqual(bars(projected, 'startup'), ['asm ceiling 296 µs', 'Rust 614 µs', 'C 683 µs', 'Bun 7.31 ms', 'Python 18.2 ms']);
   assert.deepEqual(bars(projected, 'size'), ['asm ceiling 1.45 kB', 'C 13.4 kB', 'Rust 319 kB', 'Python 6.21 MB']);
   assert.deepEqual(panel(projected, 'startup').bars.map((bar) => bar.role), ['ceiling', 'peer', 'peer', 'peer', 'peer']);
@@ -347,7 +347,7 @@ test('one line per entry: compiled peers are judged against jet build\'s binary,
 
   const standings = await tableStandings(table);
   assert.deepEqual([standings.jet_modes.c, standings.jet_modes.asm, standings.jet_modes.python, standings.jet_modes.luajit], ['build', 'build', 'run', 'run']);
-  assert.equal(standings.run, undefined, 'one judgement, no second section');
+  assert.equal(standings.run, undefined, 'one judgment, no second section');
   const judged = standings.entries.find((entry) => entry.entry === 'hello');
   assert.equal(judged.peers.python.metrics.wall.jet, 2, 'Python is judged against jet run');
   assert.equal(judged.peers.c.metrics.wall.jet, 0.0004, 'C is judged against jet build\'s binary');

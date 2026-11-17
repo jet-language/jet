@@ -33,7 +33,7 @@ belong on Tower cards; the machine-readable gap list for filing them is
   `Compiler/` for each Rust feature, and reading the Rust and Jet sites named
   in the tables.
 
-Limits of the census: it compares codes, not behaviour. The Jet compiler
+Limits of the census: it compares codes, not behavior. The Jet compiler
 sometimes reports the same situation under another code (for example an
 import cycle is `E0603` in JetDriver and `E0604` in Rust), and a code present
 in both may still differ in coverage. Rows marked "unmeasured" need a
@@ -292,7 +292,7 @@ By size: 21 L, 37 M, 12 S. Three block self-hosting: B1 (packages), EM1
 (artifact assembly) and EM2 (emission coverage). S1 becomes blocking if the
 #3708 plan removes Core's explicit `Never!` markers.
 
-Largest gaps by the amount of Rust behaviour to port:
+Largest gaps by the amount of Rust behavior to port:
 
 1. EV1 — MIREval features absent from JetEval (31.5k vs 19.9k lines).
 2. EM2 — MIRRust emission coverage (27k vs ~6.7k lines).

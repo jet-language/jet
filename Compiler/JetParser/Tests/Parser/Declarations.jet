@@ -359,7 +359,7 @@ run: fn() {}
     impl Marker {
         sites: [.Function],
         sites: [.Method],
-        colour: .Red,
+        color: .Red,
     }
 }
 run: fn() {}
@@ -372,7 +372,7 @@ run: fn() {}
     assert(block.compiler_generated)
     names := [String]{}
     loop constant in block.constants -> names.push(constant.name)
-    assert_eq(names, [String]{"sites", "sites", "colour"})
+    assert_eq(names, [String]{"sites", "sites", "color"})
 }
 
 #Test("impl_marker_group_implements_no_marker") {
@@ -408,10 +408,10 @@ run: fn() {}
 #Test("state_list_reads_moves_and_groups") {
     source: `Order: struct {
     state {
-        Draft -> Confirmed, Cancelled
-        Confirmed -> Shipped, Cancelled
+        Draft -> Confirmed, Canceled
+        Confirmed -> Shipped, Canceled
         Shipped
-        Cancelled
+        Canceled
         Open: Draft | Confirmed
     }
     id: Int,
@@ -423,11 +423,11 @@ run: fn() {}
     state: definition.state ?? panic("struct-owned state list")
     names := [String]{}
     loop name in state.states -> names.push(name.name)
-    assert_eq(names, [String]{"Draft", "Confirmed", "Shipped", "Cancelled"})
+    assert_eq(names, [String]{"Draft", "Confirmed", "Shipped", "Canceled"})
     assert_eq(state.arrows.len(), 4)
     moves := [String]{}
     loop target in state.arrows[0].to -> moves.push(target.name)
-    assert_eq(moves, [String]{"Confirmed", "Cancelled"})
+    assert_eq(moves, [String]{"Confirmed", "Canceled"})
     assert(state.arrows[2].to.is_empty())
     assert_eq(state.groups.len(), 1)
     assert_eq(state.groups[0].name.name, "Open")
@@ -437,7 +437,7 @@ run: fn() {}
     assert_eq(definition.fields.len(), 1)
     formatted: jet_format_source(source, false)
     assert(formatted.ok)
-    assert(formatted.text.contains("    state {{\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Shipped\n        Cancelled\n        Open: Draft | Confirmed\n    }}\n"))
+    assert(formatted.text.contains("    state {{\n        Draft -> Confirmed, Canceled\n        Confirmed -> Shipped, Canceled\n        Shipped\n        Canceled\n        Open: Draft | Confirmed\n    }}\n"))
     assert_eq(jet_format_source(formatted.text, false).text, formatted.text)
     flat: jet_format_source(
         `Door: struct { state { Open, Closed } }

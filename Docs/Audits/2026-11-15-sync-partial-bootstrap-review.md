@@ -82,7 +82,7 @@ Against all of these, the design has one real strength: **a synced read is an or
 
 **Check.** R3, R6, R7, R8 and R13.
 
-**Verdict: fails.** Per-page invalidation depends on unbuilt, unreviewed read sets. Assembling a list from pages has no consistency rule. The oversize behaviour and limit-after-policy are not specified enough to build.
+**Verdict: fails.** Per-page invalidation depends on unbuilt, unreviewed read sets. Assembling a list from pages has no consistency rule. The oversize behavior and limit-after-policy are not specified enough to build.
 
 **Gaps.** G2, G7, G8, G9.
 
@@ -183,7 +183,7 @@ Against all of these, the design has one real strength: **a synced read is an or
 
 **Attack.**
 
-- A change in behaviour without a change in type keeps stale results with the old meaning. Examples are a new sort order, a different policy, or a bug fix in the query. Only a later write (S5) would refresh them. A deploy epoch per endpoint is needed (the same fix as G17).
+- A change in behavior without a change in type keeps stale results with the old meaning. Examples are a new sort order, a different policy, or a bug fix in the query. Only a later write (S5) would refresh them. A deploy epoch per endpoint is needed (the same fix as G17).
 - Keys are encoded arguments (R4). Any change to how arguments encode, such as a new optional field with a default, changes every key, so an app update silently empties the warm cache.
 - What happens to queued writes for an endpoint whose wire version changed is left to #6558. The note should name that dependency.
 
@@ -278,7 +278,7 @@ Against all of these, the design has one real strength: **a synced read is an or
 
 **Attack.** The note does not say whether reads still go to the server and pushes still arrive while sync is off. "Keeps reading its cache" suggests reads stay local even online, which is the opposite of the shape's live model. Held writes grow stale. Their rebased versions (#3709 c15) produce conflicts at scale when the queue is released, and the note gives no limit on hold time.
 
-**Verdict: holds only within stated limits.** Holding the queue is well defined. The read behaviour is missing context.
+**Verdict: holds only within stated limits.** Holding the queue is well defined. The read behavior is missing context.
 
 **Gaps.** G31.
 
@@ -290,7 +290,7 @@ Against all of these, the design has one real strength: **a synced read is an or
 
 - **Mixed apps leak across accounts.** Section 5.2 allows a synced app with a local `drafts` collection. Under 5.5 the drafts belong to the device profile, not to the account. Person A writes drafts, signs out, and person B signs in on the same device and sees them. The local account of 5.1 is single, so the row policy cannot separate A from B.
 - **The cache is not scoped to the account.** Endpoint keys carry no account (R4). A sign-out that deletes "the account's" entries cannot find them, and a second account can hit the first account's entries.
-- **Deletion is not erasure.** Deleting rows in SQLite leaves bytes in free pages and in the WAL unless `secure_delete` is on and the WAL is checkpointed and truncated. Flash wear-levelling limits what any delete can promise.
+- **Deletion is not erasure.** Deleting rows in SQLite leaves bytes in free pages and in the WAL unless `secure_delete` is on and the WAL is checkpointed and truncated. Flash wear-leveling limits what any delete can promise.
 
 **Check.** R4.
 
@@ -300,7 +300,7 @@ Against all of these, the design has one real strength: **a synced read is an or
 
 ## S14. The failure table is complete
 
-**Claim (note section 6).** Seven failures with defined behaviour.
+**Claim (note section 6).** Seven failures with defined behavior.
 
 **Attack.** The table has no row for:
 
@@ -345,7 +345,7 @@ Tooling is missing as well. The device cache has no inspector (keys, bytes, vers
 | S9 Whole app local-only via in-process mount | holds only within stated limits (native, no server-only features) |
 | S10 `sync: .Off` collection never leaves the device | fails as stated |
 | S11 Switching sync on later | holds only within stated limits (one device, independent rows) |
-| S12 Switching sync off for a synced app | holds only within stated limits (read behaviour unstated) |
+| S12 Switching sync off for a synced app | holds only within stated limits (read behavior unstated) |
 | S13 Sign-out and shared devices | fails |
 | S14 Failure table complete | fails |
 
@@ -358,7 +358,7 @@ Each row is written so that Main can file it on #3709, or on the named card, as 
 | Gap | Proposed criterion text |
 |---|---|
 | G1 | The note names as unbuilt preconditions the criteria it relies on as if built: #3709 c14–c26, moved to #6867 (offline queue), #6868 (live-query scaling) and #6869 (row policies). Their proofs (`db/row_policy_judges_each_operation`, `web_app/offline_create_with_client_id`, `web_app/caller_dependent_live_query_is_not_shared`, `web_app/presence_counts_only_admitted_readers`, `web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`, `sync_two_clients` and the others those cards name) do not exist yet and stay open on #6867, #6868 and #6869. No part of the bootstrap design that depends on one of them is built before that criterion is met with its proof. |
-| G2 | The bootstrap design states which parts depend on D-INVALIDATE1 read sets (#6554, review open) and #3709 c21, and states the behaviour and cost of per-page invalidation and catch-up under table-level invalidation, today's only mechanism (`Core/Db/Db.jet:842-852`). |
+| G2 | The bootstrap design states which parts depend on D-INVALIDATE1 read sets (#6554, review open) and #3709 c21, and states the behavior and cost of per-page invalidation and catch-up under table-level invalidation, today's only mechanism (`Core/Db/Db.jet:842-852`). |
 | G3 | Every committed write gets a version from one commit-ordered sequence (a counter advanced inside the write transaction on SQLite; the commit LSN, never a transaction ID, on Postgres); invalidations are published only after commit; every live result records the version of the snapshot it read. Proof: a case pauses a write between its statement and its commit, runs a re-read on another connection in that gap, and shows the device does not keep the pre-commit result as current after the commit. |
 | G4 | The device stores a live result only when its version is at least the stored one. Proof: a case delivers a re-read at version v1 after a push at v2 > v1 and shows v2's result stays. |
 | G5 | The server write log is specified and measured: what it stores (write sets and versions), on which backends, how several servers share it durably (LISTEN/NOTIFY alone is not durable), how a cached key's read set is recovered at catch-up (stored per key or re-derived by re-running), its bytes per day for Crewboard at 200,000 tasks, and the server cost of catching up a device holding 1,000 keys after 30 days. |
@@ -379,16 +379,16 @@ Each row is written so that Main can file it on #3709, or on the named card, as 
 | G20 | A partition load reads every page at one snapshot version v, or records each page's version and replays changes after the smallest one idempotently; the device exposes a partition to queries only once it holds a complete checkpoint; a row whose sort key or partition key changes during or after the snapshot appears exactly once, in the right partition (move-in and move-out operations); resuming after the log no longer reaches v restarts the snapshot. Proof: one case per rule, including a write committed while the snapshot streams. |
 | G21 | A row inside a partition that the row policy refuses to a member is never sent to that member. Proof: a case with a private task in a shared project. |
 | G22 | The WebSocket live hub sends an event only to connections with a subscription it affects, and only after the connection's caller passed the source's policy; no event carries another caller's encoded key. Today every connection receives every topic (`Compiler/JetRuntime/Source/WsRoutes.jet:470-602`). Proof: a two-account case shows no cross-account event. |
-| G23 | A local-only entry that mounts a service states, as compile errors or local behaviour, what happens to jobs, schedules, mail, webhooks, push sends, signing keys and account flows; the D-SECRETEDGE1 cases cover a service mounted in a client build; `.serve()` on desktop or phone opens no listening socket, or only loopback with a per-launch token. Proof: a case per rule. |
+| G23 | A local-only entry that mounts a service states, as compile errors or local behavior, what happens to jobs, schedules, mail, webhooks, push sends, signing keys and account flows; the D-SECRETEDGE1 cases cover a service mounted in a client build; `.serve()` on desktop or phone opens no listening socket, or only loopback with a per-launch token. Proof: a case per rule. |
 | G24 | Device databases (local-only stores and caches) have a versioned schema; an app update runs `db.migrate` on the device with a backup first and rollback on failure; a downgrade is refused with a typed notice. Proof: a case migrates a local-only database across an update and survives a crash mid-migration. |
 | G25 | Device-authority data has a type-level marker, and the compiler refuses passing it to an `app.Remote` call, a span or log attribute, or a sync push without an explicit conversion that names the destination; or the note states that this is unchecked and why. |
 | G26 | Local-only stores are excluded from OS cloud backup by default (iOS `isExcludedFromBackup`, Android backup rules), with an entry option to include them; telemetry spans and crash reports carry no argument values from device-authority data. Proof: a case or a documented decision for each platform. |
-| G27 | Device cache entries are keyed by account as well as endpoint and arguments; in an app that mixes synced data and device-authority collections, device-authority data is scoped to the person who created it, or the docs state that it is visible to every account on the device. Proof: a case signs in as A, writes a draft, switches to B, and shows the chosen behaviour, and shows B never reads A's cached results. |
+| G27 | Device cache entries are keyed by account as well as endpoint and arguments; in an app that mixes synced data and device-authority collections, device-authority data is scoped to the person who created it, or the docs state that it is visible to every account on the device. Proof: a case signs in as A, writes a draft, switches to B, and shows the chosen behavior, and shows B never reads A's cached results. |
 | G28 | Sign-out and "Remove local data" delete with the store's secure delete (SQLite `secure_delete`, WAL checkpoint and truncate, or file deletion), and the docs state the limits on flash storage. |
 | G29 | Switching sync on uploads rows in dependency order, references before referrers; each row carries a request key, and an upload is resumable after a crash; `Exists` for the device's own earlier upload counts as success and is distinguished from another account's ID; uploads are batched; fields the create method cannot carry are reported per row, never dropped silently. Proof: a case with 10,000 rows, dependent rows, and a crash halfway. |
-| G30 | Two local-only devices joining one account have stated behaviour for duplicate seeded rows and for the same row edited on both. Proof: a case. |
+| G30 | Two local-only devices joining one account have stated behavior for duplicate seeded rows and for the same row edited on both. Proof: a case. |
 | G31 | While sync is off for a synced app, the note states whether reads go to the server and pushes arrive, and the maximum hold time before held writes are flagged as stale. Proof: a case. |
-| G32 | The failure table has a defined behaviour and a case for: disk full or quota exceeded mid-write, mid-snapshot and mid-upload; a corrupted device store; device clock skew; server restore with versions going backwards; partition resume after log expiry; a crash during the 5.3 upload; a failed device migration; a second tab of a local-only web app; Safari eviction; a result that grows past the cap; a broker outage that loses invalidations. |
+| G32 | The failure table has a defined behavior and a case for: disk full or quota exceeded mid-write, mid-snapshot and mid-upload; a corrupted device store; device clock skew; server restore with versions going backwards; partition resume after log expiry; a crash during the 5.3 upload; a failed device migration; a second tab of a local-only web app; Safari eviction; a result that grows past the cap; a broker outage that loses invalidations. |
 | G33 | `jet inspect` or the devtools show each device cache entry's key, account, bytes, version, age and warm rank, and the result of the last catch-up; the test host can disconnect a device for a simulated duration and can restore the server to an earlier version; `live_stats` adds bytes and versions. |
 | G34 | Owner choices 8.2 and 8.3 are replaced by one ballot: each store (whole app, collection or table) names its authority, `.Server` or `.Device`, with the same marker and the same rules for backup, telemetry and account scope. |
 | G35 | The server sends a store identity and epoch with every version; a device whose cached versions come from another identity or a later epoch re-reads every key. Proof: a case restores the server from a backup and shows no device keeps a result newer than the server. |
@@ -413,4 +413,4 @@ Each row is written so that Main can file it on #3709, or on the named card, as 
 
 The note's PowerSync link (`docs.powersync.com/usage/sync-rules`) points at what PowerSync now calls legacy Sync Rules, which Sync Streams replace. The redesign should cite Sync Streams.
 
-Facts not checked against an opened source in this review are marked "not opened". These are Replicache CVR details, Yjs and Automerge protocol details, Realm client resets, Safari's seven-day storage eviction, the default OS backup behaviour on iOS and Android, OPFS exclusive access handles and Postgres LISTEN/NOTIFY limits. They come from the reviewer's knowledge of those systems, and the redesign should confirm each against its documentation.
+Facts not checked against an opened source in this review are marked "not opened". These are Replicache CVR details, Yjs and Automerge protocol details, Realm client resets, Safari's seven-day storage eviction, the default OS backup behavior on iOS and Android, OPFS exclusive access handles and Postgres LISTEN/NOTIFY limits. They come from the reviewer's knowledge of those systems, and the redesign should confirm each against its documentation.

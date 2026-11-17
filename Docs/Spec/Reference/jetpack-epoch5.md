@@ -401,7 +401,7 @@ env.dev: module {
 `after` names a declared service dependency. Jetpack validates names, disabled
 dependencies, and cycles before spawning; it starts dependencies before
 dependents and stops the selected graph in reverse order. It reserves ports and
-socket paths, checks process identity before signalling, and bounds restart
+socket paths, checks process identity before signaling, and bounds restart
 count and backoff. A failed pre-start job, process, readiness gate, or
 prerequisite stops the affected dependent graph.
 
