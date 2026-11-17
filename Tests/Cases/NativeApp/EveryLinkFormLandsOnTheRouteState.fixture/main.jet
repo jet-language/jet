@@ -1,0 +1,57 @@
+// A crew's graph has one screen, a task at `/tasks/:id`, whose ID is a
+// UUIDv7. The desktop app gives it the link scheme `crewboard`, and the
+// web links of crew.example.com are its own. Every target runs this one
+// graph, so each form of a task's link opens the task's screen through
+// its route set: on a Linux desktop through `launch` and `open_link`, and
+// on the web as the page the server answers at the link's address.
+use {
+    app
+    http: core.http
+    net: core.net
+    web: core.web
+}
+
+TaskView: struct {
+    id: String
+}
+
+task: fn(view: TaskView) -> String Never! { "task {view.id}" }
+
+crewboard: fn() -> app.App Never! {
+    app.new("Crewboard").screen("/tasks/:id", task).url_scheme("crewboard").app_links(domain: "crew.example.com")
+}
+
+// The state open now: the task's, or the not-found state's link.
+open_now: fn(graph: app.App) -> String Never! {
+    if app.current<TaskView>() == .Val(view) -> return "TaskView{{id: {view.id}}}"
+    "not found: {graph.lost_link() ?? "none"}"
+}
+
+// GET `path` from the served web app, and print its status and body.
+fetch: fn(addr: String, path: String) HTTPError! {
+    answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", http.headers(), http.body_text("")))
+    print("web {path}: {answer.status} {answer.text()}")
+}
+
+run: fn() (NetError | HTTPError | TaskFailure)! {
+    graph: crewboard()
+    // The desktop passes the link the launch was given, as the desktop
+    // entry's `%u` does.
+    _: graph.launch()
+    print("launch: {open_now(graph)}")
+    id: "0190f1c2-3b4a-7c5d-8e6f-123456789abc"
+    links: [String]{"crewboard://tasks/{id}", "https://crew.example.com/tasks/{id}", "/tasks/{id}", "crewboard://projects/{id}", "https://elsewhere.example.com/tasks/{id}"}
+    loop link in links {
+        _: graph.open_link(link)
+        print("{link}: {open_now(graph)}")
+    }
+    served: web.app()
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        loop _ in 0..<2 { served.serve_once(listener) }
+    }
+    fetch(addr, "/tasks/{id}")
+    fetch(addr, "/projects/{id}")
+    serving.join()
+}

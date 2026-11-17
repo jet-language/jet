@@ -33,6 +33,8 @@ use {
     url: core.net.url
     markup: core.text.html
     files: core.files
+    sys: core.sys
+    process: core.process
     builtin: jet_builtins
 }
 
@@ -2233,6 +2235,109 @@ App: struct {
         self.copy()
     }
 
+    // Gives the app the link scheme `name`: `{name}://tasks/7` opens what
+    // the address `/tasks/7` opens (`open_link`), and the desktop entry
+    // `launch` installs on Linux names the app the handler of `name:` links
+    // (`x-scheme-handler/{name}`), so the desktop opens such a link in the
+    // app. A scheme is a letter, then letters, digits, `+`, `-` or `.`; it is
+    // kept in lowercase, as schemes compare without case.
+    url_scheme: fn(self, name: String) -> App Never! {
+        scheme: name.lower()
+        if !app_link_scheme_valid(scheme) {
+            panic("`.url_scheme(\"{name}\")` is no link scheme: write a letter, then letters, digits, `+`, `-` or `.`, as \"crewboard\"")
+        }
+        if scheme == "http" || scheme == "https" || scheme == "file" {
+            panic("`.url_scheme(\"{name}\")` names a scheme the system's browser and files own: give the app its own, as \"crewboard\", and its web links with `.app_links(domain:)`")
+        }
+        held := APP_GRAPH.guard_edit()
+        if !held.value.schemes.contains(scheme) -> held.value.schemes.push(scheme)
+        self.copy()
+    }
+
+    // Gives the app the web links of `domain`: `https://{domain}/tasks/7`
+    // opens what the address `/tasks/7` opens (`open_link`), as the page at
+    // that link does on the web. `domain` is a host name, without a scheme,
+    // port or path; it is kept in lowercase, as host names compare without
+    // case.
+    app_links: fn(self, domain: String) -> App Never! {
+        host: domain.lower()
+        if host == "" || host.contains("/") || host.contains(":") || host.contains("@") || host.contains(" ") {
+            panic("`.app_links(domain: \"{domain}\")` is no host name: write the domain alone, as \"crew.example.com\"")
+        }
+        held := APP_GRAPH.guard_edit()
+        if !held.value.link_domains.contains(host) -> held.value.link_domains.push(host)
+        self.copy()
+    }
+
+    // Opens the screen state `link` addresses, through the graph's route
+    // set, as `go` opens a state: the state's fields are the texts of each
+    // `:name` segment of the screen's path and of each `#App.Query` field in
+    // the query, and the first screen, in the order the graph adds them,
+    // whose path the link's path fits and whose texts make its state opens.
+    // A link is an address (`/tasks/7`), a link of a scheme the app has
+    // (`url_scheme`: `crewboard://tasks/7`) or a web link of one of its
+    // domains (`app_links`: `https://crew.example.com/tasks/7`). Any other
+    // link, and one no screen opens, opens the not-found state: no screen
+    // is current, and `lost_link` gives the link. True when a screen opened.
+    open_link: fn(self, link: String) -[Net, FS.Read]> Bool Never! {
+        found: app_link_address(link) ?? return app_link_lost(link)
+        path := found
+        query := ""
+        mark: found.find("?")
+        if mark >= 0 {
+            path = found.slice(0, mark)
+            query = found.slice(mark + 1, found.len())
+        }
+        loop screen in self.__screens() {
+            fields: app_link_fields(screen, path, query) ?? next
+            graph: app_graph_open(screen.state, fields.copy())
+            me: tasks.current_task()
+            resume_begin(me)
+            shown: graph.__open(screen, fields)
+            live_drop(app_graph_route_data(resume_end(me)))
+            if shown != None -> return true
+        }
+        app_link_lost(link)
+    }
+
+    // The link the not-found state shows (`open_link`), None while a screen
+    // is current or before a link opens.
+    lost_link: fn(self) -> String? Never! {
+        now: app_graph_current() ?? return None
+        if now.state != "" -> return None
+        now.fields.get(C_APP_LOST_LINK).copy()
+    }
+
+    // Starts the app on a Linux desktop. When the graph has a link scheme
+    // (`url_scheme`), it installs the app's desktop entry
+    // (`{data}/applications/{id}.desktop`, `desktop_entry`) and makes it
+    // the default handler of each scheme's links in `{config}/mimeapps.list`,
+    // as `xdg-mime default` does; `{data}` is `$XDG_DATA_HOME`, else
+    // `~/.local/share`, and `{config}` is `$XDG_CONFIG_HOME`, else
+    // `~/.config`. Then it opens the link the launch was given, the first
+    // argument that is one (`open_link`), as the desktop passes a link the
+    // entry's `%u` names. True: this process runs the app.
+    launch: fn(self) -[Env, Exec.Args, FS.Read, FS.Write, Net]> Bool Never! {
+        if app_graph_schemes().len() > 0 -> app_link_register(self.title)
+        loop given in process.args() {
+            if app_link_address(given) == None -> next
+            _: self.open_link(given)
+            break
+        }
+        true
+    }
+
+    // The text of the app's Linux desktop entry: an application named
+    // `title` that `exec` runs with the link it opens (`%u`), handling the
+    // links of each scheme the graph has (`x-scheme-handler/{scheme}`).
+    desktop_entry: fn(self, exec: String) -> String Never! {
+        lines := [String]{"[Desktop Entry]", "Type=Application", "Name={app_desktop_value(self.title)}", "Exec={app_desktop_exec(exec)} %u", "Terminal=false"}
+        handlers := ""
+        loop scheme in app_graph_schemes() -> handlers = "{handlers}x-scheme-handler/{scheme};"
+        if handlers != "" -> lines.push("MimeType={handlers}")
+        "{lines.join("\n")}\n"
+    }
+
     // `.screen(path, view, signed_in:)` as the compiler lowers it, once it
     // has checked `view`'s state `V` against `path`: `state` names `V`,
     // `query` lists its `#App.Query` fields, and `open` opens the screen at
@@ -2519,10 +2624,10 @@ Query: struct {
 }
 
 // Starts the app graph, titled `title`: a graph with no services, screens,
-// heads or queue yet.
+// heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -2993,7 +3098,8 @@ priv AppAnswer: struct {
 }
 
 // The screen open now (`App.__go`): its state's name and its address's
-// field texts, by field name.
+// field texts, by field name. The not-found state (`App.open_link`) has no
+// state name and keeps the link it shows under C_APP_LOST_LINK.
 priv AppCurrent: struct {
     state: String
     fields: [String:String]
@@ -3012,7 +3118,8 @@ AppInstall: struct {
 // (`.api`), the endpoints of the services it mounts by `{service}/{method}`,
 // its screens in the order it adds them, its offline mode, how a browser
 // installs it, the screen open now and that screen's route data: the ids of
-// the live bindings its view read.
+// the live bindings its view read, and the link schemes and web domains
+// whose links open its screens (`.url_scheme`, `.app_links`).
 priv AppGraph: struct {
     title: String
     apis: [String:AppAPI]
@@ -3022,9 +3129,11 @@ priv AppGraph: struct {
     install: AppInstall?
     current: AppCurrent?
     route_data: [Int]
+    schemes: [String]
+    link_domains: [String]
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}}}
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.
@@ -3076,6 +3185,227 @@ priv app_screen: fn(state: String) -> AppScreen? Never! {
         if screen.state == state -> return Val(screen.copy())
     }
     None
+}
+
+// The field the not-found state keeps its link under (`App.lost_link`).
+priv C_APP_LOST_LINK: "link"
+
+// Makes the not-found state that shows `link` the open one: no screen is,
+// and the bindings the screen before it read are dropped. False, for
+// `App.open_link`: no screen opened.
+priv app_link_lost: fn(link: String) -> Bool Never! {
+    fields := [String:String]{}
+    fields[C_APP_LOST_LINK] = link.copy()
+    _: app_graph_open("", fields)
+    live_drop(app_graph_route_data([Int]{}))
+    false
+}
+
+// The link schemes of the graph (`App.url_scheme`), in the order it gives
+// them.
+priv app_graph_schemes: fn() -> [String] Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.schemes.copy()
+}
+
+// Whether `scheme` is a link scheme (RFC 3986 section 3.1) in lowercase: a
+// letter, then letters, digits, `+`, `-` or `.`.
+priv app_link_scheme_valid: fn(scheme: String) -> Bool Never! {
+    if scheme == "" -> return false
+    letters: "abcdefghijklmnopqrstuvwxyz"
+    first := true
+    loop scalar in unicode.scalars(scheme) {
+        if !letters.contains(scalar) && (first || !"0123456789+-.".contains(scalar)) -> return false
+        first = false
+    }
+    true
+}
+
+// The address a link names, its path and query without its fragment: an
+// address itself, a link of one of the graph's schemes (`crewboard://tasks/7`,
+// `crewboard:tasks/7` and `crewboard:///tasks/7` all name `/tasks/7`), or an
+// `https` link of one of its domains, with or without a port. None for any
+// other link.
+priv app_link_address: fn(link: String) -> String? Never! {
+    rest := link.copy()
+    hash: rest.find("#")
+    if hash >= 0 -> rest = rest.slice(0, hash)
+    if rest.starts_with("/") && app_link_authority(rest) == None -> return Val(rest)
+    colon: rest.find(":")
+    if colon <= 0 -> return None
+    scheme: rest.slice(0, colon).lower()
+    after: rest.slice(colon + 1, rest.len())
+    held: APP_GRAPH.guard_read()
+    if held.value.schemes.contains(scheme) {
+        tail: app_link_authority(after) ?? after
+        if tail.starts_with("/") -> return Val(tail)
+        return Val("/{tail}")
+    }
+    if scheme != "https" -> return None
+    authority := app_link_authority(after) ?? return None
+    path := "/"
+    loop index in 0..<authority.len() {
+        mark: authority.slice(index, index + 1)
+        if mark != "/" && mark != "?" -> next
+        path = if mark == "/" -> authority.slice(index, authority.len()) else -> "/{authority.slice(index, authority.len())}"
+        authority = authority.slice(0, index)
+        break
+    }
+    if authority.contains("@") -> return None
+    host := authority.lower()
+    port: host.find(":")
+    if port >= 0 -> host = host.slice(0, port)
+    if !held.value.link_domains.contains(host) -> return None
+    Val(path)
+}
+
+// What follows the two slashes that open a link's authority (RFC 3986
+// section 3.2) at the start of `text`; None when `text` doesn't start with
+// them.
+priv app_link_authority: fn(text: String) -> String? Never! {
+    if !text.starts_with("/") -> return None
+    tail: text.slice(1, text.len())
+    if !tail.starts_with("/") -> return None
+    Val(tail.slice(1, tail.len()))
+}
+
+// The field texts of `screen`'s state at the address whose path is `path`
+// and whose query is `query`: each `:name` segment's text and each
+// `#App.Query` field's query value, percent-decoded. None when the path
+// doesn't fit the screen's, segment by segment, as a server's route table
+// matches it, or a text is not percent-encoded right.
+priv app_link_fields: fn(screen: AppScreen, path: String, query: String) -> [String:String]? Never! {
+    want: screen.path.split("/").to_list()
+    have: path.split("/").to_list()
+    if want.len() != have.len() -> return None
+    fields := [String:String]{}
+    loop index in 0..<want.len() {
+        if !want[index].starts_with(":") {
+            if want[index] != have[index] -> return None
+            next
+        }
+        if have[index] == "" -> return None
+        fields[want[index].removeprefix(":")] = url.percent_decode(have[index]) ?? return None
+    }
+    if query == "" || screen.query.len() == 0 -> return Val(fields)
+    pairs: url.parse_qsl(query) ?? return None
+    loop pair in pairs {
+        if pair.len() == 2 && screen.query.contains(pair[0]) {
+            fields[pair[0].copy()] = pair[1].copy()
+        }
+    }
+    Val(fields)
+}
+
+// Installs the app's desktop entry (`App.desktop_entry`) as
+// `{data}/applications/{id}.desktop`, where `id` is the app's title in
+// lowercase letters and digits joined by `-` (`app_desktop_id`), and makes
+// it the default handler of each of the graph's link schemes in
+// `{config}/mimeapps.list` (`app_mimeapps_with`), as `App.launch` says.
+// Without a home directory or an XDG directory there is nowhere to install
+// it; a file that can't be written leaves the links unregistered, and the
+// app runs as it would without them.
+priv app_link_register: fn(title: String) -[Env, FS.Read, FS.Write]> Never! {
+    home: sys.home_dir() ?? ""
+    data: app_xdg_dir("XDG_DATA_HOME", home, ".local/share") ?? return
+    config: app_xdg_dir("XDG_CONFIG_HOME", home, ".config") ?? return
+    id: "{app_desktop_id(title)}.desktop"
+    files.create_dir_all("{data}/applications") ?? return
+    files.write("{data}/applications/{id}", App{title: title}.desktop_entry(sys.executable())) ?? return
+    files.create_dir_all(config) ?? return
+    list: "{config}/mimeapps.list"
+    kept: if files.exists(list) -> files.read(list) ?? return else -> ""
+    files.write(list, app_mimeapps_with(kept, app_graph_schemes(), id)) ?? return
+}
+
+// `$name` when it is an absolute path, else `{home}/{fallback}`; None
+// without either, as the XDG base directory specification reads them.
+priv app_xdg_dir: fn(name: String, home: String, fallback: String) -[Env]> String? Never! {
+    if sys.get(name) == .Val(set) && set.starts_with("/") -> return Val(set)
+    if home == "" -> return None
+    Val("{home}/{fallback}")
+}
+
+// The desktop entry ID of the app titled `title`: its letters and digits,
+// in lowercase, each run of anything else one `-` between them; `app` when
+// it has none.
+priv app_desktop_id: fn(title: String) -> String Never! {
+    id := ""
+    gap := false
+    loop scalar in unicode.scalars(title.lower()) {
+        if !"abcdefghijklmnopqrstuvwxyz0123456789".contains(scalar) {
+            gap = true
+            next
+        }
+        if gap && id != "" -> id = "{id}-"
+        gap = false
+        id = "{id}{scalar}"
+    }
+    if id == "" -> return "app"
+    id
+}
+
+// `text` as a desktop entry's string value: a backslash, a line break, a
+// tab and a carriage return are each written as their escape.
+priv app_desktop_value: fn(text: String) -> String Never! {
+    text.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+}
+
+// The path of the program as the first word of a desktop entry's `Exec`
+// key: in double quotes, with `"`, `` ` ``, `$` and `\` each after a
+// backslash and `%` doubled, then written as a string value
+// (`app_desktop_value`), as the Desktop Entry Specification says.
+priv app_desktop_exec: fn(path: String) -> String Never! {
+    quoted := ""
+    loop scalar in unicode.scalars(path) {
+        if scalar == "\"" || scalar == "`" || scalar == "$" || scalar == "\\" {
+            quoted = "{quoted}\\{scalar}"
+        } else if scalar == "%" { quoted = "{quoted}%%" } else { quoted = "{quoted}{scalar}" }
+    }
+    app_desktop_value("\"{quoted}\"")
+}
+
+// `text`, a mimeapps.list, with the desktop entry `id` as the default
+// handler of each scheme's links: its `[Default Applications]` group,
+// added at the end when it has none, names `id` for each
+// `x-scheme-handler/{scheme}` first, and any handler it named for one
+// before is gone. Every other line stays as it was.
+priv app_mimeapps_with: fn(text: String, schemes: [String], id: String) -> String Never! {
+    handlers := [String]{}
+    keys := [String]{}
+    loop scheme in schemes {
+        keys.push("x-scheme-handler/{scheme}")
+        handlers.push("x-scheme-handler/{scheme}={id}")
+    }
+    lines: text.split("\n").to_list()
+    end := 0
+    loop index in 0..<lines.len() {
+        if lines[index].trim() != "" -> end = index + 1
+    }
+    out := [String]{}
+    group := false
+    added := false
+    loop line in lines[0..<end] {
+        trimmed: line.trim()
+        if trimmed.starts_with("[") {
+            group = trimmed == "[Default Applications]"
+            out.push(line.copy())
+            if group && !added {
+                loop handler in handlers -> out.push(handler.copy())
+                added = true
+            }
+            next
+        }
+        at: trimmed.find("=")
+        if group && at > 0 && keys.contains(trimmed.slice(0, at).trim()) -> next
+        out.push(line.copy())
+    }
+    if !added {
+        if out.len() > 0 -> out.push("")
+        out.push("[Default Applications]")
+        loop handler in handlers -> out.push(handler.copy())
+    }
+    "{out.join("\n")}\n"
 }
 
 // One remote call of the endpoint at `path` of a service the app graph
@@ -3195,6 +3525,41 @@ priv route_test_open: fn(graph: App, fields: [String:String]) -[Net, FS.Read]> S
     now: App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) }) ?? panic("the board is open")
     assert_eq(now.project, "p2")
     assert_eq(App.__current<RouteTestService>("app.RouteTestService", fn(_at: App, _fields: [String:String]) { RouteTestService?{None} }) == None, true)
+}
+
+// The board open now, as the compiler lowers `app.current<RouteTestBoard>()`.
+priv route_test_current: fn() -> RouteTestBoard? Never! {
+    App.__current<RouteTestBoard>("app.RouteTestBoard", fn(at: App, fields: [String:String]) { at.__address_state<RouteTestBoard>([String]{"project", "q"}, [String?]{at.__address_json<String>(fields, "project"), at.__address_json<String>(fields, "q")}) })
+}
+
+#Test("an address, a link of the graph's scheme and a web link of its domain open one screen state, and any other link the not-found state") {
+    graph: new("Crew Board!").__screen<RouteTestBoard>("/projects/:project/board", "app.RouteTestBoard", [String]{"q"}, false, route_test_open).url_scheme("CrewBoard").app_links(domain: "Crew.Example.com")
+    opening: [String]{"/projects/p%201/board?q=mine", "crewboard://projects/p%201/board?q=mine", "crewboard:projects/p%201/board?q=mine#top", "https://crew.example.com/projects/p%201/board?q=mine", "HTTPS://CREW.EXAMPLE.COM:443/projects/p%201/board?q=mine&other=1"}
+    loop link in opening {
+        assert(graph.open_link(link))
+        now: route_test_current() ?? panic("{link} opens the board")
+        assert_eq(now.project, "p 1")
+        assert_eq(now.q, "mine")
+        assert_eq(graph.lost_link(), String?{None})
+    }
+    // Another host, another scheme, a path no screen has and an address
+    // whose texts make no board each open the not-found state.
+    lost: [String]{"https://elsewhere.example.com/projects/p1/board?q=mine", "http://crew.example.com/projects/p1/board?q=mine", "mailto:ann@example.com", "crewboard://projects/p1", "/nowhere", "/projects/p1/board", "/projects/p%zz/board?q=mine"}
+    loop link in lost {
+        assert(!graph.open_link(link))
+        assert_eq(route_test_current() == None, true)
+        assert_eq(graph.lost_link(), Val(link))
+    }
+    // The desktop entry names the app the handler of its scheme's links,
+    // and runs the program, quoted, with the link.
+    assert_eq(graph.desktop_entry("/opt/crew board/run$"), "[Desktop Entry]\nType=Application\nName=Crew Board!\nExec=\"/opt/crew board/run\\\\$\" %u\nTerminal=false\nMimeType=x-scheme-handler/crewboard;\n")
+    assert_eq(app_desktop_id("Crew Board!"), "crew-board")
+    assert_eq(app_desktop_id("¡!"), "app")
+    // The list keeps every other line and names the entry for the scheme
+    // once, in the default group, adding the group when it has none.
+    assert_eq(app_mimeapps_with("", [String]{"crewboard"}, "crew-board.desktop"), "[Default Applications]\nx-scheme-handler/crewboard=crew-board.desktop\n")
+    assert_eq(app_mimeapps_with("[Added Associations]\ntext/plain=edit.desktop\n\n", [String]{"crewboard"}, "crew-board.desktop"), "[Added Associations]\ntext/plain=edit.desktop\n\n[Default Applications]\nx-scheme-handler/crewboard=crew-board.desktop\n")
+    assert_eq(app_mimeapps_with("[Default Applications]\nx-scheme-handler/crewboard=old.desktop\ntext/html=web.desktop\n", [String]{"crewboard"}, "crew-board.desktop"), "[Default Applications]\nx-scheme-handler/crewboard=crew-board.desktop\ntext/html=web.desktop\n")
 }
 
 // The accounts the presence test's source refuses, as a row policy would.
