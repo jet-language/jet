@@ -1,0 +1,49 @@
+// Compare-and-swap on an exact Int past the machine word under an A-B-A
+// schedule. Incrementers each load the cell and compare_exchange it to one
+// more; churners load it and swap in a fresh, equal number, freeing the old
+// one, so a freed number's memory is soon handed out again for another. The
+// swap compares the very word it holds an owner of, so no freed and reused
+// number can pass for the one loaded: every increment lands exactly once.
+BASE: 1 << 100
+
+INCREMENTERS: 4
+
+CHURNERS: 4
+
+ROUNDS: 2000
+
+increment: fn(cell: Atomic<Int>) -> Int {
+    retries := 0
+    loop _ in 0..<ROUNDS {
+        loop {
+            seen: cell.load()
+            if cell.compare_exchange(seen, seen + 1) -> break
+            retries += 1
+        }
+    }
+    retries
+}
+
+// Swaps the cell's number for an equal one built afresh: A to A' and back.
+churn: fn(cell: Atomic<Int>) -> Int {
+    swaps := 0
+    loop _ in 0..<ROUNDS {
+        seen: cell.load()
+        fresh: (seen + 1) - 1
+        if cell.compare_exchange(seen, fresh) -> swaps += 1
+    }
+    swaps
+}
+
+run: fn() {
+    cell: Atomic<Int>.new(BASE)
+    task.group schedule {
+        incrementers: loop _ in 0..<INCREMENTERS -> task increment(cell)
+        churners: loop _ in 0..<CHURNERS -> task churn(cell)
+        loop handle in incrementers -> _: handle.join() ?? 0
+        loop handle in churners -> _: handle.join() ?? 0
+    }
+    landed: cell.load() - BASE
+    print("increments landed {landed} of {INCREMENTERS * ROUNDS}")
+    print("every increment landed once {landed == INCREMENTERS * ROUNDS}")
+}

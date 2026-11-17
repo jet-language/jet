@@ -1,6 +1,7 @@
 use {
     files: core.files
     process: core.process
+    sys: core.sys
     time: core.time
 }
 
@@ -264,15 +265,15 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
 
 kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
 
-// Every running entry holds two scheduler workers, its reporting task and its own, and
-// waits on its children itself (kit_exec_wait). A watcher task per child once left every
-// worker of a pool this wide waiting on a watcher that never got one.
-#Test("a pool as wide as the scheduler's workers finishes its guarded children") {
+// Every running entry's reporting task joins the entry's own task, which waits on its
+// children itself (kit_exec_wait). A join on an entry no scheduler worker has started
+// runs it on the joining thread, so a pool twice as wide as the cores finishes.
+#Test("a pool wider than the cores finishes its guarded children") {
     root: cases_test_root("pool-width")
     env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864}
-    workers: kit_execute_workers()
-    jobs: kit_execute_jobs(4 * workers, 4 * workers, workers)
-    assert_eq(jobs, workers)
+    cores: sys.cpu_count()
+    jobs: kit_execute_jobs(2 * cores, 2 * cores, cores)
+    assert_eq(jobs, 2 * cores)
     { sender: done, receiver: finished }: channel<Int>()
     seen := 0
     task.group pool(limit: jobs) {
@@ -425,11 +426,11 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
 #Test("the pool takes every core and all the room") {
     assert_eq(kit_execute_jobs(3, 100, 16), 3)
     assert_eq(kit_execute_jobs(8, 2, 16), 2)
-    // Half the workers by default: each running entry holds two.
-    assert_eq(kit_execute_jobs(0, 100, 16), 8)
+    // One per core by default.
+    assert_eq(kit_execute_jobs(0, 100, 16), 16)
     assert_eq(kit_execute_jobs(0, 100, 1), 1)
-    // An explicit count above the workers is lowered to them.
-    assert_eq(kit_execute_jobs(40, 100, 16), 16)
+    // An explicit count above the cores is kept.
+    assert_eq(kit_execute_jobs(40, 100, 16), 40)
     assert_eq(kit_execute_jobs(0, 0, 16), 1)
     gib: 1073741824
     // The host keeps a tenth of its memory, at least 1 GiB, beside the pool.

@@ -1,0 +1,44 @@
+// Joins nested past the carriers: a group whose limit is its own task count,
+// at least the core count, runs that many parents on one carrier, and each
+// parent spawns two children and joins them. A 4 GiB address-space cap set
+// before the first task leaves fiber stacks for about 25 tasks, so the
+// parents past them run on the carrier itself. No carrier is free to start
+// a child before its parent joins it, so every join finds its child not yet
+// started and runs it on the joining thread: each child reports its
+// parent's thread. A join that waited for a carrier instead would block
+// the only one, and a child would run on another thread or never.
+package: {
+    name: "nested_join"
+    authority: { allow: [Env, Mem.Alloc, Time.Wait] }
+}
+
+use sys: core.sys
+
+CAP: 4294967296
+
+// Past the about 25 fiber stacks the cap leaves, on any core count.
+PARENTS_BEYOND_CORES: 64
+
+leaf: fn() -> Int { context.thread }
+
+// 1 when both children ran on this parent's thread.
+parent: fn() -> Int {
+    mine: context.thread
+    first: task leaf()
+    second: task leaf()
+    if (first.join() ?? -1) == mine && (second.join() ?? -1) == mine -> 1 else -> 0
+}
+
+run: fn() {
+    sys.set_memory_limit(CAP, CAP) ?? panic("set_memory_limit")
+    parents: PARENTS_BEYOND_CORES + sys.cpu_count()
+    inline := 0
+    task.group pool(limit: parents) {
+        handles: loop _ in 0..<parents -> task parent()
+        loop handle in handles {
+            got: handle.join() ?? 0
+            inline += got
+        }
+    }
+    print("nested joins finished, every child on its joiner's thread {inline == parents}")
+}

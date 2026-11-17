@@ -31,8 +31,9 @@
 //
 // The switch (Linux.jet os_fiber_switch_i64) moves the alloc thread cache
 // (TCB @320..@447) between the carrier's TCB and the fiber's, so cached
-// blocks have one owner, and points GS at the fiber's TCB: a fiber keeps its
-// TLS, park slot, context and world words across carriers.
+// blocks have one owner, lends the carrier's exact-Int hazard record
+// (IntHazard.jet int_hazard_lend), and points GS at the fiber's TCB: a fiber
+// keeps its TLS, park slot, context and world words across carriers.
 FIBER_TCB: I64{256}
 
 fiber_header_bytes: fn() -> I64 { (FIBER_TCB + context_tcb_bytes() + I64{63}) & I64{-64} }
@@ -251,6 +252,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
             sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
         }
         alloc_cache_lend(tcb, fiber_tcb)
+        int_hazard_lend(tcb, fiber_tcb)
         // The fiber runs on this carrier: `context.thread` reads its index.
         sync_store(wrapping(fiber_tcb + THREAD_TCB_INDEX), sync_load(wrapping(tcb + THREAD_TCB_INDEX)))
         sync_store(wrapping(record + I64{64}), fiber)
@@ -261,6 +263,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         sync_store(wrapping(record + I64{64}), I64{0})
         fiber_gs_write(root, tcb)
         alloc_cache_reclaim(fiber_tcb, tcb)
+        int_hazard_lend(fiber_tcb, tcb)
         if (fiber_clock_on != I64{0}) { fiber_clock_settle(fiber) }
         action: sync_load(wrapping(fiber + I64{64}))
         if (action == FIBER_PARK) {

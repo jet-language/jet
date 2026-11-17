@@ -1,0 +1,33 @@
+// Crewboard on a page: the board's Share button shares the board's link
+// (`app.share`) through the browser's share sheet, and its Notices button
+// prints the app's notices. A browser without the Web Share API copies the
+// link instead and keeps a notice that says so.
+use {
+    app
+    ui: core.ui
+}
+
+LINK: "https://crewboard.example/board/7"
+
+run: fn() {
+    tree: ui.box(
+        [
+            ui.button(
+                "Share",
+                fn() {
+                    app.share(LINK)
+                },
+            ),
+            ui.button(
+                "Notices",
+                fn() {
+                    noticed: app.notices() ?? return
+                    said := [String]{"notices: {noticed.len()}"}
+                    loop notice in noticed { said.push("notice: {notice.text}") }
+                    print(said.join("\n"))
+                },
+            ),
+        ],
+    )
+    ui.mount(ui.null_backend(), tree, ui.constraint(0.0, 0.0, 200.0, 100.0))
+}

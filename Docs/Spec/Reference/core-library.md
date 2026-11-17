@@ -5526,10 +5526,11 @@ binding. Accessibility is
 available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
-fails with `HostFailure`. File dialogs and font shaping are absent there.
-The provider also answers the app's device requests (`app.ask`,
-`app.take_photo`, `app.location`, a page's photo's bytes, and the sensor
-streams' readings); one whose
+fails with `HostFailure`. The core.ui.host file dialogs, which answer a path,
+and font shaping are absent there. The provider also answers the app's device
+requests (`app.ask`, `app.take_photo`, `app.location`, `app.open_file`, the
+files dropped on an `app.drop_files` body, a page's file's bytes, and the
+sensor streams' readings); one whose
 answer the browser gives later, a promise, is waited for where the
 program's entry can wait ([web-backend-wasm.md](web-backend-wasm.md)), and
 is no answer elsewhere.
@@ -5802,11 +5803,11 @@ tasks never read or change the process registry. The module source is
 | `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
 | `open_folder() -[Env, FS.Read, Net, Time]> PickedFolder?` | folder | Ask the person for a folder and give it; `None` when they cancel or no dialog could ask. See below. |
 | `kept_folder(key: String) -[Env, FS.Read]> PickedFolder?` | folder | The folder kept under `key` in this run or an earlier one; `None` when none is, or it is gone. See below. |
-| `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window. See below. |
+| `drop_files(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode` | node | `body`, taking the files of a kind in `types` that the person drops on it; `on_drop` gets them, and its notice shows beside `body`. Delivered by the Linux app window and the web page. See below. |
 | `context_menu(body: UINode, items: [MenuItem]) -> UINode` | node | `body` with a context menu holding `items`, which opens where the person right-clicks on `body`; an item's run that fails adds its notice to `notices()`. Delivered by the Linux app window and the web page. See below. |
-| `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland). See below. |
-| `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none. Delivered by the Linux app window (Wayland). See below. |
-| `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, copies it and says so. Delivered by the Linux app window (Wayland). See below. |
+| `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland) and the web page's Clipboard API. See below. |
+| `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none, or a page's browser refuses the read. Delivered by the Linux app window (Wayland) and, inside the person's gesture, the web page's Clipboard API. See below. |
+| `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, and in a browser without the Web Share API, copies it and says so. Delivered by the Linux app window (Wayland) and the web page. See below. |
 | `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window. See below. |
 | `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
@@ -6613,11 +6614,12 @@ person canceling is `None` with no notice. A file that can't be read, or
 no dialog to ask with, is `None`, and a notice in the app's notice list says
 why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser) asks, and the file is the path of the
-file:// URI it answers with. The other native targets keep that notice:
-their open dialogs are not built yet. A browser's file chooser answers
-after the page's code has returned, and the page runtime can't wait for it
-yet, so `app.open_file` in code whose target is the web output is a compile
-error, E-APP-TARGET-FEATURE, never a file made up for the person.
+file:// URI it answers with. In a page the browser's file chooser (an
+`<input type=file>` offering each kind's name endings and media types)
+asks; the page keeps the chosen file, and its bytes are read from there.
+The person closing the chooser without a file is `None`; with no page to
+ask in (node runs the build) it is `None` with the notice. The other native
+targets keep that notice: their open dialogs are not built yet.
 
 `app.open_folder()` asks the person for a folder and gives it as a
 `PickedFolder`: its `name`, `files()` (the files directly in it, each a
@@ -6633,8 +6635,8 @@ gives it back in that run and every later one. A folder the document
 portal shares into a sandbox, under `$XDG_RUNTIME_DIR/doc/`, is kept by its
 document portal ID, so a later run finds it under its own runtime
 directory. Any other folder is kept by its path. A key with no folder kept,
-or a folder that is gone, is `None`. A browser's directory picker answers
-after the page's code has returned too, so `app.open_folder` and
+or a folder that is gone, is `None`. A browser gives a page the files the
+person picks, never a folder it can list or keep, so `app.open_folder` and
 `app.kept_folder` in code whose target is the web output are a compile
 error, E-APP-TARGET-FEATURE.
 
@@ -6647,11 +6649,11 @@ drops a list of URIs on `body` (Wayland's wl_data_device, as
 `text/uri-list`): each local file (`file://`) in it whose name ends as the
 kind's pattern does (`*.csv` for `CSV`) is a `PickedFile` backed by its
 path, and `on_drop` gets them once, in the list's order; a drop with none
-calls nothing. The other native targets keep a notice saying their drop
-target is not built yet and give `body` back as it is. A page's drop gives the
-browser's own file handles, which the page runtime can't hand to the app
-yet, so `app.drop_files` in code whose target is the web output is a
-compile error, E-APP-TARGET-FEATURE.
+calls nothing. In a page `body`'s element takes a drop of files: the page
+keeps each dropped file, and those of a kind in `types` go to `on_drop`
+once, in the drop's order, read from the page as a picked file's are; a
+drop with none calls nothing. The other native targets keep a notice saying
+their drop target is not built yet and give `body` back as it is.
 
 `app.context_menu(body, items)` gives `body` back with a context menu
 holding `items`, made as a menu bar's are (`app.item`, `app.separator()`,
@@ -6680,22 +6682,25 @@ the person is using: a copy or paste while the app has no window, or one
 the display server refuses, adds a notice to `app.notices()`, and a paste
 then gives `None`. The Linux window speaks Wayland; an X11 session has no
 app window yet. The other native targets keep a notice saying their
-clipboard is not built yet. A browser lets a page reach the clipboard only
-inside the person's gesture, which the page runtime can't run the call in
-yet, so `app.copy_text` or `app.paste_text` in code whose target is the web
-output is a compile error, E-APP-TARGET-FEATURE.
+clipboard is not built yet. A page reaches the browser's clipboard
+through its Clipboard API: a copy writes it, and a browser without one
+adds a notice instead. A browser lends the clipboard's text only inside
+the person's gesture, such as a click's handler, so a paste there waits
+for the browser's answer, and a paste the browser refuses, or one outside
+a gesture, adds a notice and gives `None`.
 
 `app.share(url)` hands `url` to the system's share sheet. Linux has none,
 so there the app's window copies `url` to the clipboard, as
 `app.copy_text` does, and then adds a notice to `app.notices()` saying it
 copied the link, which the window shows, for the person to paste it where
 they would share it; a copy that fails adds its own notice instead, and a
-share while the app has no window adds a notice saying so. The other
-native targets keep a notice saying their share sheet is not built yet. A
-browser opens its share sheet (the Web Share API) only inside the person's
-gesture, which the page runtime can't run the call in yet, so `app.share`
-in code whose target is the web output is a compile error,
-E-APP-TARGET-FEATURE.
+share while the app has no window adds a notice saying so. A page shares
+it through the browser's share sheet (the Web Share API), which a browser
+opens only inside the person's gesture, such as a click's handler; a share
+the person dismisses is no failure. A browser without the Web Share API,
+or one that refuses the share, copies `url` instead and says so, as on
+Linux. The other native targets keep a notice saying their share sheet is
+not built yet.
 
 `app.draggable(body, value:, label:)` gives `body` back as one a person
 drags `value` with, and `app.drop_zone<V>(body, label:, on_drop:)` gives

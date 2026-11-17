@@ -1,0 +1,23 @@
+# Atomic<T> keeps its one-word contract on O0, O1 and O2. An exact Int atomic
+# grows past the machine word, both alone and while eight tasks add to it at
+# once. Eight more tasks share I64, U32 and I32 atomics and every add counts;
+# the 32-bit words wrap at their width. Under a 64 MB program allocator cap, an
+# exact add that cannot get its bytes returns AllocError at once instead of
+# waiting, the cell keeps its value, and later adds work. Each cell is the
+# word its owner holds, changed by compare-and-swap through the numbers'
+# hazard domain, with no hidden lock or atomic-only pool.
+fixture: Fixtures/WidthContract
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "exact add from 9223372036854775807 holds 9223372036854775808\nexact compare_exchange past the word true, holds 85070591730234615847396907784232501249\n16000 adds from 16 tasks\nexact under contention holds 9223372036854779807, past the word by 4000\nI64 8000, U32 wrapped to 7704, I32 wrapped to 2147480296\nthe capped add is refused, the cell unchanged true\nthe cell goes on: 1 then 2\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "exact add from 9223372036854775807 holds 9223372036854775808\nexact compare_exchange past the word true, holds 85070591730234615847396907784232501249\n16000 adds from 16 tasks\nexact under contention holds 9223372036854779807, past the word by 4000\nI64 8000, U32 wrapped to 7704, I32 wrapped to 2147480296\nthe capped add is refused, the cell unchanged true\nthe cell goes on: 1 then 2\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "exact add from 9223372036854775807 holds 9223372036854775808\nexact compare_exchange past the word true, holds 85070591730234615847396907784232501249\n16000 adds from 16 tasks\nexact under contention holds 9223372036854779807, past the word by 4000\nI64 8000, U32 wrapped to 7704, I32 wrapped to 2147480296\nthe capped add is refused, the cell unchanged true\nthe cell goes on: 1 then 2\n"

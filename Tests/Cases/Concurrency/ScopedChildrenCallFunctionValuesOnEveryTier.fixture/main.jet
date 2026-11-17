@@ -26,7 +26,7 @@ step: fn(state: Int, message: Int) -> Int {
 // fields stay intact.
 through_plan: fn<S>(plan: &&Plan<S>, start: &&S) -> S {
     current := start
-    loop turn in 0..4 {
+    loop turn in 0..<4 {
         task.group group {
             attempt: task plan.handler(current)
             if attempt.join() == {
@@ -43,7 +43,7 @@ through_plan: fn<S>(plan: &&Plan<S>, start: &&S) -> S {
 // parameter, and by a local.
 through_owned: fn(handler: &&fn(Int) -> Int) -> Int {
     current := 0
-    loop _ in 0..4 {
+    loop _ in 0..<4 {
         task.group group {
             attempt: task handler(current)
             current = attempt.join() ?? -1
@@ -54,7 +54,7 @@ through_owned: fn(handler: &&fn(Int) -> Int) -> Int {
 
 through_read: fn(handler: fn(Int) -> Int) -> Int {
     current := 0
-    loop _ in 0..4 {
+    loop _ in 0..<4 {
         task.group group {
             attempt: task handler(current)
             current = attempt.join() ?? -1
@@ -66,7 +66,7 @@ through_read: fn(handler: fn(Int) -> Int) -> Int {
 through_local: fn() -> Int {
     handler := bump
     current := 0
-    loop _ in 0..4 {
+    loop _ in 0..<4 {
         task.group group {
             attempt: task handler(current)
             current = attempt.join() ?? -1

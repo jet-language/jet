@@ -1,0 +1,93 @@
+#Target(Web)
+
+// The same import in a page: Ann picks the CSV file in the browser's file
+// chooser, and the page keeps it, its bytes reading the same whole, as text
+// and a part at a time as on Linux. Crewboard's desktop import
+// (`import_tasks`) then asks the chooser for it again and adds its rows to
+// her project as tasks, as on Linux. Last she drops it on the board with a
+// note the board does not take.
+use {
+    app
+    auth: core.auth
+    desktop
+    logic
+    ui: core.ui
+    reactive: core.reactive
+}
+
+run: fn() -[Browser, DB.Read, Env, FS.Read, IO, Net, Time]> {
+    _: app.new("Crewboard").api<logic.Crew>("/api").mount(logic.demo_crew())
+    crew: app.remote(logic.demo_crew())
+    picked: app.open_file(types: [app.FileType]{app.FileType.CSV})
+    if picked == .Val(file) -> show("picked", file) else -> print("picked: none")
+    print(imported(crew))
+    drops: reactive.signal(0)
+    backend: ui.null_backend()
+    ui.reactive_render(
+        fn() {
+            board: ui.node("board: {drops.get()} drops", 240.0, 120.0)
+            tree: app.drop_files(
+                board,
+                types: [app.FileType]{app.FileType.CSV},
+                on_drop: fn(dropped: [app.PickedFile]) app.Notice! {
+                    loop file in dropped -> show("dropped", file)
+                    drops.set(drops.get() + 1)
+                    Ok()
+                },
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
+        },
+    )
+}
+
+show: fn(how: String, file: app.PickedFile) -[FS.Read, IO, Time]> {
+    print("{how}: {file.name}, {file.bytes} bytes, {media_name(file.media)}")
+    whole: file.read() ?? return print("unreadable: {err}")
+    text: file.text() ?? return print("not text: {err}")
+    parts: streamed(file) ?? return print("unstreamable: {err}")
+    print("whole, text and stream agree: {whole == text.bytes() && whole == parts && whole.len() == file.bytes}")
+}
+
+// Ann imports a CSV file she picks into Spring fair through Crewboard's
+// desktop import, then her projects count its tasks.
+imported: fn(crew: app.Remote<logic.Crew>) -[DB.Read, Env, FS.Read, Net, Time]> String Never! {
+    app.as_caller(
+        auth.AccountID.from_string("ann"),
+        fn() {
+            added: if desktop.import_tasks(crew.copy(), "p2") == {
+                .Ok(count) -> "imported {count} tasks"
+                .Err(failure) -> "import: {desktop.import_notice(failure).text}"
+            }
+            if crew.my_projects() == {
+                .Ok(cards) -> {
+                    lines := [String]{added}
+                    loop card in cards -> lines.push("{card.name}: {card.open_tasks} open")
+                    lines.join("\n")
+                }
+                .Err(_) -> "{added}\nno projects"
+            }
+        },
+    )
+}
+
+// What the first bytes of the file show it holds.
+media_name: fn(media: app.Media?) -> String {
+    kind: media ?? return "no known media"
+    if kind == {
+        .Text -> "text"
+        .Image -> "an image"
+        .PDF -> "a PDF"
+    }
+}
+
+// The file's bytes read through its stream, a few at a time.
+streamed: fn(file: app.PickedFile) -[FS.Read, Time.Wait]> [U8] IOError! {
+    stream := file.stream() ?? return Err(err)
+    out := [U8]{}
+    loop {
+        part: stream.read_bytes(7) ?? return Err(err)
+        if part.len() == 0 -> break
+        loop b in part -> out.push(b)
+    }
+    Ok(out)
+}

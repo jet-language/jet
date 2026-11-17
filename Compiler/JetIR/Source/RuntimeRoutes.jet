@@ -500,7 +500,7 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_perf_read_bits", export: "jet_perf_read_bits", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_perf_write_bits", export: "jet_perf_write_bits", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_plugin_call", export: "jet_plugin_call", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetPlugin"}, IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "PluginError"}}},
-    IRRoute{symbol: "jet_plugin_load", export: "jet_plugin_load", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetPlugin"}}},
+    IRRoute{symbol: "jet_plugin_load", export: "jet_plugin_load", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetPlugin"}}},
     IRRoute{symbol: "jet_process_child_exited", export: "jet_process_child_exited", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessChild"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Flag, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_process_child_id", export: "jet_process_child_id", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessChild"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_process_child_interrupt", export: "jet_process_child_interrupt", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessChild"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Handle{name: "IOError"}}},
@@ -1901,14 +1901,13 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
 // Every Core declaration's identity whose bare spelling has a runtime handle
 // the runtime exports names an exported runtime handle in its own row, each
 // error and record type alike (EncodingCause, EncodingError, XMLError, the
-// math and time handles): no lookup stands in for the row.
+// math and time handles): the key's row is the declaration's only route.
 #Test("a Core identity's runtime handle is the runtime's exported one") {
     unexported := [String]{}
     loop row in IR_RUNTIME_HANDLES {
-        if !row.jet_name.starts_with("<corelib>/") -> next
         if !row.jet_name.contains("::") -> next
         parts: row.jet_name.split("::").to_list()
-        bare: ir_core_bare_handle(row.jet_name, parts[parts.len() - 1]) ?? next
+        bare: ir_runtime_handle(parts[parts.len() - 1]) ?? next
         if !ir_runtime_handle_exported(bare.runtime) -> next
         if !ir_runtime_handle_exported(row.runtime) -> unexported.push(row.jet_name.copy())
     }
@@ -1916,4 +1915,18 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
     cause: ir_runtime_handle("<corelib>/core.encoding::EncodingCause") ?? panic("EncodingCause lost its handle")
     assert_eq(cause.runtime, "EncodingCause")
     assert(ir_runtime_exports("jet_rt_handle_drop_encoding_cause"))
+}
+
+// A Core declaration takes a runtime handle only through a row under its own
+// key: the generic Point2 has one, while the Group structs of core.data,
+// core.sys and core.ui.xkb have none, so the bare `Group` row stays the task
+// group's alone.
+#Test("a Core declaration takes a runtime handle only through its own key") {
+    point: ir_runtime_handle("<corelib>/core.math::Point2") ?? panic("core.math's Point2 lost its handle")
+    assert_eq(point.runtime, "JetCoord2")
+    assert(ir_runtime_handle("<corelib>/core.data::Group") == None)
+    assert(ir_runtime_handle("<corelib>/core.sys::Group") == None)
+    assert(ir_runtime_handle("<corelib>/core.ui.xkb::Group") == None)
+    group: ir_runtime_handle("Group") ?? panic("the bare task group spelling lost its handle")
+    assert_eq(group.runtime, "JetTaskGroup")
 }

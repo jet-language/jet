@@ -1,0 +1,35 @@
+// Crewboard on a page: the board's Copy Link button copies the board's link
+// (`app.copy_text`) and its Paste button pastes the clipboard's text
+// (`app.paste_text`), each through the browser's Clipboard API. The browser
+// lends the clipboard's text only inside the person's gesture, so the paste
+// the run makes before any click is refused, gives None and keeps a notice.
+use {
+    app
+    ui: core.ui
+}
+
+LINK: "https://crewboard.example/board/7"
+
+said: fn(text: String?) -> String { text ?? "none" }
+
+run: fn() {
+    print("paste outside a click: {said(app.paste_text())}")
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    tree: ui.box(
+        [
+            ui.button(
+                "Copy Link",
+                fn() {
+                    app.copy_text(LINK)
+                },
+            ),
+            ui.button(
+                "Paste",
+                fn() {
+                    print("pasted: {said(app.paste_text())}")
+                },
+            ),
+        ],
+    )
+    ui.mount(ui.null_backend(), tree, ui.constraint(0.0, 0.0, 200.0, 100.0))
+}

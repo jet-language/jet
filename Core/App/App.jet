@@ -4926,6 +4926,14 @@ priv WEB_DEVICE_NEXT: 5
 
 priv WEB_DEVICE_STOP: 6
 
+priv WEB_DEVICE_PASTE: 7
+
+priv WEB_DEVICE_SHARE: 8
+
+priv WEB_DEVICE_OPEN: 9
+
+priv WEB_DEVICE_DROPPED: 10
+
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
     if size == 0 -> return Ok([U8]{})
@@ -4968,6 +4976,19 @@ priv app_page_place: fn(fields: [String], from: Int) -> Place? Never! {
     Val(Place{latitude: latitude, longitude: longitude, accuracy_m: accuracy})
 }
 
+// The file a page's answer holds from its field `from` on: the number the
+// page keeps it under, its size and its name, as a PickedFile whose media
+// its first bytes show (`blob_type`), as a kept blob's is. None when it has
+// none.
+priv app_page_file: fn(fields: [String], from: Int) -> PickedFile? Never! {
+    if fields.len() < from + 3 -> return None
+    number: Int.parse(fields[from]) ?? return None
+    size: Int.parse(fields[from + 1]) ?? return None
+    name: fields[from + 2]
+    head: if size == 0 -> [U8]{} else -> app_page_read(number, name, 0, min(size, BLOB_HEAD)) ?? [U8]{}
+    Val(PickedFile{name: name.copy(), bytes: size, media: blob_media(blob_type(head, size)), source: .Page(number)})
+}
+
 // The fields of the next reading of the sensor the page follows under
 // `watch` for a stream, once there is one; none when the page no longer
 // follows it.
@@ -4979,7 +5000,7 @@ priv app_page_reading: fn(watch: String) -> [String]? Never! {
 // Stops the page following the sensor under `watch`.
 priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STOP, watch) }
 
-#Test("a page's answers read as a grant, a place and a sensor's reading, and a page's file reads only in its page") {
+#Test("a page's answers read as a grant, a place, a file and a sensor's reading, and a page's file reads only in its page") {
     assert_eq(app_page_first([String]{}), None)
     assert_eq(app_page_first([String]{"denied"}), Val("denied"))
     assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}, 1), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
@@ -4989,6 +5010,17 @@ priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STO
     assert_eq(app_orientation_named("left-up"), Val(Orientation.LeftUp))
     assert_eq(app_orientation_named("undefined"), None)
     assert_eq(app_page_reading("1"), None)
+    if app_page_file([String]{"granted", "2", "0", "crew-tasks.csv"}, 1) == .Val(file) {
+        assert_eq(file.name, "crew-tasks.csv")
+        assert_eq(file.bytes, 0)
+    } else { panic("an answer with a file gives it") }
+    if app_page_file([String]{"granted"}, 1) == .Val(_) {
+        panic("an answer without a file gives none")
+    }
+    if app_page_file([String]{"granted", "two", "0", "crew-tasks.csv"}, 1) == .Val(_) {
+        panic("a file needs its number")
+    }
+    assert_eq(app_file_accept([FileType]{FileType.CSV, FileType.Image}), ".csv,text/csv,.png,.jpg,.jpeg,image/png,image/jpeg")
     empty: PickedFile{name: "empty.csv", bytes: 0, media: None, source: .Page(1)}
     assert_eq(empty.read() ?? panic("an empty file: {err}"), [U8]{})
     photo: PickedFile{name: "photo-1.jpg", bytes: 4, media: Val(Media.Image), source: .Page(0)}
@@ -5017,14 +5049,15 @@ FileType: enum {
 // cancel. The dialog offers the kinds in `types`, the first one chosen. A
 // file that can't be read, or no dialog to ask with, is `None` with a
 // notice. On Linux the desktop portal's open dialog asks
-// (org.freedesktop.portal.FileChooser); the other native targets keep that
+// (org.freedesktop.portal.FileChooser); in a page the browser's file
+// chooser asks (`app_open_web`); the other native targets keep that
 // notice.
 open_file: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFile? {
     #if #build.target.os == {
         .Linux -> { return app_open_linux(types) }
         .MacOS -> { return app_unopened(OPEN_UNBUILT) }
         .Windows -> { return app_unopened(OPEN_UNBUILT) }
-        .Web -> { return app_unopened(OPEN_UNBUILT) }
+        .Web -> { return app_open_web(types) }
         .Wasm -> { return app_unopened(OPEN_UNBUILT) }
         .Freestanding -> { return app_unopened(OPEN_UNBUILT) }
     }
@@ -5049,6 +5082,32 @@ priv app_open_linux: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFil
         .Ok(file) -> Val(file)
         .Err(err) -> app_unopened("{err}")
     }
+}
+
+// `open_file` in a page: the browser's file chooser offers the kinds in
+// `types` (`app_file_accept`), and the page keeps the chosen file, which
+// `read` reads from there, its size and its name. The person closing the
+// chooser is `None`; with no page to ask in (node runs the build), it
+// keeps the notice.
+priv app_open_web: fn(types: [FileType]) -> PickedFile? Never! {
+    fields: app_page_answer(WEB_DEVICE_OPEN, app_file_accept(types))
+    if app_page_first(fields) != .Val("granted") {
+        return app_unopened("there is no page to ask in")
+    }
+    app_page_file(fields, 1)
+}
+
+// What a page's file chooser offers for `types`, as an `<input
+// type=file>`'s accept says it: each kind's name endings, then its media
+// types, comma-separated.
+priv app_file_accept: fn(types: [FileType]) -> String Never! {
+    offered := [String]{}
+    loop kind in types {
+        filter: app_file_filter(kind)
+        loop glob in filter.globs -> offered.push(glob.removeprefix("*"))
+        loop media in filter.media -> offered.push(media.copy())
+    }
+    offered.join(",")
 }
 
 // The file at `path` as a PickedFile: its name, its size, and its media
@@ -5216,16 +5275,15 @@ priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
 // window (`App.window`) puts it there before its next frame, since the
 // display server takes a copy only from a window: a copy while the app
 // has no window, or one the display server refuses, adds a notice to
-// `notices()` and copies nothing. The other native targets keep a notice
-// that says their clipboard is not built yet. The page runtime can't reach
-// the browser's clipboard yet, so a call in code whose target is the web
-// output is a compile error.
+// `notices()` and copies nothing. A page writes it through the browser's
+// Clipboard API; a browser without one adds a notice instead. The other
+// native targets keep a notice that says their clipboard is not built yet.
 copy_text: fn(text: String) Never! {
     #if #build.target.os == {
         .Linux -> { app_window_copy(text) }
         .MacOS -> { app_no_clipboard() }
         .Windows -> { app_no_clipboard() }
-        .Web -> { app_no_clipboard() }
+        .Web -> { app_page_copy(text) }
         .Wasm -> { app_no_clipboard() }
         .Freestanding -> { app_no_clipboard() }
     }
@@ -5235,15 +5293,18 @@ copy_text: fn(text: String) Never! {
 // when the clipboard holds no text. On Linux the app's window reads it,
 // waiting up to 2 s for another program's copy: a read while the app has
 // no window, or one that fails, adds a notice to `notices()` and gives
-// None. The other native targets keep a notice that says their clipboard
-// is not built yet and give None. A call in code whose target is the web
-// output is a compile error, as `copy_text`'s is.
+// None. A page reads it through the browser's Clipboard API, which lends
+// it only inside the person's gesture, such as a click's handler: the
+// program waits for the browser's answer, and a read the browser refuses,
+// or one outside a gesture, adds a notice and gives None. The other native
+// targets keep a notice that says their clipboard is not built yet and
+// give None.
 paste_text: fn() -[Env, Net, Time]> String? Never! {
     #if #build.target.os == {
         .Linux -> { return app_window_paste() }
         .MacOS -> { return app_no_paste() }
         .Windows -> { return app_no_paste() }
-        .Web -> { return app_no_paste() }
+        .Web -> { return app_page_paste() }
         .Wasm -> { return app_no_paste() }
         .Freestanding -> { return app_no_paste() }
     }
@@ -5260,20 +5321,43 @@ priv app_no_paste: fn() -> String? Never! {
     None
 }
 
+// `copy_text` in a page: the provider writes the browser's clipboard
+// (Host.jet clipboardSet); whether it could.
+priv app_page_copied: fn(text: String) -> Bool Never! {
+    if ui_rt.clipboard_set(text) -> return true
+    __keep_notice(Notice{text: "Couldn't copy: the browser gives the page no clipboard"})
+    false
+}
+
+priv app_page_copy: fn(text: String) Never! { _: app_page_copied(text) }
+
+// `paste_text` in a page (Host.jet pasteText): None, with no notice, when
+// the clipboard holds no text.
+priv app_page_paste: fn() -> String? Never! {
+    text: ui_rt.device(WEB_DEVICE_PASTE, "") ?? {
+        __keep_notice(Notice{text: "Couldn't paste: the browser lends the clipboard only inside a click or a key press, and refused it here"})
+        return None
+    }
+    if text == "" -> return None
+    Val(text)
+}
+
 // Shares `url` through the system's share sheet. On Linux, which has none,
 // the app's window copies `url` to the clipboard, as `copy_text` does, and
 // then keeps a notice that says so, for the person to paste the link where
-// they would share it; a copy that fails keeps its own notice instead. The
+// they would share it; a copy that fails keeps its own notice instead. A
+// page shares it through the browser's Web Share API, which opens the
+// share sheet only inside the person's gesture, such as a click's handler;
+// a browser without one, or one that refuses this share, copies `url` and
+// says so, as on Linux. A share the person dismisses is no failure. The
 // other native targets keep a notice that says their share sheet is not
-// built yet. A browser's Web Share API runs only inside the person's
-// gesture, which the page runtime can't run the call in yet, so a call in
-// code whose target is the web output is a compile error.
+// built yet.
 share: fn(url: String) Never! {
     #if #build.target.os == {
         .Linux -> { app_window_share(url) }
         .MacOS -> { app_no_share() }
         .Windows -> { app_no_share() }
-        .Web -> { app_no_share() }
+        .Web -> { app_page_share(url) }
         .Wasm -> { app_no_share() }
         .Freestanding -> { app_no_share() }
     }
@@ -5284,21 +5368,29 @@ priv app_no_share: fn() Never! {
     __keep_notice(Notice{text: "Couldn't share: this system's share sheet is not built yet"})
 }
 
+// `share` in a page (Host.jet shareLink).
+priv app_page_share: fn(url: String) Never! {
+    said: ui_rt.device(WEB_DEVICE_SHARE, url) ?? "copy"
+    if said != "copy" {
+        return
+    }
+    if app_page_copied(url) -> __keep_notice(Notice{text: "Copied the link to share it: {url}"})
+}
+
 // `body`, taking the files a person drops on it: each one of a kind in
 // `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
 // with shows beside `body`, as a button's does. A native target delivers
 // drops through the window that shows `body`: on Linux the app's window
 // (`App.window`) takes them (`app_window_drop`); the other native targets
 // keep a notice that says their drop target is not built yet and give
-// `body` back as it is. A page's drop gives the browser's File handles,
-// which the page runtime can't give the app yet, so a call in code whose
-// target is the web output is a compile error.
+// `body` back as it is. In a page the browser's drop gives the files
+// (`app_drop_web`), which the page keeps and `read` reads from there.
 drop_files: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode {
     #if #build.target.os == {
         .Linux -> { return app_drop_target(body, types, on_drop.move()) }
         .MacOS -> { return app_undroppable(body) }
         .Windows -> { return app_undroppable(body) }
-        .Web -> { return app_undroppable(body) }
+        .Web -> { return app_drop_web(body, types, on_drop.move()) }
         .Wasm -> { return app_undroppable(body) }
         .Freestanding -> { return app_undroppable(body) }
     }
@@ -5330,6 +5422,35 @@ priv app_drop_target: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedF
 priv app_undroppable: fn(body: UINode) -> UINode Never! {
     __keep_notice(Notice{text: "Couldn't take dropped files: this system's drop target is not built yet"})
     body.copy()
+}
+
+// `body` as one a page gives the files dropped on it, of a kind in `types`,
+// to `on_drop` (`UINode.__taking_web_files`): a drop of files on it clicks
+// a handler that takes them from the page (`app_drop_web_run`).
+priv app_drop_web: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode Never! {
+    target: AppDrop{types: types.copy(), run: Shared{AppDropRun{run: on_drop.move()}}}
+    body.__taking_web_files(ui.button("", fn() { app_drop_web_run(target) }))
+}
+
+// The files of the page's last drop on a body that takes them, as
+// `drop_files` gives them: each of a kind `target` takes, as a PickedFile
+// in the drop's order, to its `on_drop` once. A drop with none of them
+// calls nothing.
+priv app_drop_web_run: fn(target: AppDrop) Never! {
+    fields: app_page_answer(WEB_DEVICE_DROPPED, "")
+    dropped := [PickedFile]{}
+    at := 0
+    loop at + 3 <= fields.len() {
+        if app_file_kind(fields[at + 2], target.types) {
+            if app_page_file(fields, at) == .Val(file) -> dropped.push(file)
+        }
+        at += 3
+    }
+    if dropped.len() == 0 {
+        return
+    }
+    held: target.run.guard_read()
+    app_drop_once(held.value.run, dropped)
 }
 
 // Starts the window's drop targets over, for a tree opened anew.

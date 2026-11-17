@@ -18,6 +18,10 @@ web_host_syscall: fn(e: &WebEmitter, st: &WebState) Never! {
     web_call(e, web_ref(st, "host", "syscall", WEB_SYSCALL_SIG))
 }
 
+// The host's fiber switch: the save word's and the target's addresses; its
+// result is always 0.
+WEB_SWITCH_SIG: "ll:l"
+
 // t3 := the scratch bytes' address.
 web_scratch: fn(e: &WebEmitter) Never! {
     web_global_get(e, WEB_GLOBAL_SP)
@@ -144,9 +148,17 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
         // Likewise AES-NI and PCLMULQDQ: only a caller that saw them in
         // cpuid runs these leaves.
         "os_aes_encrypt4_10_i64" | "os_aes_encrypt4_12_i64" | "os_aes_encrypt4_14_i64" | "os_aes_decrypt4_10_i64" | "os_aes_decrypt4_12_i64" | "os_aes_decrypt4_14_i64" | "os_aes_encrypt1_10_i64" | "os_aes_encrypt1_12_i64" | "os_aes_encrypt1_14_i64" | "os_ghash1_i64" | "os_ghash4_i64" -> web_op(e, 0x00)
-        // Only a carrier thread switches fibers or moves GS, and the web
-        // target starts no thread (clone below refuses).
-        "os_fiber_switch_i64" | "os_gs_base_write_i64" -> web_op(e, 0x00)
+        // A fiber switch is the host's (Host.jet fiberSwitch): fibers are
+        // coroutines it suspends and resumes, each on its own stack.
+        "os_fiber_switch_i64" -> {
+            web_get(e, args[0])
+            web_get(e, args[1])
+            web_call(e, web_ref(st, "host", "switch", WEB_SWITCH_SIG))
+            web_op(e, 0x1a)
+        }
+        // The web host reports no FSGSBASE, so the runtime moves GS with
+        // ARCH_SET_GS (Fiber.jet fiber_gs_write) and never runs this.
+        "os_gs_base_write_i64" -> web_op(e, 0x00)
         // The web host delivers no signal to a handler, so no restorer runs.
         "os_signal_return" -> web_op(e, 0x00)
         // The stack pointer; the stack mark's (JetIR Build.jet
@@ -348,8 +360,8 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
             web_scratch_out(e, args[3], 16, 88)
             web_get(e, old)
         }
-        // clone(flags, stack, parent_tid, child_tid, 0): the host runs one
-        // thread and refuses.
+        // clone(flags, stack, parent_tid, child_tid, 0): the host starts the
+        // thread as a coroutine (Host.jet clone), or refuses without JSPI.
         "os_clone_i64" -> {
             web_i64(e, 56)
             web_get(e, args[0])

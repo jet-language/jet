@@ -1,0 +1,110 @@
+// An exact Int atomic grows past the machine word, alone and under
+// contention; fixed-width atomics shared by eight tasks keep every add,
+// wrapping a 32-bit word at its width; and an exact add the capped program
+// allocator refuses returns its AllocError at once, the cell unchanged and
+// usable. Every cell is the one word its owner holds: none takes a lock or a
+// pool of its own.
+MAX: 9223372036854775807
+
+TASKS: 8
+
+ADDS: 1000
+
+exact_adds: fn(cell: Atomic<Int>) -> Int {
+    loop _ in 0..<ADDS -> _: cell.add(1)
+    ADDS
+}
+
+fixed_adds: fn(word: Atomic<I64>, small: Atomic<U32>, signed: Atomic<I32>) -> Int {
+    loop _ in 0..<ADDS {
+        _: word.add(1)
+        _: small.add(1)
+        _: signed.add(-1)
+    }
+    ADDS
+}
+
+reserve: fn(count: Int) -> [Int] AllocError! { List.try_with_capacity(count) }
+
+// Room for every list fill takes, reserved up front.
+holder: fn() -> [[Int]] AllocError! { List.try_with_capacity(64) }
+
+// Takes the largest lists that still fit, halving down to 4 KB, so under
+// 4 KB of the cap is left. `ballast` holds every list it takes; its capacity
+// is reserved, so pushing to it allocates nothing.
+fill: fn(ballast: &[[Int]]) {
+    count := 8_388_608
+    loop count >= 512 {
+        if reserve(count) == {
+            .Ok(chunk) -> { ballast.push(chunk) }
+            .Err(_error) -> count /%= 2
+        }
+    }
+}
+
+// Whether `capped.try_add(huge)` is refused while ballast fills the cap. An
+// 8 KB spare is held while the ballast fills and ends with its match arm, so
+// the add runs with 8 to 12 KB free: room for the AllocError it returns, not
+// for the 50 KB sum. The ballast ends when this returns, before anything
+// prints.
+refused_under_ballast: fn(capped: Atomic<Int>, huge: Int) -> Bool {
+    if holder() == {
+        .Ok(chunks) -> {
+            ballast := chunks
+            if reserve(1024) == {
+                .Ok(_spare) -> fill(ballast)
+                .Err(_error) -> return false
+            }
+            if capped.try_add(huge) == {
+                .Ok(_) -> false
+                .Err(_error) -> true
+            }
+        }
+        .Err(_error) -> false
+    }
+}
+
+run: fn() {
+    exact: Atomic<Int>.new(MAX)
+    old: exact.add(1)
+    print("exact add from {old} holds {exact.load()}")
+    swapped: exact.compare_exchange(MAX + 1, MAX * MAX)
+    print("exact compare_exchange past the word {swapped}, holds {exact.load()}")
+
+    crossing: Atomic<Int>.new(MAX - 4000)
+    word: Atomic<I64>.new(0)
+    small: Atomic<U32>.new(4294967000)
+    signed: Atomic<I32>.new(-2147479000)
+    done := 0
+    task.group adders {
+        exact_tasks: loop _ in 0..<TASKS -> task exact_adds(crossing)
+        fixed_tasks: loop _ in 0..<TASKS -> task fixed_adds(word, small, signed)
+        loop handle in exact_tasks {
+            got: handle.join() ?? 0
+            done += got
+        }
+        loop handle in fixed_tasks {
+            got: handle.join() ?? 0
+            done += got
+        }
+    }
+    print("{done} adds from {TASKS * 2} tasks")
+    print("exact under contention holds {crossing.load()}, past the word by {crossing.load() - MAX}")
+    print("I64 {word.load()}, U32 wrapped to {small.load()}, I32 wrapped to {signed.load()}")
+
+    // 2^400000 takes 50 KB; adding it to itself needs 50 KB more, past the
+    // room the ballast leaves under the 64 MB cap package.jet sets.
+    huge: 1 << 400000
+    capped: Atomic<Int>.new(huge)
+    if {
+        refused_under_ballast(capped, huge) -> {
+            print("the capped add is refused, the cell unchanged {capped.load() == huge}")
+        }
+        else -> print("the capped add was taken")
+    }
+    capped.store(1)
+    if capped.try_add(1) == {
+        .Ok(previous) -> { print("the cell goes on: {previous} then {capped.load()}") }
+        .Err(_) -> print("the cell stays refused")
+    }
+}
