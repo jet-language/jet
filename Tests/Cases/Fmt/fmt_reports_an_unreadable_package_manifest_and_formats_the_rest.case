@@ -1,13 +1,14 @@
 # Claim: a package.jet the package model can't read does not stop a multi-file
 #   `jet fmt`: it is reported at its first line (`--> …bad/package.jet:1:1`) and left
 #   as written, and every other file, the ones under that manifest included, is
-#   still checked and formatted; the run fails
+#   still checked and formatted; the write fails, and `--check` judges only the
+#   form of the files it can format
 fixture: FmtReportsAnUnreadablePackageManifestAndFormatsTheRest.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt --check {work}
-exit: 1 # two files would change and the manifest is refused
+exit: 1 # two files would change; the walked manifest is reported, not judged
 stdout: ~ "good/main.jet" # --check still names the dirty files
 stdout: ~ "bad/src/main.jet" # including the file under the refused manifest
 stderr: ~ "bad/package.jet:1:1" # the manifest error has a place

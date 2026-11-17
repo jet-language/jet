@@ -1,0 +1,15 @@
+# Claim: `jet fmt --check` over a tree judges the form of each source it can
+#   format. A source a directory walk finds that the formatter refuses, such as
+#   a negative test fixture, is reported with its diagnostic and skipped, and
+#   the check passes when every other source is formatted. Named on the command
+#   line, the same source still fails the check.
+fixture: CheckOverATreeSkipsARefusedSource.fixture
+env: NO_COLOR=1
+step: jet fmt --check {work}
+exit: 0 # every source the formatter accepts is formatted
+stdout: empty # no source is dirty
+stderr: ~ "fixtures/bad.jet:1:" # each refused source is reported in place
+stderr: ~ "fixtures/env.jet:2:"
+step: jet fmt --check {work}/fixtures/bad.jet
+exit: 1 # a named source the formatter refuses fails the check
+stderr: ~ "fixtures/bad.jet:1:"
