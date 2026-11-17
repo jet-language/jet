@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110975,
+    "rev": 111000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32218,8 +32218,8 @@
       "title": "Unify inferred effects, trusted defaults, and restrictive policy",
       "body": "## Current owner direction\n\nThis is the existing owner of the effect-policy change, not a new duplicate stream. The owner asked for high-priority delivery during the prep/build interview.\n\nThe latest direction changes the default assumed by D-TRUST-LAUNCH1. Preserve that ratified decision as history. Do not implement its old metadata-free prompting rule as the new default.\n\n## Trust prompt rule (owner ruling, 2026-10-01)\n\nThe owner rejected the trusted-folder framing and gave this rule in chat (logged on this card 2026-10-01):\n\n- When a program needs trust, Jet asks one question with three answers: Always trust, Once, Cancel.\n- Once: run this time only. The next run asks again.\n- Always trust: record trust for that target. Later runs never ask again.\n- Cancel: do not run.\n- A CLI flag that skips the prompt (for example --trusted, or a run-unsafe style flag) answers the prompt as Once. It never records Always.\n\nThere is no separate owned-root or trusted-folder concept. Trust comes only from an Always trust answer or from a prompt-skipping flag for that one run. #3705 owns the prompt itself (it absorbed #3419); this card owns the effect model the prompt feeds.\n\n## Requirements stated by the owner\n\n- Always infer and retain effects, including when source omits an effect row. Make the effect facts available for reflection, explanation, and enforcement.\n- Do not ask again for a target the user chose Always trust for.\n- Provide a deny-by-default restricted mode selected through invocation policy and package/module policy. Enterprise policy can make this the default.\n- Positive source effect rows are ceilings. Listing an effect permits it within the source contract but does not prove that the body uses it.\n- Authors can explicitly reject effects at package, module, entrypoint, or function scope. Keep positive ceilings and explicit empty ceilings as expert controls.\n- In restricted mode, explicit package or function budgets must cover the required effects. Resolve inherited coverage without requiring repeated declarations on every helper.\n- Keep implementation source reusable across trust policies. Choosing a policy must not require rewriting function bodies or automatically editing source.\n- Dependencies do not inherit trust from the program that uses them.\n- Apply one effect model to ordinary execution, shared program preparation, and the AOT build procedure. Keep their effect provenance separate by phase and entrypoint.\n- Prep prepares the program for every execution path. For AOT, its results are prepared into the artifact, not rerun as application startup. Build is the AOT procedure for executables, libraries, and linkable objects.\n\n## Model\n\nKeep three facts separate: inferred potential effects, written source ceilings and prohibitions, and approved execution authority (an Always trust record, a Once answer, a prompt-skipping flag, package.jet authority, --allow/--deny, or enterprise policy). A declaration in third-party source never grants itself authority. An outer approved budget can cover unannotated helpers. Inner source can narrow a boundary, not defeat an enclosing mandatory restriction. Enterprise policy is highest.\n\nAlways-on compiler tracking is not the same as recording every runtime operation. Static analysis stays conservative for dynamic calls and opaque foreign code: unknown effects are never reported as pure. The owner selected always-available effect provenance and the existing required authorization receipts, with detailed runtime auditing controlled by policy. Enterprise may require that audit; ordinary development does not record every effect occurrence.\n\nNo new public spelling is approved by this card. Restricted mode uses the existing --trust/-T axis plus package.jet authority policy; any new syntax needs its own ratification and registry cutover. Ordinary effect trust must not erase independent checks: Secret, FFI, Unsafe, provider consent, environment/package/toolchain trust, and sandbox boundaries stay separate.\n\n## Existing mechanisms\n\nSource inspection, not runtime proof: the Jet homes are Jetpack/PackageModel/Source/Authority/Resolver.jet, Jetpack/PackageModel/Source/Policy/EffectBudget.jet, Jetpack/Foundation/Source/Authority.jet and Compiler/JetSema/Source/Sema/Effects/Checks.jet. The shipped host resolver is crates/jet-foundation/src/Authority.rs plus the Source/CmdCompile.rs launch paths. Reuse these; do not add a second effect system.\n\nRelevant law: D-EFFECT-OMIT1, D-EFFECT-ROW2, D-EFFBUDGET1, D-TEAMPOLICY1, D-TRUST-LAUNCH1 (history), D-SCRIPT-CONFIRM1 (#3705), and D-META-GATE1. Existing source spellings include -[Net]>, -[!Net]>, and -[]>.\n\n## Effect-preserving caching: owner clarification\n\nA cache hit must not suppress an observable effect from a logically invoked operation. A user-written status print remains program behavior. Cache pure computations where valid, but preserve effects and their order at each logical invocation. Do not replace fresh effects with a replay of old console output. Trust selects authority; it does not license an optimizer to remove effects.\n\nLaunching an already-prepared AOT artifact does not invoke prep. Shared preparation and compiler-hook details are owned by #3509.\n",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e12",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -32597,7 +32597,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-09-15T00:27:21.584Z",
-      "updated": "2026-11-16T12:54:06.930Z",
+      "updated": "2026-11-17T01:39:02.050Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -34276,8 +34276,8 @@
       "title": "Use ordinary constructor defaults in typed package settings",
       "body": "## Outcome\n\nAfter the settings ballot, migrate declarations from key: Type = value to key: Type{value} if selected. Reuse canonical Jet token/literal/default parsing at a dependency-safe seam; remove the ad-hoc equals split and quote/depth scanners where they misread legal literal payloads. Keep declarations package-only, preserve current scalar/fieldless-enum domain, and leave profile key:value and CLI --set key=value overrides unchanged. Update every current producer/consumer/diagnostic/example; preserve historical ballots and audits.\n\n## Owned paths and integration\n\n- crates/jet-pkg-model/src/Package/mod.rs\n- crates/jet-pkg-model/src/Package/Blocks.rs\n- crates/jet-parser/src/Parser/Items/functions_params.rs\n- crates/jet-parser/src/Parser/Items/type_methods_fields.rs\n- crates/jet-driver/src/Driver/mod.rs\n- examples/features/packages/typed_settings\n- tests/package_outputs.rs\n- editors\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nExtend typed_settings_preserves_tier_parity_and_cli_override and package parser/formatter tests. Cover Bool, signed Int, Char braces/quotes, strings containing commas/equals/comment text, canonical raw/triple literals and fieldless enum values. Reject wrong type, empty/multiple/defaultless forms, aggregates, effectful constructors, old declaration spelling and undeclared profile/CLI keys. Require unchanged effective-value provenance and cold/warm runtime results.\n\n## Deduplication\n\n#3509 owns this campaign. Existing owners #3147, #3175, #3181, #3199, #3201, #3202 and #3505–#3508 are reused, not replaced. #3418, #3419, #3421 and #3042 remain separate prerequisite owners. Shared specification references alone do not make these distinct implementation outcomes duplicates.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -34386,7 +34386,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:57:27.055Z",
-      "updated": "2026-11-16T12:54:07.873Z",
+      "updated": "2026-11-17T01:39:05.154Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -34399,8 +34399,8 @@
       "title": "Core foundations: each member has one meaning, a Jet body or a typed provider leaf, with no duplicate dispatcher row",
       "body": "Destination: each foundational Core member (text, collections, math, units, time, encoding, regex, args, files and path, io and mem, portable crypto) has exactly one meaning: its Jet body in Core, or a declared typed provider leaf. No dispatcher row or tier-specific route duplicates it, and every caller and generated projection uses that one contract.\n\nWhy it matters: two meanings for one member is an I9 risk (tiers disagree) and keeps the Rust-era routing alive.\n\nState: Compiler/Prelude/Core.rows lists the source_module ownership and the remaining dispatcher rows; Tools/agent/CoreSurfaceLedger.jet checks the surface.\n\nOther items that were here moved to focused cards on 2026-11-15: names, modules and prelude to the Core names card, I/O failures to the Core I/O failures card, and single items to #6314, #6877, #3549, #4524, #6367, #6873 and #3836.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -35203,9 +35203,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-17T01:34:26.650Z",
+      "updated": "2026-11-17T01:39:09.406Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-09T19:32:04.021Z",
+      "claimedAt": "2026-11-17T01:39:09.406Z",
       "goals": [
         "G3"
       ],
@@ -35217,8 +35217,8 @@
       "title": "System Core modules are fully Jet-owned: every declaration has a Jet body or a policy-free provider leaf, with typed failures",
       "body": "Destination: the system Core modules (archive, net, service, sys, log, http, term, sync, db, event, process, tasks, watcher, email) are ordinary Jet. Every declaration has a Jet body or a typed, policy-free provider leaf; protocol, policy, validation and typed failures live in Jet source; and failure and effect proofs pass on O0, O1 and O2.\n\nWhy it matters: Core is ordinary Jet that uses only mechanisms any package can use (philosophy pillar 5), and the same program means the same on every tier (I9).\n\nOpen work: the CoreSurfaceLedger check for these modules (c1), the per-module core proofs (c3), opaque file handles (c11, D-FILES-HANDLE-ABI1=A), sys.set reporting EnvError (c17), raw-byte env values (c18, ballot D-ENV-RAW-BYTES1 on Main's ballot list (2026-11-15)) and core.os facts computed once in Core (c19).\n\nThe Rust-era plan (crates/ paths, the 2026-09 dispatcher row counts) is retired with Rust removal; the dispatcher rows now live in Compiler/Prelude/Core.rows.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -35727,9 +35727,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-17T01:34:39.519Z",
+      "updated": "2026-11-17T01:39:13.673Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-13T01:49:48.348Z",
+      "claimedAt": "2026-11-17T01:39:13.673Z",
       "goals": [
         "G3"
       ],
@@ -36704,8 +36704,8 @@
       "body": "OWNER DIRECTIVE 2026-09-27 (lifts the 2026-08-30 Jetpack-in-Jet pause recorded on #2327): the owner authorizes a full port of Jetpack from Rust to Jet. The compiler port under Compiler/ (#218) runs in parallel as a sibling; follow its conventions. Phases in order: (1) complete code build-out, (2) parity and bug fixing, (3) optimization.\n\nOwner instructions (override default routing in AGENTS.md for this stream):\n- Opus 5.5 only: every dispatched subagent runs on Opus 5.5, set explicitly on OMP task/hub. No @implementation, @full_review, @cavecrew, or other default profile/model. If a dispatch cannot run on Opus 5.5, stop that slice and report; never fall back.\n- No JetOS work: do not port, stub, test, benchmark or plan crates/jetpack/src/JetOS/, crates/jetos, or any command/provider/image path that exists only for JetOS. Omit JetOS hooks from ported code; exclude JetOS surfaces from the parity harness and performance cells.\n- All ported code lives under top-level Jetpack/, laid out as Jetpack/<Area>/Source/... mirroring Compiler/, plus Jetpack/Bootstrap/ with an ordered sources.list and check script modeled on Compiler/Bootstrap.\n- Scope (non-test LOC, ~117k, JetOS excluded): crates/jetpack (~100k incl. src/bin helpers), crates/jetpack-bin (~0.2k), crates/jet-nix-eval (~3.8k), crates/jet-store (~3.2k), crates/jet-env-model (~11k), crates/jet-pkg-model (~69k). jet-env-model and jet-pkg-model are shared with the compiler: check Compiler/ ownership first and never create a second copy. Use Compiler/ Jet versions of jet-driver, jet-sema, jet-codegen, etc., not new ports.\n- Every Rust module except JetOS maps to a named Jet home; the mapping and progress live in Tower cards only, not docs.\n- Phase 1 order: models + Nix evaluator; Store (Nar, Archive, Journal, Cache, Lifecycle, Closure, ...); Trust, TrustRoot, SemanticLock; Provider, ProviderGraph; Services, Shell, Image (OCI only), Recipe; CLI. Idiomatic current Jet, not transliterated Rust (audits list anti-patterns). Port unit/integration tests with each module. Each slice passes the Jetpack bootstrap check and runs on AOT and default jet run (I9).\n- Compiler defects/missing Core APIs: file or reuse a Tower card; no workaround inside Jetpack. New syntax/public API/dependencies need an owner ballot. ed25519-dalek and zstd need an approved bridge pattern (I6); no new external deps. No #Unsafe without an audited reason.\n- Phase 2: differential harness running Rust jetpack and the Jet build on the same inputs (existing tests such as tests/jetpack_platform, fixtures, real projects), comparing stdout, stderr, exit codes, store contents and lockfiles; drive every difference to zero with root fixes. Rust Jetpack stays shipped until an owner cutover decision.\n- Phase 3: strict gate vs Rust Jetpack, Jet/Rust <= 1.05 on every cell: warm jetpack env, store verification, hashing, graph load; record in the canonical manifest. Never trade semantics for speed.\n- Operating: Tower only ledger; one writer per path; worktrees only under .agent-worktrees/; commands via scripts/agent/jet-env; scratch in ~/.cache/jet-luna; narrow proofs per card, broad suites at milestones; report exercised receipts.\n\nDone: every non-JetOS Rust module has a ported Jet home under Jetpack/ with tests, the parity harness passes, every performance cell meets the gate; then stop and ask the owner for the cutover decision.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": "e5-m11-jetpack-in-jet",
+      "epoch": "e23",
+      "milestoneId": null,
       "phase": "building",
       "priority": "P1",
       "plan": "## Goal\nThis is the epic for the owner-authorized (2026-09-27) port of Jetpack from Rust to Jet under top-level `Jetpack/`. It runs in three phases: (1) code build-out, (2) parity and bug fixing, (3) optimization. The Rust Jetpack stays the shipped implementation until the owner ratifies a cutover ballot.\n\n## Owner rules (preserved)\n- Every dispatched subagent runs Opus 5.5, set explicitly; never fall back.\n- No JetOS work of any kind.\n- Code lives in `Jetpack/<Area>/Source/…` with `Jetpack/Bootstrap/` (ordered `sources.list`/`tests.list`, `check.sh`).\n- The mapping and progress live only in Tower cards.\n- Reuse Compiler/ and never create a second copy.\n- Compiler defects and Core gaps get Tower cards and no workaround.\n- New syntax, public API or dependencies need an owner ballot. ed25519/zstd need an approved bridge (I6).\n- No `#Unsafe` without an audited reason.\n- Write idiomatic current Jet and port the tests with each module.\n\n## Current state\n- About 96k Jet lines across 12 of 13 areas (tracked plus in-flight). Foundation 2.8k, PackageModel 38.9k (32 test files), EnvModel 8.4k, NixEval 5.6k, Nix 2.4k, Store 25.0k (15), Trust 4.5k, Recipe 0.5k, Provider 4.9k (3), Environment 0.4k, Image 0.8k, CLI 2.1k. Services is empty. The area DAG is `Jetpack/Bootstrap/areas.list:9-23`.\n- Much of PackageModel/Store/EnvModel is untracked working-tree work after the rate-limit stop (963c3cb09); the slices (#3601-#3615, #3637-#3652, …) own it.\n- No differential harness and no Jetpack performance cells exist yet.\n- `check.sh` supports `--syntax`, `--area X [--deps-from-head]`, `--each` and `--tests`. It prints `JETPACK CHECK OK (check, default run, AOT test)` and a receipt with `check-unit-sha256`.\n\n## Changes (in order)\n1. Build-out (criterion 1): finish every slice card. Each one ends with `check.sh --area <Area> --deps-from-head --tests` green and a receipt.\n2. Integrated proof (criterion 2): `check.sh --each --tests` and then a whole-unit `check.sh --tests` on main. Run a `#Unsafe` audit by searching `Jetpack/` for `#Unsafe` and checking every hit for a reason.\n3. Parity (criterion 3): a differential harness under `Jetpack/Bootstrap/` that runs Rust `jetpack` and the Jet build on the root `tests/jetpack_*.rs` inputs, fixtures and real projects (JetOS excluded), and diffs stdout, stderr, exit code, store tree and lockfiles.\n4. Performance (criterion 4): warm `jetpack env`, store verification, hashing and graph-load cells in the canonical performance manifest, strict gate Jet/Rust ≤ 1.05.\n5. Stop point (criterion 5): raise the owner cutover ballot.\n\n## Proof\n- `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --each --tests` → every area prints `JETPACK CHECK OK (check, default run, AOT test)`.\n- `Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests` → `JETPACK CHECK OK (check, default run, AOT test)`. Record the receipt and unit SHA.\n- The differential harness report shows 0 differences. The perf gate shows every Jetpack cell ≤ 1.05.\n\n## Batch\nbatch-jetpack-cli: CLI is the top of the area DAG, so its unit closes over every area. The epic's integrated proof is that unit.\n\n## Dependencies\n- #3661: the single-unit `jet check` is too slow, so the whole-unit check times out or hits the memory cap.\n- #3673: cross-module enums, type imports and constants, needed to split areas into packages.\n- #3676: the first ICE of the tier run.\n- The Core gap cards #3593-#3598 and the Compiler entry points #3599 stay on the slices that need them.",
@@ -38834,7 +38834,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-17T01:36:38.586Z",
+      "updated": "2026-11-17T01:39:17.906Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -38848,8 +38848,8 @@
       "body": "Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9).\n\nNeeded:\n1. Stat identity: device, inode, hard-link count, owner uid, nanosecond mtime (Core/files/files.jet samefile currently returns an error at :1046). Used for same-inode, hardlink-count, owner and path-swap (TOCTOU) checks in 16+ files: Store/{Ingest,Lifecycle,Cleanup,Closure,Seal,Reuse,Broker,Archive}, jet-pkg-model Authority/Envelope/SealWalk.\n2. Exclusive create (O_EXCL/create_new) with explicit creation mode (17 files).\n3. No-follow open and read through a handle (O_NOFOLLOW), and no-follow traversal from a held root directory (10 files).\n4. Directory handles and fd-relative operations: openat, mkdirat, renameat, unlinkat, fchmod, fdopendir/readdir (Store/Lifecycle/Directory.rs, Authority, Envelope).\n5. Kernel advisory lock (flock LOCK_EX|LOCK_NB / LockFileEx) with try_lock, unlock and crash release; core.files.lock today only creates an O_EXCL marker (RuntimePolicy/Lock, Store journal/transactions).\n6. Close-on-exec control.\n7. Extended attributes list/get/set (Envelope, Store capture).\n8. Binary streaming handles: read a chunk into [U8], write bytes, seek, set_len, fsync on a handle (NAR, archive, cache streaming; existing reader/writer are line-oriented).\n9. Directory fsync so renames are durable; atomic rename-exchange (renameat2 RENAME_EXCHANGE / renameatx_np); specified replace-existing + write-through rename on Windows.\n10. Sparse-hole detection (SEEK_HOLE/SEEK_DATA) for Envelope.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": "e5-m11-jetpack-in-jet",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nGive `core.files` the store-grade primitives the Jetpack Jet port (#3590) needs, exactly as the seven ratified decisions define them, with the syscalls as policy-free provider leaves. Two needs that no decision covers go to ballots.\n\n## Current state\n- Core/files/files.jet: `samefile` always errors with `file identity requires provider inode/device support` (:1041-1046). `lock` is a host marker file (:759; dispatcher `jet_std_fs_lock` at crates/jet-codegen/src/Prelude/Core.jet:322). `truncate` rewrites the whole file (:1157). Byte IO is whole-file only (`read_bytes` :132, `write_bytes` :147).\n- There is no no-follow, directory-handle, fd-relative, xattr or binary-handle API. `open`/`create` are host rows (Core.jet:1080-1081), and `stat` is `jet_std_fs_stat` (:301).\n- Ratified A: D-CORE-FILEERROR1 (`IOError.AlreadyExists`/`Unsupported(IOContext)`, one mapper); D-CORE-FILESTAT1 (`FileId{device, inode}`, `links`, `owner`, `size_on_disk`, and Instant `modified`/`changed`/`created` replacing `modified_ms`/`created_ms`; `samefile` compares ids); D-CORE-FILEOPEN1 (`create(if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow})`, `open(links:)`, and FileReader `read`/`chunks`/`seek`/`stat` plus FileWriter `write`/`write_all`/`fsync`/`set_mode`/`stat`, with all handles close-on-exec, which covers need 6); D-CORE-FILERENAME1 (`rename(if_exists: RenameIfExists{.Replace})` with Refuse and Swap, and folder `fsync`); D-CORE-FILEDIR1 (an opaque `Directory` from `open_directory` with no-follow relative-name methods); D-CORE-FILELOCK1 (flock/LockFileEx `lock(path, timeout: Duration?{None})`, `try_lock`, crash release, identity re-check); D-CORE-FILEXATTR1 (three no-follow xattr calls).\n- Needs 8 (`set_len` on a handle) and 10 (SEEK_HOLE/SEEK_DATA) have no decision.\n\n## Changes\n1. Jet semantics in files.jet: the new enums (`CreateIfExists`, `LinkPolicy`, `RenameIfExists`), `FileId`, the extended `Stat`, `samefile`, the `Directory` path-part validation (reject `..`, `.`, empty and absolute parts), lock timeout and retry policy, and every error message (what, why, fix).\n2. Provider leaves only in the retained host (Prelude CoreLib Rust and jet-rt): open flags (O_EXCL, O_NOFOLLOW, O_CLOEXEC, O_DIRECTORY), openat/mkdirat/renameat2/unlinkat/fchmod/fdopendir, flock, the [l]xattr calls, statx, renameatx_np and the Windows equivalents, plus the shared errno mapper.\n3. Cutover: remove `modified_ms`/`created_ms` and the marker lock, then migrate every caller in Core/, Jetpack/, Examples/ and tests/. Register the members in Compiler/JetFoundation/Source/Registry (CoreHostSignatures.jet, CoreCallRows.jet) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n4. Draft two ballots, D-CORE-FILESETLEN1 (handle `set_len`) and D-CORE-FILEHOLES1 (sparse data/hole query), each with same-program alternatives.\n5. New Examples/features/io/files_store_primitives.jet with its .out, one section per decision, covering the failure cells: AlreadyExists, a final link refused, a `..` part refused, Swap with a missing name, try_lock contention, and an xattr on an unsupported filesystem.\n\n## Proof\n- `jet test Compiler --profile golden io/files_store_primitives` passes.\n- `jet test Compiler --profile golden io/files_store_primitives` passes on O0, O1 and O2.\n- `node Tools/agent/gen-core-tables.mjs --check` exits 0.\n\n## Batch\nbatch-core-files: Core/files plus its provider leaves, retested in one pass.\n\n## Dependencies\nNone for the seven ratified slices. Needs 8 (set_len) and 10 (holes) wait on the two ballots this card drafts.",
@@ -39160,7 +39160,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-16T12:54:14.554Z",
+      "updated": "2026-11-17T01:39:20.995Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -39174,8 +39174,8 @@
       "body": "Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9).\n\nNeeded:\n1. Binary stdin/stdout/stderr streaming on ProcessChild (today only line streams); Provider and Store feed and read NAR/tar bytes through child processes.\n2. exec: replace the current process image (jetpack env/use shell handoff).\n3. Child process-group/session placement (Unix process_group(0), Windows CREATE_NEW_PROCESS_GROUP) and Windows Job Object containment plus GenerateConsoleCtrlEvent (Services supervision, RuntimePolicy).\n4. Hand an inherited file descriptor to a child (clear FD_CLOEXEC) (Store Broker, Services).\n5. Scoped SIGINT/SIGTERM handler with a pollable flag and restore of the previous handler (on_signal registers a policy only).\n6. core.sys: process start-identity query for pid-reuse guards on macOS/Windows.\nDepends on #3591 (core.process currently fails to check).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": "e5-m11-jetpack-in-jet",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
       "plan": "## Goal\nImplement the six ratified core.process decisions the Jetpack port (#3590) needs: binary pipes, process replacement, terminal handoff and groups, kept-open handles, scoped signal receivers, and start identity. Prove each on AOT and default `jet run` (I9). The port may not work around a missing Core API.\n\n## Current state\n- `Core/process/process.jet` (349 lines) has only line streams. `stdin_text` (:51-57) writes text, and `on_signal` (:100) registers a policy only. There is no exec, keep_open, `signals()` receiver or identity.\n- Process handles are compiler-known: `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:292-456` (ProcessChild fields `stdin`/`stdout`/`stderr`/`terminal` at :431-437, and ProcessStdin write/close at :410-412). The registry has `ProcessStdin.close` at `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1601`.\n- The host is `crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs`, which already defaults to a Unix process group and Windows Job containment (per the 2026-09-28 log, around :328-347 and :493-513), plus `ProcessSpec.rs`.\n- #3591 is done. All six decisions are ratified A: D-CORE-PROCBYTES1, PROCREPLACE1, PROCGROUP1, PROCIDENT1, PROCINHERIT1 and PROCSIGNAL1. `IOError.Unsupported` comes from D-CORE-FILEERROR1=A (card #3593), which is not yet in `Core/io/io.jet`.\n\n## Changes (Jet compiler first; one sub-slice per decision, landing together)\n1. PROCBYTES1: `ProcessStdin.write(bytes) -> Int IOError!`, `write_all(bytes)`, `write_text(text)` (renamed from `write(text)`; migrate `stdin_text` and callers). `ProcessStdoutStream`/`ProcessStderrStream` get `read(limit) -> [U8]`, where `[]` means EOF, and `chunks(size: Int{65536})`. A limit below 1 gives `IOError.InvalidInput` before any read. Sema rows go in `ProcessHandles.jet`, registry rows in CoreCallRows, and host code in `Process.rs`.\n2. PROCREPLACE1: `ProcessSpec.replace_process() -[Exec, Time.Wait]> Never IOError!`. It refuses Capture/Stream/terminal/detached/timeout/output_limit/under before execve. On Unix it flushes Jet stdio before execve. On Windows it uses a Job Object stand-in.\n3. PROCGROUP1: automatic terminal handoff (setpgid/tcsetpgrp with SIGTTOU blocked, reclaim after wait, refuse a second owner with InvalidInput). On Windows, CREATE_NEW_PROCESS_GROUP for non-console children.\n4. PROCINHERIT1: `ProcessSpec.keep_open(handle: &&KeepOpen, at: Int?{None})`, where KeepOpen is a core.files handle. Numbers below 3 or duplicates are refused. CLOEXEC is cleared only in the child. On Windows it uses PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and `at` gives Unsupported.\n5. PROCSIGNAL1: `process.signals(kinds) -[Exec]> Receiver<ProcessSignal>` with a nested newest-wins scope, restore on drop, and one pending value per kind.\n6. PROCIDENT1: `ProcessIdentity { pid, start, containment }`, `ProcessChild.identity()`, `process.identity(pid)`, `process.find(saved)` and `RunningProcess` terminate/kill/interrupt. Start tokens: Linux stat starttime, macOS proc_pidinfo, Windows GetProcessTimes. Other targets give `IOError.Unsupported`.\n7. Update `Docs/spec` core.process and the Jetpack mapping receipts.\n\n## Proof\n- Add goldens `Examples/features/io/process_bytes.jet` (binary round-trip through `cat`, chunks, invalid limit), `process_keep_open.jet`, `process_signals.jet` (self-SIGINT through `sys.kill`, nested restore) and `process_identity.jet` (identity equality, `find` after exit returns None). For each, `jet test Compiler --profile golden io/process_` passes, and `jet run` diffs empty.\n- `tests/process_replace.rs::replace_process_execs_and_refuses_capture` passes via `Tools/agent/jet-env cargo test --test process_replace`.\n- The terminal handoff is checked in `tests/help_pty.rs` style under a PTY: `Tools/agent/jet-env cargo test --test process_replace -- terminal_handoff`.\n\n## Batch\nbatch-core-files: the core.process surface plus its sema, registry and host rows, retested with the io/process goldens.\n\n## Dependencies\n#3593 (core.files handles and `IOError.Unsupported` from D-CORE-FILEERROR1) is needed for items 4 and 6. Items 1, 2, 3 and 5 can land first.",
@@ -39417,7 +39417,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-16T12:54:26.182Z",
+      "updated": "2026-11-17T01:39:24.094Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -74447,21 +74447,21 @@
           "n": 20,
           "text": "After a one-line edit to a 30-line script that uses core.files and core.regex, `jet run` prints its first output sooner than `python3` runs the equivalent script (hyperfine with a prepare step that applies the edit; Jet/Python < 1.00), with no kept program, cache or incremental state: an edited run costs what any run costs. Proof: a committed hyperfine receipt with the prepare step.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6639 c13: script startup against Lua and Python belongs with scripting speed",
-          "at": "2026-11-15T05:39:25.932Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:59.966Z",
+          "closure": "duplicate"
         },
         {
           "n": 21,
           "text": "Script startup beats Lua: on one host, the same-run median of `jet run hello.jet` and of `jet run` after an edit are each below lua 5.4 hello.lua, by design rather than by reusing a kept program or incremental state (owner 2026-11-08: do not rely on incremental compilation or caching to win; the final target is the hand-written machine-code ceiling). Baselines in the #6328 log, 2026-11-08. Proof: a committed same-run receipt.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6639 c14: script startup against Lua and Python belongs with scripting speed",
-          "at": "2026-11-15T05:39:26.922Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:01.145Z",
+          "closure": "duplicate"
         },
         {
           "n": 22,
@@ -74470,7 +74470,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6759 c20, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:50.871Z",
+          "at": "2026-11-17T01:39:03.057Z",
           "closure": "duplicate"
         },
         {
@@ -74489,38 +74489,38 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6087 c14, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:53.430Z",
+          "at": "2026-11-17T01:39:04.229Z",
           "closure": "duplicate"
         },
         {
           "n": 25,
           "text": "Embedded runtime size and call speed (#6386): The runtime a host links for a guest that uses only core.text and core.math is smaller than the Lua 5.4.7 interpreter (329,248 bytes), and 10M host-to-guest calls of a small function finish faster than `lua_pcall` on the equivalent Lua function (Jet/Lua < 1.00). Proof: `node Tools/gauntlet/harness/run.mjs --entry embed-runtime` shows no loss.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6906 c6: embedded runtime belongs with the embedding card",
-          "at": "2026-11-15T05:39:27.930Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:06.145Z",
+          "closure": "duplicate"
         },
         {
           "n": 26,
           "text": "Web page size and first output (#5201): The w06 page's shipped code (gzip) is smaller than the esbuild-minified TypeScript version of the same program and than Pyodide's, and it reaches first output sooner than Pyodide (Jet/peer < 1.00, numbers logged). Proof: `node Tools/gauntlet/harness/run.mjs --entry w06-web` shows no loss.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6959 c11: web size belongs with web performance",
-          "at": "2026-11-15T05:39:28.907Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:07.342Z",
+          "closure": "duplicate"
         },
         {
           "n": 27,
           "text": "Web wasm artifact size (#5201): The harness reports artifact_bytes for every web rail. Jet's wasm artifact is no larger than the Rust wasm artifact for the same program. Proof: `node Tools/gauntlet/harness/run.mjs --rail web` artifact_bytes column against Rust.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6959 c12: web size belongs with web performance",
-          "at": "2026-11-15T05:39:29.910Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:08.532Z",
+          "closure": "duplicate"
         },
         {
           "n": 28,
@@ -74529,7 +74529,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c10, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:56.013Z",
+          "at": "2026-11-17T01:39:10.381Z",
           "closure": "duplicate"
         },
         {
@@ -74539,7 +74539,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6797 c5, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:58.562Z",
+          "at": "2026-11-17T01:39:11.578Z",
           "closure": "duplicate"
         },
         {
@@ -74549,7 +74549,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c11, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:01.059Z",
+          "at": "2026-11-17T01:39:12.766Z",
           "closure": "duplicate"
         },
         {
@@ -74586,7 +74586,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c12, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:03.289Z",
+          "at": "2026-11-17T01:39:14.649Z",
           "closure": "duplicate"
         },
         {
@@ -74596,7 +74596,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c13, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:05.477Z",
+          "at": "2026-11-17T01:39:15.842Z",
           "closure": "duplicate"
         },
         {
@@ -74606,7 +74606,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6966 c4, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:07.610Z",
+          "at": "2026-11-17T01:39:17.015Z",
           "closure": "duplicate"
         },
         {
@@ -74634,7 +74634,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c14, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:10.235Z",
+          "at": "2026-11-17T01:39:18.896Z",
           "closure": "duplicate"
         },
         {
@@ -74662,7 +74662,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c15, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:13.030Z",
+          "at": "2026-11-17T01:39:20.071Z",
           "closure": "duplicate"
         }
       ],
@@ -74674,7 +74674,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-17T01:38:58.086Z",
+      "updated": "2026-11-17T01:39:20.071Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -76361,7 +76361,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6461 c12, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:46.373Z",
+          "at": "2026-11-17T01:39:22.015Z",
           "closure": "duplicate"
         },
         {
@@ -76371,7 +76371,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c7, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:49.042Z",
+          "at": "2026-11-17T01:39:23.194Z",
           "closure": "duplicate"
         },
         {
@@ -76381,7 +76381,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c8, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:52.025Z",
+          "at": "2026-11-17T01:39:25.061Z",
           "closure": "duplicate"
         },
         {
@@ -76857,7 +76857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-16T00:58:02.679Z",
+      "updated": "2026-11-17T01:39:25.061Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -217863,6 +217863,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:39:25.061Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T01:39:24.094Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:39:23.194Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:39:22.015Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T01:39:20.995Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iiv9ft",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:39:20.071Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-17T01:39:18.896Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-17T01:39:17.906Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:39:17.015Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-17T01:39:15.843Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-17T01:39:14.649Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-17T01:39:13.673Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:12.766Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-17T01:39:11.578Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-17T01:39:10.381Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-17T01:39:09.407Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03ai7mm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:08.533Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-17T01:39:07.342Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-17T01:39:06.146Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-17T01:39:05.154Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l5ld15",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:04.229Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#24"
+    },
+    {
+      "at": "2026-11-17T01:39:03.057Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#22"
+    },
+    {
+      "at": "2026-11-17T01:39:02.050Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05efrmn",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:01.145Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-17T01:38:59.966Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#20"
+    },
     {
       "at": "2026-11-17T01:38:58.086Z",
       "by": "Main",
