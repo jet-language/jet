@@ -1413,11 +1413,16 @@ SemaSwizzleSlots: struct {
     // Whether the slots are the value's `lanes` field.
     lanes: Bool,
     // Bit K: the declaration has `__swizzleK`; bit
-    // SEMA_SWIZZLE_SET_BIT + K: it has `__swizzle_setK`.
+    // SEMA_SWIZZLE_SET_BIT + K: it has `__swizzle_setK`; bit
+    // SEMA_WITH_LANES_BIT: it has `__with_lanes`, which bit operators and
+    // shifts on its integer lanes build their result with
+    // (Expressions/FixedArithmetic.jet).
     declared: Int,
 }
 
 SEMA_SWIZZLE_SET_BIT: 8
+
+SEMA_WITH_LANES_BIT: 16
 
 SemaSwizzleRead: struct {
     read: Expr?,
@@ -1518,7 +1523,8 @@ sema_expression_swizzle_lane_slots: fn(graph: SemaRegistrationGraph, nominal: Se
     None
 }
 
-// The `declared` bit of a declaration's own swizzle method, or 0.
+// The `declared` bit of a declaration's own swizzle or `__with_lanes`
+// method, or 0.
 sema_expression_swizzle_method_bit: fn(name: String) -> Int Never! {
     if name == {
         "__swizzle2" -> 1 << 2
@@ -1528,6 +1534,7 @@ sema_expression_swizzle_method_bit: fn(name: String) -> Int Never! {
         "__swizzle_set2" -> 1 << (SEMA_SWIZZLE_SET_BIT + 2)
         "__swizzle_set3" -> 1 << (SEMA_SWIZZLE_SET_BIT + 3)
         "__swizzle_set4" -> 1 << (SEMA_SWIZZLE_SET_BIT + 4)
+        "__with_lanes" -> 1 << SEMA_WITH_LANES_BIT
         else -> 0
     }
 }

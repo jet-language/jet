@@ -1,0 +1,32 @@
+// An integer lane type (`I8x16` to `U64x4`) takes the bit operators lane by
+// lane: `&`, `|`, `~` (exclusive or), prefix `~`, and the shifts `<<` and
+// `>>`. The right side is another value of the same lane type, or one integer
+// of the lane type; a shift count may be any integer. Each lane is the scalar
+// operator on that lane, so `>>` copies the sign bit in on signed lanes and
+// zeros in on unsigned ones.
+run: fn() {
+    a: I32x4.new(I32{-16}, I32{5}, I32{240}, I32{-1})
+    b: I32x4.new(I32{12}, I32{10}, I32{255}, I32{7})
+    print((a & b).to_array())
+    print((a | b).to_array())
+    print((a ~ b).to_array())
+    print((~a).to_array())
+    print((a << 2).to_array())
+    print((a >> 2).to_array())
+    print((a >> I32x4.new(I32{1}, I32{2}, I32{3}, I32{4})).to_array())
+    print((a & 0xF).to_array())
+    print((0xF0 & a).to_array())
+
+    u: U32x4.new(U32{4026531840}, U32{5}, U32{255}, U32{1})
+    print((u >> 4).to_array())
+    print((~u).to_array())
+    print((u | U32x4.splat(U32{8})).to_array())
+
+    bytes: U8x16.from_array([U8#16]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+    print((bytes ~ 0xFF).to_array())
+
+    wide: I64x2.new(I64{-256}, I64{256})
+    shift: 3
+    print((wide >> 4).to_array())
+    print((wide << shift).to_array())
+}

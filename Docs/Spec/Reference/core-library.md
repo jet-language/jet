@@ -3497,6 +3497,15 @@ by the lane count, an integer division for integer lanes. Operands of
 different lane types are error E2511, and a `reduce` argument that is not a
 `ReduceOp` value is error E2510.
 
+Integer lane types also take the bit operators `&`, `|`, `~` (exclusive or)
+and the shifts `<<` and `>>` lane by lane, and prefix `~` complements every
+lane. The right side is another value of the same lane type or one integer
+of the lane type (a number literal reads as one); a shift count may be any
+integer. Each lane is the scalar operator, so `>>` is arithmetic on signed
+lanes and logical on unsigned ones, and a shift by the lane width or more
+stops as the scalar shift does. Two different lane types, or a scalar of
+another type, are error E0446. Float lanes have no bit operators (E0109).
+
 ### `core.units` — measured quantities
 
 `core.units` supplies named SI and binary-unit scales over
