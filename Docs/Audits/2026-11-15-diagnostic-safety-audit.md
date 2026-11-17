@@ -14,7 +14,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 
 | Code | Type | Reported at | Why no expert path reaches the program |
 |---|---|---|---|
-| E-APP-PERMISSION-PURPOSE | AppPermissionPurpose | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1590 | the package gives each permission it asks for a purpose |
+| E-APP-PERMISSION-PURPOSE | AppPermissionPurpose | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1620 | the package gives each permission it asks for a purpose |
 | E-APP-TARGET-FEATURE | AppFeatureNotOnTarget | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1514 | the target supports the feature |
 | E-OSTARGET-BUILD-CONTEXT | OsDispatchSubjectMismatch | Compiler/JetSema/Source/Sema/Statements.jet:11348 | dispatch on `#build.target.os` |
 | E-OSTARGET-DISPATCH-ARM | InvalidOsDispatchArm | Compiler/JetSema/Source/Sema/Statements.jet:11529 | each arm names OS variants, each OS once |

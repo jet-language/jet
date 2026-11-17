@@ -1,0 +1,85 @@
+// A session bus with the desktop portal on it, for the app in ../main.jet.
+// It is its own package, so the app's package does not hold it. It listens
+// at bus.sock in the directory it runs in, and answers each connection, in
+// order, with one conversation the portal has: the camera allowed, then the
+// location refused. It writes bus.ready once it listens. When the app has
+// closed both connections, it writes heard.txt: how many connections came,
+// and how many times the app asked the portal for the camera.
+use {
+    files: core.files
+    net: core.net
+}
+
+// Hello, Properties.Get IsCameraPresent (true), AddMatch, AccessCamera
+// (the request /org/freedesktop/portal/desktop/request/1_42/jet4), then
+// that request's Response signal with code 0.
+CAMERA: [String]{
+    "6c0200010a000000010000002f000000050175000100000007017300140000006f72672e667265656465736b746f702e44427573000000000801670001730000050000003a312e343200",
+    "6c02000108000000020000002f000000050175000200000007017300140000006f72672e667265656465736b746f702e444275730000000008016700017600000162000001000000",
+    "6c020001000000000300000025000000050175000300000007017300140000006f72672e667265656465736b746f702e4442757300000000",
+    "6c02000136000000040000002f000000050175000400000007017300140000006f72672e667265656465736b746f702e444275730000000008016700016f0000310000002f6f72672f667265656465736b746f702f706f7274616c2f6465736b746f702f726571756573742f315f34322f6a65743400",
+    "6c0400010800000005000000ac00000001016f00310000002f6f72672f667265656465736b746f702f706f7274616c2f6465736b746f702f726571756573742f315f34322f6a65743400000000000000020173001e0000006f72672e667265656465736b746f702e706f7274616c2e5265717565737400000301730008000000526573706f6e7365000000000000000007017300140000006f72672e667265656465736b746f702e4442757300000000080167000675617b73767d00000000000000000000000000",
+}
+
+// Hello, AddMatch, CreateSession (the session …/session/1_44/jet3), Start
+// (the request …/request/1_44/jet4), that request's Response signal with
+// code 1, then Session.Close.
+LOCATION: [String]{
+    "6c0200010a000000010000002f000000050175000100000007017300140000006f72672e667265656465736b746f702e44427573000000000801670001730000050000003a312e343400",
+    "6c020001000000000200000025000000050175000200000007017300140000006f72672e667265656465736b746f702e4442757300000000",
+    "6c02000136000000030000002f000000050175000300000007017300140000006f72672e667265656465736b746f702e444275730000000008016700016f0000310000002f6f72672f667265656465736b746f702f706f7274616c2f6465736b746f702f73657373696f6e2f315f34342f6a65743300",
+    "6c02000136000000040000002f000000050175000400000007017300140000006f72672e667265656465736b746f702e444275730000000008016700016f0000310000002f6f72672f667265656465736b746f702f706f7274616c2f6465736b746f702f726571756573742f315f34342f6a65743400",
+    "6c0400010800000005000000ac00000001016f00310000002f6f72672f667265656465736b746f702f706f7274616c2f6465736b746f702f726571756573742f315f34342f6a65743400000000000000020173001e0000006f72672e667265656465736b746f702e706f7274616c2e5265717565737400000301730008000000526573706f6e7365000000000000000007017300140000006f72672e667265656465736b746f702e4442757300000000080167000675617b73767d00000000000100000000000000",
+    "6c020001000000000600000025000000050175000500000007017300140000006f72672e667265656465736b746f702e4442757300000000",
+}
+
+run: fn() -[FS, Net, Time]> {
+    listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
+    files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
+    streams := [net.UnixStream]{}
+    loop conversation in ([[String]]{CAMERA, LOCATION}) {
+        stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+        // The credentials byte and the AUTH line come before any answer.
+        said := [U8]{}
+        loop !ends_line(said) {
+            got: net.unix_receive(stream, 4096) ?? panic("read the AUTH line: {err}")
+            if got.bytes.len() == 0 -> break
+            loop b in got.bytes -> said.push(b)
+        }
+        answer := "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+        loop message in conversation {
+            loop b in bytes_of(message) -> answer.push(b)
+        }
+        net.unix_write_all_bytes(stream, answer) ?? panic("answer the app: {err}")
+        streams.push(stream.move())
+    }
+    camera_asks := 0
+    loop i in 0..<streams.len() {
+        heard := [U8]{}
+        loop {
+            got: net.unix_receive(streams[i], 4096) ?? break
+            if got.bytes.len() == 0 -> break
+            loop b in got.bytes -> heard.push(b)
+        }
+        camera_asks += String.from_bytes_lossy(heard).split("AccessCamera").to_list().len() - 1
+    }
+    files.write("heard.txt", "connections: {streams.len()}\ncamera asks: {camera_asks}\n") ?? panic("write heard.txt: {err}")
+}
+
+// Whether `bytes` ends with CR LF.
+ends_line: fn(bytes: [U8]) -> Bool {
+    n: bytes.len()
+    n >= 2 && (Int{bytes[n - 2]}) == 13 && (Int{bytes[n - 1]}) == 10
+}
+
+// The bytes the lowercase hex text `hex` spells.
+bytes_of: fn(hex: String) -> [U8] {
+    digits: hex.bytes()
+    out := [U8]{}
+    loop i in 0..<(digits.len() /% 2) {
+        out.push(U8{nibble(Int{digits[2 * i]}) * 16 + nibble(Int{digits[2 * i + 1]})})
+    }
+    out
+}
+
+nibble: fn(b: Int) -> Int { if b >= 97 -> b - 87 else -> b - 48 }

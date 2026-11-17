@@ -5624,6 +5624,7 @@ tasks never read or change the process registry. The module source is
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
+| `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -6186,6 +6187,19 @@ value is non-empty quoted text. `jet check` refuses an `app.ask` whose
 permission has no line, at its argument, E-APP-PERMISSION-PURPOSE: a
 literal permission (`.Camera`, `app.Permission.Camera`) needs its own line,
 and a permission chosen at run time needs a line for every permission.
+
+`app.open_settings()` opens the system's settings page for the app, where
+the person changes an answer they gave `app.ask`, and is true when one
+opened. On Linux it starts GNOME Settings on its Apps page for the app's
+desktop id (`gnome-control-center applications crew-board` for an app
+titled "Crew Board"), apart from the app, so the page stays open when the
+app exits. It is false when that program does not start, and on the other
+native targets.
+
+A browser asks for a device permission itself, when a page first uses the
+device, and keeps no settings page of the app's, so `app.ask` and
+`app.open_settings` in code whose target is the web output are a compile
+error, E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

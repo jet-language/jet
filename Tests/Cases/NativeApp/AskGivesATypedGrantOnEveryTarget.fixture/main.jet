@@ -1,0 +1,20 @@
+// A field app asks for each device permission before it uses it, and opens
+// its settings page so the person can change an answer.
+use app
+
+said: fn(grant: app.Grant) -> String {
+    if grant == {
+        .Granted -> "granted"
+        .Denied -> "denied"
+        .Restricted -> "restricted"
+    }
+}
+
+run: fn() -[Env, Exec, IO, Net, Time]> {
+    _ := app.new("Crew Board")
+    print("camera: {said(app.ask(.Camera))}")
+    print("camera again: {said(app.ask(.Camera))}")
+    print("location: {said(app.ask(.Location))}")
+    print("notifications: {said(app.ask(.Notifications))}")
+    print("settings opened: {app.open_settings()}")
+}

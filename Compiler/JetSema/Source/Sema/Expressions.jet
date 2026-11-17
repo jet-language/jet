@@ -4142,7 +4142,7 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         if sema_app_field_error_refused(module_name, method, args, environment, program, scopes, diagnostics) {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        sema_call_app_permission_purpose(module_name, method, alias, args, program, diagnostics)
+        sema_call_app_device(module_name, method, alias, method_span, args, environment, program, context.function_name, diagnostics)
         live := sema_call_try_live(module_name, method, alias, alias_span, args, type_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}
     }
