@@ -19,8 +19,8 @@ package: {
 // and reads tensors only through the functions here. Every operation
 // validates its inputs, builds a fresh row-major tensor and reports a
 // failure as a ComputeError. `Auto` selects the CPU oracle; a tensor on any
-// other device has no provider here and is rejected with
-// ComputeError.Device rather than computed on the CPU.
+// other device is rejected with ComputeError.Device rather than computed on
+// the CPU, except by the Accelerator that added that device (`launch`).
 use {
     core: core
     core.compute.[VJPRun]
@@ -143,10 +143,11 @@ placement: fn(tensor: Tensor) -> String Never! {
     accelerator: lower != "cpu"
     backend: if accelerator -> lower.copy() else -> "cpu-oracle"
     version: if lower == {
+        "cpu" -> "builtin"
         "cuda" -> "driver"
         "metal" | "vulkan" -> "system"
         "webgpu" -> "browser"
-        else -> "builtin"
+        else -> "package"
     }
     cache: if accelerator -> "runtime" else -> "none"
     ability: if accelerator -> "{lower}.f32" else if profile == PROFILE_F32 -> "cpu-oracle.f32" else -> "cpu-oracle.f64"
@@ -422,7 +423,8 @@ kernel_bounds_ok: fn(shape: [Int], index: [Int]) -> Bool ComputeError! {
 // (core_only rows), so user code holds opaque values. A device is its
 // display name. `Auto` and `CPU` select the CPU oracle; an explicit
 // accelerator has no provider here and is refused with ComputeError.Device
-// (core-library.md:4280-4281), never served on the CPU.
+// (core-library.md:4280-4281), never served on the CPU. A package adds a
+// device by implementing Accelerator; `accelerator` admits it.
 impl ComputeDevice.Display {
     display: fn(self) -> String { self.name.copy() }
 }
@@ -438,6 +440,105 @@ device_cuda: fn() -> ComputeDevice Never! { ComputeDevice{name: "CUDA"} }
 device_vulkan: fn() -> ComputeDevice Never! { ComputeDevice{name: "Vulkan"} }
 
 device_webgpu: fn() -> ComputeDevice Never! { ComputeDevice{name: "WebGPU"} }
+
+// The kernel IR a provider implements. Version 1 names each kernel by the
+// Core operation it computes over F64 row-major buffers: the elementwise
+// add, sub, mul, div, maximum and minimum of two same-shape operands, the
+// negate, abs, exp, log and sqrt of one, and the matmul of two matrices.
+KERNEL_IR: "jet.kernel/1"
+
+// A device a package adds. Its type names the device and the hardware kind
+// it runs on, lists what it runs (`caps`: KERNEL_IR, then each kernel), and
+// launches a kernel on row-major buffers. `accelerator` admits it once the
+// CPU reference suite passes on it, and `launch` checks every answer it
+// gives against the CPU oracle, so no device answers what the CPU would
+// not.
+Accelerator: trait {
+    // The device's name, as `device` and a placement show it.
+    name: fn(self) -> String Never!,
+    // The hardware kind the device runs on, such as "npu".
+    kind: fn(self) -> String Never!,
+    caps: fn(self) -> [String] Never!,
+    // The row-major output of `kernel` over `buffers`, each row-major in the
+    // matching `shapes` entry.
+    launch: fn(self, kernel: String, buffers: [[Float]], shapes: [[Int]]) -[GPU]> [Float] ComputeError!,
+}
+
+// `provider` admitted as a device named by the provider: it implements
+// KERNEL_IR, and every kernel it lists gives the CPU oracle's answer on the
+// reference operands. A provider without KERNEL_IR, or listing a kernel the
+// IR lacks, is ComputeError.Unsupported; a wrong answer is
+// ComputeError.Device.
+accelerator: fn<A: Accelerator>(provider: A) -[GPU]> ComputeDevice ComputeError! {
+    caps: provider.caps()
+    if !caps.contains(KERNEL_IR) -> return Err(ComputeError.Unsupported)
+    loop kernel in caps {
+        if kernel == KERNEL_IR -> next
+        _ := launch(provider, kernel, reference_operands(kernel))
+    }
+    Ok(ComputeDevice{name: provider.name()})
+}
+
+// The reference operands of `kernel`: 2x2 CPU matrices of positive values,
+// so log and sqrt have an answer.
+reference_operands: fn(kernel: String) -> [Tensor] Never! {
+    right: reference_matrix([0.5, 8.0, 0.25, 2.0])
+    if kernel_arity(kernel) == 1 -> return [Tensor]{right}
+    [Tensor]{reference_matrix([1.5, 2.0, 3.0, 4.0]), right}
+}
+
+reference_matrix: fn(values: &&[Float]) -> Tensor Never! {
+    Tensor{shape: [Int]{2, 2}, data: values, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1}
+}
+
+// `kernel` run by `provider` over `operands`, F64 tensors each on the CPU or
+// already on the provider's device. The result is on the provider's device
+// and is the CPU oracle's answer: a provider that gives another is
+// ComputeError.Device. A kernel the IR or the provider lacks is
+// ComputeError.Unsupported.
+launch: fn<A: Accelerator>(provider: A, kernel: String, operands: [Tensor]) -[GPU]> Tensor ComputeError! {
+    arity: kernel_arity(kernel)
+    if arity == 0 || !provider.caps().contains(kernel) -> return Err(ComputeError.Unsupported)
+    if operands.len() != arity -> return Err(ComputeError.Shape)
+    name: provider.name()
+    cpu := [Tensor]{}
+    buffers := [[Float]]{}
+    shapes := [[Int]]{}
+    loop operand in operands {
+        if operand.device != "CPU" && operand.device != name -> return Err(ComputeError.Device)
+        if operand.numeric_profile != PROFILE_F64 -> return Err(ComputeError.Unsupported)
+        cpu.push(Tensor{shape: operand.shape.copy(), data: operand.data.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: "", node: -1})
+        buffers.push(operand.data.copy())
+        shapes.push(operand.shape.copy())
+    }
+    expected: kernel_reference(kernel, cpu)
+    answer: provider.launch(kernel, buffers, shapes)
+    if answer != expected.data -> return Err(ComputeError.Device)
+    Ok(Tensor{shape: expected.shape, data: answer, device: name, numeric_profile: PROFILE_F64, requested: name, reason: "provider kind={provider.kind()}; kernel={kernel}; checked=cpu-oracle", transfer: "", node: -1})
+}
+
+// The operand count of `kernel` in KERNEL_IR, or 0 for a name it lacks.
+kernel_arity: fn(kernel: String) -> Int Never! {
+    if kernel == {
+        "add" | "sub" | "mul" | "div" | "maximum" | "minimum" | "matmul" -> 2
+        "negate" | "abs" | "exp" | "log" | "sqrt" -> 1
+        else -> 0
+    }
+}
+
+// The CPU oracle's answer to `kernel` over `operands`, as many as its arity.
+kernel_reference: fn(kernel: String, operands: [Tensor]) -> Tensor ComputeError! {
+    if kernel_arity(kernel) == 1 -> return unary(kernel, operands[0])
+    if kernel == {
+        "matmul" -> matmul(operands[0], operands[1])
+        "add" -> binary(0, operands[0], operands[1])
+        "sub" -> binary(1, operands[0], operands[1])
+        "mul" -> binary(2, operands[0], operands[1])
+        "div" -> binary(3, operands[0], operands[1])
+        "maximum" -> binary(4, operands[0], operands[1])
+        else -> binary(5, operands[0], operands[1])
+    }
+}
 
 // The device a request for `target` selects.
 select: fn(target: ComputeDevice) -> String ComputeError! {
@@ -1212,11 +1313,12 @@ f32_exact: fn(value: Float) -> Bool Never! {
 
 device_key: fn(device: String) -> String Never! {
     if device == {
+        "CPU" | "Auto" -> "cpu"
         "Metal" -> "metal"
         "CUDA" -> "cuda"
         "Vulkan" -> "vulkan"
         "WebGPU" -> "webgpu"
-        else -> "cpu"
+        else -> device.lower()
     }
 }
 

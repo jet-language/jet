@@ -1,0 +1,21 @@
+// core-conformance: core.compute.accelerator
+use compute: core.compute
+
+Doubler: struct {
+    impl compute.Accelerator {
+        name: fn(self) -> String Never! { "Doubler" }
+
+        kind: fn(self) -> String Never! { "test" }
+
+        caps: fn(self) -> [String] Never! { [String]{compute.KERNEL_IR, "add"} }
+
+        launch: fn(self, kernel: String, buffers: [[Float]], shapes: [[Int]]) -[GPU]> [Float] compute.ComputeError! {
+            Ok(loop (index, x) in buffers[0] -> x + buffers[1][index])
+        }
+    }
+}
+
+run: fn() {
+    result: compute.accelerator(Doubler{}) ?? panic("accelerator")
+    print(result)
+}
