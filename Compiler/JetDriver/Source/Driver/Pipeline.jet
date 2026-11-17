@@ -151,6 +151,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        authority_expert_only,
         effect_scope_read_paths,
         body_fixed_timing,
         BuildSettingOverride,
@@ -658,7 +659,9 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
 jet_driver_authority_policy: fn(load: JetDriverLoadResult) -> JetDriverAuthorityPolicy? {
     loop package in load.packages {
         if package.identity == load.package_identity {
-            return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, inline_package: package.inline_package, allow: package.authority_allow, deny: package.authority_deny, subject: package.name, read_scope: package.authority_read_scope, needs: package.authority_needs})
+            // Expert entries hold expert effects only; a row of nothing else
+            // sets no run ceiling (authority_expert_only).
+            return Val(JetDriverAuthorityPolicy{manifest_path: package.manifest_path, inline_package: package.inline_package, allow: if authority_expert_only(package.authority_allow ?? [String]{}) -> None else -> package.authority_allow, deny: package.authority_deny, subject: package.name, read_scope: package.authority_read_scope, needs: package.authority_needs})
         }
     }
     None
@@ -5493,7 +5496,34 @@ jet_driver_registration_package_policies: fn(request: JetDriverCompileRequest, l
             },
         )
     }
+    jet_driver_expert_policies(package_policies, load)
     package_policies
+}
+
+// The expert effects each package of `load` names, written onto its row of
+// `policies` (one row per loaded package, in load order). The main package
+// holds the expert entries of its own `allow` row; a dependency holds only
+// those the main package's `authority.grants` line lends it, by the name a
+// manifest writes it under, never by its own `allow` row. The denials that
+// bind them are the rows' own (sema_effects_check_modules).
+jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load: JetDriverLoadResult) Never! {
+    root_index: jet_driver_entry_package_index(load) ?? return
+    root: load.packages[root_index]
+    names := [String:String]{}
+    dependency_roots: jet_driver_dependency_roots(load, names)
+    loop (index, package) in load.packages {
+        if index >= policies.len() -> break
+        if index == root_index {
+            policies[index].expert_held = root.authority_allow ?? [String]{}
+            next
+        }
+        if dependency_roots.len() == 0 -> next
+        name: names.get(package.identity) ?? next
+        policies[index].grant_name = name
+        loop grant in root.authority_grants {
+            if grant.package == name -> policies[index].expert_held = grant.rights
+        }
+    }
 }
 
 // One finalization of the comptime run's `graph`: the bodies, the local
@@ -6617,7 +6647,9 @@ jet_driver_entry_package_index: fn(load: JetDriverLoadResult) -> Int? Never! {
 jet_driver_effect_budget_root: fn(load: JetDriverLoadResult) -> Int? Never! {
     index: jet_driver_entry_package_index(load) ?? return None
     package: load.packages[index]
-    if package.authority_allow == None && package.authority_deny == None -> return None
+    if (package.authority_allow == None || authority_expert_only(package.authority_allow ?? [String]{})) && package.authority_deny == None {
+        return None
+    }
     Val(index)
 }
 
@@ -6910,7 +6942,8 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
     root: load.packages[jet_driver_effect_budget_root(load) ?? return [Diagnostic]{}]
     manifest := PackageFacts.default()
     manifest.effects_enabled = true
-    if root.authority_allow == .Val(allow) {
+    ceiling: if authority_expert_only(root.authority_allow ?? [String]{}) -> None else -> root.authority_allow
+    if ceiling == .Val(allow) {
         row := [String]{}
         loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> row.push(name)
         loop name in allow -> row.push(name.copy())

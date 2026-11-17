@@ -4,16 +4,17 @@
 # makes. The `typed` build reads `Source`'s reflected fields, drops one,
 # renames one and keeps each reflected `TypeId`. The build host checks
 # every name, so no code a build computes is written: it uses
-# `Meta.Generate` and `Meta.Types` but not `Meta.Raw`. None, basic and full
-# optimization give the same identity, size, alignment and offsets, and a
-# second build gives them again. A row that denies `Meta.Raw` still builds
-# it; one that denies `Meta.Types` refuses it. `meta.add_struct` returns
-# the new struct's `TypeId`, which a second struct holds as a field. The
-# `indexed` build passes the core.compiler index's own CompilerField rows
-# for a struct, each carrying its field's `TypeId`, as they are. Beside
-# it, the same `Shape` joined into source text under the `Meta.Raw` denial
-# is refused. A computed name that is not one identifier is refused when
-# the build runs.
+# `Meta.Generate` and `Meta.Code.Types` but not `Meta.Code.Raw`. None, basic
+# and full optimization give the same identity, size, alignment and offsets,
+# and a second build gives them again. A row that denies `Meta.Code.Raw`
+# still builds it; one that denies `Meta.Code.Types` refuses it.
+# `meta.add_struct` returns the new struct's `TypeId`, which a second struct
+# holds as a field. The `indexed` build passes the core.compiler index's own
+# CompilerField rows for a struct, each carrying its field's `TypeId`, as
+# they are. Beside it, the same `Shape` joined into source text under the
+# `Meta.Code.Raw` denial is refused. A computed name that is not one
+# identifier is refused when the build runs. `Meta.Code.Types` is an expert
+# effect, so each root names it in `authority.allow`.
 fixture: AStructMadeFromReflectedFieldsNeedsNoMetaRaw.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -41,7 +42,7 @@ exit: 0
 stdout: = a_struct_made_from_reflected_fields_needs_no_meta_raw.out
 step: jet inspect graph typed/main.jet --json
 exit: 0
-json: stdout doc $.build.generated[0].authority = "Meta.Generate, Meta.Types"
+json: stdout doc $.build.generated[0].authority = "Meta.Generate, Meta.Code.Types"
 step: jet build raw_denied/main.jet
 exit: 0
 step: {work}/raw_denied/.jet/build/app
@@ -61,11 +62,11 @@ exit: 0
 stdout: = "7\n2\n"
 step: jet build types_denied/main.jet
 exit: 1
-stderr: ~ "reaches the `Meta.Types` effect, which it prohibits with `-[!Meta.Types]>`" # the row's denial wins over the typed factory
+stderr: ~ "reaches the `Meta.Code.Types` effect, which it prohibits with `-[!Meta.Code.Types]>`" # the row's denial wins over the typed factory
 file: types_denied/.jet/build/app absent
 step: jet build text/main.jet
 exit: 1
-stderr: ~ "reaches the `Meta.Raw` effect, which it prohibits with `-[!Meta.Raw]>`" # source text is unparsed code
+stderr: ~ "reaches the `Meta.Code.Raw` effect, which it prohibits with `-[!Meta.Code.Raw]>`" # source text is unparsed code
 file: text/.jet/build/app absent
 step: jet build bad_name/main.jet
 exit: 1

@@ -1,0 +1,13 @@
+Error [jet.ExpertEffectNotHeld]: `hook` needs `Meta.Code.Rewrite`: `install` uses it, and the main package doesn't grant it
+  --> Tests/UI/MetaExpertLeafRootOnlyDependencyRewrite/hook/hook.jet:2:10
+    |
+  2 |     meta.rewrite_body(
+    |          ^^^^^^^^^^^^
+ Why: Only the main package holds an expert effect; a dependency uses one only where the main package lends it with `authority.grants`
+ Fix: Add `authority: { grants: { "hook": [Meta.Code.Rewrite] } }` to the main package's manifest, or stop using `Meta.Code.Rewrite` in `install`
+ Denial: expert
+ Call chain: install
+More: jet-lang.dev/e/E0777
+
+1 problem found
+run `jet explain E0777` to learn more

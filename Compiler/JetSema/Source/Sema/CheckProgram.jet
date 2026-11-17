@@ -541,6 +541,13 @@ SemaRegistrationPackagePolicy: struct {
     // root package's row, and the policy file it names.
     organization_deny: [String]{[String]{}},
     organization_source: String{""},
+    // The entries that may hold expert effects (Authority.jet
+    // authority_expert_answer): the main package's `allow` row, or for a
+    // dependency the main package's `authority.grants` line for it.
+    expert_held: [String]{[String]{}},
+    // The name the main package's `authority.grants` keys this dependency
+    // by; "" for the main package.
+    grant_name: String{""},
 }
 
 SemaComptimeDeclarationStage: struct {
@@ -12368,6 +12375,19 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     loop graph_module in final_graph.modules {
         denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     }
+    // Each graph module's package row in `stage.package_policies` (-1 for
+    // Core and a module no package owns), whose expert effects the module's
+    // functions may use.
+    expert_modules := [Int]{}
+    loop graph_module in final_graph.modules {
+        at := -1
+        if !module_is_core(graph_module.module_identity) {
+            loop (index, policy) in stage.package_policies {
+                if policy.package_identity == graph_module.package_identity -> at = index
+            }
+        }
+        expert_modules.push(at)
+    }
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
     // and an erased generic-module template leaves its cap behind. A capped
@@ -12423,7 +12443,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     task.group sema_finalize_effect_walks {
         walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity)
         if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
         walked = walking.join() ?? panic(compiler_threads_failure_text(err))
     }

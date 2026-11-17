@@ -1,0 +1,13 @@
+Error [jet.ExpertEffectNotHeld]: `build` uses the expert effect `Meta.Code.Rewrite`, which the main package doesn't hold
+  --> Tests/UI/meta_expert_leaf_root_only_meta_leaves_code_out.jet:11:10
+    |
+ 11 |     meta.rewrite_body(
+    |          ^^^^^^^^^^^^
+ Why: `allow: [Meta]` holds only the effects under `Meta` that are not expert; it leaves out the expert effects `Meta.Code`, which must be named
+ Fix: Add `Meta.Code.Rewrite` to the main package's `authority: { allow: [...] }` row, or stop using it in `build`
+ Denial: expert
+ Call chain: build
+More: jet-lang.dev/e/E0777
+
+1 problem found
+run `jet explain E0777` to learn more

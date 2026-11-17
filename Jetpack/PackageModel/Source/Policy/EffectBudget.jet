@@ -21,6 +21,7 @@ use {
         authority_answer,
         authority_covers,
         authority_covers_any,
+        authority_expert_only,
         authority_holds,
         authority_is_deny_only,
         authority_parse_rights,
@@ -451,10 +452,14 @@ pkg_effect_without_library_grants: fn(rights: [String]) -> [String] Never! {
     out
 }
 
-// The parsed `authority.grants` row of one dependency, if any.
+// The parsed `authority.grants` row of one dependency, if any. A line of
+// expert entries only lends expert effects (sema's E0777 check) and is no
+// limit.
 pkg_effect_grant_for: fn(manifest: PackageFacts, dependency: String) -> [String]? Never! {
     loop grant in manifest.authority.grants {
-        if grant.package == dependency -> return Val(pkg_effect_budget_rights(grant.rights))
+        if grant.package == dependency && !authority_expert_only(grant.rights) {
+            return Val(pkg_effect_budget_rights(grant.rights))
+        }
     }
     None
 }

@@ -1046,8 +1046,9 @@ field is written with the bare name each type has there: a type of the
 root module or its namespace, one the prelude names, or a struct this
 build made. A type it can't see, such as `geo.Point` of a module only the
 root imports, is refused when the build runs (E3502). It uses
-`Meta.Generate` and `Meta.Types`, but not `Meta.Raw`, since no code a build
-computes is written.
+`Meta.Generate` and `Meta.Code.Types`, but not `Meta.Code.Raw`, since no
+code a build computes is written. `meta.add` of source text uses
+`Meta.Code.Types` and `Meta.Code.Raw` as well.
 `meta.find_type(text)` reads `text` as one type's spelling and gives its
 TypeId, each type it names read as the root module reads it (`geo.Point`
 through its `use geo`) or as a struct the value's target already made.
@@ -1063,8 +1064,15 @@ program, and its original text is withdrawn from its file. A line `#{f.body}`
 in the block, written with the name the call gives `f`, pastes the original
 body there, so a rewrite can wrap it. Rewrites of one function compose in the
 order they run: a later rewrite's paste is the body the earlier ones made, so
-the last rewrite registered is the outermost. It uses `Meta.Rewrite`, which a
-row denies with `-[!Meta.Rewrite]>`.
+the last rewrite registered is the outermost. It uses `Meta.Code.Rewrite`,
+which a row denies with `-[!Meta.Code.Rewrite]>`.
+`Meta.Code` and its leaves `Meta.Code.Raw`, `Meta.Code.Types` and
+`Meta.Code.Rewrite` are expert effects: no package holds one by default, and
+holding `Meta` holds none of them. The main package holds one by naming it,
+or `Meta.Code`, in its `authority.allow` row, and a dependency holds one only
+through the main package's `authority.grants` line for it; a function that
+uses one its package doesn't hold is refused (E0777), and a `deny` row always
+wins. An expert entry sets no ceiling on the other effects a package may use.
 The root package's own functions need no consent. A dependency's function is
 rewritten only after the root writes `meta.allow_rewrite(package: "orm")` on
 its value, naming that dependency, which the build loads at its locked
@@ -1080,7 +1088,7 @@ The authority and the consent a build grants freeze when `build` returns:
 every later call on its `Build` or `Compiler` values is refused, so the
 actions and compiles after it read the frozen state. A module a `Compiler`
 value made records both: its `authority`, the Meta effect its call performed
-(`Meta.Generate` for `meta.add`, `Meta.Rewrite` for `meta.rewrite_body`), and
+(`Meta.Generate` for `meta.add`, `Meta.Code.Rewrite` for `meta.rewrite_body`), and
 its `consent`, the dependency a `meta.allow_rewrite` line allowed (null for
 the root's own code). Both appear in its provenance, and both are inputs of
 its check node, so a change to either is a new identity for that module and
@@ -1100,7 +1108,7 @@ module, span). The watched name is a function, or an ambient call such as
 elsewhere is another callee, and any other name is refused (E0104). Watching
 only reads, so it needs no Meta effect, and the build refuses a value whose
 build has returned. A handler that rewrites a heard function `f` uses
-`Meta.Rewrite` like any other caller; `f.package` is the identity of the
+`Meta.Code.Rewrite` like any other caller; `f.package` is the identity of the
 package that declares it.
 A handler runs inside the build's own call, so it spends the build's
 compile-time step budget, the one every compile-time call has: the build and

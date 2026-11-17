@@ -1,0 +1,15 @@
+// @programmable_build
+// @cli_build
+// The main package lends `hook` the expert effect `Meta.Code.Rewrite` in
+// `authority.grants`, so `hook` may rewrite its own `hello`.
+use hook
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["run.jet"], [])
+    meta: b.compiler(app)
+    meta.allow_rewrite(package: "hook")
+    hook.install(meta)
+    b.default(app)
+}
+
+run: fn() { print(hook.hello()) }

@@ -10856,6 +10856,28 @@ CompilerValueOutsideRoot: struct {
     }
 }
 
+ExpertEffectNotHeld: struct {
+    impl Diagnostic {
+        code: "E0777",
+        safety_class: .Soundness,
+        safety_reason: "An expert effect changes the program beyond adding and pasting checked code, so a package using one the main package never named would act with consent nobody gave.",
+        expert_path: "the main package names the expert effect in `authority.allow`, or lends it to a dependency with `authority.grants`",
+        meaning: "A function uses an expert effect its package doesn't hold",
+
+        what: fn(self) -> String {
+            "A function uses an expert effect, such as `Meta.Code.Rewrite`, that its package doesn't hold"
+        }
+
+        why: fn(self) -> String {
+            "No package holds an expert effect by default, and holding a parent such as `Meta` never covers one: only the main package holds one, by naming it or an expert effect above it in `authority.allow`, and a dependency holds one only through the main package's `authority.grants` line for it; a `deny` row always wins"
+        }
+
+        fix: fn(self) -> String {
+            "Add the effect to the main package's `authority: {{ allow: [...] }}` row, or for a dependency to the main package's `authority: {{ grants: {{ \"name\": [...] }} }}` line, or stop using it"
+        }
+    }
+}
+
 FormActionInputMismatch: struct {
     action: String,
     form: String,

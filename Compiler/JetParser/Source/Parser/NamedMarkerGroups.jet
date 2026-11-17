@@ -71,8 +71,9 @@ marker_group_skip_semicolons: fn(tokens: [Token], index: Int) -> Int Never! {
     at
 }
 
-// `Name: struct { impl Marker { group: #[…] } }`: a marker type with no
-// fields whose one member is its group.
+// `Name: struct { impl Marker { group: #[…], } }`: a marker type with no
+// fields whose one member is its group; the comma after the group is
+// optional, as for the last data member of any brace body.
 marker_group_token_range: fn(tokens: [Token], tables: TokenTables, start: Int) -> MarkerGroupTokenRange? Never! {
     if start < 0 || start + 3 >= tokens.len() -> return None
     if tokens[start].kind != TOKEN_IDENT || tokens[start + 1].kind != TOKEN_COLON || tokens[start + 2].kind != TOKEN_KW_STRUCT || tokens[start + 3].kind != TOKEN_LBRACE {
@@ -98,7 +99,9 @@ marker_group_token_range: fn(tokens: [Token], tables: TokenTables, start: Int) -
         end += 1
     }
     if end >= tokens.len() -> return None
-    stop := marker_group_skip_semicolons(tokens, end + 1)
+    after := end + 1
+    if after < tokens.len() && tokens[after].kind == TOKEN_COMMA -> after += 1
+    stop := marker_group_skip_semicolons(tokens, after)
     if stop >= tokens.len() || tokens[stop].kind != TOKEN_RBRACE -> return None
     stop = marker_group_skip_semicolons(tokens, stop + 1)
     if stop >= tokens.len() || tokens[stop].kind != TOKEN_RBRACE -> return None

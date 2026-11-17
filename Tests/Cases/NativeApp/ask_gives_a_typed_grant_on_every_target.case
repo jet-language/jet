@@ -1,0 +1,38 @@
+# `app.ask` gives the person's answer as a Grant. On Linux the desktop
+# portal asks: the fake session bus here allows the camera and refuses the
+# location, and with no session bus each device is restricted.
+# Notifications need no permission on Linux. A process asks once for each
+# permission: the second camera ask gives the first answer, and the portal
+# hears one camera request. `app.open_settings` opens GNOME Settings' Apps
+# page for the app's desktop id. The web output has neither call, so the
+# same app built for it is an E-APP-TARGET-FEATURE compile error at each
+# call, never a silent no-op.
+fixture: AskGivesATypedGrantOnEveryTarget.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+chmod: bin/gnome-control-center 0755
+spawn portal: jet run portal/fake_portal.jet
+stdout: file portal.stdout
+stderr: file portal.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+stdout: = "camera: granted\ncamera again: granted\nlocation: denied\nnotifications: granted\nsettings opened: true\n"
+wait: portal timeout 60s
+exit: 0
+file: heard.txt = "connections: 2\ncamera asks: 1\n" # one portal request for the camera, one for the location
+await: file settings.args timeout 30s every 10ms
+file: settings.args = "applications crew-board\n" # GNOME Settings' Apps page for the app's desktop id
+step no_bus: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+stdout: = "camera: restricted\ncamera again: restricted\nlocation: restricted\nnotifications: granted\nsettings opened: true\n"
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.ask` needs target `native`, but the resolved target is `Web`." # not answered for the browser
+stderr: ~ "main.jet:15:" # at each ask
+stderr: ~ "App feature `.open_settings` needs target `native`, but the resolved target is `Web`."
+stderr: ~ "main.jet:19:" # at the settings call

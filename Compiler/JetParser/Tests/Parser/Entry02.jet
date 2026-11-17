@@ -595,6 +595,19 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert(found_interpolation)
 }
 
+// A multi-line `impl Marker` body ends its group with a comma, as every data
+// member does; the group reads the same with it.
+#Test("named_marker_group_reads_with_its_trailing_comma") {
+    declaration: lex("Fast: struct {{\n    impl Marker {{\n        group: #[Inline(.Always), Scalar],\n    }}\n}}\n".bytes())
+    assert(declaration.diagnostics.is_empty())
+    groups: named_marker_groups(declaration.tokens, declaration.tables)
+    assert_eq(groups.len(), 1)
+    assert_eq(groups[0].name, "Fast")
+    use_site := lex("#Fast helper: fn() {{}}\n".bytes())
+    expanded: expand_named_marker_groups_with_uses(use_site.tokens, use_site.tables, groups)
+    assert_eq(expanded.uses.len(), 1)
+}
+
 // A selector number that is not an integer literal is an expression: the
 // hole is the value with the selector's constant 0, then a StrFormat.Count
 // part holding the number. A literal number stays the selector's constant.

@@ -5,13 +5,15 @@
 #   to add, and nothing is built.
 # - `allowed`: the same rewrite after `meta.allow_rewrite(package: "greet")`
 #   runs the new body; the dependency's own file is unchanged. The plan's
-#   generated row names the authority (`Meta.Rewrite`) and the consent
+#   generated row names the authority (`Meta.Code.Rewrite`) and the consent
 #   (`greet`) the build froze when `build` returned, and the module's check
 #   node takes both as inputs.
 # - `handed`: the root allows `greet` and hands its value to greet's
 #   `install`, which rewrites greet's `hello` by its bare name; the root's own
 #   `hello` keeps its body.
 # - `unknown`: the consent names a package this build doesn't load.
+# Rewriting uses the expert effect `Meta.Code.Rewrite`: each root names it in
+# `authority.allow`, and grants it to `greet`, whose `install` uses it.
 fixture: ADependencyRewriteNeedsTheRootsConsent.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -30,7 +32,7 @@ exit: 0
 stdout: = "rewritten by the root\n"
 step: jet inspect graph allowed/main.jet --json
 exit: 0
-json: stdout doc $.build.generated[0].authority = "Meta.Rewrite"
+json: stdout doc $.build.generated[0].authority = "Meta.Code.Rewrite"
 json: stdout doc $.build.generated[0].consent = "greet"
 step: jet inspect explain-build allowed/main.jet --json
 exit: 0

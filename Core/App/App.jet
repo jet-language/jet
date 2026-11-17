@@ -3682,6 +3682,28 @@ priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
     assert_eq(ask(Permission.Location), Grant.Denied)
 }
 
+// Opens the system's settings page for this app, where the person changes
+// the permissions `ask` got, and gives whether one opened. On Linux that is
+// GNOME Settings' Apps page for the app's desktop entry
+// (`gnome-control-center applications {id}`, `id` made from the graph's
+// title as `app_desktop_id` makes it), started apart from the app so it
+// stays open when the app exits. It is `false` when that program does not
+// start, and on the other native targets.
+open_settings: fn() -[Env, Exec]> Bool {
+    #if #build.target.os == {
+        .Linux -> {
+            page: process.cmd([String]{"gnome-control-center", "applications", app_desktop_id(app_graph_title())})
+            _ := page.stdout(.Inherit).stderr(.Inherit).detached().spawn() ?? return false
+            return true
+        }
+        .MacOS -> { return false }
+        .Windows -> { return false }
+        .Web -> { return false }
+        .Wasm -> { return false }
+        .Freestanding -> { return false }
+    }
+}
+
 // One remote call of the endpoint at `path` of a service the app graph
 // mounts (`App.__remote_public`), answered in this process as a server
 // answers it (Web's `app_remote_response`): `body` is the JSON array of its

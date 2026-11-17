@@ -39,32 +39,30 @@ parser_type_companions: fn(marker: MarkerDecl?, effect_impl: EffectImpl?) -> [It
     items
 }
 
-// `impl Effect { … }` in a struct or enum body: empty, the one method
+// `impl Effect { … }` in a struct or enum body: empty, the method
 // `irreversible: fn(self) -> Bool { … }` whose body is `true`, `false`,
-// `self == .Case` or an `||` of those, and a package effect's one setting
-// `parent: Name`. The effect names are built when the type closes
-// (parser_finish_effect_type), once an enum's cases are known. A `repeated`
-// block is reported and parsed for recovery; it yields None so the type
-// keeps its first block.
+// `self == .Case` or an `||` of those, a toolchain effect's `expert` method
+// of the same form, and a package effect's one setting `parent: Name`. The
+// effect names are built when the type closes (parser_finish_effect_type),
+// once an enum's cases are known. A `repeated` block is reported and parsed
+// for recovery; it yields None so the type keeps its first block.
 parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated: Bool) -> EffectImpl? {
     start: parser_bump(state)
     if repeated -> parser_add_report(state, parser_effect_repeated_report(start.span, type_name))
     parser_bump(state)
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Effect` body")
-    irreversible := Expr?{None}
-    method_span := Span?{None}
-    parent := NamedSpan?{None}
+    declared := EffectImpl{span: start.span, irreversible: None, method_span: None, decls: [EffectDecl]{}}
     loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
         parser_skip_semicolons(state)
         if parser_current_kind(state) == TOKEN_RBRACE -> break
         token: parser_current(state)
         if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && !parser_method_starts_here(state) {
             written: parser_parse_effect_setting(state) ?? next
-            if parent != None {
+            if declared.parent != None {
                 parser_add_report(state, parser_effect_parent_twice_report(written.span))
                 next
             }
-            parent = Val(written)
+            declared.parent = Val(written)
             next
         }
         if !parser_method_starts_here(state) {
@@ -73,24 +71,35 @@ parser_parse_effect_impl: fn(state: &JetParserState, type_name: String, repeated
             break
         }
         method: parser_parse_type_method(state)
-        if parser_effect_method_problem(method) == .Val(problem) {
-            parser_add_report(state, problem)
-            next
-        }
-        if method_span != None {
-            parser_add_report(state, parser_effect_method_twice_report(method.name_span))
-            next
-        }
-        method_span = Val(method.span)
-        body: parser_effect_method_body(method) ?? {
-            parser_report_effect_body(state, method.name_span, type_name)
-            next
-        }
-        irreversible = Val(body)
+        reports := [Diagnostic]{}
+        parser_effect_method_take(declared, method, type_name, reports)
+        loop report in reports -> parser_add_report(state, report)
     }
     parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Effect` body")
     if repeated -> return None
-    Val(EffectImpl{span: start.span, irreversible: irreversible, method_span: method_span, parent: parent, decls: [EffectDecl]{}})
+    Val(declared)
+}
+
+// One method of `impl Effect` joins `declared`: the `irreversible` or
+// `expert` fact, each once, or a report.
+parser_effect_method_take: fn(declared: &EffectImpl, method: Func, type_name: String, reports: &[Diagnostic]) Never! {
+    if parser_effect_method_problem(method) == .Val(problem) {
+        reports.push(problem)
+        return
+    }
+    expert: method.name == "expert"
+    if (expert && declared.expert_span != None) || (!expert && declared.method_span != None) {
+        reports.push(parser_effect_method_twice_report(method.name_span, method.name))
+        return
+    }
+    if expert -> declared.expert_span = Val(method.span) else {
+        declared.method_span = Val(method.span)
+    }
+    body: parser_effect_method_body(method) ?? {
+        reports.push(parser_effect_body_report(method.name_span, type_name, method.name))
+        return
+    }
+    if expert -> declared.expert = Val(body) else -> declared.irreversible = Val(body)
 }
 
 // `name: value` in `impl Effect`: the one setting `parent: Name`, a dotted
@@ -118,12 +127,8 @@ parser_parse_effect_setting: fn(state: &JetParserState) -> NamedSpan? {
     Val(NamedSpan{name: name, span: parser_cover(first.span, end)})
 }
 
-parser_report_effect_body: fn(state: &JetParserState, span: Span, type_name: String) {
-    parser_add_report(state, parser_effect_body_report(span, type_name))
-}
-
-parser_effect_body_report: fn(span: Span, type_name: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E0633", Val(span), "this `irreversible: fn` body is not an effect fact", "the compiler reads `irreversible` without running it, so its body is `true`, `false`, `self == .Case` or an `||` of those, naming cases of `{type_name}`", "write `{{ true }}`, `{{ false }}` or `{{ self == .Write }}`")
+parser_effect_body_report: fn(span: Span, type_name: String, method: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E0633", Val(span), "this `{method}: fn` body is not an effect fact", "the compiler reads `{method}` without running it, so its body is `true`, `false`, `self == .Case` or an `||` of those, naming cases of `{type_name}`", "write `{{ true }}`, `{{ false }}` or `{{ self == .Write }}`")
 }
 
 // `report`, unless the parser is abandoning the item it is in.
@@ -137,21 +142,22 @@ parser_effect_repeated_report: fn(span: Span, type_name: String) -> Diagnostic N
 }
 
 // The report for a method of `impl Effect` that is not `irreversible: fn(self)
-// -> Bool`, or None for that method.
+// -> Bool` or `expert: fn(self) -> Bool`, or None for one of those.
 parser_effect_method_problem: fn(method: Func) -> Diagnostic? Never! {
     returns_bool := false
     if method.return_type == .Val(returned) && returned == .Bool -> returns_bool = true
     if method.return_type == .Val(returned) && returned == .Named(returned_name) && returned_name == "Bool" {
         returns_bool = true
     }
-    shaped: method.name == "irreversible" && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && returns_bool && method.declared_effects == None
+    known: method.name == "irreversible" || method.name == "expert"
+    shaped: known && method.type_params.len() == 0 && method.params.len() == 1 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && returns_bool && method.declared_effects == None
     if shaped -> return None
-    what: if method.name == "irreversible" -> "`irreversible: fn` doesn't match the `Effect` contract" else -> "`{method.name}` is not a method of `Effect`"
+    what: if known -> "`{method.name}: fn` doesn't match the `Effect` contract" else -> "`{method.name}` is not a method of `Effect`"
     Val(diagnostic_from_registry("E0907", Val(method.name_span), what, "`impl Effect` has one method, which says whether the effect's work can be rolled back", "write `irreversible: fn(self) -> Bool {{ … }}`"))
 }
 
-parser_effect_method_twice_report: fn(span: Span) -> Diagnostic Never! {
-    diagnostic_from_registry("E0105", Val(span), "`irreversible: fn` is defined twice in `impl Effect`", "an effect says once whether its work can be rolled back", "remove one of the definitions")
+parser_effect_method_twice_report: fn(span: Span, method: String) -> Diagnostic Never! {
+    diagnostic_from_registry("E0105", Val(span), "`{method}: fn` is defined twice in `impl Effect`", "an effect states each of its facts once", "remove one of the definitions")
 }
 
 parser_effect_parent_twice_report: fn(span: Span) -> Diagnostic Never! {
@@ -183,24 +189,39 @@ parser_finish_effect_type: fn(state: &JetParserState, type_name: String, name_sp
 // body is irreversible when its parent is.
 parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: EffectImpl, cases: [Variant], reports: &[Diagnostic]) -> EffectImpl Never! {
     declared := effect_impl
+    // A toolchain family under a declared case: its cases are that case's
+    // children (EffectVocabulary.jet), and it declares no name of its own.
+    nested := String?{None}
     if cases.len() > 0 && declared.parent == .Val(written) {
-        reports.push(diagnostic_from_registry("E0907", Val(written.span), "the effect family `{type_name}` names a parent", "a package effect that is a kind of another effect is a struct; an enum family's cases are the kinds of the family itself", "remove `parent: {written.name}`, or declare `{type_name}` as a struct with `impl Effect {{ parent: {written.name} }}`"))
-        declared.parent = None
+        if parser_effect_vocabulary_children(written.name, cases) -> nested = Val(written.name) else {
+            reports.push(diagnostic_from_registry("E0907", Val(written.span), "the effect family `{type_name}` names a parent", "a package effect that is a kind of another effect is a struct; an enum family's cases are the kinds of the family itself", "remove `parent: {written.name}`, or declare `{type_name}` as a struct with `impl Effect {{ parent: {written.name} }}`"))
+            declared.parent = None
+        }
     }
+    prefix: nested ?? type_name
     names := [String]{}
     loop member in cases {
         unit := false
         if member.payload == .Unit -> unit = true
         if !unit {
-            reports.push(diagnostic_from_registry("E0634", Val(member.name_span), "the effect family case `{type_name}.{member.name}` carries a payload", "an effect family's cases are effect names, which a row writes as `-[{type_name}.{member.name}]>`; a name carries no value", "remove the payload from `{member.name}`"))
+            reports.push(diagnostic_from_registry("E0634", Val(member.name_span), "the effect family case `{type_name}.{member.name}` carries a payload", "an effect family's cases are effect names, which a row writes as `-[{prefix}.{member.name}]>`; a name carries no value", "remove the payload from `{member.name}`"))
             next
         }
         names.push(member.name)
     }
     body := declared.irreversible
     if body == .Val(value) && parser_effect_fact_problem(value, names, cases.len() > 0) == .Val(span) {
-        reports.push(parser_effect_body_report(span, type_name))
+        reports.push(parser_effect_body_report(span, type_name, "irreversible"))
         body = None
+    }
+    if declared.expert == .Val(value) {
+        if parser_effect_fact_problem(value, names, cases.len() > 0) == .Val(span) {
+            reports.push(parser_effect_body_report(span, type_name, "expert"))
+            declared.expert = None
+        } else if !parser_effect_vocabulary_declares(type_name, nested, names) {
+            reports.push(diagnostic_from_registry("E0907", Val(declared.expert_span ?? name_span), "`expert: fn` is not a method of a package's `Effect`", "only the toolchain's own effects are expert, which only the main package holds by naming them", "remove `expert: fn`"))
+            declared.expert = None
+        }
     }
     case_decls := [EffectDecl]{}
     any := false
@@ -208,19 +229,50 @@ parser_effect_type_decls: fn(type_name: String, name_span: Span, effect_impl: Ef
         if !names.contains(member.name) -> next
         irreversible: parser_effect_fact_value(body, Val(member.name))
         if irreversible -> any = true
-        case_decls.push(EffectDecl{name: "{type_name}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span})
+        case_decls.push(EffectDecl{name: "{prefix}.{member.name}", name_span: member.name_span, irreversible: irreversible, span: member.name_span})
     }
     root := if cases.len() == 0 -> parser_effect_fact_value(body, None) else -> any
-    if body == None && declared.parent == .Val(written) {
+    if body == None && nested == None && declared.parent == .Val(written) {
         loop row in EFFECT_VOCABULARY_ROWS {
             if row.name == written.name -> root = row.irreversible
         }
     }
-    decls := [EffectDecl]{EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span}}
+    decls := [EffectDecl]{}
+    if nested == None {
+        decls.push(EffectDecl{name: type_name, name_span: name_span, irreversible: root, span: name_span})
+    }
     loop declaration in case_decls -> decls.push(declaration)
     declared.decls = decls
     declared.irreversible = body
     declared
+}
+
+// Whether the toolchain's vocabulary declares each of `cases` as a child of
+// the case `parent` (`Meta.Code.Raw` for `parent: Meta.Code`).
+parser_effect_vocabulary_children: fn(parent: String, cases: [Variant]) -> Bool Never! {
+    loop member in cases {
+        if !parser_effect_vocabulary_has("{parent}.{member.name}") -> return false
+    }
+    true
+}
+
+// Whether the toolchain's vocabulary declares the effect `type_name` (or,
+// under `nested`, the children) with the cases `names`: the toolchain's own
+// declaration, the one place an `expert` fact is written.
+parser_effect_vocabulary_declares: fn(type_name: String, nested: String?, names: [String]) -> Bool Never! {
+    if nested == None && !parser_effect_vocabulary_has(type_name) -> return false
+    prefix: nested ?? type_name
+    loop name in names {
+        if !parser_effect_vocabulary_has("{prefix}.{name}") -> return false
+    }
+    true
+}
+
+parser_effect_vocabulary_has: fn(name: String) -> Bool Never! {
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name -> return true
+    }
+    false
 }
 
 // An `impl Name.Effect { … }` block written outside `Name`, in the file or
@@ -331,10 +383,10 @@ parser_joined_effect_impl: fn(type_name: String, name_span: Span, own: EffectImp
 }
 
 // An outside `impl Name.Effect` block read as the block a type body holds:
-// the method `irreversible: fn(self) -> Bool` and the setting `parent`.
+// the methods `irreversible: fn(self) -> Bool` and `expert`, and the setting
+// `parent`.
 parser_effect_impl_from: fn(definition: ImplDef, type_name: String, reports: &[Diagnostic]) -> EffectImpl Never! {
-    irreversible := Expr?{None}
-    method_span := Span?{None}
+    declared := EffectImpl{span: definition.span, irreversible: None, method_span: None, decls: [EffectDecl]{}}
     parent := NamedSpan?{None}
     loop assoc in definition.assoc_type_impls {
         reports.push(parser_effect_setting_report(assoc.span, assoc.name))
@@ -356,22 +408,10 @@ parser_effect_impl_from: fn(definition: ImplDef, type_name: String, reports: &[D
         parent = Val(NamedSpan{name: name, span: value_span})
     }
     loop method in definition.methods {
-        if parser_effect_method_problem(method) == .Val(problem) {
-            reports.push(problem)
-            next
-        }
-        if method_span != None {
-            reports.push(parser_effect_method_twice_report(method.name_span))
-            next
-        }
-        method_span = Val(method.span)
-        body: parser_effect_method_body(method) ?? {
-            reports.push(parser_effect_body_report(method.name_span, type_name))
-            next
-        }
-        irreversible = Val(body)
+        parser_effect_method_take(declared, method, type_name, reports)
     }
-    EffectImpl{span: definition.span, irreversible: irreversible, method_span: method_span, parent: parent, decls: [EffectDecl]{}}
+    declared.parent = parent
+    declared
 }
 
 // The dotted name `Log` or `Log.Audit` a `parent:` value spells, or None.

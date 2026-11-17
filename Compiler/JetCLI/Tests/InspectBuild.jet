@@ -195,14 +195,14 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     // build froze when `build` returned: both are inputs of its check node,
     // so a change to either is a new identity for it and every node after it.
     made_request := inspect_build_request()
-    made_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "generated_value: fn() -> Int {{ 7 }}", authority: "Meta.Rewrite", consent: "greet"}}
+    made_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "generated_value: fn() -> Int {{ 7 }}", authority: "Meta.Code.Rewrite", consent: "greet"}}
     made_response := jet_driver_query_build_nodes(made_request, scope)
     made_query := made_response.query.move()
     inspect_build_require(made_query.complete && made_query.nodes.len() == 4, "a made module is a checked module")
     inspect_build_require(made_query.nodes[0].inputs == [String]{"authority", "build/generated.jet", "consent"}, "the check node names the frozen authority and consent")
     inspect_build_require(made_query.nodes[0].key != generated_query.nodes[0].key && made_query.nodes[1].key == generated_query.nodes[1].key && made_query.nodes[2].key != generated_query.nodes[2].key, "authority and consent are part of the module's and its output's identity, not its neighbor's")
     other_request := inspect_build_request()
-    other_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "generated_value: fn() -> Int {{ 7 }}", authority: "Meta.Rewrite", consent: "orm"}}
+    other_request.generated_modules = [JetDriverGeneratedModule]{{package_identity: loaded.modules[loaded.entry_module_index].package_identity, name: "generated", relative_path: "build/generated.jet", source: "generated_value: fn() -> Int {{ 7 }}", authority: "Meta.Code.Rewrite", consent: "orm"}}
     other_response := jet_driver_query_build_nodes(other_request, scope)
     other_query := other_response.query.move()
     inspect_build_require(other_query.complete && other_query.nodes[0].key != made_query.nodes[0].key, "another consent is another identity")

@@ -1,7 +1,9 @@
 # The hook fixture. `trace` is a library metaprogram whose handler
 # prints "hooked" before each function marked `Trace.Traced`. It acts only
 # through a `Compiler` value it is handed, so only a root that makes the value
-# and hands it on runs it:
+# and hands it on runs it. Its handler uses the expert effect
+# `Meta.Code.Rewrite`, so each root that loads `trace` grants it that effect
+# in `authority.grants`:
 # - `none`: no value and no hook. The app prints "plain".
 # - `imported`: the hook is imported and its marker written, but no value is
 #   made. An import runs no compiler code, so the app prints "plain".
@@ -12,7 +14,7 @@
 # - `forwarded`: the root forwards its `Build` to `grab`, a dependency whose
 #   own source asks it for a value to give the hook. That is E0776 at grab's
 #   line, and no app is built.
-# - `denied`: the root hands the hook its value but denies `Meta.Rewrite`.
+# - `denied`: the root hands the hook its value but denies `Meta.Code.Rewrite`.
 #   The denial reaches the rewrite inside the hook (E0749), and no app is built.
 # - `header`: the root hands its value to `mint`, which adds a module whose
 #   function calls `b.compiler`. Code a value made is not the root's own
@@ -46,7 +48,7 @@ stdout: = "hooked\nplain\n"
 step: jet inspect graph root/main.jet --json
 exit: 0
 json: stdout doc $.build.generated[0].made_by ~ "trace.jet:15" # the handoff to the hook is recorded at its rewrite
-json: stdout doc $.build.generated[0].authority = "Meta.Rewrite"
+json: stdout doc $.build.generated[0].authority = "Meta.Code.Rewrite"
 copy: root/unhooked.txt root/main.jet
 step: jet build root/main.jet
 exit: 0
@@ -61,7 +63,7 @@ file: forwarded/.jet/build/app absent
 step: jet build denied/main.jet
 exit: 1
 stderr: ~ E0749 # the root's denial reaches the rewrite inside the hook
-stderr: ~ "reaches the `Meta.Rewrite` effect, which the package denies with `authority: { deny: [Meta.Rewrite] }`" # the report names the root's row
+stderr: ~ "reaches the `Meta.Code.Rewrite` effect, which the package denies with `authority: { deny: [Meta.Code.Rewrite] }`" # the report names the root's row
 file: denied/.jet/build/app absent
 step: jet build header/main.jet
 exit: 1

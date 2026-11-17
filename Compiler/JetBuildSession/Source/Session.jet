@@ -68,8 +68,8 @@ BuildSessionGeneratedModule: struct {
     // ("`f` at file:line"), which a report from the module names.
     producer: String?{None},
     // What a `Compiler` value made the module under: the `Meta` effects its
-    // call performs (`Meta.Generate` for `meta.add`, with `Meta.Types` and
-    // `Meta.Raw` when it adds source text, `Meta.Rewrite` for
+    // call performs (`Meta.Generate` for `meta.add`, with `Meta.Code.Types`
+    // and `Meta.Code.Raw` when it adds source text, `Meta.Code.Rewrite` for
     // `meta.rewrite_body`) and, for a dependency's function, the package the
     // root's `meta.allow_rewrite` consent named. Both are fixed when `build`
     // returns, since every later call on the session is refused. Provenance
@@ -547,7 +547,8 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     // formatted items, or its source text, become the generated module
     // `name` of this package, as a `b.generate` module does, and a source of
     // the value's target. The Meta effects the add performed (`Meta.Generate`,
-    // with `Meta.Types` and `Meta.Raw` for text) are its recorded authority.
+    // with `Meta.Code.Types` and `Meta.Code.Raw` for text) are its recorded
+    // authority.
     // `meta.add_struct` also sends the name of the struct it declares.
     if method == "compiler.add" {
         if args.len() != 4 && args.len() != 5 {
@@ -654,7 +655,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         }
         path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
         name: if own -> "{function} body" else -> "{function} body of {package_name}"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Code.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
         if added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) {

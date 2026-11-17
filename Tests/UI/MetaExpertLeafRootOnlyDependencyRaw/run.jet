@@ -1,0 +1,14 @@
+// @programmable_build
+// @cli_build
+// E0777: `shapes` writes a type as source text, which uses `Meta.Code.Types`
+// and `Meta.Code.Raw`; the main package grants it only `Meta.Code.Types`.
+use shapes
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["run.jet"], [])
+    meta: b.compiler(app)
+    shapes.install(meta)
+    b.default(app)
+}
+
+run: fn() {}

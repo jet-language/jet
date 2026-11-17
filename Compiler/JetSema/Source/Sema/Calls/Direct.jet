@@ -1296,7 +1296,7 @@ sema_call_core_direct_checked: fn(call: Call, expected: Type?, environment: Sema
     if sema_app_field_error_refused(module_name, member, call.args, environment, program, scopes, diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    sema_call_app_permission_purpose(module_name, member, alias, call.args, program, diagnostics)
+    sema_call_app_device(module_name, member, alias, call.name_span, call.args, environment, program, context.function_name, diagnostics)
     live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if live.handled -> return live
     // `reactive.signal/derived/computed/autorun` have no Core call record:
