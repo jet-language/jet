@@ -1,0 +1,22 @@
+# A union arm spells a generic member's type arguments (D-PRIM-ANY1=C):
+# `.Box<Int>(b)` and `.Box<String>(s)` separate two instances of one generic,
+# and a table of both needs no `else`. instances.jet: the module's own
+# generic, in a statement table and a value table. qualified.jet: an imported
+# generic through its module (`.boxes.Box<Int>(b)`) beside a two-argument arm
+# (`.Pair<Int, String>(p)`).
+fixture: UnionArmsSpellTypeArguments.fixture
+step instances: jet run instances.jet
+exit: 0
+stdout: = "int box 2\nstring box abc\n1\n3\n"
+step instances_o0: jet run -O0 instances.jet
+exit: 0
+stdout: == instances
+step instances_o2: jet run -O2 instances.jet
+exit: 0
+stdout: == instances
+step qualified: jet run qualified.jet
+exit: 0
+stdout: = "int box 4\nstring box t\npair 1 one\n"
+step qualified_o2: jet run -O2 qualified.jet
+exit: 0
+stdout: == qualified

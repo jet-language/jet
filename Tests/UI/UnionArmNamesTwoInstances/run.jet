@@ -1,0 +1,13 @@
+// E0305: a bare `.Box` arm over two instances of one generic names both
+// members, so it names neither; the fix names each instance's arm.
+Box: struct<T> {
+    value: T,
+}
+
+pick: fn(item: Box<Int> | Box<String>) {
+    if item == {
+        .Box(_) -> print("a box")
+    }
+}
+
+run: fn() { pick(Box<Int>{value: 2}) }

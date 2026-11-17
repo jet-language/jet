@@ -518,9 +518,20 @@ sema_coverage_check_table: fn(conditions: [TExpr], multi_head: Bool, span: Span,
         diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
         return
     }
-    // Members that share a type name have no arm of their own; an `else`
-    // reaches them.
-    fix: if sema_coverage_unnamed_missing(subject_ty, missing) -> "add `else -> {{ … }}` after the last arm: no arm can name {names}, which share a type name" else -> "add an arm for: {names}"
+    // A member listed by its full type is named by the arm type position
+    // gives it (`.geo.Point`); one no name in this module reaches is left to
+    // an `else`.
+    fix := "add an arm for: {names}"
+    if sema_coverage_identity_missing(subject_ty, missing) {
+        fix = "add `else -> {{ … }}` after the last arm: no name in this module reaches {names}"
+        arms := [String]{}
+        loop name in missing {
+            if sema_coverage_case_pattern(subject_ty, name, environment, program) == .Val(arm) {
+                arms.push("`{arm}`")
+            }
+        }
+        if arms.len() == missing.len() -> fix = "add an arm for each: {arms.join(", ")}"
+    }
     diagnostic: sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", fix)
     patterns := [String]{}
     loop name in missing {
@@ -591,7 +602,8 @@ sema_coverage_check_unreachable_arms: fn(conditions: [TExpr], multi_head: Bool, 
             }
             if {
                 already -> {
-                    what: if multi_head -> "head `{variant}` is unreachable — an earlier head already handles it" else -> "arm `{variant}` is unreachable — that case is already handled"
+                    shown: sema_coverage_shown_cases(sema_pattern_unwrap_tags(table.subject.ty), [String]{variant})
+                    what: if multi_head -> "head `{shown}` is unreachable — an earlier head already handles it" else -> "arm `{shown}` is unreachable — that case is already handled"
                     why: if multi_head -> "multi-head declaration order selects the first matching head" else -> "every earlier arm already covers this pattern"
                     fix: if multi_head -> "remove this head or merge it with the earlier head" else -> "remove this arm or merge it with the one above"
                     span: sema_coverage_shape_span(shape)
@@ -889,11 +901,15 @@ sema_coverage_case_pattern: fn(subject_ty: Type, name: String, environment: Sema
             name.starts_with("Ok") -> ".Ok(_)"
             else -> ".Err(_)"
         })
-        // A union member is tested by its tag alone (`.Int -> …`). A member
-        // tagged by its full identity (two members of one name) has no
-        // written arm of its own the edit could spell.
+        // A union member is tested by its arm alone (`.Int -> …`), the name
+        // type position gives its type (`.geo.Point`); None when no name in
+        // this module reaches it.
         .Union(members) -> {
-            if sema_coverage_identity_case(members, name) != None -> return None
+            loop (index, member) in members {
+                if sema_pattern_union_tag(members, member) == name {
+                    return sema_pattern_member_arm(members, index, environment, program)
+                }
+            }
             return Val(".{name}")
         }
         .Case(_, _) -> return Val(".{name}")
@@ -943,10 +959,9 @@ sema_coverage_identity_case: fn(members: [Type], name: String) -> Type? {
     None
 }
 
-// Whether a case `missing` lists is a union member no arm can name: one of
-// two members of one name (sema_coverage_identity_case), which only an
-// `else` reaches.
-sema_coverage_unnamed_missing: fn(subject_ty: Type, missing: [String]) -> Bool Never! {
+// Whether a case `missing` lists is a union member tagged by its full
+// identity (sema_coverage_identity_case), as two members of one name are.
+sema_coverage_identity_missing: fn(subject_ty: Type, missing: [String]) -> Bool Never! {
     if subject_ty == .Union(members) {
         loop name in missing {
             if sema_coverage_identity_case(members, name) != None -> return true
@@ -988,17 +1003,18 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
             missing = sema_coverage_three_state_missing(ok_ty, shapes, keys, environment, program)
         }
     }
-    // Members that share a type name have no arm of their own; the `else`
-    // is how a table reaches them.
-    if sema_coverage_unnamed_missing(subject_ty, missing) {
-        return
-    }
+    // A union member no name in this module reaches has no arm; the `else`
+    // is how a table reaches it.
+    union_subject: subject_ty == .Union(_)
     shown: type_name(subject_ty)
     // `T?` and `T E!` never gain a case; an enum or a union can.
     fixed_cases: subject_ty == .Option(_) || subject_ty == .Result(_, _)
     patterns := [String]{}
     loop name in missing {
         pattern: sema_coverage_case_pattern(subject_ty, name, environment, program) ?? {
+            if union_subject {
+                return
+            }
             diagnostics.push(sema_error("E0641", arm.arm, "this `else` stands for cases of the closed set `{shown}`", sema_coverage_closed_else_why(shown, fixed_cases), "write an arm for each remaining case of `{shown}` in place of the `else`: {missing.join(", ")}"))
             return
         }

@@ -1,0 +1,28 @@
+// No `Point` is declared here, and `Point` in type position names geo's
+// through the one module that has it, so `.Point` names that member, as the
+// alias and the type table do.
+use geo
+
+GeoPoint: geo.Point
+
+show: fn(p: GeoPoint) -> Int { p.x }
+
+kind: fn<T>(value: T) -> String {
+    if T == {
+        geo.Point -> "geo.Point"
+        else -> "other"
+    }
+}
+
+inspect: fn(item: Int | geo.Point) {
+    if item == {
+        .Int(n) -> print(n)
+        .Point(p) -> print(p.x)
+    }
+}
+
+run: fn() {
+    print(show(geo.Point{x: 7}))
+    print(kind(geo.Point{x: 1}))
+    inspect(geo.Point{x: 2})
+}

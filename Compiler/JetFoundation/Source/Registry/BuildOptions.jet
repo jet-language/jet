@@ -125,6 +125,16 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
 // so only a program built with `checked_alloc` runs checked.
 CHECKED_ALLOC_RUNTIME_EXPORTS: #run { [String]{"jet_rt_alloc_check_link", "jet_rt_alloc_check_init"} }
 
+// The runtime exports a program replaces at link time when it defines them:
+// the run queue's hooks (JetRuntime Scheduler.jet), which a target profile's
+// scheduler provider defines. The runtime library never inlines one
+// (JetIR IRFunction.host_symbol), its object defines each one weak, and its
+// own calls reach them through their symbols (Image/Object.jet), so the
+// program's definitions take every call with no table between. The prelinked
+// runtime image has its calls bound to its own definitions, so a program that
+// defines one links the runtime pack in full (Image/MemoryLink.jet).
+RUNTIME_PROVIDER_HOOKS: #run { [String]{"jet_rt_scheduler_queue_push", "jet_rt_scheduler_queue_pop"} }
+
 // The Jai build options Jet refuses, each with the law that leaves nothing for
 // it to switch. A profile field, flag or `build: fn` call of one of these names
 // is refused with `law` instead of being an unknown name.

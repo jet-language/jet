@@ -1,0 +1,21 @@
+// E0641: the module's own `Point` and geo2's `Point` are both members of
+// the union, and each has an arm (`.Point` and `.geo2.Point`), so an `else`
+// that stands for them is an `else` over a closed set like any other.
+use geo2
+
+Point: struct {
+    z: Int,
+}
+
+show: fn(item: Point | geo2.Point | Int) {
+    if item == {
+        .Int(n) -> print("int {n}")
+        else -> print("a point")
+    }
+}
+
+run: fn() {
+    show(Point{z: 1})
+    show(geo2.Point{x: 2, y: 3})
+    show(4)
+}

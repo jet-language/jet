@@ -36,6 +36,7 @@ use {
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
+        TOKEN_LT,
         TOKEN_NULL,
         TOKEN_OR_OR,
         TOKEN_PIPE,
@@ -404,7 +405,7 @@ parser_pattern_rhs_ahead: fn(state: &JetParserState, value: Bool) -> Bool Never!
             next: parser_lookahead(state, 1)
             if next.kind == TOKEN_IDENT {
                 word: parser_value(state, next)
-                return parser_pascal_name(word) || word.starts_with("#{{")
+                return parser_pascal_name(word) || word.starts_with("#{{") || parser_module_arm_ahead(state)
             }
             next.kind == TOKEN_NULL || next.kind == TOKEN_LBRACE
         }
@@ -417,6 +418,16 @@ parser_pattern_rhs_ahead: fn(state: &JetParserState, value: Bool) -> Bool Never!
         TOKEN_IDENT -> parser_typed_pattern_ahead(state) || parser_bare_variant_head(state) || parser_named_struct_pattern_ahead(state, value)
         else -> false
     }
+}
+
+// `.geo.Point(p)`: an arm that names a type through the modules that lead to
+// it, each segment before the type's name a lowercase module name.
+parser_module_arm_ahead: fn(state: &JetParserState) -> Bool Never! {
+    offset := 1
+    loop parser_kind_at(state, offset) == TOKEN_IDENT && parser_kind_at(state, offset + 1) == TOKEN_DOT && !parser_pascal_name(parser_value_at(state, offset)) {
+        offset += 2
+    }
+    offset > 1 && parser_kind_at(state, offset) == TOKEN_IDENT && parser_pascal_name(parser_value_at(state, offset))
 }
 
 // Rust `named_struct_pattern_ahead` `Point{…}` starts a
@@ -607,6 +618,14 @@ parser_parse_pattern_atom: fn(state: &JetParserState, depth: Int, allow_named: B
         member: parser_expect_name(state, "after a separator in a variant pattern")
         path = "{path}.{parser_value(state, member)}"
         path_span = member.span
+    }
+    if leading_dot && parser_current_kind(state) == TOKEN_LT {
+        // `.Box<Int>(b)`: an arm's type arguments name one instance of a
+        // generic member; the name carries them as type text.
+        arguments: parser_parse_call_type_args(state, depth + 1)
+        shown: loop argument in arguments -> type_name(argument)
+        path = "{path}<{shown.join(", ")}>"
+        path_span = Span{start: path_span.start, end: parser_previous_end(state)}
     }
     if parser_current_kind(state) == TOKEN_LBRACE {
         // `Name.Case{…}` names the case through its enum; sema matches it

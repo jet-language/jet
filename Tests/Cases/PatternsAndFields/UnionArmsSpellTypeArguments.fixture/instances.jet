@@ -1,0 +1,26 @@
+// Two instances of one generic in a union: each arm spells its arguments,
+// and a table of both arms needs no `else`, as statements or as a value.
+Box: struct<T> {
+    value: T,
+}
+
+show: fn(item: Box<Int> | Box<String>) {
+    if item == {
+        .Box<Int>(b) -> print("int box {b.value + 1}")
+        .Box<String>(s) -> print("string box {s.value}")
+    }
+}
+
+size: fn(item: Box<Int> | Box<String>) -> Int {
+    if item == {
+        .Box<Int>(b) -> b.value
+        .Box<String>(s) -> s.value.len()
+    }
+}
+
+run: fn() {
+    show(Box<Int>{value: 1})
+    show(Box<String>{value: "abc"})
+    print(size(Box<Int>{value: 1}))
+    print(size(Box<String>{value: "abc"}))
+}

@@ -27,6 +27,7 @@ use {
     time: core.time
     rt: jet.runtime.time
     rt_web: jet.runtime.web
+    ui_rt: jet.runtime.ui
     world_rt: jet.runtime.testing
     log_rt: jet.runtime.log
     push_wire: __core_app_push
@@ -3824,13 +3825,14 @@ FileType: enum {
 // cancelling is `false` with no notice; a file that can't be written, or
 // no dialog to ask with, is `false` with a notice that names the file. On
 // Linux the desktop portal's save dialog asks
-// (org.freedesktop.portal.FileChooser); the other targets keep that notice.
+// (org.freedesktop.portal.FileChooser); a page downloads the bytes under
+// the name `suggested`; the other targets keep that notice.
 save_file: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool {
     #if #build.target.os == {
         .Linux -> { return app_save_linux(suggested, bytes, types) }
         .MacOS -> { return app_unsaved(suggested, SAVE_UNBUILT) }
         .Windows -> { return app_unsaved(suggested, SAVE_UNBUILT) }
-        .Web -> { return app_unsaved(suggested, SAVE_UNBUILT) }
+        .Web -> { return app_save_web(suggested, bytes, types) }
         .Wasm -> { return app_unsaved(suggested, SAVE_UNBUILT) }
         .Freestanding -> { return app_unsaved(suggested, SAVE_UNBUILT) }
     }
@@ -3856,6 +3858,33 @@ priv app_save_linux: fn(suggested: String, bytes: [U8], types: [FileType]) -[Env
     path: url.percent_decode(uri.removeprefix("file://")) ?? return app_unsaved(suggested, "the dialog chose {uri}, which is not a file path")
     files.write_atomic(path, bytes) ?? return app_unsaved(suggested, "{err}")
     true
+}
+
+// `save_file` in a page: the browser downloads the bytes under the name
+// `suggested`, into its downloads folder or where the person says when it
+// asks. A page never learns where the person kept the file, or whether they
+// cancelled the browser's dialog, so it is true once the browser has the
+// download. With no page to download in (node runs the build), it keeps
+// the notice.
+priv app_save_web: fn(suggested: String, bytes: [U8], types: [FileType]) -> Bool Never! {
+    if ui_rt.save_file(suggested, app_save_media(suggested, types), bytes) -> return true
+    app_unsaved(suggested, "there is no page to download it in")
+}
+
+// The media type of the file `suggested`: that of the first kind in `types`
+// whose pattern its name matches, else the first kind's first one.
+priv app_save_media: fn(suggested: String, types: [FileType]) -> String Never! {
+    if types.len() == 0 -> return "application/octet-stream"
+    name: suggested.lower()
+    loop kind in types {
+        filter: app_file_filter(kind)
+        loop (at, glob) in filter.globs {
+            if name.ends_with(glob.removeprefix("*")) {
+                return if at < filter.media.len() -> filter.media[at].copy() else -> filter.media[filter.media.len() - 1].copy()
+            }
+        }
+    }
+    app_file_filter(types[0]).media[0].copy()
 }
 
 // What the save dialog shows and matches for `kind`.

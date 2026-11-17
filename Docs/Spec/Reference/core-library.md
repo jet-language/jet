@@ -566,8 +566,10 @@ service is `None`. `facts.row()` derives the effects every artifact built for
 the machine is denied, one per missing service (`!Net`, `!FS`, `!IO`, `!Time`
 or `!Time.Wait`, `!Rand`, `!Env`, `!Exec`, `!GPU`, `!FFI` or `!FFI.C`,
 `!Browser`, `!Panic`, `!Mem.Alloc`), and the compiler checks every artifact
-against that row. Code reads the built target's operating system as
-`#build.target.os`.
+against that row. `facts.scheduler` names the type implementing
+`core.tasks.Scheduler` that spawned tasks queue in; `None` keeps the runtime's
+own first-in, first-out queue and denies nothing. Code reads the built
+target's operating system as `#build.target.os`.
 
 | Machine | Triple | Denied by its facts |
 | --- | --- | --- |
@@ -4892,6 +4894,9 @@ sendability rules. The implementation is in
 | `semaphore.acquire_within(limit: Duration) -[Time.Wait]> Bool` | taken | Take a unit, waiting at most `limit` on the monotonic clock (`sem_timedwait`); `false` when none came in time or the task is cancelled. |
 | `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
 | `semaphore.value() -> Int` | units | The free units at the moment of the read. |
+| `Scheduler: trait { push, pop }`, `QueuedTask` | trait | A scheduler provider: the run queue the runtime's carriers take submitted tasks from. `push(&self, task: QueuedTask)` queues a task; `pop(&self) -> QueuedTask?` answers the next to run, None when nothing waits. |
+| `#Unsafe queued_task(handle: Int) -> QueuedTask` | task | The task the runtime handed its scheduler hook as `handle`; the caller vouches it is a submitted task that goes back to the runtime once. |
+| `queued_handle(task: QueuedTask) -> Int` | handle | The runtime's handle of `task`, which the hook hands back. |
 
 Every function here that waits, or reads the monotonic clock for a timer's
 deadline, declares the waiting leaf `Time.Wait`, and sema infers the same leaf
@@ -4907,6 +4912,13 @@ the time the task ran, on whichever carrier threads ran it, and stands still
 while the task is parked; on a plain thread it is the thread's CPU time. Only
 the difference of two reads by the same task means anything. A deterministic
 world has no CPU clock to control, so it rejects the read.
+
+A `Scheduler` provider decides the order the runtime's carriers run
+submitted tasks in. The runtime calls `push` and `pop` one at a time, so a
+provider needs no lock of its own. Only `queued_task`, under `#Unsafe`, makes
+a `QueuedTask`, so safe code can queue, reorder and hand back the tasks it was
+given but cannot forge one. Each task goes back exactly once: a task the
+provider never hands back never runs, and its join waits for it.
 
 `Once` and `Semaphore` are built from a `Shared<T>` cell and its guards, so a
 copy shares the original's state and either can cross a task boundary.
@@ -6294,8 +6306,14 @@ person cancelling is false with no notice. A file that can't be written,
 or no dialog to ask with, is false, and a notice in the app's notice list
 names the file and why. On Linux the desktop portal's save dialog
 (org.freedesktop.portal.FileChooser) asks, and the path of the file:// URI
-it answers with is written. The other targets keep that notice: their save
-dialogs are not built yet.
+it answers with is written. A page hands `bytes` to the browser as a
+download named `suggested`, typed by the first kind whose pattern the name
+matches (else the first kind). The browser keeps it in its downloads folder,
+or asks the person where. A page never learns where the file went, or
+whether the person cancelled the browser's dialog, so the call is true once
+the browser has the download. Run under node, with no page, it is false
+with a notice. macOS and Windows keep that notice too: their save dialogs
+are not built yet.
 
 A browser asks for a device permission itself, when a page first uses the
 device, and keeps no settings page of the app's, so `app.ask`,

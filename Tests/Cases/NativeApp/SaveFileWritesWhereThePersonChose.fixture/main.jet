@@ -1,6 +1,7 @@
 // A crew app exports its board: the person chooses where in the system's
-// save dialog, and the app writes the file there. A board the app couldn't
-// save leaves a notice instead.
+// save dialog, and the app writes the file there; a page hands the file to
+// the browser to download. A board the app couldn't save leaves a notice
+// instead.
 use {
     app
     files: core.files
@@ -12,7 +13,10 @@ run: fn() -[Env, FS, IO, Net, Time]> {
     saved: app.save_file(suggested: "board.csv", bytes: board.bytes(), types: [app.FileType]{app.FileType.CSV})
     print("saved: {saved}")
     // The fake portal's person chose `saved board.csv` here; the file
-    // ends with a newline, which print adds back.
-    if saved -> print((files.read("saved board.csv") ?? "unreadable: {err}").trim())
+    // ends with a newline, which print adds back. A page's download is
+    // not a file here.
+    if saved && files.exists("saved board.csv") {
+        print((files.read("saved board.csv") ?? "unreadable: {err}").trim())
+    }
     loop notice in app.notices() -> print("notice: {notice.text}")
 }

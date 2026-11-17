@@ -87,6 +87,37 @@ TaskID: struct {
 
 current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()} }
 
+/// A task the runtime has submitted and no carrier runs yet, as a scheduler
+/// provider holds it. Only the runtime's hook makes one (`queued_task`, under
+/// `#Unsafe`), so safe code can queue, order and hand back the tasks it was
+/// given but cannot forge one.
+QueuedTask: struct {
+    priv handle: Int,
+}
+
+/// The scheduler provider trait: the run queue the runtime's carriers take
+/// tasks from. The runtime gives every submitted task to `push` and runs the
+/// task `pop` answers on the next free carrier, None when nothing waits. It
+/// calls them one at a time, so a provider needs no lock of its own. Each task
+/// goes back exactly once: a task a provider never hands back never runs, and
+/// its join waits for it.
+///
+/// A target profile selects one: its `MachineFacts.scheduler` names the type.
+/// The build binds the runtime's queue to that type's `push` and `pop` when
+/// it links the program, so a spawn compiles to the same code under every
+/// scheduler and no call goes through a table.
+Scheduler: trait {
+    push: fn(&self, task: QueuedTask) Never!,
+    pop: fn(&self) -> QueuedTask? Never!,
+}
+
+/// The task the runtime handed its scheduler hook as `handle`.
+#Unsafe("`handle` is a task the runtime submitted that no carrier has taken, and it goes back to the runtime once")
+queued_task: fn(handle: Int) -> QueuedTask Never! { QueuedTask{handle: handle} }
+
+/// The runtime's handle of `task`, which the scheduler hook hands back.
+queued_handle: fn(task: QueuedTask) -> Int Never! { task.handle }
+
 /// Runs one piece of work at most once across every task that shares the Once
 /// (pthread_once, call_once); copies share one state. A caller that arrives
 /// while the work runs waits for it to finish, so after `call` returns the work

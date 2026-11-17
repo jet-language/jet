@@ -1,0 +1,17 @@
+// The module's own generic with one instance in the union: `Box` in type
+// position names it, so the bare `.Box` arm names its member.
+Box: struct<T> {
+    v: T,
+}
+
+show: fn(item: Int | Box<Int>) {
+    if item == {
+        .Int(n) -> print("int {n}")
+        .Box(b) -> print("box {b.v}")
+    }
+}
+
+run: fn() {
+    show(Box<Int>{v: 6})
+    show(3)
+}

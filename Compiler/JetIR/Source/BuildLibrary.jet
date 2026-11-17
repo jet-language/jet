@@ -10,7 +10,7 @@
 // builds each call of one as its machine operation (ir_intrinsic_call).
 use {
     jet_backend.[LINK_FAULT_REPORT, X64DataExport]
-    jet_foundation.[AccessConvention, CompilerThreads, DeclTable, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
+    jet_foundation.[AccessConvention, CompilerThreads, DeclTable, RUNTIME_PROVIDER_HOOKS, Span, BodyCallArg, SymbolTable, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_get_text, name_rows_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -380,7 +380,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             } else { guards.push(guard) }
         }
         globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: guards.move()})
-        if IR_HOST_PROVIDER.contains(row.symbol) {
+        if IR_HOST_PROVIDER.contains(row.symbol) || RUNTIME_PROVIDER_HOOKS.contains(row.symbol) {
             m.functions[roots[index]].host_symbol = row.symbol.copy()
         }
         abis.push(ir_export_abi(m, roots[index], row.symbol))
