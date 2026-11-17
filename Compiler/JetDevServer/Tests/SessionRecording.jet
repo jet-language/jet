@@ -1,9 +1,11 @@
 recording_test_identity: fn(source_id: String, build_id: String) -> SessionRecordingIdentity {
     SessionRecordingIdentity.new(source_id, build_id) ?? panic("identity")
 }
+
 recording_test_event: fn(sequence: Int, timestamp_ms: Int) -> SessionEvent {
     SessionEvent.new(sequence, timestamp_ms, "runtime", "Trace", "request-1", `{"status":"ok"}`, None) ?? panic("event")
 }
+
 recording_test_with_events: fn(max_events: Int, count: Int) -> SessionRecording {
     recording := SessionRecording.with_limits(recording_test_identity("src-a", "build-a"), SessionRecordingLimits{max_events, max_bytes: 64 * 1024}) ?? panic("recording")
     loop index in 1..<(count + 1) {
@@ -11,6 +13,7 @@ recording_test_with_events: fn(max_events: Int, count: Int) -> SessionRecording 
     }
     recording
 }
+
 recording_test_bytes: fn(text: String) -> [U8] {
     out := [U8]{}
     loop byte in text.bytes() -> out.push(byte)
@@ -36,6 +39,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
     event: projection.event ?? panic("projected event")
     assert_eq(event.sequence, 1)
 }
+
 #Test("truncation_facts_expose_count_and_window") {
     recording: recording_test_with_events(2, 3)
     facts: recording.truncation()
@@ -47,6 +51,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
     assert(facts.event_limit_reached)
     assert(facts.truncated())
 }
+
 #Test("incompatible_identity_fails_closed_and_payload_stays_absent") {
     recording: SessionRecording.new(recording_test_identity("src-a", "build-a")) ?? panic("recording")
     mismatched: if recording.replay_for(recording_test_identity("src-b", "build-a")) == {
@@ -56,6 +61,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
     assert(mismatched)
     assert_eq(recording_test_event(1, 1).payload_json, None)
 }
+
 #Test("envelope_preserves_explicit_payload_and_rejects_time_regressions") {
     recording := SessionRecording.new(recording_test_identity("src-a", "build-a")) ?? panic("recording")
     envelope: `{"protocol":"jet.devtools.v1","events":[{"sequence":1,"timestamp_ms":7,"source":"host","kind":"Custom","entity":"item","fields":{"state":"ready"},"payload":{"published":true}}]}`

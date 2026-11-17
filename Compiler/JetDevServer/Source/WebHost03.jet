@@ -6,8 +6,13 @@ use {
     core.http.[HTTPRequest, HTTPResponse]
     core.web.[App]
     jet_canvas.[
-        canvas_host_body_empty, canvas_host_host_allowed, canvas_host_origin_allowed, canvas_host_query, canvas_host_same_secret,
-        canvas_host_session_count, canvas_host_single_security_headers,
+        canvas_host_body_empty,
+        canvas_host_host_allowed,
+        canvas_host_origin_allowed,
+        canvas_host_query,
+        canvas_host_same_secret,
+        canvas_host_session_count,
+        canvas_host_single_security_headers,
     ]
     jet_foundation.[JetReleaseDevtoolsPolicy]
     jetpack_foundation.[terminal_pad_end]
@@ -37,8 +42,12 @@ web_host_answer: fn(state: Shared<WebHostState>, request: HTTPRequest) -> HTTPRe
 
 web_host_route: fn(state: Shared<WebHostState>, request: HTTPRequest, path: String, query: String) -> HTTPResponse {
     release: web_host_is_release(state)
-    if release && (path == "/__jet_devtools" || path.starts_with("/__jet_devtools/")) -> return web_host_release_inspect(state, request, path)
-    if request.method != "GET" && request.method != "POST" -> return web_host_text(405, "method not allowed")
+    if release && (path == "/__jet_devtools" || path.starts_with("/__jet_devtools/")) {
+        return web_host_release_inspect(state, request, path)
+    }
+    if request.method != "GET" && request.method != "POST" {
+        return web_host_text(405, "method not allowed")
+    }
     if path == "/__jet_dev_version" {
         if request.method != "GET" -> return web_host_text(405, "method not allowed")
         return web_host_text(200, "{web_host_version(state)}")
@@ -61,7 +70,9 @@ web_host_route: fn(state: Shared<WebHostState>, request: HTTPRequest, path: Stri
 web_host_status: fn(state: Shared<WebHostState>, request: HTTPRequest, path: String, query: String) -> HTTPResponse {
     if request.method != "GET" -> return web_host_text(405, "method not allowed")
     if web_host_authorized(state, request, path, query) {
-        if canvas_host_query(query, "client") == .Val(client) -> web_host_queue_client(state, client, false)
+        if canvas_host_query(query, "client") == .Val(client) {
+            web_host_queue_client(state, client, false)
+        }
     }
     web_host_json(200, web_host_status_json(state))
 }
@@ -70,7 +81,9 @@ web_host_status: fn(state: Shared<WebHostState>, request: HTTPRequest, path: Str
 web_host_disconnect: fn(state: Shared<WebHostState>, request: HTTPRequest, path: String, query: String) -> HTTPResponse {
     if request.method != "POST" -> return web_host_text(405, "method not allowed")
     if !web_host_authorized(state, request, path, query) -> return web_host_rejected()
-    if canvas_host_query(query, "client") == .Val(client) -> web_host_queue_client(state, client, true)
+    if canvas_host_query(query, "client") == .Val(client) {
+        web_host_queue_client(state, client, true)
+    }
     web_host_text(200, "ok")
 }
 
@@ -82,17 +95,27 @@ web_host_perf_beacon: fn(state: Shared<WebHostState>, request: HTTPRequest, path
     nonce: web_host_nonce(state)
     if nonce == "" -> return web_host_text(503, "browser trace relay unavailable")
     sent: canvas_host_query(query, "nonce") ?? ""
-    if !canvas_host_same_secret(sent, nonce) -> return web_host_text(403, "stale or foreign browser trace session")
-    if request.body_len() > BROWSER_TRACE_ENVELOPE_LIMIT -> return web_host_text(413, "browser trace envelope exceeds 512 bytes")
+    if !canvas_host_same_secret(sent, nonce) {
+        return web_host_text(403, "stale or foreign browser trace session")
+    }
+    if request.body_len() > BROWSER_TRACE_ENVELOPE_LIMIT {
+        return web_host_text(413, "browser trace envelope exceeds 512 bytes")
+    }
     body: request.text(BROWSER_TRACE_ENVELOPE_LIMIT) ?? return web_host_text(413, "browser trace envelope exceeds 512 bytes")
-    if !web_host_queue_beacon(state, body.bytes()) -> return web_host_text(503, "browser trace inbox is full; retry")
+    if !web_host_queue_beacon(state, body.bytes()) {
+        return web_host_text(503, "browser trace inbox is full; retry")
+    }
     web_host_text(204, "")
 }
 
 web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: String, query: String) -> HTTPResponse {
     if !web_host_authorized(state, request, path, query) -> return web_host_rejected()
-    if path == "/__jet_devtools" && request.method == "POST" -> return web_host_ingest(state, request)
-    if path == "/__jet_devtools/paused/inspect" || path == "/__jet_devtools/paused/evaluate" -> return web_host_text(409, "no paused debug session on this host")
+    if path == "/__jet_devtools" && request.method == "POST" {
+        return web_host_ingest(state, request)
+    }
+    if path == "/__jet_devtools/paused/inspect" || path == "/__jet_devtools/paused/evaluate" {
+        return web_host_text(409, "no paused debug session on this host")
+    }
     if path == "/__jet_devtools/commands" {
         if request.method != "GET" -> return web_host_text(405, "method not allowed")
         frame: web_host_take_commands(state) ?? return web_host_text(503, "the next devtools frame is being prepared; retry")
@@ -105,7 +128,9 @@ web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: S
         return web_host_json(200, assets)
     }
     if path == "/__jet_devtools/recording" && request.method == "GET" && canvas_host_query(query, "sequence") == None && canvas_host_query(query, "timestamp_ms") == None {
-        if web_host_is_release(state) -> return web_host_text(404, "recording endpoint absent in release builds")
+        if web_host_is_release(state) {
+            return web_host_text(404, "recording endpoint absent in release builds")
+        }
         return web_host_json(200, web_host_recording(state))
     }
     if path == "/__jet_devtools" || path == "/__jet_devtools/workbench" {
@@ -140,7 +165,9 @@ web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: S
         payload: request.text(MAX_REQUEST_BODY_BYTES) ?? return web_host_text(400, "browser selection body is unreadable: {err}")
         selection: if browser_web_parse_selection(payload.bytes()) == {
             .Ok(chosen) -> chosen
-            .Err(error) -> { return web_host_text(400, "{error}") }
+            .Err(error) -> {
+                return web_host_text(400, "{error}")
+            }
         }
         answer: web_host_browser_select(state, payload, selection)
         if answer.status != 200 -> return web_host_text(answer.status, answer.body)
@@ -153,8 +180,12 @@ web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: S
 web_host_ingest: fn(state: Shared<WebHostState>, request: HTTPRequest) -> HTTPResponse {
     payload: request.text(MAX_REQUEST_BODY_BYTES) ?? return web_host_text(400, "devtools envelope is unreadable: {err}")
     decoded: decode_devtools_envelope(payload) ?? return web_host_text(400, "{err}")
-    if decoded.session_id() != web_host_session_id(state) -> return web_host_text(400, "jet.devtools.v1 envelope session identity mismatch")
-    if !web_host_queue_envelope(state, decoded) -> return web_host_text(503, "devtools inbox is full; retry")
+    if decoded.session_id() != web_host_session_id(state) {
+        return web_host_text(400, "jet.devtools.v1 envelope session identity mismatch")
+    }
+    if !web_host_queue_envelope(state, decoded) {
+        return web_host_text(503, "devtools inbox is full; retry")
+    }
     web_host_text(202, "accepted")
 }
 
@@ -188,15 +219,21 @@ web_host_browser_dispatch: fn(state: Shared<WebHostState>, action: BrowserHostAc
 // holds selects the panel alone.
 web_host_browser_select: fn(state: Shared<WebHostState>, payload: String, selection: DevtoolsSelectionFact?) -> WebHostFrame {
     permit := state.guard_edit()
-    if permit.value.selections.len() >= WEB_HOST_MAX_QUEUED -> return WebHostFrame{status: 503, body: "devtools selection inbox is full; retry"}
-    if selection == .Val(chosen) {
-        if permit.value.browser.host.panel(chosen.panel_id) == None -> return WebHostFrame{status: 400, body: "browser selection panel_id must match the canonical panel catalog"}
-        node_id := String?{None}
-        if chosen.item_key != "" && permit.value.browser.host.node_exists(chosen.panel_id, Val(chosen.item_key)) -> node_id = Val(chosen.item_key)
-        if permit.value.browser.host.select(chosen.panel_id, node_id) == .Err(error) -> return WebHostFrame{status: 400, body: "{error}"}
-    } else {
-        permit.value.browser.host.clear_selection()
+    if permit.value.selections.len() >= WEB_HOST_MAX_QUEUED {
+        return WebHostFrame{status: 503, body: "devtools selection inbox is full; retry"}
     }
+    if selection == .Val(chosen) {
+        if permit.value.browser.host.panel(chosen.panel_id) == None {
+            return WebHostFrame{status: 400, body: "browser selection panel_id must match the canonical panel catalog"}
+        }
+        node_id := String?{None}
+        if chosen.item_key != "" && permit.value.browser.host.node_exists(chosen.panel_id, Val(chosen.item_key)) {
+            node_id = Val(chosen.item_key)
+        }
+        if permit.value.browser.host.select(chosen.panel_id, node_id) == .Err(error) {
+            return WebHostFrame{status: 400, body: "{error}"}
+        }
+    } else { permit.value.browser.host.clear_selection() }
     permit.value.selections.push("{payload}")
     WebHostFrame{status: 200, body: browser_web_view_json(permit.value.browser, .InApp)}
 }
@@ -209,16 +246,26 @@ web_host_release_inspect: fn(state: Shared<WebHostState>, request: HTTPRequest, 
 }
 
 web_host_release_answer: fn(policy: JetReleaseDevtoolsPolicy, port: Int, session: ResidentDevSession, request: HTTPRequest, path: String) -> HTTPResponse {
-    if path != "/__jet_devtools" || policy.endpoint != .ReadOnly -> return web_host_text(404, "inspect endpoint absent")
+    if path != "/__jet_devtools" || policy.endpoint != .ReadOnly {
+        return web_host_text(404, "inspect endpoint absent")
+    }
     if request.method != "GET" -> return web_host_text(405, "method not allowed")
     if !policy.deployment.enabled -> return web_host_text(404, "inspect endpoint disabled")
     host: request.header("host") ?? ""
-    if !canvas_host_single_security_headers(request) || !canvas_host_host_allowed(host, WEB_HOST_BIND, port) -> return web_host_text(403, "inspect host rejected")
-    if request.header("origin") == .Val(origin) {
-        if !canvas_host_origin_allowed(origin, WEB_HOST_BIND, port) -> return web_host_text(403, "inspect origin rejected")
+    if !canvas_host_single_security_headers(request) || !canvas_host_host_allowed(host, WEB_HOST_BIND, port) {
+        return web_host_text(403, "inspect host rejected")
     }
-    if !web_host_release_token(request, policy) -> return web_host_json(401, "{{\"error\":\"JET_INSPECT_TOKEN required\"}}")
-    if request.header("transfer-encoding") != None || !canvas_host_body_empty(request) -> return web_host_text(400, "inspect endpoint accepts GET without a request body")
+    if request.header("origin") == .Val(origin) {
+        if !canvas_host_origin_allowed(origin, WEB_HOST_BIND, port) {
+            return web_host_text(403, "inspect origin rejected")
+        }
+    }
+    if !web_host_release_token(request, policy) {
+        return web_host_json(401, "{{\"error\":\"JET_INSPECT_TOKEN required\"}}")
+    }
+    if request.header("transfer-encoding") != None || !canvas_host_body_empty(request) {
+        return web_host_text(400, "inspect endpoint accepts GET without a request body")
+    }
     projection: session.devtools_events_since(None)
     panels: session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.all()) ?? return web_host_text(500, "{err}")
     web_host_json(200, browser_web_release_json(projection, panels))
@@ -263,7 +310,9 @@ web_host_authorized: fn(state: Shared<WebHostState>, request: HTTPRequest, path:
     if request.header("authorization") == {
         .Val(authorization) -> {
             if !authorization.starts_with("Bearer ") -> return false
-            if !canvas_host_same_secret(authorization.slice(7, authorization.len()), secret) -> return false
+            if !canvas_host_same_secret(authorization.slice(7, authorization.len()), secret) {
+                return false
+            }
             if from_query == .Val(token) -> return canvas_host_same_secret(token, secret)
             true
         }
@@ -337,7 +386,9 @@ web_host_take_assets: fn(state: Shared<WebHostState>) -> String? {
 
 // A page's client lease, or its clean drop.
 web_host_queue_client: fn(state: Shared<WebHostState>, client: String, dropped: Bool) {
-    if client == "" || client.len() > WEB_HOST_MAX_CLIENT_ID -> return
+    if client == "" || client.len() > WEB_HOST_MAX_CLIENT_ID {
+        return
+    }
     permit := state.guard_edit()
     if dropped {
         if permit.value.dropped.len() < WEB_HOST_MAX_QUEUED -> permit.value.dropped.push("{client}")
@@ -346,14 +397,14 @@ web_host_queue_client: fn(state: Shared<WebHostState>, client: String, dropped: 
     if permit.value.noted.len() < WEB_HOST_MAX_QUEUED -> permit.value.noted.push("{client}")
 }
 
-web_host_queue_beacon: fn(state: Shared<WebHostState>, &&body: [U8]) -> Bool {
+web_host_queue_beacon: fn(state: Shared<WebHostState>, body: &&[U8]) -> Bool {
     permit := state.guard_edit()
     if permit.value.beacons.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.beacons.push(body.move())
     true
 }
 
-web_host_queue_envelope: fn(state: Shared<WebHostState>, &&envelope: JetDevtoolsDecodedEnvelope) -> Bool {
+web_host_queue_envelope: fn(state: Shared<WebHostState>, envelope: &&JetDevtoolsDecodedEnvelope) -> Bool {
     permit := state.guard_edit()
     if permit.value.envelopes.len() >= WEB_HOST_MAX_QUEUED -> return false
     permit.value.envelopes.push(envelope.move())
@@ -363,6 +414,8 @@ web_host_queue_envelope: fn(state: Shared<WebHostState>, &&envelope: JetDevtools
 // The verbose request log; the dev clock stamps and prints it.
 web_host_note_request: fn(state: Shared<WebHostState>, method: String, path: String, status: Int) {
     permit := state.guard_edit()
-    if !permit.value.verbose || permit.value.requests.len() >= WEB_HOST_MAX_QUEUED -> return
+    if !permit.value.verbose || permit.value.requests.len() >= WEB_HOST_MAX_QUEUED {
+        return
+    }
     permit.value.requests.push("{method}  {terminal_pad_end(path, 20)} {status}")
 }

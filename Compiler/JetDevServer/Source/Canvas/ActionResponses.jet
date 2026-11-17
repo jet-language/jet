@@ -2,12 +2,29 @@
 // project transactions.
 use {
     jet_canvas.[
-        NodeQueryRef, Projection, QUERY_SCHEMA_VERSION, is_space_byte, json_bool, json_str, line_start, query_error, read_source_without_symlinks, source_revision,
+        NodeQueryRef,
+        Projection,
+        QUERY_SCHEMA_VERSION,
+        is_space_byte,
+        json_bool,
+        json_str,
+        line_start,
+        query_error,
+        read_source_without_symlinks,
+        source_revision,
         span_json,
     ]
     jet_foundation.[
-        Diagnostic, Span, TextEdit, diagnostic_is_warning, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
-        diagnostic_source_texts, foundation_byte_text,
+        Diagnostic,
+        Span,
+        TextEdit,
+        diagnostic_is_warning,
+        diagnostic_render_all,
+        diagnostic_source_column,
+        diagnostic_source_line,
+        diagnostic_source_position,
+        diagnostic_source_texts,
+        foundation_byte_text,
     ]
     jet_lsp.[LSPChecker]
     jet_semindex.[SemIndex]
@@ -36,7 +53,9 @@ function_signature_span: fn(src: String, name_span: Span) -> Span Err! {
     bytes: src.bytes()
     brace := if name_span.end < bytes.len() -> name_span.end else -> bytes.len()
     loop brace < bytes.len() && bytes[brace] != (U8{123}) -> brace += 1
-    if brace == bytes.len() -> return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
+    if brace == bytes.len() {
+        return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
+    }
     end := brace
     loop end > start && is_space_byte(Int{bytes[end - 1]}) -> end -= 1
     Ok(Span{start: start, end: end})
@@ -51,13 +70,9 @@ indentation_at: fn(src: String, offset: Int) -> String Never! {
     foundation_byte_text(bytes, start, end)
 }
 
-edit: fn(span: Span, text: String) -> TextEdit Never! {
-    TextEdit{span: span, new_text: text}
-}
+edit: fn(span: Span, text: String) -> TextEdit Never! { TextEdit{span: span, new_text: text} }
 
-spans_overlap: fn(a: Span, b: Span) -> Bool Never! {
-    a.start <= b.end && b.start <= a.end
-}
+spans_overlap: fn(a: Span, b: Span) -> Bool Never! { a.start <= b.end && b.start <= a.end }
 
 text_matches: fn(src: String, needle: String) -> [Span] Never! {
     out := [Span]{}
@@ -158,11 +173,7 @@ dedupe_results: fn(results: &[String]) {
         loop earlier in 0..<index {
             if results[earlier] == results[index] -> seen = true
         }
-        if seen {
-            _ := results.remove(index, .Slot)
-        } else {
-            index += 1
-        }
+        if seen -> _ := results.remove(index, .Slot) else -> index += 1
     }
 }
 

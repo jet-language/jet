@@ -15,13 +15,21 @@ use {
 }
 
 SESSION_MAX_CLIENT_ID: Int{128}
+
 SESSION_MAX_CLIENTS: Int{256}
+
 SESSION_CLIENT_TTL_MS: Int{160}
+
 SESSION_MAX_RECEIPTS: Int{128}
+
 SESSION_MAX_RETAINED_VIEW_BYTES: Int{2097152}
+
 SESSION_MAX_GAME_CONTROL_FRAME: Int{32}
+
 BROWSER_ASSET_WATCH_MAX_FILES: Int{4096}
+
 BROWSER_ASSET_WATCH_MAX_EVENTS: Int{256}
+
 BROWSER_ASSET_WATCH_MAX_PATH_BYTES: Int{1024}
 
 LiveLineage: struct {
@@ -32,16 +40,19 @@ LiveLineage: struct {
     revision: String,
     world_id: String,
 }
+
 LiveValueFact: struct {
     value_id: String,
     type_identity: String,
     disposition: String,
     reason: String,
 }
+
 LiveReceipt: struct {
     lineage: LiveLineage,
     values: [LiveValueFact],
 }
+
 Receipt: struct {
     kind: String,
     status: String,
@@ -51,6 +62,7 @@ Receipt: struct {
     output: String,
     live: LiveReceipt?,
 }
+
 DebuggerSnapshot: struct {
     state: String,
     session_id: String,
@@ -58,17 +70,22 @@ DebuggerSnapshot: struct {
     revision: String,
     tier: String,
 
-    idle: fn() -> DebuggerSnapshot Never! { DebuggerSnapshot{state: "idle", session_id: "", source_id: "", revision: "", tier: ""} }
+    idle: fn() -> DebuggerSnapshot Never! {
+        DebuggerSnapshot{state: "idle", session_id: "", source_id: "", revision: "", tier: ""}
+    }
 }
+
 RetainedView: struct {
     revision: String,
     source_id: String,
     payload: String,
 }
+
 DevtoolsSelectionFact: struct {
     panel_id: String,
     item_key: String,
 }
+
 DevtoolsStatusFact: struct {
     state: JetDevtoolsLifecycleState,
     diagnostic_code: String?,
@@ -79,10 +96,12 @@ DevtoolsStatusFact: struct {
     run_output: String?,
     test_state: String?,
 }
+
 DevtoolsCommandCapabilities: struct {
     project_rebuild: Bool,
     project_rebuild_reason: String?,
 }
+
 // What a host renders after `cursor`: identity, the retained events, the
 // selection, status and command facts.
 DevtoolsProjection: struct {
@@ -102,6 +121,7 @@ DevtoolsProjection: struct {
     reset: Bool,
     truncation: Bool,
 }
+
 DevtoolsRecordingDivergence: struct {
     divergent: Bool,
     reason: String?,
@@ -112,6 +132,7 @@ DevtoolsRecordingDivergence: struct {
     dropped_events: Int,
     truncation: TruncationFacts,
 }
+
 // The recording, its live cursor, named checkpoints and the first envelope
 // sequence it holds.
 ResidentRecordingState: struct {
@@ -131,14 +152,17 @@ BrowserAssetStamp: struct {
     modified_ns: Int,
     size: Int,
 }
+
 BrowserAssetChange: struct {
     path: String,
     kind: String,
 }
+
 BrowserAssetPoll: struct {
     changes: [BrowserAssetChange],
     skipped: Int,
 }
+
 // Polls `<entry dir>/assets` and reports created, changed and deleted files
 // as one host_to_runtime frame. Links are skipped, never followed.
 BrowserAssetWatcher: struct {
@@ -150,16 +174,19 @@ BrowserAssetWatcher: struct {
         watcher.snapshot()
         watcher
     }
+
     reopen: fn(&self, entry: String) {
         self.root = browser_asset_root(entry)
         self.snapshot()
     }
+
     snapshot: fn(&self) {
         files := [String:BrowserAssetStamp]{}
         skipped := 0
         browser_asset_collect(self.root, files, skipped)
         self.known = files
     }
+
     poll: fn(&self) -> BrowserAssetPoll {
         current := [String:BrowserAssetStamp]{}
         skipped := 0
@@ -170,14 +197,20 @@ BrowserAssetWatcher: struct {
         loop path in paths {
             stamp: current[path]
             if self.known.get(path) == {
-                .None -> changes.push(BrowserAssetChange{path: path, kind: "created"})
-                .Val(previous) -> if previous != stamp -> changes.push(BrowserAssetChange{path: path, kind: "changed"})
+                .None -> { changes.push(BrowserAssetChange{path: path, kind: "created"}) }
+                .Val(previous) -> {
+                    if previous != stamp {
+                        changes.push(BrowserAssetChange{path: path, kind: "changed"})
+                    }
+                }
             }
         }
         old_paths := self.known.keys().to_list()
         old_paths.sort()
         loop path in old_paths {
-            if !current.has_key(path) -> changes.push(BrowserAssetChange{path: path, kind: "deleted"})
+            if !current.has_key(path) {
+                changes.push(BrowserAssetChange{path: path, kind: "deleted"})
+            }
         }
         kept := [BrowserAssetChange]{}
         loop change in changes {
@@ -190,6 +223,7 @@ BrowserAssetWatcher: struct {
         self.known = current
         BrowserAssetPoll{changes: kept, skipped: skipped}
     }
+
     frame: fn(&self, session_id: String) -> String {
         polled: self.poll()
         prefix: "{self.root}/"
@@ -284,9 +318,11 @@ ResidentDevSession: struct {
     new: fn(entry: String, canvas_port: Int, application_port: Int) -> ResidentDevSession {
         ResidentDevSession.new_with_hosts(entry, "127.0.0.1", canvas_port, "127.0.0.1", application_port)
     }
+
     new_with_canvas_host: fn(entry: String, canvas_host: String, canvas_port: Int, application_port: Int) -> ResidentDevSession {
         ResidentDevSession.new_with_hosts(entry, canvas_host, canvas_port, "127.0.0.1", application_port)
     }
+
     // The id joins this process with a random token, so two sessions of one
     // process never share an id without a process-global counter.
     new_with_hosts: fn(entry: String, canvas_host: String, canvas_port: Int, application_host: String, application_port: Int) -> ResidentDevSession {
@@ -295,31 +331,61 @@ ResidentDevSession: struct {
         envelope_id: "{id}"
         queue_id: "{id}"
         ResidentDevSession{
-            session_id: id, entry: entry, canvas_host: canvas_host, canvas_port_number: canvas_port,
-            application_host_name: application_host, application_port_number: application_port, clock: session_time.start(),
-            current_revision_text: "", live_lineage: None, live_values: [LiveValueFact]{},
-            accepted_revision: "", last_good_revision: "", last_good_program: "", state: "starting",
-            diagnostic_code: "", diagnostic: "", diagnostic_revision: "",
-            selected_source_id: "", selected_output_name: "", selected_target_name: "",
-            debugger: DebuggerSnapshot.idle(), test_state: "idle", capture_fact_list: [CaptureSessionFact]{},
-            last_good_views: [String:RetainedView]{}, clients: [String:Int]{}, receipts: [Receipt]{},
-            devtools: JetDevtoolsEnvelope.new(envelope_id, session_unix_ms()), commands: JetDevtoolsCommandQueue.new(queue_id),
-            browser_game_controls: [JetDevtoolsGameControlRequest]{}, browser_asset_watcher: BrowserAssetWatcher.for_entry(entry),
-            recording: None, project_rebuild_executor: false,
+            session_id: id,
+            entry: entry,
+            canvas_host: canvas_host,
+            canvas_port_number: canvas_port,
+            application_host_name: application_host,
+            application_port_number: application_port,
+            clock: session_time.start(),
+            current_revision_text: "",
+            live_lineage: None,
+            live_values: [LiveValueFact]{},
+            accepted_revision: "",
+            last_good_revision: "",
+            last_good_program: "",
+            state: "starting",
+            diagnostic_code: "",
+            diagnostic: "",
+            diagnostic_revision: "",
+            selected_source_id: "",
+            selected_output_name: "",
+            selected_target_name: "",
+            debugger: DebuggerSnapshot.idle(),
+            test_state: "idle",
+            capture_fact_list: [CaptureSessionFact]{},
+            last_good_views: [String:RetainedView]{},
+            clients: [String:Int]{},
+            receipts: [Receipt]{},
+            devtools: JetDevtoolsEnvelope.new(envelope_id, session_unix_ms()),
+            commands: JetDevtoolsCommandQueue.new(queue_id),
+            browser_game_controls: [JetDevtoolsGameControlRequest]{},
+            browser_asset_watcher: BrowserAssetWatcher.for_entry(entry),
+            recording: None,
+            project_rebuild_executor: false,
         }
     }
+
     note_client: fn(&self, client: String) {
-        if !session_client_id_is_valid(client) -> return
+        if !session_client_id_is_valid(client) {
+            return
+        }
         now: self.clock.elapsed_millis()
         self.expire_clients(now)
-        if !self.clients.has_key(client) && self.clients.len() >= SESSION_MAX_CLIENTS -> return
+        if !self.clients.has_key(client) && self.clients.len() >= SESSION_MAX_CLIENTS {
+            return
+        }
         self.clients[client] = now
     }
+
     drop_client: fn(&self, client: String) {
-        if !session_client_id_is_valid(client) -> return
+        if !session_client_id_is_valid(client) {
+            return
+        }
         self.expire_clients(self.clock.elapsed_millis())
         _: self.clients.remove(client)
     }
+
     expire_clients: fn(&self, now: Int) {
         kept := [String:Int]{}
         loop client in self.clients.keys().to_list() {
@@ -328,10 +394,12 @@ ResidentDevSession: struct {
         }
         self.clients = kept
     }
+
     client_count: fn(&self) -> Int {
         self.expire_clients(self.clock.elapsed_millis())
         self.clients.len()
     }
+
     // Up to 32 queued browser game controls as one command frame; on a
     // serialization failure every taken control returns to the queue front.
     browser_game_control_frame: fn(&self) -> String Err! {
@@ -356,15 +424,18 @@ ResidentDevSession: struct {
         loop request_id in request_ids -> self.update_command_receipt(request_id, "relayed", None)
         Ok(body)
     }
+
     browser_game_asset_frame: fn(&self) -> String {
         frame: self.browser_asset_watcher.frame(self.session_id)
         frame
     }
+
     reopen_game_asset_watcher: fn(&self, entry: String) Err! {
         if entry.trim() == "" -> return Err("browser game asset watcher entry must not be empty")
         self.browser_asset_watcher.reopen(entry)
         Ok()
     }
+
     devtools_events_since: fn(self, cursor: Int?) -> DevtoolsProjection {
         envelope: self.devtools
         source_identity: envelope.source_identity
@@ -387,45 +458,79 @@ ResidentDevSession: struct {
         }
         reset: envelope.reset || cursor == None || truncation
         selection := DevtoolsSelectionFact?{None}
-        if envelope.selection() == .Val(selected) -> selection = Val(DevtoolsSelectionFact{panel_id: selected.panel_id, item_key: selected.item_key ?? ""})
+        if envelope.selection() == .Val(selected) {
+            selection = Val(DevtoolsSelectionFact{panel_id: selected.panel_id, item_key: selected.item_key ?? ""})
+        }
         status: DevtoolsStatusFact{
-            state: envelope.lifecycle, diagnostic_code: session_optional_fact(self.diagnostic_code), diagnostic: session_optional_fact(self.diagnostic),
-            accepted_revision: session_optional_fact(self.accepted_revision), last_good_revision: session_optional_fact(self.last_good_revision),
-            run_target: session_optional_fact(self.selected_target_name), run_output: session_optional_fact(self.selected_output_name), test_state: session_optional_fact(self.test_state),
+            state: envelope.lifecycle,
+            diagnostic_code: session_optional_fact(self.diagnostic_code),
+            diagnostic: session_optional_fact(self.diagnostic),
+            accepted_revision: session_optional_fact(self.accepted_revision),
+            last_good_revision: session_optional_fact(self.last_good_revision),
+            run_target: session_optional_fact(self.selected_target_name),
+            run_output: session_optional_fact(self.selected_output_name),
+            test_state: session_optional_fact(self.test_state),
         }
         DevtoolsProjection{
-            protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id,
-            sequence: envelope.latest_sequence() ?? 0, observed_at: session_unix_ms(), panels: envelope.events_since(cursor), selection: selection,
-            status: status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.commands.receipts(), reset: reset, truncation: truncation,
+            protocol: JET_DEVTOOLS_PROTOCOL,
+            session_id: self.session_id,
+            source_id: source_id,
+            build_id: build_id,
+            revision: revision,
+            world_id: world_id,
+            sequence: envelope.latest_sequence() ?? 0,
+            observed_at: session_unix_ms(),
+            panels: envelope.events_since(cursor),
+            selection: selection,
+            status: status,
+            command_capabilities: self.devtools_command_capabilities(),
+            command_receipts: self.commands.receipts(),
+            reset: reset,
+            truncation: truncation,
         }
     }
+
     observe_source: fn(&self, revision: String) {
-        if revision == "" -> return
+        if revision == "" {
+            return
+        }
         self.current_revision_text = revision
         if self.accepted_revision == "" -> self.accepted_revision = revision
     }
+
     set_live_lineage: fn(&self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
-        if !session_lineage_part(source_id) || !session_lineage_part(build_id) || !session_lineage_part(revision) || !session_lineage_part(world_id) -> return Err("live lineage is incomplete")
+        if !session_lineage_part(source_id) || !session_lineage_part(build_id) || !session_lineage_part(revision) || !session_lineage_part(world_id) {
+            return Err("live lineage is incomplete")
+        }
         self.live_lineage = Val(LiveLineage{protocol: "jet.live.v1", session_id: self.session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id})
         self.observe_source(revision)
         self.set_devtools_source_identity(Val("{source_id}"), Val("{build_id}"), Val("{revision}"), Val("{world_id}"))
         Ok()
     }
+
     capture_facts: fn(self) -> [CaptureSessionFact] Never! { self.capture_fact_list }
+
     trim_capture_facts: fn(&self) {
-        loop self.capture_fact_list.len() > SESSION_MAX_RECEIPTS -> _: self.capture_fact_list.remove(0, .Slot)
+        loop self.capture_fact_list.len() > SESSION_MAX_RECEIPTS {
+            _: self.capture_fact_list.remove(0, .Slot)
+        }
     }
+
     validate_capture_identity: fn(self, identity: CaptureIdentity) CaptureSinkError! {
         if !identity.is_exact() -> return Err(CaptureSinkError.IncompleteIdentity)
         if identity.session_id != self.session_id -> return Err(CaptureSinkError.SessionMismatch)
         lineage: self.live_lineage ?? return Err(CaptureSinkError.NoLiveLineage)
-        if identity.source_id != lineage.source_id || identity.build_id != lineage.build_id || identity.revision != lineage.revision -> return Err(CaptureSinkError.LineageMismatch)
+        if identity.source_id != lineage.source_id || identity.build_id != lineage.build_id || identity.revision != lineage.revision {
+            return Err(CaptureSinkError.LineageMismatch)
+        }
         Ok()
     }
+
     mark_building: fn(&self) {
         self.state = "building"
         self.publish_session_state("building", "", "")
     }
+
     mark_ready: fn(&self) {
         self.state = "ready"
         self.diagnostic_code = ""
@@ -433,6 +538,7 @@ ResidentDevSession: struct {
         self.diagnostic_revision = ""
         self.publish_session_state("ready", "", "")
     }
+
     mark_error: fn(&self, code: String, diagnostic: String) {
         self.state = "error"
         self.diagnostic_code = code
@@ -440,53 +546,88 @@ ResidentDevSession: struct {
         self.diagnostic_revision = self.current_revision_text
         self.publish_session_state("error", code, diagnostic)
     }
+
     mark_stopped: fn(&self) {
         self.state = "stopped"
         self.publish_session_state("stopped", "", "")
     }
+
     devtools_json: fn(self) -> String Err! { self.devtools.serialize() }
-    devtools_panel_catalog: fn(self) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.canonical() }
+
+    devtools_panel_catalog: fn(self) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+        JetDevtoolsPanelCatalog.canonical()
+    }
+
     devtools_panels: fn(self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] JetDevtoolsPanelCatalogError! {
         catalog: JetDevtoolsPanelCatalog.canonical()
         Ok(catalog.project(self.devtools, host, grants))
     }
+
     current_revision: fn(self) -> String Never! { self.current_revision_text }
-    devtools_command_receipts: fn(self) -> [JetDevtoolsCommandReceipt] Never! { self.commands.receipts() }
+
+    devtools_command_receipts: fn(self) -> [JetDevtoolsCommandReceipt] Never! {
+        self.commands.receipts()
+    }
+
     devtools_command_capabilities: fn(self) -> DevtoolsCommandCapabilities Never! {
         reason := String?{None}
-        if !self.project_rebuild_executor -> reason = Val("no rebuild executor is registered for this host")
-        else if self.current_revision_text == "" -> reason = Val("source revision is unavailable")
+        if !self.project_rebuild_executor {
+            reason = Val("no rebuild executor is registered for this host")
+        } else if self.current_revision_text == "" {
+            reason = Val("source revision is unavailable")
+        }
         DevtoolsCommandCapabilities{project_rebuild: reason == None, project_rebuild_reason: reason}
     }
+
     // One rebuild executor per host; the host unregisters it when it stops.
     register_project_rebuild_executor: fn(&self) Err! {
-        if self.project_rebuild_executor -> return Err("a project rebuild executor is already registered")
+        if self.project_rebuild_executor {
+            return Err("a project rebuild executor is already registered")
+        }
         self.project_rebuild_executor = true
         Ok()
     }
+
     unregister_project_rebuild_executor: fn(&self) { self.project_rebuild_executor = false }
+
     project_rebuild_executor_available: fn(self) -> Bool Never! { self.project_rebuild_executor }
+
     validate_devtools_command_admission: fn(self, command: JetDevtoolsCommand) Err! {
         command.validate()
-        if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        if command.session_id() != self.session_id {
+            return Err("jet.devtools.v1 command session identity mismatch")
+        }
         if command == .ProjectRebuild(request) {
-            if !self.project_rebuild_executor -> return Err("no rebuild executor is registered for this host")
-            if request.expected_revision != self.current_revision_text -> return Err("source changed since this rebuild was requested")
+            if !self.project_rebuild_executor {
+                return Err("no rebuild executor is registered for this host")
+            }
+            if request.expected_revision != self.current_revision_text {
+                return Err("source changed since this rebuild was requested")
+            }
         }
         Ok()
     }
-    enqueue_devtools_command: fn(&self, &&command: JetDevtoolsCommand) Err! {
+
+    enqueue_devtools_command: fn(&self, command: &&JetDevtoolsCommand) Err! {
         self.validate_devtools_command_admission(command)
         self.commands.enqueue(command)
         Ok()
     }
+
     // Why the queued rebuild `request` cannot run now, if it cannot.
     rebuild_refusal: fn(self, request: JetDevtoolsProjectRebuildRequest) -> String? Never! {
-        if request.session_id != self.session_id -> return Val("jet.devtools.v1 command session identity mismatch")
-        if !self.project_rebuild_executor -> return Val("no rebuild executor is registered for this host")
-        if request.expected_revision != self.current_revision_text -> return Val("source changed since this rebuild was requested")
+        if request.session_id != self.session_id {
+            return Val("jet.devtools.v1 command session identity mismatch")
+        }
+        if !self.project_rebuild_executor {
+            return Val("no rebuild executor is registered for this host")
+        }
+        if request.expected_revision != self.current_revision_text {
+            return Val("source changed since this rebuild was requested")
+        }
         None
     }
+
     take_project_rebuild: fn(&self) -> JetDevtoolsProjectRebuildRequest? Err! {
         command: self.commands.poll() ?? return Ok(None)
         is_rebuild: command == .ProjectRebuild(_)
@@ -505,19 +646,28 @@ ResidentDevSession: struct {
         }
         Ok(None)
     }
-    finish_project_rebuild: fn(&self, request: JetDevtoolsProjectRebuildRequest, &&failure: String?) Err! {
+
+    finish_project_rebuild: fn(&self, request: JetDevtoolsProjectRebuildRequest, failure: &&String?) Err! {
         request.validate()
-        if request.session_id != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
-        if failure == None {
-            self.commands.update_receipt(request.request_id, "completed", None)
-        } else {
+        if request.session_id != self.session_id {
+            return Err("jet.devtools.v1 command session identity mismatch")
+        }
+        if failure == None -> self.commands.update_receipt(request.request_id, "completed", None) else {
             self.commands.update_receipt(request.request_id, "failed", failure.move())
         }
         Ok()
     }
-    publish_devtools_event: fn(&self, &&event: JetDevtoolsEvent) -> Int Err! { self.push_devtools_event(event) }
-    enqueue_game_control: fn(&self, &&request: JetDevtoolsGameControlRequest) Err! { self.enqueue_devtools_command(JetDevtoolsCommand.GameControl{request: request.move()}) }
+
+    publish_devtools_event: fn(&self, event: &&JetDevtoolsEvent) -> Int Err! {
+        self.push_devtools_event(event)
+    }
+
+    enqueue_game_control: fn(&self, request: &&JetDevtoolsGameControlRequest) Err! {
+        self.enqueue_devtools_command(JetDevtoolsCommand.GameControl{request: request.move()})
+    }
+
     poll_devtools_command: fn(&self) -> JetDevtoolsCommand? Never! { self.commands.poll() }
+
     // The runtime host pulls EXPLAIN work from the session's queue; nothing
     // is dispatched through a process-global callback.
     poll_database_explain: fn(&self) -> JetDevtoolsDatabaseExplainRequest? Never! {
@@ -525,21 +675,30 @@ ResidentDevSession: struct {
         self.update_command_receipt(request.request_id, "dispatched", None)
         Val(request)
     }
-    update_command_receipt: fn(&self, request_id: String, &&status: String, &&error: String?) {
+
+    update_command_receipt: fn(&self, request_id: String, status: &&String, error: &&String?) {
         self.commands.update_receipt(request_id, status, error).drop("a receipt for a request the queue no longer holds has nothing to update")
     }
-    publish_database_explain_result: fn(&self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: Int, &&source: String) -> Int Err! {
-        if result.session_id != self.session_id -> return Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
+
+    publish_database_explain_result: fn(&self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: Int, source: &&String) -> Int Err! {
+        if result.session_id != self.session_id {
+            return Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
+        }
         result.validate()
         event: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", "{result.statement_identity}", result.render_json())
         self.push_devtools_event(event.move())
     }
+
     ingest_devtools_envelope: fn(&self, decoded: JetDevtoolsDecodedEnvelope) -> Int Err! {
         decoded.validate()
-        if decoded.session_id() != self.session_id -> return Err("jet.devtools.v1 envelope session identity mismatch")
+        if decoded.session_id() != self.session_id {
+            return Err("jet.devtools.v1 envelope session identity mismatch")
+        }
         if decoded == {
             .Events(envelope) -> {
-                if envelope.source_identity == .Val(identity) -> self.set_devtools_source_identity(identity.source_id, identity.build_id, identity.revision, identity.world_id)
+                if envelope.source_identity == .Val(identity) {
+                    self.set_devtools_source_identity(identity.source_id, identity.build_id, identity.revision, identity.world_id)
+                }
                 events: envelope.events()
                 count := 0
                 loop event in events.move() {
@@ -565,22 +724,27 @@ ResidentDevSession: struct {
                     self.validate_devtools_command_admission(command)
                     if command == .GameControl(_) -> game_count += 1
                 }
-                if self.commands.command_count() + total - game_count > JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
-                if self.browser_game_controls.len() + game_count > JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 browser game command queue is full")
+                if self.commands.command_count() + total - game_count > JET_DEVTOOLS_MAX_COMMANDS {
+                    return Err("jet.devtools.v1 command queue is full")
+                }
+                if self.browser_game_controls.len() + game_count > JET_DEVTOOLS_MAX_COMMANDS {
+                    return Err("jet.devtools.v1 browser game command queue is full")
+                }
                 loop command in commands.move() {
                     is_game: command == .GameControl(_)
                     if is_game {
                         self.commands.record_receipt(command, "queued", None)
-                        if command.move() == .GameControl(request) -> self.browser_game_controls.push(request.move())
-                    } else {
-                        self.commands.enqueue(command.move())
-                    }
+                        if command.move() == .GameControl(request) {
+                            self.browser_game_controls.push(request.move())
+                        }
+                    } else { self.commands.enqueue(command.move()) }
                 }
                 Ok(total)
             }
         }
     }
-    publish_panel_events: fn(&self, &&events: [JetDevtoolsEvent]) -> Int Err! {
+
+    publish_panel_events: fn(&self, events: &&[JetDevtoolsEvent]) -> Int Err! {
         count := 0
         loop event in events.move() {
             _: self.push_devtools_event(event.move())

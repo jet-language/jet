@@ -73,7 +73,7 @@ debug_test_local: fn(snapshot: DebugSnapshot, name: String) -> String Never! {
     src: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
     debug_test_files.write(source, src) ?? panic("source: {err}")
     revision: source_revision(src)
-    sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
+    sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String:DebugSession]{}, pause_on_input_end: true}
     first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .NativeLLDB) ?? panic("execute: {err.body}")
     assert(first.status == SessionStatus.Running)
     paused: first.snapshot ?? panic("first stop has no snapshot: {first.transcript}")

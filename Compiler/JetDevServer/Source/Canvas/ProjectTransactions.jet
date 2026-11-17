@@ -6,8 +6,15 @@
 use {
     tx_files: core.files
     jet_canvas.[
-        CanvasSourceError, SourceWriteError, ensure_no_symlink_directory, json_bool, json_str, read_source_without_symlinks, replace_source_if_unchanged_locked,
-        source_revision, write_new_file_without_symlinks,
+        CanvasSourceError,
+        SourceWriteError,
+        ensure_no_symlink_directory,
+        json_bool,
+        json_str,
+        read_source_without_symlinks,
+        replace_source_if_unchanged_locked,
+        source_revision,
+        write_new_file_without_symlinks,
     ]
     jet_driver.[jet_driver_apply_edits, jet_driver_has_errors]
     jet_env_model.[envmodel_evaluate_env, envmodel_workspace_evaluate]
@@ -63,7 +70,9 @@ required_project_touched_files: fn(request: String) -> [TouchedProjectFile] Err!
         revision: json_string_field(object, "revision") ?? return Err(project_edit_error("bad_request", "touched file missing `revision`"))
         files.push(TouchedProjectFile{path: path, revision: revision})
     }
-    if files.len() == 0 -> return Err(project_edit_error("bad_request", "Canvas project transactions must name touched files"))
+    if files.len() == 0 {
+        return Err(project_edit_error("bad_request", "Canvas project transactions must name touched files"))
+    }
     Ok(files)
 }
 
@@ -105,7 +114,9 @@ apply_project_edit_game_selection: fn(checker: LSPChecker, ctx: ProjectContext, 
     loop target in targets {
         require_touched_revision(touched, target.source_id, target.revision)
         file_revision: project_file_revision(ctx, target.source_id) ?? return Err(project_edit_error("not_found", "game selection source is not in the projected project"))
-        if !target.source_id.ends_with(".{FILE_EXT}") -> return Err(project_edit_error("bad_request", "game selection source must be a Jet source file"))
+        if !target.source_id.ends_with(".{FILE_EXT}") {
+            return Err(project_edit_error("bad_request", "game selection source must be a Jet source file"))
+        }
         path: tx_files.join(ctx.project_root, target.source_id)
         validate_project_path(ctx.project_root, path, target.source_id)
         at := game_source_index(sources, target.source_id)
@@ -150,16 +161,24 @@ required_game_selection_targets: fn(request: String) -> [GameSelectionTarget] Er
         raw_source: json_string_field(object, "source_id") ?? return Err(project_edit_error("bad_request", "game selection target missing `source_id`"))
         source_id: clean_project_rel_path(raw_source)
         revision: json_string_field(object, "revision") ?? return Err(project_edit_error("bad_request", "game selection target missing `revision`"))
-        if revision.trim() == "" -> return Err(project_edit_error("bad_request", "game selection target has an empty `revision`"))
+        if revision.trim() == "" {
+            return Err(project_edit_error("bad_request", "game selection target has an empty `revision`"))
+        }
         authored_instance_id: json_string_field(object, "authored_instance_id") ?? return Err(project_edit_error("bad_request", "game selection target missing `authored_instance_id`"))
-        if authored_instance_id.trim() == "" -> return Err(project_edit_error("bad_request", "game selection target has an empty `authored_instance_id`"))
+        if authored_instance_id.trim() == "" {
+            return Err(project_edit_error("bad_request", "game selection target has an empty `authored_instance_id`"))
+        }
         span_body: json_object_body(object, "source_span") ?? return Err(project_edit_error("bad_request", "game selection target missing `source_span`"))
         start: json_int_field(span_body, "start") ?? return Err(project_edit_error("bad_request", "game selection `source_span` missing `start`"))
         end: json_int_field(span_body, "end") ?? return Err(project_edit_error("bad_request", "game selection `source_span` missing `end`"))
-        if start >= end -> return Err(project_edit_error("bad_request", "game selection `source_span` must be non-empty"))
+        if start >= end {
+            return Err(project_edit_error("bad_request", "game selection `source_span` must be non-empty"))
+        }
         targets.push(GameSelectionTarget{source_id: source_id, revision: revision, authored_instance_id: authored_instance_id, source_span: Span{start: start, end: end}})
     }
-    if targets.len() == 0 -> return Err(project_edit_error("bad_request", "edit_game_selection needs at least one target"))
+    if targets.len() == 0 {
+        return Err(project_edit_error("bad_request", "edit_game_selection needs at least one target"))
+    }
     Ok(targets)
 }
 
@@ -167,7 +186,9 @@ required_game_selection_patch: fn(request: String) -> GameSelectionPatch Err! {
     body: json_object_body(request, "field_patch") ?? return Err(project_edit_error("bad_request", "missing `field_patch`"))
     field: json_string_field(body, "field") ?? return Err(project_edit_error("bad_request", "game field patch missing `field`"))
     value: json_string_field(body, "value") ?? return Err(project_edit_error("bad_request", "game field patch missing `value`"))
-    if field.trim() == "" -> return Err(project_edit_error("bad_request", "game field patch has an empty `field`"))
+    if field.trim() == "" {
+        return Err(project_edit_error("bad_request", "game field patch has an empty `field`"))
+    }
     Ok(GameSelectionPatch{field: field, value: value})
 }
 
@@ -180,11 +201,15 @@ game_selection_audit_json: fn(targets: [GameSelectionTarget], patch: GameSelecti
 // asset path is an `image`/`sound` argument, a component type is the generic
 // argument of a `.component<…>(…)` call.
 game_field_edit: fn(source: String, source_span: Span, field: String, value: String) -> TextEdit Err! {
-    if source_span.end > source.count_bytes() -> return Err(project_edit_error("bad_request", "game selection `source_span` is outside the source file"))
+    if source_span.end > source.count_bytes() {
+        return Err(project_edit_error("bad_request", "game selection `source_span` is outside the source file"))
+    }
     selected: foundation_byte_text(source.bytes(), source_span.start, source_span.end)
     name: field.trim()
     if name == "path" {
-        if game_call_argument_span(selected, source_span.start, [String]{"image", "sound"}) == .Val(span) -> return Ok(edit(span, game_string_literal(value)))
+        if game_call_argument_span(selected, source_span.start, [String]{"image", "sound"}) == .Val(span) {
+            return Ok(edit(span, game_string_literal(value)))
+        }
         if is_quoted_source(selected) && game_source_context_contains(source, source_span, [String]{".image(", ".sound("}) {
             return Ok(edit(source_span, game_string_literal(value)))
         }
@@ -211,7 +236,9 @@ game_source_context_contains: fn(source: String, span: Span, needles: [String]) 
     loop needle in needles {
         position: prefix.rfind(needle)
         if position < 0 -> next
-        if foundation_byte_text(prefix.bytes(), position + needle.count_bytes(), prefix.count_bytes()).trim() == "" -> return true
+        if foundation_byte_text(prefix.bytes(), position + needle.count_bytes(), prefix.count_bytes()).trim() == "" {
+            return true
+        }
     }
     false
 }
@@ -240,20 +267,12 @@ game_call_argument_span: fn(selected: String, offset: Int, methods: [String]) ->
     loop index < bytes.len() {
         byte: Int{bytes[index]}
         if in_string {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 in_string = false
             }
-        } else if byte == 34 {
-            in_string = true
-        } else if byte == 40 || byte == 91 || byte == 123 {
+        } else if byte == 34 { in_string = true } else if byte == 40 || byte == 91 || byte == 123 {
             depth += 1
-        } else if (byte == 41 || byte == 93 || byte == 125) && depth > 0 {
-            depth -= 1
-        } else if (byte == 41 || byte == 44) && depth == 0 {
+        } else if (byte == 41 || byte == 93 || byte == 125) && depth > 0 { depth -= 1 } else if (byte == 41 || byte == 44) && depth == 0 {
             end = index
             break
         }
@@ -289,12 +308,8 @@ game_component_type_span: fn(selected: String, offset: Int) -> Span? Never! {
 trim_byte_range: fn(bytes: [U8], start: Int, end: Int) -> ByteRange? Never! {
     from := start
     to := end
-    loop from < to && is_ascii_space(Int{bytes[from]}) {
-        from += 1
-    }
-    loop to > from && is_ascii_space(Int{bytes[to - 1]}) {
-        to -= 1
-    }
+    loop from < to && is_ascii_space(Int{bytes[from]}) -> from += 1
+    loop to > from && is_ascii_space(Int{bytes[to - 1]}) -> to -= 1
     if from >= to -> return None
     Val(ByteRange{start: from, end: to})
 }
@@ -317,7 +332,9 @@ is_game_type_name: fn(value: String) -> Bool Never! {
 }
 
 validate_game_type_name: fn(value: String) Err! {
-    if !is_game_type_name(value.trim()) -> return Err(project_edit_error("bad_request", "game component type must be a Jet type name"))
+    if !is_game_type_name(value.trim()) {
+        return Err(project_edit_error("bad_request", "game component type must be a Jet type name"))
+    }
     Ok()
 }
 
@@ -358,20 +375,12 @@ json_object_body: fn(text: String, key: String) -> String? Never! {
     loop index in 0..<bytes.len() {
         byte: Int{bytes[index]}
         if in_string {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 in_string = false
             }
             next
         }
-        if byte == 34 {
-            in_string = true
-        } else if byte == 123 {
-            depth += 1
-        } else if byte == 125 {
+        if byte == 34 -> in_string = true else if byte == 123 -> depth += 1 else if byte == 125 {
             depth -= 1
             if depth == 0 -> return Val(foundation_byte_text(bytes, 1, index))
         }
@@ -432,20 +441,24 @@ touched_has_path: fn(touched: [TouchedProjectFile], path: String) -> Bool Never!
 // `..`, empty or reserved parts.
 clean_project_rel_path: fn(path: String) -> String Err! {
     text := path.trim()
-    loop text.starts_with("./") {
-        text = text.removeprefix("./")
-    }
+    loop text.starts_with("./") -> text = text.removeprefix("./")
     if text == "" || text.contains("\\") || tx_files.is_abs(text) {
         return Err(project_edit_error("bad_request", "Canvas project paths must be relative source paths"))
     }
     parts := [String]{}
     loop part in text.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(project_edit_error("bad_request", "Canvas project paths must stay inside the project"))
-        if is_reserved_project_path_part(part) -> return Err(project_edit_error("bad_request", "Canvas project paths must not touch reserved project directories"))
+        if part == ".." {
+            return Err(project_edit_error("bad_request", "Canvas project paths must stay inside the project"))
+        }
+        if is_reserved_project_path_part(part) {
+            return Err(project_edit_error("bad_request", "Canvas project paths must not touch reserved project directories"))
+        }
         parts.push(part)
     }
-    if parts.len() == 0 -> return Err(project_edit_error("bad_request", "Canvas project paths must stay inside the project"))
+    if parts.len() == 0 {
+        return Err(project_edit_error("bad_request", "Canvas project paths must stay inside the project"))
+    }
     Ok(parts.join("/"))
 }
 
@@ -457,7 +470,9 @@ is_reserved_project_path_part: fn(part: String) -> Bool Never! {
 // is a symlink, a non-directory parent, or outside the root.
 validate_project_path: fn(root: String, path: String, relative: String) Err! {
     root_info: tx_files.stat(root) ?? return Err(project_edit_error("io", "could not inspect the Canvas project root: {err}"))
-    if root_info.is_symlink || !root_info.is_dir -> return Err(project_edit_error("io", "Canvas project root must be a real directory"))
+    if root_info.is_symlink || !root_info.is_dir {
+        return Err(project_edit_error("io", "Canvas project root must be a real directory"))
+    }
     if relative == "" || tx_files.is_abs(relative) || !path_under(path, root) {
         return Err(project_edit_error("bad_request", "Canvas project paths must stay inside the project"))
     }
@@ -466,7 +481,9 @@ validate_project_path: fn(root: String, path: String, relative: String) Err! {
     current := root
     loop index in 0..<components.len() {
         current = tx_files.join(current, components[index])
-        if !check_project_path_component(current, index + 1 < components.len(), canonical_root) -> break
+        if !check_project_path_component(current, index + 1 < components.len(), canonical_root) {
+            break
+        }
     }
     Ok()
 }
@@ -478,10 +495,16 @@ check_project_path_component: fn(path: String, parent: Bool, canonical_root: Str
         if err == .NotFound(_) -> return Ok(false)
         return Err(project_edit_error("io", "could not inspect Canvas project path: {err}"))
     }
-    if info.is_symlink -> return Err(project_edit_error("io", "Canvas project paths must not traverse symlinks"))
-    if parent && !info.is_dir -> return Err(project_edit_error("io", "Canvas project path has a non-directory parent"))
+    if info.is_symlink {
+        return Err(project_edit_error("io", "Canvas project paths must not traverse symlinks"))
+    }
+    if parent && !info.is_dir {
+        return Err(project_edit_error("io", "Canvas project path has a non-directory parent"))
+    }
     canonical: tx_files.canonicalize(path) ?? return Err(project_edit_error("io", "could not resolve Canvas project path: {err}"))
-    if !path_under(canonical, canonical_root) -> return Err(project_edit_error("io", "Canvas project path escapes the project root"))
+    if !path_under(canonical, canonical_root) {
+        return Err(project_edit_error("io", "Canvas project path escapes the project root"))
+    }
     Ok(true)
 }
 
@@ -527,14 +550,18 @@ apply_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, request: Stri
     if json_string_field(request, "source_id") == .Val(raw) {
         selected_rel = clean_project_rel_path(raw)
     }
-    if !project_has_source(ctx, selected_rel) -> return Err(project_edit_error("not_found", "Canvas rename source is not in the projected project"))
+    if !project_has_source(ctx, selected_rel) {
+        return Err(project_edit_error("not_found", "Canvas rename source is not in the projected project"))
+    }
     from: required_project_string(request, "from")
     to: required_project_string(request, "to")
     validate_ident_for_project(from)
     validate_ident_for_project(to)
     selected_path: tx_files.join(ctx.project_root, selected_rel)
     plan: prepare_project_rename(checker, ctx, selected_path, from, to, Val(touched)) ?? {
-        if err.kind == "conflict" -> return Err(project_edit_conflict(err.message, project_context_for_entry(ctx.entry_path).project_revision))
+        if err.kind == "conflict" {
+            return Err(project_edit_conflict(err.message, project_context_for_entry(ctx.entry_path).project_revision))
+        }
         return Err(project_edit_error(err.kind, err.message))
     }
     op: json_string_field(request, "op") ?? "rename_binding"
@@ -546,14 +573,18 @@ apply_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, request: Stri
 // definition (or the one project definition the selected file's references
 // reach) and every reference to it.
 prepare_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, selected_path: String, from: String, to: String, touched: [TouchedProjectFile]?) -> ProjectRenamePlan ProjectRenameError! {
-    if ctx.authority_diagnostic == .Val(diagnostic) -> return Err(ProjectRenameError{kind: "stale", message: diagnostic.what})
+    if ctx.authority_diagnostic == .Val(diagnostic) {
+        return Err(ProjectRenameError{kind: "stale", message: diagnostic.what})
+    }
     sources: project_rename_sources(checker, ctx)
     selected_id: rel_path(ctx.project_root, selected_path).removeprefix("./")
     selected := -1
     loop at in 0..<sources.len() {
         if sources[at].source_id == selected_id -> selected = at
     }
-    if selected < 0 -> return Err(ProjectRenameError{kind: "not_found", message: "Canvas rename source is not in the projected project"})
+    if selected < 0 {
+        return Err(ProjectRenameError{kind: "not_found", message: "Canvas rename source is not in the projected project"})
+    }
     anchor: selected_rename_anchor(ctx, sources[selected], from)
     sites := [ProjectRenameSite]{}
     seen := [String:Bool]{}
@@ -561,15 +592,21 @@ prepare_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, selected_pa
         source: sources[at]
         loop definition in source.index.definitions {
             def: definition.def
-            if def.name != from || !module_belongs_to(ctx.project_root, source.path, def.module_path) || !definition_matches_anchor(def, anchor) -> next
+            if def.name != from || !module_belongs_to(ctx.project_root, source.path, def.module_path) || !definition_matches_anchor(def, anchor) {
+                next
+            }
             add_project_rename_site(sites, seen, at, source.source_id, def.def_span)
         }
         loop reference in source.index.references {
-            if reference.name != from || !module_belongs_to(ctx.project_root, source.path, reference.module_path) || !reference_matches_anchor(reference, anchor) -> next
+            if reference.name != from || !module_belongs_to(ctx.project_root, source.path, reference.module_path) || !reference_matches_anchor(reference, anchor) {
+                next
+            }
             add_project_rename_site(sites, seen, at, source.source_id, reference.span)
         }
     }
-    if sites.len() == 0 -> return Err(ProjectRenameError{kind: "not_found", message: "Canvas found no project binding named `{from}`"})
+    if sites.len() == 0 {
+        return Err(ProjectRenameError{kind: "not_found", message: "Canvas found no project binding named `{from}`"})
+    }
     changes := [ProjectChange]{}
     loop at in 0..<sources.len() {
         edits := [TextEdit]{}
@@ -606,7 +643,9 @@ project_rename_sources: fn(checker: LSPChecker, ctx: ProjectContext) -> [Project
     loop file in ctx.files {
         if file.kind != "source" -> next
         path: tx_files.join(ctx.project_root, file.path)
-        if validate_project_path(ctx.project_root, path, file.path) == .Err(error) -> return Err(ProjectRenameError{kind: "stale", message: error.message})
+        if validate_project_path(ctx.project_root, path, file.path) == .Err(error) {
+            return Err(ProjectRenameError{kind: "stale", message: error.message})
+        }
         source: read_source_without_symlinks(path) ?? return Err(ProjectRenameError{kind: "stale", message: "Canvas project source moved or unreadable: {err.message}"})
         if source_revision(source) != file.revision {
             return Err(ProjectRenameError{kind: "conflict", message: "project source changed while Canvas was preparing its rename"})
@@ -623,14 +662,18 @@ project_rename_sources: fn(checker: LSPChecker, ctx: ProjectContext) -> [Project
 selected_rename_anchor: fn(ctx: ProjectContext, selected: ProjectRenameSource, from: String) -> SemAnchor ProjectRenameError! {
     definitions := [SemDef]{}
     loop definition in selected.index.definitions {
-        if definition.def.name == from && module_belongs_to(ctx.project_root, selected.path, definition.def.module_path) -> definitions.push(definition.def)
+        if definition.def.name == from && module_belongs_to(ctx.project_root, selected.path, definition.def.module_path) {
+            definitions.push(definition.def)
+        }
     }
     if definitions.len() == 1 {
         def: definitions[0]
         kind: semindex_definition_kind(def.kind)
         return Ok(SemAnchor{module_path: def.module_path, kind: if kind == "variant" -> "enum_variant" else -> kind, def_span: def.def_span, semantic_identity: Val(def.identity)})
     }
-    if definitions.len() > 1 -> return Err(ProjectRenameError{kind: "ambiguous", message: "Canvas rename needs one selected definition anchor"})
+    if definitions.len() > 1 {
+        return Err(ProjectRenameError{kind: "ambiguous", message: "Canvas rename needs one selected definition anchor"})
+    }
     targets := [SemAnchor]{}
     seen := [String:Bool]{}
     loop reference in selected.index.references {
@@ -643,7 +686,9 @@ selected_rename_anchor: fn(ctx: ProjectContext, selected: ProjectRenameSource, f
         targets.push(SemAnchor{module_path: target.module_path, kind: target.kind, def_span: target.def_span, semantic_identity: target.semantic_identity})
     }
     if targets.len() == 1 -> return Ok(targets[0])
-    if targets.len() == 0 -> return Err(ProjectRenameError{kind: "not_found", message: "Canvas found no project binding named `{from}`"})
+    if targets.len() == 0 {
+        return Err(ProjectRenameError{kind: "not_found", message: "Canvas found no project binding named `{from}`"})
+    }
     Err(ProjectRenameError{kind: "ambiguous", message: "Canvas rename target is ambiguous across project definitions"})
 }
 
@@ -655,27 +700,35 @@ anchor_key: fn(anchor: SemAnchor) -> String Never! {
 
 project_owns_module: fn(ctx: ProjectContext, module_path: String) -> Bool Never! {
     loop file in ctx.files {
-        if file.kind == "source" && module_belongs_to(ctx.project_root, tx_files.join(ctx.project_root, file.path), module_path) -> return true
+        if file.kind == "source" && module_belongs_to(ctx.project_root, tx_files.join(ctx.project_root, file.path), module_path) {
+            return true
+        }
     }
     false
 }
 
 add_project_rename_site: fn(sites: &[ProjectRenameSite], seen: &[String:Bool], source: Int, source_id: String, span: Span) Never! {
     key: "{source_id}\n{span.start}\n{span.end}"
-    if seen.has_key(key) -> return
+    if seen.has_key(key) {
+        return
+    }
     seen[key] = true
     sites.push(ProjectRenameSite{source: source, span: span})
 }
 
 definition_matches_anchor: fn(def: SemDef, anchor: SemAnchor) -> Bool Never! {
-    if def.module_path != anchor.module_path || def.def_span.start != anchor.def_span.start || def.def_span.end != anchor.def_span.end -> return false
+    if def.module_path != anchor.module_path || def.def_span.start != anchor.def_span.start || def.def_span.end != anchor.def_span.end {
+        return false
+    }
     if anchor.semantic_identity == .Val(identity) -> return identity == def.identity
     true
 }
 
 reference_matches_anchor: fn(reference: SemRef, anchor: SemAnchor) -> Bool Never! {
     target: reference.target ?? return false
-    if target.def_span.start != anchor.def_span.start || target.def_span.end != anchor.def_span.end -> return false
+    if target.def_span.start != anchor.def_span.start || target.def_span.end != anchor.def_span.end {
+        return false
+    }
     if target.semantic_identity == .Val(left) {
         if anchor.semantic_identity == .Val(right) -> return left == right
     }
@@ -686,7 +739,9 @@ reference_matches_anchor: fn(reference: SemRef, anchor: SemAnchor) -> Bool Never
 
 apply_project_add_dependency: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)
-    if !touched_has_path(touched, manifest_rel) -> return Err(project_edit_error("bad_request", "add_dependency must touch the edited Package file"))
+    if !touched_has_path(touched, manifest_rel) {
+        return Err(project_edit_error("bad_request", "add_dependency must touch the edited Package file"))
+    }
     name: required_project_string(request, "name")
     validate_ident_for_project(name)
     spec_text: required_project_string(request, "spec")
@@ -704,7 +759,9 @@ apply_project_add_dependency: fn(checker: LSPChecker, ctx: ProjectContext, reque
 
 apply_project_remove_dependency: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)
-    if !touched_has_path(touched, manifest_rel) -> return Err(project_edit_error("bad_request", "remove_dependency must touch the edited Package file"))
+    if !touched_has_path(touched, manifest_rel) {
+        return Err(project_edit_error("bad_request", "remove_dependency must touch the edited Package file"))
+    }
     name: required_project_string(request, "name")
     validate_ident_for_project(name)
     before: read_project_manifest(ctx, manifest_rel)
@@ -714,7 +771,9 @@ apply_project_remove_dependency: fn(checker: LSPChecker, ctx: ProjectContext, re
 
 apply_project_edit_pkg_field: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)
-    if !touched_has_path(touched, manifest_rel) -> return Err(project_edit_error("bad_request", "edit_pkg_field must touch the edited Package file"))
+    if !touched_has_path(touched, manifest_rel) {
+        return Err(project_edit_error("bad_request", "edit_pkg_field must touch the edited Package file"))
+    }
     field: required_project_string(request, "field")
     value: required_project_string(request, "value")
     validate_payload_field(field, value)
@@ -725,13 +784,17 @@ apply_project_edit_pkg_field: fn(checker: LSPChecker, ctx: ProjectContext, reque
 
 apply_project_add_target: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)
-    if !touched_has_path(touched, manifest_rel) -> return Err(project_edit_error("bad_request", "add_target must touch the edited Package file"))
+    if !touched_has_path(touched, manifest_rel) {
+        return Err(project_edit_error("bad_request", "add_target must touch the edited Package file"))
+    }
     name: required_project_string(request, "name")
     validate_ident_for_project(name)
     target: project_target_text(json_string_field(request, "target") ?? "executable")
     before: read_project_manifest(ctx, manifest_rel)
     facts: parse_project_package(before, manifest_rel)
-    if facts.outputs.has_key(name) -> return Err(project_edit_error("conflict", "target `{name}` already exists"))
+    if facts.outputs.has_key(name) {
+        return Err(project_edit_error("conflict", "target `{name}` already exists"))
+    }
     kind: output_kind_for_target(target)
     entry: json_string_field(request, "entry") ?? "run"
     entry_name := entry
@@ -755,8 +818,12 @@ apply_project_create_package: fn(checker: LSPChecker, ctx: ProjectContext, reque
     if json_string_field(request, "entry") == .Val(raw_entry) {
         entry_rel = clean_project_rel_path(raw_entry)
     }
-    if !entry_rel.starts_with("{package_rel}/") -> return Err(project_edit_error("bad_request", "create_package entry must be inside the new package"))
-    if !entry_rel.ends_with(".{FILE_EXT}") -> return Err(project_edit_error("bad_request", "create_package entry must be a Jet source file"))
+    if !entry_rel.starts_with("{package_rel}/") {
+        return Err(project_edit_error("bad_request", "create_package entry must be inside the new package"))
+    }
+    if !entry_rel.ends_with(".{FILE_EXT}") {
+        return Err(project_edit_error("bad_request", "create_package entry must be a Jet source file"))
+    }
     target: project_target_text(json_string_field(request, "target") ?? "executable")
     manifest_rel: "{package_rel}/{PACKAGE_FILE}"
     require_touched_revision(touched, manifest_rel, "missing")
@@ -765,7 +832,9 @@ apply_project_create_package: fn(checker: LSPChecker, ctx: ProjectContext, reque
     entry_path: tx_files.join(ctx.project_root, entry_rel)
     validate_project_path(ctx.project_root, manifest_path, manifest_rel)
     validate_project_path(ctx.project_root, entry_path, entry_rel)
-    if tx_files.exists(manifest_path) || tx_files.exists(entry_path) -> return Err(project_edit_error("conflict", "create_package target already exists"))
+    if tx_files.exists(manifest_path) || tx_files.exists(entry_path) {
+        return Err(project_edit_error("conflict", "create_package target already exists"))
+    }
     output_kind: output_kind_for_target(target)
     manifest: "name: \"{name}\"\nversion: \"0.1.0\"\n{name}: Output.{output_kind}{{ name: \"{name}\", entry: run }}\n"
     _: parse_project_package(manifest, manifest_rel)
@@ -790,7 +859,9 @@ apply_project_add_workspace_member: fn(checker: LSPChecker, ctx: ProjectContext,
     package_rel: "{member_path}/{PACKAGE_FILE}"
     package_path: tx_files.join(member_dir, PACKAGE_FILE)
     validate_project_path(ctx.project_root, package_path, package_rel)
-    if !tx_files.is_file(package_path) -> return Err(project_edit_error("not_found", "workspace member must contain {PACKAGE_FILE}"))
+    if !tx_files.is_file(package_path) {
+        return Err(project_edit_error("not_found", "workspace member must contain {PACKAGE_FILE}"))
+    }
     workspace_path: tx_files.join(ctx.project_root, workspace_rel)
     validate_project_path(ctx.project_root, workspace_path, workspace_rel)
     existed: tx_files.is_file(workspace_path)
@@ -799,9 +870,7 @@ apply_project_add_workspace_member: fn(checker: LSPChecker, ctx: ProjectContext,
     if existed -> revision = project_file_revision(ctx, workspace_rel) ?? "missing"
     require_touched_revision(touched, workspace_rel, revision)
     after := "workspace: module {{\n    members: [\"./{member_path}\"]\n}}\n"
-    if existed {
-        after = add_workspace_member_to_source(before, member_path)
-    }
+    if existed -> after = add_workspace_member_to_source(before, member_path)
     evaluate_project_workspace(after, ctx.project_root)
     changes := [ProjectChange]{ProjectChange{path: workspace_path, rel: workspace_rel, before: before, after: after, existed: existed}}
     finish_project_changes(checker, ctx, request, "add_workspace_member", changes)
@@ -809,9 +878,7 @@ apply_project_add_workspace_member: fn(checker: LSPChecker, ctx: ProjectContext,
 
 apply_project_add_env_service: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     env_rel := ENV_FILE
-    if json_string_field(request, "env") == .Val(raw) {
-        env_rel = clean_project_rel_path(raw)
-    }
+    if json_string_field(request, "env") == .Val(raw) -> env_rel = clean_project_rel_path(raw)
     env_path: tx_files.join(ctx.project_root, env_rel)
     validate_project_path(ctx.project_root, env_path, env_rel)
     existed: tx_files.is_file(env_path)
@@ -823,9 +890,7 @@ apply_project_add_env_service: fn(checker: LSPChecker, ctx: ProjectContext, requ
     service: env_service_source(request, name)
     before: read_source_without_symlinks(env_path) ?? ""
     after := "env.dev: module {{\n    services: {{ {service} }}\n}}\n"
-    if existed {
-        after = add_env_service_to_source(before, name, service)
-    }
+    if existed -> after = add_env_service_to_source(before, name, service)
     evaluate_project_env(after, ctx.project_root)
     changes := [ProjectChange]{ProjectChange{path: env_path, rel: env_rel, before: before, after: after, existed: existed}}
     finish_project_changes(checker, ctx, request, "add_env_service", changes)
@@ -868,9 +933,7 @@ project_manifest_rel: fn(ctx: ProjectContext, request: String) -> String Err! {
         return Ok(rel)
     }
     root := ctx.project_root
-    if ctx.manifest_root == .Val(manifest_root) {
-        root = manifest_root
-    } else if ctx.ecosystem_root == .Val(ecosystem_root) {
+    if ctx.manifest_root == .Val(manifest_root) -> root = manifest_root else if ctx.ecosystem_root == .Val(ecosystem_root) {
         root = ecosystem_root
     }
     rel: clean_project_rel_path(rel_path(ctx.project_root, tx_files.join(root, PACKAGE_FILE)))
@@ -878,7 +941,9 @@ project_manifest_rel: fn(ctx: ProjectContext, request: String) -> String Err! {
 }
 
 project_target_text: fn(target: String) -> String Err! {
-    if target == "library" || target == "executable" || target == "test" || target == "example" -> return Ok(target)
+    if target == "library" || target == "executable" || target == "test" || target == "example" {
+        return Ok(target)
+    }
     Err(project_edit_error("bad_request", "target must be library, executable, test, or example"))
 }
 
@@ -889,9 +954,15 @@ output_kind_for_target: fn(target: String) -> String Never! {
 }
 
 project_dep_spec: fn(spec: String) -> DepSpec Err! {
-    if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with("/") -> return Ok(DepSpec.Path{path: spec})
-    if spec.starts_with("git@") -> return Err(project_edit_error("unsupported", "Canvas dependency edits accept path or registry specs"))
-    if spec.trim() == "" -> return Err(project_edit_error("bad_request", "dependency spec is empty"))
+    if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with("/") {
+        return Ok(DepSpec.Path{path: spec})
+    }
+    if spec.starts_with("git@") {
+        return Err(project_edit_error("unsupported", "Canvas dependency edits accept path or registry specs"))
+    }
+    if spec.trim() == "" {
+        return Err(project_edit_error("bad_request", "dependency spec is empty"))
+    }
     Ok(DepSpec.Registry(spec))
 }
 
@@ -900,7 +971,9 @@ validate_payload_field: fn(field: String, value: String) Err! {
         validate_ident_for_project(value)
         return Ok()
     }
-    if field == "version" || field == "description" || field == "license" || field == "repository" || field == "homepage" -> return Ok()
+    if field == "version" || field == "description" || field == "license" || field == "repository" || field == "homepage" {
+        return Ok()
+    }
     Err(project_edit_error("bad_request", "Canvas can edit known payload string fields only"))
 }
 
@@ -930,20 +1003,12 @@ top_level_field_range: fn(src: String, field: String) -> ByteRange? Never! {
     loop index in 0..<bytes.len() {
         byte: Int{bytes[index]}
         if quoted {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 quoted = false
             }
             next
         }
-        if byte == 34 {
-            quoted = true
-        } else if byte == 123 || byte == 91 || byte == 40 {
-            depth += 1
-        } else if byte == 125 || byte == 93 || byte == 41 {
+        if byte == 34 -> quoted = true else if byte == 123 || byte == 91 || byte == 40 -> depth += 1 else if byte == 125 || byte == 93 || byte == 41 {
             depth -= 1
         } else if (byte == 44 || byte == 10) && depth == 0 {
             if field_entry_range(src, entry_start, index, field) == .Val(range) -> return Val(range)
@@ -977,20 +1042,12 @@ block_body_range: fn(src: String, label: String) -> ByteRange? Never! {
     loop index in open..<bytes.len() {
         byte: Int{bytes[index]}
         if in_string {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == 34 {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
                 in_string = false
             }
             next
         }
-        if byte == 34 {
-            in_string = true
-        } else if byte == 123 {
-            depth += 1
-        } else if byte == 125 {
+        if byte == 34 -> in_string = true else if byte == 123 -> depth += 1 else if byte == 125 {
             depth -= 1
             if depth == 0 -> return Val(ByteRange{start: open + 1, end: index})
         }
@@ -1001,17 +1058,25 @@ block_body_range: fn(src: String, label: String) -> ByteRange? Never! {
 add_workspace_member_to_source: fn(src: String, member_path: String) -> String Err! {
     bare: member_path.removeprefix("./")
     normalized: "./{bare}"
-    if src.contains("\"{normalized}\"") || src.contains("\"{member_path}\"") || workspace_find_covers(src, member_path) -> return Ok(src)
+    if src.contains("\"{normalized}\"") || src.contains("\"{member_path}\"") || workspace_find_covers(src, member_path) {
+        return Ok(src)
+    }
     // Offsets are bytes: `find` counts bytes, and the text is cut from the bytes.
     bytes: src.bytes()
     members_at: src.find("members")
-    if members_at < 0 -> return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    if members_at < 0 {
+        return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    }
     list_start := members_at
     loop list_start < bytes.len() && bytes[list_start] != (U8{91}) -> list_start += 1
-    if list_start == bytes.len() -> return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    if list_start == bytes.len() {
+        return Err(project_edit_error("unsupported", "Canvas can add workspace members only to a `members: [...]` list"))
+    }
     list_end := list_start
     loop list_end < bytes.len() && bytes[list_end] != (U8{93}) -> list_end += 1
-    if list_end == bytes.len() -> return Err(project_edit_error("diagnostic", "workspace members list is missing `]`"))
+    if list_end == bytes.len() {
+        return Err(project_edit_error("diagnostic", "workspace members list is missing `]`"))
+    }
     inner: foundation_byte_text(bytes, list_start + 1, list_end).trim()
     addition: if inner == "" -> "\"{normalized}\"" else -> ", \"{normalized}\""
     Ok("{foundation_byte_text(bytes, 0, list_end)}{addition}{foundation_byte_text(bytes, list_end, bytes.len())}")
@@ -1029,9 +1094,7 @@ workspace_find_covers: fn(src: String, member_path: String) -> Bool Never! {
     loop close < bytes.len() && bytes[close] != (U8{34}) -> close += 1
     if close == bytes.len() -> return false
     dir := foundation_byte_text(bytes, open + 1, close).removeprefix("./")
-    loop dir.ends_with("/") {
-        dir = dir.removesuffix("/")
-    }
+    loop dir.ends_with("/") -> dir = dir.removesuffix("/")
     member_path == dir || member_path.starts_with("{dir}/")
 }
 
@@ -1049,18 +1112,24 @@ env_service_source: fn(request: String, name: String) -> String Err! {
         rendered: loop arg in run -> "\"{manifest_string(arg)}\""
         fields.push("run: [{rendered.join(", ")}]")
     }
-    if json_string_field(request, "ready") == .Val(ready) -> fields.push("ready: \"{manifest_string(ready)}\"")
+    if json_string_field(request, "ready") == .Val(ready) {
+        fields.push("ready: \"{manifest_string(ready)}\"")
+    }
     if json_string_field(request, "shutdown") == .Val(shutdown) {
         policy: shutdown_policy(shutdown) ?? return Err(project_edit_error("bad_request", "service shutdown must be `kill`, `term`, or `graceful`, not a shell command"))
         fields.push("shutdown: {policy}")
     }
-    if json_string_field(request, "data_dir") == .Val(data_dir) -> fields.push("data_dir: \"{manifest_string(data_dir)}\"")
+    if json_string_field(request, "data_dir") == .Val(data_dir) {
+        fields.push("data_dir: \"{manifest_string(data_dir)}\"")
+    }
     Ok("{name}: {{ {fields.join(", ")} }}")
 }
 
 shutdown_policy: fn(text: String) -> String? Never! {
     if text == "kill" || text == "Kill" -> return Val(".Kill")
-    if text == "term" || text == "Term" || text == "graceful" || text == "Graceful" -> return Val(".Term")
+    if text == "term" || text == "Term" || text == "graceful" || text == "Graceful" {
+        return Val(".Term")
+    }
     None
 }
 
@@ -1073,7 +1142,9 @@ add_env_service_to_source: fn(src: String, name: String, service: String) -> Str
         return Ok("{foundation_byte_text(bytes, 0, body.end)}{addition}{foundation_byte_text(bytes, body.end, bytes.len())}")
     }
     close: src.rfind("}}")
-    if close < 0 -> return Err(project_edit_error("diagnostic", "env.jet module is missing its closing brace"))
+    if close < 0 {
+        return Err(project_edit_error("diagnostic", "env.jet module is missing its closing brace"))
+    }
     head: foundation_byte_text(bytes, 0, close)
     separator: if head.ends_with("\n") -> "" else -> "\n"
     Ok("{head}{separator}    services: {{ {service} }}\n{foundation_byte_text(bytes, close, bytes.len())}")
@@ -1089,15 +1160,11 @@ finish_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, request: St
 // preview, and answers the transaction's audit record.
 finish_project_changes_with_audit: fn(checker: LSPChecker, ctx: ProjectContext, request: String, op: String, changes: &[ProjectChange], audit: String) -> String Err! {
     rename: op == "rename_binding" || op == "rename_function"
-    loop change in changes {
-        validate_project_path(ctx.project_root, change.path, change.rel)
-    }
+    loop change in changes { validate_project_path(ctx.project_root, change.path, change.rel) }
     if rename {
         normalize_and_format_project_changes(ctx, changes)
         validate_project_rename_overlay(checker, ctx, changes)
-    } else {
-        normalize_and_validate_project_changes(checker, ctx, changes)
-    }
+    } else { normalize_and_validate_project_changes(checker, ctx, changes) }
     preview: (json_bool_field(request, "preview") ?? false) || op.starts_with("preview_")
     changed := false
     loop change in changes {
@@ -1114,9 +1181,7 @@ finish_project_changes_with_audit: fn(checker: LSPChecker, ctx: ProjectContext, 
     }
     touched_files: loop change in changes -> "{{\"path\":{json_str(change.rel)},\"revision\":{json_str(source_revision(change.after))},\"changed\":{json_bool(change.before != change.after)}}}"
     next_revision := ctx.project_revision
-    if preview {
-        next_revision = project_revision_after_changes(ctx, changes)
-    } else {
+    if preview -> next_revision = project_revision_after_changes(ctx, changes) else {
         next_revision = project_context_for_entry(ctx.entry_path).project_revision
     }
     Ok(project_edit_ok_with_audit(op, preview, changed, ctx.project_revision, next_revision, touched_files.join(","), diffs.join("\n"), audit))
@@ -1153,7 +1218,9 @@ normalize_project_change: fn(ctx: ProjectContext, change: ProjectChange) -> Stri
         return Err(project_edit_error("bad_request", "Canvas project transactions may only write Jet source truth"))
     }
     formatted: jet_format_source(change.after, false)
-    if !formatted.ok -> return Err(project_edit_error("diagnostic", diagnostic_render_all(change.path, change.after, formatted.diagnostics, false)))
+    if !formatted.ok {
+        return Err(project_edit_error("diagnostic", diagnostic_render_all(change.path, change.after, formatted.diagnostics, false)))
+    }
     Ok(formatted.text)
 }
 
@@ -1161,7 +1228,9 @@ normalize_project_change: fn(ctx: ProjectContext, change: ProjectChange) -> Stri
 normalize_and_validate_project_changes: fn(checker: LSPChecker, ctx: ProjectContext, changes: &[ProjectChange]) Err! {
     normalize_and_format_project_changes(ctx, changes)
     loop change in changes {
-        if change.before == change.after || project_file_kind_for_rel(change.rel) != "source" -> next
+        if change.before == change.after || project_file_kind_for_rel(change.rel) != "source" {
+            next
+        }
         validate_project_jet_overlay(checker, change.path, change.after)
     }
     Ok()
@@ -1182,7 +1251,9 @@ validate_project_jet_overlay: fn(checker: LSPChecker, path: String, src: String)
 validate_project_rename_overlay: fn(checker: LSPChecker, ctx: ProjectContext, changes: [ProjectChange]) Err! {
     overlays: loop change in changes -> LSPOverlay{path: change.path, source: change.after}
     checked: checker.check(ctx.entry_path, overlays)
-    if checked.index == None -> return Err(project_edit_error("diagnostic", "Canvas has no semantic index of the renamed project"))
+    if checked.index == None {
+        return Err(project_edit_error("diagnostic", "Canvas has no semantic index of the renamed project"))
+    }
     if !jet_driver_has_errors(checked.diagnostics) -> return Ok()
     entry_source := read_source_without_symlinks(ctx.entry_path) ?? ""
     loop change in changes {
@@ -1211,7 +1282,9 @@ write_project_changes_with_rollback: fn(ctx: ProjectContext, changes: [ProjectCh
 // written go back to their text before the transaction.
 write_project_changes: fn(ctx: ProjectContext, changes: [ProjectChange]) SourceWriteError! {
     current: project_context_for_entry(ctx.entry_path)
-    if current.authority_diagnostic != None || current.project_revision != ctx.project_revision -> return Err(SourceWriteError.Conflict)
+    if current.authority_diagnostic != None || current.project_revision != ctx.project_revision {
+        return Err(SourceWriteError.Conflict)
+    }
     written := [Int]{}
     loop (at, change) in changes {
         if change.before == change.after -> next
@@ -1270,7 +1343,9 @@ record_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, changes: [Pr
     files: loop at in sources -> "{{\"path\":{json_str(changes[at].path)},\"before_hash\":{json_str(source_revision(changes[at].before))},\"after_hash\":{json_str(source_revision(changes[at].after))}}}"
     op: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets.join(",")}],\"files\":[{files.join(",")}]}}"
     directory: tx_files.join(ctx.project_root, ".jet/codemods")
-    if ensure_no_symlink_directory(directory) == .Err(error) -> return Err(project_edit_error("io", "could not record project rename: {error.message}"))
+    if ensure_no_symlink_directory(directory) == .Err(error) {
+        return Err(project_edit_error("io", "could not record project rename: {error.message}"))
+    }
     afters: loop at in sources -> changes[at].after
     digest: sha256_hex(afters.join(""))
     base: "CanvasProjectRename-{digest.slice(0, 12)}"
@@ -1281,7 +1356,9 @@ record_project_rename: fn(checker: LSPChecker, ctx: ProjectContext, changes: [Pr
         suffix += 1
         receipt = tx_files.join(directory, "{base}-{suffix}.log.json")
     }
-    if write_new_file_without_symlinks(receipt, log.bytes()) == .Err(error) -> return Err(project_edit_error("io", "could not record project rename: {error.message}"))
+    if write_new_file_without_symlinks(receipt, log.bytes()) == .Err(error) {
+        return Err(project_edit_error("io", "could not record project rename: {error.message}"))
+    }
     Ok()
 }
 

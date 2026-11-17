@@ -5,6 +5,7 @@ use {
 }
 
 PAUSED_DEBUG_UNKNOWN_TYPE: "Unknown"
+
 PAUSED_DEBUG_MAX_COMPONENT_BYTES: 256
 
 // The source facts a paused stop is bound to: the source and revision the
@@ -48,7 +49,9 @@ PausedDebugSessionAdapter: struct {
             id: self.value_id(index, local.name)
             projection := value_projection_redacted(id, paused_debug_bounded_name(local.name), paused_debug_type_name(local.type_name), location)
             if evaluate_snapshot(self.snapshot, local.name) == .Ok(evaluation) {
-                if self.projection_value(evaluation, id, location) == .Ok(published) -> projection = published
+                if self.projection_value(evaluation, id, location) == .Ok(published) {
+                    projection = published
+                }
             }
             if projection.type_name == "" -> projection.type_name = PAUSED_DEBUG_UNKNOWN_TYPE
             bindings.push(projection)
@@ -65,8 +68,12 @@ PausedDebugSessionAdapter: struct {
         if request.identity != self.identity || request.scope_id != self.scope_id {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger request does not match the published stop", usage)
         }
-        if request.cancellation.requested || self.state == .Cancelled -> return evaluator_cancelled(request.identity, request.scope_id, usage)
-        if self.state != .Paused -> return evaluator_failed(request.identity, request.scope_id, "paused debugger is no longer stopped", usage)
+        if request.cancellation.requested || self.state == .Cancelled {
+            return evaluator_cancelled(request.identity, request.scope_id, usage)
+        }
+        if self.state != .Paused {
+            return evaluator_failed(request.identity, request.scope_id, "paused debugger is no longer stopped", usage)
+        }
         if request.mode == .Mutate {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger evaluation is read-only; mutation is unsupported", usage)
         }
@@ -75,7 +82,9 @@ PausedDebugSessionAdapter: struct {
         loop requested in request.authority {
             if !self.authority.allows(requested) -> allowed = false
         }
-        if !allowed -> return evaluator_failed(request.identity, request.scope_id, "paused debugger lacks read-only evaluation authority", usage)
+        if !allowed {
+            return evaluator_failed(request.identity, request.scope_id, "paused debugger lacks read-only evaluation authority", usage)
+        }
         evaluation: evaluate_snapshot(self.snapshot, request.expression) ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
         bytes: if evaluation.usage.bytes < MAX_VALUE_BYTES -> evaluation.usage.bytes else -> MAX_VALUE_BYTES
         usage = EvaluationUsage{depth: evaluation.usage.depth, nodes: evaluation.usage.nodes, bytes: bytes, steps: evaluation.usage.steps}
@@ -100,7 +109,9 @@ PausedDebugSessionAdapter: struct {
     cancel: fn(&self, host: &PausedEvaluateHost, reason: String) PausedEvaluateError! {
         self.state = .Cancelled
         if self.host_is_current(host) {
-            if host.cancel_session(reason) == .Err(failure) -> return Err(paused_error(failure.display()))
+            if host.cancel_session(reason) == .Err(failure) {
+                return Err(paused_error(failure.display()))
+            }
             host.clear_evaluator_result()
         }
         Ok()
@@ -117,15 +128,25 @@ PausedDebugSessionAdapter: struct {
     }
 
     validate: fn(self) PausedEvaluateError! {
-        if self.source.source_id != self.identity.source_id -> return Err(paused_error("paused debugger source identity does not match the session"))
-        if self.source.revision != self.identity.source_revision -> return Err(paused_error("paused debugger revision identity does not match the session"))
+        if self.source.source_id != self.identity.source_id {
+            return Err(paused_error("paused debugger source identity does not match the session"))
+        }
+        if self.source.revision != self.identity.source_revision {
+            return Err(paused_error("paused debugger revision identity does not match the session"))
+        }
         if self.source.build_id == .Val(build) {
-            if !paused_debug_bounded_component(build) -> return Err(paused_error("build identity is outside the bounded identity contract"))
+            if !paused_debug_bounded_component(build) {
+                return Err(paused_error("build identity is outside the bounded identity contract"))
+            }
         }
         if self.source.world_id == .Val(world) {
-            if !paused_debug_bounded_component(world) -> return Err(paused_error("world identity is outside the bounded identity contract"))
+            if !paused_debug_bounded_component(world) {
+                return Err(paused_error("world identity is outside the bounded identity contract"))
+            }
         }
-        if !paused_debug_bounded_component(self.scope_id) -> return Err(paused_error("paused debugger scope identity is outside the bounded contract"))
+        if !paused_debug_bounded_component(self.scope_id) {
+            return Err(paused_error("paused debugger scope identity is outside the bounded contract"))
+        }
         if self.snapshot.function == "" || self.snapshot.line == 0 || self.snapshot.locals.len() > 4096 || self.snapshot.call_stack.len() > 256 {
             return Err(paused_error("paused debugger snapshot is outside the bounded fact contract"))
         }
@@ -140,7 +161,9 @@ PausedDebugSessionAdapter: struct {
     // bounded identity.
     value_id: fn(self, index: Int, name: String) -> String Never! {
         candidate: "{self.identity.session_id}-value-{index}-{paused_debug_bounded_name(name)}"
-        if candidate.len() <= PAUSED_DEBUG_MAX_COMPONENT_BYTES && !paused_has_control(candidate) -> return candidate
+        if candidate.len() <= PAUSED_DEBUG_MAX_COMPONENT_BYTES && !paused_has_control(candidate) {
+            return candidate
+        }
         digest: sha256_hex("{self.identity.session_id}:{index}:{name}")
         "value-{digest.slice(0, 32)}"
     }
@@ -221,7 +244,9 @@ paused_debug_bounded_text: fn(value: String) -> PausedDebugBoundedText Never! {
             paused_has_control(text) -> "�"
             else -> text
         }
-        if length + shown.len() > MAX_VALUE_BYTES -> return PausedDebugBoundedText{text: pieces.join(""), truncated: true}
+        if length + shown.len() > MAX_VALUE_BYTES {
+            return PausedDebugBoundedText{text: pieces.join(""), truncated: true}
+        }
         length += shown.len()
         pieces.push(shown)
     }

@@ -17,21 +17,27 @@
 // tick does. There are no threads, locks or atomics, and a publication
 // (web_host_publish) holds the state's edit guard, so no static read sees a
 // half-swapped output root.
-use {
-    jet_foundation.[JetReleaseDevtoolsDeployment, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy, foundation_json_quote]
-}
+use jet_foundation.[JetReleaseDevtoolsDeployment, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy, foundation_json_quote]
 
 // `jet dev` scans these application ports when none is given.
 APPLICATION_PORT_FIRST: 8080
+
 APPLICATION_PORT_LAST: 8089
+
 LIVE_RELOAD_POLL_MS: 40
+
 // 64 MiB: one static answer, the live-reload script included.
 MAX_STATIC_RESPONSE_BYTES: 67108864
+
 // The most client notes, envelopes or trace rows one tick takes in.
 WEB_HOST_MAX_QUEUED: 256
+
 WEB_HOST_BIND: "127.0.0.1"
+
 WEB_HOST_TEXT: "text/plain; charset=utf-8"
+
 WEB_HOST_JSON: "application/json; charset=utf-8"
+
 SOURCE_TOOLS_OFF_REASON: "This host runs without Canvas, so source is read and edited elsewhere."
 
 #Error
@@ -63,18 +69,20 @@ WebHostFacts: struct {
     next_candidate: fn(self) -> Int Never! {
         if self.published -> self.version + 1 else -> self.version
     }
-    accepted: fn(self) -> Int? Never! {
-        if self.published -> Val(self.version) else -> None
-    }
+
+    accepted: fn(self) -> Int? Never! { if self.published -> Val(self.version) else -> None }
+
     diagnostic_revision: fn(self) -> Int? Never! {
         if self.state == "error" -> self.candidate else -> None
     }
+
     building: fn(&self) Never! {
         self.state = "building"
         self.code = ""
         self.diagnostic = ""
         self.candidate = Val(self.next_candidate())
     }
+
     // A good build; a rebuild publishes the next version.
     ready: fn(&self, build_ms: Int, rebuild: Bool) Never! {
         if rebuild -> self.version += 1
@@ -85,6 +93,7 @@ WebHostFacts: struct {
         self.last_build_ms = build_ms
         self.candidate = None
     }
+
     // A failed build keeps the candidate it was building.
     failed: fn(&self, code: String, diagnostic: String) Never! {
         self.state = "error"
@@ -92,10 +101,14 @@ WebHostFacts: struct {
         self.diagnostic = "{diagnostic}"
         if self.candidate == None -> self.candidate = Val(self.next_candidate())
     }
+
     words: fn(self) -> WebHostWords Never! {
-        if self.reconnecting -> return WebHostWords{word: "reconnecting", rest: "waiting for connection"}
+        if self.reconnecting {
+            return WebHostWords{word: "reconnecting", rest: "waiting for connection"}
+        }
         header_words(self.state, self.file, self.code, self.port, self.clients, self.last_build_ms)
     }
+
     // The dev status the page polls; a reconnect shows over the kept facts.
     json: fn(self) -> String Never! {
         words: self.words()
@@ -108,8 +121,17 @@ WebHostFacts: struct {
 // The facts before the first build: version 1, nothing published yet.
 web_host_facts: fn(file: String, port: Int) -> WebHostFacts Never! {
     WebHostFacts{
-        file: "{file}", port: port, state: "ready", code: "", diagnostic: "", last_build_ms: 0, candidate: None,
-        version: 1, published: false, clients: 0, reconnecting: false,
+        file: "{file}",
+        port: port,
+        state: "ready",
+        code: "",
+        diagnostic: "",
+        last_build_ms: 0,
+        candidate: None,
+        version: 1,
+        published: false,
+        clients: 0,
+        reconnecting: false,
     }
 }
 
@@ -121,8 +143,12 @@ web_host_int_json: fn(value: Int?) -> String Never! {
 // the last build's time.
 header_words: fn(state: String, file: String, code: String, port: Int, clients: Int, last_build_ms: Int) -> WebHostWords Never! {
     plural: if clients == 1 -> "" else -> "s"
-    if state == "building" -> return WebHostWords{word: "building", rest: "{file} · {clients} client{plural}"}
-    if state == "error" -> return WebHostWords{word: "error", rest: "{code} · {clients} client{plural}"}
+    if state == "building" {
+        return WebHostWords{word: "building", rest: "{file} · {clients} client{plural}"}
+    }
+    if state == "error" {
+        return WebHostWords{word: "error", rest: "{code} · {clients} client{plural}"}
+    }
     built: if last_build_ms > 0 -> " · built {format_build_time(last_build_ms)}" else -> ""
     WebHostWords{word: "ready", rest: "localhost:{port} · {clients} client{plural}{built}"}
 }
@@ -136,8 +162,14 @@ format_build_time: fn(ms: Int) -> String Never! {
 // The development policy: no release inspect endpoint.
 web_host_development_policy: fn() -> JetReleaseDevtoolsPolicy Never! {
     JetReleaseDevtoolsPolicy{
-        inspect: None, endpoint: .Absent, authentication: .BearerToken, authority: .LoopbackOrAllowlist, publication: .SiteGated,
-        local_rail: true, panel_code: true, stream_code: true,
+        inspect: None,
+        endpoint: .Absent,
+        authentication: .BearerToken,
+        authority: .LoopbackOrAllowlist,
+        publication: .SiteGated,
+        local_rail: true,
+        panel_code: true,
+        stream_code: true,
         deployment: JetReleaseDevtoolsDeployment{enabled: false, token: None, allowlist: [JetReleaseDevtoolsNetwork]{}},
     }
 }

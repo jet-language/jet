@@ -2,21 +2,29 @@ devserver_test_request: fn(raw: String) -> DevserverRequest Never! {
     if DevserverRequest.read(raw.bytes()) == {
         .Ok(value) -> if value == {
             .Val(request) -> request
-            .None -> { panic("missing request") }
+            .None -> {
+                panic("missing request")
+            }
         }
-        .Err(_) -> { panic("request rejected") }
+        .Err(_) -> {
+            panic("request rejected")
+        }
     }
 }
+
 devserver_test_request_fails: fn(raw: String) -> Bool Never! {
     if DevserverRequest.read(raw.bytes()) == {
         .Err(_) -> true
         .Ok(_) -> false
     }
 }
+
 devserver_test_header_error: fn(lines: [String]) -> String Never! {
     if devserver_request_headers(devserver_http.headers_parse(lines)) == {
         .Err(.InvalidData(message)) -> message
-        else -> { panic("missing devserver header refusal") }
+        else -> {
+            panic("missing devserver header refusal")
+        }
     }
 }
 
@@ -48,6 +56,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     assert(devserver_test_request_fails("GET /{"x".repeat(MAX_REQUEST_LINE_BYTES)} HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
     assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\nHost: localhost{cr}\nX-Hostile: {"x".repeat(MAX_REQUEST_LINE_BYTES)}{cr}\n{cr}\n"))
 }
+
 #Test("aggregate_request_headers_are_bounded_before_parse") {
     cr: "\r"
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
@@ -55,6 +64,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     lines.push("{cr}\n")
     assert(devserver_test_request_fails(lines.join("")))
 }
+
 #Test("request_header_count_is_bounded_before_parse") {
     cr: "\r"
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
@@ -65,13 +75,15 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 
 #Test("request_uses_canonical_strict_core_framing") {
     cr: "\r"
-    assert(if DevserverRequest.read([U8]{}) == {
-        .Ok(value) -> if value == {
-            .None -> true
-            else -> false
-        }
-        .Err(_) -> false
-    })
+    assert(
+        if DevserverRequest.read([U8]{}) == {
+            .Ok(value) -> if value == {
+                .None -> true
+                else -> false
+            }
+            .Err(_) -> false
+        },
+    )
     assert_eq(devserver_test_request("GET / HTTP/1.0{cr}\nHost: localhost{cr}\n{cr}\n").method, "GET")
     assert_eq(devserver_test_request("GET / HTTP/1.0{cr}\n{cr}\n").method, "GET")
     assert(devserver_test_request_fails("GET / HTTP/1.1\nHost: localhost\n\n"))
@@ -99,10 +111,12 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     names: [String]{"Authorization", "Origin"}
     loop name in names {
         raw: "GET / HTTP/1.1{cr}\nHost: localhost{cr}\n{name}: x{cr}\n{name}: y{cr}\n{cr}\n"
-        assert(if DevserverRequest.read(raw.bytes()) == {
-            .Err(.InvalidData(message)) -> message == "duplicate devserver security header"
-            else -> false
-        })
+        assert(
+            if DevserverRequest.read(raw.bytes()) == {
+                .Err(.InvalidData(message)) -> message == "duplicate devserver security header"
+                else -> false
+            },
+        )
     }
 }
 
@@ -114,10 +128,12 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
         "POST / HTTP/1.1{cr}\nHost: localhost{cr}\nTransfer-Encoding: chunked{cr}\n{cr}\n",
     }
     loop raw in messages {
-        assert(if DevserverRequest.read(raw.bytes()) == {
-            .Err(.CoreHTTP(_)) -> true
-            else -> false
-        })
+        assert(
+            if DevserverRequest.read(raw.bytes()) == {
+                .Err(.CoreHTTP(_)) -> true
+                else -> false
+            },
+        )
     }
 }
 
@@ -150,5 +166,4 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     request: parsed ?? panic("missing request")
     assert_eq(request.body, [U8]{0, 255, 128})
 }
-
 // Static traversal/authority and owned Canvas route tests (1275–1498) are T2.

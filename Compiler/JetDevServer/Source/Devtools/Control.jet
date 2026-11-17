@@ -7,7 +7,9 @@
 use jet_foundation.[foundation_json_quote, jettrace_has_control]
 
 JET_DEVTOOLS_MAX_COMMANDS: Int{JET_DEVTOOLS_MAX_EVENTS}
+
 JET_DEVTOOLS_MAX_COMMAND_ROWS: Int{256}
+
 JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS: Int{30000}
 
 // One database EXPLAIN request. SQL text, bindings, credentials and authority
@@ -19,19 +21,25 @@ JetDevtoolsDatabaseExplainRequest: struct {
     timeout_ms: Int,
     max_rows: Int,
 
-    new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
+    new: fn(session_id: &&String, request_id: &&String, statement_identity: &&String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
         request: JetDevtoolsDatabaseExplainRequest{session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), timeout_ms: timeout_ms, max_rows: max_rows}
         request.validate()
         Ok(request)
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "session_id")
         devtools_control_text(self.request_id, "request_id")
         devtools_control_text(self.statement_identity, "statement_identity")
-        if self.timeout_ms <= 0 || self.timeout_ms > JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS -> return Err("jet.devtools.v1 EXPLAIN timeout is outside its limit")
-        if self.max_rows <= 0 || self.max_rows > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN row limit is outside its limit")
+        if self.timeout_ms <= 0 || self.timeout_ms > JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS {
+            return Err("jet.devtools.v1 EXPLAIN timeout is outside its limit")
+        }
+        if self.max_rows <= 0 || self.max_rows > JET_DEVTOOLS_MAX_COMMAND_ROWS {
+            return Err("jet.devtools.v1 EXPLAIN row limit is outside its limit")
+        }
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"statement_identity\":{foundation_json_quote(self.statement_identity)},\"timeout_ms\":{self.timeout_ms},\"max_rows\":{self.max_rows}}}"
     }
@@ -44,17 +52,19 @@ JetDevtoolsDBPlanRow: struct {
     parent: String?,
     detail: String,
 
-    new: fn(&&id: String, &&parent: String?, &&detail: String) -> JetDevtoolsDBPlanRow Err! {
+    new: fn(id: &&String, parent: &&String?, detail: &&String) -> JetDevtoolsDBPlanRow Err! {
         row: JetDevtoolsDBPlanRow{id: id.move(), parent: parent.move(), detail: detail.move()}
         row.validate()
         Ok(row)
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.id, "plan row id")
         devtools_control_optional_text(self.parent, "plan row parent")
         devtools_control_text(self.detail, "plan row detail")
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         "{{\"id\":{foundation_json_quote(self.id)},\"parent\":{devtools_control_optional_json(self.parent)},\"detail\":{foundation_json_quote(self.detail)}}}"
     }
@@ -74,27 +84,40 @@ JetDevtoolsDatabaseExplainResult: struct {
     error_code: String?,
     error_message: String?,
 
-    new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, &&status: String, elapsed_ns: Int, truncated: Bool, row_count: Int, &&plan_rows: [JetDevtoolsDBPlanRow], &&error_code: String?, &&error_message: String?) -> JetDevtoolsDatabaseExplainResult Err! {
-        if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+    new: fn(session_id: &&String, request_id: &&String, statement_identity: &&String, status: &&String, elapsed_ns: Int, truncated: Bool, row_count: Int, plan_rows: &&[JetDevtoolsDBPlanRow], error_code: &&String?, error_message: &&String?) -> JetDevtoolsDatabaseExplainResult Err! {
+        if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS {
+            return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+        }
         result: JetDevtoolsDatabaseExplainResult{
-            session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), status: status.move(),
-            elapsed_ns: elapsed_ns, truncated: truncated, row_count: row_count, plan_rows: plan_rows.move(),
-            error_code: error_code.move(), error_message: error_message.move(),
+            session_id: session_id.move(),
+            request_id: request_id.move(),
+            statement_identity: statement_identity.move(),
+            status: status.move(),
+            elapsed_ns: elapsed_ns,
+            truncated: truncated,
+            row_count: row_count,
+            plan_rows: plan_rows.move(),
+            error_code: error_code.move(),
+            error_message: error_message.move(),
         }
         result.validate()
         Ok(result)
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "session_id")
         devtools_control_text(self.request_id, "request_id")
         devtools_control_text(self.statement_identity, "statement_identity")
         devtools_control_text(self.status, "status")
-        if self.plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+        if self.plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS {
+            return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+        }
         loop row in self.plan_rows -> row.validate()
         devtools_control_optional_text(self.error_code, "error code")
         devtools_control_optional_text(self.error_message, "error message")
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         rows := [String]{}
         loop row in self.plan_rows -> rows.push(row.render_json())
@@ -124,6 +147,7 @@ impl JetDevtoolsGameControlKind {
             .EvaluateWorld -> "evaluate_world"
         }
     }
+
     parse: fn(value: String) -> JetDevtoolsGameControlKind Err! {
         if value == {
             "play" -> Ok(.Play)
@@ -168,16 +192,31 @@ JetDevtoolsGameControlRequest: struct {
     frame_id: Int?,
     budget: Int?,
 
-    new: fn(&&session_id: String, &&request_id: String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
+    new: fn(session_id: &&String, request_id: &&String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
         request: JetDevtoolsGameControlRequest{
-            session_id: session_id.move(), request_id: request_id.move(), kind: kind,
-            source_id: None, revision: None, world_id: None, actor_id: None, component_id: None, authored_instance_id: None,
-            source_span_start: None, source_span_end: None, field: None, value: None, category: None, expression: None,
-            required_authority: None, frame_id: None, budget: None,
+            session_id: session_id.move(),
+            request_id: request_id.move(),
+            kind: kind,
+            source_id: None,
+            revision: None,
+            world_id: None,
+            actor_id: None,
+            component_id: None,
+            authored_instance_id: None,
+            source_span_start: None,
+            source_span_end: None,
+            field: None,
+            value: None,
+            category: None,
+            expression: None,
+            required_authority: None,
+            frame_id: None,
+            budget: None,
         }
         request.validate()
         Ok(request)
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "game control session_id")
         devtools_control_text(self.request_id, "game control request_id")
@@ -205,13 +244,19 @@ JetDevtoolsGameControlRequest: struct {
             devtools_control_required(self.authored_instance_id, kind, "authored_instance_id")
             devtools_control_required(self.field, kind, "field")
             devtools_control_required(self.value, kind, "value")
-            if self.source_span_start == None || self.source_span_end == None -> return Err("game control `{kind.as_str()}` requires source_span_start and source_span_end")
+            if self.source_span_start == None || self.source_span_end == None {
+                return Err("game control `{kind.as_str()}` requires source_span_start and source_span_end")
+            }
         }
         if kind == .SelectCategory -> devtools_control_required(self.category, kind, "category")
         if kind == .SelectWorld {
             devtools_control_required(self.world_id, kind, "world_id")
-            if self.component_id != None && self.actor_id == None -> return Err("select_world component_id requires actor_id")
-            if self.field != None && self.component_id == None -> return Err("select_world field requires component_id")
+            if self.component_id != None && self.actor_id == None {
+                return Err("select_world component_id requires actor_id")
+            }
+            if self.field != None && self.component_id == None {
+                return Err("select_world field requires component_id")
+            }
         }
         if kind == .EvaluateWorld {
             devtools_control_required(self.world_id, kind, "world_id")
@@ -226,10 +271,13 @@ JetDevtoolsGameControlRequest: struct {
             end: self.source_span_end ?? return Err("game control source span must include both bounds")
             if start >= end -> return Err("game control source span must end after it starts")
         } else {
-            if self.source_span_end != None -> return Err("game control source span must include both bounds")
+            if self.source_span_end != None {
+                return Err("game control source span must include both bounds")
+            }
         }
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         identity: "\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"kind\":{foundation_json_quote(self.kind.as_str())}"
         target: "\"source_id\":{devtools_control_optional_json(self.source_id)},\"revision\":{devtools_control_optional_json(self.revision)},\"world_id\":{devtools_control_optional_json(self.world_id)},\"actor_id\":{devtools_control_optional_json(self.actor_id)},\"component_id\":{devtools_control_optional_json(self.component_id)},\"authored_instance_id\":{devtools_control_optional_json(self.authored_instance_id)}"
@@ -247,17 +295,19 @@ JetDevtoolsProjectRebuildRequest: struct {
     request_id: String,
     expected_revision: String,
 
-    new: fn(&&session_id: String, &&request_id: String, &&expected_revision: String) -> JetDevtoolsProjectRebuildRequest Err! {
+    new: fn(session_id: &&String, request_id: &&String, expected_revision: &&String) -> JetDevtoolsProjectRebuildRequest Err! {
         request: JetDevtoolsProjectRebuildRequest{session_id: session_id.move(), request_id: request_id.move(), expected_revision: expected_revision.move()}
         request.validate()
         Ok(request)
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "project rebuild session_id")
         devtools_control_text(self.request_id, "project rebuild request_id")
         devtools_control_text(self.expected_revision, "project rebuild expected_revision")
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"expected_revision\":{foundation_json_quote(self.expected_revision)}}}"
     }
@@ -273,6 +323,7 @@ impl JetDevtoolsCommand {
             .ProjectRebuild(request) -> request.session_id
         }
     }
+
     request_id: fn(self) -> String Never! {
         if self == {
             .DatabaseExplain(request) -> request.request_id
@@ -280,6 +331,7 @@ impl JetDevtoolsCommand {
             .ProjectRebuild(request) -> request.request_id
         }
     }
+
     kind: fn(self) -> String Never! {
         if self == {
             .DatabaseExplain(_) -> "DatabaseExplain"
@@ -287,14 +339,16 @@ impl JetDevtoolsCommand {
             .ProjectRebuild(_) -> "ProjectRebuild"
         }
     }
+
     validate: fn(self) Err! {
         if self == {
-            .DatabaseExplain(request) -> request.validate()
-            .GameControl(request) -> request.validate()
+            .DatabaseExplain(request) -> { request.validate() }
+            .GameControl(request) -> { request.validate() }
             .ProjectRebuild(request) -> request.validate()
         }
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         if self == {
             .DatabaseExplain(request) -> request.render_json()
@@ -321,6 +375,7 @@ JetDevtoolsCommandReceipt: struct {
         devtools_control_optional_text(self.error, "command receipt error")
         Ok()
     }
+
     render_json: fn(self) -> String Never! {
         "{{\"sequence\":{self.sequence},\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"kind\":{foundation_json_quote(self.kind)},\"status\":{foundation_json_quote(self.status)},\"error\":{devtools_control_optional_json(self.error)}}}"
     }
@@ -335,31 +390,41 @@ JetDevtoolsCommandQueue: struct {
     receipt_list: [JetDevtoolsCommandReceipt],
     next_receipt_sequence: Int,
 
-    new: fn(&&session_id: String) -> JetDevtoolsCommandQueue Never! {
+    new: fn(session_id: &&String) -> JetDevtoolsCommandQueue Never! {
         JetDevtoolsCommandQueue{session_id: session_id.move(), command_list: [JetDevtoolsCommand]{}, receipt_list: [JetDevtoolsCommandReceipt]{}, next_receipt_sequence: 1}
     }
+
     // Admit one checked command and record its `queued` receipt.
-    enqueue: fn(&self, &&command: JetDevtoolsCommand) Err! {
+    enqueue: fn(&self, command: &&JetDevtoolsCommand) Err! {
         self.admit(command)
-        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command receipt queue is full")
-        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command receipt queue is full")
+        }
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command queue is full")
+        }
         receipt: self.receipt_for(command, "queued", None)
         self.receipt_list.push(receipt)
         self.command_list.push(command.move())
         Ok()
     }
+
     // Put a command back at the head when its runtime destination is not
     // ready yet, keeping FIFO order.
-    requeue_front: fn(&self, &&command: JetDevtoolsCommand) Err! {
+    requeue_front: fn(&self, command: &&JetDevtoolsCommand) Err! {
         self.admit(command)
-        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command queue is full")
+        }
         self.command_list.insert(0, command.move())
         Ok()
     }
+
     poll: fn(&self) -> JetDevtoolsCommand? Never! {
         if self.command_list.len() == 0 -> return None
         self.command_list.remove(0, .Slot)
     }
+
     // The oldest database command; every other queued command keeps its place.
     poll_database_explain: fn(&self) -> JetDevtoolsDatabaseExplainRequest? Never! {
         found := Int?{None}
@@ -374,18 +439,25 @@ JetDevtoolsCommandQueue: struct {
         if taken == .DatabaseExplain(request) -> return Val(request)
         None
     }
+
     command_count: fn(self) -> Int Never! { self.command_list.len() }
+
     // Append one receipt for `command` to the stream.
-    record_receipt: fn(&self, command: JetDevtoolsCommand, &&status: String, &&error: String?) Err! {
+    record_receipt: fn(&self, command: JetDevtoolsCommand, status: &&String, error: &&String?) Err! {
         receipt: self.receipt_for(command, status, error)
         receipt.validate()
-        if receipt.session_id != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
-        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command receipt queue is full")
+        if receipt.session_id != self.session_id {
+            return Err("jet.devtools.v1 command session identity mismatch")
+        }
+        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command receipt queue is full")
+        }
         self.receipt_list.push(receipt)
         Ok()
     }
+
     // Update the newest receipt of one request in place; no second row.
-    update_receipt: fn(&self, request_id: String, &&status: String, &&error: String?) Err! {
+    update_receipt: fn(&self, request_id: String, status: &&String, error: &&String?) Err! {
         devtools_control_text(request_id, "command receipt request_id")
         devtools_control_text(status, "command receipt status")
         devtools_control_optional_text(error, "command receipt error")
@@ -400,19 +472,25 @@ JetDevtoolsCommandQueue: struct {
         }
         Err("jet.devtools.v1 command receipt was not retained")
     }
+
     // The retained receipts, oldest first, without consuming them.
     receipts: fn(self) -> [JetDevtoolsCommandReceipt] Never! { self.receipt_list }
+
     // Drop every queued command and receipt at session teardown.
     clear: fn(&self) Never! {
         self.command_list = [JetDevtoolsCommand]{}
         self.receipt_list = [JetDevtoolsCommandReceipt]{}
     }
+
     admit: fn(self, command: JetDevtoolsCommand) Err! {
         command.validate()
-        if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        if command.session_id() != self.session_id {
+            return Err("jet.devtools.v1 command session identity mismatch")
+        }
         Ok()
     }
-    receipt_for: fn(&self, command: JetDevtoolsCommand, &&status: String, &&error: String?) -> JetDevtoolsCommandReceipt Never! {
+
+    receipt_for: fn(&self, command: JetDevtoolsCommand, status: &&String, error: &&String?) -> JetDevtoolsCommandReceipt Never! {
         sequence: self.next_receipt_sequence
         self.next_receipt_sequence = sequence + 1
         JetDevtoolsCommandReceipt{sequence: sequence, session_id: command.session_id(), request_id: command.request_id(), kind: command.kind(), status: status.move(), error: error.move()}
@@ -427,33 +505,50 @@ JetDevtoolsCommandEnvelope: struct {
     started_at_ms: Int,
     command_list: [JetDevtoolsCommand],
 
-    new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
+    new: fn(session_id: &&String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
         JetDevtoolsCommandEnvelope{session_id: session_id.move(), started_at_ms: started_at_ms, command_list: [JetDevtoolsCommand]{}}
     }
+
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "session_id")
-        if self.command_list.len() > JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        if self.command_list.len() > JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command queue is full")
+        }
         loop command in self.command_list {
             command.validate()
-            if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+            if command.session_id() != self.session_id {
+                return Err("jet.devtools.v1 command session identity mismatch")
+            }
         }
         Ok()
     }
-    enqueue_command: fn(&self, &&command: JetDevtoolsCommand) Err! {
+
+    enqueue_command: fn(&self, command: &&JetDevtoolsCommand) Err! {
         command.validate()
-        if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
-        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        if command.session_id() != self.session_id {
+            return Err("jet.devtools.v1 command session identity mismatch")
+        }
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+            return Err("jet.devtools.v1 command queue is full")
+        }
         self.command_list.push(command.move())
         Ok()
     }
+
     commands: fn(self) -> [JetDevtoolsCommand] Never! { self.command_list }
+
     command_count: fn(self) -> Int Never! { self.command_list.len() }
+
     serialize: fn(self) -> String Err! {
         self.validate()
         commands := [String]{}
-        loop command in self.command_list -> commands.push("{{\"kind\":{foundation_json_quote(command.kind())},\"payload\":{command.render_json()}}}")
+        loop command in self.command_list {
+            commands.push("{{\"kind\":{foundation_json_quote(command.kind())},\"payload\":{command.render_json()}}}")
+        }
         out: "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"direction\":\"host_to_runtime\",\"commands\":[{commands.join(",")}]}}"
-        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit")
+        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+            return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit")
+        }
         Ok(out)
     }
 }
@@ -471,6 +566,7 @@ JetDevtoolsDecodedEnvelope: enum {
         }
         Ok()
     }
+
     session_id: fn(self) -> String Never! {
         if self == {
             .Events(envelope) -> envelope.session_id
@@ -482,8 +578,12 @@ JetDevtoolsDecodedEnvelope: enum {
 // Nonempty, within the text limit and free of control characters.
 devtools_control_text: fn(value: String, field: String) Err! {
     if value == "" -> return Err("jet.devtools.v1 {field} must not be empty")
-    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
-    if jettrace_has_control(value) -> return Err("jet.devtools.v1 {field} contains a control character")
+    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+        return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    }
+    if jettrace_has_control(value) {
+        return Err("jet.devtools.v1 {field} contains a control character")
+    }
     Ok()
 }
 

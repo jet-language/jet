@@ -4,6 +4,7 @@
 capture_consent_test_identity: fn() -> CaptureIdentity Never! {
     CaptureIdentity.exact("inputs", "a0.0.1", "native", "session", "source", "build", "rev")
 }
+
 capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     CaptureConsentScope.new([String]{"Net", "Rand"}, [String]{"example.test"}, [String]{"out"}, [String]{"raw input"}, "record", U64{123})
 }
@@ -222,13 +223,15 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     fact: CaptureSourceFact.at(CaptureSource.Randomness, "rand.jet", U32{11})
     reason: CaptureSkipReason.UnsafeSource{source: fact}
     if reason.source() == {
-        .Val(source) -> assert_eq(source.reason_text(), "Rand at rand.jet:11")
+        .Val(source) -> { assert_eq(source.reason_text(), "Rand at rand.jet:11") }
         .None -> { panic("source lost") }
     }
     skip: CaptureSkip{reason, terminal_available: false}
     eligibility: CaptureEligibility.Skipped{skip}
     if eligibility.skip() == {
-        .Val(found) -> assert_eq(found.status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
+        .Val(found) -> {
+            assert_eq(found.status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
+        }
         .None -> { panic("skip lost") }
     }
 }

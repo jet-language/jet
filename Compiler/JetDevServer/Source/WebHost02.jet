@@ -12,25 +12,50 @@ use {
 }
 
 WEB_HOST_SECRET_BYTES: 32
+
 // 25 ticks of LIVE_RELOAD_POLL_MS: a second.
 WEB_HOST_RECORDING_TICKS: 25
 
 // A host for `file` serving the output root `root` under `policy`; it
 // listens once web_host_bind binds it.
-web_host_new: fn(file: String, root: String, verbose: Bool, &&policy: JetReleaseDevtoolsPolicy) -> Shared<WebHostState> WebHostError! {
+web_host_new: fn(file: String, root: String, verbose: Bool, policy: &&JetReleaseDevtoolsPolicy) -> Shared<WebHostState> WebHostError! {
     canonical: webhost_files.canonicalize(root) ?? return Err(WebHostError{message: "error: couldn't open static output `{root}`: {err}"})
     secret: webhost_random.token_hex(WEB_HOST_SECRET_BYTES) ?? return Err(WebHostError{message: "error: couldn't make the dev session secret: {err}"})
     session: ResidentDevSession.new(file, 0, 0) ?? return Err(WebHostError{message: "error: couldn't start the dev session for `{file}`: {err}"})
     session_id: "{session.session_id}"
     browser: BrowserWebState.new(session_id) ?? return Err(WebHostError{message: "error: couldn't start the browser devtools view: {err}"})
     tty: webhost_term.stderr().is_tty()
-    Ok(Shared{WebHostState{
-        facts: web_host_facts(file, 0), session: session, session_id: session_id, root: canonical, secret: secret, policy: policy.move(),
-        color: ColorChoice.Auto.resolve(tty), pinned: tty && !verbose, verbose: verbose, trace_enabled: false,
-        relays: [BrowserTraceRelay]{}, nonce: "", noted: [String]{}, dropped: [String]{}, beacons: [[U8]]{},
-        envelopes: [JetDevtoolsDecodedEnvelope]{}, selections: [String]{}, browser: browser, requests: [String]{},
-        commands: None, assets: None, recording: "", recording_ticks: 0, log: [String]{}, dirty: true, block_lines: 0, stopped: None,
-    }})
+    Ok(
+        Shared{WebHostState{
+            facts: web_host_facts(file, 0),
+            session: session,
+            session_id: session_id,
+            root: canonical,
+            secret: secret,
+            policy: policy.move(),
+            color: ColorChoice.Auto.resolve(tty),
+            pinned: tty && !verbose,
+            verbose: verbose,
+            trace_enabled: false,
+            relays: [BrowserTraceRelay]{},
+            nonce: "",
+            noted: [String]{},
+            dropped: [String]{},
+            beacons: [[U8]]{},
+            envelopes: [JetDevtoolsDecodedEnvelope]{},
+            selections: [String]{},
+            browser: browser,
+            requests: [String]{},
+            commands: None,
+            assets: None,
+            recording: "",
+            recording_ticks: 0,
+            log: [String]{},
+            dirty: true,
+            block_lines: 0,
+            stopped: None,
+        }},
+    )
 }
 
 // Listens on `port`, or on the first free one from APPLICATION_PORT_FIRST to
@@ -164,18 +189,26 @@ impl WebHostState {
     step: fn(&self, clock: String) -> String {
         self.apply_clients()
         loop envelope in self.envelopes {
-            if self.session.ingest_devtools_envelope(envelope) == .Err(error) -> self.note_log("{clock}  devtools envelope refused: {error}")
+            if self.session.ingest_devtools_envelope(envelope) == .Err(error) {
+                self.note_log("{clock}  devtools envelope refused: {error}")
+            }
         }
         self.envelopes = [JetDevtoolsDecodedEnvelope]{}
         loop selection in self.selections {
-            if self.session.set_devtools_selection(selection) == .Err(error) -> self.note_log("{clock}  devtools selection refused: {error}")
+            if self.session.set_devtools_selection(selection) == .Err(error) {
+                self.note_log("{clock}  devtools selection refused: {error}")
+            }
         }
         self.selections = [String]{}
-        if browser_web_sync_session(self.browser, self.session) == .Err(error) -> self.note_log("{clock}  browser devtools sync failed: {error}")
+        if browser_web_sync_session(self.browser, self.session) == .Err(error) {
+            self.note_log("{clock}  browser devtools sync failed: {error}")
+        }
         if self.relays.len() > 0 {
             // A beacon's row that doesn't fit the trace is dropped, as the
             // page doesn't wait for an answer.
-            loop body in self.beacons -> self.relays[0].record(body).drop("a browser trace beacon is best-effort")
+            loop body in self.beacons {
+                self.relays[0].record(body).drop("a browser trace beacon is best-effort")
+            }
         }
         self.beacons = [[U8]]{}
         self.take_trace_request()
@@ -218,7 +251,9 @@ impl WebHostState {
     // perf script.
     take_trace_request: fn(&self) {
         taken: browser_trace_take_request() ?? false
-        if !taken -> return
+        if !taken {
+            return
+        }
         self.trace_enabled = true
         self.open_relay()
         self.facts.version += 1
@@ -305,9 +340,7 @@ format_line_colored: fn(word: String, rest: String) -> String Never! {
     "jet dev  {esc}[{sgr}m●{esc}[0m {word} · {rest}"
 }
 
-format_line_plain: fn(word: String, rest: String) -> String Never! {
-    "jet dev  [{word}] {rest}"
-}
+format_line_plain: fn(word: String, rest: String) -> String Never! { "jet dev  [{word}] {rest}" }
 
 // A diagnostic in a box headed by its code, 20 to 96 columns wide.
 frame_lines: fn(code: String, diagnostic: String) -> [String] Never! {
@@ -337,7 +370,9 @@ web_host_lines: fn(text: String) -> [String] Never! {
     pieces: text.split("\n").to_list()
     loop (index, piece) in pieces {
         if index == pieces.len() - 1 && piece == "" -> break
-        if piece.ends_with("\r") -> out.push(piece.slice(0, piece.len() - 1)) else -> out.push("{piece}")
+        if piece.ends_with("\r") -> out.push(piece.slice(0, piece.len() - 1)) else {
+            out.push("{piece}")
+        }
     }
     out
 }

@@ -2,6 +2,7 @@ native_swap_test_executable: fn(source: NativeSwapSourceIdentity, code: String, 
     revision: NativeSwapRevision.new(code, "data-1") ?? panic("revision")
     NativeSwapExecutable.new(source, revision, generation) ?? panic("executable")
 }
+
 native_swap_test_refusal: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable) -> NativeSwapError {
     if NativeSwapPlan.new(source, from, to) == {
         .Ok(_) -> panic("expected the native swap plan to refuse")
@@ -16,6 +17,7 @@ native_swap_test_refusal: fn(source: NativeSwapSourceIdentity, from: NativeSwapE
     assert_eq(error.source_id(), "server.jet")
     assert(error.render().contains("native hot swap is not available"))
 }
+
 #Test("stale_native_swap_plan_is_rejected_before_the_refusal") {
     source: NativeSwapSourceIdentity.new("server.jet") ?? panic("source identity")
     error: native_swap_test_refusal(source, native_swap_test_executable(source, "code-2", U64{2}), native_swap_test_executable(source, "code-1", U64{1}))

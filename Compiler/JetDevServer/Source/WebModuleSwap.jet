@@ -5,16 +5,24 @@ WebModuleSwapIdentity: struct {
     module_ref: String,
     page: String,
 
-    new: fn(module_ref: String, page: String) -> WebModuleSwapIdentity { WebModuleSwapIdentity{module_ref, page} }
+    new: fn(module_ref: String, page: String) -> WebModuleSwapIdentity {
+        WebModuleSwapIdentity{module_ref, page}
+    }
+
     is_valid: fn(self) -> Bool { self.module_ref.len() > 0 && self.page.len() > 0 }
-    matches: fn(self, other: WebModuleSwapIdentity) -> Bool { self.module_ref == other.module_ref && self.page == other.page }
+
+    matches: fn(self, other: WebModuleSwapIdentity) -> Bool {
+        self.module_ref == other.module_ref && self.page == other.page
+    }
 }
+
 WebPageFact: struct {
     identity: String,
     artifact: String,
 
     new: fn(identity: String, artifact: String) -> WebPageFact { WebPageFact{identity, artifact} }
 }
+
 WebModuleFact: struct {
     identity: String,
     interface_fingerprint: String,
@@ -24,8 +32,13 @@ WebModuleFact: struct {
         WebModuleFact{identity, interface_fingerprint, body_fingerprint}
     }
 }
+
 WebStateValue: enum {
-    Text(String), Integer(I64), Unsigned(U64), Boolean(Bool), Bytes([U8]),
+    Text(String),
+    Integer(I64),
+    Unsigned(U64),
+    Boolean(Bool),
+    Bytes([U8]),
 
     kind: fn(self) -> String {
         if self == {
@@ -37,6 +50,7 @@ WebStateValue: enum {
         }
     }
 }
+
 // WebStateKind's row order in Vocabulary.tsv is the canonical state order.
 impl WebStateKind {
     as_str: fn(self) -> String {
@@ -50,6 +64,7 @@ impl WebStateKind {
             .Island -> "island"
         }
     }
+
     rank: fn(self) -> Int {
         if self == {
             .Signal -> 0
@@ -68,54 +83,80 @@ WebSignalFact: struct {
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebSignalFact { WebSignalFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebSignalFact {
+        WebSignalFact{key, type_fingerprint, value}
+    }
 }
+
 WebStoreFact: struct {
     key: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebStoreFact { WebStoreFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebStoreFact {
+        WebStoreFact{key, type_fingerprint, value}
+    }
 }
+
 WebQueryCacheFact: struct {
     key: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebQueryCacheFact { WebQueryCacheFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebQueryCacheFact {
+        WebQueryCacheFact{key, type_fingerprint, value}
+    }
 }
+
 WebFormDraftFact: struct {
     key: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFormDraftFact { WebFormDraftFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFormDraftFact {
+        WebFormDraftFact{key, type_fingerprint, value}
+    }
 }
+
 WebScrollFact: struct {
     key: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebScrollFact { WebScrollFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebScrollFact {
+        WebScrollFact{key, type_fingerprint, value}
+    }
 }
+
 WebFocusFact: struct {
     key: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFocusFact { WebFocusFact{key, type_fingerprint, value} }
+    new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFocusFact {
+        WebFocusFact{key, type_fingerprint, value}
+    }
 }
+
 WebIslandFact: struct {
     key: String,
     identity: String,
     type_fingerprint: String,
     value: WebStateValue,
 
-    new: fn(key: String, identity: String, type_fingerprint: String, value: WebStateValue) -> WebIslandFact { WebIslandFact{key, identity, type_fingerprint, value} }
+    new: fn(key: String, identity: String, type_fingerprint: String, value: WebStateValue) -> WebIslandFact {
+        WebIslandFact{key, identity, type_fingerprint, value}
+    }
 }
+
 WebModuleSwapStateFact: enum {
-    Signal(WebSignalFact), Store(WebStoreFact), QueryCache(WebQueryCacheFact), FormDraft(WebFormDraftFact),
-    Scroll(WebScrollFact), Focus(WebFocusFact), Island(WebIslandFact),
+    Signal(WebSignalFact),
+    Store(WebStoreFact),
+    QueryCache(WebQueryCacheFact),
+    FormDraft(WebFormDraftFact),
+    Scroll(WebScrollFact),
+    Focus(WebFocusFact),
+    Island(WebIslandFact),
 
     kind: fn(self) -> WebStateKind {
         if self == {
@@ -128,6 +169,7 @@ WebModuleSwapStateFact: enum {
             .Island(_) -> WebStateKind.Island
         }
     }
+
     key: fn(self) -> String {
         if self == {
             .Signal(fact) -> fact.key
@@ -139,6 +181,7 @@ WebModuleSwapStateFact: enum {
             .Island(fact) -> fact.key
         }
     }
+
     // Islands carry their own identity; every other family is identified by its key.
     identity: fn(self) -> String {
         if self == {
@@ -146,6 +189,7 @@ WebModuleSwapStateFact: enum {
             else -> self.key()
         }
     }
+
     type_fingerprint: fn(self) -> String {
         if self == {
             .Signal(fact) -> fact.type_fingerprint
@@ -157,6 +201,7 @@ WebModuleSwapStateFact: enum {
             .Island(fact) -> fact.type_fingerprint
         }
     }
+
     value: fn(self) -> WebStateValue {
         if self == {
             .Signal(fact) -> fact.value
@@ -168,6 +213,7 @@ WebModuleSwapStateFact: enum {
             .Island(fact) -> fact.value
         }
     }
+
     with_value: fn(self, value: WebStateValue) -> WebModuleSwapStateFact {
         if self == {
             .Signal(fact) -> WebModuleSwapStateFact.Signal(WebSignalFact{key: fact.key, type_fingerprint: fact.type_fingerprint, value})
@@ -179,8 +225,12 @@ WebModuleSwapStateFact: enum {
             .Island(fact) -> WebModuleSwapStateFact.Island(WebIslandFact{key: fact.key, identity: fact.identity, type_fingerprint: fact.type_fingerprint, value})
         }
     }
-    same_slot: fn(self, other: WebModuleSwapStateFact) -> Bool { self.kind() == other.kind() && self.key() == other.key() }
+
+    same_slot: fn(self, other: WebModuleSwapStateFact) -> Bool {
+        self.kind() == other.kind() && self.key() == other.key()
+    }
 }
+
 WebModuleSwapSnapshot: struct {
     identity: WebModuleSwapIdentity,
     source_revision: String,
@@ -194,34 +244,55 @@ WebModuleSwapSnapshot: struct {
         snapshot.normalize()
         snapshot
     }
+
     // Sorts modules by identity and state by (kind, key), then rejects empty or duplicate facts.
     normalize: fn(&self) WebModuleSwapError! {
-        if !self.identity.is_valid() -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "module and page identity must be non-empty"})
-        if self.source_revision.len() == 0 || self.build_revision.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "source and build revisions must be non-empty"})
-        if self.page.identity.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "page identity must be non-empty"})
-        if self.page.identity != self.identity.page -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "page fact identity does not match swap identity"})
+        if !self.identity.is_valid() {
+            return Err(WebModuleSwapError.InvalidSnapshot{detail: "module and page identity must be non-empty"})
+        }
+        if self.source_revision.len() == 0 || self.build_revision.len() == 0 {
+            return Err(WebModuleSwapError.InvalidSnapshot{detail: "source and build revisions must be non-empty"})
+        }
+        if self.page.identity.len() == 0 {
+            return Err(WebModuleSwapError.InvalidSnapshot{detail: "page identity must be non-empty"})
+        }
+        if self.page.identity != self.identity.page {
+            return Err(WebModuleSwapError.InvalidSnapshot{detail: "page fact identity does not match swap identity"})
+        }
         self.modules.sort_by(fn(left, right) { left.identity <=> right.identity })
         loop item in self.modules {
-            if item.identity.len() == 0 || item.interface_fingerprint.len() == 0 || item.body_fingerprint.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "module identity and fingerprints must be non-empty"})
+            if item.identity.len() == 0 || item.interface_fingerprint.len() == 0 || item.body_fingerprint.len() == 0 {
+                return Err(WebModuleSwapError.InvalidSnapshot{detail: "module identity and fingerprints must be non-empty"})
+            }
         }
         loop index in 1..<self.modules.len() {
-            if self.modules[index - 1].identity == self.modules[index].identity -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "module identities must be unique"})
+            if self.modules[index - 1].identity == self.modules[index].identity {
+                return Err(WebModuleSwapError.InvalidSnapshot{detail: "module identities must be unique"})
+            }
         }
         web_swap_sort_state(self.state)
         loop fact in self.state {
-            if fact.key().len() == 0 || fact.type_fingerprint().len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "state keys and type fingerprints must be non-empty"})
-            if fact.kind() == WebStateKind.Island && fact.identity().len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "island identities must be non-empty"})
+            if fact.key().len() == 0 || fact.type_fingerprint().len() == 0 {
+                return Err(WebModuleSwapError.InvalidSnapshot{detail: "state keys and type fingerprints must be non-empty"})
+            }
+            if fact.kind() == WebStateKind.Island && fact.identity().len() == 0 {
+                return Err(WebModuleSwapError.InvalidSnapshot{detail: "island identities must be non-empty"})
+            }
         }
         loop index in 1..<self.state.len() {
-            if self.state[index - 1].same_slot(self.state[index]) -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "state keys must be unique within a state family"})
+            if self.state[index - 1].same_slot(self.state[index]) {
+                return Err(WebModuleSwapError.InvalidSnapshot{detail: "state keys must be unique within a state family"})
+            }
         }
     }
+
     module_ref: fn(self, identity: String) -> WebModuleFact? {
         loop item in self.modules {
             if item.identity == identity -> return Val(item)
         }
         None
     }
+
     state_fact: fn(self, kind: WebStateKind, key: String) -> WebModuleSwapStateFact? {
         loop fact in self.state {
             if fact.kind() == kind && fact.key() == key -> return Val(fact)
@@ -229,6 +300,7 @@ WebModuleSwapSnapshot: struct {
         None
     }
 }
+
 impl WebModuleSwapReasonCode {
     as_str: fn(self) -> String {
         if self == {
@@ -259,10 +331,14 @@ impl WebModuleSwapReasonCode {
         }
     }
 }
-impl WebModuleSwapReasonCode.Display { display: fn(self) -> String { self.as_str() } }
+
+impl WebModuleSwapReasonCode.Display {
+    display: fn(self) -> String { self.as_str() }
+}
 
 WebModuleSwapCompatibility: enum {
-    Compatible, Incompatible(reason_codes: [WebModuleSwapReasonCode]),
+    Compatible,
+    Incompatible(reason_codes: [WebModuleSwapReasonCode]),
 
     is_compatible: fn(self) -> Bool {
         if self == {
@@ -270,6 +346,7 @@ WebModuleSwapCompatibility: enum {
             .Incompatible(_) -> false
         }
     }
+
     reason_codes: fn(self) -> [WebModuleSwapReasonCode] {
         if self == {
             .Compatible -> [WebModuleSwapReasonCode]{}
@@ -277,6 +354,7 @@ WebModuleSwapCompatibility: enum {
         }
     }
 }
+
 WebModuleSwapResetFact: struct {
     state: WebModuleSwapStateFact,
     prior_identity: String?,
@@ -302,8 +380,11 @@ WebModuleSwapPlan: struct {
         checked_candidate.normalize()
         Err(WebModuleSwapError.Unavailable{feature: "checked hot-swap decision"})
     }
+
     is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
+
     changed_module_set: fn(self) -> [String] { self.changed_modules }
+
     applied_snapshot: fn(self) -> WebModuleSwapSnapshot {
         snapshot := self.candidate
         loop kept in self.preserved {
@@ -314,6 +395,7 @@ WebModuleSwapPlan: struct {
         snapshot
     }
 }
+
 impl WebModuleSwapOperation {
     as_str: fn(self) -> String {
         if self == {
@@ -325,7 +407,10 @@ impl WebModuleSwapOperation {
         }
     }
 }
-impl WebModuleSwapOperation.Display { display: fn(self) -> String { self.as_str() } }
+
+impl WebModuleSwapOperation.Display {
+    display: fn(self) -> String { self.as_str() }
+}
 
 impl WebModuleSwapPhase {
     as_str: fn(self) -> String {
@@ -336,7 +421,10 @@ impl WebModuleSwapPhase {
         }
     }
 }
-impl WebModuleSwapPhase.Display { display: fn(self) -> String { self.as_str() } }
+
+impl WebModuleSwapPhase.Display {
+    display: fn(self) -> String { self.as_str() }
+}
 
 impl WebModuleSwapReceiptStatus {
     as_str: fn(self) -> String {
@@ -366,7 +454,9 @@ WebModuleSwapReceipt: struct {
     active_page: WebPageFact,
 
     changed_module_set: fn(self) -> [String] { self.changed_modules }
+
     preserved_facts: fn(self) -> [WebModuleSwapStateFact] { self.preserved }
+
     audit: fn(self) -> String {
         changed: self.changed_modules.join(",")
         reason_names := [String]{}
@@ -376,11 +466,14 @@ WebModuleSwapReceipt: struct {
         loop fact in self.preserved -> preserved_names.push("{fact.kind().as_str()}:{fact.key()}")
         preserved: preserved_names.join(",")
         reset_names := [String]{}
-        loop fact in self.reset -> reset_names.push("{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})")
+        loop fact in self.reset {
+            reset_names.push("{fact.state.kind().as_str()}:{fact.state.key()}({fact.reason.as_str()})")
+        }
         reset: reset_names.join(",")
         "operation={self.operation.as_str()} status={self.status.as_str()} phase={self.phase.as_str()} identity={self.identity.module_ref}/{self.identity.page} candidate={self.candidate_identity.module_ref}/{self.candidate_identity.page} source_revision={self.source_revision} build_revision={self.build_revision} changed_modules=[{changed}] reasons=[{reasons}] preserved=[{preserved}] reset=[{reset}] committed_page={self.committed_page.artifact} active_page={self.active_page.artifact}"
     }
 }
+
 #Error
 WebModuleSwapError: enum {
     InvalidSnapshot(detail: String),
@@ -388,7 +481,9 @@ WebModuleSwapError: enum {
     StalePlan(expected_source_revision: String, found_source_revision: String, expected_build_revision: String, found_build_revision: String),
     Incompatible(reason_codes: [WebModuleSwapReasonCode]),
     InvalidTransition(operation: WebModuleSwapOperation, phase: WebModuleSwapPhase),
-    NoPendingPlan, NoAppliedPlan, NoCommittedPage,
+    NoPendingPlan,
+    NoAppliedPlan,
+    NoCommittedPage,
     Unavailable(feature: String),
 
     impl Display {
@@ -407,6 +502,7 @@ WebModuleSwapError: enum {
         }
     }
 }
+
 WebModuleSwapState: struct {
     committed_snapshot: WebModuleSwapSnapshot,
     pending_plan: WebModuleSwapPlan?,
@@ -418,52 +514,86 @@ WebModuleSwapState: struct {
         checked.normalize()
         WebModuleSwapState{committed_snapshot: checked, pending_plan: None, active_snapshot: checked, current_phase: WebModuleSwapPhase.Committed}
     }
+
     committed: fn(self) -> WebModuleSwapSnapshot { self.committed_snapshot }
+
     active: fn(self) -> WebModuleSwapSnapshot { self.active_snapshot }
+
     pending: fn(self) -> WebModuleSwapPlan? { self.pending_plan }
+
     phase: fn(self) -> WebModuleSwapPhase { self.current_phase }
+
     pause: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
-        if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None -> return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Pause, phase: self.current_phase})
+        if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None {
+            return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Pause, phase: self.current_phase})
+        }
         self.validate_base(plan)
-        if !plan.base.identity.matches(plan.candidate.identity) -> return Err(WebModuleSwapError.IdentityMismatch{expected: plan.base.identity, found: plan.candidate.identity})
-        if !plan.is_compatible() -> return Err(WebModuleSwapError.Incompatible{reason_codes: plan.compatibility.reason_codes()})
+        if !plan.base.identity.matches(plan.candidate.identity) {
+            return Err(WebModuleSwapError.IdentityMismatch{expected: plan.base.identity, found: plan.candidate.identity})
+        }
+        if !plan.is_compatible() {
+            return Err(WebModuleSwapError.Incompatible{reason_codes: plan.compatibility.reason_codes()})
+        }
         self.pending_plan = Val(plan)
         self.current_phase = WebModuleSwapPhase.Paused
         self.receipt_for_plan(plan, WebModuleSwapOperation.Pause, WebModuleSwapReceiptStatus.Paused)
     }
+
     apply: fn(&self) -> WebModuleSwapReceipt WebModuleSwapError! {
-        if self.current_phase != WebModuleSwapPhase.Paused -> return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Apply, phase: self.current_phase})
+        if self.current_phase != WebModuleSwapPhase.Paused {
+            return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Apply, phase: self.current_phase})
+        }
         plan: self.pending_plan ?? return Err(WebModuleSwapError.NoPendingPlan)
         self.validate_base(plan)
-        if !plan.is_compatible() -> return Err(WebModuleSwapError.Incompatible{reason_codes: plan.compatibility.reason_codes()})
+        if !plan.is_compatible() {
+            return Err(WebModuleSwapError.Incompatible{reason_codes: plan.compatibility.reason_codes()})
+        }
         self.active_snapshot = plan.applied_snapshot()
         self.current_phase = WebModuleSwapPhase.Applied
         self.receipt_for_plan(plan, WebModuleSwapOperation.Apply, WebModuleSwapReceiptStatus.Applied)
     }
+
     commit: fn(&self) -> WebModuleSwapReceipt WebModuleSwapError! {
-        if self.current_phase != WebModuleSwapPhase.Applied -> return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Commit, phase: self.current_phase})
+        if self.current_phase != WebModuleSwapPhase.Applied {
+            return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Commit, phase: self.current_phase})
+        }
         plan: self.pending_plan ?? return Err(WebModuleSwapError.NoAppliedPlan)
         self.validate_base(plan)
-        if !self.active_snapshot.identity.matches(plan.candidate.identity) -> return Err(WebModuleSwapError.IdentityMismatch{expected: plan.candidate.identity, found: self.active_snapshot.identity})
+        if !self.active_snapshot.identity.matches(plan.candidate.identity) {
+            return Err(WebModuleSwapError.IdentityMismatch{expected: plan.candidate.identity, found: self.active_snapshot.identity})
+        }
         self.pending_plan = None
         self.committed_snapshot = self.active_snapshot
         self.current_phase = WebModuleSwapPhase.Committed
         self.receipt_for_plan(plan, WebModuleSwapOperation.Commit, WebModuleSwapReceiptStatus.Committed)
     }
+
     // Rollback always restores the last committed page; with no pending plan it reports nothing to roll back.
     rollback: fn(&self) -> WebModuleSwapReceipt {
         prior: self.pending_plan
         self.pending_plan = None
         self.active_snapshot = self.committed_snapshot
         self.current_phase = WebModuleSwapPhase.Committed
-        if prior == .Val(plan) -> return self.receipt_for_plan(plan, WebModuleSwapOperation.Rollback, WebModuleSwapReceiptStatus.RolledBack)
-        WebModuleSwapReceipt{operation: WebModuleSwapOperation.Rollback, status: WebModuleSwapReceiptStatus.RolledBack, phase: self.current_phase,
-            identity: self.committed_snapshot.identity, candidate_identity: self.committed_snapshot.identity,
-            source_revision: self.committed_snapshot.source_revision, build_revision: self.committed_snapshot.build_revision,
-            changed_modules: [String]{}, reason_codes: [WebModuleSwapReasonCode]{WebModuleSwapReasonCode.NothingToRollback},
-            preserved: [WebModuleSwapStateFact]{}, reset: [WebModuleSwapResetFact]{},
-            committed_page: self.committed_snapshot.page, active_page: self.active_snapshot.page}
+        if prior == .Val(plan) {
+            return self.receipt_for_plan(plan, WebModuleSwapOperation.Rollback, WebModuleSwapReceiptStatus.RolledBack)
+        }
+        WebModuleSwapReceipt{
+            operation: WebModuleSwapOperation.Rollback,
+            status: WebModuleSwapReceiptStatus.RolledBack,
+            phase: self.current_phase,
+            identity: self.committed_snapshot.identity,
+            candidate_identity: self.committed_snapshot.identity,
+            source_revision: self.committed_snapshot.source_revision,
+            build_revision: self.committed_snapshot.build_revision,
+            changed_modules: [String]{},
+            reason_codes: [WebModuleSwapReasonCode]{WebModuleSwapReasonCode.NothingToRollback},
+            preserved: [WebModuleSwapStateFact]{},
+            reset: [WebModuleSwapResetFact]{},
+            committed_page: self.committed_snapshot.page,
+            active_page: self.active_snapshot.page,
+        }
     }
+
     // Compatible plans pause, apply and commit as one transaction; any failure rolls back.
     apply_decision: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
         if !plan.is_compatible() -> return self.restart(plan)
@@ -478,32 +608,56 @@ WebModuleSwapState: struct {
         }
         receipt
     }
+
     restart: fn(&self, plan: WebModuleSwapPlan) -> WebModuleSwapReceipt WebModuleSwapError! {
-        if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None -> return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Restart, phase: self.current_phase})
+        if self.current_phase != WebModuleSwapPhase.Committed || self.pending_plan != None {
+            return Err(WebModuleSwapError.InvalidTransition{operation: WebModuleSwapOperation.Restart, phase: self.current_phase})
+        }
         self.validate_base(plan)
-        if !plan.base.identity.matches(plan.candidate.identity) -> return Err(WebModuleSwapError.IdentityMismatch{expected: plan.base.identity, found: plan.candidate.identity})
-        if plan.is_compatible() -> return Err(WebModuleSwapError.Incompatible{reason_codes: [WebModuleSwapReasonCode]{WebModuleSwapReasonCode.SemanticIncompatible}})
+        if !plan.base.identity.matches(plan.candidate.identity) {
+            return Err(WebModuleSwapError.IdentityMismatch{expected: plan.base.identity, found: plan.candidate.identity})
+        }
+        if plan.is_compatible() {
+            return Err(WebModuleSwapError.Incompatible{reason_codes: [WebModuleSwapReasonCode]{WebModuleSwapReasonCode.SemanticIncompatible}})
+        }
         self.active_snapshot = plan.candidate
         self.committed_snapshot = plan.candidate
         self.current_phase = WebModuleSwapPhase.Committed
         self.receipt_for_plan(plan, WebModuleSwapOperation.Restart, WebModuleSwapReceiptStatus.Restarted)
     }
+
     validate_base: fn(self, plan: WebModuleSwapPlan) WebModuleSwapError! {
-        if !self.committed_snapshot.identity.matches(plan.base.identity) -> return Err(WebModuleSwapError.IdentityMismatch{expected: self.committed_snapshot.identity, found: plan.base.identity})
+        if !self.committed_snapshot.identity.matches(plan.base.identity) {
+            return Err(WebModuleSwapError.IdentityMismatch{expected: self.committed_snapshot.identity, found: plan.base.identity})
+        }
         if self.committed_snapshot.source_revision != plan.base.source_revision || self.committed_snapshot.build_revision != plan.base.build_revision {
             return Err(WebModuleSwapError.StalePlan{expected_source_revision: plan.base.source_revision, found_source_revision: self.committed_snapshot.source_revision, expected_build_revision: plan.base.build_revision, found_build_revision: self.committed_snapshot.build_revision})
         }
     }
+
     receipt_for_plan: fn(self, plan: WebModuleSwapPlan, operation: WebModuleSwapOperation, status: WebModuleSwapReceiptStatus) -> WebModuleSwapReceipt {
-        WebModuleSwapReceipt{operation, status, phase: self.current_phase, identity: self.committed_snapshot.identity, candidate_identity: plan.candidate.identity,
-            source_revision: plan.candidate.source_revision, build_revision: plan.candidate.build_revision, changed_modules: plan.changed_modules,
-            reason_codes: plan.reason_codes, preserved: plan.preserved, reset: plan.reset,
-            committed_page: self.committed_snapshot.page, active_page: self.active_snapshot.page}
+        WebModuleSwapReceipt{
+            operation,
+            status,
+            phase: self.current_phase,
+            identity: self.committed_snapshot.identity,
+            candidate_identity: plan.candidate.identity,
+            source_revision: plan.candidate.source_revision,
+            build_revision: plan.candidate.build_revision,
+            changed_modules: plan.changed_modules,
+            reason_codes: plan.reason_codes,
+            preserved: plan.preserved,
+            reset: plan.reset,
+            committed_page: self.committed_snapshot.page,
+            active_page: self.active_snapshot.page,
+        }
     }
 }
+
 web_swap_sort_state: fn(facts: &[WebModuleSwapStateFact]) {
     facts.sort_by(fn(left, right) { (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()) })
 }
+
 web_swap_reason_list: fn(codes: [WebModuleSwapReasonCode]) -> String {
     names := [String]{}
     loop code in codes -> names.push(code.as_str())

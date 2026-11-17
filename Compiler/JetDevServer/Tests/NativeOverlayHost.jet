@@ -1,9 +1,11 @@
 overlay_test_panel: fn(id: String, freshness: Int) -> NativeOverlayPanelFact {
     NativeOverlayPanelFact.new(id, id, freshness, "ready", [NativeOverlayNode]{NativeOverlayNode.text("{id}:item", "item")})
 }
+
 overlay_test_event: fn(revision: String, sequence: Int, observed_at_ms: Int, panels: [NativeOverlayPanelFact]) -> NativeOverlayEvent {
     NativeOverlayEvent.current("session", revision, sequence, observed_at_ms, panels)
 }
+
 overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) -> String {
     _: host.ingest(event) ?? return err.message
     panic("expected the native overlay to reject the event")
@@ -18,12 +20,14 @@ overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) 
     assert_eq(first.panels[0].panel_id, second.panels[0].panel_id)
     assert_eq(second.panels[0].freshness, 5)
 }
+
 #Test("stale_revision_identity_is_rejected_at_equal_sequence") {
     host := NativeOverlayHost.new()
     host.ingest(overlay_test_event("revision-a", 1, 10, [NativeOverlayPanelFact]{overlay_test_panel("Build", 1)})) ?? panic("ingest")
     message: overlay_test_rejection(host, overlay_test_event("revision-b", 1, 11, [NativeOverlayPanelFact]{overlay_test_panel("Build", 2)}))
     assert(message.contains("revision identity"))
 }
+
 #Test("revision_rollover_discards_old_panels") {
     host := NativeOverlayHost.new()
     host.ingest(overlay_test_event("revision-a", 1, 10, [NativeOverlayPanelFact]{overlay_test_panel("Old", 1)})) ?? panic("old")
@@ -32,6 +36,7 @@ overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) 
     assert_eq(frame.panels.len(), 1)
     assert_eq(frame.panels[0].panel_id, "New")
 }
+
 #Test("focused_overlay_never_routes_input_to_game") {
     host := NativeOverlayHost.new()
     host.open()
@@ -45,22 +50,27 @@ overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) 
     host.close()
     assert_eq(host.route_input(NativeOverlayInput.Key{code: "Space", pressed: true}), NativeOverlayInputRoute.Game)
 }
+
 #Test("headless_projection_is_deterministic") {
     event: overlay_test_event("revision", 7, 99, [NativeOverlayPanelFact]{overlay_test_panel("Traces", 3), overlay_test_panel("Build", 3)})
     first: NativeOverlayHost.headless_projection(event) ?? panic("first projection")
     second: NativeOverlayHost.headless_projection(event) ?? panic("second projection")
     assert_eq(first, second)
 }
+
 #Test("merged_projection_stays_bounded") {
     host := NativeOverlayHost.new()
     nodes := [NativeOverlayNode]{}
-    loop index in 0..<MAX_OVERLAY_NODES -> nodes.push(NativeOverlayNode.text("node-{index}", "node"))
+    loop index in 0..<MAX_OVERLAY_NODES {
+        nodes.push(NativeOverlayNode.text("node-{index}", "node"))
+    }
     host.ingest(overlay_test_event("revision", 1, 1, [NativeOverlayPanelFact]{NativeOverlayPanelFact.new("first", "first", 1, "ready", nodes)})) ?? panic("full panel")
     message: overlay_test_rejection(host, overlay_test_event("revision", 2, 2, [NativeOverlayPanelFact]{overlay_test_panel("second", 1)}))
     assert(message.contains("node budget"))
     frame: host.frame() ?? panic("frame")
     assert_eq(frame.sequence, 1)
 }
+
 #Test("frame_history_is_bounded") {
     host := NativeOverlayHost.new()
     host.set_frame_capacity(2)

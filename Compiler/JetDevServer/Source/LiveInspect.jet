@@ -11,8 +11,11 @@ use {
 LiveInspectError: struct {
     message: String,
 
-    impl Display { display: fn(self) -> String { self.message } }
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
 }
+
 live_inspect_error: fn(message: String) -> LiveInspectError Never! {
     LiveInspectError{message: message}
 }
@@ -26,13 +29,13 @@ live_inspect_read: fn(pid: Int) -[FS, Env, Time]> String LiveInspectError! {
     Ok(view)
 }
 
-live_view_count: fn(counters: [String:Int], key: String) -> Int Never! {
-    counters.get(key) ?? 0
-}
+live_view_count: fn(counters: [String:Int], key: String) -> Int Never! { counters.get(key) ?? 0 }
+
 live_view_optional: fn(value: Int?) -> String Never! {
     if value == .Val(number) -> return "{number}"
     "null"
 }
+
 live_view_value: fn(value: JetLiveValue) -> String Never! {
     rendered: if value.rendered_value == .Val(shown) -> ",\"rendered_value\":{foundation_json_quote(shown)}" else -> ""
     "{{\"value_id\":{foundation_json_quote(value.value_id)},\"type_identity\":{foundation_json_quote(value.type_identity)},\"disposition\":{foundation_json_quote(value.disposition)},\"reason\":{foundation_json_quote(value.reason)}{rendered}}}"

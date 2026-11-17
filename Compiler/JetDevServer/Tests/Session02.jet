@@ -59,7 +59,9 @@
         "\"diagnostic_code\":\"E0102\"",
         "Error [jet.UnknownFunction]: missing name",
     }
-    loop expected in expectations -> assert(json.contains(expected), "session lost {expected}: {json}")
+    loop expected in expectations {
+        assert(json.contains(expected), "session lost {expected}: {json}")
+    }
 }
 
 #Test("first_observed_source_is_the_accepted_session_baseline") {
@@ -92,7 +94,9 @@
         "\"debugger\":{{\"state\":\"active\",\"session_id\":\"canvas-debug-1\"",
         "\"clients\":1",
     }
-    loop expected in expectations -> assert(json.contains(expected), "reconnect lost {expected}: {json}")
+    loop expected in expectations {
+        assert(json.contains(expected), "reconnect lost {expected}: {json}")
+    }
     session.record_debug("{{\"schema_version\":1,\"revision\":\"accepted-revision\",\"source_id\":\"helper.jet\",\"session_id\":\"canvas-debug-1\",\"stop\":true}}")
     assert(session.json().contains("\"debugger\":{{\"state\":\"idle\",\"session_id\":null"))
 }

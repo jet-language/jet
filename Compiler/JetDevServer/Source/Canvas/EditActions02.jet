@@ -98,22 +98,24 @@ apply_reorder_statements: fn(checker: LSPChecker, path: String, src: String, gra
     anchor_at: loc_by_anchor(locs, anchor) ?? return Err(edit_error("not_found", "Canvas anchor step no longer exists"))
     moved_full: locs[moved_at].full
     anchor_full: locs[anchor_at].full
-    if !same_block(locs[moved_at].block, locs[anchor_at].block) -> return Err(edit_error("bad_request", "can't move a step into a different branch yet"))
+    if !same_block(locs[moved_at].block, locs[anchor_at].block) {
+        return Err(edit_error("bad_request", "can't move a step into a different branch yet"))
+    }
     if locs[moved_at].index == locs[anchor_at].index -> return Ok(edit_ok(false, path))
     if moved_full.start <= anchor_full.start && anchor_full.start < moved_full.end {
         return Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
     }
     insert := 0
-    if position == "before" {
-        insert = anchor_full.start
-    } else if position == "after" {
+    if position == "before" -> insert = anchor_full.start else if position == "after" {
         insert = anchor_full.end
     } else {
         return Err(edit_error("bad_request", "Canvas reorder position must be before or after"))
     }
     // Spans count bytes, so the source is cut and rejoined by byte.
     src_bytes: src.bytes()
-    if moved_full.end > src_bytes.len() -> return Err(edit_error("bad_request", "Canvas moved source span is stale"))
+    if moved_full.end > src_bytes.len() {
+        return Err(edit_error("bad_request", "Canvas moved source span is stale"))
+    }
     chunk: foundation_byte_text(src_bytes, moved_full.start, moved_full.end)
     rest: "{foundation_byte_text(src_bytes, 0, moved_full.start)}{foundation_byte_text(src_bytes, moved_full.end, src_bytes.len())}"
     if insert > moved_full.start -> insert -= moved_full.end - moved_full.start
@@ -145,15 +147,21 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
     if strategy != "extract" && strategy != "helper" && strategy != "duplicate" {
         return Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
     }
-    if same_span(from_span, target_span) -> return Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
+    if same_span(from_span, target_span) {
+        return Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
+    }
     name_span: graph_id_name_span(graph_id) ?? return Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
     checked: checked_source(checker, path, src)
     doc: checked.modules[checked.at]
     func: find_func_by_name_span(doc.tables, doc.items, name_span) ?? return Err(edit_error("not_found", "Canvas graph no longer exists"))
     target: find_expression_selection(func.tables, func.body, target_span, src) ?? return Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
-    if target.full.end > src.count_bytes() -> return Err(edit_error("bad_request", "Canvas convergence target span is stale"))
+    if target.full.end > src.count_bytes() {
+        return Err(edit_error("bad_request", "Canvas convergence target span is stale"))
+    }
     target_text: foundation_byte_text(src.bytes(), target.span.start, target.span.end).trim()
-    if target_text == "" -> return Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
+    if target_text == "" {
+        return Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
+    }
     scan := InsertionScan{node_span: from_span, pin_name: from_pin_name, found: None, problem: None}
     find_exec_insertion(func.tables, src, func.body, scan)
     if scan.problem == .Val(problem) -> return Err(edit_error("ambiguous", problem))
@@ -169,7 +177,9 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
     edits := [TextEdit]{}
     if strategy == "helper" {
         name: helper_name ?? ""
-        if name == "" -> return Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
+        if name == "" {
+            return Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
+        }
         validate_ident(name)
         if (exact_body_helper_name(doc.tables, doc.items, src, target_text, func.name) ?? "") != name {
             return Err(edit_error("stale", "The selected helper body no longer matches the converged source"))
@@ -177,7 +187,9 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
         call_name = name
     }
     if strategy == "extract" {
-        if function_name_exists(doc.items, function) -> return Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
+        if function_name_exists(doc.items, function) {
+            return Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
+        }
         signature_parts: loop param in params -> "{param.name}: {param.ty}"
         body_lines: loop line in target_text.lines() -> "    {line.trim()}\n"
         edits.push(edit(Span{start: 0, end: 0}, "{function}: fn({signature_parts.join(", ")}) {{\n{body_lines.join("")}}}\n\n"))
@@ -197,7 +209,9 @@ apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph
 convergence_params: fn(index: SemIndex, module_path: String, target: Span) -> [NamedType] Err! {
     order := [Int]{}
     loop (at, reference) in index.references {
-        if reference.module_path == module_path && reference.span.start >= target.start && reference.span.end <= target.end -> order.push(at)
+        if reference.module_path == module_path && reference.span.start >= target.start && reference.span.end <= target.end {
+            order.push(at)
+        }
     }
     loop at in 1..<order.len() {
         cursor := at
@@ -216,13 +230,13 @@ convergence_params: fn(index: SemIndex, module_path: String, target: Span) -> [N
         shown := String?{None}
         loop definition in index.definitions {
             def: definition.def
-            if def.module_path != anchor.module_path || !same_span(def.def_span, anchor.def_span) -> next
+            if def.module_path != anchor.module_path || !same_span(def.def_span, anchor.def_span) {
+                next
+            }
             if def.kind == .Local(_, local_ty) {
                 found: local_ty ?? return Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type"))
                 shown = Val(type_name(found))
-            } else if def.kind == .Param(param_ty) {
-                shown = Val(type_name(param_ty))
-            }
+            } else if def.kind == .Param(param_ty) { shown = Val(type_name(param_ty)) }
             break
         }
         ty: shown ?? next
@@ -248,7 +262,9 @@ find_expression_selection: fn(tables: ASTTables, stmts: [StmtNode], target: Span
 }
 
 note_expression_selection: fn(tables: ASTTables, scan: &SelectionScan, body: [StmtNode], src: String) Never! {
-    if scan.found != None -> return
+    if scan.found != None {
+        return
+    }
     scan.found = find_expression_selection(tables, body, scan.target, src)
 }
 
@@ -276,9 +292,7 @@ expression_selection_in_block: fn(tables: ASTTables, stmts: [StmtNode], target: 
             span: source_expression_span(tables, src, expression)
             if at == first -> start = span.start
             end = span.end
-        } else {
-            return None
-        }
+        } else { return None }
     }
     if stop - first > 1 && (start < target.start || end > target.end) -> return None
     Val(ExpressionSelection{span: Span{start: start, end: end}, full: Span{start: line_start(src, start), end: line_after(src, end)}})
@@ -288,12 +302,16 @@ expression_selection_in_block: fn(tables: ASTTables, stmts: [StmtNode], target: 
 // statement, or at the end of the branch body its pin names.
 find_exec_insertion: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &InsertionScan) Never! {
     loop stmt in stmts {
-        if scan.found != None || scan.problem != None -> return
+        if scan.found != None || scan.problem != None {
+            return
+        }
         if exec_branch_node_matches(tables, stmt, scan.node_span) {
             wanted: exec_branch_index(tables, stmt, scan.pin_name) ?? -1
             owner: branch_source_span(src, stmt)
             stmt_each_branch(tables, stmt, fn(branch: Int, body: [StmtNode]) { note_branch_insertion(tables, scan, src, body, owner, branch == wanted) })
-            if scan.found == None && scan.problem == None -> scan.problem = Val("Canvas convergence pin has no source-backed branch body")
+            if scan.found == None && scan.problem == None {
+                scan.problem = Val("Canvas convergence pin has no source-backed branch body")
+            }
             return
         }
         if same_span(stmt_source_span(tables, stmt), scan.node_span) || same_span(stmt_execution_anchor(tables, stmt), scan.node_span) {
@@ -310,7 +328,9 @@ find_exec_insertion: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan:
 }
 
 note_branch_insertion: fn(tables: ASTTables, scan: &InsertionScan, src: String, body: [StmtNode], owner: Span, selected: Bool) Never! {
-    if !selected || scan.found != None || scan.problem != None -> return
+    if !selected || scan.found != None || scan.problem != None {
+        return
+    }
     if body.len() == 0 {
         scan.problem = Val("Canvas needs a non-empty source-backed branch body to converge")
         return
@@ -337,8 +357,12 @@ note_branch_insertion: fn(tables: ASTTables, scan: &InsertionScan, src: String, 
 exec_branch_node_matches: fn(tables: ASTTables, stmt: StmtNode, node_span: Span) -> Bool Never! {
     view: ast_stmt(tables, stmt)
     if view == .ComptimeIf(_, _, _, _, span, _) -> return same_span(span, node_span)
-    if view == .Switch(_, arms, _, span) -> return switch_node_matches(tables, arms, span, node_span)
-    if view == .ComptimeSwitch(_, arms, _, span) -> return switch_node_matches(tables, arms, span, node_span)
+    if view == .Switch(_, arms, _, span) {
+        return switch_node_matches(tables, arms, span, node_span)
+    }
+    if view == .ComptimeSwitch(_, arms, _, span) {
+        return switch_node_matches(tables, arms, span, node_span)
+    }
     false
 }
 
@@ -400,18 +424,26 @@ stmt_is_structured: fn(tables: ASTTables, stmt: StmtNode) -> Bool Never! {
 exact_body_helper_name: fn(tables: ASTTables, items: [Item], src: String, target: String, current: String) -> String? Never! {
     loop item in items {
         if item == .Func(function) {
-            if function.name != current && body_matches_expression(tables, src, function.body, target) -> return Val(function.name)
+            if function.name != current && body_matches_expression(tables, src, function.body, target) {
+                return Val(function.name)
+            }
         } else if item == .Struct(structure) {
             loop method in structure.methods {
-                if method.name != current && body_matches_expression(tables, src, method.body, target) -> return Val(method.name)
+                if method.name != current && body_matches_expression(tables, src, method.body, target) {
+                    return Val(method.name)
+                }
             }
         } else if item == .Impl(implementation) {
             loop method in implementation.methods {
-                if method.name != current && body_matches_expression(tables, src, method.body, target) -> return Val(method.name)
+                if method.name != current && body_matches_expression(tables, src, method.body, target) {
+                    return Val(method.name)
+                }
             }
         } else if item == .CodeModule(code) {
             if code.body == .Val(body) {
-                if exact_body_helper_name(tables, body, src, target, current) == .Val(found) -> return Val(found)
+                if exact_body_helper_name(tables, body, src, target, current) == .Val(found) {
+                    return Val(found)
+                }
             }
         }
     }
@@ -432,9 +464,7 @@ expression_body_source: fn(tables: ASTTables, src: String, body: [StmtNode]) -> 
             span: source_expression_span(tables, src, expression)
             if at == 0 -> start = span.start
             end = span.end
-        } else {
-            return None
-        }
+        } else { return None }
     }
     if start > end || end > src.count_bytes() -> return None
     Val(foundation_byte_text(src.bytes(), start, end).trim())
@@ -464,16 +494,10 @@ normalized_source_shape: fn(source: String) -> String Never! {
         byte: Int{bytes[at]}
         keep := true
         if quote != 0 {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == quote {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == quote {
                 quote = 0
             }
-        } else if byte == 34 || byte == 39 {
-            quote = byte
-        } else if is_space_byte(byte) {
+        } else if byte == 34 || byte == 39 { quote = byte } else if is_space_byte(byte) {
             keep = false
         }
         if keep {
@@ -537,7 +561,9 @@ apply_remove_pattern_arm: fn(checker: LSPChecker, path: String, src: String, gra
     scan := ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
     find_arm_span(func.tables, src, func.body, scan)
     if !scan.found -> return Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
-    if scan.only_arm -> return Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
+    if scan.only_arm {
+        return Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
+    }
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(scan.remove_span, "")}) ?? return Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
     write_checked_formatted(checker, path, src, changed)
 }
@@ -546,7 +572,9 @@ apply_remove_pattern_arm: fn(checker: LSPChecker, path: String, src: String, gra
 // A classic `if x == .V(…)` branch is rewritten whole into a switch.
 find_arm_insert: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &ArmInsertScan) Never! {
     loop stmt in stmts {
-        if scan.found != None -> return
+        if scan.found != None {
+            return
+        }
         view: ast_stmt(tables, stmt)
         if view == .Switch(subject, arms, else_body, span) {
             if jfmt_is_subjectless_guard(subject, span) && switch_was_classic_if(tables, src, arms, span) {
@@ -571,9 +599,7 @@ find_arm_insert: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &Ar
 
 switch_arm_insert: fn(src: String, arms: [SwitchArm], else_body: [StmtNode]?, span: Span, head: String, fresh: String) -> TextEdit Never! {
     insert := dispatch_body_insert_offset(src, span)
-    if arms.len() > 0 {
-        insert = line_after(src, arms[arms.len() - 1].span.end)
-    } else if else_body == .Val(body) {
+    if arms.len() > 0 -> insert = line_after(src, arms[arms.len() - 1].span.end) else if else_body == .Val(body) {
         insert = if body.len() > 0 -> line_start(src, jfmt_stmt_span(body[0]).start) else -> line_start(src, span.end)
     }
     indent: indentation_at(src, insert)
@@ -584,12 +610,16 @@ switch_arm_insert: fn(src: String, arms: [SwitchArm], else_body: [StmtNode]?, sp
 // classic single-pattern branch.
 classic_switch_source: fn(tables: ASTTables, src: String, arm: SwitchArm, else_body: [StmtNode]?, new_head: String, fresh: String) -> String Never! {
     subject_src := ""
-    if ast_expr(tables, arm.cond) == .PatternTest(subject, _, _, _) -> subject_src = snippet(src, ast_expr_span(tables, subject))
+    if ast_expr(tables, arm.cond) == .PatternTest(subject, _, _, _) {
+        subject_src = snippet(src, ast_expr_span(tables, subject))
+    }
     head_span: pattern_arm_edit_span(tables, src, arm.cond)
     head: if head_span.start >= 0 && head_span.end <= src.count_bytes() && head_span.start <= head_span.end -> foundation_byte_text(src.bytes(), head_span.start, head_span.end) else -> snippet(src, ast_expr_span(tables, arm.cond))
     then_body: block_body_source(tables, src, arm.body, "        ")
     else_text := ""
-    if else_body == .Val(body) -> else_text = "    else -> {{\n{block_body_source(tables, src, body, "        ")}    }}\n"
+    if else_body == .Val(body) {
+        else_text = "    else -> {{\n{block_body_source(tables, src, body, "        ")}    }}\n"
+    }
     "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh}\n    }}\n{else_text}}}\n"
 }
 
@@ -597,7 +627,9 @@ block_body_source: fn(tables: ASTTables, src: String, stmts: [StmtNode], indent:
     parts := [String]{}
     loop stmt in stmts {
         span: stmt_text_span(tables, src, stmt)
-        loop line in foundation_byte_text(src.bytes(), span.start, span.end).trim().lines() -> parts.push("{indent}{line.trim()}\n")
+        loop line in foundation_byte_text(src.bytes(), span.start, span.end).trim().lines() {
+            parts.push("{indent}{line.trim()}\n")
+        }
     }
     parts.join("")
 }
@@ -615,7 +647,9 @@ dispatch_body_insert_offset: fn(src: String, span: Span) -> Int Never! {
 // and whether it is the branch's only path.
 find_arm_span: fn(tables: ASTTables, src: String, stmts: [StmtNode], scan: &ArmSpanScan) Never! {
     loop stmt in stmts {
-        if scan.found -> return
+        if scan.found {
+            return
+        }
         view: ast_stmt(tables, stmt)
         if view == .Switch(subject, arms, else_body, span) {
             guard: jfmt_is_subjectless_guard(subject, span)
@@ -671,7 +705,9 @@ apply_toggle_switch_state: fn(checker: LSPChecker, path: String, src: String, gr
         removed: jet_driver_apply_edits(src, [TextEdit]{edit(marker_span, "")}) ?? return Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
         return Ok(write_checked_formatted(checker, path, src, removed))
     }
-    if scan.nested -> return Err(edit_error("bad_request", "Canvas node is already inside a statement state"))
+    if scan.nested {
+        return Err(edit_error("bad_request", "Canvas node is already inside a statement state"))
+    }
     if !statement_contains_span(func.body, node_span) || same_span(func.name_span, node_span) {
         return Err(edit_error("not_found", "Canvas statement node no longer exists"))
     }
@@ -682,7 +718,9 @@ apply_toggle_switch_state: fn(checker: LSPChecker, path: String, src: String, gr
 
 find_switched_node: fn(tables: ASTTables, stmts: [StmtNode], scan: &SwitchedScan) Never! {
     loop stmt in stmts {
-        if scan.marker != None || scan.nested -> return
+        if scan.marker != None || scan.nested {
+            return
+        }
         if ast_stmt(tables, stmt) == .Switched(marker, _, span) {
             if same_span(span, scan.node_span) {
                 scan.marker = Val(Span{start: marker.span.start, end: marker.span.end})
@@ -710,16 +748,18 @@ apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, nod
     checked: checked_source(checker, path, src)
     func: find_func_containing_span(checked.modules[checked.at].tables, checked.modules[checked.at].items, node_span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
     list: find_list_literal(func.tables, func.body, node_span)
-    if !list.found -> return Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
+    if !list.found {
+        return Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
+    }
     if node_span.start < 0 || node_span.end > src.count_bytes() || node_span.start > node_span.end {
         return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
     }
     insert := 0
-    if list.items.len() > 0 {
-        insert = list.items[list.items.len() - 1].end
-    } else {
+    if list.items.len() > 0 -> insert = list.items[list.items.len() - 1].end else {
         close: foundation_byte_text(src.bytes(), node_span.start, node_span.end).rfind("]")
-        if close < 0 -> return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
+        if close < 0 {
+            return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
+        }
         insert = node_span.start + close
     }
     prefix: if list.items.len() == 0 -> "" else -> ", "
@@ -731,7 +771,9 @@ apply_remove_multi_input_element: fn(checker: LSPChecker, path: String, src: Str
     checked: checked_source(checker, path, src)
     func: find_func_containing_span(checked.modules[checked.at].tables, checked.modules[checked.at].items, node_span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
     list: find_list_literal(func.tables, func.body, node_span)
-    if !span_listed(list.items, element_span) -> return Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
+    if !span_listed(list.items, element_span) {
+        return Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
+    }
     remove: comma_separated_remove_span(src, node_span, element_span)
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(remove, "")}) ?? return Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
     write_checked_formatted(checker, path, src, changed)
@@ -745,9 +787,13 @@ find_list_literal: fn(tables: ASTTables, body: [StmtNode], node_span: Span) -> L
 }
 
 note_list_literal: fn(tables: ASTTables, scan: &ListScan, expression: ExprNode) Never! {
-    if scan.found -> return
+    if scan.found {
+        return
+    }
     if ast_expr(tables, expression) == .ListLit(elements, span, _) {
-        if !same_span(span, scan.node_span) -> return
+        if !same_span(span, scan.node_span) {
+            return
+        }
         scan.found = true
         loop element in elements -> scan.items.push(ast_expr_span(tables, element))
     }
@@ -815,7 +861,9 @@ CheckedSource: struct {
 // Check `src` as `path`; an error diagnostic refuses the edit.
 checked_source: fn(checker: LSPChecker, path: String, src: String) -> CheckedSource Err! {
     checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: src}})
-    if jet_driver_has_errors(checked.diagnostics) -> return Err(diagnostics_error(path, src, error_diagnostics(checked.diagnostics)))
+    if jet_driver_has_errors(checked.diagnostics) {
+        return Err(diagnostics_error(path, src, error_diagnostics(checked.diagnostics)))
+    }
     at: canvas_event_module(path, src, checked.modules) ?? return Err(edit_error("check", "Canvas could not find this file among its checked modules"))
     Ok(CheckedSource{modules: checked.modules, at: at, index: checked.index})
 }
@@ -860,7 +908,9 @@ find_func_by_name_span: fn(tables: ASTTables, items: [Item], name_span: Span) ->
             }
         } else if item == .CodeModule(code) {
             if code.body == .Val(body) {
-                if find_func_by_name_span(tables, body, name_span) == .Val(found) -> return Val(found)
+                if find_func_by_name_span(tables, body, name_span) == .Val(found) {
+                    return Val(found)
+                }
             }
         }
     }
@@ -870,14 +920,20 @@ find_func_by_name_span: fn(tables: ASTTables, items: [Item], name_span: Span) ->
 find_func_containing_span: fn(tables: ASTTables, items: [Item], span: Span) -> CanvasFunc? Never! {
     loop item in items {
         if item == .Func(function) {
-            if span_within(span, canvas_func_span(function)) -> return Val(canvas_func(tables, function))
+            if span_within(span, canvas_func_span(function)) {
+                return Val(canvas_func(tables, function))
+            }
         } else if item == .Struct(structure) {
             loop method in structure.methods {
-                if span_within(span, canvas_func_span(method)) -> return Val(canvas_func(tables, method))
+                if span_within(span, canvas_func_span(method)) {
+                    return Val(canvas_func(tables, method))
+                }
             }
         } else if item == .Impl(implementation) {
             loop method in implementation.methods {
-                if span_within(span, canvas_func_span(method)) -> return Val(canvas_func(tables, method))
+                if span_within(span, canvas_func_span(method)) {
+                    return Val(canvas_func(tables, method))
+                }
             }
         } else if item == .CodeModule(code) {
             if code.body == .Val(body) {
@@ -937,14 +993,24 @@ stmt_text_span: fn(tables: ASTTables, src: String, stmt: StmtNode) -> Span Never
 
 stmt_source_span: fn(tables: ASTTables, stmt: StmtNode) -> Span Never! {
     view: ast_stmt(tables, stmt)
-    if view == .Val(binding) -> return Span{start: binding.name_span.start, end: ast_expr_span(tables, binding.init).end}
-    if view == .Assign(target, _, _, value) -> return Span{start: lvalue_span(target).start, end: ast_expr_span(tables, value).end}
+    if view == .Val(binding) {
+        return Span{start: binding.name_span.start, end: ast_expr_span(tables, binding.init).end}
+    }
+    if view == .Assign(target, _, _, value) {
+        return Span{start: lvalue_span(target).start, end: ast_expr_span(tables, value).end}
+    }
     if view == .Expr(expression) -> return ast_expr_span(tables, expression)
     if view == .Return(value, span) {
-        if value == .Val(expression) -> return Span{start: span.start, end: ast_expr_span(tables, expression).end}
+        if value == .Val(expression) {
+            return Span{start: span.start, end: ast_expr_span(tables, expression).end}
+        }
     }
-    if view == .BreakValue(value, span) -> return Span{start: span.start, end: ast_expr_span(tables, value).end}
-    if view == .BreakLabelValue(_, _, value, span) -> return Span{start: span.start, end: ast_expr_span(tables, value).end}
+    if view == .BreakValue(value, span) {
+        return Span{start: span.start, end: ast_expr_span(tables, value).end}
+    }
+    if view == .BreakLabelValue(_, _, value, span) {
+        return Span{start: span.start, end: ast_expr_span(tables, value).end}
+    }
     jfmt_stmt_span(stmt)
 }
 
@@ -982,7 +1048,9 @@ call_source_end: fn(src: String, name_end: Int, fallback_end: Int) -> Int Never!
 // Each statement body directly inside `stmt`.
 stmt_each_body: fn(tables: ASTTables, stmt: StmtNode, visit: fn([StmtNode]) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if ast_stmt(tables, stmt) == {
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> visit(body)
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> {
+            visit(body)
+        }
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             loop arm in arms -> visit(arm.body)
             if else_body == .Val(body) -> visit(body)
@@ -1000,7 +1068,9 @@ stmt_each_body: fn(tables: ASTTables, stmt: StmtNode, visit: fn([StmtNode]) -[Me
 // a comptime if's then and else.
 stmt_each_branch: fn(tables: ASTTables, stmt: StmtNode, visit: fn(Int, [StmtNode]) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if ast_stmt(tables, stmt) == {
-        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> visit(0, body)
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> {
+            visit(0, body)
+        }
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             loop (at, arm) in arms -> visit(at, arm.body)
             if else_body == .Val(body) -> visit(arms.len(), body)
@@ -1040,21 +1110,13 @@ find_unquoted_byte: fn(src: String, start: Int, wanted: Int) -> Int? Never! {
         if comment {
             if byte == 10 -> comment = false
         } else if quote != 0 {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == quote {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == quote {
                 quote = 0
             }
-        } else if byte == 34 || byte == 39 {
-            quote = byte
-        } else if byte == 47 && following == 47 {
+        } else if byte == 34 || byte == 39 { quote = byte } else if byte == 47 && following == 47 {
             comment = true
             cursor += 1
-        } else if byte == wanted {
-            return Val(cursor)
-        }
+        } else if byte == wanted { return Val(cursor) }
         cursor += 1
     }
     None
@@ -1074,21 +1136,13 @@ matching_delimiter: fn(src: String, open: Int, opening: Int, closing: Int) -> In
         if comment {
             if byte == 10 -> comment = false
         } else if quote != 0 {
-            if escaped {
-                escaped = false
-            } else if byte == 92 {
-                escaped = true
-            } else if byte == quote {
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == quote {
                 quote = 0
             }
-        } else if byte == 34 || byte == 39 {
-            quote = byte
-        } else if byte == 47 && following == 47 {
+        } else if byte == 34 || byte == 39 { quote = byte } else if byte == 47 && following == 47 {
             comment = true
             cursor += 1
-        } else if byte == opening {
-            depth += 1
-        } else if byte == closing {
+        } else if byte == opening { depth += 1 } else if byte == closing {
             if depth > 0 -> depth -= 1
             if depth == 0 -> return Val(cursor)
         }

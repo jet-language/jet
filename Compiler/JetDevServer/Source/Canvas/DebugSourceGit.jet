@@ -12,19 +12,33 @@ use {
 }
 
 DEBUG_SCHEMA_VERSION: 1
+
 MAX_DEBUG_SESSIONS: 32
+
 MAX_DEBUG_COMMANDS: 64
+
 MAX_DEBUG_WATCHES: 32
+
 MAX_DEBUG_BREAKPOINTS: 128
+
 MAX_DEBUG_COMMAND_BYTES: 256
+
 MAX_DEBUG_TRACE_LINES: 128
+
 MAX_DEBUG_CALL_STACK: 32
+
 MAX_DEBUG_TRACE_BYTES: 32768
+
 MAX_DEBUG_LOCAL_VALUES: 64
+
 MAX_DEBUG_VALUE_BYTES: 4096
+
 MAX_DEBUG_CALL_STACK_BYTES: 16384
+
 MAX_DEBUG_WIRE_PATH: 64
+
 MAX_DEBUG_MESSAGE_BYTES: 16384
+
 // Git and request bodies share the devserver response bound.
 MAX_DEBUG_CHILD_OUTPUT_BYTES: 67108864
 
@@ -42,12 +56,10 @@ DebugTier: enum {
 
     parse: fn(value: String?) -> DebugTier CanvasDebugError! {
         if value == {
-            .Val(name) -> {
-                if {
-                    name == "native-lldb" -> Ok(DebugTier.NativeLLDB)
-                    name == "jet-dev-replay" -> Err(canvas_debug_error("unsupported", "the jet-dev-replay Canvas debug tier is unavailable; use native-lldb"))
-                    else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native-lldb"))
-                }
+            .Val(name) -> if {
+                name == "native-lldb" -> Ok(DebugTier.NativeLLDB)
+                name == "jet-dev-replay" -> Err(canvas_debug_error("unsupported", "the jet-dev-replay Canvas debug tier is unavailable; use native-lldb"))
+                else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native-lldb"))
             }
             .None -> Ok(DebugTier.NativeLLDB)
         }
@@ -111,12 +123,16 @@ DebugSessions: struct {
     jet: String,
     deep_checks: DeepChecks{DeepChecks{}},
     next_id: Int,
-    sessions: [String: DebugSession],
+    sessions: [String:DebugSession],
     pause_on_input_end: Bool,
 
     execute: fn(&self, path: String, source_id: String, revision: String, requested_id: String?, commands: [String], breakpoints: [Int], watches: [String], tier: DebugTier) -> DebugExecution CanvasDebugError! {
-        if !debug_identity_text_valid(source_id) -> return Err(canvas_debug_error("bad_request", "Canvas debug source_id must be bounded source identity text"))
-        if !debug_identity_text_valid(revision) -> return Err(canvas_debug_error("bad_request", "Canvas debug revision must be bounded source identity text"))
+        if !debug_identity_text_valid(source_id) {
+            return Err(canvas_debug_error("bad_request", "Canvas debug source_id must be bounded source identity text"))
+        }
+        if !debug_identity_text_valid(revision) {
+            return Err(canvas_debug_error("bad_request", "Canvas debug revision must be bounded source identity text"))
+        }
         next_commands := commands.copy()
         if next_commands.len() == 0 -> next_commands.push("s")
         id := ""
@@ -127,7 +143,9 @@ DebugSessions: struct {
                     self.release(requested)
                     return Err(canvas_debug_error("conflict", "debug session is stale for the current source identity or revision"))
                 }
-                if session.tier != tier -> return Err(canvas_debug_error("conflict", "debug session tier does not match the requested execution tier"))
+                if session.tier != tier {
+                    return Err(canvas_debug_error("conflict", "debug session tier does not match the requested execution tier"))
+                }
                 if session.commands.len() + next_commands.len() > MAX_DEBUG_COMMANDS {
                     return Err(canvas_debug_error("limit", "debug session command history is full; start a new session"))
                 }
@@ -154,9 +172,19 @@ DebugSessions: struct {
                 id = "canvas-debug-{serial}"
                 native: native_debug_artifact(self.jet, path, id, self.deep_checks)
                 self.sessions[id] = DebugSession{
-                    path: path, source_id: source_id, revision: revision, tier: tier, created: serial,
-                    breakpoints: breakpoints.copy(), commands: next_commands.copy(), watches: watches.copy(), native: Val(native),
-                    native_live: None, native_stop: None, snapshot: None, paused_adapter: None,
+                    path: path,
+                    source_id: source_id,
+                    revision: revision,
+                    tier: tier,
+                    created: serial,
+                    breakpoints: breakpoints.copy(),
+                    commands: next_commands.copy(),
+                    watches: watches.copy(),
+                    native: Val(native),
+                    native_live: None,
+                    native_stop: None,
+                    snapshot: None,
+                    paused_adapter: None,
                 }
             }
         }
@@ -322,7 +350,7 @@ DebugSessions: struct {
 }
 
 debug_sessions: fn(deep_checks: DeepChecks) -> DebugSessions Never! {
-    DebugSessions{jet: canvas_sys.executable(), deep_checks: deep_checks, next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
+    DebugSessions{jet: canvas_sys.executable(), deep_checks: deep_checks, next_id: 1, sessions: [String:DebugSession]{}, pause_on_input_end: true}
 }
 
 debug_identity_text_valid: fn(value: String) -> Bool Never! {
@@ -340,15 +368,21 @@ validate_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [Stri
         return Err(canvas_debug_error("limit", "Canvas debug accepts at most 64 commands, 128 breakpoints, and 32 watches per session"))
     }
     loop value in commands {
-        if value.len() > MAX_DEBUG_COMMAND_BYTES -> return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        if value.len() > MAX_DEBUG_COMMAND_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
     }
     loop value in watches {
-        if value.len() > MAX_DEBUG_COMMAND_BYTES -> return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        if value.len() > MAX_DEBUG_COMMAND_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug command and watch names are limited to 256 bytes"))
+        }
     }
     loop command in commands -> validate_debug_command(command)
     // A watch is read by the compiler's parser and names one local.
     loop watch in watches {
-        if !debug_is_local_name(watch) -> return Err(canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
+        if !debug_is_local_name(watch) {
+            return Err(canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
+        }
     }
     Ok()
 }
@@ -356,9 +390,13 @@ validate_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [Stri
 validate_debug_breakpoint_anchors: fn(anchors: [String]) CanvasDebugError! {
     over: anchors.len() > MAX_DEBUG_BREAKPOINTS
     loop anchor in anchors {
-        if over || anchor.len() > MAX_DEBUG_COMMAND_BYTES -> return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+        if over || anchor.len() > MAX_DEBUG_COMMAND_BYTES {
+            return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+        }
     }
-    if over -> return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+    if over {
+        return Err(canvas_debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
+    }
     Ok()
 }
 
@@ -389,7 +427,9 @@ debug_positive_int: fn(text: String) -> Bool Never! {
 
 validate_debug_command: fn(command: String) CanvasDebugError! {
     parts: debug_words(command)
-    if parts.len() == 0 -> return Err(canvas_debug_error("unsupported", "Canvas debug commands cannot be empty"))
+    if parts.len() == 0 {
+        return Err(canvas_debug_error("unsupported", "Canvas debug commands cannot be empty"))
+    }
     verb: parts[0]
     count: parts.len()
     valid: if verb == {
@@ -412,8 +452,7 @@ native_debug_artifact: fn(jet: String, path: String, id: String, deep_checks: De
     // releasing the session removes it.
     scratch: canvas_files.mkdtemp("jet-canvas-debug-{id}") ?? return Err(canvas_debug_error("io", "couldn't prepare native Canvas debug storage: {err}"))
     out_dir: canvas_files.join(scratch, "out")
-    built: canvas_process.cmd(native_debug_build_argv(jet, path, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run()
-        ?? return Err(canvas_debug_error("io", "couldn't run the native Canvas debug build: {err}"))
+    built: canvas_process.cmd(native_debug_build_argv(jet, path, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return Err(canvas_debug_error("io", "couldn't run the native Canvas debug build: {err}"))
     if !built.success {
         if canvas_files.remove_all(scratch) == {
             .Err(_) -> {}
@@ -446,7 +485,9 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
         live := NativeSession.start(native.binary, canvas_files.join(native.dir, "output.txt")) ?? return Err(debug_unavailable(err))
         opened: if live.open(native.jet_file, native.jet_lines) == {
             .Ok(step) -> step
-            .Err(failure) -> { return Err(debug_unavailable(failure)) }
+            .Err(failure) -> {
+                return Err(debug_unavailable(failure))
+            }
         }
         first: opened ?? return Err(canvas_debug_error("diagnostic", "This program has no `run` function"))
         transcript = first.text
@@ -469,7 +510,9 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
         stop.kind == NativeStopKind.Paused -> {
             snapshot = if live.snapshot() == {
                 .Ok(paused) -> paused
-                .Err(failure) -> { return Err(debug_unavailable(failure)) }
+                .Err(failure) -> {
+                    return Err(debug_unavailable(failure))
+                }
             }
             session.native_live = Val(live)
         }
@@ -605,9 +648,13 @@ required_debug_string: fn(text: String, key: String) -> String CanvasDebugError!
 debug_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop line in text.split("\n") {
-        if line.ends_with("\r") && line.cut_last("\r") == .Val(parts) -> lines.push(parts.before) else -> lines.push(line)
+        if line.ends_with("\r") && line.cut_last("\r") == .Val(parts) -> lines.push(parts.before) else {
+            lines.push(line)
+        }
     }
-    if lines.len() > 0 && lines[lines.len() - 1] == "" -> lines.pop().drop("the text ends with a line break")
+    if lines.len() > 0 && lines[lines.len() - 1] == "" {
+        lines.pop().drop("the text ends with a line break")
+    }
     lines
 }
 
@@ -719,7 +766,9 @@ debug_collect_record_spans: fn(value: Dyn, id_key: String, records: &[DebugRecor
                 if member.key == id_key && member.value == .Text(text) -> id = Val(text)
                 if member.key == "source_span" -> span = debug_span_value(member.value)
             }
-            if id == .Val(found) && span == .Val(range) -> records.push(DebugRecordSpan{id: found, span: range})
+            if id == .Val(found) && span == .Val(range) {
+                records.push(DebugRecordSpan{id: found, span: range})
+            }
             loop member in members -> debug_collect_record_spans(member.value, id_key, records)
         }
         .Array(items) -> {
@@ -988,7 +1037,9 @@ git_relative_path: fn(root: String, path: String) -> String Never! {
     absolute: canonical_path(path)
     base: canonical_path(root)
     relative := absolute
-    if absolute.starts_with("{base}/") && absolute.split_once("{base}/") == .Val(parts) -> relative = parts.after
+    if absolute.starts_with("{base}/") && absolute.split_once("{base}/") == .Val(parts) {
+        relative = parts.after
+    }
     relative.replace("\\", "/")
 }
 
