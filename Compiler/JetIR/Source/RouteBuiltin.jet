@@ -1,5 +1,7 @@
 // Canonical lowering for closed checked builtin-method operations.
 use jet_foundation.[
+    BUILTIN_METHOD_ROWS,
+    BuiltinMethodReceiver,
     Effect,
     TBuiltinOp,
     TFailureCarrier,
@@ -858,20 +860,21 @@ ir_builtin_string_method_route: fn(method: String, result: Type, carrier: TFailu
     panic("checked StringMethod has no canonical route")
 }
 
+// A Bytes method's route takes the receiver and the parameters its
+// BUILTIN_METHOD_ROWS row declares, the one row sema checked the call
+// against. Every operand is borrowed: an index or count is read from its
+// exact Int.
 ir_builtin_byte_buffer_method_route: fn(method: String) -> IRBuiltinRoute Never! {
-    if method == "capacity" {
-        return ir_builtin_plain_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
-    }
     arity := 0
-    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" || method == "parse" {
-        arity = 1
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.receiver == BuiltinMethodReceiver.Bytes && row.name == method {
+            arity = row.parameters.len() + 1
+            break
+        }
     }
-    if method == "get" || method == "seek" || method == "read_bytes" || method == "read_string" || method == "contains" || method == "starts_with" || method == "ends_with" || method == "index_of" || method == "last_index_of" || method == "split" || method == "partition" || method == "join" || method == "equal" || method == "compare" || method == "copy_to" || method == "write_to" {
-        arity = 2
+    if arity == 0 {
+        panic("checked ByteBufferMethod `{method}` has no Bytes row in BUILTIN_METHOD_ROWS")
     }
-    if method == "replace" -> arity = 3
-    if arity == 0 -> panic("checked ByteBufferMethod has no canonical route")
-    // Every operand is borrowed: an index or count is read from its exact Int.
     mask := [Bool]{}
     loop _ in 0..<arity -> mask.push(true)
     ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", arity, mask, Val(Effect.Mem))
