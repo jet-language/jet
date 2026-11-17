@@ -2322,10 +2322,10 @@ App: struct {
     // that entry the default handler of each scheme's links in
     // `{config}/mimeapps.list`, as `xdg-mime default` does. `{data}` is
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
-    // `$XDG_CONFIG_HOME`, else `~/.config`. Then it opens the link the
-    // launch was given (`open_link`) and is true. That link is the first
-    // argument that is one, as the desktop passes the link the entry's `%u`
-    // names.
+    // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
+    // work (`background`). Then it opens the link the launch was given
+    // (`open_link`) and is true. That link is the first argument that is
+    // one, as the desktop passes the link the entry's `%u` names.
     launch: fn(self) -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool Never! {
         link := ""
         loop given in process.args() {
@@ -2338,6 +2338,7 @@ App: struct {
         if app_launch_hand(socket, link, token) -> return false
         if app_graph_schemes().len() > 0 -> app_link_register(self.title)
         app_launch_listen(App{title: self.title.copy()}, socket)
+        app_background_start(self.title)
         if link != "" -> _: self.open_link(link)
         true
     }
@@ -2350,6 +2351,23 @@ App: struct {
     activations: fn(self) -> [String] Never! {
         held: APP_GRAPH.guard_read()
         held.value.activations.copy()
+    }
+
+    // Runs `run` in the background on a Linux desktop, every `every`
+    // while the app runs, from `launch` on. When `at_login`, the app also
+    // runs at login: `launch` installs its XDG autostart entry
+    // (`{config}/autostart/{id}.desktop`, `desktop_entry`), and a launch
+    // whose graph asks no work to run at login removes it. A run that
+    // fails puts its notice in the app's notice list (`notices`): no
+    // control shows it. Gives back the graph. Panics when `every` isn't
+    // positive.
+    background: fn(self, every: Duration, run: &&fn() Notice!, at_login: Bool{false}) -> App Never! {
+        if every.ns <= 0 {
+            panic("background work runs every positive duration, not every {every.ns}ns")
+        }
+        held := APP_GRAPH.guard_edit()
+        held.value.backgrounds.push(AppBackground{every_ns: every.ns, at_login: at_login, run: Shared{AppBackgroundRun{run: run.move()}}})
+        self.copy()
     }
 
     // The text of the app's Linux desktop entry: an application named
@@ -2652,7 +2670,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -3144,8 +3162,9 @@ AppInstall: struct {
 // its screens in the order it adds them, its offline mode, how a browser
 // installs it, the screen open now and that screen's route data: the ids of
 // the live bindings its view read, the link schemes and web domains whose
-// links open its screens (`.url_scheme`, `.app_links`), and the activation
-// tokens of the later launches that handed it their links (`.launch`).
+// links open its screens (`.url_scheme`, `.app_links`), the activation
+// tokens of the later launches that handed it their links (`.launch`) and
+// its background work (`.background`).
 priv AppGraph: struct {
     title: String
     apis: [String:AppAPI]
@@ -3158,9 +3177,22 @@ priv AppGraph: struct {
     schemes: [String]
     link_domains: [String]
     activations: [String]
+    backgrounds: [AppBackground]
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}}}
+
+// One piece of a graph's background work (`App.background`): it runs every
+// `every_ns` nanoseconds while the app runs, and at login when `at_login`.
+priv AppBackground: struct {
+    every_ns: Int
+    at_login: Bool
+    run: Shared<AppBackgroundRun>
+}
+
+priv AppBackgroundRun: struct {
+    run: fn() Notice!
+}
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.
@@ -3408,6 +3440,55 @@ priv app_launch_line: fn(stream: &UnixStream) -[Net, Time.Wait]> String Never! {
         text = "{text}{part}"
     }
     text.removesuffix("\n")
+}
+
+// Starts the graph's background work (`App.background`) as this process
+// becomes the app's running copy (`App.launch`): a task for each piece
+// runs it on its timer. The app's autostart entry is installed when a
+// piece asks to run at login, and removed otherwise.
+priv app_background_start: fn(title: String) -[Env, FS.Read, FS.Write, Time.Wait]> Never! {
+    at_login := false
+    loop work in app_graph_backgrounds() {
+        if work.at_login -> at_login = true
+        runner: task { app_background_run(work.every_ns, work.run) }
+        runner.detach()
+    }
+    app_autostart(title, at_login)
+}
+
+priv app_graph_backgrounds: fn() -> [AppBackground] Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.backgrounds.copy()
+}
+
+// Runs one piece of background work every `every_ns` nanoseconds, the
+// first time one interval after it starts; a failed run's notice joins the
+// app's notice list (`__keep_notice`).
+priv app_background_run: fn(every_ns: Int, work: Shared<AppBackgroundRun>) -[Time.Wait]> Never! {
+    every_ms: if every_ns < 1000000 -> 1 else -> every_ns /% 1000000
+    loop {
+        tasks.sleep(every_ms)
+        held: work.guard_read()
+        app_background_once(held.value.run)
+    }
+}
+
+priv app_background_once: fn(run: fn() Notice!) Never! {
+    if run() == .Err(notice) -> __keep_notice(notice)
+}
+
+// Installs the app's XDG autostart entry (`{config}/autostart/{id}.desktop`,
+// its desktop entry), which starts the app when the user logs in, when
+// `at_login`; otherwise removes the one an earlier launch installed.
+priv app_autostart: fn(title: String, at_login: Bool) -[Env, FS.Read, FS.Write]> Never! {
+    config: app_xdg_dir("XDG_CONFIG_HOME", sys.home_dir() ?? "", ".config") ?? return
+    entry: "{config}/autostart/{app_desktop_id(title)}.desktop"
+    if !at_login {
+        if files.exists(entry) -> files.remove(entry) ?? return
+        return
+    }
+    files.create_dir_all("{config}/autostart") ?? return
+    files.write(entry, App{title: title}.desktop_entry(sys.executable())) ?? return
 }
 
 // `$name` when it is an absolute path, else `{home}/{fallback}`; None

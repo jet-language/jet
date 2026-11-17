@@ -1,0 +1,20 @@
+# Background work on a Linux desktop is a timer while the app runs: nothing
+# runs before `launch`, and the refresh then runs every 20ms. The third run
+# fails, and its notice joins the app's notice list, which no control shows.
+# An app that asks to run at login gets an XDG autostart entry, its desktop
+# entry in `{config}/autostart`; a launch that no longer asks removes it.
+fixture: BackgroundRegistersOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+mkdir: run
+step: jet run main.jet
+exit: 0
+stdout: = "before launch: 0 runs\nwhile running: four runs or more: true\nnotice: Couldn't refresh the board: offline.\n"
+file: config/autostart/crewboard.desktop ~ "[Desktop Entry]\nType=Application\nName=Crewboard\nExec=" # the login item
+file: config/autostart/crewboard.desktop ~ "main.jet\" %u\nTerminal=false\n" # runs the program
+step: jet run main.jet -- --not-at-login
+exit: 0
+file: config/autostart/crewboard.desktop absent # no longer a login item

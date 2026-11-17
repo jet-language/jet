@@ -5593,6 +5593,7 @@ tasks never read or change the process registry. The module source is
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
 | `graph.launch() -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
+| `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
@@ -6105,8 +6106,20 @@ scheme. In `{config}/mimeapps.list` (`$XDG_CONFIG_HOME` or `~/.config`) the
 `[Default Applications]` group names the entry for each
 `x-scheme-handler/{scheme}`, as `xdg-mime default` does, and every other
 line stays. A file that can't be written leaves the links unregistered and
-the app runs. Then the launch's link opens (`graph.open_link`), and
-`launch` is true.
+the app runs. Then the graph's background work starts, and the launch's
+link opens (`graph.open_link`), and `launch` is true.
+
+`graph.background(every:, run:, at_login:)` gives the graph background
+work, and a Linux desktop runs it on a timer. Once `graph.launch()` makes
+this process the running copy, a task for each piece runs `run` every
+`every`, the first time one interval after the launch, until the process
+ends; nothing runs before `launch`. A run that fails adds its `Notice` to
+the app's notice list (`app.notices()`), since no control is there to show
+it. When a piece asks `at_login`, `launch` installs the app's XDG autostart
+entry, its desktop entry at `{config}/autostart/{id}.desktop`, and the
+desktop starts the app when the user logs in. A launch whose graph asks no
+piece to run at login removes that entry. `every` must be positive; any
+other value panics.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
