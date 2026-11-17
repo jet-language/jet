@@ -3188,7 +3188,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         }
         return ir_precise_values(m, p, b, ty, type_name, method, slots, span)
     }
-    route: ir_general_handle_route(operation, ir_ty(p, b, receiver), args.len()) ?? return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
+    route: ir_general_handle_route(operation, ir_ty(p, b, receiver)) ?? return ir_fail_slot(b, span, "handle method {ir_handle_op_name(operation)} without a closed route")
     // A mutating receiver still crosses as its handle: the route mutates the
     // runtime value behind it (a HandleMut carrier).
     if route.symbol == "jet_dyn_remove" || route.symbol == "jet_dyn_set_path" {

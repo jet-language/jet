@@ -483,6 +483,163 @@ Gate: enum {
     Marker(Type),
 }
 
+// A foreign language: the root its modules are imported under (`c` in
+// `use c.stdio`). A type that implements it adds the language, Core's own
+// below and a package's alike, and no local module may take a language's
+// root as its name or alias (E1002).
+Language: trait {
+    // The import root: `c`, `py`, `zig`.
+    root: String,
+}
+
+// The languages the toolchain's binders bind, in the order of the `FFI`
+// effect's cases; Jetpack's binder table (BinderDescriptor.jet) registers one
+// binder for each of these roots, in this order.
+GoLanguage: struct {
+    impl Language {
+        root: "go",
+    }
+}
+
+JavaLanguage: struct {
+    impl Language {
+        root: "java",
+    }
+}
+
+DotNetLanguage: struct {
+    impl Language {
+        root: "cs",
+    }
+}
+
+FortranLanguage: struct {
+    impl Language {
+        root: "fortran",
+    }
+}
+
+CobolLanguage: struct {
+    impl Language {
+        root: "cobol",
+    }
+}
+
+TclLanguage: struct {
+    impl Language {
+        root: "tcl",
+    }
+}
+
+LuaLanguage: struct {
+    impl Language {
+        root: "lua",
+    }
+}
+
+AdaLanguage: struct {
+    impl Language {
+        root: "ada",
+    }
+}
+
+PascalLanguage: struct {
+    impl Language {
+        root: "pascal",
+    }
+}
+
+DartLanguage: struct {
+    impl Language {
+        root: "dart",
+    }
+}
+
+PowerShellLanguage: struct {
+    impl Language {
+        root: "pwsh",
+    }
+}
+
+PerlLanguage: struct {
+    impl Language {
+        root: "perl",
+    }
+}
+
+RubyLanguage: struct {
+    impl Language {
+        root: "ruby",
+    }
+}
+
+PhpLanguage: struct {
+    impl Language {
+        root: "php",
+    }
+}
+
+RLanguage: struct {
+    impl Language {
+        root: "r",
+    }
+}
+
+ComLanguage: struct {
+    impl Language {
+        root: "com",
+    }
+}
+
+// The C binder: `use c.<lib>` binds a C header.
+CLanguage: struct {
+    impl Language {
+        root: "c",
+    }
+}
+
+CppLanguage: struct {
+    impl Language {
+        root: "cpp",
+    }
+}
+
+AsmLanguage: struct {
+    impl Language {
+        root: "asm",
+    }
+}
+
+PyLanguage: struct {
+    impl Language {
+        root: "py",
+    }
+}
+
+OctaveLanguage: struct {
+    impl Language {
+        root: "octave",
+    }
+}
+
+RustLanguage: struct {
+    impl Language {
+        root: "rust",
+    }
+}
+
+JSLanguage: struct {
+    impl Language {
+        root: "js",
+    }
+}
+
+SwiftLanguage: struct {
+    impl Language {
+        root: "swift",
+    }
+}
+
 // Compiler-supplied #Receipt facts are not a user-constructible handle.
 // This private source target retains the typed payload and all three checked
 // metadata arguments; the raw store operation uses the existing encoder.

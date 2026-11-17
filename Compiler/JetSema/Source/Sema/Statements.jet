@@ -6517,16 +6517,6 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
         if init.kind == .Lambda(viewing_lambda) {
             sema_ownership_bind_closure_captures(state, key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
         }
-        // Rust `check_binding`: an escaping lambda moves the owned
-        // non-cloneable captures it did not take with `.move()` when it is built,
-        // so a later use of one here is E0121.
-        if init.kind == .Lambda(moving_lambda) && moving_lambda.capture_facts.escapes {
-            taken_names: loop capture in captured_lambda.take_names -> capture.name
-            loop name in moving_lambda.capture_facts.moved {
-                if taken_names.contains(name) -> next
-                _ := sema_ownership_mark_move(state, Expr.Ident{name: name, span: captured_lambda.span, id: AST_NODE_GENERATED}, scopes, "an escaping lambda", diagnostics)
-            }
-        }
     }
     sema_single_use_note_binding(state, symbol, environment, program)
     if binding.name == "_" {

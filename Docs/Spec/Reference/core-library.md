@@ -345,7 +345,7 @@ use the same names.
 
 | Declaration | Kind | Purpose |
 | --- | --- | --- |
-| `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
+| `ABI`, `Target`, `Track` | enum | Calling convention, code-generation target, and tracking policy values |
 | `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound`, `OverflowMode`, `RuntimeMode` | enum | Inlining, publication scope, parallel-kernel, representation, memoization, fixed-width overflow, and compile-time evaluation choices |
 | `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting` | enum | Effect roots, field naming, proof obligations, and policy values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
@@ -366,6 +366,22 @@ module contains `JobScope`, `KernelMode`, `MemoBound`, `OverflowMode`, and
 `RuntimeMode`;
 it does not export the retired `IntType` declaration. Marker sites are the
 prelude's `Site` enum.
+
+Foreign languages are no menu here. A language is a type that implements the
+prelude's `Language` trait, whose `root` is the root its modules are imported
+under: Core's own languages (`c`, `cpp`, `py`, …) are declared that way in
+`Core/Prelude/Prelude.jet`, and a package adds one the same way. No local
+module may take a language's root as its name or alias (E1002):
+
+```jet
+ZigLanguage: struct {
+    impl Language {
+        root: "zig",
+    }
+}
+```
+
+`#FFI(<lang>)` names an inline foreign body's language by that root.
 
 ### `core.compiler` — compiler-owned package views
 
@@ -1118,7 +1134,7 @@ runs each of these cases.
 | `[T]` | `update_first(fn(item) { Bool }, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `split_write(Int)` | exclusive, in place | Disjoint | Ok(two empty write views) at zero | current |
 | `[T]` | `get_disjoint_write([Int])` | exclusive, in place | Disjoint | Ok(empty view list) for no indexes | current |
-| `[T]` | `edit_disjoint([Int], (ViewMut<item>, ViewMut<item>) -> T)` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
+| `[T]` | `edit_disjoint([Int], fn(ViewMut<item>, ViewMut<item>) { T })` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
 | `[T]` | `replace(item, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
 | `[T]` | `binary_search_by(fn(item) { T })` | borrows | Search | None | current |
@@ -5075,7 +5091,7 @@ rules. The implementation is in
 | Signature | Result | Description |
 |---|---|---|
 | `spawn<S, M>(state: S, handler: fn(S, M) -> S) -> Actor<M>` | actor | Start an actor whose state begins as `state`; it stops when `handler` fails or when it is stopped. |
-| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`; when `handler` fails, the message is dropped and `strategy` decides what follows. |
+| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`. Each message is handled in a `task.group` child, so a handler that panics fails its turn as one that fails does; the message is dropped and `strategy` decides what follows. |
 | `actor.send(message: M) -[Time.Wait]> SendError<M>!` | — | Queue `message`; fails with the message back once the actor has stopped. |
 | `actor.ask<R, E>(request: fn(Reply<R>) -> M E!) -[Time.Wait]> R? E!` | answer | Send the message `request` builds around a fresh `Reply<R>` and wait until the actor has handled it: the handler's answer, or None when the actor stopped first or the handler failed or did not answer. A failure of `request` is the call's, unchanged, and sends nothing. |
 | `actor.stop()` | — | Stop the actor once it has handled the messages already queued; later sends fail. |

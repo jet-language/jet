@@ -99,6 +99,10 @@ SemaTaskGroupState: struct {
     // until then, as a `task.group` child does until its group's join. The
     // spawn check clears it for the task's own body.
     combinator_branch: Bool{false},
+    // The task body about to be checked is a scoped child (sema_taskgroup_scoped_spawn).
+    // Its lambda check leaves each capture it has no copy of to the spawn
+    // check, which borrows it (sema_taskgroup_check_lambda_captures).
+    spawn_scoped: Bool{false},
 }
 
 sema_taskgroup_state_init: fn() -> SemaTaskGroupState Never! {
@@ -154,6 +158,7 @@ sema_taskgroup_state_snapshot: fn(source: SemaTaskGroupState) -> SemaTaskGroupSt
         detach_unsound_tasks: source.detach_unsound_tasks.copy(),
         spawn_body: source.spawn_body,
         combinator_branch: source.combinator_branch,
+        spawn_scoped: source.spawn_scoped,
     }
 }
 
@@ -243,6 +248,16 @@ sema_taskgroup_note_detach_problem: fn(context: &SemaCheckContext, view_borrow: 
 
 sema_taskgroup_push_parameter: fn(context: &SemaCheckContext, name: String) Never! {
     context.taskgroups.stack.push(sema_taskgroup_frame(name, SemaTaskGroupOrigin.Parameter, Span{start: 0, end: 0}))
+}
+
+// Whether a task spawned here is a scoped child: a branch of a scoped
+// combinator, or a child of the lexical `task.group` around it. Both are
+// joined before the block that spawned them goes on, so the child may borrow
+// the places it reads instead of taking them.
+sema_taskgroup_scoped_spawn: fn(context: SemaCheckContext) -> Bool Never! {
+    if context.taskgroups.combinator_branch -> return true
+    count: context.taskgroups.stack.len()
+    count > 0 && context.taskgroups.stack[count - 1].origin == SemaTaskGroupOrigin.Lexical
 }
 
 // Hands the parent's ownership checks the places running children hold. A
@@ -578,7 +593,12 @@ sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environme
             diagnostics.push(sema_error("E1110", span, "`{capture.source}` is a `Group` and cannot escape in a task", "a group is a scoped spawn authority and only lives until its owning block joins", "pass `group: Group` to a direct helper instead of capturing the handle"))
             next
         }
-        taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, program, context.generic_params)
+        // A capture the lambda check left to this spawn (a scoped child's
+        // capture it has no copy of) is borrowed until the join. One the
+        // body writes, or one no loan reaches, the child takes instead.
+        left: lambda.capture_facts.lent.contains(index)
+        writes: sema_taskgroup_contains_name(lambda.capture_facts.mutable, capture.source)
+        taken := !left && sema_ownership_crossing_capture_taken(lambda, capture, environment, program, context.generic_params)
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
         // An Atomic cell the task does not take stays the owner's one cell,
@@ -608,8 +628,14 @@ sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environme
         // A read window the body materializes still names the place it lends
         // from, so a `task.group` child borrows that place like Rust's
         // `admit_scoped_borrow`, which runs before any view materialization.
-        if (!taken || window_element != None) && !frozen {
-            borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, state, context, diagnostics)
+        if (!taken || window_element != None) && !frozen && !(left && writes) {
+            borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, left, span, scopes, state, context, diagnostics)
+        }
+        if left && borrowed == None {
+            if !sema_taskgroup_take_capture(lambda, capture, span, scopes, state, diagnostics) {
+                next
+            }
+            taken = true
         }
         // The task reaches a lent window's elements, so they must be sendable.
         if borrowed == (Val(true)) && window_element == .Val(element) {
@@ -621,7 +647,7 @@ sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environme
         // A borrowed read of a sendable value needs no copy of its own: the
         // owner cannot write or move the place before the join, so the task
         // reads it by address beside its siblings.
-        if borrowed == (Val(true)) && window_element == None && !materialized && !sema_taskgroup_contains_name(lambda.capture_facts.mutable, capture.source) {
+        if borrowed == (Val(true)) && window_element == None && !materialized && !writes {
             if sema_ownership_crossing_problem(capture.ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context) == None {
                 lent.push(index)
             }
@@ -629,7 +655,10 @@ sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environme
         // A scoped `task.group` borrow is admitted, but a detached task could
         // outlive it (Rust `view_borrow_escape_tasks`).
         if borrowed == (Val(true)) -> sema_taskgroup_note_detach_problem(context, true)
-        if borrowed == (Val(true)) || borrowed == (Val(false)) -> next
+        if borrowed == (Val(false)) || (borrowed == (Val(true)) && !left) -> next
+        // What the child has no copy of crosses as the value it would
+        // otherwise take, borrowed or not.
+        if left -> taken = true
         problem := sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.TaskCapture, taken, environment, program, scopes, state, context)
         if problem == .Val(value) {
             sema_taskgroup_note_detach_problem(context, value.kind == SemaSendProblemKind.ViewBorrow)
@@ -638,7 +667,7 @@ sema_taskgroup_check_lambda_captures: fn(lambda: &TLambda, span: Span, environme
         }
         // A capture of the function's own type parameter crosses as each
         // call's type argument (Ownership/GenericCrossings.jet).
-        sema_generic_crossing_note(capture.ty, SemaSendCrossing.TaskCapture, sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source), true, environment, program, context)
+        sema_generic_crossing_note(capture.ty, SemaSendCrossing.TaskCapture, left || sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source), true, environment, program, context)
         // A capture the body writes is refused: the task runs beside its
         // owner. A `.move()` or a frozen snapshot removes the outer alias, a shared
         // handle orders its own crossing, and the owner of a window the task
@@ -685,13 +714,10 @@ sema_taskgroup_view_element: fn(ty: Type) -> Type? Never! {
     None
 }
 
-sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
-    if !context.taskgroups.combinator_branch {
-        if context.taskgroups.stack.len() == 0 -> return None
-        if context.taskgroups.stack[context.taskgroups.stack.len() - 1].origin != SemaTaskGroupOrigin.Lexical {
-            return None
-        }
-    }
+// `left`: the lambda check left this capture to the spawn (it has no copy
+// of it), so the child borrows the owner's place whatever binds it.
+sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts, left: Bool, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
+    if !sema_taskgroup_scoped_spawn(context) -> return None
     name := capture.source
     expression := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     place := SemaOwnershipPlace?{None}
@@ -716,7 +742,8 @@ sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts,
     if place == None {
         binding_index: sema_scope_resolve_index(scopes, name) ?? return None
         binding := scopes.bindings[binding_index]
-        if binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write) {
+        lent_parameter: binding.symbol.kind == SymbolKind.Parameter && (binding.access == AccessConvention.Read || binding.access == AccessConvention.Write)
+        if left || lent_parameter {
             places := sema_ownership_places_from_expr_in_state(expression, scopes, state)
             if places.len() > 0 -> place = Val(places[0])
             if binding.access == AccessConvention.Write -> access = AccessConvention.Write
@@ -726,6 +753,19 @@ sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts,
     admitted: sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_id: symbol_none(), root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, diagnostics)
     sema_taskgroup_publish_loans(context, state)
     admitted
+}
+
+// A scoped child takes a capture it can neither copy nor borrow, as any task
+// does: the owner gives the value up, so a later use is E0121. A read or
+// write parameter has no value to give (E0120).
+sema_taskgroup_take_capture: fn(lambda: &TLambda, capture: TCapture, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
+    binding_index: sema_scope_resolve_index(scopes, capture.source) ?? return false
+    if scopes.bindings[binding_index].symbol.kind == SymbolKind.Parameter && scopes.bindings[binding_index].access != AccessConvention.Move {
+        diagnostics.push(sema_expression_lambda_capture_diagnostic(capture.source, capture.ty, true, span))
+        return false
+    }
+    sema_expression_lambda_append_name(lambda.capture_facts.moved, capture.source)
+    sema_ownership_mark_move(state, Expr.Ident{name: capture.source, span: span, id: AST_NODE_GENERATED}, scopes, "a task that captures it", diagnostics)
 }
 
 // A task's borrow of the local Atomic cell (or holder of one) `capture`
@@ -963,9 +1003,12 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
     // The task's own body is no combinator branch; this spawn's captures
     // (below) are judged as the spawn site's.
     branch: context.taskgroups.combinator_branch
+    saved_spawn_scoped: context.taskgroups.spawn_scoped
+    context.taskgroups.spawn_scoped = sema_taskgroup_scoped_spawn(context)
     context.taskgroups.combinator_branch = false
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, scopes, state, tail_store, context, Val(true), diagnostics)
     context.taskgroups.combinator_branch = branch
+    context.taskgroups.spawn_scoped = saved_spawn_scoped
     context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
     sema_taskgroup_publish_loans(context, state)

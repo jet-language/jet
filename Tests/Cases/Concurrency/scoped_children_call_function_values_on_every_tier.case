@@ -1,0 +1,17 @@
+# A task.group child or a task.any branch that calls a function value (a
+# generic plan's field, an owned or read parameter, a local) borrows it until
+# the join, on every turn of the loop around it. A child that took the value
+# freed it on the first turn: a later turn read freed memory, corrupted the
+# plan's other fields, or jumped through a freed box. The checked heap traps
+# a box freed twice or never.
+fixture: ScopedChildrenCallFunctionValuesOnEveryTier.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc -O0 main.jet
+exit: 0
+stdout: = "plan 0: plan, restart true\nplan 1: plan, restart true\nplan 2: plan, restart true\nplan 3: plan, restart true\n4\n4\n40\n4\n4\n112\n"
+step: jet run --checked-alloc -O1 main.jet
+exit: 0
+stdout: = "plan 0: plan, restart true\nplan 1: plan, restart true\nplan 2: plan, restart true\nplan 3: plan, restart true\n4\n4\n40\n4\n4\n112\n"
+step: jet run --checked-alloc -O2 main.jet
+exit: 0
+stdout: = "plan 0: plan, restart true\nplan 1: plan, restart true\nplan 2: plan, restart true\nplan 3: plan, restart true\n4\n4\n40\n4\n4\n112\n"

@@ -13,6 +13,7 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USAGE,
         JET_DRIVER_EXIT_USER_ERROR,
+        JET_DRIVER_RESERVED_ROOTS,
     ]
     jet_foundation.[
         CORE_MODULE_EXPORTS,
@@ -124,39 +125,6 @@ jet_cli_inspect_b_error: fn(code: String, what: String, color: Bool, json: Bool,
 // LEXER_RETIRED_SPELLINGS, generated from it), the words no identifier may
 // be; its contextual words are the rest of the keyword list, which name a
 // form only where it starts and stay valid identifiers elsewhere.
-
-// Syntax `FIRST_PARTY_RESERVED` (S51): first-party short names reserved
-// before packages land.
-JET_CLI_FIRST_PARTY_RESERVED: [String]{
-    "core",
-    "jet",
-    "c",
-    "rust",
-    "py",
-    "js",
-    "swift",
-    "go",
-    "java",
-    "cs",
-    "tcl",
-    "lua",
-    "fortran",
-    "cobol",
-    "ada",
-    "pascal",
-    "dart",
-    "pwsh",
-    "perl",
-    "r",
-    "octave",
-    "com",
-    "http",
-    "regex",
-    "csv",
-    "toml",
-    "crypto",
-    "archive",
-}
 
 // One reserved word or sigil.
 JetCLIReservedEntry: struct {
@@ -453,7 +421,7 @@ jet_cli_llm_digest: fn() -> String Never! {
         jet_cli_digest_section("Canonical idiom suites", idiom_suites_body),
         jet_cli_digest_section("Keywords", jet_cli_digest_list(JET_KEYWORD_NAMES)),
         jet_cli_digest_section("Built-in type names", jet_cli_digest_list(JET_TYPE_NAMES)),
-        jet_cli_digest_section("Reserved first-party names", jet_cli_digest_list(JET_CLI_FIRST_PARTY_RESERVED)),
+        jet_cli_digest_section("Reserved first-party names", jet_cli_digest_list(JET_DRIVER_RESERVED_ROOTS)),
         jet_cli_digest_section("Markers", marker_body),
         jet_cli_digest_section("Core module index", core_body),
         jet_cli_digest_section("Diagnostics", diagnostic_body),

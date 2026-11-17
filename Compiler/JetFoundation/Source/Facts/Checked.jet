@@ -555,7 +555,9 @@ TZipFillMode: enum {
 }
 
 TBuiltinOp: enum {
-    AtomicMethod(method: String),
+    // An Atomic method by the runtime operation its BUILTIN_METHOD_ROWS row
+    // declares (`load`, `store`, `add`, `try_add`, `compare_exchange`).
+    AtomicMethod(operation: String),
     LenString,
     LenList,
     IsEmpty,
@@ -566,7 +568,9 @@ TBuiltinOp: enum {
     TryReserve,
     TryInsertMap,
     TryStringPush,
-    StringEdit(method: String),
+    // An in-place String edit by the runtime symbol its BUILTIN_METHOD_ROWS
+    // row declares.
+    StringEdit(symbol: String),
     Pop,
     PriorityQueuePop,
     InsertMap,
@@ -742,9 +746,11 @@ TBuiltinOp: enum {
     BitSetCount,
     BitSetToList,
     ByteBufferFrom,
-    ByteBufferWrite(method: String),
+    // A Bytes method by the runtime symbol its BUILTIN_METHOD_ROWS row
+    // declares; a write takes the receiver and the one value it appends.
+    ByteBufferWrite(symbol: String),
     ByteBufferToBytes,
-    ByteBufferMethod(method: String),
+    ByteBufferMethod(symbol: String),
     ByteBufferWithCapacity,
     BagAdd,
     BagRemove,

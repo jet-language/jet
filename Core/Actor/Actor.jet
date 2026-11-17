@@ -78,17 +78,19 @@ spawn: fn<S, M>(state: &&S, handler: &&fn(S, M) -> S) -> Actor<M> {
     Actor<M>{inbox: inbox}
 }
 
-/// Starts a supervised actor whose state begins as `start()`. When its
-/// handler fails, the message is dropped and `strategy` decides: `.Stop`
-/// stops the actor, `.Restart(limit)` starts again from `start()` until it
-/// has restarted `limit` times, then stops.
+/// Starts a supervised actor whose state begins as `start()`. Each message
+/// is handled in a `task.group` child, so a handler that panics fails the
+/// turn as one that returns an error does. When a turn fails, the message is
+/// dropped and `strategy` decides: `.Stop` stops the actor, `.Restart(limit)`
+/// starts again from `start()` until it has restarted `limit` times, then
+/// stops.
 supervise: fn<S, M>(start: &&fn() -> S, handler: &&fn(S, M) -> S, strategy: Strategy) -> Actor<M> {
     { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
     worker: task &&mailbox {
         current := start()
         restarts := 0
         loop envelope in mailbox {
-            if !turn(current, handler, envelope) {
+            if !supervised_turn(current, handler, envelope) {
                 retry: if strategy == .Restart(limit) -> restarts < limit else -> false
                 if !retry -> break
                 restarts += 1
@@ -125,6 +127,28 @@ priv turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) 
     }
     envelope.finish()
     handled
+}
+
+// Handles one message as `turn` does, in a `task.group` child: whether the
+// handler finished, the state replaced when it did. The child borrows the
+// state, the handler and the envelope until its join.
+priv supervised_turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
+    outcome := S?{None}
+    task.group group {
+        attempt: task handler(current, envelope.message)
+        if attempt.join() == {
+            .Ok(next) -> { outcome = Val(next) }
+            .Err(_) -> {}
+        }
+    }
+    envelope.finish()
+    if outcome == {
+        .Val(next) -> {
+            current = next
+            true
+        }
+        .None -> false
+    }
 }
 
 // Refuses later sends, then releases every ask still queued.
