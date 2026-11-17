@@ -27,13 +27,22 @@ BUTTON_Y: 30
 // a failure.
 BOARD_AFTER_CLICK: 3
 
-// A wl_buffer: its pool (an index into `fds`), offset and size.
+// wl_shm's codes for ARGB8888 and XRGB8888, the formats every compositor
+// offers: little-endian words, so blue, green, red, then alpha or X in
+// memory.
+FORMAT_ARGB8888: 0
+
+FORMAT_XRGB8888: 1
+
+// A wl_buffer: its pool (an index into `fds`), offset, size and wl_shm
+// format.
 FakeBuffer: struct {
     id: Int,
     pool: Int,
     offset: Int,
     width: Int,
     height: Int,
+    format: Int,
 }
 
 Fake: struct {
@@ -140,21 +149,26 @@ fake_pool: fn(f: Fake, object: Int) -> Int {
     -1
 }
 
-// The four bytes of pixel (x, y) of `buffer` as stored: red, green, blue
-// and alpha for the window's ABGR8888.
+// The pixel (x, y) of `buffer` as red, green, blue and alpha, decoded by
+// the format the window gave the buffer.
 fake_pixel: fn(f: &Fake, buffer: FakeBuffer, x: Int, y: Int) -> [U8] {
     if buffer.pool >= f.fds.len() || x >= buffer.width || y >= buffer.height {
         fake_fail(f, "pixel {x},{y} is outside buffer {buffer.id}")
+        return [U8]{}
+    }
+    if buffer.format != FORMAT_ARGB8888 && buffer.format != FORMAT_XRGB8888 {
+        fake_fail(f, "buffer {buffer.id} has format {buffer.format}, which the fake never offered")
         return [U8]{}
     }
     at: Int(0..9223372036854775807).from_int(buffer.offset + (y * buffer.width + x) * 4) ?? {
         fake_fail(f, "pixel {x},{y} lies before the start of its pool")
         return [U8]{}
     }
-    f.fds[buffer.pool].read_at(at, 4) ?? {
+    stored: f.fds[buffer.pool].read_at(at, 4) ?? {
         fake_fail(f, "reading a pool failed: {err}")
-        [U8]{}
+        return [U8]{}
     }
+    [U8]{stored[2], stored[1], stored[0], stored[3]}
 }
 
 // The pointer enters the window's surface at (x, y), in logical units,
@@ -246,7 +260,9 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
         if interface == "wl_compositor" -> f.compositor = id
         if interface == "wl_shm" {
             f.shm = id
-            fake_event(f, id, 0, fake_words([Int]{1}))
+            // wl_shm.format: ARGB8888 and XRGB8888, as every compositor.
+            fake_event(f, id, 0, fake_words([Int]{FORMAT_ARGB8888}))
+            fake_event(f, id, 0, fake_words([Int]{FORMAT_XRGB8888}))
         }
         if interface == "xdg_wm_base" -> f.wm_base = id
         if interface == "wl_seat" {
@@ -267,7 +283,7 @@ fake_request: fn(f: &Fake, object: Int, opcode: Int, body: [U8]) -[Env]> {
     pool: fake_pool(f, object)
     if pool >= 0 {
         if opcode == 0 {
-            f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12)})
+            f.buffers.push(FakeBuffer{id: fake_u32(body, 0), pool: pool, offset: fake_u32(body, 4), width: fake_u32(body, 8), height: fake_u32(body, 12), format: fake_u32(body, 20)})
         }
         return
     }
