@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111981,
+    "rev": 111989,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93108,11 +93108,11 @@
         {
           "n": 1,
           "text": "Each listed comment matches the current code or is removed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T09:36:20.211Z"
+          "evidence": "Landed in f3785b5297 (dev, p279). The listed comments were checked against dev 0921df52d9. flake.nix still said normal Jet compilation and the runtime build with Rust, and it now says Rust is only for extern rust bridges and opt-in FFI helpers. The others already match the code: JetEnv.jet --norust, Admit.jet \"without Rust\" rows, Chain.jet \"compiles no C and links no musl\", and the flake LIBRARY_PATH musl comment, which matches Compiler/JetCLI/Source/CLI/ForeignLink.jet find_folder. Land.jet:969 now holds unrelated code.",
+          "at": "2026-11-17T22:19:06.583Z"
         }
       ],
       "refs": [],
@@ -93120,7 +93120,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T09:36:12.216Z",
-      "updated": "2026-11-09T17:55:18.554Z",
+      "updated": "2026-11-17T22:19:06.583Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -102959,11 +102959,11 @@
         {
           "n": 5,
           "text": "IR decides runtime-handle layout without `<corelib>/` key-prefix tests (BuildTypes.jet, about 14 sites, for example lines 33, 399, 547, 561, 598 and 3384), so a package type gets the same layout rule. Runtime-handle layout for package types is on Main's ballot list (2026-11-15). Proof: `git grep -c 'corelib>/' Compiler/JetIR/Source/BuildTypes.jet` prints 0 and `jet test Compiler --profile golden --filter Types` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:34:11.898Z"
+          "evidence": "Landed in 0099c1cc87 (dev, p279). On 0099c1cc87, `git grep -c \"corelib>/\" Compiler/JetIR/Source/BuildTypes.jet` prints nothing (0 matches), and `jet test Compiler --profile golden --filter Types` passes 252/252 on the p279 batch compiler. 42 Core runtime-handle rows are keyed by their own declaration, ir_core_bare_handle is gone, and the rule is now \"carried under its key\" for Core and packages alike.",
+          "at": "2026-11-17T22:33:09.250Z"
         },
         {
           "n": 6,
@@ -103032,7 +103032,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-17T21:41:02.023Z",
+      "updated": "2026-11-17T22:33:09.250Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -113545,7 +113545,7 @@
       "track": "epoch",
       "epoch": "e22",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -113553,25 +113553,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1+c2 met on p279 (2d611a5578). Compiler/JetRuntime/Tests/AtomicIntTests.c is unreferenced and unlinkable standalone; the Atomics cases replace it."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "D-ATOMIC-WIDTH1=A: an exact Int atomic grows beyond the machine width, concurrent fixed-width atomic operations stay correct, and allocator exhaustion still makes nonblocking progress, with no hidden lock or Atomic-specific pool. Proof: `jet test Compiler --profile cases --filter Atomics/d_atomic_width1_contract` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:47.982Z"
+          "evidence": "Landed in 2d611a5578 (dev, p279 batch compiler 0099c1cc87). `jet test Compiler --profile cases --filter Atomics/` passes 2/2 on the batch compiler, including Atomics/d_atomic_width1_contract on O0, O1 and O2. Exact atomics past machine width, concurrent fixed-width ops and allocator exhaustion all hold. Root fix: the hazard record moved off TCB offset 192 (the thread-index word) to its own slot.",
+          "at": "2026-11-17T22:32:37.199Z"
         },
         {
           "n": 2,
           "text": "Compare-and-swap on an exact atomic uses the same validated raw word as its retained owner, so it has no ABA. Proof: `jet test Compiler --profile cases --filter Atomics/cas_aba_witness`, plus the original schedule test, on the shipping runtime.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:14:48.910Z"
+          "evidence": "Landed in 2d611a5578 (dev, p279). Atomics/cas_aba_witness passes on the shipping runtime of the batch compiler 0099c1cc87 (Atomics/ 2/2). It runs the original schedule on O0, O1 and O2: incrementers race tasks that swap in a fresh equal number and free the old one. Compiler/JetRuntime/Tests/AtomicIntTests.c is referenced by nothing (`git grep AtomicIntTests` prints nothing), and it cannot link against jet_runtime.pack.o alone (it lacks jet_rt_fault_report and __jet_init_array_*; checked on gate-p279). The case is the runnable form of that schedule.",
+          "at": "2026-11-17T22:32:38.167Z"
         }
       ],
       "refs": [],
@@ -113582,8 +113588,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:38:00.697Z",
-      "updated": "2026-11-17T01:50:15.943Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T22:32:46.981Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T22:32:46.981Z"
     },
     {
       "id": "c0ndv80x",
@@ -118028,12 +118035,21 @@
         },
         {
           "n": 2,
-          "text": "The testkit's default pool no longer sets JET_SCHEDULER_THREADS as a deadlock workaround. Proof: `git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit` prints nothing.",
+          "text": "The testkit's default pool no longer sets JET_SCHEDULER_THREADS as a deadlock workaround. Proof: `git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit ':!Compiler/JetTestKit/Source/EnvironmentNames.jet'` prints nothing (that file is the generated name table of every registered variable).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed in 321f8ee4a2 (dev, p279). On 0099c1cc87 the proof grep prints nothing. ENV_JET_SCHEDULER_THREADS appears only in the generated name tables, and nothing in JetTestKit uses it. kit_execute_jobs takes the requested job count, or one per core.",
+          "at": "2026-11-17T22:33:11.202Z"
+        },
+        {
+          "n": 3,
+          "text": "The inline join keeps each task's observable identity. A child that a join runs on the joining thread still reports its own task thread/context, its CPU time is charged to the child and not the joiner, and carrier kind facts are unchanged. Proof (p279 regressions): Examples/Concurrency/TaskCPUClock golden on o0/o1/o2, the cases Context/local_values_reaching_a_context_read_stay_run_time_code, Context/compile_time_code_reads_the_build_root_context, TaskControlTiers/carriers_come_from_the_runtime_or_from_the_c_closures_libc and FFICallbacksTasks/programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads all pass, and Runtime/nested_join_more_tasks_than_workers runs (not REFUSED).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-15T05:29:07.249Z"
+          "at": "2026-11-17T22:33:17.795Z"
         }
       ],
       "refs": [],
@@ -118045,8 +118061,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-17T21:16:35.023Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T22:33:17.795Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0oymlrt",
@@ -215987,6 +216004,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T22:33:17.795Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ywczn1",
+      "note": "#3 The inline join keeps each task's observable identity. A chi"
+    },
+    {
+      "at": "2026-11-17T22:33:11.202Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ywczn1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T22:33:10.204Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ywczn1",
+      "note": "#2: the generated test-kit name table (Tools/Agent/EnvironmentRows.jet output) lists every registered variable and is not a workaround; was: The testkit's default pool no longer sets JET_SCHEDULER_THREADS as a deadlock workaround. Proof: `git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit` prints nothing."
+    },
+    {
+      "at": "2026-11-17T22:33:09.250Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0sdz4q0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T22:32:46.981Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07qvm0k",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T22:32:38.167Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07qvm0k",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T22:32:37.199Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07qvm0k",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T22:19:06.583Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09a7oci",
+      "note": "#1"
+    },
     {
       "at": "2026-11-17T22:10:20.341Z",
       "by": "Main",
