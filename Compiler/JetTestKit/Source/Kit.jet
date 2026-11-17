@@ -971,9 +971,11 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     scratch_memory: kit_exec_memory_backed(canonical)
     ffi_cache: if scratch_memory -> "" else -> files.join(state, "ffi")
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
-    // Golden C rows build on every tier, each with a fresh Hangar: the run
-    // takes the pack once, so no tier unpacks a copy of its own.
-    if jetpack != "" && kit_expect_named(selected_suites, "golden") {
+    // Golden and cases C rows build on every tier, each with a fresh Hangar:
+    // the run takes the pack once, so no tier unpacks a copy of its own, and
+    // the musl libraries are built once beside that pack, which each row's
+    // engine copies instead of building musl itself.
+    if jetpack != "" && (kit_expect_named(selected_suites, "golden") || kit_expect_named(selected_suites, "cases")) {
         env.cc_pack = kit_cc_pack_root(jetpack, state)
     }
     if entries.any(fn(item) { item.suite == "ui" && item.entry.mode != "coverage" }) {

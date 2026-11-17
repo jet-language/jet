@@ -196,3 +196,65 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     assert(provider_cc_is_regular_file(files.join(double, asset.file)))
     files.remove_all(base).drop("best-effort test cleanup")
 }
+
+// A pack in `{base}/hangar` whose clang runs `clang_body` under sh and whose
+// llvm-ar writes an empty archive, so a musl build runs without a compiler.
+provider_cc_musl_test_tools: fn(base: String, clang_body: String) -[FS, Env]> CcPackTools Never! {
+    digest: "sha256-{pkg_sha256_hex(clang_body.bytes())}"
+    root: files.join(base, "hangar/objects/{digest}")
+    files.create_dir_all(files.join(root, "bin")) ?? panic("create the stub pack: {err}")
+    files.create_dir_all(files.join(root, "musl/x86_64/include")) ?? panic("create the stub musl headers: {err}")
+    files.write(files.join(root, "musl/x86_64/sources"), "src/stub.c\n") ?? panic("write the stub musl source list: {err}")
+    clang: files.join(root, CC_PACK_CLANG)
+    files.write(clang, "#!/bin/sh\n{clang_body}\n") ?? panic("write the stub clang: {err}")
+    files.set_mode(clang, 0o755) ?? panic("make the stub clang executable: {err}")
+    archiver: files.join(root, CC_PACK_AR)
+    files.write(archiver, "#!/bin/sh\n: > \"$2\"\n") ?? panic("write the stub llvm-ar: {err}")
+    files.set_mode(archiver, 0o755) ?? panic("make the stub llvm-ar executable: {err}")
+    asset: provider_cc_pack_test_asset(provider_cc_pack_test_archive())
+    CcPackTools{digest: digest, root: root, asset: asset, manifest: CcPackManifest{llvm: "21.1.8", musl: "1.2.5", glibc: "2.42"}, clang_sha256: "", lld_sha256: "", ar_sha256: ""}
+}
+
+#Test("a musl build whose compiler is killed names the signal and publishes nothing") {
+    base: files.tmpdir("jet-cc-musl-kill-") ?? panic("scratch")
+    tools: provider_cc_musl_test_tools(base, "kill -KILL $$")
+    target: provider_cc_pack_covered_target("x86_64-linux-musl") ?? panic("x86_64 musl is covered")
+    hangar: files.join(base, "hangar")
+    if provider_cc_pack_musl_libraries(tools, target, hangar) == {
+        .Ok(_) -> { panic("a killed compiler must fail the musl build") }
+        .Err(error) -> {
+            message: error.message()
+            assert(message.contains("building musl for x86_64-unknown-linux-musl failed (killed by signal 9)"), "message: {message}")
+        }
+    }
+    // Only the lock is left: no staging, no scratch and no published build.
+    left: files.list_dir(files.join(hangar, "build-scratch/cc-musl")) ?? panic("list the shared musl builds: {err}")
+    assert_eq(left.len(), 1)
+    assert(left[0].name.ends_with(".lock"), "left: {left[0].name}")
+    files.remove_all(base).drop("best-effort test cleanup")
+}
+
+#Test("musl builds once per pack and target, and a Hangar of the run takes the build beside the shared pack") {
+    base: files.tmpdir("jet-cc-musl-once-") ?? panic("scratch")
+    count: files.join(base, "compiles")
+    tools: provider_cc_musl_test_tools(base, "for last; do :; done\n: > \"$last\"\necho >> '{count}'")
+    target: provider_cc_pack_covered_target("x86_64-linux-musl") ?? panic("x86_64 musl is covered")
+    hangar: files.join(base, "hangar")
+    first: provider_cc_pack_musl_libraries(tools, target, hangar) ?? panic("build musl: {err.message()}")
+    assert(provider_cc_is_regular_file(files.join(first, "libc.a")))
+    assert(provider_cc_is_regular_file(files.join(first, "crt1.o")))
+    compiles: (files.read(count) ?? panic("read the compile count: {err}")).lines().len()
+    assert_eq(compiles, 1 + CC_PACK_MUSL_CRT.len())
+    again: provider_cc_pack_musl_libraries(tools, target, hangar) ?? panic("reuse musl: {err.message()}")
+    assert_eq(again, first)
+    previous: sys.get(ENV_JET_CC_PACK_ROOT)
+    sys.set(ENV_JET_CC_PACK_ROOT, tools.root)
+    shared: provider_cc_pack_musl_libraries(tools, target, files.join(base, "row-hangar")) ?? "the shared musl build failed: {err.message()}"
+    if previous == {
+        .Val(value) -> { sys.set(ENV_JET_CC_PACK_ROOT, value) }
+        .None -> { sys.unset(ENV_JET_CC_PACK_ROOT) ?? panic("restore {ENV_JET_CC_PACK_ROOT}") }
+    }
+    assert_eq(shared, first)
+    assert_eq((files.read(count) ?? panic("read the compile count: {err}")).lines().len(), compiles)
+    files.remove_all(base).drop("best-effort test cleanup")
+}

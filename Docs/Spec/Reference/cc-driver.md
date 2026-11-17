@@ -53,7 +53,12 @@ it is E1275, never an unsandboxed compile.
 The per-target libc is built lazily into its own Hangar entry: a glibc target
 copies the pack's headers and link stubs, and a musl target compiles `libc.a`
 with the pack's own clang the first time it is used (`building musl for
-<target> (first time only)`). The pack carries only libc. Any other library,
+<target> (first time only)`). That build happens once per pack and target:
+concurrent realizations take turns under a file lock and copy the one
+published build, which lives in the Hangar's build scratch, or beside the
+pack `JET_CC_PACK_ROOT` names when that is the same pack (a test run shares
+one this way). A failed build names how the compiler ended: its exit code, or
+the signal that killed it. The pack carries only libc. Any other library,
 including the C++ standard library, is a package dependency.
 
 The selected descriptor is part of the action key. Select its target with
