@@ -1,0 +1,65 @@
+// Ann's Crewboard app on her Linux laptop, the device "laptop", with the
+// server in server/main.jet at $CREW_PORT. It signs in, asks who it is,
+// waits past its access token and asks again, revokes its own device, and
+// asks right away and again once its access token ends.
+use {
+    app
+    auth: core.auth
+    sys: core.sys
+    tasks: core.tasks
+}
+
+// The server's Crew, as the app calls it.
+Crew: struct {
+    // The account the call came from.
+    #App.SignedIn whoami: fn(self) -> String { app.caller().raw() }
+
+    // Ends the refresh of the caller's device `device`: whether it held one.
+    #App.SignedIn revoke: fn(self, device: String) -[DB]> Bool {
+        auth.revoke_device(app.caller().raw(), device) ?? false
+    }
+}
+
+run: fn() {
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    server: "http://127.0.0.1:{port}/api"
+    crew: app.remote_at<Crew>(server)
+    print("signed in at the start: {app.signed_in(server)}")
+    print("whoami before signing in: {whoami(crew)}")
+    print("a sign-in with a wrong credential: {outcome(app.sign_in(server, "acct_ann", "wrong", "laptop"))}")
+    print("a sign-in: {outcome(app.sign_in(server, "acct_ann", "ann's credential", "laptop"))}")
+    print("signed in: {app.signed_in(server)}")
+    print("whoami: {whoami(crew)}")
+    // Past the access token's three seconds, the call refreshes it first.
+    tasks.sleep(4000)
+    print("whoami after the access token ended: {whoami(crew)}")
+    revoked: if crew.revoke("laptop") == {
+        .Ok(held) -> "{held}"
+        .Err(failure) -> "{failure}"
+    }
+    print("revoked the laptop: {revoked}")
+    // The access token still lasts, so this call is answered.
+    print("whoami right after the revoke: {whoami(crew)}")
+    // Its refresh is refused, so the device is signed out.
+    tasks.sleep(4000)
+    print("whoami after the access token ended: {whoami(crew)}")
+    print("signed in at the end: {app.signed_in(server)}")
+}
+
+// Who `crew` says the caller is, or why it can't say.
+whoami: fn(crew: app.Remote<Crew>) -> String {
+    if crew.whoami() == {
+        .Ok(who) -> who
+        .Err(.SignedOut) -> "signed out"
+        .Err(failure) -> "{failure}"
+    }
+}
+
+// How a sign-in went.
+outcome: fn(result: app.CallError!) -> String {
+    if result == {
+        .Ok(_) -> "signed in"
+        .Err(.SignedOut) -> "signed out"
+        .Err(failure) -> "{failure}"
+    }
+}
