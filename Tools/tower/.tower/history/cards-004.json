@@ -103804,6 +103804,225 @@
       "completedAt": "2026-11-14T04:19:27.461Z",
       "questions": [],
       "retiredAt": "2026-11-17T04:24:35.646Z"
+    },
+    {
+      "id": "c0m1e5o0",
+      "num": 4631,
+      "title": "Quoted CR and Unicode scalar escapes with Debug lexical round-trip",
+      "body": "D-STR-ESCAPE1=A is ratified. Implement quoted carriage-return and Unicode scalar escapes plus Debug lexical round-trip; see chosen technical contract below. Existing Rust lexical path is a frozen seed path unless a minimal current port seam requires an exception under #29.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-STR-ESCAPE1=A\nQuoted/triple/Char literals accept r and 1..6-hex scalar escapes, Char accepts escaped quote; bytes accept r/xNN but not Unicode; E0001 precise scalar-invalid diagnostics; Debug prints NUL as u{0} and lexes back exactly including braces; fmt canonicalization stable; migrate listed CR workarounds and all relevant registry/spec/UI rows.\nPaths: Compiler/JetLexer/Source/Lexer/Payload.jet; Jetpack/EnvModel/Source/ModuleEval/ literal decoder; Compiler/JetEval/Source/Formatting/Values.jet; Jet runtime Display layer; Jet formatter quoted-literal canonicalization; Driver/{Loader,Pipeline}.jet CR workarounds\nRegistry/spec/UI/goldens: Legacy Syntax.rs ESCAPES reference; Jetpack/Foundation/Source/Syntax.jet ESCAPES gains r and scalar-rule authority D-STR-ESCAPE1=A/D-CHAR-SCALAR1; Jet DiagnosticRows E0001 texts updated; raw/typed heads unchanged; Docs/spec/spec.md string/Char/byte/triple rules; Docs/spec/syntax-decisions.md S20/S41 amendment; core-library Debug round-trip; E0001 exact bad scalar spans: surrogate, >10FFFF, empty/7 digits; byte Unicode refusal; Char quote escape; formatter canonical hex/lowercase snapshots; Round-trip all scalars/controls/braces default run/AOT/evaluator; CRLF HTTP fixtures http_parse_body_limits and http_server_trailers; fmt u{a}/u{9}/u{d} -> n/t/r and u{001B}->u{1b}; remove String.from_bytes CR workarounds\nTiming: Jet lexer/Debug port alignment NOW only where needed to port existing semantics; new literal surface after feature resumption under #29 unless a minimal current port requires it. #27 Jet-half-only path viable; Rust mirror only minimal port/seed exception with ledger. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: Both-lexers older criterion must be annotated #27: Jet admission now, Rust freeze/removal later. Do not run installed Rust probes on new accepted syntax as evidence of Jet implementation.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met: D-STR-ESCAPE1=A is built (6187d81eff, 164477023b, e6c242297f, 025afcd397)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c4: Examples/features/net/http_parse_body_limits.jet -> tests/run/Net/HTTPParseBodyLimits.jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-10-07",
+          "by": "Pip",
+          "text": "D-STR-ESCAPE1=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned lexer/formatter; RtL6 (current live Display owner, RuntimeJet2 confirmed); RuntimeJet2 reviewer; RtText1 does NOT own Debug policy. Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-STR-ESCAPE1 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-STR-ESCAPE1 is ratified, outcome A (tower decisions, ratified 2026-10-07); built by 6187d81eff, 164477023b, e6c242297f and 025afcd397.",
+          "at": "2026-11-14T04:31:42.206Z",
+          "closure": "decision"
+        },
+        {
+          "n": 4,
+          "text": "If A or B: every carriage-return workaround is migrated to the escape (Examples/features/net/http_parse_body_limits.jet:32, Compiler/JetDriver/Source/Driver/Loader.jet:211,263,571, Pipeline.jet:2503, and Core's String.from_bytes([U8]{13}) sites); no byte-built CR spelling remains in Jet source.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-4631c4 (batch 34, dev 3fbb97653f..164477023b) migrated 138 byte-built CR and CRLF sites to \"\\r\" and \"\\r\\n\", including Loader, Pipeline, Core and HTTPParseBodyLimits; G6Meta-4631c4b (light24, 2913c41a05..e6c242297f) spelled the last mixed control fixtures in Jetpack/Publication/Tests/Index.jet with \\u{…}. Proofs: `git grep -E \"from_bytes\\(\\[U8\\]\\{13[,}]\" -- *.jet *.template` gives 0 hits on e6c242297f; golden Net/HTTPParseBodyLimits 3/0 (o0, o1, o2), HTMLUnescapeStrip 3/0 and HasControl 3/0 on the batch-34 jet; JetLexer/Tests 38/0; Jetpack/Publication/Tests 300/0.",
+          "at": "2026-11-14T03:46:38.250Z"
+        },
+        {
+          "n": 7,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (the D-STR-ESCAPE1 escapes). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-4631c7 landed in batch 30 (dev 1c1bba4180..6187d81eff; commit 6187d81eff): the escapes \\r and \\u{H}, an exact-span E0001 for a bad escape, byte literals that refuse \\u, Syntax rows and the D-STR-ESCAPE1 entry. On the batch-30 jet (gate-p36): JetLexer/Tests 38/0; LexicalLedger --check rc 0; SurfaceBudget --check rc 0; jet self devtools grammars rc 0 with Tools/editors unchanged (same md5 before and after); guards grammar 13/0 and syntax_reconciliation 15/0; ui escape 35/0, bad_escape 1/0, char_escape_unknown 1/0.",
+          "at": "2026-11-14T03:32:13.238Z"
+        },
+        {
+          "n": 11,
+          "text": "D-STR-ESCAPE1=A: Quoted/triple/Char literals accept r and 1..6-hex scalar escapes, Char accepts escaped quote; bytes accept r/xNN but not Unicode; E0001 precise scalar-invalid diagnostics; Debug prints NUL as u{0} and lexes back exactly including braces; fmt canonicalization stable; migrate listed CR workarounds and all relevant registry/spec/UI rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "025afcd397 (batch 39) builds the last parts of D-STR-ESCAPE1=A on top of c4 and c7 (164477023b, e6c242297f). On the gate-p45 jet: case char_debug_nul_reads_back_on_every_tier 1/0 (Debug prints NUL as \\u{0} and lexes back exactly); ui scalar_escape_out_of_range, bad_escape and char_escape_unknown 1/0 each (E0001 at exact spans); the JetParser test scalar_escapes_format_to_one_spelling 1/0 (stable fmt canonicalization); the 5 JetLexer tests 1/0 each (\\r and \\u{H} in quoted, triple and Char literals, an escaped apostrophe in Char, \\xNN in bytes, no scalar escape in bytes); the greps for rust_debug_char and \"not yet built\" are both 0.",
+          "at": "2026-11-14T04:31:24.306Z"
+        }
+      ],
+      "refs": [
+        "Docs/spec/syntax-decisions.md (S20)",
+        "D-RAWSTR1",
+        "D-TEXT-CONTROL1",
+        "#4428"
+      ],
+      "tags": [
+        "lexer",
+        "strings",
+        "owner-choice",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c0gibkuw",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:52.711Z",
+      "updated": "2026-11-14T04:31:44.445Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-14T04:31:44.445Z",
+      "questions": [
+        {
+          "id": "q4p8lzbr",
+          "cardId": "c0m1e5o0",
+          "decisionId": "D-STR-ESCAPE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I'd like to have the TUI corelib include constants for ansi escape sequences/characters so everything is in one place, there is a gist that is an excellent guide for all the different kinds of control, colors, cursor options, etc. We should also have helper functions to control that so its super easy to do things like color text in a tui or clear lines or reset cursor posistion or activate other buffer etc. also, shouldnt this be able to be controlled with a more strongly typed string? where you can use a string literal constructor to avoid collisions with \"\"? update accordingly.",
+          "status": "answered",
+          "answer": "Yes. Keep D-STR-ESCAPE1=A (`\\r`, `\\u{…}`) as the lexer floor, and add a companion ballot: `core.tui` ANSI constants (ESC, CSI, SGR colors/styles, cursor, erase, alternate screen, mouse), helpers (`fg(.Red)`, `clearLine()`, `moveCursor(row:, col:)`, `altScreen(on:)`), and an `ANSI{\"…\"}` typed literal checked at compile time that yields a terminal-code value, not `String`. Reason: reuses the existing typed-literal head, so no new syntax, and keeps control codes from mixing with plain text. Status: Open; ballot needs revision. (Pip, from $JET_STATE_ROOT/ballots/OPEN-QUESTIONS.md)",
+          "created": "2026-10-06T00:13:22.793Z",
+          "answeredAt": "2026-10-06",
+          "answeredBy": "Pip"
+        }
+      ],
+      "retiredAt": "2026-11-17T04:55:29.014Z"
+    },
+    {
+      "id": "c0wyaelh",
+      "num": 6627,
+      "title": "Automatic differentiation in core.compute",
+      "body": "gradient, jvp, vjp and value_and_gradient on every tier (Examples/Math/Compute/ComputeAutoDiff.jet). Moved out of bug card #3955 by owner ruling 2026-11-06.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c3 decision (Main, 2026-11-14): the ComputeAutoDiff golden prints the host`s matmul dispatch (dispatch=avx2;vector_width=8), which differs on wasm (scalar;1), ARM and non-AVX2 x86, so the golden is host-dependent, against I5 and I9. The example stops printing the dispatch fields (option b); its golden changes once. A web profile .out was rejected, since no harness reads it, and so was counting web as met with a differing line. G3Core-2: 22 of 23 lines already match on web on the batch-27 jet; O0, O1 and O2 golden ComputeAutoDiff PASS 3/0."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "MechB-2 notes (2026-11-06): ComputeAutoDiff.jet fails because IR has no lowering for MathBuiltin(core.compute, gradient|value_and_gradient|vjp|jvp): Compiler/JetIR/Source/BuildExpr.jet:1896 sends it to ir_precise_builtin -> ir_precise_route -> 'unlowered: generic Core call core.compute.*'. Separate bug: Compiler/JetIR/Source/CompilerOwned.jet:254 declares VJPRun.grads as Fn() -> t while sema (Expressions/Places.jet:522) declares plain t. Planned design (unbuilt): runtime tracing inside Core (private Tensor fields ad_meta: [[Int]], ad_data: [[Float]]), private __ad_* helpers in Core/Compute/Compute.jet reached through CoreReach.jet, and a new Compiler/JetIR/Source/BuildAutodiff.jet lowering the curried and direct forms."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 3,
+          "text": "Examples/Math/Compute/ComputeAutoDiff.jet (gradient, jvp, vjp, value_and_gradient) passes on O0, O1, O2 and web with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #3955 c3)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ae47d251e4 (light33, dev b11c9391b4..d049ae24d9): following Main`s decision (b) logged on this card (a host-dependent golden breaks I5 and I9), ComputeAutoDiff prints a profile line that reads the same on every target, and its .out changed once for that; it is otherwise unchanged. Golden Compute/ComputeAutoDiff 3/0 (o0, o1, o2); `jet build --target web` plus `node app.js` rc 0 with 23 lines, diff 0 against the .out. ComputeModels.jet keeps the gradient, jvp and vjp checks (E0112 transform checks at lines 255-303).",
+          "at": "2026-11-14T04:31:21.773Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T23:25:43.242Z",
+      "updated": "2026-11-14T04:31:26.624Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-14T04:31:26.624Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T04:55:29.015Z"
+    },
+    {
+      "id": "c0pc0jb9",
+      "num": 6837,
+      "title": "A task spawned with an Atomic argument gets a copy of the word, so its stores are invisible to the caller",
+      "body": "Found by G3Core-2 on 2026-11-13 behind the Examples Concurrency/BusyTurns TIMEOUT on the batch-15 jet. A task spawned with an Atomic<Bool> argument copies the word, so the task`s store(true) never reaches main, which prints \"main sees false\", and the spinners never stop. An Atomic is an inline word borrowed by address (BuildTypes.jet:430), but task-spawn argument lowering copies it by value. This is a semantics defect (shared-state atomics), not a stale example.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c1 met by 08130d813a (batch 41)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A task spawned with an Atomic argument shares the caller`s atomic (borrowed by address), so a store in either is seen by the other, on o0, o1 and o2. Proof: a run case where a spawned task stores true and main loads true, and golden Concurrency/BusyTurns passes 3/3 with no TIMEOUT.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "08130d813a (batch 41): a carrier whose fiber just gave its turn starts a queued task first, so busy fibers that outnumber carriers no longer starve the task that stops them. On the gate-p47 jet: `jet run tests/run/Concurrency/AtomicTaskShare.jet` diff 0 against .out on none, basic and full (main sees the spawned task`s store); golden Concurrency/BusyTurns 3/0; case fiber_liveness/more_busy_tasks_than_carriers_still_start_a_queued_task 1/0; golden Concurrency/ 189/0 (run twice, with no fairness change); fiber_ 21/0; scheduler 8/0/1KF.",
+          "at": "2026-11-14T04:31:18.217Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T01:12:16.479Z",
+      "updated": "2026-11-14T04:31:20.379Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T04:31:20.379Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T04:55:29.015Z"
     }
   ]
 }

@@ -31438,6 +31438,436 @@
       "outcome": "F",
       "ratifiedAt": "2026-11-11",
       "retiredAt": "2026-11-17T04:06:48.831Z"
+    },
+    {
+      "id": "D-STR-ESCAPE1",
+      "cardId": "c0m1e5o0",
+      "group": "syntax",
+      "title": "Carriage return and Unicode escapes in plain strings",
+      "situation": "Web, mail and CSV formats end lines with carriage return then newline, but Jet text cannot spell the carriage return, so programs build it from raw byte numbers. Jet's own debug printing already shows text as \"a\\r\\u{1b}\", which Jet then refuses to read back. You asked for named terminal codes, easy helpers and a checked terminal-text form instead of raw codes in plain strings, and a companion vote, now ratified, provides exactly that. This vote decides only the plain-text floor beneath it: whether quoted text gains a carriage-return escape and one escape for any Unicode character.",
+      "gist": "Add \\r and \\u{…} to quoted text, add \\r only, or keep four escapes and use byte literals?",
+      "lesson": "An escape is a backslash code inside quotes that stands for a character you cannot type or see. Jet strings know four: \\n newline, \\t tab, \\\" quote and \\\\ backslash. A carriage return is character 13; web headers end every line with carriage return plus newline. A Unicode escape \\u{1F600} names any character by its hexadecimal number.",
+      "explainer": "Beginner path: write \"GET / HTTP/1.1\\r\\n\" exactly as in RFCs, tutorials and other languages. Terminal colors and cursor moves do not use raw codes in plain text: the companion terminal vote gives checked ANSI{\"[bold red]error:[/] {name}\"} text and helpers such as tui.clearLine(). Expert path: write invisible or confusable characters by number, such as \"\\u{200B}\" for a zero-width space, so a reviewer can see them. Byte literals keep their own \\x0D form because bytes are not text.\n\nShared work under every option: E0001 lists the full escape set, the Rust and Jet lexers stay identical, and Debug output prints only escapes that the lexer reads back.",
+      "story": "Ana writes a tiny HTTP client over a TCP socket. Every tutorial writes the request as \"GET / HTTP/1.1\\r\\n...\", and Jet answers E0001. She copies a workaround that builds the two characters from byte numbers, then prints the request with Debug and sees \\r again.",
+      "inWild": "// https://doc.rust-lang.org/reference/tokens.html#character-escapes (consulted 2026-10-05)\nlet head = \"GET / HTTP/1.1\\r\\nHost: a\\r\\n\\r\\n\"; // \\n \\r \\t \\\\ \\0 \\x41 (7-bit) \\u{7FFF}\n// Swift, Zig, Go, Python, Kotlin and C# all accept \\r; Rust, Swift and Zig spell any scalar as \\u{...}.\n// rustc's deny-by-default text_direction_codepoint_in_literal lint suggests rewriting a hidden U+202E as '\\u{202e}'.",
+      "detail": "Suite revision by BallotSuite1, 2026-10-07. Wording only: the companion terminal vote D-TUI-ANSI1 was ratified as A on 2026-10-06, so the situation no longer calls it a proposal. Options and claims are unchanged.\n\nYOUR QUESTION (q4p8lzbr, 2026-10-05)\n\nYou asked for three things. First, ANSI escape constants in the TUI Core library, so every terminal code lives in one place. Second, helpers that color text, clear lines, move or reset the cursor and switch to the alternate screen. Third, a strongly typed string literal for terminal codes, so they never mix with plain \"\" text.\n\nAnswer: yes, through the companion ballot D-TUI-ANSI1 on this card. It recommends core.tui constants (tui.ESC, tui.CSI), helpers (tui.moveCursor(row:, col:), tui.clearLine(), tui.altScreen(on:), tui.mouse(on:)) and a checked ANSI{\"[bold red]error:[/] {name}\"} literal. That literal makes a terminal-text value, not a String. A misspelled style fails the build, inserted user text prints as text, and styles always close. It reuses Jet's existing checked literal heads, such as SQL{…} and HTML{…}, so it adds no new syntax.\n\nWhat changes in this ballot: it stays the plain-text floor, and it no longer teaches terminal styling through raw codes. Protocol text still needs \\r. Debug output, review of invisible characters and core.tui's own source still need \\u{…}. Option A's example now shows a zero-width space instead of a hand-written color code, and the beginner path for colors points to the companion. The two votes are independent: D-TUI-ANSI1's checked literal works under every option here.\n\nCODE FACTS\n\nThese code facts were checked on 2026-10-05 against dev 91a438ce4 and release jet dev-05ea86f65.\n\nLaw: spec.md:62-63 and S20 allow four escapes. Any other escape is E0001. D-BOUND-RAW1 and D-RAWSTR1 reaffirm the four-entry table. Byte-head literals already accept \\xNN (Compiler/JetLexer/Source/Lexer/Payload.jet:551-572): [U8]{\"GET / HTTP/1.1\\x0D\\x0A...\"} produced 27 bytes with byte 14 = 13 in a probe.\n\nExercised: \"{head}\\r\\n...\" fails E0001 three times (probe status_line.jet, first version).\n\nWorkarounds in the tree: Examples/features/net/http_parse_body_limits.jet:32 `crlf :: String.from_bytes([U8]{13, 10}) ?? panic(\"CRLF\")`; Compiler/JetDriver/Source/Driver/Loader.jet:211,263,571 and Pipeline.jet:2503 `String.from_bytes([U8]{U8{13}}) ?? \"\"`; Examples/features/net/http_server_trailers.jet:26-29 pushes bytes 13 and 10 per line. 105 tracked .jet files compare or push byte 13.\n\nDebug round trip: the evaluator renderer (Compiler/JetEval/Source/Formatting/Values.jet:157-181) and the default-run runtime both follow Rust's {:?}. A probe ($JET_SCRATCH_ROOT/mine/legwork/adversary2/debug_rt.jet) printed the text a, CR, NUL, ESC, {b}, ', e plus U+0301 as \"a\\r\\0\\u{1b}{b}'e\\u{301}\". None of \\r, \\0 or \\u{…} lex today. Compiler/JetCodegen/Source/Emit/Context.jet:476-520 only spells Rust source literals, so it is not a Debug renderer.\n\nRatified example drift: D-HTTP-BYTES-FORM1's code writes \"POST / HTTP/1.1\\r\\n...\", which does not compile today (handled on card #4428 independently of this vote).\n\nNo decision was found that rejected \\r or \\u{...} on purpose; S20 is the original four-entry choice.\n\nFresh review reconciliation, 2026-10-05. D-BOUND-RAW1's line that plain strings keep the four-entry table only states its own scope, so A amends it together with S20. Once #3881 [#4204] rejects raw direction marks inside literals, \\u{202E} becomes their legitimate visible spelling, as rustc's lint already suggests.\n\nJava decodes \\u escapes before lexing, so a comment containing \\u000a ends early; that design is a known failure. A avoids it because Jet decodes escapes only inside quoted text. In interpolated text the lexer reads \\u{ as an escape before a brace can open a hole, so \"\\u{1b}\" never names a binding 1b.\n\nAdversarial pass, 2026-10-05, same release; probes in $JET_SCRATCH_ROOT/mine/legwork/adversary2/. Braces: the probe above prints {b} unchanged, and pasting \"a{b}\" back would interpolate b. So the round-trip promise covers escapes only. Doubling braces in Debug was rejected because it would make every JSON value in Debug output harder to read, and Rust prints them plainly too.\n\nchar_quote.jet: '\\'' is E0001 today, although the char-literal E0001 text lists \\' as an escape. So no apostrophe Char can be written, yet the evaluator's Debug prints one as '\\''. A adds \\' to character literals so that Char Debug output reads back too.\n\nOne table, Syntax::ESCAPES (crates/jet-foundation/src/Syntax/math_layout.rs:456), feeds plain strings, character literals, [U8] byte-head bodies and the module evaluator (crates/jet-env-model/src/ModuleEval/Eval.rs:2608). Adding r there gives byte literals \\r as well, as in Rust's b\"\\r\"; \\u{…} is handled outside that table and stays text-only.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add \\r and \\u{…}",
+          "detail": "Quoted text and character literals gain \\r (character 13) and \\u{H}. H is one to six hexadecimal digits naming any Unicode scalar. Surrogates (D800-DFFF), values above 10FFFF, empty braces and seven digits are E0001 at the exact span. Character literals also accept \\', which today's error text already lists but the lexer rejects. Byte literals gain \\r through the shared table, keep \\xNN for other bytes, and do not gain \\u.\n\nDebug prints only \\n \\t \\r \\\" \\' \\\\ and \\u{…}, so every escape it prints reads back as the same text. Braces still print as themselves, as in Rust, so pasted Debug text containing { needs {{. jet fmt rewrites \\u{a}, \\u{9} and \\u{d} to \\n, \\t and \\r, and writes other hex in lowercase without leading zeros. Each character keeps one spelling in formatted code.",
+          "technical": "Both lexers change. Rust paths: crates/jet-lexer/src/Lexer/Strings.rs:195-210,550-561 and Scan.rs:1014-1030. Self-hosted path: Compiler/JetLexer/Source/Lexer/Payload.jet:574-590. Syntax::ESCAPES gains r=13, the char-literal path gains \\', and a braced scalar escape is added for text and Char only. Validation uses the scalar rule of D-CHAR-SCALAR1 Char.from_u32: 0..=0x10FFFF minus 0xD800..=0xDFFF.\n\nTriple-quoted strings follow automatically, since spec.md:73-74 gives them the ordinary escape rules. Raw backtick strings and typed text heads are unchanged (D-RAWSTR1, D-BOUND-RAW1). The module evaluator's literal decoder (crates/jet-env-model/src/ModuleEval/Eval.rs:2608) learns \\u{…} too.\n\nThe evaluator renderer (JetEval Values.jet:157-181) and the runtime Debug formatter for default run and AOT print NUL as \\u{0} instead of \\0. Everything else they print already lexes under A. E0001 why-text lists the six text escapes, and the char-literal text matches its real set. jet fmt canonicalization is a formatter rule, not a new diagnostic.",
+          "code": "head :: \"GET / HTTP/1.1\\r\\nHost: example\\r\\n\\r\\n\"\nzwsp :: \"\\u{200b}\"          // zero-width space, now visible in review\nprint(\"{\"a\\rb\":Debug}\")   // \"a\\rb\" — paste it back and it is the same text\nquote :: '\\''              // apostrophe as a Char\nbad :: \"\\u{D800}\"          // E0001: D800 is a surrogate, not a character"
+        },
+        {
+          "key": "B",
+          "name": "Add \\r only",
+          "detail": "Quoted text and character literals gain \\r. Everything else stays: NUL, escape and other invisible characters still have no spelling, so Debug output for them cannot be read back and must keep printing an unreadable form.",
+          "technical": "Same two-lexer change limited to r=13. Debug renderers keep \\0 and \\u{hex} for other controls, which remain unlexable; or they print those characters raw, which hides them.",
+          "code": "head :: \"GET / HTTP/1.1\\r\\nHost: example\\r\\n\\r\\n\"\nesc :: String.from_bytes([U8]{27}) ?? \"\"\nbold :: \"{esc}[1mready{esc}[0m\""
+        },
+        {
+          "key": "C",
+          "name": "Keep four escapes; teach byte literals",
+          "detail": "No lexer change. Wire fixtures use byte literals such as [U8]{\"...\\x0D\\x0A\"}; text that needs a carriage return interpolates a value built from bytes. E0001 for \\r gains a fix line pointing to the byte literal. Debug output still prints \\r and \\0 that Jet cannot read.",
+          "technical": "Only the E0001 fix text changes. Byte literals are [U8], so any text processing first needs String.from_bytes with a failure path.",
+          "code": "head :: [U8]{\"GET / HTTP/1.1\\x0D\\x0AHost: example\\x0D\\x0A\\x0D\\x0A\"}\ncrlf :: String.from_bytes([U8]{13, 10}) ?? panic(\"CRLF\")\nline :: \"Host: {host}{crlf}\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Reference, tokens chapter, consulted 2026-10-05: \\n \\r \\t \\\\ \\0, \\x up to 7F, \\u{…} up to six digits, must be a scalar.",
+          "code": "let s = \"a\\r\\n\\u{1F600}\";"
+        },
+        {
+          "lang": "Swift",
+          "note": "From the language guide (not fetched in this run): \\0 \\\\ \\t \\n \\r \\\" \\' and \\u{n} with one to eight hex digits.",
+          "code": "let s = \"a\\r\\n\\u{1F600}\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A lets protocol text read exactly like the specifications, gives every invisible character a visible spelling, and makes every escape Debug prints something Jet can read back. Terminal colors and cursor moves get named, checked forms in the companion terminal vote, which builds on this floor.",
+        "gains": [
+          "Every RFC and tutorial line pastes in unchanged.",
+          "Hidden or confusable characters get a visible spelling.",
+          "Every escape Debug prints is valid Jet."
+        ],
+        "losses": [
+          {
+            "loss": "Two spellings exist for newline, tab and carriage return (\\n or \\u{a}).",
+            "mitigation": "jet fmt rewrites the numeric form of those three to the short form, so formatted code has one spelling."
+          },
+          {
+            "loss": "Learners meet two more escapes, plus \\' in character literals.",
+            "mitigation": "E0001 lists the full set with one example each, and the HTTP and CSV lessons introduce \\r where it is needed. \\' is the spelling C, Java and Rust programmers already type."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Fixes line endings but leaves escape, NUL and zero-width characters unwritable, and Debug still prints escapes Jet cannot read."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps the language smallest, but text code still builds characters from bytes with a failure path, and Debug still prints escapes Jet cannot read."
+          }
+        ],
+        "tradeoff": "Two short escapes, normalized by the formatter, instead of byte-building workarounds."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: MineReview. Skill: rli5. Predict tasks failed on hex, on \\u{1b} and on option B calling a control character 'Escape'; all three are now explained in the surface. Explain, modify and derive tasks passed, and Debug and byte literals are not needed to choose.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-opus. Fresh agent: BallotAdversary-2. Probes showed Debug prints braces raw, so pasted text would interpolate, and that '\\'' is rejected despite its error text; the read-back promise now covers escapes only and A adds \\' to character literals. Wrong renderer citations, byte literals silently gaining \\r through the shared table, the module evaluator's decoder and fmt hex canonicalization were also corrected."
+      },
+      "checkInstructions": "Validate the payload without Tower writes. After ratification of A, both lexers accept \\r and \\u{1..6 hex} in quoted, triple-quoted and character literals, and \\' in character literals. They reject surrogates, values above 10FFFF, empty braces and seven digits with E0001 at the exact span. Byte literals accept \\r and \\xNN and reject \\u{…}.\n\nDebug of \"a\\r\\u{0}\\u{1b}\" prints that same spelling. The printed text lexes back to equal text on default run, AOT and the evaluator. Debug of text with braces prints them unchanged. jet fmt rewrites \\u{a}, \\u{9} and \\u{d} to \\n, \\t and \\r, and \\u{001B} to \\u{1b}.\n\nMigrate the workarounds named in detail in the same cutover. They are http_parse_body_limits.jet:32, Loader.jet:211, 263 and 571, Pipeline.jet:2503 and http_server_trailers.jet:26-29. Update spec.md:62-63, S20, S41 and both E0001 registry texts together.",
+      "surface": {
+        "gist": "Add \\r and \\u{…} to quoted text, \\r only, or keep four escapes?",
+        "lesson": "An escape is a backslash code for a character you cannot see. Jet text has \\n, \\t, \\\" and \\\\. Web and mail lines end with carriage return (character 13) then newline. \\u{…} names any character by its number in hex, which counts in base 16 with digits 0-9 and a-f. Debug printing shows text using these codes. A also lets a character literal write '\\''.",
+        "trio": {
+          "current": {
+            "note": "Today: \\r is error E0001, so programs build it from bytes.",
+            "code": "crlf :: String.from_bytes([U8]{13, 10}) ?? panic(\"CRLF\")\nhead :: \"GET / HTTP/1.1{crlf}Host: a{crlf}{crlf}\""
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust, Swift, Zig, Go and Python accept \\r; Rust, Swift and Zig accept \\u{…}.",
+            "code": "let head = \"GET / HTTP/1.1\\r\\nHost: a\\r\\n\\r\\n\";"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Add \\r and \\u{…}",
+            "gist": "Spell carriage return and any character by number; Debug's escape codes read back.",
+            "gains": [
+              "Specs paste in unchanged.",
+              "Invisible characters become visible."
+            ],
+            "losses": [
+              "Two spellings for newline, tab and carriage return; jet fmt keeps the short one."
+            ],
+            "proposed": {
+              "code": "head :: \"GET / HTTP/1.1\\r\\nHost: a\\r\\n\\r\\n\"\nzwsp :: \"\\u{200b}\"                    // zero-width space, now visible\nquote :: '\\''                         // apostrophe character, an error today\n// Debug of \"a\\rb\" prints \"a\\rb\", which reads back\n// colors: ANSI{\"[bold]ready[/]\"}, from the companion vote"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Add \\r only",
+            "gist": "Fix line endings; other invisible characters stay unwritable.",
+            "gains": [
+              "Smallest change that fixes protocols."
+            ],
+            "losses": [
+              "The terminal escape character and NUL still need bytes."
+            ],
+            "proposed": {
+              "code": "head :: \"GET / HTTP/1.1\\r\\nHost: a\\r\\n\\r\\n\"\nesc :: String.from_bytes([U8]{27}) ?? \"\""
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep four; use byte literals",
+            "gist": "No lexer change; wire data is written as bytes.",
+            "gains": [
+              "No new escapes."
+            ],
+            "losses": [
+              "Text code still builds characters from bytes."
+            ],
+            "proposed": {
+              "code": "head :: [U8]{\"GET / HTTP/1.1\\x0D\\x0AHost: a\\x0D\\x0A\\x0D\\x0A\"}\n// \\x0D\\x0A are bytes 13 and 10"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Protocol text reads like the spec, invisible characters get a visible name, and Debug escapes read back. Terminal codes get checked names in the companion vote.",
+          "gains": [
+            "One line instead of a byte workaround."
+          ],
+          "losses": [
+            {
+              "loss": "Two spellings for newline, tab and carriage return.",
+              "mitigation": "jet fmt rewrites \\u{a}, \\u{9}, \\u{d} to the short form."
+            },
+            {
+              "loss": "Two more escapes, plus \\' in character literals.",
+              "mitigation": "E0001 lists the full set with examples; \\' is what most programmers already type."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Leaves the terminal escape character, NUL and zero-width characters unwritable."
+            },
+            {
+              "key": "C",
+              "reason": "Text code keeps byte-building workarounds, and Debug still prints escapes Jet cannot read."
+            }
+          ],
+          "tradeoff": "Two formatter-normalized escapes instead of byte workarounds."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A numeric escape could hide which character is meant.",
+          "attempts": [
+            "Keep short named forms for the three common controls and let jet fmt rewrite their numeric forms; numeric form remains for characters that have no visible glyph."
+          ],
+          "result": "Numeric form appears only where a character is otherwise invisible, which is the readability gain."
+        },
+        {
+          "loss": "\\x in text would blur bytes and characters.",
+          "attempts": [
+            "Follow Rust's lesson (\\x limited to 7F because higher values are ambiguous) by giving text only \\u{…} and keeping \\xNN in byte literals."
+          ],
+          "result": "No byte/character ambiguity: bytes use \\x, text uses \\u."
+        },
+        {
+          "loss": "Debug output would still differ between tiers.",
+          "attempts": [
+            "Make both Debug renderers emit only lexable escapes as part of the same cutover."
+          ],
+          "result": "Shared work, not an option-specific loss."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-05T21:09:14.528Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-07",
+      "retiredAt": "2026-11-17T04:55:29.014Z"
+    },
+    {
+      "id": "D-TUI-ANSI1",
+      "cardId": "c0m1e5o0",
+      "group": "core",
+      "title": "Terminal colors, cursor moves and screen clearing in core.tui",
+      "situation": "Terminal programs color words and move the cursor by printing hidden control codes. Jet has no named list of these codes, and its one styling call silently prints plain text when a color is misspelled. Text from users can also carry its own codes, which rewrite the screen when printed. This vote decides how Core spells colors, cursor moves and clearing; I recommend a checked terminal-text form that refuses typos and makes user text harmless.",
+      "gist": "How should Jet programs color terminal text and move the cursor?",
+      "lesson": "A terminal reads hidden codes inside printed text: one code turns words red, another clears a line. Jet already has checked text forms, such as `SQL{\"…\"}` and `HTML{\"…\"}`, which check their contents when the program is built and make inserted values safe. Terminal codes have no such form today, so they are unchecked plain text.",
+      "explainer": "Beginner path: write `ANSI{\"[bold red]error:[/] {name}\"}` and print it; a misspelled style fails the build, and `name` prints as text even if it hides codes. Expert path: `tui.moveCursor(row:, col:)`, `tui.clearLine()`, `tui.altScreen(on:)` and `tui.mouse(on:)` return the same checked value, and `tui.ESC` and `tui.CSI` reach codes the table lacks. Shared work under every option: plain strings keep whatever escapes the carriage-return ballot grants, and full-screen apps keep `tui.run` with `TUIStyle`.",
+      "story": "Omar writes a deploy tool that prints red errors next to server names typed by users. A misspelled color printed plain text for a week. A server name holding hidden codes once cleared his whole screen.",
+      "inWild": "# Python rich (rich.readthedocs.io/en/stable/markup.html)\nfrom rich.markup import escape\nconsole.print(f\"[bold red]error:[/] no user {escape(name)}\")\n# forget escape() and `name` can inject its own markup",
+      "detail": "Origin. Owner question q4p8lzbr on D-STR-ESCAPE1 asked for terminal escape constants and helpers in the TUI library, controlled by a strongly typed string literal. D-STR-ESCAPE1 stays the lexer floor (`\\r`, `\\u{…}` in plain strings). This companion ballot owns the terminal vocabulary. Both outcomes of D-STR-ESCAPE1 work with every option here.\n\nJet today. Core/tui/tui.jet:30-41 has `TUIColorProfile` and `TUIColor` (`ANSI16`, `ANSI256`, `RGB`), and `TUIStyle` with `style_text`. Core/term/term.jet:101 `term.style(style, text)` calls the host. crates/jet-codegen/src/Prelude/Term.rs:273-288 accepts one of ten single words and returns the text unstyled for anything else, so `\"bold red\"` and `\"redd\"` both print plain.\n\nMore of today. Core/term/term.jet:103-178 `style_force` parses a different multi-word table, so the two tiers disagree. Term.rs:245-262 already applies NO_COLOR, FORCE_COLOR and the is-a-terminal test. No cursor, erase, alternate-screen or mouse codes exist. Eight `term.style` calls sit in six tracked .jet files. Two files build the escape byte with `String.from_bytes([U8]{27})`.\n\nRust. crossterm (docs.rs/crossterm 0.29) exposes typed commands: `cursor::MoveTo`, `terminal::Clear`, `EnterAlternateScreen`, `EnableMouseCapture`, queued onto a writer. owo-colors adds zero-allocation methods such as `\"x\".red()`. It honors NO_COLOR, FORCE_COLOR and terminal detection only through `if_supports_color` and an optional feature.\n\nGo. lipgloss builds style values (`NewStyle().Bold(true).Foreground(Color(\"205\"))`) and renders text through them. It downsamples true color to 256, 16 or no color for the detected terminal. Styles are values, but each colored word needs its own render call.\n\nPython. rich uses bracket markup, `[bold red]alert![/]`, inside strings, and raises MarkupError on mismatched tags. Its own docs warn that interpolated text can inject tags and require `rich.markup.escape`. That check runs at run time, and forgetting `escape` is silent.\n\nNode. chalk chains styles (`chalk.red.bold(\"x\")`) and drops codes when color is unsupported. chalk-template is a tagged template, `` chalkTemplate`{red ${x}}` ``. It escapes braces in inserted values but not control codes, and its docs say raw template input must be escaped by the caller.\n\nKnown failure. Terminal escape injection is a recorded bug class: CVE-2021-25743 says kubectl did not neutralize escape and control sequences in data printed to a terminal (CWE-150). The code table follows the common reference, fnky's ANSI Escape Sequences gist (gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797).\n\nWhat the evidence says. Typed values with automatic terminal detection (lipgloss, chalk) prevent codes leaking into files. Markup (rich, chalk-template) reads best for mixed inline styles. Every surveyed library leaves inserted text unescaped by default or behind an extra call. Option A combines the readable markup, build-time checking, terminal detection, and inserted text that is made harmless by default.\n\nHow A fits Jet. D-TEXTHEAD-TYPE1=A lets a library declare checked text as a String-backed type with a `CheckedText` impl, so `ANSI` needs no compiler change. D-UNIFYLIT1=A and D-REGEX-LIT1=D fix the `Type{\"…\"}` head form. D-TEXT-CONTROL1=A supplies the control-character test used for inserted text.\n\nNames. The helpers use the camelCase spelling from the owner's question. Under the ratified D-CASE-LAW1=A they would read `move_cursor` and `clear_line`; D-CASE-LAW2 is open and decides which spelling ships.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Checked terminal text plus helpers",
+          "gist": "A typed `ANSI{\"…\"}` literal and helpers that all return one checked value.",
+          "detail": "Style words in brackets are checked when the program is built. Inserted values print as text even if they hide codes. Cursor, clearing, alternate-screen and mouse helpers return the same type, so they compose inside the literal. Printing keeps the codes only on a color terminal.",
+          "technical": "Library-defined checked text (no compiler change); holes neutralize control characters; output follows the existing NO_COLOR and terminal test.",
+          "code": "use core.tui as tui\nuse core.tui.[ANSI]\nprint(ANSI{\"[bold red]error:[/] no user {name}\"})   // name's codes show as text\nprint(ANSI{\"{tui.clearLine()}[green]done[/]\"})\nbad :: ANSI{\"[redd]x\"}  // error: unknown style `redd`; did you mean `red`?"
+        },
+        {
+          "key": "B",
+          "name": "Helpers and constants that return plain text",
+          "gist": "Functions return code strings that you glue into ordinary strings.",
+          "detail": "Like chalk, owo-colors and crossterm. Helpers return plain strings, empty when output is not a color terminal. Nothing checks inserted text, and the writer must remember each reset.",
+          "technical": "Constants and functions returning `String`; no new type.",
+          "code": "use core.tui as tui\nprint(\"{tui.bold()}{tui.fg(.Red)}error:{tui.reset()} no user {name}\")\nprint(\"{tui.clearLine()}{tui.fg(.Green)}done{tui.reset()}\")\n// codes inside name reach the terminal; a missed reset colors the next line"
+        },
+        {
+          "key": "C",
+          "name": "Style values only",
+          "gist": "Build a style value and render each piece of text through it.",
+          "detail": "Like lipgloss. Extend today's `TUIStyle` with builder methods and a render call, and add the cursor and clearing helpers. No literal form.",
+          "technical": "Methods on `TUIStyle`; helpers return `String`.",
+          "code": "use core.tui as tui\nerr :: tui.style().bold(true).fg(.Red)\nprint(\"{err.render(\"error:\")} no user {name}\")   // name still unchecked\nprint(\"{tui.clearLine()}{tui.style().fg(.Green).render(\"done\")}\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (crossterm, owo-colors)",
+          "note": "Typed commands for cursor and screen; color methods on any value. Source: docs.rs/crossterm 0.29 and the owo-colors README. Illustration, not executed.",
+          "code": "execute!(stdout, cursor::MoveTo(0, 0), terminal::Clear(ClearType::CurrentLine))?;\nprintln!(\"{} no user {}\", \"error:\".red().bold(), name);"
+        },
+        {
+          "lang": "Go (lipgloss)",
+          "note": "Style values with automatic color downsampling. Source: lipgloss README.",
+          "code": "err := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(\"9\"))\nlipgloss.Println(err.Render(\"error:\") + \" no user \" + name)"
+        },
+        {
+          "lang": "Node (chalk, chalk-template)",
+          "note": "Chained styles, plus a tagged template that escapes braces but not control codes. Source: chalk and chalk-template READMEs.",
+          "code": "console.log(chalk.red.bold('error:') + ` no user ${name}`);\nconsole.log(chalkTemplate`{red.bold error:} no user ${name}`);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Misspelled styles fail the build, inserted user text can never run terminal codes, styles always close, and piped output stays clean. It reuses the checked text form Jet already has for SQL and HTML.",
+        "gains": [
+          "Typos are build errors, not silent plain text.",
+          "User text cannot rewrite the screen.",
+          "No new syntax: the same `Type{\"…\"}` form as SQL and HTML."
+        ],
+        "losses": [
+          {
+            "loss": "Putting styled text inside a plain string needs an explicit choice.",
+            "mitigation": "The build error offers `.plain()` to drop the codes, or writing the whole line as `ANSI{…}`."
+          },
+          {
+            "loss": "The old `term.style` call retires.",
+            "mitigation": "`jet fix` rewrites the eight existing calls to `ANSI{…}` literals in one step."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "User text can still inject codes, and a forgotten reset colors the rest of the screen."
+          },
+          {
+            "key": "C",
+            "reason": "Every colored word needs its own render call, and text beside it stays unchecked."
+          }
+        ],
+        "tradeoff": "One new checked type buys typo-proof, injection-proof terminal output with no new syntax."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "Before posting, run the read-only READY ballot validator and require exit zero. No example here was executed; facts were read from the tree on 2026-10-05. This ballot is the companion to D-STR-ESCAPE1 requested in owner question q4p8lzbr and sits on the same card.\n\nAfter ratification, open one build card. It adds the `ANSI` checked text type and helpers to core.tui with one Prelude lowering per I9. It renames the sixteen `TUIColor` cases and retires `term.style` and `term.style_force` with a `jet fix` rewrite. It needs UI snapshots for an unknown style and for a plain-string insert.\n\nThe same card adds a conformance test that a hostile hole prints its codes as text. It ships an example with golden output on every tier, both on a terminal and piped.",
+      "surface": {
+        "gist": "How should Jet programs color terminal text and move the cursor?",
+        "lesson": "A terminal reads hidden codes inside printed text: one turns words red, another clears a line. Jet's checked text forms, like `SQL{\"…\"}`, check their contents at build time and make inserted values safe. Terminal codes have no such form today.",
+        "trio": {
+          "current": {
+            "note": "Today a typo prints plain text, and user text can carry codes.",
+            "code": "use core.term as term\nlabel :: term.style(\"redd\", \"error:\")   // typo: silently unstyled\nprint(\"{label} no user {name}\")         // codes inside name reach the terminal\nesc :: String.from_bytes([U8]{27}) ?? \"\"\nprint(\"{esc}[2K\")                        // clear line: no helper exists"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "rich markup reads well, but inserted text must be escaped by hand. Source: rich markup docs.",
+            "code": "from rich.markup import escape\nconsole.print(f\"[bold red]error:[/] no user {escape(name)}\")\n# forget escape() and `name` can inject its own markup"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Checked terminal text plus helpers",
+            "gist": "A typed `ANSI{\"…\"}` literal and helpers that return one checked value.",
+            "gains": [
+              "Typos fail the build.",
+              "User text prints as text, never as codes.",
+              "Codes appear only on a color terminal."
+            ],
+            "losses": [
+              "Styled text inside a plain string needs an explicit choice."
+            ],
+            "proposed": {
+              "code": "use core.tui as tui\nuse core.tui.[ANSI]\nprint(ANSI{\"[bold red]error:[/] no user {name}\"})   // name's codes show as text\nprint(ANSI{\"{tui.clearLine()}[green]done[/]\"})\nbad :: ANSI{\"[redd]x\"}  // error: unknown style `redd`; did you mean `red`?"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Helpers that return plain text",
+            "gist": "Functions return code strings glued into ordinary strings.",
+            "gains": [
+              "Familiar from Rust and Node libraries."
+            ],
+            "losses": [
+              "User text can still inject codes.",
+              "A missed reset colors the next line."
+            ],
+            "proposed": {
+              "code": "use core.tui as tui\nprint(\"{tui.bold()}{tui.fg(.Red)}error:{tui.reset()} no user {name}\")\nprint(\"{tui.clearLine()}{tui.fg(.Green)}done{tui.reset()}\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Style values only",
+            "gist": "Build a style and render each piece of text through it.",
+            "gains": [
+              "Reusable styles, like Go's lipgloss."
+            ],
+            "losses": [
+              "Wordy for mixed inline styles.",
+              "Text beside a rendered piece stays unchecked."
+            ],
+            "proposed": {
+              "code": "use core.tui as tui\nerr :: tui.style().bold(true).fg(.Red)\nprint(\"{err.render(\"error:\")} no user {name}\")\nprint(\"{tui.clearLine()}{tui.style().fg(.Green).render(\"done\")}\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Typos fail the build, user text can never run terminal codes, and styles always close, using the checked text form Jet already has.",
+          "gains": [
+            "Safe, checked terminal output with no new syntax."
+          ],
+          "losses": [
+            {
+              "loss": "Styled text inside a plain string needs a choice.",
+              "mitigation": "The error offers `.plain()` or writing the line as `ANSI{…}`."
+            },
+            {
+              "loss": "The old `term.style` call retires.",
+              "mitigation": "`jet fix` rewrites the eight existing calls."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "User text can inject codes; a missed reset leaks color."
+            },
+            {
+              "key": "C",
+              "reason": "One render call per colored word; nearby text unchecked."
+            }
+          ],
+          "tradeoff": "One checked type for typo-proof, injection-proof output."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Codes could leak into files and pipes.",
+          "attempts": [
+            "Write codes only when the existing color test passes: NO_COLOR, FORCE_COLOR and is-a-terminal."
+          ],
+          "result": "Piped and logged output is plain text with no extra call."
+        },
+        {
+          "loss": "A forgotten reset could color the rest of the screen.",
+          "attempts": [
+            "Close every open style at the end of each `ANSI` value."
+          ],
+          "result": "Color never leaks past the value that set it."
+        },
+        {
+          "loss": "Inserted text could carry its own codes or markup.",
+          "attempts": [
+            "Holes show control characters in their visible `\\u{…}` form and never parse brackets."
+          ],
+          "result": "Escaping is the default, unlike rich and chalk-template."
+        },
+        {
+          "loss": "A new literal form would add syntax.",
+          "attempts": [
+            "Define `ANSI` as library checked text on the existing `Type{\"…\"}` head."
+          ],
+          "result": "No grammar or compiler change."
+        },
+        {
+          "loss": "Two color spellings would remain.",
+          "attempts": [
+            "Retire `term.style` with a `jet fix` rewrite; keep `TUIStyle` only for full-screen `tui.run` views."
+          ],
+          "result": "One way to style printed lines."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-06T01:00:28.949Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-06",
+      "retiredAt": "2026-11-17T04:55:29.014Z"
     }
   ]
 }
