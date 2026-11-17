@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111125,
+    "rev": 111150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69742,7 +69742,7 @@
       "body": "Owner direction (2026-10-29): always keep the compiler's memory-layout optimization, unlike Rust where #[repr(C)] turns field reordering off. C interop and FFI must be confirmed working with the optimizations on. Current state (Main probe on dev bb9c74e522): a default struct reports kind \"default\", guarantee \"physical layout unspecified\" and no size fact (Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:682-723; `Mixed.$layout.size` is empty). The same 5-field struct {U8, Int, U8, Int, U8} under #Layout(c) is 40 bytes, while the optimal order is 24. Runtime record glue (e.g. JetRuntime/Source/DataPlotFlat.jet:68-92) stores each field in its own 8-byte word in a jet_rt_alloc block. That suggests default records are heap blocks with a word per field, the same cost the nbody profile showed for [T#N] (#3039 C6).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -69857,7 +69857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:00:23.863Z",
-      "updated": "2026-11-16T12:59:09.241Z",
+      "updated": "2026-11-17T01:42:07.246Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -71885,7 +71885,7 @@
       "body": "Destination: D-GC-OPTIN1=A (2026-10-30) is built. `#Policy(gc)` opts in the types declared under it, so their cycles are collected wherever their values go, with collection only at the D-GC-WHEN1 points; E0221 still fires for code without the opt-in; one Jet-owned collector serves every tier; and trace mode, `jet gc report`, `jet audit memory` and `jet fix memory` explain each promotion and how to remove it.\n\nWhy: a ratified opt-in that lifts nothing leaves cyclic programs with no escape.\n\nSource: probes q/bd/probe/gc (BallotDesign, dev 94df799429), with archived #658, #659 and #1895. `Mem.Gc` became a declared leaf on dev 84f8b2f7ff (c1).",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -72057,7 +72057,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T01:20:50.043Z",
-      "updated": "2026-11-16T12:59:21.001Z",
+      "updated": "2026-11-17T01:42:08.763Z",
       "updatedBy": "Main",
       "criteriaLastN": 17
     },
@@ -72221,8 +72221,8 @@
       "title": "Cache control and visibility: give programs control over L1/L2/L3 use and show where code leaves cache for RAM or disk",
       "body": "Owner question 2026-10-30 (verbatim): 'Cache hits are critical -> how can we give control over L1,2,3 cache, visualize when we are no longer in cache & go to RAM or HDD/SSD?'\n\nStarting facts: D-CACHE-CONTROL1 A is ratified (mem.prefetch(place, .Read|.Write, level: .L1), mem.stream_store, the build fact for the cache-line size, each needing a paired gauntlet cell). #Layout(c, align(N)) and D-PLACE1 cover alignment; #Layout(columnar) covers SoA. Whether any of this is implemented is unproven; this card measures it.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -72416,7 +72416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-17T01:38:27.020Z",
+      "updated": "2026-11-17T01:42:10.302Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -72426,8 +72426,8 @@
       "title": "Type conversions: make explicit conversion clean (owner asks about Int{myFloat}-style constructor casts)",
       "body": "Owner question 2026-10-30 (verbatim): 'Type conversions generally need casts, how can we make this clean? Should casting be done by wrapping the value to cast in a type literal constructor? like Int{myFloatVar}?'\n\nStarting facts: D-SHAPE-CONVERT1 A (ratified 2026-07-14, #566) makes conversion destination-owned: Target.from_source(value) (U8.from_int(n) ?? return, UserId.from_int(raw)); checked narrowing is fallible; safe widening is implicit; casts, to_* and convert() are refused. D-JAI-SMALL1 A adds #As member conversion. Type{...} braces already mean typed literals and field defaults (String{\"\"}, ANSI{\"...\"}), so Int{x} would overlap them.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -72536,7 +72536,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-16T12:59:26.603Z",
+      "updated": "2026-11-17T01:42:11.923Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -72546,8 +72546,8 @@
       "title": "Custom allocators and struct-of-arrays: native, complete support and its interactions",
       "body": "Owner questions 2026-10-30 (verbatim): 'How can jet support custom allocators? What does this feature intefere with? Does this overlap with anything? Can we just support it natively? what about soa data types? We should support those.'\n\nStarting facts: D-REGION1/D-ALLOC1/D-ALLOC2 (mem.Arena, scope-bound views, E0631/E0632), D-FIXED-BACKING1 (mem.Fixed), D-ALLOCFAIL1 (try_alloc family, AllocError), D-ALLOC-DEFAULT1 A (Jet-written size-class mem.Heap), D-TARGET-ALLOC1, D-SOA1/D-SOA2A-D (#Layout(columnar), whole-struct only, E1107-E1109), D-SOA-SITE1 A and D-SOA-TIER1 A. Core/Mem/Mem.jet declares empty struct Arena {}, Bump {} and Pool<T> {}. #6109 (Arena/Bump .alloc) closed; #6310 is an allocator-view ICE; #5042/#5043 are allocator speed cards.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -72738,7 +72738,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-16T12:59:34.150Z",
+      "updated": "2026-11-17T01:42:13.486Z",
       "updatedBy": "Main",
       "criteriaLastN": 18
     },
@@ -72748,8 +72748,8 @@
       "title": "Terminal control API: broad, deep core.term so no external terminal library is needed",
       "body": "Owner order 2026-10-30 (verbatim): 'I want to ensure it is easy to use Terminal \"commands\" like \"execute(term.clear_buffer, term.enable_raw_mode, term.enable_alternate_screen, term.hide_cursor)\" with an excellent, broad and deep API so external libraries would not be needed'.\n\nStarting facts: Core/Term/Term.jet (64 fns) and Core/Tui/Tui.jet (62 fns) exist; D-TUI-ANSI1 A (ANSI{...} checked text plus cursor, clearing, alternate-screen and mouse helpers returning one checked value), D-TERM-INCREMENTAL1 A (one lossless key decoder), D-CORE-TERMSTDIN1 A (is-a-terminal), D-CORE-PROCGROUP1 A. #6147 is an open ballot on whether the terminal UI leaves Core; this card's API must agree with its outcome. A grep finds no raw-mode or alternate-screen function in Core today.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -72894,7 +72894,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-17T01:38:39.392Z",
+      "updated": "2026-11-17T01:42:15.037Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -72904,8 +72904,8 @@
       "title": "Case-suite seams the kit refuses: store ingest, hangar realization and fixtures, budget verify, receipt store and other unported kit forms",
       "body": "Found by TestGreen's cases classification at dev 82d3369757 ($JET_SCRATCH_ROOT/lanes/TestGreen/GROUPS.tsv, cases-g2n). These rows are REFUSED because the case kit form has no product primitive under it; this host could run them. Rows: store-ingest 19, hangar-verified-realization 17, budget-verify 13, hangar-verified-fixture 8, hangar-fixture-backdate 7, receipt-store 5, crypto-provider-failure 3, process-file-fd 2, package-tests 2, core-tls-server 2, codec-allocation-probe 2, build-target 2, PENDING-SEAM(term-is-terminal) 2, and 1 each for sparse-set-len, runtime-http-internals, process-merge-stderr, manifest-facts-parse, lock-fixture and core-sys-raw-env. The PTY (41) and session read_bytes (22) rows belong to the frozen #3594 and are not in this card.",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -73214,7 +73214,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T14:11:07.271Z",
-      "updated": "2026-11-16T03:01:47.488Z",
+      "updated": "2026-11-17T01:42:16.590Z",
       "updatedBy": "Main",
       "criteriaLastN": 29
     },
@@ -73322,8 +73322,8 @@
       "title": "Build server protocol: study Zig's build server, choose what Jet includes and excludes, and tie the build graph to compile-time metaprogramming (Jai style)",
       "body": "Owner question (2026-10-30): look into the Zig Build Server Protocol (and the related LSP/BSP build-server designs), decide what to include and exclude for Jet, and how the build description loops into compile-time metaprogramming the way Jai's build is ordinary compile-time code. Design only until the owner asks for implementation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -73391,7 +73391,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:29.401Z",
-      "updated": "2026-11-16T12:59:35.129Z",
+      "updated": "2026-11-17T01:42:18.134Z",
       "updatedBy": "Main"
     },
     {
@@ -73400,8 +73400,8 @@
       "title": "Zero undefined behavior: guarantee, as Odin does, that no Jet program has undefined behavior, and prove it",
       "body": "Owner question (2026-10-30): Odin defines the behavior of every operation (no undefined behavior). Jet must guarantee the same. Inventory every place Jet could have undefined, unspecified or implementation-defined behavior today and fix the contract so each one has one defined meaning on every tier. Design only until the owner asks for implementation.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -73533,7 +73533,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:47.559Z",
-      "updated": "2026-11-16T12:59:42.041Z",
+      "updated": "2026-11-17T01:42:19.676Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -73543,8 +73543,8 @@
       "title": "Make a := binding that is never reassigned an error",
       "body": "Owner order (2026-10-30): a mutable binding (:=) that is never reassigned or mutated must be an error, so name: value (D-DECL-COLON1=A) is the only spelling for a value that never changes. Design only until the owner lifts the hold; the go-ahead to build D-MUT-NEVER1=A is on Main's ballot list (2026-11-15).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -73603,8 +73603,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-15T11:36:40.806Z",
-      "updatedBy": "TowerKeeper-2"
+      "updated": "2026-11-17T01:42:21.210Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0r2eell",
@@ -73707,8 +73707,8 @@
       "title": "Excellent built-in support for state machines",
       "body": "Owner order (2026-10-30): Jet needs excellent built-in support for things like state machines. The owner lifted the design-only hold on 2026-11-09: c3-c5 are built under ratified D-MACHINE1.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -73816,12 +73816,14 @@
       "tags": [
         "owner-paused"
       ],
-      "goals": [],
+      "goals": [
+        "G6"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-16T22:39:27.539Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-17T01:42:22.738Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -73830,8 +73832,8 @@
       "title": "Binary size: Jet's default build must produce the smallest output of any language, for every program, by design rather than per-program tricks",
       "body": "Owner (2026-10-30): 437 KB for hello world is far too big. Measured by Main on this machine (x86-64 Linux, $JET_SCRATCH_ROOT/lanes/Main/q/hello): Zig 0.15.2 ReleaseSmall 10,720 B (static), Zig ReleaseFast stripped 18,744 B, C gcc -O2 stripped 14,440 B (dynamic glibc), C musl static stripped 17,696 B, Rust 1.97.1 -O stripped 394,032 B (dynamic). Jet with #6106 C1 (per-function sections plus gc): 437,416 B with .text 387,880 B (IrTypes-2 measurement); dev before #6106 C1: 5,210,576 B. A hand-written static ELF hello is a few hundred bytes. The size comes from runtime code that startup and print reach (allocator, task and thread setup, panic and formatting machinery), not from the program.",
       "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -74674,7 +74676,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-17T01:39:20.071Z",
+      "updated": "2026-11-17T01:42:24.270Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -74684,8 +74686,8 @@
       "title": "String edited in place: insert, remove, truncate, reserve and capacity (D-TEXT-FIXED1=A)",
       "body": "Owner, 2026-10-30: \"Relook at string types: string should be constant, not flexible, and string builders (don't love the name). String builders are the mutable version that can grow, shrink, change, etc.; strings should generally be fixed. Maybe strings would be like Odin string builders and text would be static unchangeable constant strings? Open to suggestions for both concepts' names.\" Today Jet's one text type is String (about 2,250 uses in Examples), and D-STRING-EMPTY1 covers reusing it. Owner: SurfaceDesign (design only).",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -74776,8 +74778,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T17:30:09.329Z",
-      "updated": "2026-11-15T03:48:14.762Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:42:25.814Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0qbikgx",
@@ -75360,8 +75362,8 @@
       "title": "API design principle: strong composable primitives first, pareto wrappers on top, full use of variadics and named/positional arguments",
       "body": "Owner direction 2026-10-30: wrappers solve some problems but often make everything outside their case harder. Jet's APIs need a very strong primitives layer that can express everything, then pareto-level high-quality wrappers for the common work. Jet's API tools (variadics, named and positional arguments, defaults) are barely used today and should be, to make APIs more powerful and more streamlined. This must become a fundamental design element of the project, with a review that checks the APIs follow it.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -75488,7 +75490,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:54.632Z",
-      "updated": "2026-11-16T12:59:48.930Z",
+      "updated": "2026-11-17T01:42:27.373Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -75994,8 +75996,8 @@
       "title": "core.compute port: devices, streams, sparse tensors and transfer receipts need storage in the registered compute vocabulary",
       "body": "The R1 port of core.compute to Jet source (Core/Compute/Compute.jet) cannot express on_device and transfer to non-CPU placements, transfer_show, streams, sparse CSR, VJPRun or deserialize receipts. The registered types have no storage for them (core-library.md:4289-4291 makes the registered vocabulary their only owner). ComputeDevice, ComputeStream and SparseTensor are opaque to users today (E0119 on a literal, E0302 on field access), so their storage is added as private core_only field rows. Tensor is a 5-field literal that users can read and assign today (a.requested = \"Metal\" changes compute.placement), so where its reason and transfer receipts live is the owner ballot D-COMPUTE-TENSOR-STORE1 on this card.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -76095,7 +76097,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T22:49:32.837Z",
-      "updated": "2026-11-16T12:59:49.870Z",
+      "updated": "2026-11-17T01:42:28.908Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -76105,8 +76107,8 @@
       "title": "Run time: default codegen must be borderline equal to hand-written optimized assembly for every program",
       "body": "Owner order, 2026-10-30: performance should be borderline equal to hand-written assembly with default codegen, not with flags or per-program tricks. Binary size has the same goal, and #6328 owns size. This card owns speed. Every program in the perf corpus (one per required perf cell plus the codegen kernels: loops, bounds-checked indexing, string length and iteration, slices, calls, closures, records, allocation, I/O write) gets a hand-written, optimized x86-64 assembly reference, committed with a harness that measures cycles and instructions (perf stat, best of N, pinned CPU). The gap is closed in the code generator and runtime design (instruction selection, register allocation, bounds-check elimination, inlining, layout), never by weakening safety, semantics or diagnostics (AGENTS.md performance gate).",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -76857,7 +76859,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:40:24.924Z",
+      "updated": "2026-11-17T01:42:30.494Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -76867,8 +76869,8 @@
       "title": "Unbuilt CLI commands: every registered command and flag that reports E2104 \"not built yet\" is built",
       "body": "One card for the CLI commands that are registered but still answer E2104 \"`jet X` is not built yet\", so their cases rows can carry KNOWN-FAILING links to one place (owner ruling 2026-10-30). ToolsJet-2 owns the cluster, in rows-per-day order. jet prove (#5492), jet build --lib (#6308), jet add/fetch (#4944), jet repl (#6195), the web target (#5201) and service.tree (#4957) keep their own cards.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -78285,7 +78287,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-16T20:37:03.013Z",
+      "updated": "2026-11-17T01:42:32.003Z",
       "updatedBy": "Main",
       "criteriaLastN": 154
     },
@@ -78943,7 +78945,7 @@
       "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- Moves: Core/Font/Font.jet and Compiler/JetRuntime/Source/RouteAFont.jet to\n  Jetpack/Provider/Batteries/font/. Jetpack/Provider/Batteries/gui adds `font` to its\n  dependencies.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -78995,7 +78997,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:37.133Z",
-      "updated": "2026-11-16T12:59:50.836Z",
+      "updated": "2026-11-17T01:42:33.520Z",
       "updatedBy": "Main"
     },
     {
@@ -79696,7 +79698,7 @@
       "body": "Measured by IrTypes-3 2026-10-31 (IrTypes-25b timing): a generator pull hands off through the task scheduler (park the consumer, wake the producer, and back), about 20 us per yield. The iterloop kit case does 3M yields plus 1.28M channel pulls and takes 79 s. A generator that runs on the consumer thread needs no scheduler: a direct stack switch or a compiled state machine costs nanoseconds, and C/Rust/Zig iterators cost one call or less. This is a structural cost on every program that iterates a generator. Related: #6089 (lazy pulls charging comptime fuel through a global mutex).",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -79732,7 +79734,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T11:41:45.304Z",
-      "updated": "2026-11-16T12:59:51.787Z",
+      "updated": "2026-11-17T01:42:35.095Z",
       "updatedBy": "Main"
     },
     {
@@ -79742,7 +79744,7 @@
       "body": "Floor-1 same-run measurement on df84 (2026-10-31, $JET_SCRATCH_ROOT/lanes/Floor/out/pareto-speed.md): the cat cell is about 3,300x Rust by task-clock, because terminal/stdin reads go one byte per read syscall (Compiler/JetRuntime/Source/RouteTerm.jet:19-51). stdout writes need the same check. Fix the root in the one shared runtime: buffered stdin and stdout with correct flush semantics (line-buffered for a TTY, block-buffered otherwise, flush at exit, flush before reading interactive input), with one meaning on every tier.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -79818,7 +79820,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:01:34.913Z",
-      "updated": "2026-11-16T12:59:52.790Z",
+      "updated": "2026-11-17T01:42:36.666Z",
       "updatedBy": "Main"
     },
     {
@@ -79828,7 +79830,7 @@
       "body": "Move card for #6146 (D-WEB-HOME1=A, ratified).\n\n- Moves Core/Web (pages, forms, router, store, tables, live queries, browser storage) to the first-party battery Jetpack/Provider/Batteries/web/. It ships with Jet at its version, and `jet add web` writes the one dependency line.\n- core.http and core.net stay in Core.\n- The sema web rows become markers and traits in the package (Core gets no private powers).\n- `use core.web` is removed with no teaching error, snapshot or `jet fix` rewrite (owner order 2026-11-06; migration support is set during v1 release preparation, #6068).\n- One greenfield cutover: every in-repo caller, example, golden and doc moves in the same change.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -80071,7 +80073,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-16T13:40:19.786Z",
+      "updated": "2026-11-17T01:42:38.184Z",
       "updatedBy": "Main",
       "criteriaLastN": 19
     },
@@ -80082,7 +80084,7 @@
       "body": "Move card for #6147 (D-TUI-HOME1=A, ratified).\n\n- Moves Core/Tui (layouts, widgets) to the first-party battery Jetpack/Provider/Batteries/tui/; `jet add tui` writes the dependency line. Printing, keys and raw mode stay in core.term.\n- Deletes the #Live syntax-registry row; core.term declares `Live` as a library marker (struct Live implementing the marker API), spelled `#term.Live`.\n- ANSI text lands in core.term.\n- `use core.tui` becomes a registered error naming `jet add tui` (what/why/fix and a UI snapshot); `jet fix` rewrites imports and #Live uses.\n- One greenfield cutover of every in-repo caller, example, golden and doc.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -80228,7 +80230,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-16T13:00:12.756Z",
+      "updated": "2026-11-17T01:42:39.709Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -80239,7 +80241,7 @@
       "body": "Move card for #6148 (D-UI-HOME1=A, ratified).\n\n- Moves Ui.jet and the node and window carriers to the first-party battery Jetpack/Provider/Batteries/ui/; `jet add ui` writes the dependency line.\n- core.ui.host (clipboard, file dialogs, text input, drag and drop, shortcuts, accessibility) stays in Core.\n- UiHandles rows and the #Unsafe transfer leaves become package code (Core gets no private powers).\n- `use core.ui` (other than core.ui.host) is removed with no teaching error, snapshot or `jet fix` rewrite (owner order 2026-11-06; migration support is set during v1 release preparation, #6068).\n- One greenfield cutover of every in-repo caller, example, golden and doc.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e4",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -80321,7 +80323,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:09.409Z",
-      "updated": "2026-11-16T13:00:15.640Z",
+      "updated": "2026-11-17T01:42:41.296Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -80516,7 +80518,7 @@
       "body": "Found by Codegen-1 on 2026-10-31. Tools/gauntlet measurement-manifest.json entries carry jet and python programs only, and axes need a status and harness. There is no field for the matched Rust peer, so the AGENTS.md performance gate (Jet/Rust <= 1.05 per cell and metric, strictly below 1.00 against every other peer) cannot be encoded in the manifest, only in prose and lane notes (Floor cells, Codegen-1 corpus). The manifest must name every required peer per entry, with the matched program, and the gate must fail any required cell where a peer is missing or the comparator fails.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -80552,7 +80554,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T16:40:33.121Z",
-      "updated": "2026-11-16T13:00:16.588Z",
+      "updated": "2026-11-17T01:42:42.859Z",
       "updatedBy": "Main"
     },
     {
@@ -80562,7 +80564,7 @@
       "body": "Owner order 2026-10-31: peers are the initial benchmark; hand-written, maximally optimized machine code is the final one (Jet/ceiling <= 1.00 in cycles and bytes per required cell). The manifest encodes it (strict_performance_policy v3 ceiling block, CardClose-8). Of 28 required cells only numerics.int-kernel (sieve) has a reference today; the 27 others report uncovered and fail the gate. Each reference lives in Tools/perf/asm-parity (cells.json entry naming its gauntlet cell ids, plus ref.S), gives the identical output, and uses the best known technique for the workload (SIMD, algorithmic, syscall-level), not a transliteration.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -80946,7 +80948,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T18:51:36.927Z",
-      "updated": "2026-11-16T13:00:29.649Z",
+      "updated": "2026-11-17T01:42:44.440Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -217873,6 +217875,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:42:44.440Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j6lwuh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:42.859Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y7kqfw",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:41.296Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02t52c5",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:39.709Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0isxyo3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:38.185Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y7zq8s",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:36.666Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05p5u7s",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:35.095Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00w7rum",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:33.520Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0byuovb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:32.003Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:30.494Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i891tv",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:28.908Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lvend",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:27.373Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ov7lce",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:25.814Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l7lwif",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:24.271Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:22.738Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06he0ee",
+      "note": "track,epoch,goals"
+    },
+    {
+      "at": "2026-11-17T01:42:21.211Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01vsb2c",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:19.676Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sg79an",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:18.134Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g5cadm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:16.590Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0heplig",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:15.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vqsfl8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:13.486Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ct4a0i",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:11.923Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vhdiiv",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:10.302Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9nq8j",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:08.763Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kyjdtx",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:42:07.246Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0do6acc",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:42:05.350Z",
       "by": "Main",
