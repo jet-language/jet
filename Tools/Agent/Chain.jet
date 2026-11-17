@@ -261,8 +261,8 @@ dirhash: fn(dir: String) -[Exec, FS, IO]> String Never! {
 BUILDER_FIELDS: ["compilerSha256", "recipeSha256"]
 
 PackFile: struct {
-    path: String
-    bytes: [U8]
+    path: String,
+    bytes: [U8],
 }
 
 // A pack's provenance.json.
@@ -379,15 +379,15 @@ stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! 
 // --- diff -------------------------------------------------------------------
 
 Change: struct {
-    path: String
-    status: String
-    sha: String
+    path: String,
+    status: String,
+    sha: String,
 }
 
 Diff: struct {
-    base: String
-    changed: [Change]
-    digest: String
+    base: String,
+    changed: [Change],
+    digest: String,
 }
 
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
@@ -531,14 +531,14 @@ FULL_FILES: ["Compiler/package.jet", "Compiler/build.jet", "flake.nix", "flake.l
 FULL_NAMES: ["comptime", "lower", "link", "native", "emit", "codegen", "object", "sched", "thread", "parallel"]
 
 Plan: struct {
-    level: String
-    reasons: [String]
-    members: [String]
+    level: String,
+    reasons: [String],
+    members: [String],
 }
 
 Class: struct {
-    level: String
-    reason: String
+    level: String,
+    reason: String,
 }
 
 rank: fn(level: String) -> Int Never! {
@@ -683,10 +683,10 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 // --- store ------------------------------------------------------------------
 
 StoreEntry: struct {
-    name: String
-    dir: String
-    bytes: Int
-    used: Int
+    name: String,
+    dir: String,
+    bytes: Int,
+    used: Int,
 }
 
 GIB: 1073741824
@@ -775,14 +775,14 @@ root_of: fn(name: String, fallback: String) -[Env, FS]> String Never! {
 // tools run (JET_TOOLCHAIN_ROOT, else the current directory) and the
 // canonical build root.
 Roots: struct {
-    state: String
-    scratch: String
-    run: String
-    seeds: String
-    tools: String
-    repo: String
-    r14: String
-    root: String
+    state: String,
+    scratch: String,
+    run: String,
+    seeds: String,
+    tools: String,
+    repo: String,
+    r14: String,
+    root: String,
 }
 
 roots: fn() -[Env, Exec, FS, IO]> Roots Never! {
@@ -1020,13 +1020,13 @@ export_tree: fn(r: Roots, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]>
 LEVELS: ["check", "s1", "full", "full+threads"]
 
 ChainOptions: struct {
-    tree: String
-    level: String
-    auto: Bool
-    out: String
-    base: String
-    dry: Bool
-    gate: Bool
+    tree: String,
+    level: String,
+    auto: Bool,
+    out: String,
+    base: String,
+    dry: Bool,
+    gate: Bool,
 }
 
 parse_chain: fn(args: [String]) -[Env, Exec, FS, IO]> ChainOptions Never! {
@@ -1070,36 +1070,36 @@ parse_chain: fn(args: [String]) -[Env, Exec, FS, IO]> ChainOptions Never! {
 
 // One chain run: its roots, tree, store and the stage results so far.
 Chain: struct {
-    r: Roots
-    tree: String
-    level: String
-    auto: Bool
-    out: String
-    logs: String
-    base: String
-    base_src: String
-    seed: String
-    cid: String
-    ver: String
-    mem: Int
-    store: String
-    cap: String
-    work: String
-    nsdir: String
-    mode: String
-    rows: [String]
-    sha: [String:String]
-    pk: [String:String]
-    miss: String
-    cpus: [Int]
-    seed_sha: String
-    seed_pk: String
-    bin: String
-    digest: String
-    members: [String]
-    reasons: [String]
-    nchanged: String
-    started: Int
+    r: Roots,
+    tree: String,
+    level: String,
+    auto: Bool,
+    out: String,
+    logs: String,
+    base: String,
+    base_src: String,
+    seed: String,
+    cid: String,
+    ver: String,
+    mem: Int,
+    store: String,
+    cap: String,
+    work: String,
+    nsdir: String,
+    mode: String,
+    rows: [String],
+    sha: [String:String],
+    pk: [String:String],
+    miss: String,
+    cpus: [Int],
+    seed_sha: String,
+    seed_pk: String,
+    bin: String,
+    digest: String,
+    members: [String],
+    reasons: [String],
+    nchanged: String,
+    started: Int,
 }
 
 // Whole GiB a program may still fill on the file system holding `path`; 0
@@ -1380,9 +1380,9 @@ build_mat: fn(c: &Chain, builder: String, builder_pack: String, identity: String
 }
 
 StageRun: struct {
-    rc: Int
-    ns: Int
-    rss: Int
+    rc: Int,
+    ns: Int,
+    rss: Int,
 }
 
 // Run one stage process, its output to logs/NAME.out and logs/NAME.err,
@@ -1825,10 +1825,10 @@ slot_cpus: fn(name: String) -> String Never! {
 }
 
 SlotTaken: struct {
-    name: String
-    cpus: String
-    queued: Int
-    locks: [files.FileLock]
+    name: String,
+    cpus: String,
+    queued: Int,
+    locks: [files.FileLock],
 }
 
 mem_available_gb: fn() -[FS]> Int Never! {
@@ -2071,17 +2071,17 @@ trapscan: fn(path: String) -[FS, IO]> Int Never! {
 
 // A PT_LOAD program header.
 Load: struct {
-    executable: Bool
-    off: Int
-    vaddr: Int
-    filesz: Int
+    executable: Bool,
+    off: Int,
+    vaddr: Int,
+    filesz: Int,
 }
 
 // A function symbol, `order` its place in the symbol table.
 Symbol: struct {
-    value: Int
-    order: Int
-    name: String
+    value: Int,
+    order: Int,
+    name: String,
 }
 
 // The sorted owners of the `todo` traps of an x86-64 ELF image, None when it

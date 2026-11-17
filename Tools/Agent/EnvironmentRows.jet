@@ -65,7 +65,7 @@ VARIABLE_FIELD: ", variable: \""
 
 #Error
 EnvironmentRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> EnvironmentRowsError Never! {
@@ -74,18 +74,18 @@ rows_fail: fn(message: String) -> EnvironmentRowsError Never! {
 
 // One row of JET_ENVIRONMENT_VARIABLES, its strings as they read.
 EnvironmentRow: struct {
-    name: String
-    section: String
-    reader: String
-    value: String
-    meaning: String
+    name: String,
+    section: String,
+    reader: String,
+    value: String,
+    meaning: String,
 }
 
 // A string literal read off the front of a row: its text, and the row after
 // its closing quote.
 Taken: struct {
-    text: String
-    rest: String
+    text: String,
+    rest: String,
 }
 
 // The Jet string literal `text` opens with (its opening quote already gone),
@@ -150,7 +150,7 @@ read_sections: fn(registry: String) -> [String] EnvironmentRowsError! {
         return Err(rows_fail("{REGISTRY_PATH} declares no JetEnvironmentSection enum"))
     }
     sections := [String]{}
-    loop word in opened.tail.partition("\n").head.split(" ") {
+    loop word in opened.tail.partition("\n").head.replace(",", " ").split(" ") {
         if word != "" -> sections.push(word.copy())
     }
     if sections.len() == 0 {
@@ -320,7 +320,7 @@ environment_rows_main: fn(args: [String]) -[FS]> String EnvironmentRowsError! {
 
 run: fn() { print(environment_rows_main(process.args()) ?? process.fail(1, err.message)) }
 
-MINIMAL_REGISTRY: "// rows\nJetEnvironmentSection: enum {{\n    User Maintainer Internal\n}}\n\nJET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{{\n    {{name: \"JET_A\", section: JetEnvironmentSection.User, reader: \"a.jet\", value: \"`1`\", meaning: \"Says \\\"a\\\" in `{{{{a}}}}`.\"}},\n    {{name: \"JET_B_*\", section: JetEnvironmentSection.Internal, reader: \"b.jet\", value: \"\", meaning: \"Hands b on.\"}},\n}}\n"
+MINIMAL_REGISTRY: "// rows\nJetEnvironmentSection: enum {{\n    User, Maintainer, Internal,\n}}\n\nJET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{{\n    {{name: \"JET_A\", section: JetEnvironmentSection.User, reader: \"a.jet\", value: \"`1`\", meaning: \"Says \\\"a\\\" in `{{{{a}}}}`.\"}},\n    {{name: \"JET_B_*\", section: JetEnvironmentSection.Internal, reader: \"b.jet\", value: \"\", meaning: \"Hands b on.\"}},\n}}\n"
 
 minimal_page: fn() -> String Never! {
     blocks := "# Page\n"

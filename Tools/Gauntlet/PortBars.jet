@@ -258,22 +258,22 @@ JET_ENTRIES: [String]{"run", "main"}
 
 #Error
 JudgeError: struct {
-    message: String
+    message: String,
 }
 
 judge_fail: fn(message: String) -> JudgeError Never! { JudgeError{message: "port-bars: {message}"} }
 
 Language: enum {
-    Jet
-    JavaScript
-    Python
-    Shell
+    Jet,
+    JavaScript,
+    Python,
+    Shell,
 }
 
 TokenKind: enum {
-    Word
-    Text
-    Symbol
+    Word,
+    Text,
+    Symbol,
 }
 
 // One source token: a word's or symbol's text ("" for a string literal);
@@ -283,89 +283,89 @@ TokenKind: enum {
 // each part on a line of its own; "" for none. Its `literal` is its source,
 // quotes included; "" for any other token.
 Token: struct {
-    text: String
-    kind: TokenKind
-    first: Bool
-    column: Int
-    inner: String
-    literal: String
+    text: String,
+    kind: TokenKind,
+    first: Bool,
+    column: Int,
+    inner: String,
+    literal: String,
 }
 
 // What the proxies measure of one program.
 Proxies: struct {
-    branches: Int
-    depth: Int
+    branches: Int,
+    depth: Int,
 }
 
 EnvVar: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // One case of an entry: what both programs run with and must give; `check`
 // is the entry's Jet program that checks the job, or "".
 Case: struct {
-    args: [String]
-    env: [EnvVar]
-    exit: Int
-    expected: String
-    check: String
+    args: [String],
+    env: [EnvVar],
+    exit: Int,
+    expected: String,
+    check: String,
 }
 
 // A tool entry as the judge reads it; `problems` keep it from being judged.
 Entry: struct {
-    name: String
-    dir: String
-    original: String
-    twin: String
-    fixtures: String
-    cases: [Case]
+    name: String,
+    dir: String,
+    original: String,
+    twin: String,
+    fixtures: String,
+    cases: [Case],
     // What closes the token gap: Core API criteria and syntax ballots.
-    token_gaps: [String]
+    token_gaps: [String],
     // Each side's `tool.programs`: the repository programs its driver runs,
     // each `path` or `path#definition`.
-    programs: [[String]]
-    problems: [String]
+    programs: [[String]],
+    problems: [String],
 }
 
 // One run of one program on one case; `problem` is why it did not run.
 Run: struct {
-    code: Int
-    output: String
-    errors: String
-    wall_ns: Int
-    peak_bytes: Int
-    problem: String
+    code: Int,
+    output: String,
+    errors: String,
+    wall_ns: Int,
+    peak_bytes: Int,
+    problem: String,
 }
 
 // An entry's review record, read: the checklist totals and helper counts of
 // both programs, and every problem that makes the record fail.
 Review: struct {
-    reviewer: String
-    date: String
-    original: Int
-    jet: Int
-    helpers_original: Int
-    helpers_jet: Int
-    problems: [String]
+    reviewer: String,
+    date: String,
+    original: Int,
+    jet: Int,
+    helpers_original: Int,
+    helpers_jet: Int,
+    problems: [String],
 }
 
 Bar: struct {
-    name: String
-    pass: Bool
-    detail: String
+    name: String,
+    pass: Bool,
+    detail: String,
 }
 
 Report: struct {
-    entry: String
-    bars: [Bar]
+    entry: String,
+    bars: [Bar],
 }
 
 // Every original round beats every Jet round, the reverse, or neither.
 Lead: enum {
-    Win
-    Loss
-    Even
+    Win,
+    Loss,
+    Even,
 }
 
 // ---- entries ----
@@ -1102,15 +1102,15 @@ language_of: fn(path: String, first_line: String) -> Language? Never! {
 // token count of each file and the namespace imports of its files
 // (`namespace_aliases`).
 Program: struct {
-    paths: [String]
+    paths: [String],
     // How many of `paths`, from the first, are roots.
-    roots: Int
+    roots: Int,
     // The definition each root's reach starts at: what follows the `#` of
     // its `tool.programs` name, "" for its own code and entry.
-    entries: [String]
-    counts: [Int]
-    tokens: [Token]
-    aliases: [String]
+    entries: [String],
+    counts: [Int],
+    tokens: [Token],
+    aliases: [String],
 }
 
 // `path` with its `.` and `..` segments resolved, or "" when it climbs out of
@@ -1599,12 +1599,12 @@ namespace_aliases: fn(text: String, language: Language) -> [String] Never! {
 // that runs where it stands) and the type a Jet method or `impl` block
 // belongs to ("" for none); an import is `inert`, reaching nothing.
 Definition: struct {
-    file: Int
-    start: Int
-    end: Int
-    name: String
-    owner: String
-    inert: Bool
+    file: Int,
+    start: Int,
+    end: Int,
+    name: String,
+    owner: String,
+    inert: Bool,
 }
 
 // The text of token `at` of `list` before `end`, "" elsewhere.
@@ -1863,9 +1863,9 @@ shell_fallbacks: fn(text: String) -> Int Never! {
 // Where a shell `case` block stands: before its `in`, in an arm's pattern,
 // or in an arm's commands.
 CaseState: enum {
-    Header
-    Pattern
-    Body
+    Header,
+    Pattern,
+    Body,
 }
 
 // The arms of the shell `case` blocks in `list` but the default `*)`: each
@@ -2658,7 +2658,7 @@ run: fn() {
     plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
     plant(dir, "Tools/kit/Source/Big.jet", "leaf: fn(a: Int) -> Int {{\n    if a > 0 -> twig(a) else -> 0\n}}\n\ntwig: fn(a: Int) -> Int {{\n    if a > 1 -> 1 else -> 2\n}}\n\nheavy: fn(a: Int) -> Int {{\n    loop i in 0..<a {{\n        if i > 2 && a > 3 || a > 4 -> return i\n    }}\n    gate(a)\n}}\n")
     plant(dir, "Tools/kit/Source/Gate.jet", "gate: fn(a: Int) -> Int {{\n    if a > 0 && a < 9 -> 1 else -> 0\n}}\n")
-    plant(dir, "Tools/kit/Source/Shape.jet", "Box: struct {{\n    w: Int\n}}\n\nBox.area: fn(self) -> Int {{\n    if self.w > 0 -> self.w else -> 0\n}}\n\nBox.unused: fn(self) -> Int {{\n    if self.w > 1 -> 1 else -> 0\n}}\n")
+    plant(dir, "Tools/kit/Source/Shape.jet", "Box: struct {{\n    w: Int,\n}}\n\nBox.area: fn(self) -> Int {{\n    if self.w > 0 -> self.w else -> 0\n}}\n\nBox.unused: fn(self) -> Int {{\n    if self.w > 1 -> 1 else -> 0\n}}\n")
     package: "package: {{\n    name: \"fx\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\n"
     plant(dir, "Tools/fx/leaf/run.jet", "{package}use kit.[leaf, Box]\n\nrun: fn() {{\n    print(leaf(1) + Box{{w: 2}}.area())\n}}\n\nspare: fn(a: Int) -> Int {{\n    if a > 0 && a < 2 -> 1 else -> 0\n}}\n")
     plant(dir, "Tools/fx/gate/run.jet", "{package}use kit.[heavy]\n\nrun: fn() {{\n    print(heavy(3))\n}}\n")
@@ -2720,7 +2720,7 @@ defined: fn(source: String, language: Language) -> [String] Never! {
 }
 
 #Test("a top-level definition starts at column 0, past closing brackets, a Python clause and the line after an attribute or decorator") {
-    assert_eq(defined("#Error\nE: struct {{\n    m: String\n}}\n\nuse {{\n    files: core.files\n}}\n\nf: fn() {{}}\n\nBox.g: fn(self) {{}}\n", .Jet), [".E/false", "./true", ".f/false", "Box.g/false"])
+    assert_eq(defined("#Error\nE: struct {{\n    m: String,\n}}\n\nuse {{\n    files: core.files\n}}\n\nf: fn() {{}}\n\nBox.g: fn(self) {{}}\n", .Jet), [".E/false", "./true", ".f/false", "Box.g/false"])
     assert_eq(defined("import x from './x.mjs';\nconst t = {{\n  a: 1,\n}};\nexport async function g() {{\n}}\ntry {{\n  g();\n}} catch {{\n}}\n", .JavaScript), ["./true", ".t/false", ".g/false", "./false"])
     assert_eq(defined("@dec\ndef f():\n    pass\n\ntry:\n    f()\nexcept E:\n    pass\nX = 1\n", .Python), [".f/false", "./false", ".X/false"])
 }

@@ -28,9 +28,9 @@ GAME_CRASH_REPORTER_ABI: "jet-game-crash-reporter-v1"
 
 // The explicit package target; nothing is inferred from the host process.
 BundleTarget: enum {
-    LinuxAppImage
-    MacOSApp
-    WindowsMsix
+    LinuxAppImage,
+    MacOSApp,
+    WindowsMsix,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -60,8 +60,8 @@ BundleTarget: enum {
 
 // Whether the shared bundle is for a desktop application or a game.
 BundleKind: enum {
-    Desktop
-    Game
+    Desktop,
+    Game,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -74,20 +74,20 @@ BundleKind: enum {
 // The executable the compiler/build adapter supplies.
 BundleExecutable: struct {
     // File name inside the target layout.
-    name: String
+    name: String,
     // Source path recorded in the receipt; this model never resolves it.
-    source: String
+    source: String,
     // Exact executable bytes placed in the layout.
-    bytes: [U8]
+    bytes: [U8],
 
     digest: fn(self) -> String Never! { pkg_sha256_hex(self.bytes) }
 }
 
 IconFormat: enum {
-    PNG
-    Icns
-    Ico
-    SVG
+    PNG,
+    Icns,
+    Ico,
+    SVG,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -126,11 +126,11 @@ IconFormat: enum {
 // An icon payload. `source` is receipt provenance only; the bytes are the
 // authority for the emitted artifact.
 BundleIcon: struct {
-    name: String
-    format: IconFormat
-    size: Int
-    source: String?
-    bytes: [U8]
+    name: String,
+    format: IconFormat,
+    size: Int,
+    source: String?,
+    bytes: [U8],
 
     new: fn(name: String, format: IconFormat, size: Int, bytes: [U8]) -> BundleIcon Never! {
         BundleIcon{name: name, format: format, size: size, source: None, bytes: bytes}
@@ -147,8 +147,8 @@ BundleIcon: struct {
 
 // A signer or verification adapter input; the adapter owns the command.
 SigningHookInput: struct {
-    path: String
-    digest: String
+    path: String,
+    digest: String,
 
     new: fn(path: String, digest: String) -> SigningHookInput Never! {
         SigningHookInput{path: path, digest: digest}
@@ -156,9 +156,9 @@ SigningHookInput: struct {
 }
 
 SigningPhase: enum {
-    PreSign
-    PostSign
-    Verify
+    PreSign,
+    PostSign,
+    Verify,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -179,11 +179,11 @@ SigningPhase: enum {
 
 // A typed signing hook declaration; this module executes none.
 SigningHook: struct {
-    name: String
-    phase: SigningPhase
-    program: String
-    args: [String]
-    inputs: [SigningHookInput]
+    name: String,
+    phase: SigningPhase,
+    program: String,
+    args: [String],
+    inputs: [SigningHookInput],
 
     new: fn(name: String, phase: SigningPhase, program: String) -> SigningHook Never! {
         SigningHook{name: name, phase: phase, program: program, args: [String]{}, inputs: [SigningHookInput]{}}
@@ -194,10 +194,10 @@ SigningHook: struct {
 // artifact and payload facts from the exact executable payload; the receipt
 // carries the final materialized artifact digest.
 UpdaterSpec: struct {
-    channel: String
-    url: String
-    signature_url: String?
-    release_notes_url: String?
+    channel: String,
+    url: String,
+    signature_url: String?,
+    release_notes_url: String?,
 
     new: fn(channel: String, url: String) -> UpdaterSpec Never! {
         UpdaterSpec{channel: channel, url: url, signature_url: None, release_notes_url: None}
@@ -207,11 +207,11 @@ UpdaterSpec: struct {
 // Human- and platform-facing metadata. `identifier` is the stable package
 // identity; display text may contain spaces and Unicode.
 BundleMetadata: struct {
-    identifier: String
-    display_name: String
-    publisher: String
-    description: String
-    categories: [String]
+    identifier: String,
+    display_name: String,
+    publisher: String,
+    description: String,
+    categories: [String],
 
     new: fn(identifier: String, display_name: String) -> BundleMetadata Never! {
         BundleMetadata{identifier: identifier, display_name: display_name, publisher: "", description: "", categories: [String]{}}
@@ -220,9 +220,9 @@ BundleMetadata: struct {
 
 // One deterministic asset payload carried by a game bundle plan.
 GameBundleAsset: struct {
-    path: String
-    mode: Int
-    bytes: [U8]
+    path: String,
+    mode: Int,
+    bytes: [U8],
 
     new: fn(path: String, mode: Int, bytes: [U8]) -> GameBundleAsset Never! {
         GameBundleAsset{path: path, mode: mode, bytes: bytes}
@@ -232,14 +232,14 @@ GameBundleAsset: struct {
 }
 
 GameCrashReporterSpec: struct {
-    installation: String
-    upload_policy: String
-    routing: String
-    memory_stacks: Int
-    memory_logs: Int
-    retention_mode: String
-    retention_path: String
-    retention_limit: Int
+    installation: String,
+    upload_policy: String,
+    routing: String,
+    memory_stacks: Int,
+    memory_logs: Int,
+    retention_mode: String,
+    retention_path: String,
+    retention_limit: Int,
 
     not_installed: fn() -> GameCrashReporterSpec Never! {
         GameCrashReporterSpec{installation: "not-installed", upload_policy: "never", routing: "local", memory_stacks: GAME_CRASH_MAX_STACKS, memory_logs: GAME_CRASH_MAX_LOGS, retention_mode: "none", retention_path: "", retention_limit: 0}
@@ -311,18 +311,18 @@ GameCrashReporterSpec: struct {
 // Game-only facts attached to the shared package plan. The package command
 // computes them; the bundler owns their canonical layout and receipt.
 GameBundleSpec: struct {
-    profile_name: String
-    export_preset: String
-    source_revision: String
-    build_identity: String
-    backend: String
-    renderer: String
-    cook_mode: String
-    development_stripping: Bool
-    crash_reporter: String
-    crash_consent: String
-    crash_runtime: GameCrashReporterSpec
-    assets: [GameBundleAsset]
+    profile_name: String,
+    export_preset: String,
+    source_revision: String,
+    build_identity: String,
+    backend: String,
+    renderer: String,
+    cook_mode: String,
+    development_stripping: Bool,
+    crash_reporter: String,
+    crash_consent: String,
+    crash_runtime: GameCrashReporterSpec,
+    assets: [GameBundleAsset],
 
     new: fn(profile_name: String, export_preset: String, source_revision: String, backend: String, renderer: String, cook_mode: String) -> GameBundleSpec Never! {
         GameBundleSpec{
@@ -344,16 +344,16 @@ GameBundleSpec: struct {
 
 // All inputs for one target-specific bundle layout.
 BundleSpec: struct {
-    kind: BundleKind
-    target: BundleTarget
-    package: String
-    version: String
-    executable: BundleExecutable
-    metadata: BundleMetadata
-    icons: [BundleIcon]
-    signing_hooks: [SigningHook]
-    updater: UpdaterSpec?
-    game: GameBundleSpec?
+    kind: BundleKind,
+    target: BundleTarget,
+    package: String,
+    version: String,
+    executable: BundleExecutable,
+    metadata: BundleMetadata,
+    icons: [BundleIcon],
+    signing_hooks: [SigningHook],
+    updater: UpdaterSpec?,
+    game: GameBundleSpec?,
 
     new: fn(kind: BundleKind, target: BundleTarget, package: String, version: String, executable: BundleExecutable, metadata: BundleMetadata) -> BundleSpec Never! {
         BundleSpec{kind: kind, target: target, package: package, version: version, executable: executable, metadata: metadata, icons: [BundleIcon]{}, signing_hooks: [SigningHook]{}, updater: None, game: None}
@@ -478,11 +478,11 @@ BundleSpec: struct {
 
 #Error
 BundleError: enum {
-    EmptyField(String)
-    InvalidField(field: String, reason: String)
-    InvalidPath(field: String, path: String)
-    DuplicatePath(String)
-    InvalidWindowsVersion(String)
+    EmptyField(String),
+    InvalidField(field: String, reason: String),
+    InvalidPath(field: String, path: String),
+    DuplicatePath(String),
+    InvalidWindowsVersion(String),
 
     message: fn(self) -> String Never! {
         if self == {

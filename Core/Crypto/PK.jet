@@ -38,28 +38,28 @@ PK_SIGNATURE_MAX_SIZE: 1024
 /// on unchanged.
 #Error
 PKError: enum {
-    TypeMismatch
-    BadInput
-    KeyInvalidVersion
-    KeyInvalidFormat(asn1.ASN1Error?)
-    KeyInvalidFormatEcp(ecp.EcpError)
-    UnknownPKAlg
-    PasswordRequired
-    PasswordMismatch
-    InvalidPubkey(asn1.ASN1Error?)
-    InvalidAlg(asn1.ASN1Error?)
-    UnknownNamedCurve
-    FeatureUnavailable
-    SigLenMismatch
-    BufferTooSmall
-    RSA(rsa.RSAError)
-    Ecp(ecp.EcpError)
-    ECDSA(ecdsa.ECDSAError)
-    Asn1(asn1.ASN1Error)
-    Oid(oids.OIDError)
-    PEM(pem.PEMError)
-    PKCS5(pkcs5.PBEError)
-    PKCS12(pkcs5.PBEError)
+    TypeMismatch,
+    BadInput,
+    KeyInvalidVersion,
+    KeyInvalidFormat(asn1.ASN1Error?),
+    KeyInvalidFormatEcp(ecp.EcpError),
+    UnknownPKAlg,
+    PasswordRequired,
+    PasswordMismatch,
+    InvalidPubkey(asn1.ASN1Error?),
+    InvalidAlg(asn1.ASN1Error?),
+    UnknownNamedCurve,
+    FeatureUnavailable,
+    SigLenMismatch,
+    BufferTooSmall,
+    RSA(rsa.RSAError),
+    Ecp(ecp.EcpError),
+    ECDSA(ecdsa.ECDSAError),
+    Asn1(asn1.ASN1Error),
+    Oid(oids.OIDError),
+    PEM(pem.PEMError),
+    PKCS5(pkcs5.PBEError),
+    PKCS12(pkcs5.PBEError),
 }
 
 /// The key cannot do this operation (TYPE_MISMATCH, -0x3F00).
@@ -108,37 +108,37 @@ impl oids.OIDError -> PKError { PKError.Oid(self) }
 /// decrypt(input, output_max_len), sign(md, hash), and the modulus length
 /// in bytes. The functions are pure, so the TLS engine can call them.
 RSAAltKey: struct {
-    decrypt: fn([U8], Int) -[]> [U8] PKError!
-    sign: fn(hashes.Md?, [U8]) -[]> [U8] PKError!
-    key_len: fn() -[]> Int
+    decrypt: fn([U8], Int) -[]> [U8] PKError!,
+    sign: fn(hashes.Md?, [U8]) -[]> [U8] PKError!,
+    key_len: fn() -[]> Int,
 }
 
 /// The RSASSA-PSS verification options (mbedtls_pk_rsassa_pss_options): the
 /// MGF1 digest and the salt length, or rsa.SALT_LEN_ANY.
 PSSOptions: struct {
-    mgf1_hash_id: hashes.Md?
-    expected_salt_len: Int
+    mgf1_hash_id: hashes.Md?,
+    expected_salt_len: Int,
 }
 
 /// One value pk_debug shows (mbedtls_pk_debug_type).
 PKDebugValue: enum {
-    Mpi(bn.Mpi)
-    Point(ecp.Point)
+    Mpi(bn.Mpi),
+    Point(ecp.Point),
 }
 
 /// A named public value of a key (mbedtls_pk_debug_item).
 PKDebugItem: struct {
-    name: String
-    value: PKDebugValue
+    name: String,
+    value: PKDebugValue,
 }
 
 /// A key (mbedtls_pk_context): its type, None until set up, and the RSA,
 /// elliptic-curve or RSA-alt key that type uses.
 PKContext: struct {
-    kind: oids.PKType?
-    rsa: rsa.RSAContext
-    ec: ecp.Keypair
-    alt: RSAAltKey?
+    kind: oids.PKType?,
+    rsa: rsa.RSAContext,
+    ec: ecp.Keypair,
+    alt: RSAAltKey?,
 }
 
 /// A context with no key (mbedtls_pk_init).

@@ -177,7 +177,7 @@ OUTPUT_LIMIT: 268435456
 
 #Error
 LedgerError: struct {
-    message: String
+    message: String,
 }
 
 fail: fn(message: String) -> LedgerError Never! { LedgerError{message: message.copy()} }
@@ -1305,10 +1305,10 @@ same_texts: fn(value: Dyn, want: [String]) -> Bool Never! { same(value, texts(wa
 // first name of its first group, once over every group and once over the
 // groups that also apply in a module namespace.
 Synonyms: struct {
-    index: [String:[String]]
-    index_module: [String:[String]]
-    canonical: [String:String]
-    canonical_module: [String:String]
+    index: [String:[String]],
+    index_module: [String:[String]],
+    canonical: [String:String],
+    canonical_module: [String:String],
 }
 
 normalize: fn(name: String) -> String Never! {
@@ -1416,8 +1416,8 @@ domain_for: fn(container: String) -> String Never! {
 // Tests/Conformance/fixture-bindings.tsv: one `row<TAB>path` line per witness,
 // the path relative to the conformance corpus root.
 Binding: struct {
-    row: String
-    paths: [String]
+    row: String,
+    paths: [String],
 }
 
 fixture_bindings: fn(source: String) -> [Binding] LedgerError! {
@@ -1497,34 +1497,34 @@ conformance_fixture_sources: fn(root: String, bindings: [Binding], row_id: Strin
 // ---- Core surface inventory ----------------------------------------------------
 
 Collection: struct {
-    function: String
-    type_name: String
-    methods: [String]
-    source_line: Int
+    function: String,
+    type_name: String,
+    methods: [String],
+    source_line: Int,
 }
 
 Inventory: struct {
-    fixed_pairs: [String]
-    collections: [Collection]
+    fixed_pairs: [String],
+    collections: [Collection],
 }
 
 // One Core module fact from `jet inspect structure --core --json`.
 ModuleFact: struct {
-    name: String
-    members: [String]
-    source_line: Int
+    name: String,
+    members: [String],
+    source_line: Int,
 }
 
 // The Jet tables a receivers row reads. Each is the compiler's own row set:
 // sema checks receiver methods against these rows, so reading them here keeps
 // the inventory receiver-aware with no second copy.
 ReceiverTables: struct {
-    builtin: [String:[String]]
-    collection: [String:[String]]
-    statics: [String:[String]]
-    numeric: [String]
-    module_paths: [String:[String]]
-    sema_names: [String:Bool]
+    builtin: [String:[String]],
+    collection: [String:[String]],
+    statics: [String:[String]],
+    numeric: [String],
+    module_paths: [String:[String]],
+    sema_names: [String:Bool],
 }
 
 record_name: fn(table: &[String:[String]], key: String, name: String) {
@@ -1810,9 +1810,9 @@ core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [S
 // ---- Competitor surfaces ------------------------------------------------------
 
 SurfaceEntry: struct {
-    language: String
-    path: String
-    surface: Dyn
+    language: String,
+    path: String,
+    surface: Dyn,
 }
 
 parse_json: fn(source: String, path: String) -> Dyn LedgerError! {
@@ -1931,20 +1931,20 @@ canonical_containers: fn(surfaces: [SurfaceEntry]) -> [String] Never! {
 // One recorded container of one language, indexed for matching: `first` maps
 // each normalized operation to the position of its first spelling.
 SurfaceRecord: struct {
-    present: Bool
-    reason: Dyn
-    has_reason: Bool
-    attribution: String
-    operations: [String]
-    first: [String:Int]
+    present: Bool,
+    reason: Dyn,
+    has_reason: Bool,
+    attribution: String,
+    operations: [String],
+    first: [String:Int],
 }
 
 LanguageSurface: struct {
-    language: String
-    path: String
-    names: [String]
-    records: [SurfaceRecord]
-    position: [String:Int]
+    language: String,
+    path: String,
+    names: [String],
+    records: [SurfaceRecord],
+    position: [String:Int],
 }
 
 index_surfaces: fn(surfaces: [SurfaceEntry]) -> [LanguageSurface] Never! {
@@ -2034,12 +2034,12 @@ qualifier_base: fn(member: String, siblings: [String]) -> String Never! {
 // Every key Jet covers, indexed by matching domain. Built once from the Jet
 // side so both the row verdicts and the gap walk read the same answer.
 JetSide: struct {
-    containers: [String]
-    members: [[String]]
-    position: [String:Int]
-    prefixes: [[String]]
-    domains: [String:Int]
-    domain_keys: [[String:Bool]]
+    containers: [String],
+    members: [[String]],
+    position: [String:Int],
+    prefixes: [[String]],
+    domains: [String:Int],
+    domain_keys: [[String:Bool]],
 }
 
 add_member: fn(side: &JetSide, container: String, member: String) {
@@ -2088,12 +2088,12 @@ side_prefixes: fn(side: JetSide, container: String) -> [String] Never! {
 
 // One competitor cell. `operation` and `found_in` are "" when the cell has none.
 CompetitorCell: struct {
-    language: String
-    status: String
-    operation: String
-    found_in: String
-    reason: Dyn
-    has_reason: Bool
+    language: String,
+    status: String,
+    operation: String,
+    found_in: String,
+    reason: Dyn,
+    has_reason: Bool,
 }
 
 plain_cell: fn(language: String, status: String) -> CompetitorCell Never! {
@@ -2168,25 +2168,25 @@ verdict_for: fn(cells: [CompetitorCell]) -> String Never! {
 // `declined_by` are "" when absent, and `pooled_witness_count` is -1 unless it
 // differs from the row's own witness count.
 Row: struct {
-    id: String
-    kind: String
-    module_name: String
-    type_name: String
-    function: String
-    member: String
-    source_line: Int
-    containers: [String]
-    languages: [String]
-    qualifies: String
-    container: String
-    jet_spelling: String?
-    workflow: String
-    verdict: String
-    witness_count: Int
-    pooled_witness_count: Int
-    competitors: [CompetitorCell]
-    evidence: [String]
-    declined_by: String
+    id: String,
+    kind: String,
+    module_name: String,
+    type_name: String,
+    function: String,
+    member: String,
+    source_line: Int,
+    containers: [String],
+    languages: [String],
+    qualifies: String,
+    container: String,
+    jet_spelling: String?,
+    workflow: String,
+    verdict: String,
+    witness_count: Int,
+    pooled_witness_count: Int,
+    competitors: [CompetitorCell],
+    evidence: [String],
+    declined_by: String,
 }
 
 row_for_module: fn(module_fact: ModuleFact, member: String, fixed_only: Bool, surfaces: [LanguageSurface], keys: [String], qualified_by: String) -> Row Never! {
@@ -2259,8 +2259,8 @@ member_keys: fn(names: Synonyms, side: JetSide, container: String, member: Strin
 }
 
 JetRows: struct {
-    rows: [Row]
-    side: JetSide
+    rows: [Row],
+    side: JetSide,
 }
 
 module_fact_named: fn(modules: [ModuleFact], name: String) -> ModuleFact? Never! {
@@ -2323,14 +2323,14 @@ build_rows: fn(root: String, names: Synonyms, modules: [ModuleFact], inventory: 
 
 // One workflow Jet lacks, merged over its domain.
 Gap: struct {
-    id: String
-    container: String
-    key: String
-    containers: [String]
-    languages: [String]
-    operations: [String]
-    found_in: [String]
-    evidence: [String]
+    id: String,
+    container: String,
+    key: String,
+    containers: [String],
+    languages: [String],
+    operations: [String],
+    found_in: [String],
+    evidence: [String],
 }
 
 // Walking only Jet's own tables can never surface a feature Jet is missing, so
@@ -2550,21 +2550,21 @@ row_dyn: fn(row: Row) -> Dyn Never! {
 // ---- Owners ---------------------------------------------------------------------
 
 BoardCard: struct {
-    num: Int
-    phase: String
+    num: Int,
+    phase: String,
 }
 
 BoardDecision: struct {
-    id: String
-    status: String
+    id: String,
+    status: String,
 }
 
 // The cards and decisions this ledger names, as the tree's Tower board shows
 // them. `readable` is false when the tree carries no board.
 Board: struct {
-    readable: Bool
-    cards: [BoardCard]
-    decisions: [BoardDecision]
+    readable: Bool,
+    cards: [BoardCard],
+    decisions: [BoardDecision],
 }
 
 tower_command: fn(jet: String, root: String, args: [String]) -> ProcessSpec Never! {
@@ -2712,8 +2712,8 @@ package_attributed_containers: fn(surfaces: [LanguageSurface]) -> Dyn Never! {
 // item per container, so it is reported as a repeat instead of hiding inside
 // the row count.
 Repeat: struct {
-    operation: String
-    containers: [String]
+    operation: String,
+    containers: [String],
 }
 
 repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
@@ -3269,11 +3269,11 @@ core_api_jet_win: fn(row: Row) -> Dyn LedgerError! {
 // temporaries follow let, const, var or comptime; imports are lines that open
 // with use, import, from, require or include. Whitespace is JavaScript's `\s`.
 Metrics: struct {
-    tokens: Int
-    statements: Int
-    calls: Int
-    named_temporaries: Int
-    imports: Int
+    tokens: Int,
+    statements: Int,
+    calls: Int,
+    named_temporaries: Int,
+    imports: Int,
 }
 
 // The byte length of the JavaScript `\s` character at `at`, or 0.
@@ -3517,8 +3517,8 @@ source_metrics: fn(source: String) -> Metrics Never! {
 
 // The metrics of every path the gate counts, each read once.
 MetricsCache: struct {
-    paths: [String]
-    metrics: [Metrics]
+    paths: [String],
+    metrics: [Metrics],
 }
 
 cached_metrics: fn(root: String, cache: &MetricsCache, path: String) -[FS]> Metrics LedgerError! {
@@ -3833,10 +3833,10 @@ totals_count: fn(into: &Dyn, surface: Dyn, key: String, as_key: String) {
 
 // The ledger, and the board and surfaces it was built from.
 Built: struct {
-    ledger: Dyn
-    board: Board
-    surfaces: [SurfaceEntry]
-    modules: [ModuleFact]
+    ledger: Dyn,
+    board: Board,
+    surfaces: [SurfaceEntry],
+    modules: [ModuleFact],
 }
 
 build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built LedgerError! {
@@ -5011,8 +5011,8 @@ write_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Ledge
 }
 
 ReleaseFailure: struct {
-    task: String
-    reason: String
+    task: String,
+    reason: String,
 }
 
 release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String LedgerError! {

@@ -10,8 +10,8 @@ use {
 
 #Error
 NoteError: enum {
-    Denied(String)
-    Unreachable(String)
+    Denied(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> NoteError {
@@ -26,8 +26,8 @@ impl app.CallError -> NoteError {
 // The server's side: each publish merges the client's copy into the session
 // and answers the merged document with its generation.
 Notes: struct {
-    session: String
-    runs: Shared<Int>
+    session: String,
+    runs: Shared<Int>,
 
     #App.Public publish: fn(self, doc: String) -> String NoteError! {
         ran := self.runs.guard_edit()
@@ -41,9 +41,9 @@ Notes: struct {
 // One client: its Remote, and its own copy of the notes, which it writes
 // whether or not it reaches the server.
 Client: struct {
-    name: String
-    notes: app.Remote<Notes>
-    local: crdt.SyncList
+    name: String,
+    notes: app.Remote<Notes>,
+    local: crdt.SyncList,
 }
 
 write: fn(client: &Client, note: String) {

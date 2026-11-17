@@ -2,31 +2,31 @@
 // semantic types are the canonical JetFoundation::Type.
 
 Pattern: enum {
-    Variant(variant: String, bindings: [PatSlot], leading_dot: Bool, span: Span)
-    Present(binding: String, binding_span: Span, inner: Pattern?, span: Span)
-    Absent(span: Span)
-    Ok(binding: String, binding_span: Span, inner: Pattern?, span: Span)
-    Err(binding: String, binding_span: Span, inner: Pattern?, span: Span)
-    Range(lo: Int, hi: Int, span: Span)
-    Or(alternatives: [Pattern], span: Span)
-    Struct(fields: [StructPatField], rest: Span?, span: Span, type_name: PatternTypeHead?)
-    List(items: [PatSlot], rest: ListPatRest?, span: Span)
-    Map(entries: [MapPatEntry], rest: Span?, span: Span)
-    StrMatch(parts: [StrMatchPart], span: Span)
-    BinMatch(parts: [BinMatchPart], span: Span)
+    Variant(variant: String, bindings: [PatSlot], leading_dot: Bool, span: Span),
+    Present(binding: String, binding_span: Span, inner: Pattern?, span: Span),
+    Absent(span: Span),
+    Ok(binding: String, binding_span: Span, inner: Pattern?, span: Span),
+    Err(binding: String, binding_span: Span, inner: Pattern?, span: Span),
+    Range(lo: Int, hi: Int, span: Span),
+    Or(alternatives: [Pattern], span: Span),
+    Struct(fields: [StructPatField], rest: Span?, span: Span, type_name: PatternTypeHead?),
+    List(items: [PatSlot], rest: ListPatRest?, span: Span),
+    Map(entries: [MapPatEntry], rest: Span?, span: Span),
+    StrMatch(parts: [StrMatchPart], span: Span),
+    BinMatch(parts: [BinMatchPart], span: Span),
 }
 
 // S31: `inner` holds a nested payload pattern (`.Val(.Rect(w, h))`,
 // `.Err(.Low)`); the binding is then `_`.
 
 PatSlot: enum {
-    Wildcard
-    Bind(name: String, span: Span)
-    Range(lo: Int, hi: Int)
-    Nested(pattern: Pattern)
-    Named(field: String, field_span: Span, slot: PatSlot)
-    Rest(span: Span)
-    Value(value: Expr)
+    Wildcard,
+    Bind(name: String, span: Span),
+    Range(lo: Int, hi: Int),
+    Nested(pattern: Pattern),
+    Named(field: String, field_span: Span, slot: PatSlot),
+    Rest(span: Span),
+    Value(value: Expr),
 }
 
 // S31: a nested pattern tests this payload slot.
@@ -36,76 +36,76 @@ PatSlot: enum {
 // The trailing `..` of `.Case{field: pat, ..}`.
 
 BinMatchPart: enum {
-    Lit(bytes: [U8])
-    Hole(name: String, spec: BinSpec, span: Span)
+    Lit(bytes: [U8]),
+    Hole(name: String, spec: BinSpec, span: Span),
 }
 
 BinSpec: enum {
-    Bits(width: Int, endian: BinEndian)
-    Rest
+    Bits(width: Int, endian: BinEndian),
+    Rest,
 }
 
 BinEndian: enum {
-    Unspecified
-    Big
-    Little
+    Unspecified,
+    Big,
+    Little,
 }
 
 StrMatchPart: enum {
-    Lit(text: String)
-    Hole(name: String, ty: Type?, span: Span)
+    Lit(text: String),
+    Hole(name: String, ty: Type?, span: Span),
 }
 
 StructPatField: enum {
-    Bind(field: String, field_span: Span, local: String, local_span: Span)
-    Value(field: String, field_span: Span, value: Expr)
-    Nested(field: String, field_span: Span, pattern: Pattern)
+    Bind(field: String, field_span: Span, local: String, local_span: Span),
+    Value(field: String, field_span: Span, value: Expr),
+    Nested(field: String, field_span: Span, pattern: Pattern),
 }
 
 PatternTypeHead: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 ListPatRest: struct {
-    name: BindName?
-    span: Span
+    name: BindName?,
+    span: Span,
 }
 
 MapPatEntry: struct {
-    key: Expr
-    optional: Bool
-    slot: PatSlot
-    span: Span
+    key: Expr,
+    optional: Bool,
+    slot: PatSlot,
+    span: Span,
 }
 
 BindName: struct {
-    name: String
-    span: Span
-    rename: BindNameRename?
+    name: String,
+    span: Span,
+    rename: BindNameRename?,
 }
 
 BindNameRename: struct {
-    name: String
-    span: Span
+    name: String,
+    span: Span,
 }
 
 BindPattern: enum {
-    Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
-    List(elems: [BindName], span: Span)
-    Tuple(elems: [BindName], span: Span)
-    Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
+    Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span),
+    List(elems: [BindName], span: Span),
+    Tuple(elems: [BindName], span: Span),
+    Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span),
 }
 
 OrFallback: enum {
-    Value(value: Expr)
-    Block(body: [Stmt], value: Expr?, span: Span)
-    Return(value: Expr?, span: Span)
-    Panic(name_span: Span, args: [CallArg])
-    Break(span: Span)
-    Continue(span: Span)
-    BreakLabel(name: String, span: Span)
-    ContinueLabel(name: String, span: Span)
+    Value(value: Expr),
+    Block(body: [Stmt], value: Expr?, span: Span),
+    Return(value: Expr?, span: Span),
+    Panic(name_span: Span, args: [CallArg]),
+    Break(span: Span),
+    Continue(span: Span),
+    BreakLabel(name: String, span: Span),
+    ContinueLabel(name: String, span: Span),
 }
 
 // Rust `Pattern::binding_names`: the capture names a successful match

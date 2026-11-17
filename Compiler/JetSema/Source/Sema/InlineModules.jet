@@ -107,80 +107,80 @@ use {
 // A member reached through a `use` inside a module: an inline module member
 // function, or (qualified) a member of a file module imported by this file.
 SemaInlineTarget: struct {
-    module_alias: String
-    member: String
-    qualified: Bool
+    module_alias: String,
+    member: String,
+    qualified: Bool,
 }
 
 SemaInlineModuleSurface: struct {
     // How the rewritten body spells the module: its full dotted path, or,
     // inside an enclosing module, its path relative to that module.
-    name: String
+    name: String,
     // The full dotted path its member identities are named under.
-    path: String
+    path: String,
     // A nested `priv module`: the path of the module it is private to.
-    private_to: String?
+    private_to: String?,
     // Member function names reachable by this enclosing file.
-    functions: [String:Bool]
+    functions: [String:Bool],
     // Member constant names, read as `module.NAME`.
-    constants: [String:Bool]
+    constants: [String:Bool],
     // The members written `priv`, each with its name's span;
     // only this module and its children reach them.
-    private_members: [String:Span]
+    private_members: [String:Span],
     // `pub use` inside the module: re-exported local name -> its owner.
-    reexports: [String:SemaInlineTarget]
+    reexports: [String:SemaInlineTarget],
 }
 
 SemaInlineFunctionBinding: struct {
-    semantic_name: String
-    module_alias: String
-    source_name: String
-    span: Span
-    visibility: Int
+    semantic_name: String,
+    module_alias: String,
+    source_name: String,
+    span: Span,
+    visibility: Int,
 }
 
 // The existing binder's products, retained after body rewriting for checked
 // metadata references. These contain names/spans only, never function ASTs.
 SemaInlinePreparedBindings: struct {
-    imports: [String:SemaInlineFunctionBinding]
-    modules: [SemaInlineModuleSurface]
+    imports: [String:SemaInlineFunctionBinding],
+    modules: [SemaInlineModuleSurface],
 }
 
 SemaInlineRewrite: struct {
-    types: [String:Type]
+    types: [String:Type],
     // Generic-module value parameters and constants -> their literal value.
-    values: [String:Expr]
+    values: [String:Expr],
     // Sibling functions of the module whose body is being rewritten.
-    sibling_module: String
-    siblings: [String:Bool]
+    sibling_module: String,
+    siblings: [String:Bool],
     // File-level inline modules reachable as `alias.f(...)`.
-    modules: [SemaInlineModuleSurface]
+    modules: [SemaInlineModuleSurface],
     // `use g: bank.f`: local name -> member identity.
-    imported: [String:SemaInlineFunctionBinding]
+    imported: [String:SemaInlineFunctionBinding],
     // A module's own `use limits.[MAX]` over a file module alias.
-    qualified: [String:SemaInlineTarget]
+    qualified: [String:SemaInlineTarget],
     // A module's own module or file import alias -> the generated file-level
     // alias its lifted bodies read it through (sema_inline_alias_imports).
-    aliases: [String:String]
-    locals: [String]
+    aliases: [String:String],
+    locals: [String],
     // Trait-bounded variadic functions -> their fixed parameter count; each
     // call renames to its arity's function, whose arities are noted in order.
-    variadic: [String:Int]
-    variadic_arities: [String:[Int]]
-    diagnostics: [Diagnostic]
+    variadic: [String:Int],
+    variadic_arities: [String:[Int]],
+    diagnostics: [Diagnostic],
 }
 
 SemaInlineHoist: struct {
-    declarations: [Item]
-    exported: [String:Type]
-    has_exported: Bool
+    declarations: [Item],
+    exported: [String:Type],
+    has_exported: Bool,
 }
 
 SemaInlineHoisted: struct {
-    code_module: CodeModule
+    code_module: CodeModule,
     // Every lifted type's full source path, in declaration order.
-    paths: [String]
-    types: [String:Type]
+    paths: [String],
+    types: [String:Type],
 }
 
 // ---------------------------------------------------------------------------

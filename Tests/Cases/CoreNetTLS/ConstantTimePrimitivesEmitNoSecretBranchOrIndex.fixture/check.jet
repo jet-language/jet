@@ -72,111 +72,111 @@ use {
 
 Check: struct {
     // Per function.
-    fn_name: [String]
-    fn_base: [String]
-    fn_key: [String]
-    fn_file: [String]
-    fn_params: [Int]
-    fn_slot: [Int]
-    fn_op: [Int]
-    fn_row: [Int]
-    fn_rows: [Int]
+    fn_name: [String],
+    fn_base: [String],
+    fn_key: [String],
+    fn_file: [String],
+    fn_params: [Int],
+    fn_slot: [Int],
+    fn_op: [Int],
+    fn_row: [Int],
+    fn_rows: [Int],
     // Per slot, function by function.
-    slot_kind: [String]
-    slot_name: [String]
-    slot_type: [String]
+    slot_kind: [String],
+    slot_name: [String],
+    slot_type: [String],
     // Whether the slot's type is a spec `public-type`: it never holds a
     // secret.
-    slot_public: [Bool]
+    slot_public: [Bool],
     // The slot's size in bytes, and whether it may hold an address (a word
     // that does not is never a pointer to secret bytes; see find_addresses).
-    slot_size: [Int]
-    slot_addr: [Bool]
+    slot_size: [Int],
+    slot_addr: [Bool],
     // The type of the list element a word slot addresses ("" none, "?" no
     // one type), the variant's payload type an enum slot holds and where
     // it starts (see find_elements), and the instructions writing each slot.
-    slot_elem: [String]
-    slot_payload: [String]
-    slot_payload_at: [Int]
-    slot_defs: [[Int]]
+    slot_elem: [String],
+    slot_payload: [String],
+    slot_payload_at: [Int],
+    slot_defs: [[Int]],
     // Per instance: a function walked with one pattern of secret arguments
     // (`inst_by`: `<function>/<pattern>`), its slots' state from
     // `inst_base` on.
-    inst_fn: [Int]
-    inst_base: [Int]
-    inst_ret_value: [Bool]
-    inst_ret_contents: [Bool]
-    inst_by: [String:Int]
+    inst_fn: [Int],
+    inst_base: [Int],
+    inst_ret_value: [Bool],
+    inst_ret_contents: [Bool],
+    inst_by: [String:Int],
     // Per instance slot: its function's slot, and its two bits.
-    state_static: [Int]
-    value: [Bool]
-    contents: [Bool]
+    state_static: [Int],
+    value: [Bool],
+    contents: [Bool],
     // The instruction (and its instance) that first set each bit (-1: a
     // root), for a finding's trail back to its secret.
-    why_value: [Int]
-    why_value_in: [Int]
-    why_contents: [Int]
-    why_contents_in: [Int]
+    why_value: [Int],
+    why_value_in: [Int],
+    why_contents: [Int],
+    why_contents_in: [Int],
     // The instruction and instance the flow is at, and the slot it writes
     // as a declassified verdict (-1: none; see declassify_inlined).
-    at_op: Int
-    at_inst: Int
-    at_declassified: Int
+    at_op: Int,
+    at_inst: Int,
+    at_declassified: Int,
     // Per instruction, function by function.
-    op_name: [String]
-    op_dst: [Int]
-    op_a: [Int]
-    op_b: [Int]
-    op_c: [Int]
-    op_args: [[Int]]
-    op_callee: [String]
-    op_text: [String]
+    op_name: [String],
+    op_dst: [Int],
+    op_a: [Int],
+    op_b: [Int],
+    op_c: [Int],
+    op_args: [[Int]],
+    op_callee: [String],
+    op_text: [String],
     // Whether the instruction writes the verdict of an inlined `public`
     // function (declassify_inlined).
-    op_declassified: [Bool]
+    op_declassified: [Bool],
     // Per instruction, the inline site it came from in its function (0: the
     // function's own code); per function, the row of its first site in
     // `site_key` and `site_outer`, the inlined function and the site it sits
     // in (declassify_inlined).
-    op_site: [Int]{[Int]{}}
-    fn_site: [Int]{[Int]{}}
-    site_key: [String]{[String]{}}
-    site_outer: [Int]{[Int]{}}
+    op_site: [Int]{[Int]{}},
+    fn_site: [Int]{[Int]{}},
+    site_key: [String]{[String]{}},
+    site_outer: [Int]{[Int]{}},
     // Per emission row, function by function.
-    row_at: [Int]
-    row_kind: [String]
-    row_text: [String]
-    by_base: [String:Int]
-    by_key: [String:Int]
+    row_at: [Int],
+    row_kind: [String],
+    row_text: [String],
+    by_base: [String:Int],
+    by_key: [String:Int],
     // Struct members by `<struct base>/<member>`, from the log's `field`
     // lines: offset and size in bytes, offset -2 when two instances of a
     // generic struct place the member apart, and checked type (`box` for a
     // boxed member); `members`: each struct's member keys.
-    field_offset: [String:Int]
-    field_size: [String:Int]
-    field_type: [String:String]
-    members: [String:[String]]
+    field_offset: [String:Int],
+    field_size: [String:Int],
+    field_type: [String:String],
+    members: [String:[String]],
 }
 
 Spec: struct {
-    roots: [String:[String]]
-    public: [String:Bool]
-    callees: [String:Bool]
-    runtime: [String:Bool]
+    roots: [String:[String]],
+    public: [String:Bool],
+    callees: [String:Bool],
+    runtime: [String:Bool],
     // Structs whose exact Int and Bool fields hold secrets.
-    secret_structs: [String:Bool]
+    secret_structs: [String:Bool],
     // Types whose values are public wherever they sit (error kinds,
     // algorithm ids, curve parameters).
-    public_types: [String:Bool]
+    public_types: [String:Bool],
     // Struct members, by `<struct base>/<member>`, that hold public parts
     // of a value whose other members are secret (a key's modulus).
-    public_fields: [String:Bool]
+    public_fields: [String:Bool],
     // Enums whose tag word is public while their payload is secret.
-    public_tags: [String:Bool]
+    public_tags: [String:Bool],
     // Functions whose findings are expected, with the reason.
-    expected: [String:String]
+    expected: [String:String],
     // Parts of the source paths whose functions the check judges.
-    checked: [String]
+    checked: [String],
 }
 
 check_new: fn() -> Check Never! {
@@ -816,10 +816,10 @@ public_field: fn(c: Check, spec: Spec, ty: String, offset: Int) -> Bool Never! {
 /// type of the member, element or payload the access lands in when the
 /// layout tells it (`leaf`, "" when not).
 FieldAt: struct {
-    ty: String
-    offset: Int
-    public: Bool
-    leaf: String
+    ty: String,
+    offset: Int,
+    public: Bool,
+    leaf: String,
 }
 
 field_at: fn(c: Check, spec: Spec, ty: String, offset: Int) -> FieldAt Never! {

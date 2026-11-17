@@ -3,16 +3,16 @@
 // A nonowning Read trait formal instead borrows the original concrete value;
 // passing that loan does not allocate a box or clone the concrete owner.
 Adapter: trait {
-    go: fn(self) -> Int
+    go: fn(self) -> Int,
 }
 
 Cloner: trait {
-    go2: fn(self) -> Int
-    again: fn(self) -> Cloner
+    go2: fn(self) -> Int,
+    again: fn(self) -> Cloner,
 }
 
 Real: struct {
-    n: Int
+    n: Int,
 
     impl Adapter {
         go: fn(self) -> Int { self.n }
@@ -27,12 +27,12 @@ Real: struct {
 }
 
 Plain: struct {
-    adapter: Adapter
+    adapter: Adapter,
 }
 
 Config: struct {
-    adapter: Adapter?
-    cloner: Cloner?
+    adapter: Adapter?,
+    cloner: Cloner?,
 }
 
 direct: fn(plain: Plain) -> Int { plain.adapter.go() }

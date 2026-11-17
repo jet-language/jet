@@ -21,7 +21,7 @@ use {
 
 /// A running stopwatch started at a host monotonic nanosecond sample.
 Stopwatch: struct {
-    start_ns: Int
+    start_ns: Int,
 
     /// Whole milliseconds since `start()`.
     elapsed_millis: fn(self) -[Time]> Int Never! { duration_as_ms(elapsed(self)) }
@@ -69,12 +69,12 @@ unix_ns: fn() -[Time]> Int Never! {
 // System clocks use the raw host monotonic epoch, not world/replay selection;
 // their labeled state keeps the elapsed sample and millisecond offset distinct.
 priv ClockState: enum {
-    Manual(Int)
+    Manual(Int),
     System(started_ns: Int, offset_ms: Int)
 }
 
 Clock: struct {
-    state: Shared<ClockState>
+    state: Shared<ClockState>,
 
     new: fn(seed: Int) -> Clock Never! { Clock{state: Shared{ClockState.Manual(seed)}} }
 
@@ -164,7 +164,7 @@ Clock: struct {
 }
 
 __ClockObserver: struct {
-    state: Shared<ClockState>
+    state: Shared<ClockState>,
 
     now: fn(self) -> Int Never! {
         guard: self.state.guard_read()
@@ -188,8 +188,8 @@ clock_state_now: fn(state: ClockState) -> Int Never! {
 // of the public API; payload access always checks the strict expiry boundary.
 #!Debug
 ExpiringValue: struct<T> {
-    value: T
-    deadline_ms: Int
+    value: T,
+    deadline_ms: Int,
 
     new: fn<T>(value: T, ttl: Duration, clock: Clock) -> ExpiringValue<T> Never! {
         ExpiringValue<T>{value: value, deadline_ms: __expiry_deadline(clock.now(), ttl)}
@@ -613,15 +613,15 @@ totime: fn(dt: DateTime) -> LocalTime Never! { time_of(dt) }
 // Civil carriers own their validation and arithmetic here, not in an emitter.
 #Error
 TimeError: struct {
-    reason: String
+    reason: String,
 
     new: fn(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
 
 LocalDate: struct {
-    date_y: Int
-    date_m: Int
-    date_d: Int
+    date_y: Int,
+    date_m: Int,
+    date_d: Int,
 
     year: fn(self) -> Int Never! { self.date_y }
 
@@ -763,10 +763,10 @@ LocalDate: struct {
 }
 
 LocalTime: struct {
-    hour_value: Int
-    minute_value: Int
-    second_value: Int
-    nanos: Int
+    hour_value: Int,
+    minute_value: Int,
+    second_value: Int,
+    nanos: Int,
 
     hour: fn(self) -> Int Never! { self.hour_value }
 
@@ -863,9 +863,9 @@ LocalTime: struct {
 }
 
 DateTime: struct {
-    secs: Int
-    nanos: Int
-    leap_second: Bool
+    secs: Int,
+    nanos: Int,
+    leap_second: Bool,
 
     date: fn(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
 
@@ -1066,8 +1066,8 @@ DateTime: struct {
     // A checked `DateTime{"…"}` literal is one complete RFC 3339 instant, checked
     // before the program runs by the same parser that reads runtime strings.
     impl CheckedText {
-        Error: TimeError
-        Hole: String
+        Error: TimeError,
+        Hole: String,
 
         check: fn(text: String) -[]> TimeError! {
             if text.contains("{{}}") {
@@ -1086,9 +1086,9 @@ DateTime: struct {
 }
 
 Period: struct {
-    years_value: Int
-    months_value: Int
-    days_value: Int
+    years_value: Int,
+    months_value: Int,
+    days_value: Int,
 
     years: fn(self) -> Int Never! { self.years_value }
 
@@ -1147,12 +1147,12 @@ Period: struct {
 }
 
 ZoneInfo: struct {
-    offset: Int
+    offset: Int,
     is_dst: Bool
 }
 
 ZoneTransition: struct {
-    at: Int
+    at: Int,
     info: Int
 }
 
@@ -1164,48 +1164,48 @@ ZoneTransition: struct {
 // (.Weekday: weekday `day`, 0 Sunday, of week `week`, 5 the last, of
 // `month`). `at` is the local wall-clock second, -167 to 167 hours.
 ZoneRuleForm: enum {
-    Julian
-    Ordinal
+    Julian,
+    Ordinal,
     Weekday
 }
 
 ZoneRuleEdge: struct {
-    form: ZoneRuleForm
-    month: Int
-    week: Int
-    day: Int
+    form: ZoneRuleForm,
+    month: Int,
+    week: Int,
+    day: Int,
     at: Int
 }
 
 ZoneSaving: struct {
-    info: ZoneInfo
-    start: ZoneRuleEdge
+    info: ZoneInfo,
+    start: ZoneRuleEdge,
     end: ZoneRuleEdge
 }
 
 ZoneRule: struct {
-    standard: ZoneInfo
+    standard: ZoneInfo,
     saving: ZoneSaving?
 }
 
 // One change of offset: the UTC second it happens and the offsets around it.
 ZoneShift: struct {
-    at: Int
-    before: Int
+    at: Int,
+    before: Int,
     after: Int
 }
 
 ZoneData: struct {
-    transitions: [ZoneTransition]
-    infos: [ZoneInfo]
+    transitions: [ZoneTransition],
+    infos: [ZoneInfo],
     rule: ZoneRule?{None}
 }
 
 // Zone tables never change after construction; plain borrowed reads do not
 // acquire scheduler permits or add Time / Time.Wait to civil operations.
 Zone: struct {
-    name_value: String
-    data: ZoneData
+    name_value: String,
+    data: ZoneData,
 
     name: fn(self) -> String Never! { self.name_value.copy() }
 
@@ -1270,8 +1270,8 @@ Zone: struct {
 }
 
 ZonedDateTime: struct {
-    instant: DateTime
-    zone_value: Zone
+    instant: DateTime,
+    zone_value: Zone,
 
     date: fn(self) -> LocalDate Never! { civil_zoned_parts(self).date }
 
@@ -1387,7 +1387,7 @@ ZonedDateTime: struct {
 }
 
 Instant: struct {
-    start_ns: Int
+    start_ns: Int,
 
     elapsed: fn(self) -[Time]> Duration Never! {
         duration_ns(saturating_sub_ns(civil_monotonic_ns(), self.start_ns))
@@ -1782,9 +1782,9 @@ parse_iso_week_date: fn(value: String) -> LocalDate TimeError! {
 }
 
 CivilTimeParts: struct {
-    hour: Int
-    minute: Int
-    second: Int
+    hour: Int,
+    minute: Int,
+    second: Int,
     nanos: Int
 }
 

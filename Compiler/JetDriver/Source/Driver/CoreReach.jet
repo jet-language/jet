@@ -100,15 +100,15 @@ use {
 // `held` lists the declarations the unit's parse held
 // (jet_driver_reach_hold), by position.
 JetDriverUnitWords: struct {
-    words: [String]
-    items: [Int]
-    members: [String]
-    owners: [Int]
-    names: [String]
-    cascades: [Bool]
-    traits: [String]
-    spells: [[Int]]
-    held: [JetDriverReachDeclaration]
+    words: [String],
+    items: [Int],
+    members: [String],
+    owners: [Int],
+    names: [String],
+    cascades: [Bool],
+    traits: [String],
+    spells: [[Int]],
+    held: [JetDriverReachDeclaration],
 }
 
 // The words of a unit that spells nothing.
@@ -120,10 +120,10 @@ jet_driver_unit_no_words: fn() -> JetDriverUnitWords Never! {
 // its type and its trait. A compiler-owned trait (Compiler/Prelude/Traits.jet)
 // has the module "", and so does a builtin type.
 JetDriverCoreImplRow: struct {
-    type_module: String
-    type_name: String
-    trait_module: String
-    trait_name: String
+    type_module: String,
+    type_name: String,
+    trait_module: String,
+    trait_name: String,
 }
 
 // Whether a load keeps `row`: both its type and its trait are reached.
@@ -157,11 +157,11 @@ jet_driver_reach_lazy_trait: fn(trait_name: String) -> Bool Never! {
 // `name`, the byte where the name starts, its `span` (with the comments
 // before it) and whether it is a `constant`.
 JetDriverReachDeclaration: struct {
-    position: Int
-    name: String
-    name_start: Int
-    span: Span
-    constant: Bool
+    position: Int,
+    name: String,
+    name_start: Int,
+    span: Span,
+    constant: Bool,
 }
 
 // A lazy Core unit holds back the parse of each top-level declaration that
@@ -188,8 +188,8 @@ JetDriverReachDeclaration: struct {
 // declarations (their positions still -1) and the spans of the dropped
 // functions.
 JetDriverReachHeld: struct {
-    declarations: [JetDriverReachDeclaration]
-    dropped: [Span]
+    declarations: [JetDriverReachDeclaration],
+    dropped: [Span],
 }
 
 jet_driver_reach_trivia: fn(kind: Int) -> Bool Never! {
@@ -543,13 +543,13 @@ jet_driver_reach_lazy_type: fn(item: Item) -> Span? Never! {
 // (jet_driver_reach_lazy_trait) is a row reached once its type and its
 // trait are (jet_driver_core_impl_reached), and within a lazy type's row.
 JetDriverReachRows: struct {
-    items: [Int]
-    members: [String]
-    owners: [Int]
-    names: [String]
-    cascades: [Bool]
-    traits: [String]
-    spans: [Span]
+    items: [Int],
+    members: [String],
+    owners: [Int],
+    names: [String],
+    cascades: [Bool],
+    traits: [String],
+    spans: [Span],
 }
 
 jet_driver_reach_no_rows: fn() -> JetDriverReachRows Never! {
@@ -719,10 +719,10 @@ JET_DRIVER_ROUTED_MODULES: [String]{"core.math"}
 // name. A routed module's F32-width source is called by its member's
 // spelling (jet_driver_core_f32_member).
 JetDriverCoreRoutes: struct {
-    module_name: String
-    routed: Bool
-    path: String
-    names: [String:Bool]
+    module_name: String,
+    routed: Bool,
+    path: String,
+    names: [String:Bool],
 }
 
 jet_driver_core_routes: fn(module_name: String) -> JetDriverCoreRoutes Never! {
@@ -802,9 +802,9 @@ jet_driver_reach_item_name: fn(item: Item) -> String Never! {
 // `table` holds each distinct word once, and spelling `n` is `keys[n]`
 // (`word * 4 + kind`, as in JetDriverUnitWords) at byte `starts[n]`.
 JetDriverSpellings: struct {
-    table: NameTable
-    starts: [Int]
-    keys: [Int]
+    table: NameTable,
+    starts: [Int],
+    keys: [Int],
 }
 
 // What `tokens`, the lex of `source` into `tables`, spell outside comments.
@@ -1009,18 +1009,18 @@ jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], held: [Jet
 // (jet_driver_reach_hold). An implementation's row has its `lazy_impl` in
 // the reach's impls (-1 for any other).
 JetDriverReachItem: struct {
-    unit: Int
-    item: Int
-    member: String
-    owner: Int
-    children: [Int]
-    wanted: Bool
-    name: Int
-    cascade: Bool
-    spells: [Int]
-    live: Bool
-    held: Bool
-    lazy_impl: Int
+    unit: Int,
+    item: Int,
+    member: String,
+    owner: Int,
+    children: [Int],
+    wanted: Bool,
+    name: Int,
+    cascade: Bool,
+    spells: [Int],
+    live: Bool,
+    held: Bool,
+    lazy_impl: Int,
 }
 
 // A lazy implementation of the load: its reach `item`, its row
@@ -1029,10 +1029,10 @@ JetDriverReachItem: struct {
 // reaches the trait: its own, its codec method's, and its derive family's
 // (`Codable`).
 JetDriverReachImpl: struct {
-    item: Int
-    row: JetDriverCoreImplRow
-    written: String
-    triggers: [Int]
+    item: Int,
+    row: JetDriverCoreImplRow,
+    written: String,
+    triggers: [Int],
 }
 
 // One loaded module whose source counts toward reach, at `loaded` in the
@@ -1044,23 +1044,23 @@ JetDriverReachImpl: struct {
 // a set per module, not a flag for every name, which grew each module's
 // rows to the whole name table.
 JetDriverReachUnit: struct {
-    loaded: Int
-    module_name: String
-    open: Bool
-    local: [Int:Bool]
-    dotted: [Int:Bool]
-    heads: [Int:Bool]
+    loaded: Int,
+    module_name: String,
+    open: Bool,
+    local: [Int:Bool],
+    dotted: [Int:Bool],
+    heads: [Int:Bool],
 }
 
 // A private import a Core module defers until its alias is a reached head:
 // `alias`, or `marker`, the alias as a qualified marker's library part
 // spells it after its `#` (`#Builtin` for `builtin`; jet_driver_spell_push).
 JetDriverReachEdge: struct {
-    unit: Int
-    scoped: JetDriverScopedImport
-    alias: Int
-    marker: Int
-    followed: Bool
+    unit: Int,
+    scoped: JetDriverScopedImport,
+    alias: Int,
+    marker: Int,
+    followed: Bool,
 }
 
 // What a Core module's source demands of another Core module
@@ -1070,13 +1070,13 @@ JetDriverReachEdge: struct {
 // after a `.` when `dotted`. Then `module_name` loads, joining the load's
 // bare modules when `bare` and reached whole when `open`.
 JetDriverReachDemand: struct {
-    unit: Int
-    word: Int
-    dotted: Bool
-    module_name: String
-    bare: Bool
-    open: Bool
-    followed: Bool
+    unit: Int,
+    word: Int,
+    dotted: Bool,
+    module_name: String,
+    bare: Bool,
+    open: Bool,
+    followed: Bool,
 }
 
 // The load's reach: one name table for every spelling, the names reached
@@ -1085,19 +1085,19 @@ JetDriverReachDemand: struct {
 // implementations, and `reached` the reach in the keys of
 // jet_driver_core_impl_reached.
 JetDriverReach: struct {
-    enabled: Bool
-    names: NameTable
-    global: [Bool]
-    spelled: [Bool]
-    units: [JetDriverReachUnit]
-    items: [JetDriverReachItem]
-    by_name: [[Int]]
-    impls: [JetDriverReachImpl]
-    reached: NameRows
-    edges: [JetDriverReachEdge]
-    demands: [JetDriverReachDemand]
-    open_names: [String]
-    stack: [Int]
+    enabled: Bool,
+    names: NameTable,
+    global: [Bool],
+    spelled: [Bool],
+    units: [JetDriverReachUnit],
+    items: [JetDriverReachItem],
+    by_name: [[Int]],
+    impls: [JetDriverReachImpl],
+    reached: NameRows,
+    edges: [JetDriverReachEdge],
+    demands: [JetDriverReachDemand],
+    open_names: [String],
+    stack: [Int],
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
@@ -1469,9 +1469,9 @@ jet_driver_reach_drain: fn(reach: &JetDriverReach) {
 // Core interface (jet_driver_core_ready_write) when the module read its
 // rows from it.
 JetDriverReachHeldModule: struct {
-    loaded: Int
-    declarations: [JetDriverReachDeclaration]
-    ready: JetDriverCoreReady?
+    loaded: Int,
+    declarations: [JetDriverReachDeclaration],
+    ready: JetDriverCoreReady?,
 }
 
 // What jet_driver_reach_parse_held did: how many held declarations took
@@ -1480,11 +1480,11 @@ JetDriverReachHeldModule: struct {
 // interface it took, and the internal problem of a ready parse missing or
 // unreadable.
 JetDriverReachHeldParse: struct {
-    count: Int
-    fragments: Int
-    fragment_bytes: Int
-    fragment_reads: Int
-    problem: String?
+    count: Int,
+    fragments: Int,
+    fragment_bytes: Int,
+    fragment_reads: Int,
+    problem: String?,
 }
 
 // Per module of the load's `count` modules, the program.items positions of
@@ -1623,21 +1623,21 @@ jet_driver_reach_held_missing: fn(done: JetDriverReachHeldParse, module_name: St
 // held declarations should parse to their stubs as in the module's own
 // parse.
 JetDriverReachSource: struct {
-    bytes: [U8]
-    hold: JetDriverReachHoldRow?
+    bytes: [U8],
+    hold: JetDriverReachHoldRow?,
 }
 
 // What a Core unit's hold reads of its row (jet_driver_parse_core_source).
 JetDriverReachHoldRow: struct {
-    module_name: String
-    owned_members: [String]
-    runtime: Bool
+    module_name: String,
+    owned_members: [String],
+    runtime: Bool,
 }
 
 // A module source's parse, and how many tokens its lexer read.
 JetDriverReachParse: struct {
-    parsed: ParseResult
-    tokens: Int
+    parsed: ParseResult,
+    tokens: Int,
 }
 
 // The parses of the module sources `sources` (on several threads, moved

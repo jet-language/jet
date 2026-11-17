@@ -398,11 +398,11 @@ jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, qui
 
 // One workspace member's `jet test`, as its child process ended.
 JetCLITestMemberRun: struct {
-    index: Int
-    done: Bool
-    code: Int
-    output: String
-    errors: String
+    index: Int,
+    done: Bool,
+    code: Int,
+    output: String,
+    errors: String,
 }
 
 // `jet test` in children (JetCLIPlan.TestWorkspace): each of `member_args`
@@ -860,9 +860,9 @@ jet_cli_runtime_part_file: fn(name: String) -[FS.Read, Env, FFI.Asm]> X64ImagePa
 // The sealed keys of the Core facts list `facts` (JET_CLI_CORE_FACTS_FILE:
 // `key<TAB>reason` rows) and, apart, each other row's key and reason.
 JetCLICoreFacts: struct {
-    sealed: [String]
-    excluded: [String]
-    reasons: [String]
+    sealed: [String],
+    excluded: [String],
+    reasons: [String],
 }
 
 jet_cli_core_facts: fn(facts: [U8]) -> JetCLICoreFacts Never! {
@@ -943,13 +943,13 @@ jet_cli_checked_alloc: fn(options: BuildOptions) -> Bool Never! {
 
 // Why the one native executable route stopped; each caller reports it.
 JetCLINativeFailure: enum {
-    RustForeign(error: JetDriverRustForeignError)
-    NoEntry
-    Faulted
-    Write(what: String)
-    RuntimeKey(what: String)
-    Runtime(what: String)
-    Foreign(message: String)
+    RustForeign(error: JetDriverRustForeignError),
+    NoEntry,
+    Faulted,
+    Write(what: String),
+    RuntimeKey(what: String),
+    Runtime(what: String),
+    Foreign(message: String),
 }
 
 // A compiler fault stopped the route before an image: the census holds
@@ -958,8 +958,8 @@ JetCLINativeFailure: enum {
 
 // The native route's result: the linked executable, else why not.
 JetCLINativeLinked: enum {
-    Image(executable: X64Executable)
-    Failed(failure: JetCLINativeFailure)
+    Image(executable: X64Executable),
+    Failed(failure: JetCLINativeFailure),
 }
 
 // The ICE census row of a function the native route can't build (pass,
@@ -1313,16 +1313,16 @@ jet_cli_symbols_file: fn(root: String, executable: X64Executable, path: String) 
 // else the Jet-only object for a platform closure, else the pack), else why
 // reading it failed.
 JetCLIForeignRealized: struct {
-    inputs: JetCLIForeignInputs?
-    error: String
-    runtime: [U8]?
-    runtime_path: String
-    runtime_stamp: [Int]
-    runtime_at: Int
-    runtime_gap_at: Int
-    runtime_gap: Int
-    runtime_error: String
-    bound: Bool
+    inputs: JetCLIForeignInputs?,
+    error: String,
+    runtime: [U8]?,
+    runtime_path: String,
+    runtime_stamp: [Int],
+    runtime_at: Int,
+    runtime_gap_at: Int,
+    runtime_gap: Int,
+    runtime_error: String,
+    bound: Bool,
 }
 
 // `runtime_key` is None when the object's route already fails on it: the
@@ -1389,12 +1389,12 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
 // library's code (jet_cli_native_executable), `core` holds the Core exports
 // (JET_CLI_CORE_EXPORTS_FILE) and `core_threads` the Core thread receipt.
 JetCLIRuntimeExports: struct {
-    key: String
-    exports: [U8]
-    threads: [U8]?
-    failure: JetCLINativeFailure?
-    core: IRCoreImage?{None}
-    core_threads: [U8]?{None}
+    key: String,
+    exports: [U8],
+    threads: [U8]?,
+    failure: JetCLINativeFailure?,
+    core: IRCoreImage?{None},
+    core_threads: [U8]?{None},
 }
 
 jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExports Never! {
@@ -1451,8 +1451,8 @@ jet_cli_single_thread: fn(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [
 // The program's object (jet_cli_native_executable), else why the route
 // stopped before it.
 JetCLINativeObject: struct {
-    bytes: [U8]
-    failure: JetCLINativeFailure?
+    bytes: [U8],
+    failure: JetCLINativeFailure?,
 }
 
 jet_cli_native_object_failure: fn(failure: JetCLINativeFailure) -> JetCLINativeObject Never! {
@@ -1530,8 +1530,8 @@ jet_cli_runtime_exports_compare: fn(bytes: [U8], start: Int, end: Int, row: [U8]
 // export, IR Lint and `ir.opt` at the options' level. Each fault is an ICE row
 // of `census` and traps its function (jet_cli_ice_trap).
 JetCLINativeProgram: struct {
-    program: IRModule
-    failure: JetCLINativeFailure?
+    program: IRModule,
+    failure: JetCLINativeFailure?,
 }
 
 // The entry package's `authority.needs`, which bounds every literal plugin
@@ -2014,8 +2014,8 @@ jet_cli_build_option_policy: fn(root: String, key: PolicyKey, choice: BuildOptio
 }
 
 JetCLIBuilt: enum {
-    Image(executable: X64Executable, path: String)
-    Failed(output: JetDriverVerbOutput)
+    Image(executable: X64Executable, path: String),
+    Failed(output: JetDriverVerbOutput),
 }
 
 // The linked executable; `path` is its place in .jet/build (written
@@ -2261,23 +2261,23 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, sources: 
 // `rows` shares the checked rows `inputs` holds until the native route takes
 // them.
 JetCLICheckedTarget: struct {
-    result: JetDriverCompileResult
-    inputs: JetDriverLoweringInputs?
-    rows: JetDriverLoweringInputs?
-    snapshot: JetDriverAuthorizedSourceSnapshot
+    result: JetDriverCompileResult,
+    inputs: JetDriverLoweringInputs?,
+    rows: JetDriverLoweringInputs?,
+    snapshot: JetDriverAuthorizedSourceSnapshot,
 }
 
 // What a build target's compile leaves once its image is written: its
 // diagnostics, facts, checked rows and source snapshot.
 JetCLICompileHeld: struct {
-    diagnostics: [Diagnostic]
-    generated: [SourceFile]
-    structure_facts: [StructureFact]
-    comptime_values: [SemaComptimeItemValue]
-    doc_modules: [JetDriverDocModule]
-    inputs: JetDriverLoweringInputs?
-    rows: JetDriverLoweringInputs?
-    snapshot: JetDriverAuthorizedSourceSnapshot
+    diagnostics: [Diagnostic],
+    generated: [SourceFile],
+    structure_facts: [StructureFact],
+    comptime_values: [SemaComptimeItemValue],
+    doc_modules: [JetDriverDocModule],
+    inputs: JetDriverLoweringInputs?,
+    rows: JetDriverLoweringInputs?,
+    snapshot: JetDriverAuthorizedSourceSnapshot,
 }
 
 // Drops what `checked` holds on a detached task. Drop glue walks every row,
@@ -2449,8 +2449,8 @@ jet_cli_perf_samples_image: fn(executable: X64Executable) {
 // thread because only a single-threaded jet may run it in its own place
 // (jet_cli_launch). `json` is `jet run --json`'s.
 JetCLIRunStep: enum {
-    Output(output: JetDriverVerbOutput)
-    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool)
+    Output(output: JetDriverVerbOutput),
+    Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool, json: Bool),
 }
 
 // Finish `step` on this thread: run its program (jet_cli_launch) with the
@@ -3224,8 +3224,8 @@ jet_cli_compile_core_test: fn(file: String, source: String, path: String, color:
 // which `jet test --browser-scaffold` writes, is the app its test opens.
 jet_cli_new_run_source: fn(template: String) -> String Never! {
     if template == {
-        "cli" -> "#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    print(greeting(args.name))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
-        "ui" -> "use ui: core.ui\n\n#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    message: greeting(args.name)\n    print(message)\n    backend: ui.null_backend()\n    ui.reactive_render(fn() {{\n        tree: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    }})\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
+        "cli" -> "#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}},\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    print(greeting(args.name))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
+        "ui" -> "use ui: core.ui\n\n#CLI\nGreetingArgs: struct {{\n    #Doc(\"name to greet\") name: String{{\"world\"}},\n}}\n\ngreeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn(args: GreetingArgs) {{\n    message: greeting(args.name)\n    print(message)\n    backend: ui.null_backend()\n    ui.reactive_render(fn() {{\n        tree: ui.text(message)\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 80.0))\n    }})\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
         "web" -> "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse {{\n    ui: core.ui\n    reactive: core.reactive\n    core.color.[Color]\n}}\n#Target(Web)\n\nrun: fn() {{\n    count: reactive.signal(0)\n    ui.reactive_render(fn() {{\n        n := count.get()\n        tree: ui.box([\n            ui.node_color(\"Clicks: {{n}}\", 240.0, 40.0, Color{{r: 51, g: 102, b: 255, a: 255}}),\n            ui.button(\"Add one\", fn() {{\n                count.set(count.get() + 1)\n            }})\n        ])\n        backend: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    }})\n}}\n\n#Test(\"the counter increments\") {{\n    count: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}}\n"
         "browser-test" -> "// The app the browser tests open: `jet dev` serves it at\n// http://127.0.0.1:4173/ and reloads it on every edit.\nuse web: core.web\n\nhome: fn() -> WebPage {{\n    web.page(\"Hello\", \"<p id=\\\"greeting\\\">Your first browser test passes.</p>\")\n}}\n\nrun: fn() {{ web.app().route(\"/\", home).serve(4173) }}\n"
         else -> "greeting: fn(name: String) -> String {{ \"hello, {{name}}\" }}\n\nrun: fn() {{\n    print(greeting(\"world\"))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
@@ -3523,21 +3523,21 @@ JET_CLI_FMT_IGNORED_DIRS: [String]{"vendor", "target", "build", ".git", "node_mo
 // One preflight result (`run_fmt` `FileResult`); `report` is a host
 // refusal already rendered (a `--explicit-copies` check that could not run).
 JetCLIFmtFile: struct {
-    path: String
-    original: String
-    formatted: String
-    changed: Bool
-    io_error: String?
-    diagnostics: [Diagnostic]
-    report: String?
+    path: String,
+    original: String,
+    formatted: String,
+    changed: Bool,
+    io_error: String?,
+    diagnostics: [Diagnostic],
+    report: String?,
 }
 
 // One formatted source, or what stopped it (`format_source_for_fmt`'s
 // `Result<String, Vec<Diagnostic>>`, plus a rendered host refusal).
 JetCLIFmtSource: struct {
-    text: String
-    diagnostics: [Diagnostic]
-    report: String?
+    text: String,
+    diagnostics: [Diagnostic],
+    report: String?,
 }
 
 jet_cli_fmt_formatted: fn(text: String) -> JetCLIFmtSource Never! {
@@ -3634,9 +3634,9 @@ JET_CLI_FMT_EXPLICIT_FAILURES_POLICY: "#Policy(failures: .Explicit)\n"
 // One mark a policy's Safe edits write: `text` inserted at byte `site` of the
 // source, for the report at `report` (one report can write two marks).
 JetCLIFmtMark: struct {
-    site: Int
-    text: String
-    report: Int
+    site: Int,
+    text: String,
+    report: Int,
 }
 
 // The Rust `format_source_for_fmt` copy materialization: `origin` must check
@@ -4038,8 +4038,8 @@ jet_cli_external_fmt_ok: fn(json: Bool) -> JetDriverVerbOutput Never! {
 
 // A staging directory (`ExternalFmtTempDir::new`), or the problem text.
 JetCLIExternalFmtTemp: struct {
-    path: String
-    problem: String?
+    path: String,
+    problem: String?,
 }
 
 // `ExternalFmtTempDir::new`: `jet-fmt-<ns>-<pid>-<attempt>` under the
@@ -4642,8 +4642,8 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
 // build and ends `jet dev`, as it ends `jet run`. Otherwise it ends only when the
 // user stops it.
 JetCLIDevConfigured: enum {
-    Config(config: JetDriverDevConfig)
-    Refused(output: JetDriverVerbOutput)
+    Config(config: JetDriverDevConfig),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The package's dev configuration: its `dev: fn(d: Dev)`, or the stock loop.
@@ -4742,9 +4742,9 @@ jet_cli_dev_canvas_hint: fn(file: String) {
 // The program `jet dev` runs: a child running the image from memory, else
 // one running its file, else none (its build failed or it couldn't start).
 JetCLIDevChild: enum {
-    Idle
-    Memory(pid: Int)
-    File(child: ProcessChild)
+    Idle,
+    Memory(pid: Int),
+    File(child: ProcessChild),
 }
 
 // Start `jet dev`'s program from its build `built` (a failed build prints

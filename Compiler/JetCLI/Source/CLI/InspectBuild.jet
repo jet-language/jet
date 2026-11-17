@@ -404,9 +404,9 @@ jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [
 // One build action output before the graph ran: its package-relative path,
 // and its bytes when it was a file (`present`).
 JetCLIActionOutput: struct {
-    path: String
-    present: Bool
-    bytes: [U8]
+    path: String,
+    present: Bool,
+    bytes: [U8],
 }
 
 // The action outputs `produced` names outside the managed `.jet/` tree (the
@@ -542,8 +542,8 @@ jet_cli_build_workspace_members: fn(file: String, color: Bool, options: BuildOpt
 
 // The workspace whose index `file` is: its root directory and index path.
 JetCLIWorkspaceIndex: struct {
-    root: String
-    path: String
+    root: String,
+    path: String,
 }
 
 // The workspace `file` indexes, or None when `file` is not its directory's
@@ -646,8 +646,8 @@ jet_cli_check_library: fn(file: String, source: String, sources: [String], gener
 // `[[build.contribution]]` rows of the project lock under `root`, which every
 // compile of the package folds (jet_cli_driver_request).
 JetCLISettingsPackage: struct {
-    root: String
-    name: String
+    root: String,
+    name: String,
 }
 
 // The settings package of `snapshot`'s entry root, read from the snapshot's
@@ -693,8 +693,8 @@ jet_cli_root_package_facts: fn(root: JetDriverAuthorizedSourceRoot) -> PackageFa
 // so the compile reads the rows of this evaluation. `refusal` is set when the
 // build or the lock write failed.
 JetCLIContributedRequest: struct {
-    request: JetDriverCompileRequest
-    refusal: JetDriverVerbOutput?
+    request: JetDriverCompileRequest,
+    refusal: JetDriverVerbOutput?,
 }
 
 jet_cli_contributed_request: fn(owned_request: &&JetDriverCompileRequest, color: Bool) -> JetCLIContributedRequest {
@@ -954,8 +954,8 @@ jet_cli_build_duration: fn(value: Float) -> String Never! {
 // profile and runtime identity. Retain the verified object handle separately;
 // the current RecordIndex contract has no native-object link kind.
 JetCLICompileNodeObservation: struct {
-    node: BuildNodeRecord
-    object: ObjectHandle
+    node: BuildNodeRecord,
+    object: ObjectHandle,
 }
 
 jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {

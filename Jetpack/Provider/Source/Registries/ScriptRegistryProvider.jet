@@ -13,14 +13,14 @@ use {
 // Which scripting registry a provider instance serves: its provider family
 // and the registry facts that differ between families.
 ScriptRegistryKind: struct {
-    family: ProviderFamily
-    title: String
-    recipe: String
-    repository: String
-    fetch_authorities: [String]
-    archive_suffix: String
+    family: ProviderFamily,
+    title: String,
+    recipe: String,
+    repository: String,
+    fetch_authorities: [String],
+    archive_suffix: String,
     // File-name suffixes that mark native code or executable plugins.
-    native_suffixes: [String]
+    native_suffixes: [String],
 
     // The ref source label and lock registry name.
     label: fn(self) -> String Never! { self.family.label() }
@@ -65,15 +65,15 @@ provider_script_registry: fn(family: ProviderFamily) -> ScriptRegistryKind Never
 
 // One dependency edge: a package name and its registry-syntax requirement.
 RegistryDependency: struct {
-    name: String
-    requirement: String
+    name: String,
+    requirement: String,
 }
 
 // How a fetched archive is verified.
 RegistryIntegrity: enum {
-    SHA256(String)
-    SHA1(String)
-    ImmutableGit(repository: String, reference: String)
+    SHA256(String),
+    SHA1(String),
+    ImmutableGit(repository: String, reference: String),
 }
 
 // A GitHub zipball of a full commit reference whose source authority the
@@ -81,24 +81,24 @@ RegistryIntegrity: enum {
 
 // One registry release candidate.
 RegistryPackage: struct {
-    name: String
-    version: String
-    url: String
-    integrity: RegistryIntegrity
-    dependencies: [RegistryDependency]
+    name: String,
+    version: String,
+    url: String,
+    integrity: RegistryIntegrity,
+    dependencies: [RegistryDependency],
     // Packagist PSR-4 prefix -> relative directories.
-    psr4: [String:[String]]
+    psr4: [String:[String]],
 }
 
 // A fetched archive of the resolved closure.
 RegistryArtifact: struct {
-    package: RegistryPackage
-    path: String
-    sha256: String
+    package: RegistryPackage,
+    path: String,
+    sha256: String,
 }
 
 ScriptRegistryProvider: struct {
-    kind: ScriptRegistryKind
+    kind: ScriptRegistryKind,
 
     // A locked realization must still match `authority.providers`.
     validate_cache_authority: fn(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env]> ProviderError! {
@@ -271,10 +271,10 @@ provider_script_resolve_closure: fn(kind: ScriptRegistryKind, authority: Registr
 // unselected constrained name (in name order), try each candidate that meets
 // every constraint on it, add its dependency constraints, and recurse.
 ScriptRegistrySolver: struct {
-    kind: ScriptRegistryKind
-    authority: RegistryAuthority
-    scratch: String
-    candidates: [String:[RegistryPackage]]
+    kind: ScriptRegistryKind,
+    authority: RegistryAuthority,
+    scratch: String,
+    candidates: [String:[RegistryPackage]],
 
     solve: fn(&self, constraints: [String:[String]], selected: [String:RegistryPackage]) -[FS, Env, Net, Time.Wait]> [String:RegistryPackage]? RegistryError! {
         loop entry in selected {
@@ -334,10 +334,10 @@ provider_script_meets_all: fn(kind: ScriptRegistryKind, version: String, require
 
 // Dependencies before dependents, each once; a cycle is refused.
 ScriptRegistryOrderWalk: struct {
-    selected: [String:RegistryPackage]
-    active: [String]
-    done: [String]
-    out: [RegistryPackage]
+    selected: [String:RegistryPackage],
+    active: [String],
+    done: [String],
+    out: [RegistryPackage],
 
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) {

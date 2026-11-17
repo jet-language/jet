@@ -21,19 +21,19 @@ set: module
 
 /// Insertion-ordered string multiset. `get` is `0` for an unseen key.
 Counter: struct {
-    keys: [String]
+    keys: [String],
     counts: [Int]
 }
 
 /// Insertion-ordered string map. Replacing a key keeps its original position.
 OrderedMap: struct {
-    keys: [String]
+    keys: [String],
     values: [String]
 }
 
 /// One map layer in a `Chain`. Earlier layers win on lookup.
 Layer: struct {
-    keys: [String]
+    keys: [String],
     values: [String]
 }
 
@@ -45,7 +45,7 @@ Chain: struct {
 /// A handle to one row of a `Rows<T>`: its 4-byte position in that table.
 /// A handle only indexes a table of the same row type.
 Row: struct<T> {
-    __slot: U32
+    __slot: U32,
 
     /// The row's position in its table: 0 for the first `add`.
     index: fn(self) -> Int Never! { Int{self.__slot} }
@@ -56,7 +56,7 @@ Row: struct<T> {
 /// field of every row. Rows are never removed, inserted or reordered, so a
 /// handle stays valid for the table's life.
 Rows: struct<T> {
-    __rows: [T]{[]}
+    __rows: [T]{[]},
 
     /// Appends `value` and returns its handle. Panics past 4294967295 rows.
     add: fn(&self, value: &&T) -> Row<T> Never! {

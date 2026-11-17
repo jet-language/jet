@@ -155,7 +155,7 @@ cli_registry_flag_scopes: fn() Never! {
 // Prelude/Markers.jet marker types through the one rule explanation. A
 // comment, a variadic last field and a group exercise the reader's shape.
 cli_registry_explain_markers: fn() Never! {
-    rules: marker_source_read("Pure: struct {{\n    impl Marker {{\n        sites: [.Function, .Method]\n    }}\n}}\n\n// Hidden: struct {{ impl Marker {{ sites: [.Block] }} }}\nInline: struct {{\n    mode: InlineMode{{.Hint}}\n\n    impl Marker {{\n        sites: [.Function, .Method, .Constant]\n    }}\n}}\n\nScope: struct {{\n    effects: [Effect]\n\n    impl Marker {{\n        sites: [.Block]\n        repeatable: true\n    }}\n}}\n\nFast: struct {{\n    impl Marker {{\n        group: #[Inline(.Always)]\n    }}\n}}\n")
+    rules: marker_source_read("Pure: struct {{\n    impl Marker {{\n        sites: [.Function, .Method],\n    }}\n}}\n\n// Hidden: struct {{ impl Marker {{ sites: [.Block] }} }}\nInline: struct {{\n    mode: InlineMode{{.Hint}},\n\n    impl Marker {{\n        sites: [.Function, .Method, .Constant],\n    }}\n}}\n\nScope: struct {{\n    effects: [Effect],\n\n    impl Marker {{\n        sites: [.Block],\n        repeatable: true,\n    }}\n}}\n\nFast: struct {{\n    impl Marker {{\n        group: #[Inline(.Always)],\n    }}\n}}\n")
     cli_registry_require(rules.len() == 3, "the reader keeps the three rule types and skips the comment and the group")
     pure: jet_cli_rule_named(rules, "Pure") ?? panic("Pure rule row")
     inline: jet_cli_rule_named(rules, "Inline") ?? panic("Inline rule row")

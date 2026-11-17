@@ -23,11 +23,11 @@ use {
 // surface as `UIError.Protocol`.
 
 FakeMode: enum {
-    Fractional
-    Preferred
-    Outputs
-    Resize
-    DisplayError
+    Fractional,
+    Preferred,
+    Outputs,
+    Resize,
+    DisplayError,
     ShortEvent
 }
 
@@ -43,107 +43,107 @@ FakeMode: enum {
 // the size to the window) when `configure`, at `scale120` / 120. A step
 // with an `edge` gets there by an interactive resize from that edge.
 FakeStep: struct {
-    configure: Bool
-    width: Int
-    height: Int
-    scale120: Int
+    configure: Bool,
+    width: Int,
+    height: Int,
+    scale120: Int,
     edge: String
 }
 
 // A size the compositor configures, in the resizing state or not.
 FakeSize: struct {
-    width: Int
-    height: Int
+    width: Int,
+    height: Int,
     resizing: Bool
 }
 
 // A configure sent and not yet acked.
 FakeConfigure: struct {
-    serial: Int
-    width: Int
+    serial: Int,
+    width: Int,
     height: Int
 }
 
 // A wl_buffer: its pool (an index into `pools`), offset, size and format.
 FakeBuffer: struct {
-    id: Int
-    pool: Int
-    offset: Int
-    width: Int
-    height: Int
+    id: Int,
+    pool: Int,
+    offset: Int,
+    width: Int,
+    height: Int,
     format: Int
 }
 
 Fake: struct {
-    stream: net.UnixStream
-    mode: FakeMode
-    inbox: [U8]
-    out: [U8]
-    globals: [String]
-    registry: Int
-    compositor: Int
-    shm: Int
-    wm_base: Int
-    fractional_manager: Int
-    viewporter: Int
-    output: Int
-    surface: Int
-    xdg_surface: Int
-    toplevel: Int
-    fractional: Int
-    viewport: Int
+    stream: net.UnixStream,
+    mode: FakeMode,
+    inbox: [U8],
+    out: [U8],
+    globals: [String],
+    registry: Int,
+    compositor: Int,
+    shm: Int,
+    wm_base: Int,
+    fractional_manager: Int,
+    viewporter: Int,
+    output: Int,
+    surface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
+    fractional: Int,
+    viewport: Int,
     // The seat's pointer and its cursor-shape device; enters so far and the
     // latest enter's serial.
-    seat: Int
-    pointer: Int
-    cursor_manager: Int
-    cursor_device: Int
+    seat: Int,
+    pointer: Int,
+    cursor_manager: Int,
+    cursor_device: Int,
     // The icon manager, the icon being built and its name, buffer sides
     // and each buffer's first pixel as stored.
-    icon_manager: Int
-    icon: Int
-    icon_name: String
-    icon_sides: [Int]
-    icon_first: [String]
-    enters: Int
-    enter_serial: Int
+    icon_manager: Int,
+    icon: Int,
+    icon_name: String,
+    icon_sides: [Int],
+    icon_first: [String],
+    enters: Int,
+    enter_serial: Int,
     // Every pool, and the descriptors the window sent, one per pool in
     // order: only wl_shm.create_pool carries one.
-    pools: [Int]
-    fds: [sys.Fd]
-    buffers: [FakeBuffer]
+    pools: [Int],
+    fds: [sys.Fd],
+    buffers: [FakeBuffer],
     // Surface state: pending, then current at commit.
-    attached: Int
-    current: Int
-    acked: Int
-    callbacks: [Int]
-    destination_w: Int
-    destination_h: Int
-    buffer_scale: Int
-    entered: Bool
+    attached: Int,
+    current: Int,
+    acked: Int,
+    callbacks: [Int],
+    destination_w: Int,
+    destination_h: Int,
+    buffer_scale: Int,
+    entered: Bool,
     // Script state.
-    steps: [FakeStep]
-    step: Int
-    serial: Int
+    steps: [FakeStep],
+    step: Int,
+    serial: Int,
     // Configures sent and not yet acked, oldest first, and the sizes the
     // current interactive resize has yet to configure.
-    configures: [FakeConfigure]
-    drag: [FakeSize]
-    drag_configures: Int
-    logical_w: Int
-    logical_h: Int
-    scale120: Int
-    reached: Bool
+    configures: [FakeConfigure],
+    drag: [FakeSize],
+    drag_configures: Int,
+    logical_w: Int,
+    logical_h: Int,
+    scale120: Int,
+    reached: Bool,
     // A configure was sent and no commit has acked it or a newer one yet.
-    pending_ack: Bool
+    pending_ack: Bool,
     // Some commit has acked a configure.
-    acked_any: Bool
-    settled: Int
-    closing: Bool
+    acked_any: Bool,
+    settled: Int,
+    closing: Bool,
     // The window set the cursor again after the second enter.
-    cursor_done: Bool
-    commits: Int
-    report: [String]
+    cursor_done: Bool,
+    commits: Int,
+    report: [String],
     failures: [String]
 }
 

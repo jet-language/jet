@@ -111,19 +111,19 @@ ELF64_OBJECT_SYMBOL_RODATA: 6
 ELF64_OBJECT_SYMBOL_FIRST_OWN: 7
 
 X64ObjectRela: struct {
-    at: Int
-    symbol: Int
-    kind: Int
-    addend: Int
+    at: Int,
+    symbol: Int,
+    kind: Int,
+    addend: Int,
 }
 
 X64ObjectSymbol: struct {
-    name: String
+    name: String,
     // (bind << 4) | type
-    info: Int
-    section: Int
-    value: Int
-    size: Int
+    info: Int,
+    section: Int,
+    value: Int,
+    size: Int,
 }
 
 // One section header after the null one: its contents and header fields.
@@ -132,24 +132,24 @@ X64ObjectSymbol: struct {
 // x64_object_file writes them straight into the file, so a section built
 // in parts on threads is never joined first.
 X64ObjectSection: struct {
-    name: String
-    kind: Int
-    flags: Int
-    bytes: [U8]
-    pieces: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    fill: Int{0}
-    relas: [X64ObjectRela]{[X64ObjectRela]{}}
-    link: Int
-    info: Int
-    align: Int
-    entry_size: Int
+    name: String,
+    kind: Int,
+    flags: Int,
+    bytes: [U8],
+    pieces: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    fill: Int{0},
+    relas: [X64ObjectRela]{[X64ObjectRela]{}},
+    link: Int,
+    info: Int,
+    align: Int,
+    entry_size: Int,
 }
 
 // Part of a section's contents and its offset in the section; a section's
 // pieces ascend and do not overlap.
 X64ObjectPiece: struct {
-    at: Int
-    bytes: [U8]
+    at: Int,
+    bytes: [U8],
 }
 
 // The size of `section`'s contents.
@@ -312,24 +312,24 @@ x64_object_text_weight: fn(function: X64CompiledFunction) -> Int Never! {
 // sections, per function the symbol of its section (empty otherwise), and
 // every place is 0.
 X64ObjectTextShared: struct {
-    functions: [X64CompiledFunction]
-    offsets: [Int]
-    function_rows: [Int]
-    exported: [Bool]
-    extended: Bool
-    data_offsets: [Int]
-    function_symbols: [Int]
-    data_symbols: [Int]
+    functions: [X64CompiledFunction],
+    offsets: [Int],
+    function_rows: [Int],
+    exported: [Bool],
+    extended: Bool,
+    data_offsets: [Int],
+    function_symbols: [Int],
+    data_symbols: [Int],
 }
 
 // One thread's consecutive function range, the range's code (each
 // function's bytes, taken out of it) and its rows (`outputs` holds one row
 // once the thread finished).
 X64ObjectTextPart: struct {
-    start: Int
-    end: Int
-    codes: [[U8]]
-    outputs: [X64ObjectTextRows]
+    start: Int,
+    end: Int,
+    codes: [[U8]],
+    outputs: [X64ObjectTextRows],
 }
 
 // A function range's `.text`, one piece per function at its offset (calls
@@ -345,17 +345,17 @@ X64ObjectTextPart: struct {
 // the range's names: a row's name is its offset there plus 1 (0: no name)
 // until the merge moves it to the object's (x64_object_symbol_rebase).
 X64ObjectTextRows: struct {
-    text: [X64ObjectPiece]
-    relas: [U8]
-    rela_ends: [Int]
-    aligns: [Int]
-    runtime_at: [Int]
-    runtime_local: [Int]
-    imports: [String]
-    symtab: [U8]
-    strtab: [U8]
-    xindex: [U8]
-    errors: [String]
+    text: [X64ObjectPiece],
+    relas: [U8],
+    rela_ends: [Int],
+    aligns: [Int],
+    runtime_at: [Int],
+    runtime_local: [Int],
+    imports: [String],
+    symtab: [U8],
+    strtab: [U8],
+    xindex: [U8],
+    errors: [String],
 }
 
 // Builds `parts[from..]`, one task per part and the last part on this
@@ -858,20 +858,20 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
 // symbols, with own sections the functions' and data objects' sections,
 // and how many `.text` threads were admitted; with an error only `errors`.
 X64ObjectLaid: struct {
-    text: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    data: [U8]{[U8]{}}
-    data_align: Int{1}
-    rodata: [U8]{[U8]{}}
-    rodata_align: Int{1}
-    rela_text: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    symtab: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    xindex: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    strtab: [X64ObjectPiece]{[X64ObjectPiece]{}}
-    first_global: Int{0}
-    data_relas: [X64ObjectRela]{[X64ObjectRela]{}}
-    own: [X64ObjectSection]{[X64ObjectSection]{}}
-    workers: Int{0}
-    errors: [String]{[String]{}}
+    text: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    data: [U8]{[U8]{}},
+    data_align: Int{1},
+    rodata: [U8]{[U8]{}},
+    rodata_align: Int{1},
+    rela_text: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    symtab: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    xindex: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    strtab: [X64ObjectPiece]{[X64ObjectPiece]{}},
+    first_global: Int{0},
+    data_relas: [X64ObjectRela]{[X64ObjectRela]{}},
+    own: [X64ObjectSection]{[X64ObjectSection]{}},
+    workers: Int{0},
+    errors: [String]{[String]{}},
 }
 
 // The data, symbol and `.text` layout of x64_object_functions_threads,
@@ -1173,9 +1173,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
 // with the thread that spawns it, which drops them after the join, so what
 // x64_object_release drops reaches it here: it takes it off.
 X64ObjectReleased: struct {
-    functions: [X64CompiledFunction]
-    debug: [X64FunctionDebug]
-    programs: [X64ObjectModule]
+    functions: [X64CompiledFunction],
+    debug: [X64FunctionDebug],
+    programs: [X64ObjectModule],
 }
 
 // Drops the `.text` threads' share of the functions (they all joined).

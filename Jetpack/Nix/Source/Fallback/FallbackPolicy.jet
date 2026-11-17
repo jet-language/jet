@@ -29,10 +29,10 @@ NIX_FALLBACK_MAX_STDERR_BYTES: 16384
 NIX_FALLBACK_SCRUBBED_ENV: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
 
 NixFallbackMode: enum {
-    Offline
-    CI
-    NonInteractive
-    Interactive
+    Offline,
+    CI,
+    NonInteractive,
+    Interactive,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -46,12 +46,12 @@ NixFallbackMode: enum {
 
 // The machine-readable decision of one policy check.
 NixFallbackPolicyReceipt: struct {
-    mode: NixFallbackMode
-    allowed: Bool
-    explicit: Bool
-    policy_value: String
-    reason: String
-    invocations: Int
+    mode: NixFallbackMode,
+    allowed: Bool,
+    explicit: Bool,
+    policy_value: String,
+    reason: String,
+    invocations: Int,
 
     json: fn(self) -> String Never! {
         pkg_json_render(
@@ -91,8 +91,8 @@ NixFallbackPolicyReceipt: struct {
 
 // The captured output of one permitted local Nix build and its facts.
 NixFallbackRun: struct {
-    stdout: String
-    facts: [String:String]
+    stdout: String,
+    facts: [String:String],
 }
 
 // The pure policy decision for the observed offline, CI, terminal and

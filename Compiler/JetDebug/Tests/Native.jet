@@ -92,7 +92,7 @@ NATIVE_TEST_PROGRAM: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nr
 
 // A ring buffer whose view lists its items in order. The program calls the
 // view itself, so the image has it whether or not the build keeps views.
-NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String\n    value: String\n}}\n\nRing: struct {{\n    items: [Int]\n    start: Int\n    count: Int\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
+NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nRing: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
 
 #Test("a_struct_with_a_debug_view_shows_its_items") {
     scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")

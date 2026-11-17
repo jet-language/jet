@@ -174,15 +174,15 @@ policy_scope_rank: fn(scope: PolicyScope) -> Int Never! {
 }
 
 PolicyCombine: enum {
-    Tighten
-    Override
-    Merge
+    Tighten,
+    Override,
+    Merge,
 }
 
 PolicyRule: struct {
-    key: PolicyKey
-    scopes: [PolicyScope]
-    combine: PolicyCombine
+    key: PolicyKey,
+    scopes: [PolicyScope],
+    combine: PolicyCombine,
 }
 
 POLICY_PACKAGE_SCOPES: #run { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
@@ -232,17 +232,17 @@ policy_rule: fn(key: PolicyKey) -> PolicyRule Never! {
 }
 
 EffectivePolicy: struct {
-    key: PolicyKey
-    value: PolicyValue
+    key: PolicyKey,
+    value: PolicyValue,
     // Outer-to-inner declaration chain, including overridden declarations.
-    provenance: [PolicyDeclaration]
+    provenance: [PolicyDeclaration],
 }
 
 // The source text of a file a policy chain names, so its declarations
 // render as `path:line:col`.
 PolicySourceText: struct {
-    path: String
-    text: DiagnosticSourceText
+    path: String,
+    text: DiagnosticSourceText,
 }
 
 // Where `declaration` was written: `path:line:col` when its source is among
@@ -273,9 +273,9 @@ policy_explain: fn(resolution: EffectivePolicy, sources: [PolicySourceText]) -> 
 // one collides with, so the report names its site.
 #Error
 PolicyError: enum {
-    ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
-    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration)
-    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration)
+    ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span),
+    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span, outer_site: PolicyDeclaration),
+    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span, outer_site: PolicyDeclaration),
 
     // Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
     // print it verbatim).
@@ -458,7 +458,7 @@ policy_gate_widens: fn(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
 // Rust `parse_value` returns the refusal as a `String`.
 #Error
 PolicyValueError: struct {
-    detail: String
+    detail: String,
 
     message: fn(self) -> String Never! { self.detail }
 }

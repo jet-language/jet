@@ -1,37 +1,37 @@
 TTestKind: enum {
-    Unit
-    Property
+    Unit,
+    Property,
 }
 
 TTestParamFact: struct {
-    index: Int
-    name: String
-    span: Span
-    ty: Type
-    convention: AccessConvention
-    label: String
-    zone: ParamZone
-    variadic: Bool
-    default_present: Bool
+    index: Int,
+    name: String,
+    span: Span,
+    ty: Type,
+    convention: AccessConvention,
+    label: String,
+    zone: ParamZone,
+    variadic: Bool,
+    default_present: Bool,
 }
 
 TTestFact: struct {
-    key: String
-    function: TFunctionRef
-    name: String
-    span: Span
-    kind: TTestKind
-    parameters: [TTestParamFact]
-    faults: [String]
-    expected_failure: Bool
-    contract_generated: Bool
-    eligibility: TFunctionRef?
-    generation_unavailable_reason: String?
+    key: String,
+    function: TFunctionRef,
+    name: String,
+    span: Span,
+    kind: TTestKind,
+    parameters: [TTestParamFact],
+    faults: [String],
+    expected_failure: Bool,
+    contract_generated: Bool,
+    eligibility: TFunctionRef?,
+    generation_unavailable_reason: String?,
     // A property test's law; None for a unit test.
-    law: TTestLawFact?{None}
+    law: TTestLawFact?{None},
     // A law test the compiler could not make (JetSema TraitLaws.jet): why.
     // The test stops, and `jet test` ends as an internal compiler error.
-    compiler_fault: String?{None}
+    compiler_fault: String?{None},
 }
 
 // A property test's law (#6015 c5), each part as its source text: the `#Pre`
@@ -41,18 +41,18 @@ TTestFact: struct {
 // (`surfaces`, sorted). The run adds its seed and the cases the precondition
 // rejected (JetCLI TestOutcome.jet jet_cli_test_law_attachments).
 TTestLawFact: struct {
-    precondition: [String]
-    partitions: [String]
-    relation: [String]
-    surfaces: [String]
+    precondition: [String],
+    partitions: [String],
+    relation: [String],
+    surfaces: [String],
 }
 
 // Collects a property body's assertions (`assert`, `assert_eq` and an
 // `expect(…)` method) and the other names it calls, over `source`.
 TTestLawVisitor: struct {
-    source: [U8]
-    relation: [String]
-    surfaces: [String]
+    source: [U8],
+    relation: [String],
+    surfaces: [String],
 
     visit: fn(&self, tables: ASTTables, expression: ExprNode) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never! {
         if ast_expr(tables, expression) == {
@@ -80,9 +80,9 @@ TTestLawVisitor: struct {
 }
 
 TOutputCheckFact: struct {
-    key: String
-    name: String
-    function: TFunctionRef
+    key: String,
+    name: String,
+    function: TFunctionRef,
 }
 
 // A test's key: its module identity's text `module_text` ("" for none), then

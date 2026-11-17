@@ -59,10 +59,10 @@ SCRATCH_DEFAULT_PARTS: ["~", ".cache", "jet-dev", "enum-codec-bench"]
 
 #Codable(only: .Encode)
 Witness: struct {
-    source_expression: String
-    semantic_value: String
-    decode_expectation: String
-    purpose: String
+    source_expression: String,
+    semantic_value: String,
+    decode_expectation: String,
+    purpose: String,
 }
 
 // The same semantic value is the known payload in every form.
@@ -82,10 +82,10 @@ WIRE_PAYLOADS: [
 
 #Codable(only: .Encode)
 FormInfo: struct {
-    description: String
-    entrypoint: String
-    marker: String
-    runtime_supported: Bool
+    description: String,
+    entrypoint: String,
+    marker: String,
+    runtime_supported: Bool,
 }
 
 FORM_INFO: [
@@ -107,71 +107,71 @@ DIGITS: Regex{"[0-9]+"}
 
 #CLI
 Args: struct {
-    #Doc("run an explicitly supplied existing canonical codec adapter") run: Bool
-    #Doc("emit static workload/unavailable cells without running a command (default)") dry_run: Bool
-    #[Doc("existing adapter command"), Arg(env: "JET_ENUM_CODEC_BENCH_COMMAND")] command: String?
-    #Doc("number of fresh samples per executable cell, 1..99") samples: Int{5}
-    #Doc("equal workload repetitions requested from the adapter, 1..1000000") rounds: Int{1}
-    #Doc("wall timeout per sample in seconds, above 0 and at most 3600") timeout_seconds: Float{30.0}
-    #Doc("the same as --timeout-seconds") timeout: Float?
-    #Doc("best-effort child address-space limit in MiB, 1..65536") memory_limit_mib: Int{1024}
-    #Doc("maximum adapter output and metrics file size, 1..16777216") max_output_bytes: Int{1048576}
-    #[Doc("disk-oriented scratch parent; /tmp and the repository's target/ are refused (default the enum-codec-bench dir of the user cache's jet-dev dir)"), Arg(env: "JET_ENUM_CODEC_BENCH_SCRATCH_ROOT")] scratch_root: String?
-    #Doc("requested optimized profile metadata, release or debug (does not verify the adapter)") profile: String{"release"}
-    #Doc("compiler name metadata override") compiler: String?
-    #Doc("compiler version metadata override") compiler_version: String?
-    #Doc("toolchain metadata override") toolchain: String?
-    #Doc("codec library metadata override") library: String?
-    #Doc("codec library version metadata override") library_version: String?
+    #Doc("run an explicitly supplied existing canonical codec adapter") run: Bool,
+    #Doc("emit static workload/unavailable cells without running a command (default)") dry_run: Bool,
+    #[Doc("existing adapter command"), Arg(env: "JET_ENUM_CODEC_BENCH_COMMAND")] command: String?,
+    #Doc("number of fresh samples per executable cell, 1..99") samples: Int{5},
+    #Doc("equal workload repetitions requested from the adapter, 1..1000000") rounds: Int{1},
+    #Doc("wall timeout per sample in seconds, above 0 and at most 3600") timeout_seconds: Float{30.0},
+    #Doc("the same as --timeout-seconds") timeout: Float?,
+    #Doc("best-effort child address-space limit in MiB, 1..65536") memory_limit_mib: Int{1024},
+    #Doc("maximum adapter output and metrics file size, 1..16777216") max_output_bytes: Int{1048576},
+    #[Doc("disk-oriented scratch parent; /tmp and the repository's target/ are refused (default the enum-codec-bench dir of the user cache's jet-dev dir)"), Arg(env: "JET_ENUM_CODEC_BENCH_SCRATCH_ROOT")] scratch_root: String?,
+    #Doc("requested optimized profile metadata, release or debug (does not verify the adapter)") profile: String{"release"},
+    #Doc("compiler name metadata override") compiler: String?,
+    #Doc("compiler version metadata override") compiler_version: String?,
+    #Doc("toolchain metadata override") toolchain: String?,
+    #Doc("codec library metadata override") library: String?,
+    #Doc("codec library version metadata override") library_version: String?,
 }
 
 // What a sample is run with.
 Bench: struct {
-    root: String
-    command: String
-    scratch: String
-    samples: Int
-    rounds: Int
-    timeout_seconds: Float
-    memory_limit_mib: Int
-    max_output_bytes: Int
-    profile: String
+    root: String,
+    command: String,
+    scratch: String,
+    samples: Int,
+    rounds: Int,
+    timeout_seconds: Float,
+    memory_limit_mib: Int,
+    max_output_bytes: Int,
+    profile: String,
 }
 
 #Codable(only: .Encode)
 FieldStatus: struct {
-    encoded_bytes: String
-    allocation_count: String
-    encode_median_ns: String
-    decode_median_ns: String
+    encoded_bytes: String,
+    allocation_count: String,
+    encode_median_ns: String,
+    decode_median_ns: String,
 }
 
 #Codable(only: .Encode)
 Matrix: struct {
-    id: String
-    form: String
-    case: String
-    operation: String
-    source_expression: String
-    wire_payload: String
-    wire_payload_bytes: Int
-    decode_expectation: String
-    status: String
-    reason: String
-    sample_results: [Dyn]
-    process_wall_median_ns: Int?
-    codec_median_ns: Int?
-    encode_median_ns: Int?
-    decode_median_ns: Int?
-    encode_time_ns: Int?
-    decode_time_ns: Int?
-    allocation_count: Int?
-    allocation_median: Int?
-    encoded_bytes: Int
-    encoded_bytes_status: String
-    allocation_status: String
-    timing_status: String
-    field_status: FieldStatus
+    id: String,
+    form: String,
+    case: String,
+    operation: String,
+    source_expression: String,
+    wire_payload: String,
+    wire_payload_bytes: Int,
+    decode_expectation: String,
+    status: String,
+    reason: String,
+    sample_results: [Dyn],
+    process_wall_median_ns: Int?,
+    codec_median_ns: Int?,
+    encode_median_ns: Int?,
+    decode_median_ns: Int?,
+    encode_time_ns: Int?,
+    decode_time_ns: Int?,
+    allocation_count: Int?,
+    allocation_median: Int?,
+    encoded_bytes: Int,
+    encoded_bytes_status: String,
+    allocation_status: String,
+    timing_status: String,
+    field_status: FieldStatus,
 }
 
 run: fn(args: Args) Err! {
@@ -549,16 +549,16 @@ median: fn(values: [Int?]) -> Int? Never! {
 
 // One sample: its report row, and what the cell's medians read from it.
 Sample: struct {
-    tree: Dyn
-    status: String
-    wall_ns: Int
-    codec_ns: Int?
-    allocation_count: Int?
+    tree: Dyn,
+    status: String,
+    wall_ns: Int,
+    codec_ns: Int?,
+    allocation_count: Int?,
 }
 
 Metrics: struct {
-    codec_ns: Int?
-    allocation_count: Int?
+    codec_ns: Int?,
+    allocation_count: Int?,
 }
 
 // One run of the adapter for a cell, judged against the cell's fixture.

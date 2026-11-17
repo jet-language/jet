@@ -12,79 +12,79 @@ use {
 
 // One function or method of the checked module a Canvas graph draws.
 CanvasFunc: struct {
-    name: String
-    name_span: Span
-    span: Span
-    body: [StmtNode]
+    name: String,
+    name_span: Span,
+    span: Span,
+    body: [StmtNode],
     // The AST tables the body's nodes index.
-    tables: ASTTables
-    return_type: String?
+    tables: ASTTables,
+    return_type: String?,
 }
 
 // One statement of a function body: its execution anchor, its source span,
 // its whole lines, and the branch path of the block that holds it.
 StatementLoc: struct {
-    anchor: Span
-    source: Span
-    full: Span
-    block: [Int]
-    index: Int
-    is_guard: Bool
-    is_expr: Bool
-    guard_span: Span?
+    anchor: Span,
+    source: Span,
+    full: Span,
+    block: [Int],
+    index: Int,
+    is_guard: Bool,
+    is_expr: Bool,
+    guard_span: Span?,
 }
 
 // The whole ordinary statements a convergence target selects.
 ExpressionSelection: struct {
-    span: Span
-    full: Span
+    span: Span,
+    full: Span,
 }
 
 // Where a convergence step goes: the offset, the text before the step, the
 // span of the statement or branch it follows, and whether that is a branch.
 ExecInsertion: struct {
-    offset: Int
-    indent: String
-    owner: Span
-    branch: Bool
+    offset: Int,
+    indent: String,
+    owner: Span,
+    branch: Bool,
 }
 
 SelectionScan: struct {
-    target: Span
-    found: ExpressionSelection?
+    target: Span,
+    found: ExpressionSelection?,
 }
 
 InsertionScan: struct {
-    node_span: Span
-    pin_name: String
-    found: ExecInsertion?
-    problem: String?
+    node_span: Span,
+    pin_name: String,
+    found: ExecInsertion?,
+    problem: String?,
 }
 
 ArmInsertScan: struct {
-    node_span: Span
-    head: String
-    fresh: String
-    found: TextEdit?
+    node_span: Span,
+    head: String,
+    fresh: String,
+    found: TextEdit?,
 }
 
 ArmSpanScan: struct {
-    pattern_span: Span
-    found: Bool
-    remove_span: Span
-    only_arm: Bool
+    pattern_span: Span,
+    found: Bool,
+    remove_span: Span,
+    only_arm: Bool,
 }
 
 SwitchedScan: struct {
-    node_span: Span
-    marker: Span?
-    nested: Bool
+    node_span: Span,
+    marker: Span?,
+    nested: Bool,
 }
 
 ListScan: struct {
-    node_span: Span
-    found: Bool
-    items: [Span]
+    node_span: Span,
+    found: Bool,
+    items: [Span],
 }
 
 // ---- Reorder ----
@@ -807,9 +807,9 @@ consume_leading_space_back: fn(before: String, comma: Int) -> Int Never! {
 // One checked module of a Canvas file: the check's modules, the position of
 // the file's own, and the semantic index the check built.
 CheckedSource: struct {
-    modules: [JetDriverDocModule]
-    at: Int
-    index: SemIndex?
+    modules: [JetDriverDocModule],
+    at: Int,
+    index: SemIndex?,
 }
 
 // Check `src` as `path`; an error diagnostic refuses the edit.

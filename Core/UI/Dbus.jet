@@ -65,13 +65,13 @@ APPEARANCE: "org.freedesktop.appearance"
 
 #Error
 DbusError: enum {
-    NoBus(String)
-    Connect(String)
-    Auth(String)
-    Protocol(String)
-    Closed
-    Timeout(String)
-    Failed(name: String, message: String)
+    NoBus(String),
+    Connect(String),
+    Auth(String),
+    Protocol(String),
+    Closed,
+    Timeout(String),
+    Failed(name: String, message: String),
 
     // No session bus is named, or only on a transport this client lacks.
     // The bus's socket could not be reached, read or written.
@@ -100,73 +100,73 @@ DbusError: enum {
 // unsigned value. An array carries its element signature, so an empty one
 // still has a type.
 DbusValue: enum {
-    Byte(Int)
-    Bool(Bool)
-    Int16(Int)
-    Uint16(Int)
-    Int32(Int)
-    Uint32(Int)
-    Int64(Int)
-    Uint64(Int)
-    Double(Float)
-    Text(String)
-    Path(String)
-    Signature(String)
-    Variant(DbusValue)
-    Array(signature: String, items: [DbusValue])
-    Struct([DbusValue])
-    Entry(key: DbusValue, value: DbusValue)
+    Byte(Int),
+    Bool(Bool),
+    Int16(Int),
+    Uint16(Int),
+    Int32(Int),
+    Uint32(Int),
+    Int64(Int),
+    Uint64(Int),
+    Double(Float),
+    Text(String),
+    Path(String),
+    Signature(String),
+    Variant(DbusValue),
+    Array(signature: String, items: [DbusValue]),
+    Struct([DbusValue]),
+    Entry(key: DbusValue, value: DbusValue),
 }
 
 // The four message types, numbered as the header's type byte.
 #[Specified, Layout(U8)]
 DbusKind: enum {
-    Call = 1
-    Return = 2
-    Error = 3
-    Signal = 4
+    Call = 1,
+    Return = 2,
+    Error = 3,
+    Signal = 4,
 }
 
 // One message. Empty strings and a zero reply serial are header fields
 // left out; `signature` is the body's, filled in when a message is read.
 DbusMessage: struct {
-    kind: DbusKind
-    flags: Int
-    serial: Int
-    reply_serial: Int
-    path: String
-    interface: String
-    member: String
-    error_name: String
-    destination: String
-    sender: String
-    signature: String
-    body: [DbusValue]
+    kind: DbusKind,
+    flags: Int,
+    serial: Int,
+    reply_serial: Int,
+    path: String,
+    interface: String,
+    member: String,
+    error_name: String,
+    destination: String,
+    sender: String,
+    signature: String,
+    body: [DbusValue],
 }
 
 // A connection to a bus: the unique name Hello gave, bytes read but not yet
 // a whole message, and the signals that arrived while a call waited.
 DbusConnection: struct {
-    stream: net.UnixStream
-    serial: Int
-    name: String
-    inbox: [U8]
-    queued: [DbusMessage]
+    stream: net.UnixStream,
+    serial: Int,
+    name: String,
+    inbox: [U8],
+    queued: [DbusMessage],
 }
 
 // A decoded message and the bytes it took; `used` is 0 while the bytes
 // hold no whole message yet, and `message` is None for a message of a
 // type this client ignores.
 Decoded: struct {
-    used: Int
-    message: DbusMessage?
+    used: Int,
+    message: DbusMessage?,
 }
 
 // Bytes being read: the message so far and where the current value ends.
 Reader: struct {
-    bytes: [U8]
-    at: Int
-    end: Int
+    bytes: [U8],
+    at: Int,
+    end: Int,
 }
 
 // ---- connecting
@@ -994,17 +994,17 @@ hex_digit: fn(b: Int) -> Int {
 // color-scheme setting.
 #[Specified, Layout(U8)]
 PortalScheme: enum {
-    NoPreference = 0
-    Dark = 1
-    Light = 2
+    NoPreference = 0,
+    Dark = 1,
+    Light = 2,
 }
 
 // The appearance the desktop asks apps for: `accent` is red, green and
 // blue in 0..1, empty when the desktop sets none.
 PortalAppearance: struct {
-    scheme: PortalScheme
-    accent: [Float]
-    high_contrast: Bool
+    scheme: PortalScheme,
+    accent: [Float],
+    high_contrast: Bool,
 }
 
 default_appearance: fn() -> PortalAppearance {
@@ -1133,8 +1133,8 @@ number: fn(value: DbusValue) -> Int {
 
 // A connected pair of sockets: the client's end and a fake bus's.
 TestBus: struct {
-    client: net.UnixStream
-    server: net.UnixStream
+    client: net.UnixStream,
+    server: net.UnixStream,
 }
 
 test_bus: fn(name: String) -[Env, Net, Time]> TestBus {

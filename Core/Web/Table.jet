@@ -9,34 +9,34 @@ C_MAX_TABLE_INDEX: 2147483647
 
 #Error
 WebTableError: enum {
-    NotFound
-    Invalid
+    NotFound,
+    Invalid,
 }
 
 WebTableSortDirection: enum {
-    Ascending
-    Descending
+    Ascending,
+    Descending,
 }
 
 WebTablePageMode: enum {
-    Client
-    Server
+    Client,
+    Server,
 }
 
 WebTableSort: struct {
-    column: String
-    descending: Bool
+    column: String,
+    descending: Bool,
 }
 
 WebTableFilter: struct {
-    column: String
-    value: String
+    column: String,
+    value: String,
 }
 
 WebTableColumn: struct<T> {
-    name: String
-    label: String
-    project: fn(T) -> String Never!
+    name: String,
+    label: String,
+    project: fn(T) -> String Never!,
 }
 
 // The compiler's table rule keys on this marker, not on this module's name:
@@ -44,41 +44,41 @@ WebTableColumn: struct<T> {
 // there is checked against that row's fields.
 ColumnOf: struct {
     impl Marker {
-        sites: [.Parameter]
+        sites: [.Parameter],
     }
 }
 
 WebTableRow: struct<T> {
-    key: String
-    value: T
+    key: String,
+    value: T,
 }
 
 WebTablePage: struct<T> {
-    rows: [T]
-    row_keys: [String]
-    total_rows: Int
-    page_index: Int
-    page_size: Int
-    page_count: Int
+    rows: [T],
+    row_keys: [String],
+    total_rows: Int,
+    page_index: Int,
+    page_size: Int,
+    page_count: Int,
 }
 
 WebTableState: struct {
-    sort: WebTableSort
-    filter: WebTableFilter
-    page_index: Int
-    page_size: Int
-    selected: [String]
-    focus: String
-    page_mode: WebTablePageMode
+    sort: WebTableSort,
+    filter: WebTableFilter,
+    page_index: Int,
+    page_size: Int,
+    selected: [String],
+    focus: String,
+    page_mode: WebTablePageMode,
 }
 
 WebTable: struct<T> {
-    name: String
-    columns: [WebTableColumn<T>]
-    rows: [WebTableRow<T>]
-    state: WebTableState
+    name: String,
+    columns: [WebTableColumn<T>],
+    rows: [WebTableRow<T>],
+    state: WebTableState,
     // Zero or one typed server loader; `with_server_page` replaces it.
-    server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]
+    server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!],
 
     with_column: fn(&self, col: &&WebTableColumn<T>) Never! { with_column<T>(self, col) }
 

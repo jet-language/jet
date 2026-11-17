@@ -86,7 +86,7 @@ s6_ratchet_unrelated: fn(path: String, line: String) -> Bool {
         return line.contains(s6_ratchet_concat("Capabil", "ity is a sigil"))
     }
     // The `DataInvalidationCause` variant and the registry rows that name it.
-    if path == "Core/Data/Data.jet" -> return line.trim() == s6_ratchet_concat("Capabil", "ity")
+    if path == "Core/Data/Data.jet" -> return line.trim().removesuffix(",") == s6_ratchet_concat("Capabil", "ity")
     if path == "Compiler/JetIR/Source/CompilerOwned.jet" || path == "Compiler/JetIR/Source/RuntimeRoutes.jet" || path == "Compiler/Prelude/Core.rows" {
         return line.contains("DataInvalidationCause")
     }

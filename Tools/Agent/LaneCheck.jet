@@ -147,8 +147,8 @@ assembly_refused: fn(output: String) -[Exec, IO]> Never {
 
 // An environment setting of a child run.
 Setting: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // The Jetpack assembly check's environment. Its Jet tool
@@ -500,8 +500,8 @@ int_or: fn(text: String, fallback: Int) -> Int Never! {
 }
 
 Ran: struct {
-    code: Int
-    text: String
+    code: Int,
+    text: String,
 }
 
 mem_available_mb: fn() -[FS]> Int Never! {
@@ -573,8 +573,8 @@ diagnostic_head: fn(line: String) -> Bool Never! {
 }
 
 Located: struct {
-    head: String
-    location: String
+    head: String,
+    location: String,
 }
 
 // `CHECK OK`, or `CHECK FAILED` with every diagnostic grouped by file and then
@@ -635,8 +635,8 @@ file_of: fn(location: String) -> String Never! {
 // What a Core source checks as: the module whose probe loads it (a private
 // part's owner, else its own module), or itself when it is a runtime unit.
 CoreRow: struct {
-    probe_module: String
-    runtime: Bool
+    probe_module: String,
+    runtime: Bool,
 }
 
 // Text field `key` of a JSON object, or "" when it is absent or not text.
@@ -704,14 +704,14 @@ RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 // Where one line of the assembled runtime unit came from: a listed source and
 // its 1-based line, or no path for the unit's Core import header.
 UnitLine: struct {
-    path: String
-    line: Int
+    path: String,
+    line: Int,
 }
 
 RuntimeUnit: struct {
-    text: String
-    lines: [UnitLine]
-    problem: String
+    text: String,
+    lines: [UnitLine],
+    problem: String,
 }
 
 // The runtime's explicit source manifest: every non-empty, non-comment line,
@@ -930,19 +930,19 @@ runtime_locations: fn(text: String, unit_path: String, lines: [UnitLine]) -> Str
 // --- personal-information guard ---------------------------------------------
 
 Identity: struct {
-    home: String
-    user: String
-    host: String
-    scratch_root: String
-    mounts: [String]
-    email: String
-    name: String
+    home: String,
+    user: String,
+    host: String,
+    scratch_root: String,
+    mounts: [String],
+    email: String,
+    name: String,
 }
 
 Rule: struct {
-    kind: String
-    find: String
-    source: String
+    kind: String,
+    find: String,
+    source: String,
 }
 
 // Names too common to be personal; a machine using one is not flagged by it.
@@ -1028,8 +1028,8 @@ machine_identity: fn(dir: String) -[Env, Exec, FS, Time.Wait]> Identity Never! {
 }
 
 RuleSet: struct {
-    rules: [Rule]
-    seen: [String]
+    rules: [Rule],
+    seen: [String],
 }
 
 add_path: fn(set: &RuleSet, raw: String) Never! {

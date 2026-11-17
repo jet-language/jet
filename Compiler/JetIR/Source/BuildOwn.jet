@@ -246,8 +246,8 @@ ir_box_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == ir_
 // One payload shape of a box: the members it holds while its selector word
 // at byte 0 is `selector` (-1: an Option's payload, held by every box).
 IRBoxShape: struct {
-    selector: Int
-    members: [IRMember]
+    selector: Int,
+    members: [IRMember],
 }
 
 // The payload shapes of the box row `row` (Option: payload at 0; Result:
@@ -990,50 +990,50 @@ ir_copy_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int N
 // a `defer close` names the variable, so it closes before the scope's other
 // closes (ir_close_deferred).
 IRClose: struct {
-    slot: Int
-    armed: Int
-    glue: Int
-    members_only: Bool
-    flag: Int
-    deferred: Bool{false}
+    slot: Int,
+    armed: Int,
+    glue: Int,
+    members_only: Bool,
+    flag: Int,
+    deferred: Bool{false},
 }
 
 // One step from a value to a part it holds: the member at byte `offset` of
 // the enum variant (or Result side: 1 Ok, 0 Err) `selector`; -1 for a
 // struct or tuple member and an Option's payload.
 IRPartStep: struct {
-    selector: Int
-    offset: Int
+    selector: Int,
+    offset: Int,
 }
 
 // The value in `slot` was read out of the value in `parent` by `step`, and
 // something in it closes (ir_close_note).
 IRPlace: struct {
-    slot: Int
-    parent: Int
-    step: IRPartStep
+    slot: Int,
+    parent: Int,
+    step: IRPartStep,
 }
 
 // The closing variable in `root` and the path from its value to a part.
 IRPlacePath: struct {
-    root: Int
-    path: [IRPartStep]
+    root: Int,
+    path: [IRPartStep],
 }
 
 // The part at `path` of the value of the closing variable in `root`: bit
 // `bit` of the variable's `armed` word is set once it moved out.
 IRMovedPart: struct {
-    root: Int
-    path: [IRPartStep]
-    bit: Int
+    root: Int,
+    path: [IRPartStep],
+    bit: Int,
 }
 
 // The Call at instruction `at` to the partial close of the closing variable
 // in `root`: its callee is built once every part that moves out of the
 // variable is known (ir_resolve_part_closes).
 IRPartClose: struct {
-    at: Int
-    root: Int
+    at: Int,
+    root: Int,
 }
 
 // The most parts of one variable's value that can move out: the bits of its

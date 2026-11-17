@@ -7,21 +7,21 @@ use files: core.files
 
 // A Pascal binding also names the shared runtime FreePascal produced.
 PascalBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    runtime: String
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    runtime: String,
+    provenance: String,
 }
 
 PKG_PASCAL_TOOL_ACTION: "rejected the Pascal binding source"
 
 // The cdecl value shapes the bridge accepts.
 PascalScalar: enum {
-    Int
-    Float
-    Pointer
-    Void
+    Int,
+    Float,
+    Pointer,
+    Void,
 
     parse: fn(value: String) -> PascalScalar? Never! {
         if pkg_ascii_lower(value.trim()) == {
@@ -58,27 +58,27 @@ PascalScalar: enum {
 }
 
 PascalParam: struct {
-    name: String
-    kind: PascalScalar
+    name: String,
+    kind: PascalScalar,
 }
 
 PascalRoutine: struct {
-    name: String
-    params: [PascalParam]
-    result: PascalScalar
+    name: String,
+    params: [PascalParam],
+    result: PascalScalar,
 }
 
 // The class handle group: constructor, pointer-first methods, and close.
 PascalHandle: struct {
-    group: String
-    ctor: PascalRoutine
-    close: PascalRoutine
-    methods: [PascalRoutine]
+    group: String,
+    ctor: PascalRoutine,
+    close: PascalRoutine,
+    methods: [PascalRoutine],
 }
 
 PascalSurface: struct {
-    plain: [PascalRoutine]
-    handle: PascalHandle
+    plain: [PascalRoutine],
+    handle: PascalHandle,
 }
 
 // Build the FreePascal library at `path` and bind its exported cdecl surface.
@@ -453,8 +453,8 @@ pkg_pascal_render_jet: fn(lib: String, surface: PascalSurface) -> String Never! 
     out.push(pkg_pascal_raw_jet(abi, handle.ctor, handle.ctor.name))
     loop routine in handle.methods -> out.push(pkg_pascal_raw_jet(abi, routine, routine.name))
     out.push(pkg_pascal_raw_jet(abi, handle.close, "{handle.group}_close"))
-    out.push("}}\n\n#Error\nPascalError: enum {{\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}}\n\n")
-    out.push("{ty}: struct {{\n    value: Int\n}}\n\n")
+    out.push("}}\n\n#Error\nPascalError: enum {{\n    InvalidHandle,\n    Foreign,\n    ResourceLimit,\n}}\n\n")
+    out.push("{ty}: struct {{\n    value: Int,\n}}\n\n")
     out.push("error: fn(code: Int) -> PascalError {{\n    if code == 1 -> return PascalError.InvalidHandle\n    if code == 2 -> return PascalError.ResourceLimit\n    return PascalError.Foreign\n}}\n\n")
     loop routine in surface.plain {
         out.push("{routine.name}: fn{pkg_pascal_params_jet(routine.params, 0)} -> {routine.result.jet()} {{\n    return abi.{routine.name}{pkg_pascal_call_args(routine.params, 0, None, ", ")}\n}}\n\n")

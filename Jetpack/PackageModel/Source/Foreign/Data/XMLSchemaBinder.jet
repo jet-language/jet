@@ -20,25 +20,25 @@ pkg_data_bind_xml: fn(input: String, root_name: String?) -> SchemaBuilder DataBi
 
 // What one piece of element content is.
 XMLContent: enum {
-    Text
-    CData
-    Element(XMLNode)
-    Comment
-    ProcessingInstruction
+    Text,
+    CData,
+    Element(XMLNode),
+    Comment,
+    ProcessingInstruction,
 }
 
 // An element with its expanded name, expanded attributes, content kinds, and
 // the namespace bindings in scope.
 XMLNode: struct {
-    name: String
-    attrs: [{name: String, value: String}]
-    content: [XMLContent]
-    namespaces: [String:String]
+    name: String,
+    attrs: [{name: String, value: String}],
+    content: [XMLContent],
+    namespaces: [String:String],
 }
 
 XMLParser: struct {
-    chars: [String]
-    pos: Int
+    chars: [String],
+    pos: Int,
 
     peek: fn(self) -> String Never! { pkg_data_at(self.chars, self.pos) }
 

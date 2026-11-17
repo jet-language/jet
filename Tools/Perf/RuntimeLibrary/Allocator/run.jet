@@ -52,62 +52,62 @@ SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGAB
 // signal's name or null, and why it did not start when it did not.
 #Codable(only: .Encode)
 Step: struct {
-    name: String
-    rc: Dyn
-    signal: Dyn
+    name: String,
+    rc: Dyn,
+    signal: Dyn,
     error: String?
 }
 
 #Codable(only: .Encode)
 Input: struct {
-    file: String
+    file: String,
     sha256: String
 }
 
 #Codable(only: .Encode)
 SourceHashes: struct {
-    driver: String
+    driver: String,
     rust: String
 }
 
 #Codable(only: .Encode)
 Inputs: struct {
-    o0: Input
-    o1: Input
+    o0: Input,
+    o1: Input,
     remaining: Input
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
 Pins: struct {
-    cell: String
-    iterations: Int
-    words: Int
-    align: Int
-    cpu: String
-    final_e2: String
-    composed: String
-    source_hashes: SourceHashes
+    cell: String,
+    iterations: Int,
+    words: Int,
+    align: Int,
+    cpu: String,
+    final_e2: String,
+    composed: String,
+    source_hashes: SourceHashes,
     inputs: Inputs
 }
 
 #Codable(only: .Encode)
 Build: struct {
-    pins: Pins
+    pins: Pins,
     steps: [Step]
 }
 
 // One timed run's samples.jsonl line.
 #[Codable(only: .Encode), Rename(.Camel)]
 Sample: struct {
-    arm: String
-    round: Int
-    cpu: String
-    wall_ns: String
-    rc: Dyn
-    signal: Dyn
-    stdout: String
-    stderr: String
-    error: String?
+    arm: String,
+    round: Int,
+    cpu: String,
+    wall_ns: String,
+    rc: Dyn,
+    signal: Dyn,
+    stdout: String,
+    stderr: String,
+    error: String?,
     verdict: String
 }
 
@@ -115,52 +115,52 @@ Sample: struct {
 // printed the expected checksum.
 #[Codable(only: .Encode), Rename(.Camel)]
 Measured: struct {
-    binary: String
-    sha256: String
-    verdict: String
-    samples: [Float]
-    median_ms: Float?
-    min_ms: Float?
+    binary: String,
+    sha256: String,
+    verdict: String,
+    samples: [Float],
+    median_ms: Float?,
+    min_ms: Float?,
     max_ms: Float?
 }
 
 #Codable(only: .Encode)
 Arms: struct {
-    #Rename("O0") o0: Measured
-    #Rename("O1") o1: Measured
+    #Rename("O0") o0: Measured,
+    #Rename("O1") o1: Measured,
     #Rename("Rust") rust: Measured
 }
 
 #Codable(only: .Encode)
 Ratios: struct {
-    #Rename("O0/Rust") o0: Float?
+    #Rename("O0/Rust") o0: Float?,
     #Rename("O1/Rust") o1: Float?
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
 Result: struct {
-    pins: Pins
-    expected: String
-    arms: Arms
-    ratios: Ratios
-    performance_admission: String
+    pins: Pins,
+    expected: String,
+    arms: Arms,
+    ratios: Ratios,
+    performance_admission: String,
     verdict: String
 }
 
 Arm: struct {
-    name: String
-    binary: String
-    sha256: String
-    verdict: String
+    name: String,
+    binary: String,
+    sha256: String,
+    verdict: String,
     samples: [Float]
 }
 
 // How one spawn ended, in spawnSync's terms.
 Ended: struct {
-    rc: Int?
-    signal: String?
-    error: String?
-    output: String
+    rc: Int?,
+    signal: String?,
+    error: String?,
+    output: String,
     errors: String
 }
 

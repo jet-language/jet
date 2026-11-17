@@ -31,10 +31,10 @@ use {
 ///   5.3.5), only for a key set up to decrypt, else empty.
 /// The host leaf reads `rk` and `dk`; the Jet rounds read `sk`.
 AESKey: struct {
-    rounds: Int
-    sk: [U64]
-    rk: [U8]
-    dk: [U8]
+    rounds: Int,
+    sk: [U64],
+    rk: [U8],
+    dk: [U8],
 
     impl Close {
         close: fn(&&self) {
@@ -785,15 +785,15 @@ encrypt_in_place: fn(k: AESKey, b: &[U8]) Never! {
 /// 16-byte blocks. The key must hold an encryption schedule.
 ForwardBlock: trait {
     /// The 16-byte block `b` replaced by its encryption.
-    encrypt_one: fn(self, b: &[U8]) Never!
+    encrypt_one: fn(self, b: &[U8]) Never!,
     /// `count` whole blocks of `src` from `off` XORed with the keystream of
     /// the counter block `ctr`, appended to `out`; `ctr` ends incremented
     /// by `count` in its last 32 bits (the CTR32 operation of `blocks`).
-    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!
+    ctr32_blocks: fn(self, ctr: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!,
     /// `count` whole blocks of `src` from `off` CBC-encrypted from the
     /// chaining value `iv`, appended to `out`; `iv` ends holding the last
     /// ciphertext block (the CBC_ENC operation of `blocks`).
-    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!
+    cbc_blocks: fn(self, iv: &[U8], src: [U8], off: Int, count: Int, out: &[U8]) Never!,
 }
 
 // ---------------------------------------------------------------------------
@@ -921,8 +921,8 @@ ofb: fn(k: AESKey, offset: Int, iv: &[U8], src: [U8], off: Int, len: Int, out: &
 
 /// The data key and the tweak key of XTS-AES-128 or XTS-AES-256.
 XTSKey: struct {
-    crypt: AESKey
-    tweak: AESKey
+    crypt: AESKey,
+    tweak: AESKey,
 }
 
 /// The two halves of a 32- or 64-byte XTS key: the first encrypts the
@@ -1042,8 +1042,8 @@ cmac_prf_128: fn(key: [U8], msg: [U8]) -> [U8] Never! {
 /// refused.
 #Error
 CipherError: enum {
-    Input
-    Auth
+    Input,
+    Auth,
 }
 
 /// A length or parameter outside the algorithm's limits.
@@ -1200,11 +1200,11 @@ kw_unwrapped_len: fn(plen: U64) -> Int Never! { Int{wrapping(U32{plen})} }
 // CBC padding (mbedtls cipher.c).
 
 CBCPadding: enum {
-    PKCS7
-    OneAndZeros
-    ZerosAndLen
-    Zeros
-    Unpadded
+    PKCS7,
+    OneAndZeros,
+    ZerosAndLen,
+    Zeros,
+    Unpadded,
 }
 
 /// PKCS #7: n bytes of value n.
@@ -1237,8 +1237,8 @@ cbc_add_padding: fn(mode: CBCPadding, out: &[U8], len: Int, data_len: Int) Never
 /// (CipherLayer.jet `padding_len`, `padding_valid`); an Int would test
 /// its range on every use.
 CBCPaddingCheck: struct {
-    data_len: U64
-    bad: U64
+    data_len: U64,
+    bad: U64,
 }
 
 /// All ones when x is not zero, else zero, without a branch.

@@ -2,15 +2,15 @@
 // jetpack::ProviderGraph.
 
 ProviderObject: struct {
-    family: ProviderFamily
-    ref_key: String
-    exact_identity: String
-    hash: String
-    platform: String
-    signature: String
-    audit: [String]
-    sandbox_effects: [String]
-    build_effects: [String]
+    family: ProviderFamily,
+    ref_key: String,
+    exact_identity: String,
+    hash: String,
+    platform: String,
+    signature: String,
+    audit: [String],
+    sandbox_effects: [String],
+    build_effects: [String],
 
     // A binary artifact: its hash and platform are its identity, and it runs
     // no build.
@@ -39,28 +39,28 @@ ProviderObject: struct {
 }
 
 ProviderRequest: struct {
-    family: ProviderFamily
-    ref_key: String
-    exact_identity: String
-    hash: String
-    platform: String
-    offline: Bool
+    family: ProviderFamily,
+    ref_key: String,
+    exact_identity: String,
+    hash: String,
+    platform: String,
+    offline: Bool,
 }
 
 FetchDecision: enum {
-    AllowedOfflineSatisfied
-    AllowedNetworkWithGrant(authority: String)
-    DeniedOfflineMissingLock
+    AllowedOfflineSatisfied,
+    AllowedNetworkWithGrant(authority: String),
+    DeniedOfflineMissingLock,
 }
 
 // Why a provider object or report cannot be formed.
 #Error
 ProviderGraphError: struct {
-    message: String
+    message: String,
 }
 
 AuthorityGraph: struct {
-    locked_objects: [ProviderObject]
+    locked_objects: [ProviderObject],
 
     empty: fn() -> AuthorityGraph Never! { AuthorityGraph{locked_objects: [ProviderObject]{}} }
 

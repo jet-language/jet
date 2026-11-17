@@ -5,11 +5,11 @@
 // declares `IO`. Declaring `-[]>` on `parse` would stop the check with E0740,
 // naming `Traced<Parser>` and the `Parser::scan` it runs.
 Scan: trait {
-    scan: fn(self, input: String) -> Int
+    scan: fn(self, input: String) -> Int,
 }
 
 Plain: struct {
-    scale: Int
+    scale: Int,
 
     impl Scan {
         scan: fn(self, input: String) -> Int { input.len() * self.scale }
@@ -17,7 +17,7 @@ Plain: struct {
 }
 
 Parser: struct {
-    scale: Int
+    scale: Int,
 
     impl Scan {
         scan: fn(self, input: String) -> Int {
@@ -28,7 +28,7 @@ Parser: struct {
 }
 
 Traced: struct<T: Scan> {
-    inner: T
+    inner: T,
 
     traced: fn(self, input: String) -> Int { self.inner.scan(input) + 1 }
 }

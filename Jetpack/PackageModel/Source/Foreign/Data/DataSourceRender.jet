@@ -7,22 +7,22 @@ use jetpack_foundation.[foundation_generated_snake_name, foundation_generated_ty
 // Why a data schema could not be bound.
 #Error
 DataBindError: struct {
-    message: String
+    message: String,
 }
 
 // Result of binding a data schema into ordinary, visible Jet source.
 DataBindResult: struct {
-    source: String
-    record_count: Int
+    source: String,
+    record_count: Int,
 }
 
 // The supported data schema formats.
 DataSchemaFormat: enum {
-    JSON
-    CSV
-    SQL
-    XML
-    Proto
+    JSON,
+    CSV,
+    SQL,
+    XML,
+    Proto,
 
     parse: fn(format: String) -> DataSchemaFormat? Never! {
         if format == {
@@ -64,12 +64,12 @@ DataSchemaFormat: enum {
 
 // An inferred field type.
 BoundType: enum {
-    Scalar(String)
-    Bytes
-    Named(String)
-    Array(BoundType)
-    Optional(BoundType)
-    Dynamic
+    Scalar(String),
+    Bytes,
+    Named(String),
+    Array(BoundType),
+    Optional(BoundType),
+    Dynamic,
 
     render: fn(self) -> String Never! {
         if self == {
@@ -91,29 +91,29 @@ pkg_data_bound_scalar: fn(name: String) -> BoundType Never! {
 
 // A field before its generated Jet name is chosen.
 FieldSeed: struct {
-    wire_name: String
-    ty: BoundType
-    optional: Bool
-    note: String?
+    wire_name: String,
+    ty: BoundType,
+    optional: Bool,
+    note: String?,
 }
 
 BoundField: struct {
-    wire_name: String
-    name: String
-    ty: BoundType
-    optional: Bool
-    note: String?
+    wire_name: String,
+    name: String,
+    ty: BoundType,
+    optional: Bool,
+    note: String?,
 }
 
 BoundRecord: struct {
-    name: String
-    fields: [BoundField]
+    name: String,
+    fields: [BoundField],
 }
 
 // The records a schema produces, in declaration order, with unique names.
 SchemaBuilder: struct {
-    records: [BoundRecord]
-    used_type_names: [String]
+    records: [BoundRecord],
+    used_type_names: [String],
 
     new: fn() -> SchemaBuilder Never! {
         SchemaBuilder{records: [BoundRecord]{}, used_type_names: [String]{}}
@@ -207,8 +207,8 @@ pkg_data_render_source: fn(kind: DataSchemaFormat, format: String, input_path: S
             }
             optional: if field.optional -> "?" else -> ""
             if field.wire_name != field.name {
-                lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional}\n")
-            } else { lines.push("    {field.name}: {field.ty.render()}{optional}\n") }
+                lines.push("    #Rename({pkg_data_quote_jet_string(field.wire_name)}) {field.name}: {field.ty.render()}{optional},\n")
+            } else { lines.push("    {field.name}: {field.ty.render()}{optional},\n") }
         }
         lines.push("}}\n\n")
     }

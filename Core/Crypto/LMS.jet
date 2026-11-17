@@ -19,10 +19,10 @@ use {
 /// Why an LMS or LM-OTS operation failed (MBEDTLS_ERR_LMS_*).
 #Error
 LMSError: enum {
-    BadInput
-    OutOfPrivateKeys
-    VerifyFailed
-    RandomFailed
+    BadInput,
+    OutOfPrivateKeys,
+    VerifyFailed,
+    RandomFailed,
 }
 
 /// A malformed key, an unsupported type, or a used or absent private
@@ -33,14 +33,14 @@ LMSError: enum {
 
 /// The LM-OTS parameter set (mbedtls_lmots_algorithm_type_t).
 LMOTSType: enum {
-    SHA256N32W8
+    SHA256N32W8,
 }
 
 /// LMOTS_SHA256_N32_W8, IANA type 4: n = 32, w = 8, p = 34.
 
 /// The LMS parameter set (mbedtls_lms_algorithm_type_t).
 LMSType: enum {
-    SHA256M32H10
+    SHA256M32H10,
 }
 
 /// LMS_SHA256_M32_H10, IANA type 6: m = 32, a tree of height 10.
@@ -129,23 +129,23 @@ put_all: fn(out: &[U8], src: [U8]) Never! {
 /// identifier I, the big-endian leaf number q (zero outside an LMS key) and
 /// the parameter set.
 LMOTSParams: struct {
-    key_id: [U8]
-    leaf_id: [U8]
-    kind: LMOTSType
+    key_id: [U8],
+    leaf_id: [U8],
+    kind: LMOTSType,
 }
 
 /// An LM-OTS public key, the hash K (mbedtls_lmots_public_t).
 LMOTSPublic: struct {
-    params: LMOTSParams
-    key: [U8]
+    params: LMOTSParams,
+    key: [U8],
 }
 
 /// An LM-OTS private key (mbedtls_lmots_private_t): p secret hashes, wiped
 /// and marked unusable once it signs.
 LMOTSPrivate: struct {
-    params: LMOTSParams
-    keys: [[U8]]
-    usable: Bool
+    params: LMOTSParams,
+    keys: [[U8]],
+    usable: Bool,
 
     impl Close {
         close: fn(&&self) {
@@ -320,24 +320,24 @@ lmots_sign: fn<R: RNG>(ctx: &LMOTSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError!
 /// The identity of an LMS key (mbedtls_lms_parameters_t): the key
 /// identifier I and the two parameter sets.
 LMSParams: struct {
-    key_id: [U8]
-    ots: LMOTSType
-    kind: LMSType
+    key_id: [U8],
+    ots: LMOTSType,
+    kind: LMSType,
 }
 
 /// An LMS public key, the Merkle root T[1] (mbedtls_lms_public_t).
 LMSPublic: struct {
-    params: LMSParams
-    root: [U8]
+    params: LMSParams,
+    root: [U8],
 }
 
 /// An LMS private key (mbedtls_lms_private_t): one LM-OTS key pair per leaf
 /// and the next unused leaf.
 LMSPrivate: struct {
-    params: LMSParams
-    next_leaf: Int
-    ots_private: [LMOTSPrivate]
-    ots_public: [LMOTSPublic]
+    params: LMSParams,
+    next_leaf: Int,
+    ots_private: [LMOTSPrivate],
+    ots_public: [LMOTSPublic],
 }
 
 // T[r] for leaf r: H(I || u32 r || D_LEAF || K) (create_merkle_leaf_value).
@@ -558,7 +558,7 @@ lms_sign: fn<R: RNG>(ctx: &LMSPrivate, rng: &R, msg: [U8]) -> [U8] LMSError! {
 
 // A test generator that hands out one fixed buffer, repeated as needed.
 FixedRNG: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     impl RNG {
         fill: fn(&self, out: &[U8]) -> Bool Never! {

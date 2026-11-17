@@ -4,9 +4,9 @@
 use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, name_mangle, symbol_find, symbol_key_text, symbol_none]
 
 SemaOutputIntent: enum {
-    Check
-    Run
-    Test
+    Check,
+    Run,
+    Test,
 }
 
 // Metadata bindings are not runtime constants. Explicit comptime bindings still
@@ -18,17 +18,17 @@ sema_output_metadata_binding: fn(definition: ConstDef) -> Bool {
 }
 
 SemaOutputTarget: struct {
-    module_index: Int
-    function_index: Int
-    source_name: String
-    references: [SemaNameReferenceFact]
+    module_index: Int,
+    function_index: Int,
+    source_name: String,
+    references: [SemaNameReferenceFact],
 }
 
 SemaOutputRow: struct {
-    module_index: Int
-    item_index: Int
-    fact: ResolvedOutput
-    references: [SemaNameReferenceFact]
+    module_index: Int,
+    item_index: Int,
+    fact: ResolvedOutput,
+    references: [SemaNameReferenceFact],
 }
 
 sema_output_error: fn(span: Span, what: String, why: String, fix: String) -> Diagnostic {

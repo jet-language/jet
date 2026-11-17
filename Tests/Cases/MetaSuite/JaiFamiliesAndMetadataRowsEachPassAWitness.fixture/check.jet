@@ -24,20 +24,20 @@ LEVELS: [String]{"o0", "o1", "o2"}
 
 // One row that must be witnessed: a Jai family or a contract row.
 CoverageRow: struct {
-    name: String
-    witnesses: [String]
+    name: String,
+    witnesses: [String],
 }
 
 Coverage: struct {
-    rows: [CoverageRow]
-    families: Int
-    contract: Int
+    rows: [CoverageRow],
+    families: Int,
+    contract: Int,
     // The families no observed source shows.
-    historical_only: [String]
-    problems: [String]
+    historical_only: [String],
+    problems: [String],
     // Each known-failing verdict, with its row, and how many rows hold one.
-    owed: [String]
-    owed_rows: Int
+    owed: [String],
+    owed_rows: Int,
 }
 
 // A family id, `J01` to `J40`.
@@ -175,9 +175,9 @@ witness_ids: fn(coverage: Coverage) -> [String] {
 
 // One verdict of the results document.
 Verdict: struct {
-    tier: String
-    status: String
-    detail: String
+    tier: String,
+    status: String,
+    detail: String,
 }
 
 text_field: fn(record: Dyn, name: String) -> String {
@@ -206,8 +206,8 @@ read_results: fn(path: String) -> [String:[Verdict]] {
 // The witness `id` on its tiers: why it does not pass, and each known-failing
 // verdict, which leaves its row owed rather than passed.
 WitnessReport: struct {
-    problems: [String]
-    owed: [String]
+    problems: [String],
+    owed: [String],
 }
 
 witness_report: fn(id: String, verdicts: [String:[Verdict]]) -> WitnessReport {

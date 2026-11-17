@@ -6,83 +6,83 @@ TEST_COMPARISON_SCHEMA_VERSION: U16{1}
 // A comparison verdict. The non-success states are deliberately distinct: a
 // caller must not turn an empty, unavailable, or cancelled run into pass.
 ComparisonStatus: enum {
-    Matched
-    Mismatch
-    Empty
-    Unsupported
-    Unavailable
-    Timeout
-    Cancelled
-    InvalidOracle
-    Contaminated
+    Matched,
+    Mismatch,
+    Empty,
+    Unsupported,
+    Unavailable,
+    Timeout,
+    Cancelled,
+    InvalidOracle,
+    Contaminated,
 }
 
 // The relation used to decide whether two observations agree.
 ObservationRelation: enum {
-    TypedEquality
-    OrderedEffects
-    TypedFailure
-    Custom(name: String)
+    TypedEquality,
+    OrderedEffects,
+    TypedFailure,
+    Custom(name: String),
 }
 
 // One side's observable result: `raw` is the typed canonical rendering.
 ComparisonObservation: struct {
-    raw: String
-    typed_failure: String?
-    mutation: String?
-    ordered_effects: [String]
-    cleanup: [String]
+    raw: String,
+    typed_failure: String?,
+    mutation: String?,
+    ordered_effects: [String],
+    cleanup: [String],
 }
 
 // Stable identity for one replayable case.
 ComparisonIdentity: struct {
-    case_id: String
-    input_id: String
-    seed: U64?
-    source: String
-    tool: String
-    target: String
+    case_id: String,
+    input_id: String,
+    seed: U64?,
+    source: String,
+    tool: String,
+    target: String,
 }
 
 // A reference/candidate observation pair with optional independent replays.
 ComparisonSample: struct {
-    identity: ComparisonIdentity
-    reference: ComparisonObservation
-    candidate: ComparisonObservation
-    reference_replay: ComparisonObservation?
-    candidate_replay: ComparisonObservation?
+    identity: ComparisonIdentity,
+    reference: ComparisonObservation,
+    candidate: ComparisonObservation,
+    reference_replay: ComparisonObservation?,
+    candidate_replay: ComparisonObservation?,
     // Checked semantic equality of the two observed values, which every
     // relation reads; its supplier computes it by canonical typed comparison.
     // Diagnostic raw renderings are not nominal/value equality facts.
-    declared_equal: Bool?
+    declared_equal: Bool?,
 }
 
 ComparisonRecord: struct {
-    schema_version: U16
-    status: ComparisonStatus
-    relation: ObservationRelation
-    samples: [ComparisonSample]
-    discarded_cases: Int
-    first_difference: Int?
-    reduced_counterexample: ComparisonSample?
-    contamination: String?
-    reason: String?
+    schema_version: U16,
+    status: ComparisonStatus,
+    relation: ObservationRelation,
+    samples: [ComparisonSample],
+    discarded_cases: Int,
+    first_difference: Int?,
+    reduced_counterexample: ComparisonSample?,
+    contamination: String?,
+    reason: String?,
     // Always false: the non-proof boundary made explicit.
-    universal_proof: Bool
+    universal_proof: Bool,
 }
 
 // Rust's `String` refusals from validate/to_json/artifact_id.
 #Error
 ComparisonRecordError: struct {
-    message: String
+    message: String,
 }
 
 impl CanonicalJSONError -> ComparisonRecordError { return ComparisonRecordError{message: self.message} }
 
 #Error
 ComparisonAssertionError: struct {
-    status: ComparisonStatus
-    reason: String
+    status: ComparisonStatus,
+    reason: String,
 }
 
 // Rust `ComparisonStatus::as_str`.

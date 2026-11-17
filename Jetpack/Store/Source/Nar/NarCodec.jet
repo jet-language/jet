@@ -34,21 +34,21 @@ STORE_NAR_CHUNK_BYTES: 65536
 STORE_NAR_STAGE_SEQUENCE: Shared{ProcessSequence{next: 0}}
 
 NarStats: struct {
-    digest: String
-    bytes: Int
-    nodes: Int
+    digest: String,
+    bytes: Int,
+    nodes: Int,
 }
 
 // A decoded NAR tree.
 NarNode: enum {
-    Directory([NarDirectoryEntry])
-    Regular(executable: Bool, bytes: [U8])
-    Symlink([U8])
+    Directory([NarDirectoryEntry]),
+    Regular(executable: Bool, bytes: [U8]),
+    Symlink([U8]),
 }
 
 NarDirectoryEntry: struct {
-    name: [U8]
-    node: NarNode
+    name: [U8],
+    node: NarNode,
 }
 
 // A byte source for streaming decode: an open file, a Zstandard stream over
@@ -57,13 +57,13 @@ NarDirectoryEntry: struct {
 // the data.
 // workaround #5940(d,e): an enum, not an escaping closure owning the reader.
 NarByteInput: enum {
-    File(FileReader)
-    Zstd(ZstdReader)
-    Reader(fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!)
+    File(FileReader),
+    Zstd(ZstdReader),
+    Reader(fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!),
 }
 
 NarByteSource: struct {
-    priv input: NarByteInput
+    priv input: NarByteInput,
 
     file: fn(reader: &&FileReader) -> NarByteSource Never! {
         NarByteSource{input: NarByteInput.File(reader)}
@@ -236,11 +236,11 @@ store_nar_put_bytes: fn(out: &[U8], bytes: [U8]) StoreError! {
 
 // An in-memory NAR decoder.
 NarReader: struct {
-    bytes: [U8]
-    at: Int
-    allow_nix_store_symlinks: Bool
-    nodes: Int
-    content_bytes: Int
+    bytes: [U8],
+    at: Int,
+    allow_nix_store_symlinks: Bool,
+    nodes: Int,
+    content_bytes: Int,
 
     take_bytes: fn(&self, length: Int) -> [U8] StoreError! {
         if length < 0 || self.at + length > self.bytes.len() {
@@ -408,12 +408,12 @@ store_nar_stream_decode: fn(reader: &NarStreamReader, destination: String, expec
 }
 
 NarStreamReader: struct {
-    source: NarByteSource
-    limit: Int
-    bytes: Int
-    hasher: Hasher
-    allow_nix_store_symlinks: Bool
-    nodes: Int
+    source: NarByteSource,
+    limit: Int,
+    bytes: Int,
+    hasher: Hasher,
+    allow_nix_store_symlinks: Bool,
+    nodes: Int,
 
     // Up to `wanted` bytes, never past the declared size plus one.
     read_some: fn(&self, wanted: Int) -> [U8] StoreError! {

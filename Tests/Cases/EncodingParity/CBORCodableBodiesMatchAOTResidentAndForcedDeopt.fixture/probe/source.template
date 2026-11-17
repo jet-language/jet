@@ -23,26 +23,26 @@ impl Token.Decode {
 
 #Codable
 Event: enum {
-    Idle
-    Count(Int)
+    Idle,
+    Count(Int),
 }
 
 #Codable
 Wrap: struct<T> {
-    value: T
+    value: T,
 }
 
 #[Codable, Rename(.Camel)]
 Packet: struct {
-    display_name: String
-    token: Token
-    event: Event
-    bytes: [U8]
-    numbers: [Int]
-    labels: [String:Int]
-    maybe: Int?
-    score: Float
-    letter: Char
+    display_name: String,
+    token: Token,
+    event: Event,
+    bytes: [U8],
+    numbers: [Int],
+    labels: [String:Int],
+    maybe: Int?,
+    score: Float,
+    letter: Char,
 }
 
 resident: fn() -[]> String {
@@ -55,7 +55,7 @@ resident: fn() -[]> String {
         labels: [String:Int]{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
-        letter: 'Z'
+        letter: 'Z',
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
@@ -78,7 +78,7 @@ forced_deopt: fn(seed: String) -[]> String {
         labels: [String:Int]{ "x": 6 },
         maybe: Val(8),
         score: 1.5,
-        letter: 'Z'
+        letter: 'Z',
     }
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")

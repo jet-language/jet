@@ -25,32 +25,32 @@ JETLIB_NUL: #run { String.from_bytes([U8]{U8{0}}) ?? "" }
 
 // Actual compiler/host facts are passed by the existing identity provider.
 JetLibIdentity: struct {
-    compiler_version: String
-    target: String
-    host_max: Int
+    compiler_version: String,
+    target: String,
+    host_max: Int,
 }
 
 // Private structured parser failures keep producer and loader wording distinct.
 JetLibParseKind: enum {
-    Length
-    Field
-    TooLarge
-    UTF8
+    Length,
+    Field,
+    TooLarge,
+    UTF8,
 }
 
 JetLibParseFailure: struct {
-    kind: JetLibParseKind
-    field: String
+    kind: JetLibParseKind,
+    field: String,
 }
 
 // The one scalar vocabulary admits for native Library rows. Each case number
 // is the byte a .jetlib header stores for it.
 #[Specified, Layout(U8)]
 JetLibScalar: enum {
-    Int = 0
-    Float = 1
-    Bool = 2
-    Text = 3
+    Int = 0,
+    Float = 1,
+    Bool = 2,
+    Text = 3,
 }
 
 // The access convention carried with each native parameter: the C scalar
@@ -58,19 +58,19 @@ JetLibScalar: enum {
 // Each case number is the byte a .jetlib header stores for it.
 #[Specified, Layout(U8)]
 JetLibAccess: enum {
-    Read = 0
-    Write = 1
-    Move = 2
+    Read = 0,
+    Write = 1,
+    Move = 2,
 }
 
 // One exact C ABI row: `symbol` is the emitted foreign name; access
 // conventions stay explicit metadata, never inferred from generated code.
 JetLibExport: struct {
-    name: String
-    symbol: String
-    scalar: JetLibScalar
-    params: U32
-    conventions: [JetLibAccess]
+    name: String,
+    symbol: String,
+    scalar: JetLibScalar,
+    params: U32,
+    conventions: [JetLibAccess],
 
     new: fn(name: String, scalar: JetLibScalar, params: Int) -> JetLibExport Never! {
         conventions := [JetLibAccess]{}
@@ -86,20 +86,20 @@ JetLibExport: struct {
 
 // The load-time identity a `.jetlib` header carries.
 JetLibStamp: struct {
-    compiler_version: String
-    compiler_build: String
-    library_name: String
+    compiler_version: String,
+    compiler_build: String,
+    library_name: String,
     // The selected manifest output entry, kept for build provenance.
-    entry: String?
-    target: String
-    target_triple: String
-    linker_identity: String
-    abi_identity: String
-    abi_version: U32
-    exports: [JetLibExport]
+    entry: String?,
+    target: String,
+    target_triple: String,
+    linker_identity: String,
+    abi_identity: String,
+    abi_version: U32,
+    exports: [JetLibExport],
     // Sorted and duplicate-free (Rust `EffectSet`).
-    declared_effects: [String]
-    payload_digest: String
+    declared_effects: [String],
+    payload_digest: String,
 
     // The all-empty stamp (Rust `Default`).
     empty: fn() -> JetLibStamp Never! {
@@ -268,8 +268,8 @@ JetLibStamp: struct {
 // input owner and extent; no payload to_list/to_vec conversion. host_max is
 // actual target usize::MAX.
 JetLibArtifact: struct {
-    stamp: JetLibStamp
-    payload: View<U8>
+    stamp: JetLibStamp,
+    payload: View<U8>,
 
     encode_bytes: fn(self) -> [U8] Never! {
         out := JetLibWriter{bytes: self.stamp.encode_bytes()}
@@ -297,7 +297,7 @@ JetLibArtifact: struct {
 
 // Big-endian header writer.
 JetLibWriter: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     new: fn() -> JetLibWriter Never! { JetLibWriter{bytes: [U8]{}} }
 
@@ -323,9 +323,9 @@ JetLibWriter: struct {
 // The Rust take_bytes/take_string. One structured private failure rail;
 // each consumer's original strings render only here.
 JetLibReader: struct {
-    bytes: View<U8>
-    at: Int
-    loader: Bool
+    bytes: View<U8>,
+    at: Int,
+    loader: Bool,
 
     take_byte: fn(&self) -> Int? Never! {
         if self.at >= self.bytes.len() -> return None
@@ -480,13 +480,13 @@ pkg_jetlib_valid_payload_digest: fn(digest: String) -> Bool Never! {
 // Rust validate_load_metadata:531–626. A structured result also supplies the
 // loader's Invalid/Unsupported classification without a second validation walk.
 JetLibMetadataKind: enum {
-    Invalid
-    Unsupported
+    Invalid,
+    Unsupported,
 }
 
 JetLibMetadataFailure: struct {
-    kind: JetLibMetadataKind
-    reason: String
+    kind: JetLibMetadataKind,
+    reason: String,
 }
 
 jetlib_metadata_failure: fn(reason: String, unsupported: Bool) -> JetLibMetadataFailure? Never! {
@@ -576,7 +576,7 @@ pkg_e1339: fn(library: String, effect_name: String) -> Diagnostic Never! {
 // Rust Result<(),Diagnostic/Vec<Diagnostic>> uses the existing result-carrier
 // convention, not a new public #Error identity.
 JetLibRefusal: struct {
-    diagnostics: [Diagnostic]
+    diagnostics: [Diagnostic],
 }
 
 pkg_jetlib_check_compiler_identity: fn(stamp: JetLibStamp, version: String) -> Diagnostic? Never! {

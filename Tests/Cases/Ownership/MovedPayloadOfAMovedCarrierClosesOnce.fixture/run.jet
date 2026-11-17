@@ -5,12 +5,12 @@
 use files: core.files
 
 Lock: struct {
-    owner: files.FileLock
-    marker: files.FileReader
+    owner: files.FileLock,
+    marker: files.FileReader,
 }
 
 Tag: struct {
-    name: String
+    name: String,
 
     impl Close {
         close: fn(&&self) { print("close {self.name}") }
@@ -18,14 +18,14 @@ Tag: struct {
 }
 
 Held: struct {
-    name: String
-    lock: Lock?
-    tag: Tag
+    name: String,
+    lock: Lock?,
+    tag: Tag,
 }
 
 #Error
 Failure: enum {
-    Missing
+    Missing,
 }
 
 held: fn(name: String) -> Held Never! { Held{name: name, lock: None, tag: Tag{name: name}} }

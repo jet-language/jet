@@ -5,10 +5,10 @@
 use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_text_lines]
 
 PublicationResolveMode: enum {
-    Conservative
-    Latest
-    Lowest
-    LowestDirect
+    Conservative,
+    Latest,
+    Lowest,
+    LowestDirect,
 }
 
 publication_resolve_mode_default: fn() -> PublicationResolveMode Never! {
@@ -25,33 +25,33 @@ publication_resolve_mode_label: fn(mode: PublicationResolveMode) -> String Never
 }
 
 PublicationVersionConstraint: struct {
-    package: String
-    req: PublicationVersionReq
-    from: String
+    package: String,
+    req: PublicationVersionReq,
+    from: String,
 }
 
 PublicationSolverCandidate: struct {
-    version: PublicationSemVer
-    dependencies: [PublicationVersionConstraint]
+    version: PublicationSemVer,
+    dependencies: [PublicationVersionConstraint],
     // Set-valued Rust fields use unique lists, comparing canonical precedence.
-    rejected: [String:[PublicationSemVer]]
-    preferred: [String:[PublicationVersionReq]]
-    strict: [String]
+    rejected: [String:[PublicationSemVer]],
+    preferred: [String:[PublicationVersionReq]],
+    strict: [String],
 }
 
 PublicationSolverState: struct {
-    constraints: [String:[PublicationVersionConstraint]]
-    assignments: [String:PublicationSemVer]
-    rejected: [String:[PublicationSemVer]]
-    preferred: [String:[PublicationVersionReq]]
-    strict: [String]
+    constraints: [String:[PublicationVersionConstraint]],
+    assignments: [String:PublicationSemVer],
+    rejected: [String:[PublicationSemVer]],
+    preferred: [String:[PublicationVersionReq]],
+    strict: [String],
 }
 
 // Rust Result<T, Diagnostic> uses Jet's one fallible return mechanism; the
 // wrapper preserves the complete canonical Diagnostic unchanged.
 #Error
 PublicationDiagnosticError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 }
 
 publication_satisfies_all: fn(version: PublicationSemVer, constraints: [PublicationVersionConstraint]) -> Bool Never! {
@@ -247,8 +247,8 @@ publication_solve_registry_state: fn(state: PublicationSolverState, candidates: 
 
 // conflicting_pair (:405-417). Named index carrier avoids optional tuples.
 PublicationConflictPair: struct {
-    first: Int?
-    second: Int?
+    first: Int?,
+    second: Int?,
 }
 
 publication_conflicting_pair: fn(requirements: [PublicationVersionConstraint]) -> PublicationConflictPair Never! {

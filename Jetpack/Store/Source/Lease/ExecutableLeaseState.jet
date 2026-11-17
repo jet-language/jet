@@ -28,13 +28,13 @@ LEASE_RECEIPT_BYTE_BOUND: 131072
 // A snapshot request and the owner lock that must stay held until the
 // receipt is accepted and the process handoff completes.
 PreparedLeaseSnapshot: struct {
-    request: LeaseRequest
-    owner_lock: RuntimeLock
+    request: LeaseRequest,
+    owner_lock: RuntimeLock,
 }
 
 ExecutableLeaseProtocol: struct {
-    priv root: String
-    priv key: TrustKey
+    priv root: String,
+    priv key: TrustKey,
 
     open: fn(root: String) -[FS, Env, Rand]> ExecutableLeaseProtocol IOError! {
         store_lease_ensure_real_directory(root, "Jetpack root")
@@ -903,9 +903,9 @@ store_lease_reclaim_container: fn(path: String, leases: String, live_lock: &&Run
 
 // How far a container got out of the live namespace.
 LeaseQuarantine: enum {
-    NotMoved
-    MovedUnpublished
-    Published
+    NotMoved,
+    MovedUnpublished,
+    Published,
 }
 
 // The rename failed; the container is still live-named.

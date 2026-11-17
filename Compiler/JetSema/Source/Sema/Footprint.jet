@@ -12,14 +12,14 @@ use jet_foundation.[ASTTables, AccessConvention, Diagnostic, Expr, ExprNode, Fun
 // the stored fields it reaches (with their first use), the sibling methods it
 // calls on `self`, and the first use of the whole `self`.
 SemaFootprintUses: struct {
-    known: [String]
-    names: [String]
-    spans: [Span]
-    calls: [NamedSpan]
-    whole: Span?
+    known: [String],
+    names: [String],
+    spans: [Span],
+    calls: [NamedSpan],
+    whole: Span?,
     // The starts of the `self` bases a field, spread or call already counted;
     // the walk visits a node before its children.
-    settled: [Int:Bool]
+    settled: [Int:Bool],
 
     visit: fn(&self, tables: ASTTables, expression: ExprNode) Never! {
         if ast_expr(tables, expression) == {
@@ -59,9 +59,9 @@ SemaFootprintUses: struct {
 // A solved footprint: each field with the span that first reaches it, or the
 // whole record (`whole`) with the span that first uses it.
 SemaFootprint: struct {
-    names: [String]
-    spans: [Span]
-    whole: Span?
+    names: [String],
+    spans: [Span],
+    whole: Span?,
 }
 
 // The span of `self`, or of a marked `&self` / `&&self` place.
@@ -104,8 +104,8 @@ sema_footprint_body_uses: fn(tables: ASTTables, method: Func, known: [String]) -
 
 // One owner (a struct or an impl target) and its methods, each declared once.
 SemaFootprintOwner: struct {
-    name: String
-    methods: [Func]
+    name: String,
+    methods: [Func],
 }
 
 // Check every stated footprint of the methods declared in `items` against its

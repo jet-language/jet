@@ -10,9 +10,9 @@ use {
 }
 
 WhyLocation: struct {
-    path: String
-    line: Int?
-    text: String?
+    path: String,
+    line: Int?,
+    text: String?,
 
     not_found: fn() -> WhyLocation Never! { WhyLocation{path: "not found", line: None, text: None} }
 
@@ -29,39 +29,39 @@ WhyLocation: struct {
 }
 
 WhyRequesting: struct {
-    env_file: WhyLocation
-    lock_file: WhyLocation
+    env_file: WhyLocation,
+    lock_file: WhyLocation,
 }
 
 WhyOrigin: struct {
-    catalog: String
-    endpoint: String
-    cache_endpoint: String
-    signature_chain: String
-    source: String
-    source_digest: String
+    catalog: String,
+    endpoint: String,
+    cache_endpoint: String,
+    signature_chain: String,
+    source: String,
+    source_digest: String,
 }
 
 WhyTrust: struct {
-    grade: String
-    reason: String
+    grade: String,
+    reason: String,
 }
 
 WhyDisk: struct {
-    bytes: Int?
-    objects: Int
+    bytes: Int?,
+    objects: Int,
 }
 
 PackageWhy: struct {
-    query: String
-    package: String
-    available: Bool
-    requesting: WhyRequesting
-    origin: WhyOrigin
-    trust: WhyTrust
-    disk: WhyDisk
-    dependents: [String]
-    receipt: String
+    query: String,
+    package: String,
+    available: Bool,
+    requesting: WhyRequesting,
+    origin: WhyOrigin,
+    trust: WhyTrust,
+    disk: WhyDisk,
+    dependents: [String],
+    receipt: String,
 
     from_explain: fn(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
         package: if explanation.entry == {
@@ -204,8 +204,8 @@ store_why_source_location: fn(path: String?, names: [String], qualified: [String
 
 // A matched source line: 1-based number and trimmed text.
 WhyLine: struct {
-    line: Int
-    text: String
+    line: Int,
+    text: String,
 }
 
 store_why_source_line: fn(raw: String, names: [String], qualified: [String]) -> WhyLine? Never! {

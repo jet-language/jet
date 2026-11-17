@@ -14,191 +14,191 @@ use {
 JET_CLI_WEB_MIDDLEWARE: [String]{"context", "auth", "csp", "logging", "observability"}
 
 JetCLIWebField: struct {
-    name: String
-    ty: String
-    codec: String
-    required: Bool
-    default: String?
+    name: String,
+    ty: String,
+    codec: String,
+    required: Bool,
+    default: String?,
 }
 
 JetCLIWebLoader: struct {
-    handler: String
-    data_type: String
-    dependency: String
-    preload: Bool
-    cache_identity: String
+    handler: String,
+    data_type: String,
+    dependency: String,
+    preload: Bool,
+    cache_identity: String,
 }
 
 JetCLIWebCapture: struct {
-    name: String
-    ty: String
-    serializable: Bool
+    name: String,
+    ty: String,
+    serializable: Bool,
 }
 
 JetCLIWebIsland: struct {
-    identity: String
-    captures: [JetCLIWebCapture]
-    serializable: Bool
+    identity: String,
+    captures: [JetCLIWebCapture],
+    serializable: Bool,
 }
 
 JetCLIWebRoute: struct {
-    path: String
-    handler: String
-    route_identity: String
-    path_params: [JetCLIWebField]{[JetCLIWebField]{}}
-    search_params: [JetCLIWebField]{[JetCLIWebField]{}}
-    search_codec: String{"query"}
-    loader: JetCLIWebLoader?{None}
-    pending: String?{None}
-    not_found: String?{None}
-    error: String?{None}
-    precedence: String
+    path: String,
+    handler: String,
+    route_identity: String,
+    path_params: [JetCLIWebField]{[JetCLIWebField]{}},
+    search_params: [JetCLIWebField]{[JetCLIWebField]{}},
+    search_codec: String{"query"},
+    loader: JetCLIWebLoader?{None},
+    pending: String?{None},
+    not_found: String?{None},
+    error: String?{None},
+    precedence: String,
     // The builder's render spelling: csr, ssr, ssg, stream or island.
-    render: String
+    render: String,
     // Render facts: the mode is a fact mode (static, server, server+stream,
     // server+island, client).
-    mode: String{"static"}
-    reason: [String]{[String]{}}
-    effects: [String]{[String]{}}
-    interactive: Bool{false}
-    data_loader: String?{None}
-    form: String?{None}
-    cache: String{"unspecified"}
-    override_mode: String?{None}
+    mode: String{"static"},
+    reason: [String]{[String]{}},
+    effects: [String]{[String]{}},
+    interactive: Bool{false},
+    data_loader: String?{None},
+    form: String?{None},
+    cache: String{"unspecified"},
+    override_mode: String?{None},
     // Decimal text of the stable u64 boundary id.
-    pending_boundary_id: String?{None}
-    island: JetCLIWebIsland?{None}
-    provenance: String
-    span: Span
+    pending_boundary_id: String?{None},
+    island: JetCLIWebIsland?{None},
+    provenance: String,
+    span: Span,
 }
 
 JetCLIWebContract: struct {
-    input: String
-    output: String
-    error: String
-    effects: [String]
-    middleware: [String]
+    input: String,
+    output: String,
+    error: String,
+    effects: [String],
+    middleware: [String],
 }
 
 JetCLIWebAction: struct {
-    name: String
-    handler: String
-    kind: String
-    preload: Bool
-    contract: JetCLIWebContract
-    provenance: String
-    span: Span
+    name: String,
+    handler: String,
+    kind: String,
+    preload: Bool,
+    contract: JetCLIWebContract,
+    provenance: String,
+    span: Span,
 }
 
 JetCLIWebFormField: struct {
-    name: String
-    ty: String
-    required: Bool
-    default: String?
-    label: String
-    control: String
+    name: String,
+    ty: String,
+    required: Bool,
+    default: String?,
+    label: String,
+    control: String,
 }
 
 JetCLIWebForm: struct {
-    model: String
-    action: String
-    contract: JetCLIWebContract
-    fields: [JetCLIWebFormField]
-    provenance: String
+    model: String,
+    action: String,
+    contract: JetCLIWebContract,
+    fields: [JetCLIWebFormField],
+    provenance: String,
 }
 
 JetCLIWebQuery: struct {
-    key: String
-    footprint: String
-    source: String
-    kind: String
+    key: String,
+    footprint: String,
+    source: String,
+    kind: String,
 }
 
 JetCLIWebStore: struct {
-    name: String
-    source: String
-    kind: String
-    history_limit: String
+    name: String,
+    source: String,
+    kind: String,
+    history_limit: String,
 }
 
 JetCLIWebMount: struct {
-    prefix: String
-    handler: String
-    effects: [String]
-    security: [String]
-    provenance: String
-    span: Span
+    prefix: String,
+    handler: String,
+    effects: [String],
+    security: [String],
+    provenance: String,
+    span: Span,
 }
 
 JetCLIWebRoot: struct {
-    root: String
-    span: Span
+    root: String,
+    span: Span,
 }
 
 // One row of the App's route table, in the order the program registers it.
 JetCLIWebRow: struct {
-    verb: String
-    address: String
+    verb: String,
+    address: String,
     // The page, handler, action, struct method or static root that answers.
-    target: String
+    target: String,
     // page, action, handler, mount, marked or static.
-    form: String
+    form: String,
     // The file the row is written in; "" is the entry.
-    file: String
-    span: Span
+    file: String,
+    span: Span,
     // `mount(value)`: the struct whose marked methods become rows; "" for
     // every other row.
-    mounted: String{""}
+    mounted: String{""},
 }
 
 // An image asset node: a `web.image` call whose source is a literal path,
 // and the function it is written in.
 JetCLIWebImage: struct {
-    source: String
-    provenance: String
-    span: Span
+    source: String,
+    provenance: String,
+    span: Span,
 }
 
 // The `app.images(...)` settings as written: None leaves a setting at its
 // default. The check holds each one to literal data (E2811), so the graph
 // knows every variant before the app runs.
 JetCLIWebImageSettings: struct {
-    formats: [String]?{None}
-    widths: [Int]?{None}
-    quality: Int?{None}
-    enabled: Bool?{None}
+    formats: [String]?{None},
+    widths: [Int]?{None},
+    quality: Int?{None},
+    enabled: Bool?{None},
 }
 
 JetCLIWebGraph: struct {
-    entry: String
-    hydration: String{"dev-overlay"}
-    routes: [JetCLIWebRoute]{[JetCLIWebRoute]{}}
-    actions: [JetCLIWebAction]{[JetCLIWebAction]{}}
-    forms: [JetCLIWebForm]{[JetCLIWebForm]{}}
-    queries: [JetCLIWebQuery]{[JetCLIWebQuery]{}}
-    stores: [JetCLIWebStore]{[JetCLIWebStore]{}}
-    mounts: [JetCLIWebMount]{[JetCLIWebMount]{}}
-    routes_from: [JetCLIWebRoot]{[JetCLIWebRoot]{}}
-    security: [String]{[String]{}}
-    assets: [String]{[String]{}}
-    split: [String]{[String]{}}
-    cache: [String]{[String]{}}
-    a11y: [String]{[String]{}}
-    adapters: [String]{[String]{}}
-    table: [JetCLIWebRow]{[JetCLIWebRow]{}}
-    images: [JetCLIWebImage]{[JetCLIWebImage]{}}
-    image_settings: JetCLIWebImageSettings{JetCLIWebImageSettings{}}
+    entry: String,
+    hydration: String{"dev-overlay"},
+    routes: [JetCLIWebRoute]{[JetCLIWebRoute]{}},
+    actions: [JetCLIWebAction]{[JetCLIWebAction]{}},
+    forms: [JetCLIWebForm]{[JetCLIWebForm]{}},
+    queries: [JetCLIWebQuery]{[JetCLIWebQuery]{}},
+    stores: [JetCLIWebStore]{[JetCLIWebStore]{}},
+    mounts: [JetCLIWebMount]{[JetCLIWebMount]{}},
+    routes_from: [JetCLIWebRoot]{[JetCLIWebRoot]{}},
+    security: [String]{[String]{}},
+    assets: [String]{[String]{}},
+    split: [String]{[String]{}},
+    cache: [String]{[String]{}},
+    a11y: [String]{[String]{}},
+    adapters: [String]{[String]{}},
+    table: [JetCLIWebRow]{[JetCLIWebRow]{}},
+    images: [JetCLIWebImage]{[JetCLIWebImage]{}},
+    image_settings: JetCLIWebImageSettings{JetCLIWebImageSettings{}},
 }
 
 // The builder walk: the graph so far, the render mode later routes take, the
 // explicit mode the next route takes, whether an `app()` root was seen, and
 // the `run` bindings that hold the App.
 JetCLIWebWalk: struct {
-    graph: JetCLIWebGraph
-    render: String{"csr"}
-    next_override: String?{None}
-    found_app: Bool{false}
-    app_names: [String]{[String]{}}
+    graph: JetCLIWebGraph,
+    render: String{"csr"},
+    next_override: String?{None},
+    found_app: Bool{false},
+    app_names: [String]{[String]{}},
 }
 
 // ---- builder argument readers ----
@@ -410,8 +410,8 @@ jet_cli_web_function: fn(functions: [Func], name: String) -> Func? {
 
 // A user function with the AST tables of the module that declares it.
 JetCLIWebFunction: struct {
-    tables: ASTTables
-    function: Func
+    tables: ASTTables,
+    function: Func,
 }
 
 // The user function `name`, found in jet_cli_web_user_functions order.
@@ -446,8 +446,8 @@ jet_cli_web_find_struct: fn(items: [Item], name: String) -> StructDef? {
 
 // A user struct with the AST tables of the module that declares it.
 JetCLIWebRecord: struct {
-    tables: ASTTables
-    definition: StructDef
+    tables: ASTTables,
+    definition: StructDef,
 }
 
 jet_cli_web_struct: fn(modules: [JetDriverDocModule], name: String) -> JetCLIWebRecord? {
@@ -1210,8 +1210,8 @@ jet_cli_web_is_namespace: fn(tables: ASTTables, expression: ExprNode, member: St
 
 // A query or store call: its kind and arguments.
 JetCLIWebNamespaceCall: struct {
-    kind: String
-    args: [CallArg]
+    kind: String,
+    args: [CallArg],
 }
 
 jet_cli_web_namespace_call: fn(tables: ASTTables, expression: ExprNode, member: String) -> JetCLIWebNamespaceCall? {
@@ -1343,10 +1343,10 @@ jet_cli_web_store: fn(tables: ASTTables, expression: ExprNode, source: String) -
 // The query, store, form and image calls one walk over the user functions
 // found.
 JetCLIWebUses: struct {
-    queries: [JetCLIWebQuery]
-    stores: [JetCLIWebStore]
-    forms: [JetCLIWebForm]
-    images: [JetCLIWebImage]
+    queries: [JetCLIWebQuery],
+    stores: [JetCLIWebStore],
+    forms: [JetCLIWebForm],
+    images: [JetCLIWebImage],
 }
 
 jet_cli_web_note_use: fn(tables: ASTTables, uses: &JetCLIWebUses, node: ExprNode, modules: [JetDriverDocModule], functions: [Func], source: String) {

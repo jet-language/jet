@@ -291,16 +291,16 @@ jet_cli_runtime_packed: fn(result: &&JetDriverCompileResult, prefix: String, pac
 // bindings render, the threads its machine code compiles on and its thread
 // receipt. Else the result that stops the build.
 JetCLIRuntimeIR: enum {
-    Stopped(result: JetDriverCompileResult)
-    Built(result: JetDriverCompileResult, library: IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String])
+    Stopped(result: JetDriverCompileResult),
+    Built(result: JetDriverCompileResult, library: IRLibraryResult, interface_text: String, threads: CompilerThreads, receipt: [String]),
 }
 
 // The runtime library's object (jet_cli_runtime_object): its bytes, written
 // to `{prefix}.o` with its export list, ABI, thread receipt and interface,
 // else the problem that stops the build.
 JetCLIRuntimeObject: struct {
-    bytes: [U8]
-    problem: String
+    bytes: [U8],
+    problem: String,
 }
 
 jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLIRuntimeIR {
@@ -419,8 +419,8 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
 // the runtime library with Core links it while the Core object still
 // compiles (jet_cli_runtime_with_core), as the `runtime.pack.alone` span.
 JetCLIRuntimePackLinked: struct {
-    path: String
-    linked: X64ExecutableResult
+    path: String,
+    linked: X64ExecutableResult,
 }
 
 jet_cli_runtime_pack_linked: fn(prefix: String, object: &&[U8], trace_sink: JetCLITraceSink?) -> JetCLIRuntimePackLinked? {
@@ -523,8 +523,8 @@ jet_cli_is_core_library: fn(directory: String) -[FS, Env]> Bool Never! {
 
 // Where the toolchain sources a tool run in `input` (a file or directory) needs come from.
 JetCLIToolchainRoot: enum {
-    Found(root: String)
-    Missing(what: String, fix: String)
+    Found(root: String),
+    Missing(what: String, fix: String),
 }
 
 // The checkout a tool that reads a checkout's other files works in (`jet
@@ -594,8 +594,8 @@ JET_CLI_FOREIGN_CACHE_DIRECTORIES: [String]{".jet/bindings/c", ".jet/bindings/cp
 JET_CLI_FOREIGN_CACHE_SIDECARS: [String]{"metadata", "provenance"}
 
 JetCLICompiled: enum {
-    Compiled(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot)
-    Refused(output: JetDriverVerbOutput)
+    Compiled(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The driver ran; `snapshot` is the source snapshot it compiled, kept for
@@ -637,9 +637,9 @@ jet_cli_is_project_boundary: fn(directory: String) -[FS]> Bool Never! {
 // `directories` for App convention routing. Returns the problem that stopped
 // the walk.
 JetCLISourceBudget: struct {
-    entries: Int
-    bytes: Int
-    files: Int
+    entries: Int,
+    bytes: Int,
+    files: Int,
 }
 
 jet_cli_source_read_limit: fn(budget: JetCLISourceBudget, size: Int, path: String) -> Int JetCLIReadError! {
@@ -901,8 +901,8 @@ jet_cli_held_project_boundary: fn(directory: cli_files.Directory) -[FS]> Bool Je
 }
 
 JetCLICacheSource: struct {
-    relative_path: String
-    read: JetCLIHeldSource
+    relative_path: String,
+    read: JetCLIHeldSource,
 }
 
 // One checked foreign-cache record under `root` (a binding or its sidecar).
@@ -1053,8 +1053,8 @@ jet_cli_dependency_within: fn(path: String, root: String) -> Bool Never! {
 // `RootPathReach`: the entry's relative declarations, canonicalized once, and
 // the canonical sibling directories they open outside its tree.
 JetCLIRootPathReach: struct {
-    declared: [String]
-    sibling_dirs: [String]
+    declared: [String],
+    sibling_dirs: [String],
 }
 
 jet_cli_root_path_reach: fn(entry: String, dependencies: [String:DepSpec]) -[FS]> JetCLIRootPathReach Never! {
@@ -1340,9 +1340,9 @@ jet_cli_default_threads: fn(logical: Int, work: Int) -[FS, Time]> Int Never! {
 // One end of a load window: `/proc/stat`'s text (`""` when unread), this
 // process's CPU time (`own_ns`, -1 when unread) and the instant of the read.
 JetCLILoadSample: struct {
-    stat: String
-    own_ns: Int
-    at_ns: Int
+    stat: String,
+    own_ns: Int,
+    at_ns: Int,
 }
 
 // The process's last load sample: a compiling verb's at startup, then each
@@ -1391,8 +1391,8 @@ jet_cli_window_threads: fn(logical: Int, allowed: [Int], start: JetCLILoadSample
 // steal; guest time is inside user and nice) and `busy` all of them but idle
 // and iowait. A CPU without a line (offline) has `total` -1.
 JetCLICPUTicks: struct {
-    busy: Int
-    total: Int
+    busy: Int,
+    total: Int,
 }
 
 // Each CPU's ticks in `stat`, the text of `/proc/stat`, indexed by CPU
@@ -1466,8 +1466,8 @@ jet_cli_threads_left: fn(logical: Int, allowed: Int, busy: Int) -> Int Never! {
 // one still refuses the request up front. Every compile also needs this
 // compiler's identity, so its absence refuses here too.
 JetCLICoreSources: enum {
-    Loaded(sources: [JetDriverCoreSource])
-    Missing(what: String, fix: String)
+    Loaded(sources: [JetDriverCoreSource]),
+    Missing(what: String, fix: String),
 }
 
 jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
@@ -1574,8 +1574,8 @@ JetCLIBuiltinCoreSourceReader: struct {
 // (jet_cli_runtime_part_range). jet-bare carries none (`size` 0), so its
 // loads parse every Core unit whole.
 JetCLICoreInterface: struct {
-    at: Int
-    size: Int
+    at: Int,
+    size: Int,
 
     impl JetDriverCoreInterfaceReader {
         read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]? {
@@ -1774,7 +1774,7 @@ jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSessio
 // this jet's image part, lent (`embedded`), else the file without its
 // loaded segments (JetBackend Image/Loader.jet x64_image_file_read).
 JetCLINativeImageReader: struct {
-    embedded: Bool
+    embedded: Bool,
 
     impl JetEvalNativeImageReader {
         read: fn(self, file: String) -[FS.Read, Env, FFI.Asm]> X64ImageFile? {
@@ -1858,8 +1858,8 @@ jet_cli_build_read_rooted: fn(root: String, relative: String, limit: Int) -[FS.R
 }
 
 JetCLIHeldSource: struct {
-    bytes: [U8]
-    stat: cli_files.Stat
+    bytes: [U8],
+    stat: cli_files.Stat,
 }
 
 jet_cli_read_rooted_source: fn(root: String, relative: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
@@ -2045,8 +2045,8 @@ jet_cli_compile_file: fn(file: String, color: Bool, threads: Int?, mode: JetDriv
 // One file's bytes as a compile sees them in place of the disk copy, or as a
 // new source file beside it; nothing is written.
 JetCLIOverlay: struct {
-    path: String
-    source: String
+    path: String,
+    source: String,
 }
 
 // `jet_cli_compile_file` with the entry file's bytes replaced by
@@ -2128,15 +2128,15 @@ jet_cli_insert_source: fn(files: &&[JetDriverAuthorizedSourceFile], added: JetDr
 // A prepared compile: the authorized request and the snapshot it holds, or
 // the refusal that stopped preparing it.
 JetCLIPrepared: enum {
-    Prepared(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceSnapshot)
-    Refused(output: JetDriverVerbOutput)
+    Prepared(request: JetDriverCompileRequest, snapshot: JetDriverAuthorizedSourceSnapshot),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // The authorized source snapshot of a compile, before the Core sources join
 // it, or the refusal that stopped taking it.
 JetCLISnapshotted: enum {
-    Held(snapshot: JetDriverAuthorizedSourceSnapshot)
-    Refused(output: JetDriverVerbOutput)
+    Held(snapshot: JetDriverAuthorizedSourceSnapshot),
+    Refused(output: JetDriverVerbOutput),
 }
 
 jet_cli_prepare_refused: fn(what: String, fix: String, color: Bool) -> JetCLIPrepared Never! {
@@ -2236,8 +2236,8 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
 // `jet dev`): the driver's compile stopped before lowering, with the checked
 // inputs the native route builds from (Host.jet jet_cli_native_executable).
 JetCLIExecutableCompiled: enum {
-    Checked(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot)
-    Refused(output: JetDriverVerbOutput)
+    Checked(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // `inputs` is None when the compile stopped before lowering; the result's
@@ -2497,8 +2497,8 @@ jet_cli_core_test_source: fn(file: String, path: String) -[FS, Env]> String Neve
 // `jet test Core/Encoding` runs `jet test <file>` for each. `names` are
 // their row paths, `files` the toolchain files, in row order.
 JetCLICoreTestFiles: struct {
-    names: [String]
-    files: [String]
+    names: [String],
+    files: [String],
 }
 
 jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? Never! {
@@ -2728,11 +2728,11 @@ JET_CLI_TRACE_BLOCK_BYTES: 262144
 // (`begin_item`, or an indexed `begin`), which reads only its task's CPU
 // clock.
 JetCLITraceSpan: struct {
-    kind: String
-    label: String
-    start_us: Int
-    start: JetCLITraceUsage
-    item: Bool
+    kind: String,
+    label: String,
+    start_us: Int,
+    start: JetCLITraceUsage,
+    item: Bool,
 }
 
 // CPU time in ns of the calling task (core.tasks.cpu_ns: the time its fiber
@@ -2742,59 +2742,59 @@ JetCLITraceSpan: struct {
 // reports the difference between its end and its begin; begin and end run in
 // the same task (spans nest per task).
 JetCLITraceUsage: struct {
-    cpu_ns: Int
-    proc_cpu_ns: Int
-    majflt: Int
+    cpu_ns: Int,
+    proc_cpu_ns: Int,
+    majflt: Int,
 }
 
 JetCLITraceState: struct {
     // False after a failed write: the trace stops, the compile does not.
-    writing: Bool
+    writing: Bool,
     // The target, open for appending from the trace's start.
-    writer: cli_files.FileWriter
+    writer: cli_files.FileWriter,
     // Open spans per trace lane (jet_cli_trace_lane), innermost last.
-    stacks: [Int:[JetCLITraceSpan]]
+    stacks: [Int:[JetCLITraceSpan]],
     // Each task's trace lane, its events' `tid`: 1 for the task that opened
     // the trace, then numbered in the order tasks first trace.
-    lanes: [cli_tasks.TaskID:Int]
+    lanes: [cli_tasks.TaskID:Int],
     // When each progress kind was last written (clock µs).
-    progress_at: [String:Int]
+    progress_at: [String:Int],
     // How many times each progress kind was reported.
-    progress_calls: [String:Int]
+    progress_calls: [String:Int],
     // The last read of the process's clocks and faults (`cpu_ns` -1) and
     // memory, and when it was taken (clock ms, -1 before the first).
-    process: JetCLITraceUsage
-    memory: JetCLITraceMemory?
-    process_ms: Int
+    process: JetCLITraceUsage,
+    memory: JetCLITraceMemory?,
+    process_ms: Int,
     // How many other processes' traces were spliced in (jet_cli_trace_splice).
-    spliced: Int
+    spliced: Int,
     // The events not written yet, in order, and their bytes.
-    pending: [String]{[String]{}}
-    pending_bytes: Int{0}
+    pending: [String]{[String]{}},
+    pending_bytes: Int{0},
     // Every event's bytes so far and the blocks written
     // (jet_cli_trace_finish counts them).
-    bytes: Int{0}
-    flushes: Int{0}
+    bytes: Int{0},
+    flushes: Int{0},
     // After jet_cli_trace_finish every event is written at once.
-    finished: Bool{false}
+    finished: Bool{false},
 }
 
 JetCLITraceSink: struct {
     // The trace file, or `/dev/stderr` for the readable stream.
-    target: String
-    human: Bool
+    target: String,
+    human: Bool,
     // The monotonic clock (µs) when the trace opened: the origin of every
     // timestamp.
-    start_us: Int
+    start_us: Int,
     // The wall clock (µs since the Unix epoch) read with `start_us`: the
     // origin on the clock every process on the machine shares, which places
     // a trace spliced into this one (jet_cli_trace_splice).
-    start_unix_us: Int
-    pid: Int
-    functions: Bool
-    phase_counters: Bool
+    start_unix_us: Int,
+    pid: Int,
+    functions: Bool,
+    phase_counters: Bool,
     // Shared by every copy of the sink and every compiler thread.
-    state: Shared<JetCLITraceState>
+    state: Shared<JetCLITraceState>,
 
     impl CompilerTraceSink {
         begin: fn(self, name: String, detail: String, index: Int, total: Int) -[FS, Time]> Never! {
@@ -2913,8 +2913,8 @@ JetCLITraceSink: struct {
 
 // Resident and peak resident set size in kB (`VmRSS`, `VmHWM`).
 JetCLITraceMemory: struct {
-    rss_kb: Int
-    peak_kb: Int
+    rss_kb: Int,
+    peak_kb: Int,
 }
 
 // The process's one sink, opened by `jet_cli_main` for a compiling verb: the

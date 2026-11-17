@@ -23,46 +23,46 @@ CC_MAX_RESPONSE_ARGS: 100000
 
 // A standalone compiler metadata probe; it takes no flags or sources.
 DriverProbe: enum {
-    DumpMachine
-    PrintSysroot
-    DumpVersion
+    DumpMachine,
+    PrintSysroot,
+    DumpVersion,
 }
 
 // One path operand in the parsed argv: its index and the attached option
 // prefix (empty when the path is a separate argument).
 DriverPathOperand: struct {
-    index: Int
-    prefix: String
+    index: Int,
+    prefix: String,
 }
 
 // The parsed driver command line. `argv` holds the compiler arguments the
 // driver forwards; the index fields point into it.
 DriverOptions: struct {
-    offline: Bool
-    fixtures: String?
-    project_root: String?
-    build_root: String?
-    working_dir: String
-    target: String?
-    compile_only: Bool
-    output: String?
-    dep_mode: Bool
-    dep_phony: Bool
-    depfile: String?
-    dep_target: String?
-    probe: DriverProbe?
-    verbose: Bool
-    help: Bool
-    version: Bool
-    argv: [String]
-    sources: [String]
-    source_indices: [Int]
-    path_indices: [DriverPathOperand]
-    output_index: Int?
-    depfile_index: Int?
-    dep_target_index: Int?
-    dep_target_option: String?
-    separator_index: Int?
+    offline: Bool,
+    fixtures: String?,
+    project_root: String?,
+    build_root: String?,
+    working_dir: String,
+    target: String?,
+    compile_only: Bool,
+    output: String?,
+    dep_mode: Bool,
+    dep_phony: Bool,
+    depfile: String?,
+    dep_target: String?,
+    probe: DriverProbe?,
+    verbose: Bool,
+    help: Bool,
+    version: Bool,
+    argv: [String],
+    sources: [String],
+    source_indices: [Int],
+    path_indices: [DriverPathOperand],
+    output_index: Int?,
+    depfile_index: Int?,
+    dep_target_index: Int?,
+    dep_target_option: String?,
+    separator_index: Int?,
 
     empty: fn() -> DriverOptions Never! {
         DriverOptions{
@@ -520,9 +520,9 @@ cli_cc_response_scope_roots: fn(args: [String], current_dir: String) -[FS, Env]>
 
 // Recursive `@file` expansion with a cycle stack and file/argument bounds.
 CcResponseExpansion: struct {
-    expanded: [String]
-    stack: [String]
-    file_count: Int
+    expanded: [String],
+    stack: [String],
+    file_count: Int,
 
     run: fn(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] CLIToolError! {
         expansion := CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
@@ -592,9 +592,9 @@ cli_cc_read_bounded_response_file: fn(path: String) -[FS]> [U8] CLIToolError! {
 
 // The quoting state while splitting a response file into words.
 CcResponseQuote: enum {
-    Unquoted
-    Single
-    Double
+    Unquoted,
+    Single,
+    Double,
 }
 
 // Split response-file text into words: whitespace separates, single quotes

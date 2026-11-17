@@ -18,15 +18,15 @@ use {
 
 #Equatable
 ParquetFailureKind: enum {
-    Decode
-    Unsupported
-    Limit
+    Decode,
+    Unsupported,
+    Limit,
 }
 
 #[Error, Equatable]
 ParquetFailure: struct {
-    kind: ParquetFailureKind
-    reason: String
+    kind: ParquetFailureKind,
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { self.display_text() }
@@ -117,8 +117,8 @@ logical_name: fn(logical: Int) -> String Never! {
 
 // A bounded read position over `input[pos..<end]`.
 Cursor: struct {
-    pos: Int
-    end: Int
+    pos: Int,
+    end: Int,
 
     byte: fn(&self, input: [U8]) -> Int ParquetFailure! {
         if self.pos >= self.end {
@@ -299,58 +299,58 @@ expect_struct: fn(kind: Int, what: String) ParquetFailure! {
 }
 
 SchemaElement: struct {
-    physical: Int
-    type_length: Int
-    repetition: Int
-    name: String
-    children: Int
-    converted: Int
-    logical: Int
-    logical_width: Int
-    logical_signed: Bool
+    physical: Int,
+    type_length: Int,
+    repetition: Int,
+    name: String,
+    children: Int,
+    converted: Int,
+    logical: Int,
+    logical_width: Int,
+    logical_signed: Bool,
 }
 
 ColumnMeta: struct {
-    physical: Int
-    path: [String]
-    codec: Int
-    values: Int
-    compressed_size: Int
-    data_offset: Int
-    dictionary_offset: Int
-    external: Bool
+    physical: Int,
+    path: [String],
+    codec: Int,
+    values: Int,
+    compressed_size: Int,
+    data_offset: Int,
+    dictionary_offset: Int,
+    external: Bool,
 }
 
 RowGroup: struct {
-    columns: [ColumnMeta]
-    rows: Int
+    columns: [ColumnMeta],
+    rows: Int,
 }
 
 FileMeta: struct {
-    schema: [SchemaElement]
-    rows: Int
-    groups: [RowGroup]
+    schema: [SchemaElement],
+    rows: Int,
+    groups: [RowGroup],
 }
 
 PageHeader: struct {
-    kind: Int
-    uncompressed: Int
-    compressed: Int
-    values: Int
-    encoding: Int
-    level_encoding: Int
-    has_data: Bool
-    has_dictionary: Bool
+    kind: Int,
+    uncompressed: Int,
+    compressed: Int,
+    values: Int,
+    encoding: Int,
+    level_encoding: Int,
+    has_data: Bool,
+    has_dictionary: Bool,
 }
 
 // One flat column: its name, physical type and how values surface.
 Leaf: struct {
-    name: String
-    physical: Int
-    width: Int
-    optional: Bool
-    text: Bool
-    unsigned: Bool
+    name: String,
+    physical: Int,
+    width: Int,
+    optional: Bool,
+    text: Bool,
+    unsigned: Bool,
 }
 
 parse_logical: fn(cursor: &Cursor, input: [U8], element: &SchemaElement) ParquetFailure! {
@@ -1020,15 +1020,15 @@ test_page: fn(kind: Int, values: Int, encoding: Int, levels: Int, body: [U8], si
 
 // A one-column file: column `v`, one row group, one chunk at byte 4.
 TestColumn: struct {
-    physical: Int
-    repetition: Int
-    converted: Int
-    logical: Int
-    children: Int
-    codec: Int
-    external: Bool
-    pages: [U8]
-    rows: Int
+    physical: Int,
+    repetition: Int,
+    converted: Int,
+    logical: Int,
+    children: Int,
+    codec: Int,
+    external: Bool,
+    pages: [U8],
+    rows: Int,
 }
 
 test_column: fn(physical: Int, pages: [U8], rows: Int) -> TestColumn Never! {

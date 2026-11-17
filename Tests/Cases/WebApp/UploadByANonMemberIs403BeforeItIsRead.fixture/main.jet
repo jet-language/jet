@@ -18,28 +18,28 @@ use {
 
 #[Codable, Comparable]
 MemberKey: struct {
-    project: Int
-    account: auth.AccountID
+    project: Int,
+    account: auth.AccountID,
 }
 
 #Codable
 Member: struct {
-    project: Int
-    account: auth.AccountID
+    project: Int,
+    account: auth.AccountID,
 }
 
 #Codable
 Chore: struct {
-    id: Int
-    project: Int
-    title: String
+    id: Int,
+    project: Int,
+    title: String,
 }
 
 #Error
 TaskError: enum {
-    NotAllowed
-    Unreadable
-    Unkept
+    NotAllowed,
+    Unreadable,
+    Unkept,
 }
 
 members_in: fn(store: db.Store) -> db.Table<MemberKey, Member> {
@@ -71,7 +71,7 @@ task_policy: fn(row: Chore, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]>
 // The store the tables open from. A lambda owns what it captures, so each
 // call opens the tables rather than capturing them.
 Stores: struct {
-    store: db.Store?
+    store: db.Store?,
 }
 
 STORE: Shared{Stores{store: None}}
@@ -100,7 +100,7 @@ editable: fn(task: Int) -[DB.Read]> TaskError! {
 }
 
 Crew: struct {
-    shelf: app.Blobs
+    shelf: app.Blobs,
 
     // Attaches `file` to task `task`.
     #[App.SignedIn, App.UploadCheck(method: "may_attach")]

@@ -22,45 +22,45 @@ use jet_foundation.[
 ]
 
 SemaCallParam: struct {
-    label: String
-    name: String
-    zone: ParamZone
-    default: Expr?
-    default_ref: FunctionDefaultRef?
-    convention: AccessConvention
-    ty: Type?
-    variadic: Bool
+    label: String,
+    name: String,
+    zone: ParamZone,
+    default: Expr?,
+    default_ref: FunctionDefaultRef?,
+    convention: AccessConvention,
+    ty: Type?,
+    variadic: Bool,
 }
 
 SemaCallArgSource: enum {
-    Written(index: Int)
-    Default(parameter: Int)
+    Written(index: Int),
+    Default(parameter: Int),
 }
 
 SemaCallConventionDecision: enum {
-    Accepted
-    NeedsImplicitClone
+    Accepted,
+    NeedsImplicitClone,
 }
 
 SemaCallBinding: struct {
     // One entry per written source argument. The value is the explicit
     // parameter slot, or -1 only for an argument that has no slot after an
     // arity failure is recovered by the caller.
-    slots: [Int]
+    slots: [Int],
     // Declaration/output order. Written indices always refer to the original
     // source argument list, never to the rewritten list.
-    sources: [SemaCallArgSource]
+    sources: [SemaCallArgSource],
     // Defaults carried by Type.Fn but not materializable in this layer. The
     // owner_key/source_file/span identity is kept intact for a later resolver.
-    default_refs: [FunctionDefaultRef]
+    default_refs: [FunctionDefaultRef],
     // True when the result's written values can be evaluated left-to-right
     // without compiler temporaries: written source indices are increasing and
     // every supplied value precedes every default.
-    source_ordered: Bool
+    source_ordered: Bool,
     // True when args was changed to declaration order or a concrete default
     // was inserted. Unresolved metadata defaults intentionally keep args in
     // source order and set this false.
-    rewrote: Bool
+    rewrote: Bool,
 }
 
 sema_call_param_optional: fn(param: SemaCallParam) -> Bool Never! {

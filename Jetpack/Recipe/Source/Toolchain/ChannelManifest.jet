@@ -38,63 +38,63 @@ TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS: 2592000
 
 // What one `jet self update` invocation asks for.
 ToolchainUpdateOptions: struct {
-    endpoint: String
-    channel: String
-    platform: String
-    trust_key: String
-    dry_run: Bool
-    apply: Bool
+    endpoint: String,
+    channel: String,
+    platform: String,
+    trust_key: String,
+    dry_run: Bool,
+    apply: Bool,
     // Permit an explicitly selected local file endpoint without signature
     // sidecars. Never applies to HTTP(S) endpoints.
-    allow_unofficial: Bool
+    allow_unofficial: Bool,
     // The running client's version: a channel cannot raise this floor, and a
     // toolchain cannot move backwards.
-    running_version: String
+    running_version: String,
     // Per-channel/platform monotonic state, written only after a successful
     // activation.
-    state_path: String
+    state_path: String,
 }
 
 // The trust tier a verified plan came from.
 ToolchainUpdateTrust: enum {
-    Signed
-    UnofficialKeyless
+    Signed,
+    UnofficialKeyless,
 }
 
 // A fully verified update candidate.
 ToolchainUpdatePlan: struct {
-    endpoint: String
-    channel: String
-    version: String
-    platform: String
-    artifact_path: String
-    artifact_url: String
-    sha256: String
-    size: Int
-    key_id: String?
-    trust: ToolchainUpdateTrust
-    sequence: Int
-    published_at: Int
-    expires_at: Int
-    min_version: String
+    endpoint: String,
+    channel: String,
+    version: String,
+    platform: String,
+    artifact_path: String,
+    artifact_url: String,
+    sha256: String,
+    size: Int,
+    key_id: String?,
+    trust: ToolchainUpdateTrust,
+    sequence: Int,
+    published_at: Int,
+    expires_at: Int,
+    min_version: String,
 }
 
 ToolchainUpdateResult: struct {
-    plan: ToolchainUpdatePlan
-    applied: Bool
-    deferred: Bool
+    plan: ToolchainUpdatePlan,
+    applied: Bool,
+    deferred: Bool,
 }
 
 // The channel manifest document.
 ToolchainChannelManifest: struct {
-    schema: Int
-    channel: String
-    version: String
-    sequence: Int
-    published_at: Int
-    expires_at: Int
-    min_version: String
-    artifacts: [ToolchainArtifact]
+    schema: Int,
+    channel: String,
+    version: String,
+    sequence: Int,
+    published_at: Int,
+    expires_at: Int,
+    min_version: String,
+    artifacts: [ToolchainArtifact],
 
     // Parse and fully validate manifest bytes for `expected_channel`; the
     // bytes must be exactly the canonical encoding.
@@ -180,11 +180,11 @@ ToolchainChannelManifest: struct {
 
 // One per-target artifact entry of a channel manifest.
 ToolchainArtifact: struct {
-    target: String
-    path: String
-    sha256: String
-    size: Int
-    signature: String
+    target: String,
+    path: String,
+    sha256: String,
+    size: Int,
+    signature: String,
 
     parse: fn(value: Dyn) -> ToolchainArtifact RecipeError! {
         fields: recipe_update_object(value, "toolchain artifact")
@@ -213,10 +213,10 @@ ToolchainArtifact: struct {
 
 // A detached `.sig.json` signature sidecar.
 ToolchainSignatureSidecar: struct {
-    schema: Int
-    key_id: String
-    algorithm: String
-    signature: String
+    schema: Int,
+    key_id: String,
+    algorithm: String,
+    signature: String,
 
     parse: fn(bytes: [U8], label: String) -> ToolchainSignatureSidecar RecipeError! {
         text: String.from_bytes(bytes) ?? return Err(RecipeError.Update("{label} signature is not UTF-8"))
@@ -247,12 +247,12 @@ ToolchainSignatureSidecar: struct {
 
 // The accepted per-channel/platform update state.
 ToolchainUpdateState: struct {
-    schema: Int
-    channel: String
-    platform: String
-    sequence: Int
-    version: String
-    sha256: String
+    schema: Int,
+    channel: String,
+    platform: String,
+    sequence: Int,
+    version: String,
+    sha256: String,
 
     from_plan: fn(plan: ToolchainUpdatePlan) -> ToolchainUpdateState Never! {
         ToolchainUpdateState{schema: 1, channel: plan.channel, platform: plan.platform, sequence: plan.sequence, version: plan.version, sha256: plan.sha256}
@@ -298,16 +298,16 @@ ToolchainUpdateState: struct {
 
 // One semantic-version prerelease identifier.
 PreIdentifier: enum {
-    Numeric(Int)
-    Text(String)
+    Numeric(Int),
+    Text(String),
 }
 
 // A semantic version, ordered by SemVer precedence (build metadata ignored).
 SemanticVersion: struct {
-    major: Int
-    minor: Int
-    patch: Int
-    pre: [PreIdentifier]
+    major: Int,
+    minor: Int,
+    patch: Int,
+    pre: [PreIdentifier],
 
     parse: fn(value: String, label: String) -> SemanticVersion RecipeError! {
         without_build := value
@@ -488,8 +488,8 @@ recipe_update_validate_state_transition: fn(previous: ToolchainUpdateState?, cha
 
 // A trusted toolchain signing key and its published id.
 ToolchainTrustedKey: struct {
-    key_id: String
-    key: VerifyKey
+    key_id: String,
+    key: VerifyKey,
 }
 
 // Verify a detached sidecar over `domain || bytes` with the trusted key.

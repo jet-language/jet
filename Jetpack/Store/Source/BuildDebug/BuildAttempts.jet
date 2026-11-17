@@ -24,14 +24,14 @@ BUILD_DEBUG_STAGE_PREFIX: ".jet-build-stage-"
 
 // One logged recipe step.
 StepLog: struct {
-    index: Int
-    total: Int
-    name: String
-    command: String
-    cwd: String
-    status: String
-    stdout: String
-    stderr: String
+    index: Int,
+    total: Int,
+    name: String,
+    command: String,
+    cwd: String,
+    status: String,
+    stdout: String,
+    stderr: String,
 
     // The step as persisted: secrets in captured output are redacted.
     to_tree: fn(self) -> Dyn Never! {
@@ -50,18 +50,18 @@ StepLog: struct {
 
 // One build attempt (Rust `BuildDebug::Attempt`).
 BuildAttempt: struct {
-    id: String
-    package: String
-    reference: String
-    provider: String
-    recipe_hash: String
-    source_hash: String
-    platform: String
-    status: String
-    failed_step: Int
-    scratch_dir: String
-    log_dir: String
-    steps: [StepLog]
+    id: String,
+    package: String,
+    reference: String,
+    provider: String,
+    recipe_hash: String,
+    source_hash: String,
+    platform: String,
+    status: String,
+    failed_step: Int,
+    scratch_dir: String,
+    log_dir: String,
+    steps: [StepLog],
 
     new: fn(package: String, reference: String, provider: String, recipe_hash: String, source_hash: String) -[Env, Time]> BuildAttempt Never! {
         now: time.unix_ns()

@@ -13,9 +13,9 @@ PKG_GO_BUILD_ACTION: "rejected the source"
 
 // The Go scalar shapes the c-archive boundary accepts.
 GoScalar: enum {
-    Int
-    Float
-    Handle
+    Int,
+    Float,
+    Handle,
 
     parse: fn(value: String) -> GoScalar? Never! {
         if value == {
@@ -44,15 +44,15 @@ GoScalar: enum {
 }
 
 GoParam: struct {
-    name: String
-    scalar: GoScalar
+    name: String,
+    scalar: GoScalar,
 }
 
 // One `//export`ed Go function.
 GoFunction: struct {
-    name: String
-    params: [GoParam]
-    result: GoScalar?
+    name: String,
+    params: [GoParam],
+    result: GoScalar?,
 }
 
 // Build the Go source at `source_path` into one c-archive and bind its exports.

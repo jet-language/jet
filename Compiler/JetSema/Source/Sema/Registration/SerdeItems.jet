@@ -598,9 +598,9 @@ sema_serde_items_tree_read_body: fn(name: String, type_params: [TypeParam], span
 // encode or decode (each one's codec is demanded with it). None when that
 // item is not a struct, enum or distinct type.
 SemaSerdeCodecBody: struct {
-    body: [Stmt]
-    read: [Stmt]
-    wire: [Type]
+    body: [Stmt],
+    read: [Stmt],
+    wire: [Type],
 }
 
 sema_serde_items_codec_body: fn(items: [Item], position: Int, trait_name: String, span: Span) -> SemaSerdeCodecBody? Never! {
@@ -2016,10 +2016,10 @@ sema_serde_items_result_switch: fn(subject: Expr, ok_binding: String, ok_body: [
 // also gets every requirement a check records, met before or not
 // (sema_demand_capture_open).
 SemaCodecDemand: struct {
-    keys: [String:Bool]
-    order: [String]
-    capturing: Bool{false}
-    captured: [String]{[String]{}}
+    keys: [String:Bool],
+    order: [String],
+    capturing: Bool{false},
+    captured: [String]{[String]{}},
 }
 
 // The generated codec methods by symbol key, so a checked call and a codec
@@ -2364,8 +2364,8 @@ sema_derive_demand_add: fn(demand: Shared<SemaDeriveDemand>, keys: [String]) {
 // that function reaches, and a local value splice
 // (LocalSplice.jet) sees its owner checks demand apart.
 SemaDemandCapture: struct {
-    codecs: [String]
-    derived: [String]
+    codecs: [String],
+    derived: [String],
 }
 
 // Starts recording what the graph's checks demand; the comptime function

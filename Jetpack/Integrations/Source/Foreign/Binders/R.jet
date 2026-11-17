@@ -124,7 +124,7 @@ pkg_r_render_jet: fn(lib: String, functions: [String]) -> String Never! {
         out.push("    {name}_table: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n")
         out.push("    {name}_plot: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n")
     }
-    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRError: enum {{ NotRunning, Timeout, Cancelled, Protocol, CommandFailed, Limit }}\n\n")
     out.push(pkg_render_decode_response("RError", DecoderProtocol.StandardEnvelope))
     out.push(PKG_R_JET_SESSION)
     loop name in functions {

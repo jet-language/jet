@@ -38203,10 +38203,10 @@ copy: fn(n: Float) -> Float Never! { n }
 /// The direction `round_to_signed` and `round_to_unsigned` round in: an
 /// IEEE 754 rounding direction, or ties away from zero or to even.
 Rounding: enum {
-    TowardNegative
-    TowardPositive
-    TowardZero
-    TiesToAway
+    TowardNegative,
+    TowardPositive,
+    TowardZero,
+    TiesToAway,
     TiesToEven
 }
 
@@ -39097,7 +39097,7 @@ priv payload_bits_f32: fn(payload: F32) -> Int? Never! {
 // Keep fixed-size lane storage and ordered scalar arithmetic.
 // The native carrier adapters are bootstrap paths, not the source policy.
 Vec2: struct {
-    lanes: [Float#2]
+    lanes: [Float#2],
 
     new: fn(x: Float, y: Float) -> Vec2 Never! { Vec2{lanes: [Float#2]{x, y}} }
 
@@ -39187,7 +39187,7 @@ impl Float.Mul(Vec2) {
 }
 
 Vec3: struct {
-    lanes: [Float#3]
+    lanes: [Float#3],
 
     new: fn(x: Float, y: Float, z: Float) -> Vec3 Never! { Vec3{lanes: [Float#3]{x, y, z}} }
 
@@ -39337,7 +39337,7 @@ impl Float.Div(Vec2) {
 }
 
 Vec4: struct {
-    lanes: [Float#4]
+    lanes: [Float#4],
 
     new: fn(x: Float, y: Float, z: Float, w: Float) -> Vec4 Never! {
         Vec4{lanes: [Float#4]{x, y, z, w}}
@@ -39468,7 +39468,7 @@ impl Float.Div(Vec4) {
 }
 
 Mat3: struct {
-    lanes: [Float#9]
+    lanes: [Float#9],
 
     new: fn(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float) -> Mat3 Never! {
         Mat3{lanes: [Float#9]{m0, m1, m2, m3, m4, m5, m6, m7, m8}}
@@ -39534,7 +39534,7 @@ Mat3: struct {
 }
 
 Mat4: struct {
-    lanes: [Float#16]
+    lanes: [Float#16],
 
     new: fn(m0: Float, m1: Float, m2: Float, m3: Float, m4: Float, m5: Float, m6: Float, m7: Float, m8: Float, m9: Float, m10: Float, m11: Float, m12: Float, m13: Float, m14: Float, m15: Float) -> Mat4 Never! {
         Mat4{lanes: [Float#16]{m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15}}
@@ -39626,8 +39626,8 @@ Mat4: struct {
 // Exact Int fields hold the normalized ratio. #4767 affects native Int
 // ownership, not this source policy or the arbitrary-precision contract.
 Fraction: struct {
-    num_value: Int
-    den_value: Int
+    num_value: Int,
+    den_value: Int,
 
     numerator: fn(self) -> Int Never! { __fraction_numerator(self) }
 
@@ -39755,9 +39755,9 @@ priv fraction_rounded: fn(value: Fraction, mode: Rounding) -> Fraction Never! {
 }
 
 Decimal: struct {
-    negative: Bool
-    magnitude: Int
-    scale: Int
+    negative: Bool,
+    magnitude: Int,
+    scale: Int,
 
     to_string: fn(self) -> String Never! { __decimal_to_string(self) }
 
@@ -40402,8 +40402,8 @@ __decimal_to_float: fn(value: Decimal) -> Float Never! {
 }
 
 Complex: struct {
-    real: Float
-    imaginary: Float
+    real: Float,
+    imaginary: Float,
 
     impl Display {
         display: fn(self) -> String { __complex_to_string(self) }
@@ -40491,15 +40491,15 @@ __complex_abs: fn(value: Complex) -> Float Never! { hypot(value.real, value.imag
 
 // How a SIMD lane reduction combines a vector's lanes into one value.
 ReduceOp: enum {
-    Add
-    Mul
-    Min
-    Max
+    Add,
+    Mul,
+    Min,
+    Max,
     Avg
 }
 
 F64x4: struct {
-    lanes: [Float#4]
+    lanes: [Float#4],
 
     new: fn(a: Float, b: Float, c: Float, d: Float) -> F64x4 Never! {
         F64x4{lanes: [Float#4]{a, b, c, d}}
@@ -40673,7 +40673,7 @@ priv f32_swizzle_lane: fn(value: Float) -> F32 Never! {
 // `max` skip NaN lanes like `min_float` and `max_float`; integer `min` and
 // `max` fold from lane 0.
 F32x4: struct {
-    lanes: [F32#4]
+    lanes: [F32#4],
 
     new: fn(l0: F32, l1: F32, l2: F32, l3: F32) -> F32x4 Never! {
         F32x4{lanes: [F32#4]{l0, l1, l2, l3}}
@@ -40808,7 +40808,7 @@ F32x4: struct {
 }
 
 F32x8: struct {
-    lanes: [F32#8]
+    lanes: [F32#8],
 
     new: fn(l0: F32, l1: F32, l2: F32, l3: F32, l4: F32, l5: F32, l6: F32, l7: F32) -> F32x8 Never! {
         F32x8{lanes: [F32#8]{l0, l1, l2, l3, l4, l5, l6, l7}}
@@ -40911,7 +40911,7 @@ F32x8: struct {
 }
 
 F64x2: struct {
-    lanes: [Float#2]
+    lanes: [Float#2],
 
     new: fn(l0: Float, l1: Float) -> F64x2 Never! { F64x2{lanes: [Float#2]{l0, l1}} }
 
@@ -41014,7 +41014,7 @@ F64x2: struct {
 }
 
 I8x16: struct {
-    lanes: [I8#16]
+    lanes: [I8#16],
 
     new: fn(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8) -> I8x16 Never! {
         I8x16{lanes: [I8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}}
@@ -41115,7 +41115,7 @@ I8x16: struct {
 }
 
 U8x16: struct {
-    lanes: [U8#16]
+    lanes: [U8#16],
 
     new: fn(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8) -> U8x16 Never! {
         U8x16{lanes: [U8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}}
@@ -41216,7 +41216,7 @@ U8x16: struct {
 }
 
 I16x8: struct {
-    lanes: [I16#8]
+    lanes: [I16#8],
 
     new: fn(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16) -> I16x8 Never! {
         I16x8{lanes: [I16#8]{l0, l1, l2, l3, l4, l5, l6, l7}}
@@ -41317,7 +41317,7 @@ I16x8: struct {
 }
 
 U16x8: struct {
-    lanes: [U16#8]
+    lanes: [U16#8],
 
     new: fn(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16) -> U16x8 Never! {
         U16x8{lanes: [U16#8]{l0, l1, l2, l3, l4, l5, l6, l7}}
@@ -41418,7 +41418,7 @@ U16x8: struct {
 }
 
 I32x4: struct {
-    lanes: [I32#4]
+    lanes: [I32#4],
 
     new: fn(l0: I32, l1: I32, l2: I32, l3: I32) -> I32x4 Never! {
         I32x4{lanes: [I32#4]{l0, l1, l2, l3}}
@@ -41517,7 +41517,7 @@ I32x4: struct {
 }
 
 U32x4: struct {
-    lanes: [U32#4]
+    lanes: [U32#4],
 
     new: fn(l0: U32, l1: U32, l2: U32, l3: U32) -> U32x4 Never! {
         U32x4{lanes: [U32#4]{l0, l1, l2, l3}}
@@ -41616,7 +41616,7 @@ U32x4: struct {
 }
 
 I64x2: struct {
-    lanes: [I64#2]
+    lanes: [I64#2],
 
     new: fn(l0: I64, l1: I64) -> I64x2 Never! { I64x2{lanes: [I64#2]{l0, l1}} }
 
@@ -41713,7 +41713,7 @@ I64x2: struct {
 }
 
 U64x2: struct {
-    lanes: [U64#2]
+    lanes: [U64#2],
 
     new: fn(l0: U64, l1: U64) -> U64x2 Never! { U64x2{lanes: [U64#2]{l0, l1}} }
 
@@ -41810,7 +41810,7 @@ U64x2: struct {
 }
 
 I8x32: struct {
-    lanes: [I8#32]
+    lanes: [I8#32],
 
     new: fn(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8, l16: I8, l17: I8, l18: I8, l19: I8, l20: I8, l21: I8, l22: I8, l23: I8, l24: I8, l25: I8, l26: I8, l27: I8, l28: I8, l29: I8, l30: I8, l31: I8) -> I8x32 Never! {
         I8x32{lanes: [I8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
@@ -41911,7 +41911,7 @@ I8x32: struct {
 }
 
 U8x32: struct {
-    lanes: [U8#32]
+    lanes: [U8#32],
 
     new: fn(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8, l16: U8, l17: U8, l18: U8, l19: U8, l20: U8, l21: U8, l22: U8, l23: U8, l24: U8, l25: U8, l26: U8, l27: U8, l28: U8, l29: U8, l30: U8, l31: U8) -> U8x32 Never! {
         U8x32{lanes: [U8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
@@ -42012,7 +42012,7 @@ U8x32: struct {
 }
 
 I16x16: struct {
-    lanes: [I16#16]
+    lanes: [I16#16],
 
     new: fn(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16, l8: I16, l9: I16, l10: I16, l11: I16, l12: I16, l13: I16, l14: I16, l15: I16) -> I16x16 Never! {
         I16x16{lanes: [I16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}}
@@ -42113,7 +42113,7 @@ I16x16: struct {
 }
 
 U16x16: struct {
-    lanes: [U16#16]
+    lanes: [U16#16],
 
     new: fn(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16, l8: U16, l9: U16, l10: U16, l11: U16, l12: U16, l13: U16, l14: U16, l15: U16) -> U16x16 Never! {
         U16x16{lanes: [U16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}}
@@ -42214,7 +42214,7 @@ U16x16: struct {
 }
 
 I32x8: struct {
-    lanes: [I32#8]
+    lanes: [I32#8],
 
     new: fn(l0: I32, l1: I32, l2: I32, l3: I32, l4: I32, l5: I32, l6: I32, l7: I32) -> I32x8 Never! {
         I32x8{lanes: [I32#8]{l0, l1, l2, l3, l4, l5, l6, l7}}
@@ -42315,7 +42315,7 @@ I32x8: struct {
 }
 
 U32x8: struct {
-    lanes: [U32#8]
+    lanes: [U32#8],
 
     new: fn(l0: U32, l1: U32, l2: U32, l3: U32, l4: U32, l5: U32, l6: U32, l7: U32) -> U32x8 Never! {
         U32x8{lanes: [U32#8]{l0, l1, l2, l3, l4, l5, l6, l7}}
@@ -42416,7 +42416,7 @@ U32x8: struct {
 }
 
 I64x4: struct {
-    lanes: [I64#4]
+    lanes: [I64#4],
 
     new: fn(l0: I64, l1: I64, l2: I64, l3: I64) -> I64x4 Never! {
         I64x4{lanes: [I64#4]{l0, l1, l2, l3}}
@@ -42515,7 +42515,7 @@ I64x4: struct {
 }
 
 U64x4: struct {
-    lanes: [U64#4]
+    lanes: [U64#4],
 
     new: fn(l0: U64, l1: U64, l2: U64, l3: U64) -> U64x4 Never! {
         U64x4{lanes: [U64#4]{l0, l1, l2, l3}}
@@ -42629,9 +42629,9 @@ U64x4: struct {
 
 // Stock coordinates retain the seed's frame-zero constructors and left frame.
 ScreenPoint: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> ScreenPoint Never! { ScreenPoint{x: x, y: y, frame_id: 0} }
 
@@ -42661,9 +42661,9 @@ ScreenPoint: struct {
 }
 
 ScreenDelta: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> ScreenDelta Never! { ScreenDelta{x: x, y: y, frame_id: 0} }
 
@@ -42687,9 +42687,9 @@ ScreenDelta: struct {
 }
 
 WorldPoint: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> WorldPoint Never! { WorldPoint{x: x, y: y, frame_id: 0} }
 
@@ -42719,9 +42719,9 @@ WorldPoint: struct {
 }
 
 WorldDelta: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> WorldDelta Never! { WorldDelta{x: x, y: y, frame_id: 0} }
 
@@ -42763,9 +42763,9 @@ WorldDelta: struct {
 }
 
 ViewPoint: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> ViewPoint Never! { ViewPoint{x: x, y: y, frame_id: 0} }
 
@@ -42795,9 +42795,9 @@ ViewPoint: struct {
 }
 
 ViewDelta: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> ViewDelta Never! { ViewDelta{x: x, y: y, frame_id: 0} }
 
@@ -42821,9 +42821,9 @@ ViewDelta: struct {
 }
 
 CameraPoint: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> CameraPoint Never! { CameraPoint{x: x, y: y, frame_id: 0} }
 
@@ -42853,9 +42853,9 @@ CameraPoint: struct {
 }
 
 CameraDelta: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> CameraDelta Never! { CameraDelta{x: x, y: y, frame_id: 0} }
 
@@ -42900,9 +42900,9 @@ CameraDelta: struct {
 }
 
 DevicePoint: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> DevicePoint Never! { DevicePoint{x: x, y: y, frame_id: 0} }
 
@@ -42932,9 +42932,9 @@ DevicePoint: struct {
 }
 
 DeviceDelta: struct {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float) -> DeviceDelta Never! { DeviceDelta{x: x, y: y, frame_id: 0} }
 
@@ -42959,7 +42959,7 @@ DeviceDelta: struct {
 
 #Error
 TransformError: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }
@@ -42969,9 +42969,9 @@ TransformError: struct {
 // Phantom params follow existing KeyRef<T>/DataTracked<T,K> source declarations.
 // The seed erases both params and keeps f64 payloads even for F32 spellings.
 Point2: struct<T, Space> {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float, frame_id: Int) -> Point2<T, Space> Never! {
         Point2<T, Space>{x: x, y: y, frame_id: frame_id}
@@ -43006,9 +43006,9 @@ Point2: struct<T, Space> {
 }
 
 Delta2: struct<T, Space> {
-    x: Float
-    y: Float
-    frame_id: Int
+    x: Float,
+    y: Float,
+    frame_id: Int,
 
     new: fn(x: Float, y: Float, frame_id: Int) -> Delta2<T, Space> Never! {
         Delta2<T, Space>{x: x, y: y, frame_id: frame_id}
@@ -43079,19 +43079,19 @@ GeometryPoint: trait {
 }
 
 Ray2: struct<T, From, To> {
-    origin: Point2<T, To>
+    origin: Point2<T, To>,
     direction: Delta2<T, To>
 }
 
 Transform: struct<From, To> {
-    m00: Float
-    m01: Float
-    m10: Float
-    m11: Float
-    tx: Float
-    ty: Float
-    from_frame: Int
-    to_frame: Int
+    m00: Float,
+    m01: Float,
+    m10: Float,
+    m11: Float,
+    tx: Float,
+    ty: Float,
+    from_frame: Int,
+    to_frame: Int,
 
     affine: fn(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform<From, To> Never! {
         Transform<From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}
@@ -43164,14 +43164,14 @@ Transform: struct<From, To> {
 }
 
 Transform2: struct<T, From, To> {
-    m00: Float
-    m01: Float
-    m10: Float
-    m11: Float
-    tx: Float
-    ty: Float
-    from_frame: Int
-    to_frame: Int
+    m00: Float,
+    m01: Float,
+    m10: Float,
+    m11: Float,
+    tx: Float,
+    ty: Float,
+    from_frame: Int,
+    to_frame: Int,
 
     affine: fn(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: Int, to_frame: Int) -> Transform2<T, From, To> Never! {
         Transform2<T, From, To>{m00: m00, m01: m01, m10: m10, m11: m11, tx: tx, ty: ty, from_frame: from_frame, to_frame: to_frame}

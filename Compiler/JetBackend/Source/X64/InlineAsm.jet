@@ -4,29 +4,29 @@
 use jet_foundation.[INLINE_ASSEMBLY_X64_MNEMONICS]
 
 X64AsmResult: struct {
-    code: [U8]
-    regs: [Int]
-    result: Int
-    error: String?
+    code: [U8],
+    regs: [Int],
+    result: Int,
+    error: String?,
     // The template keeps r8 and r9: its operands are at most four (in rdi,
     // rsi, rdx and rcx), it makes no call and no line names r8 or r9 at
     // any width, a clobber included. A value in r8 or r9 lives through its
     // code in place (JetIR X64Alloc.jet ir_x64_silent). A rail never is.
-    quiet: Bool{false}
+    quiet: Bool{false},
 }
 
 X64AsmState: struct {
-    code: X64Code
-    names: [String]
-    written: [Bool]
-    depth: Int
-    result: Int
+    code: X64Code,
+    names: [String],
+    written: [Bool],
+    depth: Int,
+    result: Int,
     // The template stack depth of the word `push rbx` saved, -1 for none.
     // rbx is callee-saved and outside the operand vocabulary; a template
     // saves it only so `cpuid` may write ebx.
-    rbx_saved: Int
+    rbx_saved: Int,
     // `cpuid` wrote rbx and `pop rbx` has not restored the saved word yet.
-    rbx_dirty: Bool
+    rbx_dirty: Bool,
 }
 
 // The template's operand registers, in binding order: rdi, rsi, rdx, rcx,
@@ -39,8 +39,8 @@ x64_asm_call_clobbers: fn(reg: Int) -> Bool Never! {
 }
 
 X64AsmMemory: struct {
-    base: Int
-    disp: Int
+    base: Int,
+    disp: Int,
 }
 
 x64_asm_register: fn(text: String) -> Int Never! {
@@ -140,10 +140,10 @@ x64_asm_xmm: fn(text: String) -> Int Never! {
 // for none), opcode map (0 for 0F, else the 0F 38 or 0F 3A escape), opcode,
 // and whether an imm8 follows the operands.
 X64AsmSse: struct {
-    prefix: Int
-    escape: Int
-    opcode: Int
-    immediate: Bool
+    prefix: Int,
+    escape: Int,
+    opcode: Int,
+    immediate: Bool,
 }
 
 x64_asm_sse: fn(mnemonic: String) -> X64AsmSse? Never! {

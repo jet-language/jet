@@ -1,0 +1,61 @@
+// Data members take a comma after each one: the formatter writes it after
+// every member of a multi-line body and keeps a one-line body of data on one
+// line without the last one.
+Point: struct { x: Int, y: Int, }
+
+Size: struct {
+    w: Int,
+    h: Int
+}
+
+Mode: enum { Fast, Safe }
+
+Shape: enum { Circle(Float), Rect(w: Float, h: Float), Dot }
+
+Level: enum {
+    Low,
+    Mid, // the middle one
+    High
+}
+
+Burn: enum {
+    Fire { Hot, Scald },
+    Cold
+}
+
+Code: enum { Ok = 0, Warn = 4, Fail = 8 }
+
+Sided: trait {
+    sides: Int,
+    area: fn(self) -> Int,
+
+    twice: fn(self) -> Int {
+        self.area() * 2
+    }
+}
+
+Square: struct {
+    side: Int,
+
+    impl Sided {
+        sides: 4,
+
+        area: fn(self) -> Int {
+            self.side * self.side
+        }
+    }
+}
+
+run: fn() {
+    p: Point{x: 1, y: 2,}
+    s: Size{
+        w: 3,
+        h: 4
+    }
+    r: {
+        a: 5,
+        b: 6
+    }
+    q: Square{side: 3}
+    print("{p.x} {s.h} {r.b} {q.twice()}")
+}

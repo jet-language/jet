@@ -7,8 +7,8 @@ use mem: core.mem
 // `count` I64 words of heap storage, taken at `claim` and released once, at
 // close.
 Words: struct {
-    priv base: mem.Ptr<I64>
-    priv count: Int
+    priv base: mem.Ptr<I64>,
+    priv count: Int,
 
     #Inline(Always) claim: fn(count: Int) -> Words? Never! {
         #Unsafe("the block is used only through this owner, which releases it once, at close") {
@@ -93,7 +93,7 @@ Words: struct {
 
 // One atomic word.
 Ticks: struct {
-    priv word: Atomic<I64>
+    priv word: Atomic<I64>,
 
     #Inline(Always) start: fn() -> Ticks Never! { Ticks{word: 0} }
 
@@ -113,9 +113,9 @@ Ticks: struct {
 // A mapping of fresh private pages, read and written as I64 words, unmapped
 // once, at close.
 Pages: struct {
-    priv region: mem.Region
-    priv base: mem.Ptr<I64>
-    priv count: Int
+    priv region: mem.Region,
+    priv base: mem.Ptr<I64>,
+    priv count: Int,
 
     #Inline(Always) map: fn(bytes: Int) -> Pages? Never! {
         region: mem.Region.reserve(bytes) ?? return None

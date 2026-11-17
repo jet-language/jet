@@ -33,25 +33,25 @@ use {
 /// Verification failure. Every variant and payload is part of the contract.
 #Error
 AuthError: enum {
-    MalformedToken(String)
-    UnsupportedToken(String)
-    InvalidSignature
-    WeakKey
-    MissingClaim(String)
-    WrongAudience(expected: String, actual: String)
-    WrongIssuer(expected: String, actual: String?)
-    TokenExpired
-    DecodeError(String)
+    MalformedToken(String),
+    UnsupportedToken(String),
+    InvalidSignature,
+    WeakKey,
+    MissingClaim(String),
+    WrongAudience(expected: String, actual: String),
+    WrongIssuer(expected: String, actual: String?),
+    TokenExpired,
+    DecodeError(String),
     TokenNotYetValid
 }
 
 /// Verified token claims. `audience` is the expected audience the token named.
 Claims: struct {
-    subject: String?
-    audience: String
-    issuer: String?
-    expires_at: Int
-    not_before: Int?
+    subject: String?,
+    audience: String,
+    issuer: String?,
+    expires_at: Int,
+    not_before: Int?,
     issued_at: Int?
 }
 
@@ -66,10 +66,10 @@ AccountID: distinct String
 /// A validated session. Neither its display nor its debug view prints the id
 /// or cookie bytes.
 Session: struct {
-    #Redact id: String
-    user_id: String
-    #Redact cookie: String
-    expires_at: Int
+    #Redact id: String,
+    user_id: String,
+    #Redact cookie: String,
+    expires_at: Int,
 
     impl Display {
         display: fn(self) -> String { session_show(self) }
@@ -87,7 +87,7 @@ AUTH_MAX_PROVIDERS: 64
 
 /// An app's auth configuration: its users table and OAuth providers.
 Auth: struct {
-    users_table: String
+    users_table: String,
     providers: [String]
 }
 
@@ -636,16 +636,16 @@ session_show: fn(session: Session) -> String Never! {
 /// n expiry ms), 3 = magic-link token (a token, b user, c delivery identity,
 /// n expiry ms), 4 = OAuth state (a state, b provider, c nonce, n expiry ms).
 AuthRecord: struct {
-    kind: Int
-    a: String
-    b: String
-    c: String
+    kind: Int,
+    a: String,
+    b: String,
+    c: String,
     n: Int
 }
 
 OAuthConfig: struct {
-    secret: [U8]
-    issuer: String
+    secret: [U8],
+    issuer: String,
     audience: String
 }
 
@@ -912,17 +912,17 @@ oauth_b64: fn(text: String) -> [U8] {
 /// Claims an assertion header or payload may carry; a repeated claim is
 /// rejected.
 OAuthClaims: struct {
-    alg: String?
-    nonce: String?
-    iss: String?
-    aud: String?
-    sub: String?
-    exp: Int?
+    alg: String?,
+    nonce: String?,
+    iss: String?,
+    aud: String?,
+    sub: String?,
+    exp: Int?,
     iat: Int?
 }
 
 JSONText: struct {
-    text: String
+    text: String,
     next: Int
 }
 

@@ -10,16 +10,16 @@ ADA_BIND_SCHEMA: "jet-ada-bind-v1"
 ADA_TOOL_ACTION: "rejected the Ada binding source"
 
 AdaBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    runtime_dir: String
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    runtime_dir: String,
+    provenance: String,
 }
 
 AdaScalar: enum {
-    Int
-    Float
+    Int,
+    Float,
 
     jet: fn(self) -> String Never! {
         if self == {
@@ -46,27 +46,27 @@ AdaScalar: enum {
 }
 
 AdaConstraint: struct {
-    low: String
-    high: String
+    low: String,
+    high: String,
 }
 
 // A resolved Ada type: its scalar and the subtype range, if any.
 AdaType: struct {
-    scalar: AdaScalar
-    constraint: AdaConstraint?
+    scalar: AdaScalar,
+    constraint: AdaConstraint?,
 }
 
 AdaParam: struct {
-    name: String
-    scalar: AdaScalar
-    constraint: AdaConstraint?
+    name: String,
+    scalar: AdaScalar,
+    constraint: AdaConstraint?,
 }
 
 AdaRoutine: struct {
-    name: String
-    symbol: String
-    params: [AdaParam]
-    result: AdaScalar
+    name: String,
+    symbol: String,
+    params: [AdaParam],
+    result: AdaScalar,
 }
 
 // Parse the spec, compile it with its body through gnatmake/gnatbind, build

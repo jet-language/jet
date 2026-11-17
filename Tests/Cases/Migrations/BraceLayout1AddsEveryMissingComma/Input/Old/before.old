@@ -1,0 +1,66 @@
+// Data members that a line break or a space alone ends.
+Point: struct {
+    x: Int
+    // The height.
+    y: Int  // in pixels
+}
+
+Pair: struct { left: Int right: Int }
+
+Level: enum {
+    Low
+    Mid(rank: Int)
+    High { Hot Cold }
+}
+
+Frame: struct {
+    size: {
+        width: Int
+        height: Int
+    }
+    label: String
+
+    describe: fn(self) -> String { self.label }
+}
+
+Shape: trait {
+    Unit: type
+    sides: Int
+    area: fn(self) -> Int
+
+    twice: fn(self) -> Int { self.area() * 2 }
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        sides: 4
+
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+        colour: .Red
+    }
+}
+
+run: fn() {
+    spot: {
+        x: 1
+        y: 2
+    }
+    print("{spot.x}")
+}
+
+// A quoted program and prose that only looks like one.
+QUOTED: "Size: struct {{\n    w: Int\n    h: Int\n}}\n"
+RAW: `Mode: enum {
+    Fast
+    Safe
+}
+`
+PROSE: "write {{ a b }} as you like"

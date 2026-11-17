@@ -41,38 +41,38 @@ use {
 // selector rows every function's selection named (ir_x64_tables_add).
 IRX64Tables: struct {
     // The IR data rows (same ids), then headers and texts.
-    data: [X64Data]
+    data: [X64Data],
     // Byte length of every data row.
-    lengths: [Int]
+    lengths: [Int],
     // Per IR data row: the data row of its immortal String header, -1 when
     // no ConstText names it.
-    headers: [Int]
+    headers: [Int],
     // Selector texts (source paths, stop messages, big-integer decimals) -> data row.
-    texts: [String:Int]
+    texts: [String:Int],
     // Big-integer decimals -> the data row of the word that is their static
     // exact Int (ir_x64_static_int).
-    ints: [String:Int]
+    ints: [String:Int],
     // DWARF: the source files (row per distinct path) and a debug type per
     // IR type row (debug row r describes m.types[r]), then the rows they name.
-    files: [String]
-    file_rows: [String:Int]
-    debug_types: [X64DebugType]
+    files: [String],
+    file_rows: [String:Int],
+    debug_types: [X64DebugType],
     // The data row of the byte caching whether the CPU has FMA3 (X64Select.jet
     // ir_x64_fma), -1 when no function calls jet_std_math_fma.
-    fma: Int
+    fma: Int,
     // Per data row, whether code that goes on reads it (ir_x64_tables_heat);
     // rows past its end are not.
-    hot: [Bool]{[Bool]{}}
+    hot: [Bool]{[Bool]{}},
 }
 
 // A data row a function's selection names besides the IR data rows: a
 // selector text, the String header of an IR data row, a big-integer
 // decimal's static Int word, the FMA byte.
 IRX64Use: enum {
-    Text(text: String)
-    Header(row: Int)
-    StaticInt(text: String)
-    Fma
+    Text(text: String),
+    Header(row: Int),
+    StaticInt(text: String),
+    Fma,
 }
 
 // Use k of a function's selection is data row IR_X64_LOCAL_DATA + k in its
@@ -87,25 +87,25 @@ IR_X64_LOCAL_DATA: 1099511627776
 // uses their rows afterwards, in function order (ir_x64_tables_add), the
 // rows one walk over the whole module would give them.
 IRX64FunctionTables: struct {
-    uses: [IRX64Use]
+    uses: [IRX64Use],
     // Per use: the byte length of its data.
-    lengths: [Int]
+    lengths: [Int],
     // Selector texts, IR data rows with a String header, big-integer
     // decimals with a static Int -> local data row.
-    texts: [String:Int]
-    headers: [Int:Int]
-    ints: [String:Int]
+    texts: [String:Int],
+    headers: [Int:Int],
+    ints: [String:Int],
     // The local data row of the FMA byte, -1 when the function calls no
     // jet_std_math_fma.
-    fma: Int
+    fma: Int,
     // Whether the selection keeps an emission log (JET_X64_EMIT_LOG,
     // ir_x64_compile_module_logged).
-    logged: Bool
+    logged: Bool,
     // The data rows its DataAddress and ConstText instructions read (module
     // rows, a header as its local row), `cold` those on the way to a stop
     // (ir_x64_dying), `hot` the others; ir_x64_tables_heat marks them.
-    hot: [Int]{[Int]{}}
-    cold: [Int]{[Int]{}}
+    hot: [Int]{[Int]{}},
+    cold: [Int]{[Int]{}},
 }
 
 // Whether JET_X64_EMIT_LOG entry list `names` names function `f`: an entry
@@ -121,17 +121,17 @@ ir_x64_log_names: fn(f: IRFunction, names: [String]) -> Bool Never! {
 // The module moves in and comes back in `program`, so the object writer
 // reads the same rows the selection read without a copy.
 IRX64Result: struct {
-    program: IRModule
-    functions: [X64CompiledFunction]
-    debug: [X64FunctionDebug]
+    program: IRModule,
+    functions: [X64CompiledFunction],
+    debug: [X64FunctionDebug],
     // Per function: the debug variables its ranges index.
-    variables: [[X64DebugVariable]]
-    errors: [String]
-    tables: IRX64Tables
-    threads: CompilerThreads
+    variables: [[X64DebugVariable]],
+    errors: [String],
+    tables: IRX64Tables,
+    threads: CompilerThreads,
     // The logged functions' emission logs, in function order
     // (ir_x64_log_text), one line per row.
-    log: [String]
+    log: [String],
 }
 
 ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
@@ -218,16 +218,16 @@ ir_x64_static_int_fits: fn(text: String) -> Bool Never! {
 // The shared rows the DWARF types of the IR type rows name.
 IRX64DebugRows: struct {
     // A machine word (I64), a byte (U8) and an untyped pointer.
-    word: Int
-    byte: Int
-    pointer: Int
+    word: Int,
+    byte: Int,
+    pointer: Int,
     // The exact Int: the word under its own name, which a debugger shows
     // so a reader knows to decode a tagged carrier (JetRuntime Int.jet).
-    int: Int
+    int: Int,
     // The pointee structs, made on first use (-1 before).
-    string: Int
-    decimal: Int
-    fraction: Int
+    string: Int,
+    decimal: Int,
+    fraction: Int,
 }
 
 // Appends `ty` to the debug types; returns its row.
@@ -776,22 +776,22 @@ ir_x64_compile_module_logged: fn(program: &&IRModule, threads: CompilerThreads, 
 // which a thread takes with one atomic add, and per seat the row its thread
 // is selecting (-1 none).
 IRX64Inputs: struct {
-    programs: [IRModule]
-    names: [String]
-    order: [Int]
-    next: Atomic<Int>
-    seats: [IRX64Seat]
+    programs: [IRModule],
+    names: [String],
+    order: [Int],
+    next: Atomic<Int>,
+    seats: [IRX64Seat],
 }
 
 IRX64Seat: struct {
-    row: Atomic<Int>
+    row: Atomic<Int>,
 }
 
 // A function row and its selection, kept by the thread that selected it
 // until the join.
 IRX64Selected: struct {
-    row: Int
-    compiled: IRX64FunctionResult
+    row: Int,
+    compiled: IRX64FunctionResult,
 }
 
 // Runs the selecting threads until every row of `outputs` holds its result
@@ -924,11 +924,11 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
 // straight from them (JetBackend Image/DirectBind.jet
 // x64_bind_functions_at); else `errors`, ir_x64_object's.
 IRX64Program: struct {
-    program: X64ObjectModule
-    functions: [X64CompiledFunction]
-    debug: [X64FunctionDebug]
-    threads: CompilerThreads
-    errors: [String]
+    program: X64ObjectModule,
+    functions: [X64CompiledFunction],
+    debug: [X64FunctionDebug],
+    threads: CompilerThreads,
+    errors: [String],
 }
 
 // The program of `compiled` (moved in, its rows moved on; the rest drops
@@ -1043,8 +1043,8 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
 // arguments stay shared with the thread that spawns it, which drops them
 // after the join, so what a task drops reaches it here: it pops it off.
 IRX64Released: struct {
-    runs: [[IRFunction]]
-    rest: [IRX64Result]
+    runs: [[IRFunction]],
+    rest: [IRX64Result],
 }
 
 // The most runs the IR functions of an object's compile drop in

@@ -2,7 +2,7 @@
 /// wrapper is dropped, and a generic take forwards a Close value to the place
 /// that drops it. Each release prints once, where the owner's scope ends.
 Lock: struct {
-    name: String
+    name: String,
 
     impl Close {
         close: fn(&&self) { print("release {self.name}") }
@@ -10,8 +10,8 @@ Lock: struct {
 }
 
 Session: struct {
-    lock: Lock
-    user: String
+    lock: Lock,
+    user: String,
 }
 
 hand_off: fn(s: &&Session) { print("got {s.user}") }

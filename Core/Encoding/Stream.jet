@@ -30,8 +30,8 @@ typed_string: fn(text: &&String) -> Dyn Never! { Dyn.Text(text) }
 // One codec's heap charge. Its owner holds it in place and lends it to
 // `reserve`, so a charge is two integer steps, not a lock.
 AllocationBudget: struct {
-    used: Int
-    limit: Int
+    used: Int,
+    limit: Int,
 
     charge: fn(&self, bytes: Int) -> Bool Never! {
         updated: self.used + bytes
@@ -56,8 +56,8 @@ budget: fn(limits: EncodingLimits) -> AllocationBudget Never! {
 
 #Error
 __ReserveFailure: enum {
-    Heap
-    Allocation
+    Heap,
+    Allocation,
 }
 
 reserve: fn<T>(allocation: &AllocationBudget, values: &[T], additional: Int) -> Bool Never! {
@@ -99,8 +99,8 @@ __reserve_checked: fn<T>(allocation: &AllocationBudget, values: &[T], additional
 }
 
 FoldBudget: struct {
-    decoded: Int
-    tracked: Int
+    decoded: Int,
+    tracked: Int,
 }
 
 validate_limits: fn(limits: EncodingLimits) EncodingError! {
@@ -216,38 +216,38 @@ errno_kind: fn(code: Int) -> String Never! {
 
 // Size-compatible frame slots use machine integers, not exact Int carriers.
 ReadFrame: enum {
-    ArrayValueOrEnd(first: Bool, index: U64)
-    ArrayCommaOrEnd(U64)
-    ObjectKeyOrEnd(Bool)
-    ObjectColonValue
-    ObjectCommaOrEnd
+    ArrayValueOrEnd(first: Bool, index: U64),
+    ArrayCommaOrEnd(U64),
+    ObjectKeyOrEnd(Bool),
+    ObjectColonValue,
+    ObjectCommaOrEnd,
 }
 
 JSONPull: struct<R: Reader> {
-    input: R
-    limits: EncodingLimits
-    total: Int
-    offset: Int
-    line: Int
-    column: Int
+    input: R,
+    limits: EncodingLimits,
+    total: Int,
+    offset: Int,
+    line: Int,
+    column: Int,
     // The bytes read ahead from `input` (buffer_bytes at a time, charged to
     // `allocation` once), and how many of them `fill` has passed.
-    buffer: [U8]
-    buffered: Int
-    frames: [ReadFrame]
-    root_started: Bool
-    eof: Bool
-    record_mode: Bool
-    typed_numbers: Bool
-    terminal: EncodingError?
-    allocation: AllocationBudget
-    output_heap: Int
+    buffer: [U8],
+    buffered: Int,
+    frames: [ReadFrame],
+    root_started: Bool,
+    eof: Bool,
+    record_mode: Bool,
+    typed_numbers: Bool,
+    terminal: EncodingError?,
+    allocation: AllocationBudget,
+    output_heap: Int,
     // Each open object's keys, from `seen_starts` on: a strict reader keeps
     // all of them to reject a repeated key, a duplicate-allowing reader only
     // the current one. The last is the key the error path names.
-    allow_duplicates: Bool
-    seen_keys: [String]
-    seen_starts: [Int]
+    allow_duplicates: Bool,
+    seen_keys: [String],
+    seen_starts: [Int],
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first)
@@ -1254,33 +1254,33 @@ write_ascii: fn(out: &[U8], text: String) Never! {
 }
 
 WriteFrame: enum {
-    Array(Bool)
-    ObjectKey(Bool)
-    ObjectValue
+    Array(Bool),
+    ObjectKey(Bool),
+    ObjectValue,
 }
 
 CanonicalFrame: struct {
-    is_object: Bool
-    first: Bool
-    entries: [{key: String, value: [U8]}]
-    key: String?
-    value: [U8]
-    retained: U64
+    is_object: Bool,
+    first: Bool,
+    entries: [{key: String, value: [U8]}],
+    key: String?,
+    value: [U8],
+    retained: U64,
 }
 
 JSONPush: struct<W: Writer> {
-    output: W
+    output: W,
     // The bytes of one write to `output`, kept so their room is reused.
-    out: [U8]
-    limits: EncodingLimits
-    frames: [WriteFrame]
-    root_written: Bool
-    finished: Bool
-    terminal: EncodingError?
-    total: Int
-    canonical: Bool
-    canonical_frames: [CanonicalFrame]
-    canonical_retained: Int
+    out: [U8],
+    limits: EncodingLimits,
+    frames: [WriteFrame],
+    root_written: Bool,
+    finished: Bool,
+    terminal: EncodingError?,
+    total: Int,
+    canonical: Bool,
+    canonical_frames: [CanonicalFrame],
+    canonical_retained: Int,
 
     error: fn(self, kind: EncodingErrorKind, reason: String) -> EncodingError Never! {
         stream_error(kind, self.total, 1, self.total + 1, reason)
@@ -1983,9 +1983,9 @@ wire_float: fn(value: Float) -> String Never! {
 }
 
 JSONLinesPull: struct<R: Reader> {
-    parser: JSONPull<R>
-    record_index: Int
-    terminal: EncodingError?
+    parser: JSONPull<R>,
+    record_index: Int,
+    terminal: EncodingError?,
 
     next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! {
         if self.terminal == .Val(error) -> return Err(error)
@@ -2198,11 +2198,11 @@ jsonl_wire_size: fn<W: Writer>(writer: JSONPush<W>, value: Dyn) -> Int EncodingE
 // and reserve this record plus LF. The LF stays pending until the next
 // record, a flush or finish writes it, so a flushed file ends on a whole line.
 JSONLinesPush: struct<W: Writer> {
-    writer: JSONPush<W>
-    finished: Bool
-    terminal: EncodingError?
-    record_index: Int
-    pending_lf: Bool
+    writer: JSONPush<W>,
+    finished: Bool,
+    terminal: EncodingError?,
+    record_index: Int,
+    pending_lf: Bool,
 
     close_line: fn(&self) -[IO]> EncodingError! {
         if !self.pending_lf {

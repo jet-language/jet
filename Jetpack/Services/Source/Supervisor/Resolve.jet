@@ -14,13 +14,13 @@ SERVICES_MAX_BACKOFF_MS: 60000
 
 // A `services:` entry resolved to what actually runs.
 ServiceResolved: struct {
-    run: [String]
-    ready: String?
-    ready_probe: ReadyProbe?
-    ports: [Int]
-    dir: String
-    data_dir: String
-    project_dir: String
+    run: [String],
+    ready: String?,
+    ready_probe: ReadyProbe?,
+    ports: [Int],
+    dir: String,
+    data_dir: String,
+    project_dir: String,
 }
 
 // Resolve `plan`, applying the preset default for every field the author
@@ -231,8 +231,8 @@ services_validate_socket_names: fn(sockets: [String]) ServicesError! {
 // Loopback listeners that hold the service's ports until spawn. Port 0 asks
 // the system for an ephemeral port, recorded in `ports`.
 ServicePortReservation: struct {
-    ports: [Int]
-    listeners: [TCPListener]
+    ports: [Int],
+    listeners: [TCPListener],
 
     // Rust `drop(allocated_ports)`: release the listeners immediately before
     // spawn so the service binds its ports without a race. The consuming
@@ -262,8 +262,8 @@ services_allocate_ports: fn(ports: [Int]) -[Net, Time.Wait]> ServicePortReservat
 // paths itself, so `release` drops the listeners and removes the files just
 // before spawn.
 ServiceSocketReservation: struct {
-    paths: [String]
-    listeners: [UnixListener]
+    paths: [String],
+    listeners: [UnixListener],
 
     release: fn(&&self) -[FS]> ServicesError! {
         first_error := String?{None}

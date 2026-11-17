@@ -10,22 +10,22 @@ use {
 
 #Error
 JetCLIComparisonError: struct {
-    message: String
+    message: String,
 }
 
 JetCLIComparisonBinding: struct {
-    boundary_digest: String
-    source_identity: String
-    replacement_identity: String
-    tool_identity: String
-    target_identity: String
-    coverage_digest: String
-    assumptions: [String]
+    boundary_digest: String,
+    source_identity: String,
+    replacement_identity: String,
+    tool_identity: String,
+    target_identity: String,
+    coverage_digest: String,
+    assumptions: [String],
 }
 
 JetCLIComparisonRun: struct {
-    record: ComparisonRecord
-    binding: JetCLIComparisonBinding
+    record: ComparisonRecord,
+    binding: JetCLIComparisonBinding,
 }
 
 jet_cli_comparison_error: fn(message: String) -> JetCLIComparisonError Never! {
@@ -295,8 +295,8 @@ jet_cli_comparison_error_output: fn(message: String, json: Bool) -> JetDriverVer
 // The host consumes a successful run for receipt/evidence recording, then
 // calls the renderer. On invalid input it returns the exact Rust output.
 JetCLIComparisonRead: enum {
-    Ready(run: JetCLIComparisonRun)
-    Failed(output: JetDriverVerbOutput)
+    Ready(run: JetCLIComparisonRun),
+    Failed(output: JetDriverVerbOutput),
 }
 
 jet_cli_comparison_read: fn(target: String, args: [String], json: Bool) -[FS]> JetCLIComparisonRead Never! {

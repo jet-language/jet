@@ -21,7 +21,7 @@ C_POLL_MS: 80
 
 #Error
 Failure: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message }
@@ -30,17 +30,17 @@ Failure: struct {
 
 // The launched session, its BiDi channel and the tab every action drives.
 Driver: struct {
-    session: Browser
-    bidi: BrowserProtocol
-    context: String
-    engine: String
-    version: String
+    session: Browser,
+    bidi: BrowserProtocol,
+    context: String,
+    engine: String,
+    version: String,
 }
 
 // A viewport point in CSS pixels.
 Point: struct {
-    x: Float
-    y: Float
+    x: Float,
+    y: Float,
 }
 
 fail_with: fn(message: String) -> Failure { Failure{message: message} }
@@ -303,8 +303,8 @@ pause: fn() { sleep_ms(C_POLL_MS) }
 
 // A poll deadline: `w: deadline(ms)` then `loop alive(w) { ...; pause() }`.
 Deadline: struct {
-    started: Instant
-    ms: Int
+    started: Instant,
+    ms: Int,
 }
 
 deadline: fn(ms: Int) -> Deadline { Deadline{started: time.instant(), ms: ms} }

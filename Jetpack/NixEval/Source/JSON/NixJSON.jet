@@ -8,10 +8,10 @@
 // ±mantissa * 2^exponent with an odd (or zero) mantissa; zero is unsigned, so
 // structural equality matches IEEE `==`.
 NixEvalJSONNumber: struct {
-    negative: Bool
-    infinite: Bool
-    mantissa: Int
-    exponent: Int
+    negative: Bool,
+    infinite: Bool,
+    mantissa: Int,
+    exponent: Int,
 
     zero: fn() -> NixEvalJSONNumber Never! {
         NixEvalJSONNumber{negative: false, infinite: false, mantissa: 0, exponent: 0}
@@ -38,17 +38,17 @@ NixEvalJSONNumber: struct {
 }
 
 NixEvalJSONNode: enum {
-    Null
-    Bool(Bool)
-    Num(NixEvalJSONNumber)
-    Str(String)
-    Array([Int])
-    Object([String:Int])
+    Null,
+    Bool(Bool),
+    Num(NixEvalJSONNumber),
+    Str(String),
+    Array([Int]),
+    Object([String:Int]),
 }
 
 NixEvalJSON: struct {
-    nodes: [NixEvalJSONNode]
-    root: Int
+    nodes: [NixEvalJSONNode],
+    root: Int,
 
     parse: fn(input: String) -> NixEvalJSON NixEvalError! {
         parser := NixEvalJSONParser{bytes: input.bytes(), position: 0, nodes: [NixEvalJSONNode]{}}
@@ -118,9 +118,9 @@ NixEvalJSON: struct {
 }
 
 NixEvalJSONParser: struct {
-    bytes: [U8]
-    position: Int
-    nodes: [NixEvalJSONNode]
+    bytes: [U8],
+    position: Int,
+    nodes: [NixEvalJSONNode],
 
     add: fn(&self, node: NixEvalJSONNode) -> Int Never! {
         self.nodes.push(node.copy())

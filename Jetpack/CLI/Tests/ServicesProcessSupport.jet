@@ -302,8 +302,8 @@ esac
 
 // The fake systemd `bin` and `state` directories.
 FakeSystemd: struct {
-    bin: String
-    state: String
+    bin: String,
+    state: String,
 
     install: fn() -[FS]> FakeSystemd {
         root: files.tmpdir("jpk-fake-systemd-") ?? panic("claim fake systemd scratch")
@@ -327,10 +327,10 @@ cli_test_write_script: fn(path: String, contents: String) -[FS]> {
 // One claim's project, Jetpack root, and home scratch directories plus the
 // fake systemd (Linux only) every `jetpack` call runs under.
 ServicesClaim: struct {
-    project: String
-    root: String
-    home: String
-    fake: FakeSystemd?
+    project: String,
+    root: String,
+    home: String,
+    fake: FakeSystemd?,
 
     new: fn(label: String) -[FS, Env]> ServicesClaim {
         ServicesClaim{

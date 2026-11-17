@@ -49,9 +49,9 @@ store_lease_fd_text: fn(fd: Int) -> LeaseText Never! { LeaseText{text: store_lea
 
 #Error
 LeaseHandoffError: enum {
-    HandleLost(String)
-    Unbound(String)
-    Pass(IOError)
+    HandleLost(String),
+    Unbound(String),
+    Pass(IOError),
 
     // A leased directory no longer holds the handle its descriptor passes.
     // Child text names a leased directory its process was not given.
@@ -71,7 +71,7 @@ impl LeaseHandoffError -> StoreError { StoreError.Other(self.message()) }
 // The leased directories one ProcessSpec carries, by reserved descriptor.
 // Only `CacheLease.keep_open_for` adds to it, after passing the directory.
 LeaseBinding: struct {
-    priv fds: [Int]
+    priv fds: [Int],
 
     empty: fn() -> LeaseBinding Never! { LeaseBinding{fds: [Int]{}} }
 }
@@ -80,7 +80,7 @@ LeaseBinding: struct {
 // The only way out is `render` against the binding of the child's own
 // spec; this process never reads leased bytes through it.
 LeaseText: struct {
-    priv text: String
+    priv text: String,
 
     plain: fn(text: String) -> LeaseText Never! { LeaseText{text: text} }
 
@@ -138,17 +138,17 @@ LeaseText: struct {
 // One opened executable of a lease; `relative` is its file name and `id`
 // the identity recorded when it was opened.
 SnapshotFile: struct {
-    relative: String
-    file: FileReader?
-    id: FileID
+    relative: String,
+    file: FileReader?,
+    id: FileID,
 }
 
 // One held directory of a lease and the child descriptor reserved for it.
 LeasedDirectory: struct {
-    path: String
-    priv directory: Directory?
-    id: FileID
-    child_fd: Int
+    path: String,
+    priv directory: Directory?,
+    id: FileID,
+    child_fd: Int,
 
     holds_handle: fn(self) -> Bool Never! { self.directory != None }
 
@@ -222,22 +222,22 @@ store_lease_handle_lost: fn(path: String) -> IOError Never! {
 
 // A held Nix projection source: its directory or regular file.
 ProjectionHandle: enum {
-    Directory(LeasedDirectory)
-    File(FileReader)
+    Directory(LeasedDirectory),
+    File(FileReader),
 }
 
 // The stability witness of one projected Nix object: a pinned handle, or
 // for a symlink root the exact link target (a link cannot be opened
 // no-follow, so its target is re-read instead).
 NixProjectionBinding: struct {
-    logical: String
-    digest: String
-    primary: Bool
-    source: String
-    handle: ProjectionHandle?
-    pinned_id: FileID?
-    pinned_dir: Bool
-    symlink_target: String?
+    logical: String,
+    digest: String,
+    primary: Bool,
+    source: String,
+    handle: ProjectionHandle?,
+    pinned_id: FileID?,
+    pinned_dir: Bool,
+    symlink_target: String?,
 
     // The descriptor reserved for a held directory source.
     child_fd: fn(self) -> Int? Never! {
@@ -266,62 +266,62 @@ NixProjectionBinding: struct {
 // A logical `/nix/store/<name>` path and the source a rootless namespace
 // binds there.
 NixProjectionPath: struct {
-    logical: String
-    source: LeaseText
+    logical: String,
+    source: LeaseText,
 }
 
 // A leased output root, how a child names it, and the descriptor reserved
 // for its held directory (None when the child gets the canonical source).
 LeasedOutputRoot: struct {
-    output_root: String
-    child_root: LeaseText
-    child_fd: Int?
+    output_root: String,
+    child_root: LeaseText,
+    child_fd: Int?,
 }
 
 ConsumptionStatus: enum {
-    Consumable
-    NonConsumable(String)
+    Consumable,
+    NonConsumable(String),
 }
 
 CacheLease: struct {
-    priv verification: StoreVerification
-    priv executables: [SnapshotFile]
-    priv out: String
-    priv lease_root: String
-    priv lease_lock_path: String
-    priv live_lock: RuntimeLock?
+    priv verification: StoreVerification,
+    priv executables: [SnapshotFile],
+    priv out: String,
+    priv lease_root: String,
+    priv lease_lock_path: String,
+    priv live_lock: RuntimeLock?,
     // The child descriptor every child of this lease keeps the live lock at.
-    priv live_lock_child_fd: Int
-    priv handed_off: Bool
-    priv protocol_lease_id: String
-    priv protocol_generation: Int
-    priv protocol_owner_scope: String
-    priv protocol_owner_lock: RuntimeLock?
-    snapshot_root: String
-    priv snapshot_dir: LeasedDirectory?
-    priv bin_relative: String?
+    priv live_lock_child_fd: Int,
+    priv handed_off: Bool,
+    priv protocol_lease_id: String,
+    priv protocol_generation: Int,
+    priv protocol_owner_scope: String,
+    priv protocol_owner_lock: RuntimeLock?,
+    snapshot_root: String,
+    priv snapshot_dir: LeasedDirectory?,
+    priv bin_relative: String?,
     // The sealed private snapshot's digest, which `validate` re-proves.
-    priv expected_digest: String
+    priv expected_digest: String,
     // The realization's canonical output digest, which names it in the Store
     // and in profile receipts.
-    priv output_hash: String
-    priv direct_cas: Bool
-    priv package: String
-    priv version: String
-    priv reference: String
-    priv store_root: String
-    priv consumption_status_value: ConsumptionStatus
+    priv output_hash: String,
+    priv direct_cas: Bool,
+    priv package: String,
+    priv version: String,
+    priv reference: String,
+    priv store_root: String,
+    priv consumption_status_value: ConsumptionStatus,
     // Logical `/nix/store/<name>` paths and the source a rootless namespace
     // binds there.
-    priv nix_store_projection_paths: [NixProjectionPath]
+    priv nix_store_projection_paths: [NixProjectionPath],
     // Verified output roots a consumer path may name.
-    priv leased_output_roots: [LeasedOutputRoot]
-    priv bin_output_root: String?
+    priv leased_output_roots: [LeasedOutputRoot],
+    priv bin_output_root: String?,
     // The `leased_output_roots` entry the bin directory lies in.
-    priv bin_output_index: Int?
-    priv projected_bin_root: String?
-    priv nix_projection_bindings: [NixProjectionBinding]
-    priv wrapper_directory_handle: LeasedDirectory?
+    priv bin_output_index: Int?,
+    priv projected_bin_root: String?,
+    priv nix_projection_bindings: [NixProjectionBinding],
+    priv wrapper_directory_handle: LeasedDirectory?,
 
     // Record that a launched process tree may now hold the lease handles.
     mark_process_handoff: fn(&self) Never! { self.handed_off = true }
@@ -832,9 +832,9 @@ store_lease_member_path_matches: fn(root: String?, bin: String, member: String, 
 // The leased output root containing `path`, how a child names that root,
 // and the path below it.
 LeasedOutputMatch: struct {
-    output_root: String
-    child_root: LeaseText
-    relative: String
+    output_root: String,
+    child_root: LeaseText,
+    relative: String,
 }
 
 store_lease_output_for: fn(roots: [LeasedOutputRoot], path: String) -> LeasedOutputMatch? Never! {

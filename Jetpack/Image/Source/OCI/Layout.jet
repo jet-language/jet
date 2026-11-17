@@ -42,26 +42,26 @@ IMAGE_MAX_LAYER_PATH_BYTES: 100
 // One file layered into the image, relative to the image root (no leading
 // `/`), e.g. `usr/local/bin/myapp`. `mode` is the tar entry's permission bits.
 LayerFile: struct {
-    path: String
-    data: [U8]
-    mode: Int
+    path: String,
+    data: [U8],
+    mode: Int,
 }
 
 // Everything needed to build one `.Oci` image (Rust `BuildSpec`). Pure data;
 // `files` need not be sorted because the build sorts by path.
 OCIBuildSpec: struct {
-    files: [LayerFile]
+    files: [LayerFile],
     // The single platform represented by this OCI layout.
-    platform: String
+    platform: String,
     // The container `Entrypoint`, e.g. `["/usr/local/bin/myapp"]`.
-    entrypoint: [String]
-    env: [ImageEnvVar]
+    entrypoint: [String],
+    env: [ImageEnvVar],
     // `expose:` TCP ports, rendered as `"<port>/tcp"` keys.
-    expose: [Int]
+    expose: [Int],
     // The non-root container user.
-    user: Int
+    user: Int,
     // Optional `CM ` health command.
-    healthcheck: String?
+    healthcheck: String?,
 
     // Rust `BuildSpec::default()`.
     defaults: fn() -> OCIBuildSpec Never! {
@@ -79,17 +79,17 @@ OCIBuildSpec: struct {
 
 // Where a successful build landed and the manifest digest naming it.
 OCIBuiltImage: struct {
-    out_dir: String
+    out_dir: String,
     // `sha256:<hex>`: the image manifest's own digest.
-    manifest_digest: String
+    manifest_digest: String,
     // Total bytes across the layer, config, and manifest blobs.
-    total_bytes: Int
+    total_bytes: Int,
 }
 
 OCILayerDescriptor: struct {
-    media_type: String
-    digest: String
-    size: Int
+    media_type: String,
+    digest: String,
+    size: Int,
 
     tree: fn(self) -> Dyn Never! {
         fields := [String:Dyn]{}
@@ -101,19 +101,19 @@ OCILayerDescriptor: struct {
 }
 
 OCIBaseLayout: struct {
-    root: String
-    platform: String
-    layers: [OCILayerDescriptor]
-    diff_ids: [String]
+    root: String,
+    platform: String,
+    layers: [OCILayerDescriptor],
+    diff_ids: [String],
 }
 
 // What a path names without following a final link (`fs::symlink_metadata`).
 OCINode: enum {
-    Missing
-    File(Int)
-    Directory
-    Symlink
-    Special
+    Missing,
+    File(Int),
+    Directory,
+    Symlink,
+    Special,
 
     is_file: fn(self) -> Bool Never! {
         if self == {

@@ -4,13 +4,13 @@
 // unported `build: fn` surface; see Model.jet).
 
 HermeticBuildPlan: struct {
-    context: Int
-    targets: [HermeticBuildTarget]
-    actions: [HermeticBuildAction]
-    toolchains: [HermeticBuildToolchain]
-    signing_identities: [HermeticBuildSigningIdentity]
-    probes: [HermeticBuildProbe]
-    default: TargetRef?
+    context: Int,
+    targets: [HermeticBuildTarget],
+    actions: [HermeticBuildAction],
+    toolchains: [HermeticBuildToolchain],
+    signing_identities: [HermeticBuildSigningIdentity],
+    probes: [HermeticBuildProbe],
+    default: TargetRef?,
 
     default_target: fn(self) -> TargetRef? Never! { self.default }
 
@@ -339,55 +339,55 @@ HermeticBuildPlan: struct {
 // One finished action of an execution, by handle (Rust `(ActionHandle,
 // ActionOutcome)`).
 BuildActionOutcomeRow: struct {
-    action: HermeticActionHandle
-    outcome: ActionOutcome
+    action: HermeticActionHandle,
+    outcome: ActionOutcome,
 }
 
 BuildExecutionModel: struct {
-    pools: [BuildResourcePoolSpec]
-    nodes: [BuildExecutionNode]
-    stages: [BuildExecutionStage]
-    events: [BuildExecutionEvent]
-    console_order: [Int]
-    metrics: BuildExecutionMetrics
+    pools: [BuildResourcePoolSpec],
+    nodes: [BuildExecutionNode],
+    stages: [BuildExecutionStage],
+    events: [BuildExecutionEvent],
+    console_order: [Int],
+    metrics: BuildExecutionMetrics,
 }
 
 BuildExecutionNode: struct {
-    action: Int
-    name: String
-    target: Int?
-    prerequisites: [Int]
-    pools: [BuildResourcePool]
+    action: Int,
+    name: String,
+    target: Int?,
+    prerequisites: [Int],
+    pools: [BuildResourcePool],
 }
 
 BuildExecutionStage: struct {
-    index: Int
-    actions: [Int]
+    index: Int,
+    actions: [Int],
 }
 
 BuildExecutionEvent: enum {
-    Ready(action: Int, stage: Int)
-    Finished(action: Int, outcome: ActionOutcome)
-    Cancelled(action: Int, failed_prereq: Int)
-    Pending(action: Int)
+    Ready(action: Int, stage: Int),
+    Finished(action: Int, outcome: ActionOutcome),
+    Cancelled(action: Int, failed_prereq: Int),
+    Pending(action: Int),
 }
 
 BuildExecutionMetrics: struct {
-    actions_total: Int
-    parallel_stages: Int
-    max_parallel_actions: Int
+    actions_total: Int,
+    parallel_stages: Int,
+    max_parallel_actions: Int,
     // Actions reused when unchanged, and those with an ambient effect.
-    reusable_actions: Int
-    ambient_actions: Int
-    failed_actions: Int
-    cancelled_actions: Int
-    cache_restored_actions: Int
-    pending_actions: Int
+    reusable_actions: Int,
+    ambient_actions: Int,
+    failed_actions: Int,
+    cancelled_actions: Int,
+    cache_restored_actions: Int,
+    pending_actions: Int,
 }
 
 BuildExecutionReport: struct {
-    events: [BuildExecutionEvent]
-    metrics: BuildExecutionMetrics
+    events: [BuildExecutionEvent],
+    metrics: BuildExecutionMetrics,
 }
 
 build_insert_sorted_int: fn(values: &[Int], value: Int) Never! {

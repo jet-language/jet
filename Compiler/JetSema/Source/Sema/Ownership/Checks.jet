@@ -64,308 +64,308 @@ use jet_foundation.[
 ]
 
 SemaOwnershipReferenceKind: enum {
-    Read
-    Write
-    Move
+    Read,
+    Write,
+    Move,
 }
 
 SemaOwnershipProjection: enum {
-    Field(name: String, span: Span)
-    Index(value: Int?, span: Span)
-    Range(start: Int?, end: Int?, span: Span)
-    Fresh(span: Span)
-    Deref(span: Span)
+    Field(name: String, span: Span),
+    Index(value: Int?, span: Span),
+    Range(start: Int?, end: Int?, span: Span),
+    Fresh(span: Span),
+    Deref(span: Span),
 }
 
 SemaOwnershipPlace: struct {
-    root: String
+    root: String,
     // The root binding's symbol; symbol_none() for a place with no binding.
-    root_id: SymbolID
-    root_span: Span
-    projections: [String]
-    typed_projections: [SemaOwnershipProjection]
+    root_id: SymbolID,
+    root_span: Span,
+    projections: [String],
+    typed_projections: [SemaOwnershipProjection],
 }
 
 SemaOwnershipViewFact: struct {
-    carrier: String
-    carrier_id: SymbolID
-    carrier_span: Span
-    source: SemaOwnershipPlace
-    output_path: [String]
-    access: AccessConvention
-    scope_depth: Int
-    seq: Int
-    loan_seq: Int
-    loan_span: Span
+    carrier: String,
+    carrier_id: SymbolID,
+    carrier_span: Span,
+    source: SemaOwnershipPlace,
+    output_path: [String],
+    access: AccessConvention,
+    scope_depth: Int,
+    seq: Int,
+    loan_seq: Int,
+    loan_span: Span,
     // Only this capability's actual ancestry may exempt overlapping windows.
-    reborrow_parent: Int{-1}
-    lexical: Bool{false}
+    reborrow_parent: Int{-1},
+    lexical: Bool{false},
     // A window opened over a conflict already reported (E0212) inside a
     // `task.group` body: it is kept so a child capturing it is judged against
     // its place, but it neither blocks nor is blocked by other views.
-    contested: Bool{false}
-    active: Bool
-    invalidated: Bool
-    invalidated_span: Span
-    invalidated_verb: String
+    contested: Bool{false},
+    active: Bool,
+    invalidated: Bool,
+    invalidated_span: Span,
+    invalidated_verb: String,
 }
 
 SemaOwnershipViewProducer: struct {
-    source: Expr
-    access: AccessConvention
-    span: Span
+    source: Expr,
+    access: AccessConvention,
+    span: Span,
 }
 
 SemaOwnershipMoveOrigin: struct {
-    span: Span
-    consumer: String
+    span: Span,
+    consumer: String,
     // The moved binding's type when this was an unmarked
     // move of a whole binding written as its plain name. A later use turns
     // that site into a share; `None` for an exact `.move()` or a projection.
-    share_ty: Type?
+    share_ty: Type?,
     // The callee when this was an unmarked argument to a
     // take parameter, moved as its name's last use. A later use reports
     // E0209 at the argument (pass a copy with `.copy()`) instead of sharing it.
-    implicit_take: String?{None}
+    implicit_take: String?{None},
     // The captured name a run-once lambda takes with
     // `.move()`, when this move is that lambda binding's call. A later call
     // reports E0121 naming the capture (Rust `moved_use_diagnostic`).
-    once_capture: String?{None}
+    once_capture: String?{None},
     // The scope depth of the `defer close(name)` that made this move. The
     // value leaves when that scope exits: until then later statements still
     // read it and only another move is refused.
-    deferred_depth: Int?{None}
+    deferred_depth: Int?{None},
     // The moved binding's type when the move names a plain binding, so the
     // later use can say why a one-pass source has no copy to give.
-    moved_ty: Type?{None}
+    moved_ty: Type?{None},
     // The whole `place.move()` of an exact move: the E0121 label covers the mark
     // that moved the value, not only the place after it.
-    label_span: Span?{None}
+    label_span: Span?{None},
     // The move does not repeat at a loop's back edge because each pass gets
     // its own copy: a lambda capture of a value whose clone is structurally
     // known (spec "copyable captures are copied at closure creation"), or an
     // owned field filled from a value whose copy facts are undecided here,
     // which a later use copies (sema_copy_site_refuse_copy).
-    copies_each_pass: Bool{false}
+    copies_each_pass: Bool{false},
 }
 
 // A lambda whose body takes a captured name with `.move()`.
 // `site` is the lambda's span; `key` is the binding that holds it, once bound.
 SemaOwnershipOnceLambda: struct {
-    site: Span
-    key: String
-    capture: String
+    site: Span,
+    key: String,
+    capture: String,
 }
 
 // A lambda binding `key` whose body writes the captured `names` (TCaptureFacts
 // `mutable`): calling it changes them, so a call inside a loop reading one of
 // them is E0507.
 SemaOwnershipClosureWrites: struct {
-    key: String
-    names: [String]
+    key: String,
+    names: [String],
 }
 
 // A lambda binding `key` that is only ever called directly and reads or
 // writes the captured `places` (it takes or materializes none of them):
 // each call reads them, so a call after one of them moved is E0121.
 SemaOwnershipClosureCaptures: struct {
-    key: String
-    places: [SemaOwnershipPlace]
+    key: String,
+    places: [SemaOwnershipPlace],
 }
 
 // A captured name an escaping lambda binding writes, held until the scope
 // that bound the lambda (`scope_depth`) closes.
 SemaOwnershipLambdaWriteBorrow: struct {
-    name: String
-    scope_depth: Int
+    name: String,
+    scope_depth: Int,
 }
 
 // An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
 SemaOwnershipShareSite: struct {
-    span: Span
-    ty: Type
+    span: Span,
+    ty: Type,
 }
 
 SemaOwnershipMovedPlace: struct {
-    place: SemaOwnershipPlace
-    origin: SemaOwnershipMoveOrigin
+    place: SemaOwnershipPlace,
+    origin: SemaOwnershipMoveOrigin,
 }
 
 SemaOwnershipLoan: struct {
-    place: SemaOwnershipPlace
-    access: AccessConvention
-    span: Span
-    scope_depth: Int
-    seq: Int
-    carrier_fact_seq: Int
-    carrier_id: SymbolID
+    place: SemaOwnershipPlace,
+    access: AccessConvention,
+    span: Span,
+    scope_depth: Int,
+    seq: Int,
+    carrier_fact_seq: Int,
+    carrier_id: SymbolID,
     // A window a `&place`/read-place expression opened in value position. No
     // name carries it unless its own statement binds it (`w := &xs`); an
     // unbound one ends before the next statement (sema_ownership_release_dead_views).
-    statement_window: Bool{false}
+    statement_window: Bool{false},
 }
 
 // A place a running `task.group` child holds through a captured window
 // (TaskGroups.jet publishes those borrows here). The child keeps it past the
 // window binding's last lexical use, until `group` joins.
 SemaOwnershipGroupLoan: struct {
-    name: String
-    group: String
-    place: SemaOwnershipPlace
-    access: AccessConvention
+    name: String,
+    group: String,
+    place: SemaOwnershipPlace,
+    access: AccessConvention,
 }
 
 SemaOwnershipBindingFact: struct {
-    id: SymbolID
-    name: String
-    span: Span
-    parameter: Bool
-    scope_depth: Int
-    references: Int
-    writes: Int
-    active: Bool
+    id: SymbolID,
+    name: String,
+    span: Span,
+    parameter: Bool,
+    scope_depth: Int,
+    references: Int,
+    writes: Int,
+    active: Bool,
     // This binding owns a `#SingleUse` value's consume duty
     // (Ownership/SingleUse.jet).
-    single_use: Bool
+    single_use: Bool,
     // The duty is a task handle's `join` (L1101), not `consume`.
-    owes_join: Bool{false}
+    owes_join: Bool{false},
     // The fields of a record or tuple that hold its duty: moving each of them
     // out discharges it as a move of the whole value does.
-    duty_fields: [String]{[String]{}}
+    duty_fields: [String]{[String]{}},
     // A record or enum owing the duty only through a field or payload: a
     // loan of it leaves the duty here (sema_single_use_lendable).
-    lendable: Bool{false}
+    lendable: Bool{false},
     // Provenance belongs to this exact binding, not its name.
-    frozen_site: SemaOwnershipFreezeSite?{None}
+    frozen_site: SemaOwnershipFreezeSite?{None},
     // The compiler declared this binding (a fallback's `err`); an unread one
     // is not the user's dead code.
-    ambient: Bool{false}
+    ambient: Bool{false},
 }
 
 SemaOwnershipReference: struct {
-    name: String
-    def_id: SymbolID
-    def_span: Span
-    use_span: Span
-    kind: SemaOwnershipReferenceKind
+    name: String,
+    def_id: SymbolID,
+    def_span: Span,
+    use_span: Span,
+    kind: SemaOwnershipReferenceKind,
     // The anchor's bucket in SemaOwnershipAnchors (sema_ownership_anchor_key).
-    anchor: Int
+    anchor: Int,
 }
 
 // A typed place whose own Close implementation needs the complete value.
 SemaOwnershipCloseOwner: struct {
-    place: SemaOwnershipPlace
-    ty: Type
+    place: SemaOwnershipPlace,
+    ty: Type,
 }
 
 SemaOwnershipState: struct {
-    scope_depth: Int
-    next_seq: Int
-    declarations: [SemaOwnershipBindingFact]
-    moved: [SemaOwnershipMovedPlace]
-    loans: [SemaOwnershipLoan]
-    views: [SemaOwnershipViewFact]
-    references: [SemaOwnershipReference]
-    receiver_frames: [SemaReceiverMarkFrame]
+    scope_depth: Int,
+    next_seq: Int,
+    declarations: [SemaOwnershipBindingFact],
+    moved: [SemaOwnershipMovedPlace],
+    loans: [SemaOwnershipLoan],
+    views: [SemaOwnershipViewFact],
+    references: [SemaOwnershipReference],
+    receiver_frames: [SemaReceiverMarkFrame],
     // Share sites this check applies, and the sites it
     // found that a later use reached.
-    share_known: [Span]
-    share_found: [SemaOwnershipShareSite]
+    share_known: [Span],
+    share_found: [SemaOwnershipShareSite],
     // Unmarked take arguments the typed argument check
     // found eligible to move at their last use (Rust
     // `take_unmarked_last_use`); the call ownership check makes the move.
-    implicit_take_ok: [Span]{[Span]{}}
+    implicit_take_ok: [Span]{[Span]{}},
     // Eligible unmarked take arguments whose name another
     // argument of the same call also names. Such a name has no last use in
     // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
-    implicit_take_twice: [Span]{[Span]{}}
+    implicit_take_twice: [Span]{[Span]{}},
     // Taken field arguments the typed argument check found to be exact
     // moves into a consuming parameter; the call ownership check records the
     // move, so a later use of the field is E0121.
-    exact_field_takes: [Span]{[Span]{}}
+    exact_field_takes: [Span]{[Span]{}},
     // Run-once lambdas found in this function, and the
     // bindings holding them (Rust `once_lambda_sites` / `once_lambdas`).
-    once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}}
+    once_lambdas: [SemaOwnershipOnceLambda]{[SemaOwnershipOnceLambda]{}},
     // Lambda bindings that write a capture, by binding key.
-    closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}}
+    closure_writes: [SemaOwnershipClosureWrites]{[SemaOwnershipClosureWrites]{}},
     // Lambda bindings that only direct calls reach, by lambda span.
-    direct_call_lambdas: [Span]{[Span]{}}
+    direct_call_lambdas: [Span]{[Span]{}},
     // Lambda bindings whose calls read their captures, by binding key.
-    closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}}
+    closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}},
     // Names an escaping lambda bound in an open scope writes.
-    lambda_write_borrows: [SemaOwnershipLambdaWriteBorrow]{[SemaOwnershipLambdaWriteBorrow]{}}
+    lambda_write_borrows: [SemaOwnershipLambdaWriteBorrow]{[SemaOwnershipLambdaWriteBorrow]{}},
     // `#Reactive` bodies checked so far: their writes land on the
     // registration's clones, not on the enclosing lambda's captures.
-    reactive_bodies: [Span]{[Span]{}}
+    reactive_bodies: [Span]{[Span]{}},
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
-    fixed_length_write_params: [String]
+    fixed_length_write_params: [String],
     // E0420: `Type{ uninit }` bindings not yet
     // definitely written on every path reaching this point.
-    uninit: [SemaOwnershipUninitFact]
+    uninit: [SemaOwnershipUninitFact],
     // Rust `is_static_move_root`: symbols of this module's `#Persist`, mutable,
     // and `#Static` bindings, which own one shared storage cell (E0222/E0223).
-    static_roots: [SymbolID]
+    static_roots: [SymbolID],
     // The `#Persist` subset of `static_roots`, which a write borrow may lend.
-    persist_roots: [SymbolID]
-    close_owners: [SemaOwnershipCloseOwner]
+    persist_roots: [SymbolID],
+    close_owners: [SemaOwnershipCloseOwner],
     // Only the parameter symbol of this exact consuming Close body is exempt.
-    close_receiver_id: SymbolID
+    close_receiver_id: SymbolID,
     // Indices over declarations and references: `id_slots` maps a binding
     // symbol's id to its row in `key_facts`; previous rows link equal ids.
-    id_slots: [U32:Int]
-    key_facts: [SemaOwnershipKeyFacts]
-    declaration_previous: [Int]
+    id_slots: [U32:Int],
+    key_facts: [SemaOwnershipKeyFacts],
+    declaration_previous: [Int],
     // Scope buckets may hold stale rows; readers check the declaration itself.
-    active_rows: [[Int]]
-    single_use_rows: [Int]
+    active_rows: [[Int]],
+    single_use_rows: [Int],
     // Rows before dirty_clean have canonical reference counts again.
-    dirty_rows: [Int]
-    dirty_clean: Int
-    anchors: SemaOwnershipAnchors
+    dirty_rows: [Int],
+    dirty_clean: Int,
+    anchors: SemaOwnershipAnchors,
     // Declaration edits are recorded while a branch fork is open.
-    forks: Int
-    trail: [SemaOwnershipUndo]
-    freeze_sites: [SemaOwnershipFreezeSite]{[SemaOwnershipFreezeSite]{}}
+    forks: Int,
+    trail: [SemaOwnershipUndo],
+    freeze_sites: [SemaOwnershipFreezeSite]{[SemaOwnershipFreezeSite]{}},
     // Match payload bindings (sema_ownership_payload_key) and the subject
     // places their payload is read from (Expressions/Control.jet
     // sema_expression_pattern_binding_sources): an explicit `p.move()` takes the
     // payload out of that subject (sema_ownership_move_pattern_payload).
-    pattern_sources: [String:[Expr]]{[String:[Expr]]{}}
+    pattern_sources: [String:[Expr]]{[String:[Expr]]{}},
     // Spans of the windows whose overlap is judged where the value lands —
     // a binding statement's whole initializer, the elements of a `ViewMut`
     // list literal (sema_ownership_view_open_deferred).
-    deferred_view_opens: [Span]{[Span]{}}
+    deferred_view_opens: [Span]{[Span]{}},
     // Facts the evaluated access walk reads by source span (key
     // sema_ownership_span_key): each checked lambda's capture modes, each
     // method call's resolved receiver access, and each field read's type.
     // A lambda body hands its own back (sema_ownership_note_lambda).
-    lambda_facts: [Int:SemaOwnershipLambdaFacts]{[Int:SemaOwnershipLambdaFacts]{}}
-    receiver_accesses: [Int:SemaOwnershipReceiverAccess]{[Int:SemaOwnershipReceiverAccess]{}}
-    place_types: [Int:Type]{[Int:Type]{}}
+    lambda_facts: [Int:SemaOwnershipLambdaFacts]{[Int:SemaOwnershipLambdaFacts]{}},
+    receiver_accesses: [Int:SemaOwnershipReceiverAccess]{[Int:SemaOwnershipReceiverAccess]{}},
+    place_types: [Int:Type]{[Int:Type]{}},
     // Each checked call's returned-view facts by the span its return views
     // are published under: a nested call's View result keeps its source
     // lent as an argument of the enclosing call.
-    call_views: [Int:[SemaCallReturnViewFact]]{[Int:[SemaCallReturnViewFact]]{}}
+    call_views: [Int:[SemaCallReturnViewFact]]{[Int:[SemaCallReturnViewFact]]{}},
     // Symbol ids of the bindings a checked path read, including a path that
     // leaves (`return`, `break`). A fork rollback drops a leaving path's
     // references, but its reads are still uses for L0101/L0102.
-    used_ids: [U32:Bool]{[U32:Bool]{}}
+    used_ids: [U32:Bool]{[U32:Bool]{}},
     // The `:=` bindings this body declares (E0514 candidates) and the name
     // starts of the bindings a checked write needed `:=` for. Like
     // `used_ids`, neither is rolled back: a write in a branch, a lambda, an
     // unreached line or a discarded check still counts.
-    mutable_bindings: [SemaOwnershipMutableBinding]{[SemaOwnershipMutableBinding]{}}
-    mutable_sigils: [Int:Bool]{[Int:Bool]{}}
-    mutated_starts: [Int:Bool]{[Int:Bool]{}}
+    mutable_bindings: [SemaOwnershipMutableBinding]{[SemaOwnershipMutableBinding]{}},
+    mutable_sigils: [Int:Bool]{[Int:Bool]{}},
+    mutated_starts: [Int:Bool]{[Int:Bool]{}},
     // The places the active task groups lend to running children, as the
     // parent sees them; empty while a child's own body is checked.
-    group_loans: [SemaOwnershipGroupLoan]{[SemaOwnershipGroupLoan]{}}
+    group_loans: [SemaOwnershipGroupLoan]{[SemaOwnershipGroupLoan]{}},
     // The allocators of the open `#Context(allocator: a)` blocks being
     // checked, outermost first (Statements.jet sema_stmt_check_context_block).
-    block_allocators: [SemaOwnershipBlockAllocator]{[SemaOwnershipBlockAllocator]{}}
+    block_allocators: [SemaOwnershipBlockAllocator]{[SemaOwnershipBlockAllocator]{}},
 }
 
 // The allocator a `#Context(allocator: a)` block allocates from: `name` as
@@ -373,8 +373,8 @@ SemaOwnershipState: struct {
 // live in `a` until they leave the block, so `a` may not reset, change or
 // move while the block runs.
 SemaOwnershipBlockAllocator: struct {
-    name: String
-    id: SymbolID
+    name: String,
+    id: SymbolID,
 }
 
 // E0204 when a write or move reaches an open block's allocator.
@@ -393,72 +393,72 @@ sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [S
 // by name start, and the text from the end of the name through `:=`, which
 // the E0514 edit replaces with `:`.
 SemaOwnershipMutableBinding: struct {
-    name: String
-    name_span: Span
-    sigil: Span
-    starts: [Int]
+    name: String,
+    name_span: Span,
+    sigil: Span,
+    starts: [Int],
 }
 
 // First/last declaration rows and total reference/write counts for one id.
 SemaOwnershipKeyFacts: struct {
-    first: Int
-    last: Int
-    references: Int
-    writes: Int
+    first: Int,
+    last: Int,
+    references: Int,
+    writes: Int,
 }
 
 // Mutable declaration fields before one edit.
 SemaOwnershipUndo: struct {
-    row: Int
-    references: Int
-    writes: Int
-    active: Bool
-    single_use: Bool
-    frozen_site: SemaOwnershipFreezeSite?
+    row: Int,
+    references: Int,
+    writes: Int,
+    active: Bool,
+    single_use: Bool,
+    frozen_site: SemaOwnershipFreezeSite?,
 }
 
 // Indexed-store counts and small per-path facts before a branch arm.
 SemaOwnershipFork: struct {
-    scope_depth: Int
-    next_seq: Int
-    declarations: Int
-    references: Int
-    trail: Int
-    dirty: Int
-    dirty_clean: Int
-    single_use: Int
-    moved: [SemaOwnershipMovedPlace]
-    loans: [SemaOwnershipLoan]
-    views: [SemaOwnershipViewFact]
-    uninit: [SemaOwnershipUninitFact]
-    share_found: [SemaOwnershipShareSite]
-    receiver_frames: [SemaReceiverMarkFrame]
-    freeze_sites: [SemaOwnershipFreezeSite]
+    scope_depth: Int,
+    next_seq: Int,
+    declarations: Int,
+    references: Int,
+    trail: Int,
+    dirty: Int,
+    dirty_clean: Int,
+    single_use: Int,
+    moved: [SemaOwnershipMovedPlace],
+    loans: [SemaOwnershipLoan],
+    views: [SemaOwnershipViewFact],
+    uninit: [SemaOwnershipUninitFact],
+    share_found: [SemaOwnershipShareSite],
+    receiver_frames: [SemaReceiverMarkFrame],
+    freeze_sites: [SemaOwnershipFreezeSite],
 }
 
 // Rows added after a fork, and that path's small facts at its end.
 SemaOwnershipPath: struct {
-    scope_depth: Int
-    next_seq: Int
-    declarations: [SemaOwnershipBindingFact]
-    references: [SemaOwnershipReference]
-    moved: [SemaOwnershipMovedPlace]
-    loans: [SemaOwnershipLoan]
-    views: [SemaOwnershipViewFact]
-    uninit: [SemaOwnershipUninitFact]
-    share_found: [SemaOwnershipShareSite]
+    scope_depth: Int,
+    next_seq: Int,
+    declarations: [SemaOwnershipBindingFact],
+    references: [SemaOwnershipReference],
+    moved: [SemaOwnershipMovedPlace],
+    loans: [SemaOwnershipLoan],
+    views: [SemaOwnershipViewFact],
+    uninit: [SemaOwnershipUninitFact],
+    share_found: [SemaOwnershipShareSite],
     // Only bindings whose provenance changed on an in-place arm; whole-state
     // snapshot paths include every binding because they have no undo trail.
-    frozen: SemaOwnershipFrozenRows
-    freeze_sites: [SemaOwnershipFreezeSite]
+    frozen: SemaOwnershipFrozenRows,
+    freeze_sites: [SemaOwnershipFreezeSite],
 }
 
 // The freeze provenance of binding symbols (a path's `frozen`): `rows` maps
 // an id to its first-set position in `ids` and `sites`.
 SemaOwnershipFrozenRows: struct {
-    rows: [U32:Int]
-    ids: [SymbolID]
-    sites: [SemaOwnershipFreezeSite?]
+    rows: [U32:Int],
+    ids: [SymbolID],
+    sites: [SemaOwnershipFreezeSite?],
 }
 
 sema_ownership_frozen_rows: fn() -> SemaOwnershipFrozenRows Never! {
@@ -477,44 +477,44 @@ sema_ownership_frozen_set: fn(rows: &SemaOwnershipFrozenRows, id: SymbolID, site
 }
 
 SemaOwnershipFreezeSite: struct {
-    span: Span
-    line: Int
-    column: Int
+    span: Span,
+    line: Int,
+    column: Int,
 }
 
 // One `Type{ uninit }` binding that is not yet definitely written.
 // A fixed list tracks the literal slots written so far; `fixed_len` is None
 // for a scalar, or once two paths disagree on the length.
 SemaOwnershipUninitFact: struct {
-    key: String
-    name: String
-    fixed_len: Int?
-    initialized: [Int]
+    key: String,
+    name: String,
+    fixed_len: Int?,
+    initialized: [Int],
 }
 
 // One frame per method call being checked. Receiver hooks
 // record the strongest convention the resolved call uses for its receiver,
 // and under `#Policy(writes: .Explicit)` the signature line of that call.
 SemaReceiverMarkFrame: struct {
-    receiver_span: Span
-    convention: AccessConvention?
-    signature: String{""}
+    receiver_span: Span,
+    convention: AccessConvention?,
+    signature: String{""},
 }
 
 SemaOwnershipCallViewFact: struct {
-    output_path: [String]
-    access: AccessConvention
-    places: [SemaOwnershipPlace]
+    output_path: [String],
+    access: AccessConvention,
+    places: [SemaOwnershipPlace],
 }
 
 SemaOwnershipCheckResult: struct {
-    accepted: Bool
-    complete: Bool
+    accepted: Bool,
+    complete: Bool,
 }
 
 SemaOwnershipFlowResult: struct {
-    complete: Bool
-    falls_through: Bool
+    complete: Bool,
+    falls_through: Bool,
 }
 
 sema_ownership_state_init: fn() -> SemaOwnershipState Never! {
@@ -1335,8 +1335,8 @@ sema_ownership_recompute_reference_counts: fn(state: &SemaOwnershipState) Never!
 // compares a few rows instead of formatting and hashing a text key per
 // reference.
 SemaOwnershipAnchors: struct {
-    slots: [Int:Int]
-    rows: [[Int]]
+    slots: [Int:Int],
+    rows: [[Int]],
 }
 
 // The bucket of an anchor: its use span and its definition symbol. A body
@@ -1400,8 +1400,8 @@ sema_ownership_const_index: fn(expr: Expr) -> Int? {
 }
 
 SemaOwnershipRangeBounds: struct {
-    start: Int?
-    end: Int?
+    start: Int?,
+    end: Int?,
 }
 
 sema_ownership_range_bounds: fn(start: Expr, end: Expr, range: Expr?) -> SemaOwnershipRangeBounds Never! {
@@ -3815,11 +3815,11 @@ sema_ownership_label_moves: fn(state: &SemaOwnershipState, origin_span: Span, la
 // while one the call keeps holding, a move, or a second write conflicts at the
 // later argument.
 SemaOwnershipCallAccess: struct {
-    place: SemaOwnershipPlace
-    access: AccessConvention
-    span: Span
-    reserved: Bool
-    retained: Bool
+    place: SemaOwnershipPlace,
+    access: AccessConvention,
+    span: Span,
+    reserved: Bool,
+    retained: Bool,
 }
 
 // Rust `check_call_place_access_kind`: the latest access of the call that
@@ -4814,20 +4814,20 @@ sema_ownership_owner_of_captured_window: fn(state: SemaOwnershipState, owner: St
 // each active call frame.
 
 SemaOwnershipAccessWalk: enum {
-    EvaluateNow
-    ConstructCaptures
-    CaptureRequirements
+    EvaluateNow,
+    ConstructCaptures,
+    CaptureRequirements,
 }
 
 SemaOwnershipEvaluatedAccess: struct {
-    place: SemaOwnershipPlace
-    capture_place: SemaOwnershipPlace
-    capture_ty: Type?
-    capture_is_view: Bool
-    access: AccessConvention
-    site: Expr
-    through_call: Bool
-    moves_owner: Bool
+    place: SemaOwnershipPlace,
+    capture_place: SemaOwnershipPlace,
+    capture_ty: Type?,
+    capture_is_view: Bool,
+    access: AccessConvention,
+    site: Expr,
+    through_call: Bool,
+    moves_owner: Bool,
 }
 
 // One place check a nested call makes against the enclosing call. `holds`
@@ -4835,34 +4835,34 @@ SemaOwnershipEvaluatedAccess: struct {
 // argument (whose parameter may take or keep it), a move, or a taking
 // receiver. A reserved `&` argument lets only the other accesses pass.
 SemaOwnershipNestedCheck: struct {
-    place: SemaOwnershipPlace
-    access: AccessConvention
-    reserved: Bool
-    holds: Bool
-    span: Span
+    place: SemaOwnershipPlace,
+    access: AccessConvention,
+    reserved: Bool,
+    holds: Bool,
+    span: Span,
 }
 
 // A checked lambda's capture modes (TCaptureFacts), read back by its span.
 SemaOwnershipLambdaFacts: struct {
-    escapes: Bool
-    needs_fn_mut: Bool
-    cloned: [String]
-    moved: [String]
+    escapes: Bool,
+    needs_fn_mut: Bool,
+    cloned: [String],
+    moved: [String],
 }
 
 // The receiver access a method call resolved; `reserved` is a two-phase
 // `&` receiver (Rust `record_call_receiver_reservation`).
 SemaOwnershipReceiverAccess: struct {
-    convention: AccessConvention
-    reserved: Bool
+    convention: AccessConvention,
+    reserved: Bool,
 }
 
 // Rust `capture_place_info`: the capture prefix of a written place, its
 // type, and whether an index or range stopped it.
 SemaOwnershipCapturePlace: struct {
-    place: SemaOwnershipPlace
-    ty: Type?
-    stopped: Bool
+    place: SemaOwnershipPlace,
+    ty: Type?,
+    stopped: Bool,
 }
 
 sema_ownership_span_key: fn(span: Span) -> Int Never! { span.start * 4294967296 + span.end }

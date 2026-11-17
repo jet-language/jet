@@ -20,7 +20,7 @@ use {
 KEYMAP: #run embed_file("us_de.xkb")
 
 FakeMode: enum {
-    UsTable
+    UsTable,
     Keymap
 }
 
@@ -29,59 +29,59 @@ FakeMode: enum {
 
 // A wl_buffer: its pool (an index into `pools`), offset and size.
 FakeBuffer: struct {
-    id: Int
-    pool: Int
-    offset: Int
-    width: Int
+    id: Int,
+    pool: Int,
+    offset: Int,
+    width: Int,
     height: Int
 }
 
 Fake: struct {
-    stream: net.UnixStream
-    mode: FakeMode
-    inbox: [U8]
-    out: [U8]
-    registry: Int
-    compositor: Int
-    subcompositor: Int
-    shm: Int
-    wm_base: Int
-    decoration_manager: Int
-    decoration: Int
-    seat: Int
-    keyboard: Int
-    surface: Int
-    chrome: Int
-    subsurface: Int
-    xdg_surface: Int
-    toplevel: Int
+    stream: net.UnixStream,
+    mode: FakeMode,
+    inbox: [U8],
+    out: [U8],
+    registry: Int,
+    compositor: Int,
+    subcompositor: Int,
+    shm: Int,
+    wm_base: Int,
+    decoration_manager: Int,
+    decoration: Int,
+    seat: Int,
+    keyboard: Int,
+    surface: Int,
+    chrome: Int,
+    subsurface: Int,
+    xdg_surface: Int,
+    toplevel: Int,
     // Every pool, and the descriptors the window sent, one per pool in order.
-    pools: [Int]
-    fds: [sys.Fd]
-    buffers: [FakeBuffer]
+    pools: [Int],
+    fds: [sys.Fd],
+    buffers: [FakeBuffer],
     // The content surface: pending, then current at commit.
-    attached: Int
-    current: Int
-    acked: Int
-    callbacks: [Int]
+    attached: Int,
+    current: Int,
+    acked: Int,
+    callbacks: [Int],
     // The chrome's buffer: pending, cached by its commit, shown by the
     // content's.
-    chrome_pending: Int
-    chrome_cached: Int
-    chrome_shown: Int
-    chrome_dirty: Bool
-    position_x: Int
-    position_y: Int
-    shown_x: Int
-    shown_y: Int
-    serial: Int
+    chrome_pending: Int,
+    chrome_cached: Int,
+    chrome_shown: Int,
+    chrome_dirty: Bool,
+    position_x: Int,
+    position_y: Int,
+    shown_x: Int,
+    shown_y: Int,
+    serial: Int,
     // Configure serials not yet acked, oldest first.
-    configures: [Int]
-    phase: Int
-    settled: Int
-    commits: Int
-    report: [String]
-    failures: [String]
+    configures: [Int],
+    phase: Int,
+    settled: Int,
+    commits: Int,
+    report: [String],
+    failures: [String],
     closing: Bool
 }
 

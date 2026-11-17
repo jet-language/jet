@@ -31,23 +31,23 @@ PER_FILE: 600
 // Where a domain's units go: source files of about PER_FILE code lines, or
 // all into the entry file.
 Layout: enum {
-    Files
-    Entry
+    Files,
+    Entry,
 }
 
 Domain: struct {
-    name: String
-    build_name: String
-    dimension: String
-    kinds: Int
-    common: [String]
-    layout: Layout
+    name: String,
+    build_name: String,
+    dimension: String,
+    kinds: Int,
+    common: [String],
+    layout: Layout,
 }
 
 Cluster: struct {
-    entry: String
-    helpers: [String]
-    lines: [String]
+    entry: String,
+    helpers: [String],
+    lines: [String],
 }
 
 unit: fn(entry: String, helpers: [String], text: String) -> Cluster {
@@ -83,9 +83,9 @@ draws: fn(r: &Seeded, count: Int, hi: Int) -> [Int] {
 // which the comparison types (and where `Float{` would open the `if` body).
 FloatRules: struct {
     // A string literal.
-    strings: rx.Regex
+    strings: rx.Regex,
     // A decimal literal that is not a comparison's right operand.
-    decimals: rx.Regex
+    decimals: rx.Regex,
 }
 
 float_rules: fn() -> FloatRules {
@@ -186,21 +186,21 @@ all: fn() -> [Domain] {
 
 WEB_COMMON: """
 Request: struct {{
-    method: String
-    path: String
-    user_id: Int
+    method: String,
+    path: String,
+    user_id: Int,
     body: String
 }}
 
 Response: struct {{
-    status: Int
+    status: Int,
     body: String
 }}
 
 #Error
 APIError: enum {{
-    NotFound(String)
-    Invalid(field: String, reason: String)
+    NotFound(String),
+    Invalid(field: String, reason: String),
     Unauthorized
 }}
 
@@ -233,11 +233,11 @@ web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["customer{i}_score"],
                 """
                 Customer{i}: struct {{
-                    id: Int
-                    name: String
-                    email: String
-                    tier: Int
-                    active: Bool
+                    id: Int,
+                    name: String,
+                    email: String,
+                    tier: Int,
+                    active: Bool,
                     tags: [String]
                 }}
 
@@ -361,9 +361,9 @@ web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Query{i}: struct {{
-                    table: String
-                    filters: [String]
-                    limit: Int
+                    table: String,
+                    filters: [String],
+                    limit: Int,
                     order: String
                 }}
 
@@ -397,8 +397,8 @@ web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["permissions{i}_level"],
                 """
                 Role{i}: enum {{
-                    Guest
-                    Member(Int)
+                    Guest,
+                    Member(Int),
                     Admin(String)
                 }}
 
@@ -442,7 +442,7 @@ web: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 
 GAME_COMMON: """
 Vec2: struct {{
-    x: Float
+    x: Float,
     y: Float
 }}
 
@@ -465,7 +465,7 @@ clampf: fn(v: Float, lo: Float, hi: Float) -> Float {{
 to_score: fn(v: Float) -> Int {{ (Int.from_float(clampf(v, 0.0, 1000000.0)) ?? 0) % 1000003 }}
 
 Behavior: trait {{
-    tick: fn(self, dt: Float) -> Float
+    tick: fn(self, dt: Float) -> Float,
     label: fn(self) -> String
 }}
 
@@ -479,9 +479,9 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["system{i}_frames"],
                 """
                 Body{i}: struct {{
-                    position: Vec2
-                    velocity: Vec2
-                    mass: Float
+                    position: Vec2,
+                    velocity: Vec2,
+                    mass: Float,
                     alive: Bool
                 }}
 
@@ -528,9 +528,9 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Mind{i}: enum {{
-                    Idle
-                    Patrol(Int)
-                    Chase(target: Int, speed: Float)
+                    Idle,
+                    Patrol(Int),
+                    Chase(target: Int, speed: Float),
                     Flee(Float)
                 }}
 
@@ -589,8 +589,8 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 }}
 
                 Spawn{i}: struct {{
-                    kind: Int
-                    count: Int
+                    kind: Int,
+                    count: Int,
                     delay: Float
                 }}
 
@@ -622,9 +622,9 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Item{i}: struct {{
-                    name: String
-                    weight: Int
-                    value: Int
+                    name: String,
+                    weight: Int,
+                    value: Int,
                     rarity: Int
                 }}
 
@@ -647,8 +647,8 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Turret{i}: struct {{
-                    range: Float
-                    rate: Float
+                    range: Float,
+                    rate: Float,
                     heat: Float
                 }}
 
@@ -676,8 +676,8 @@ game: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 CLI_COMMON: """
 #Error
 CLIError: enum {{
-    UnknownFlag(String)
-    MissingValue(String)
+    UnknownFlag(String),
+    MissingValue(String),
     BadNumber(String)
 }}
 
@@ -690,9 +690,9 @@ cli_error_text: fn(error: CLIError) -> String {{
 }}
 
 Options: struct {{
-    verbose: Bool
-    count: Int
-    name: String
+    verbose: Bool,
+    count: Int,
+    name: String,
     extra: [String]
 }}
 
@@ -754,9 +754,9 @@ cli: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["command{i}_weight"],
                 """
                 Command{i}: enum {{
-                    Build(String)
-                    Test(Int)
-                    Clean
+                    Build(String),
+                    Test(Int),
+                    Clean,
                     Help
                 }}
 
@@ -797,7 +797,7 @@ cli: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Column{i}: struct {{
-                    title: String
+                    title: String,
                     width: Int
                 }}
 
@@ -918,8 +918,8 @@ data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["groups{i}_bucket"],
                 """
                 Sale{i}: struct {{
-                    region: String
-                    product: Int
+                    region: String,
+                    product: Int,
                     amount: Float
                 }}
 
@@ -948,8 +948,8 @@ data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Reading{i}: struct {{
-                    sensor: Int
-                    value: Float
+                    sensor: Int,
+                    value: Float,
                     valid: Bool
                 }}
 
@@ -970,7 +970,7 @@ data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 """
                 #Error
                 RowError{i}: enum {{
-                    Short(Int)
+                    Short(Int),
                     BadField(String)
                 }}
 
@@ -1006,9 +1006,9 @@ data: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 
 GUI_COMMON: """
 Rect: struct {{
-    x: Int
-    y: Int
-    w: Int
+    x: Int,
+    y: Int,
+    w: Int,
     h: Int
 }}
 
@@ -1026,9 +1026,9 @@ gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Widget{i}: enum {{
-                    Label(String)
-                    Button(text: String, id: Int)
-                    Spacer(Int)
+                    Label(String),
+                    Button(text: String, id: Int),
+                    Spacer(Int),
                     Image(width: Int, height: Int)
                 }}
 
@@ -1068,17 +1068,17 @@ gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["reducer{i}_step"],
                 """
                 State{i}: struct {{
-                    count: Int
-                    title: String
-                    items: [String]
+                    count: Int,
+                    title: String,
+                    items: [String],
                     selected: Int
                 }}
 
                 Msg{i}: enum {{
-                    Increment(Int)
-                    Rename(String)
-                    Add(String)
-                    Select(Int)
+                    Increment(Int),
+                    Rename(String),
+                    Add(String),
+                    Select(Int),
                     Reset
                 }}
 
@@ -1111,19 +1111,19 @@ gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Style{i}: struct {{
-                    margin: Int
-                    padding: Int
-                    border: Int
-                    radius: Int
-                    font_size: Int
-                    line_height: Int
-                    weight: Int
-                    opacity: Int
-                    shadow: Int
-                    gap: Int
-                    min_width: Int
-                    max_width: Int
-                    color: String
+                    margin: Int,
+                    padding: Int,
+                    border: Int,
+                    radius: Int,
+                    font_size: Int,
+                    line_height: Int,
+                    weight: Int,
+                    opacity: Int,
+                    shadow: Int,
+                    gap: Int,
+                    min_width: Int,
+                    max_width: Int,
+                    color: String,
                     background: String
                 }}
 
@@ -1152,9 +1152,9 @@ gui: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Event{i}: enum {{
-                    Click(x: Int, y: Int)
-                    Key(String)
-                    Scroll(Int)
+                    Click(x: Int, y: Int),
+                    Key(String),
+                    Scroll(Int),
                     Resize(w: Int, h: Int)
                 }}
 
@@ -1226,8 +1226,8 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Ring{i}: struct {{
-                    data: [Int#16]
-                    head: Int
+                    data: [Int#16],
+                    head: Int,
                     count: Int
                 }}
 
@@ -1287,9 +1287,9 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Frame{i}: enum {{
-                    Sync
-                    Header(Int)
-                    Payload(remaining: Int, sum: Int)
+                    Sync,
+                    Header(Int),
+                    Payload(remaining: Int, sum: Int),
                     Done(Int)
                 }}
 
@@ -1322,8 +1322,8 @@ embedded: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 
 COMPILER_COMMON: """
 Symbol: struct {{
-    name: String
-    slot: Int
+    name: String,
+    slot: Int,
     depth: Int
 }}
 
@@ -1339,17 +1339,17 @@ compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Tok{i}: enum {{
-                    Num(Int)
-                    Ident(String)
-                    Plus
-                    Minus
-                    Star
-                    Slash
-                    LParen
-                    RParen
-                    Comma
-                    Let
-                    Assign
+                    Num(Int),
+                    Ident(String),
+                    Plus,
+                    Minus,
+                    Star,
+                    Slash,
+                    LParen,
+                    RParen,
+                    Comma,
+                    Let,
+                    Assign,
                     End
                 }}
 
@@ -1408,10 +1408,10 @@ compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["eval{i}_fold"],
                 """
                 Node{i}: enum {{
-                    Lit(Int)
-                    Var(String)
-                    Add(left: Int, right: Int)
-                    Mul(left: Int, right: Int)
+                    Lit(Int),
+                    Var(String),
+                    Add(left: Int, right: Int),
+                    Mul(left: Int, right: Int),
                     Neg(Int)
                 }}
 
@@ -1448,15 +1448,15 @@ compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Op{i}: enum {{
-                    Push(Int)
-                    Add
-                    Sub
-                    Mul
-                    Dup
-                    Swap
-                    Drop
-                    Jz(Int)
-                    Jmp(Int)
+                    Push(Int),
+                    Add,
+                    Sub,
+                    Mul,
+                    Dup,
+                    Swap,
+                    Drop,
+                    Jz(Int),
+                    Jmp(Int),
                     Halt
                 }}
 
@@ -1523,10 +1523,10 @@ compiler: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Ty{i}: enum {{
-                    IntT
-                    BoolT
-                    StrT
-                    ListT(Int)
+                    IntT,
+                    BoolT,
+                    StrT,
+                    ListT(Int),
                     FnT(params: Int, result: Int)
                 }}
 
@@ -1665,9 +1665,9 @@ scientific: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 [String]{},
                 """
                 Oscillator{i}: struct {{
-                    position: Float
-                    velocity: Float
-                    damping: Float
+                    position: Float,
+                    velocity: Float,
+                    damping: Float,
                     stiffness: Float
                 }}
 
@@ -1693,12 +1693,12 @@ scientific: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
 
 GENERIC_COMMON: """
 Boxed: struct<T> {{
-    value: T
+    value: T,
     version: Int
 }}
 
 Keyed: struct<K, V> {{
-    key: K
+    key: K,
     value: V
 }}
 
@@ -1736,8 +1736,8 @@ generic_lib: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
                 ["model{i}_rank"],
                 """
                 Model{i}: struct {{
-                    id: Int
-                    label: String
+                    id: Int,
+                    label: String,
                     score: Int
                 }}
 
@@ -1840,7 +1840,7 @@ generated: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
             to_code := [String]{}
             from_code := [String]{}
             loop v in 0..<24 {
-                variants.push("    Kind{v}")
+                variants.push("    Kind{v},")
                 to_code.push("        .Kind{v} -> {v * 3 + 1}")
                 from_code.push("        {v * 3 + 1} -> Registry{i}.Kind{v}")
             }
@@ -1899,7 +1899,7 @@ generated: fn(k: Int, i: Int, r: &Seeded, h: [String]) -> Cluster {
             sets := [String]{}
             gets := [String]{}
             loop (index, name) in names {
-                fields.push("    {name}: Int")
+                fields.push("    {name}: Int,")
                 accessors.extend(["    get_{name}: fn(self) -> Int {{ self.{name} }}", "    set_{name}: fn(&self, value: Int) {{ self.{name} = value }}"])
                 values.push("{name}: {index}")
                 sets.push("    &record.set_{name}(seed + {index})")

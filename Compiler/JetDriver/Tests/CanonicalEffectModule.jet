@@ -45,7 +45,7 @@ canonical_effect_require: fn(label: String, effects: EffectModuleSource) Never! 
 }
 
 #Test("effect module of one source matches the parser") {
-    source: "// Effects.\nStore: enum {{\n    Read // a read\n    Write\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n\n  IO: struct {{\n    impl Effect {{}}\n}}\nLaunch: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\n"
+    source: "// Effects.\nStore: enum {{\n    Read, // a read\n    Write,\n\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ self == .Write }}\n    }}\n}}\n\n  IO: struct {{\n    impl Effect {{}}\n}}\nLaunch: struct {{\n    impl Effect {{\n        irreversible: fn(self) -> Bool {{ true }}\n    }}\n}}\n"
     effects: effect_vocabulary_module(source)
     canonical_effect_require("one source", effects)
     if effects.decls.len() != 5 || effects.decls[1].name != "Store.Read" || !effects.decls[0].irreversible || !effects.decls[2].irreversible || effects.decls[1].irreversible {

@@ -101,13 +101,13 @@ use {
 }
 
 SemaComptimeReflectionField: struct {
-    name: String
-    value: TComptimeValue
+    name: String,
+    value: TComptimeValue,
 }
 
 SemaComptimeReflectionStateView: struct {
-    states: TComptimeValue
-    transitions: TComptimeValue
+    states: TComptimeValue,
+    transitions: TComptimeValue,
 }
 
 sema_comptime_reflection_struct: fn(type_name: String, fields: [SemaComptimeReflectionField]) -> TComptimeValue Never! {
@@ -243,9 +243,9 @@ sema_comptime_reflection_in_file: fn(value: TComptimeValue, file: String) -> TCo
 // from. The lexer finds the comments, so a `//` inside a string or a marker
 // argument stays text.
 SemaComptimeReflectionSource: struct {
-    bytes: [U8]
-    tokens: [Token]
-    file: String
+    bytes: [U8],
+    tokens: [Token],
+    file: String,
 }
 
 // The source of a declaration made by no file: no comments.
@@ -501,21 +501,21 @@ sema_comptime_reflection_state_view: fn(definition: StructDef, graph: SemaStateG
 }
 
 SemaComptimeReflectionMarkerParam: struct {
-    name: String
-    source_type: String
+    name: String,
+    source_type: String,
 }
 
 SemaComptimeReflectionMarkerRule: struct {
-    name: String
-    params: [SemaComptimeReflectionMarkerParam]
-    variadic_source_type: String?
-    sites: [String]
-    repeatable: Bool
+    name: String,
+    params: [SemaComptimeReflectionMarkerParam],
+    variadic_source_type: String?,
+    sites: [String],
+    repeatable: Bool,
 }
 
 SemaComptimeReflectionMarkerViews: struct {
-    markers: [TComptimeValue]
-    expanded_markers: [TComptimeValue]
+    markers: [TComptimeValue],
+    expanded_markers: [TComptimeValue],
 }
 
 sema_comptime_reflection_marker_rule: fn(registry: SemaScopeMembersMarkerRegistry, name: String) -> SemaComptimeReflectionMarkerRule? {
@@ -1806,15 +1806,15 @@ sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact, file: S
 // One written fixed-width-policy candidate: a `+`, `-`, `*`, `**` or prefix
 // `-`, or a compound `+=`, `-=`, `*=`, `**=`, at its operator span.
 SemaArithmeticSite: struct {
-    operation: ArithmeticOperation
-    span: Span
+    operation: ArithmeticOperation,
+    span: Span,
 }
 
 // The arithmetic syntax of one function body: every candidate operation and
 // every `#Overflow(mode) { … }` block, in source order.
 SemaArithmeticScan: struct {
-    sites: [SemaArithmeticSite]
-    scopes: [ArithmeticPolicyFact]
+    sites: [SemaArithmeticSite],
+    scopes: [ArithmeticPolicyFact],
 }
 
 sema_arithmetic_binary_operation: fn(op: BinOp) -> ArithmeticOperation? Never! {

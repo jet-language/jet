@@ -125,9 +125,9 @@ select_wrong_num_terms_error: fn(a: &ast.AST, s: Int) Never! {
 // `refs` the cursors of pRef, `exclude` those of the subqueries entered,
 // `code` the walker's eCode.
 RefSrcWalker: struct {
-    refs: [Int]
-    exclude: [Int]
-    code: Int
+    refs: [Int],
+    exclude: [Int],
+    code: Int,
 
     impl SQLWalker {
         // exprRefToSrcList.
@@ -276,7 +276,7 @@ window_update: fn(p: &cg.Parse, a: &ast.AST, list: Int, win: Int, d: conn.FuncDe
 
 // incrAggFunctionDepth's walker: TK_AGG_FUNCTION nodes move `n` levels out.
 IncrAggDepthWalker: struct {
-    n: Int
+    n: Int,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -1172,7 +1172,7 @@ resolve_order_group_by: fn(p: &cg.Parse, a: &ast.AST, sel: Int, ob: Int, z_type:
 
 // resolveRemoveWindowsCb's walker.
 RemoveWindowsWalker: struct {
-    sel: Int
+    sel: Int,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -1388,7 +1388,7 @@ resolve_select_body: fn(p: &cg.Parse, a: &ast.AST, s0: Int, outer: Int, nc: Int)
 // The resolver's walker (resolveExprStep and, unless the context has
 // NC_NoSelect, resolveSelectStep).
 ResolveWalker: struct {
-    select: Bool
+    select: Bool,
 
     impl WalkCb {
         on_expr: fn(self, p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> Int Never! {
@@ -1498,7 +1498,7 @@ resolve_self_reference: fn(p: &cg.Parse, a: &ast.AST, t: Int, typ: Int, e: Int, 
 
 // A Gen with no schema, authorizer or SELECT machinery.
 ResolveTestGen: struct {
-    calls: Int
+    calls: Int,
 
     impl Gen {
         read_schema: fn(self, p: &cg.Parse, a: &ast.AST) -[DB]> Int Never! { base.OK }

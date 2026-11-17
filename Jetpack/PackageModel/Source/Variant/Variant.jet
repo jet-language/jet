@@ -11,9 +11,9 @@
 
 // Dependency / build graph role (Nix-style build/host/target).
 VariantRole: enum {
-    Build
-    Host
-    Target
+    Build,
+    Host,
+    Target,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -34,9 +34,9 @@ VariantRole: enum {
 }
 
 VariantOS: enum {
-    Linux
-    MacOS
-    Windows
+    Linux,
+    MacOS,
+    Windows,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -59,8 +59,8 @@ VariantOS: enum {
 }
 
 VariantArch: enum {
-    X64
-    Aarch64
+    X64,
+    Aarch64,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -83,10 +83,10 @@ VariantArch: enum {
 }
 
 VariantLibc: enum {
-    Gnu
-    Musl
-    Msvc
-    NoLibc
+    Gnu,
+    Musl,
+    Msvc,
+    NoLibc,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -117,8 +117,8 @@ VariantLibc: enum {
 }
 
 VariantLinkage: enum {
-    Shared
-    Static
+    Shared,
+    Static,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -137,9 +137,9 @@ VariantLinkage: enum {
 }
 
 VariantABI: enum {
-    Sysv
-    Ms
-    Unknown
+    Sysv,
+    Ms,
+    Unknown,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -167,14 +167,14 @@ VariantABI: enum {
 }
 
 ArtifactKind: enum {
-    Library
-    Executable
-    Object
-    Archive
-    Headers
-    DevTool
-    Sysroot
-    Any
+    Library,
+    Executable,
+    Object,
+    Archive,
+    Headers,
+    DevTool,
+    Sysroot,
+    Any,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -207,15 +207,15 @@ ArtifactKind: enum {
 // The axes in tie-break order, plus the provider-fact tie that no mapped
 // axis separates.
 VariantAxis: enum {
-    Role
-    OS
-    Arch
-    Libc
-    Linkage
-    ABI
-    Artifact
-    Features
-    ProviderFacts
+    Role,
+    OS,
+    Arch,
+    Libc,
+    Linkage,
+    ABI,
+    Artifact,
+    Features,
+    ProviderFacts,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -250,14 +250,14 @@ VariantAxis: enum {
 // Closed typed variant. `features` is a set: kept sorted
 // and unique so equal sets compare equal.
 PackageVariant: struct {
-    role: VariantRole
-    os: VariantOS
-    arch: VariantArch
-    libc: VariantLibc
-    linkage: VariantLinkage
-    abi: VariantABI
-    artifact: ArtifactKind
-    features: [String]
+    role: VariantRole,
+    os: VariantOS,
+    arch: VariantArch,
+    libc: VariantLibc,
+    linkage: VariantLinkage,
+    abi: VariantABI,
+    artifact: ArtifactKind,
+    features: [String],
 
     // Total defaults from the requesting context: its platform, Host role,
     // shared linkage, library artifact, no features.
@@ -432,9 +432,9 @@ PackageVariant: struct {
 // A candidate offered by a package producer, with namespaced provider facts
 // that never influence native selection unless mapped.
 VariantCandidate: struct {
-    label: String
-    variant: PackageVariant
-    provider_facts: [String:String]
+    label: String,
+    variant: PackageVariant,
+    provider_facts: [String:String],
 
     new: fn(label: String, variant: PackageVariant) -> VariantCandidate Never! {
         VariantCandidate{label: label, variant: variant, provider_facts: [String:String]{}}
@@ -481,13 +481,13 @@ VariantCandidate: struct {
 // Explicit mapping from a provider fact key onto a closed axis value.
 // Without a map, provider facts are ignored during selection.
 VariantMapEntry: struct {
-    provider_key: String
-    axis: String
-    value: String
+    provider_key: String,
+    axis: String,
+    value: String,
 }
 
 #Error
 VariantSelectError: enum {
-    NoMatch(need: PackageVariant, candidate_count: Int)
-    Ambiguous(need: PackageVariant, axis: VariantAxis, labels: [String])
+    NoMatch(need: PackageVariant, candidate_count: Int),
+    Ambiguous(need: PackageVariant, axis: VariantAxis, labels: [String]),
 }

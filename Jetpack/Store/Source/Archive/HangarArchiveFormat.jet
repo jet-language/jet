@@ -47,10 +47,10 @@ store_archive_magic: fn() -> [U8] Never! {
 
 // Summary of one archive operation, printed by the Hangar CLI.
 HangarArchiveReport: struct {
-    objects: Int
-    bytes: Int
-    signed: Bool
-    root: String
+    objects: Int,
+    bytes: Int,
+    signed: Bool,
+    root: String,
 
     // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
     json: fn(self, action: String) -> String ReportError! {
@@ -67,19 +67,19 @@ HangarArchiveReport: struct {
 // wire tag.
 #[Specified, Layout(U8)]
 HangarArchiveNodeKind: enum {
-    Directory = 0
-    File = 1
-    Symlink = 2
-    Hardlink = 3
+    Directory = 0,
+    File = 1,
+    Symlink = 2,
+    Hardlink = 3,
 }
 
 // One node of an archived output tree. `bytes` holds file contents or the
 // link target of a symlink or hardlink.
 HangarArchiveNode: struct {
-    path: String
-    kind: HangarArchiveNodeKind
-    mode: Int
-    bytes: [U8]
+    path: String,
+    kind: HangarArchiveNodeKind,
+    mode: Int,
+    bytes: [U8],
 
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
@@ -95,20 +95,20 @@ HangarArchiveNode: struct {
 // One archived record: an output tree (empty `meta`, `id == digest`) or a
 // package record whose `meta` is the entry's meta.json.
 HangarArchiveObject: struct {
-    id: String
-    digest: String
-    meta: String
-    root_mode: Int
-    nodes: [HangarArchiveNode]
+    id: String,
+    digest: String,
+    meta: String,
+    root_mode: Int,
+    nodes: [HangarArchiveNode],
 }
 
 // The typed closure manifest a Nix CAS bundle carries after its objects.
 NixClosureManifest: struct {
-    output: String
-    platform: String
-    revision: String
-    cache_key: String
-    members: [NixClosureMember]
+    output: String,
+    platform: String,
+    revision: String,
+    cache_key: String,
+    members: [NixClosureMember],
 
     encode_into: fn(self, out: &[U8]) StoreError! {
         store_archive_put_string(out, self.output)
@@ -154,17 +154,17 @@ NixClosureManifest: struct {
 // One member of a Nix closure manifest: its CAS key, the digest and size of
 // its canonical object bytes, and its sorted direct references.
 NixClosureMember: struct {
-    key: String
-    hash: String
-    size: Int
-    references: [String]
+    key: String,
+    hash: String,
+    size: Int,
+    references: [String],
 }
 
 // The detached signature trailer.
 HangarArchiveSignature: struct {
-    key_id: String
-    algorithm: String
-    sig_hex: String
+    key_id: String,
+    algorithm: String,
+    sig_hex: String,
 
     from_trust: fn(signature: TrustSignature) -> HangarArchiveSignature Never! {
         HangarArchiveSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: signature.sig_hex}
@@ -173,10 +173,10 @@ HangarArchiveSignature: struct {
 
 // A decoded or assembled canonical archive.
 HangarArchive: struct {
-    root_id: String
-    objects: [HangarArchiveObject]
-    nix_manifest: NixClosureManifest?
-    signature: HangarArchiveSignature?
+    root_id: String,
+    objects: [HangarArchiveObject],
+    nix_manifest: NixClosureManifest?,
+    signature: HangarArchiveSignature?,
 
     report: fn(self) -> HangarArchiveReport Never! {
         bytes := 0
@@ -358,8 +358,8 @@ HangarArchive: struct {
 
 // Bounded little-endian cursor over archive bytes.
 HangarArchiveReader: struct {
-    bytes: [U8]
-    at: Int
+    bytes: [U8],
+    at: Int,
 
     take_bytes: fn(&self, len: Int) -> [U8] StoreError! {
         if len < 0 -> return Err(StoreError.InvalidData("archive length overflows"))

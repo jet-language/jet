@@ -42,9 +42,9 @@ SEMA_CLI_ENTRY_IMPORTS: "use {{\n    __jet_cli_args: core.args\n    __jet_cli_pr
 // One typed entry of the entry file that has no wrapper yet: `wrapper` calls
 // `function`, through `module_alias` when the entry is `module.function`.
 SemaCLIEntryTarget: struct {
-    wrapper: String
-    function: String
-    module_alias: String?
+    wrapper: String,
+    function: String,
+    module_alias: String?,
 }
 
 // The generated entry of the Executable Output bound to `address`.
@@ -232,30 +232,30 @@ sema_cli_entry_struct: fn(items: [Item], type_name: String) -> StructDef? {
 // One input of the spec. The compiler writes it into the `__cli_spec` data
 // table and into the help text; `env` is the variable it falls back to.
 SemaCLIInput: struct {
-    name: String
-    short: String
-    help: String
-    meta: String
-    flag: Bool
-    kind: Int
-    choices: [String]
-    default: String?
-    env: String
-    required: Bool
-    positional: Bool
+    name: String,
+    short: String,
+    help: String,
+    meta: String,
+    flag: Bool,
+    kind: Int,
+    choices: [String],
+    default: String?,
+    env: String,
+    required: Bool,
+    positional: Bool,
 }
 
 // One command word and its own inputs.
 SemaCLICommand: struct {
-    name: String
-    description: String?
-    inputs: [SemaCLIInput]
+    name: String,
+    description: String?,
+    inputs: [SemaCLIInput],
 }
 
 // One arm of a generated table: the quoted words it matches and its body.
 SemaCLIArm: struct {
-    patterns: [String]
-    body: [String]
+    patterns: [String],
+    body: [String],
 }
 
 // The spec of `definition`, which the generated code names `type_ref`;
@@ -267,15 +267,15 @@ SemaCLIArm: struct {
 // the test of whether argv gave it; `commands` are the arms of the table that
 // dispatches the selected command.
 SemaCLIEntrySpec: struct {
-    root: [SemaCLIInput]
-    help: String
-    standard: Bool
-    table: String?
-    parse: String
-    literal: [String]
-    assigned: [String]
-    inputs: [{field: String, explicit: String}]
-    commands: [SemaCLIArm]
+    root: [SemaCLIInput],
+    help: String,
+    standard: Bool,
+    table: String?,
+    parse: String,
+    literal: [String],
+    assigned: [String],
+    inputs: [{field: String, explicit: String}],
+    commands: [SemaCLIArm],
 }
 
 sema_cli_entry_spec: fn(definition: StructDef, items: [Item], type_ref: String) -> SemaCLIEntrySpec? {

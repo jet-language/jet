@@ -47,9 +47,9 @@ use {
 // IR signature of a function symbol (ir_core_signature), IR_CORE_DATA for a
 // data symbol.
 IRCoreExport: struct {
-    symbol: String
-    key: String
-    signature: String
+    symbol: String,
+    key: String,
+    signature: String,
 }
 
 // Each row of the Core library's facts (ir_core_facts_text) is a Core
@@ -67,8 +67,8 @@ IR_CORE_SEALED: "sealed"
 // whether the Core exports still keep the function (a program calls the
 // library's code for it, though it builds no Core body as sealed).
 IRCoreExclusion: struct {
-    reason: String
-    exported: Bool
+    reason: String,
+    exported: Bool,
 }
 
 // The reasons a Core function is not sealed, each counted apart
@@ -112,14 +112,14 @@ ir_core_exclusion: fn(reason: String) -> IRCoreExclusion? Never! {
 // `facts` holds one line per Core function key (ir_core_fact_line), sorted:
 // each export's and each function left out of the exports.
 IRCoreLibrary: struct {
-    program: IRModule
-    failures: [IRBuildFailure]
-    errors: [String]
-    exports: [IRLibraryExport]
-    data: [X64DataExport]
-    rows: [IRCoreExport]
-    skipped: [IRBuildFailure]
-    facts: [String]
+    program: IRModule,
+    failures: [IRBuildFailure],
+    errors: [String],
+    exports: [IRLibraryExport],
+    data: [X64DataExport],
+    rows: [IRCoreExport],
+    skipped: [IRBuildFailure],
+    facts: [String],
 }
 
 IR_CORE_FUNCTION_PREFIX: "jet_core_fn_"
@@ -467,13 +467,13 @@ ir_core_function_values: fn(m: IRModule, callers: [[Int]]) -> [Bool] Never! {
 // the image's export list as the toolchain build wrote it
 // (ir_core_exports_text, JetCLI Host.jet JET_CLI_CORE_EXPORTS_FILE).
 IRCoreImage: struct {
-    exports: [U8]
+    exports: [U8],
 }
 
 // The key and signature columns of one export row.
 IRCoreImageRow: struct {
-    key: String
-    signature: String
+    key: String,
+    signature: String,
 }
 
 // The row of `symbol` in `exports` (sorted by symbol), found by a binary

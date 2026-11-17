@@ -20,20 +20,20 @@ use {
 
 #Codable
 Note: struct {
-    id: Int
-    text: String
+    id: Int,
+    text: String,
 }
 
 #Codable
 Count: struct {
-    name: String
-    runs: Int
+    name: String,
+    runs: Int,
 }
 
 #Error
 BoardError: enum {
-    Failed(String)
-    Unreachable(String)
+    Failed(String),
+    Unreachable(String),
 }
 
 impl app.CallError -> BoardError {
@@ -70,14 +70,14 @@ cell_set: fn(cell: Shared<Int>, to: Int) {
 }
 
 Board: struct {
-    store: db.Store
-    effects: db.Store
-    crash: Bool
+    store: db.Store,
+    effects: db.Store,
+    crash: Bool,
     // 1 once the crashing job counted; 2 once the process holds its read on
     // the board's store.
-    gate: Shared<Int>
+    gate: Shared<Int>,
     // The job's runs in this process.
-    tries: Shared<Int>
+    tries: Shared<Int>,
 
     // Saves note `id` and queues its count.
     #App.Public add: fn(self, id: Int) -> Int BoardError! {

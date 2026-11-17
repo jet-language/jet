@@ -100,7 +100,7 @@ sema_patchable_mark: fn(methods: &[Func], definition: StructDef) Never! {
 
 sema_patchable_source: fn(base: String, fields: [Field]) -> String Never! {
     patch: "{base}.Patch"
-    rows: loop field in fields -> "    {field.name}: Unit? = None\n"
+    rows: loop field in fields -> "    {field.name}: Unit? = None,\n"
     applied: loop field in fields -> "            {field.name}: patch.{field.name} ?? self.{field.name}"
     changed: loop field in fields -> "            {field.name}: if new.{field.name} == old.{field.name} -> None else -> Val(new.{field.name})"
     merged: loop field in fields -> "            {field.name}: if self.{field.name} == None -> other.{field.name} else -> self.{field.name}"

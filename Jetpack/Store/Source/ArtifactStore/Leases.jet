@@ -12,8 +12,8 @@ use {
 // Ownership identity recorded in lock and lease files. PID alone is not
 // sufficient because a later process may reuse it.
 ArtifactProcessIdentity: struct {
-    priv pid_value: Int
-    priv start_value: String
+    priv pid_value: Int,
+    priv start_value: String,
 
     new: fn(pid: Int, start: String) -> ArtifactProcessIdentity Never! {
         ArtifactProcessIdentity{pid_value: pid, start_value: start}
@@ -45,9 +45,9 @@ ArtifactProcessIdentity: struct {
 
 // What the platform reports about a process start token.
 ArtifactIdentityLookup: enum {
-    Found(String)
-    Missing
-    Unknown
+    Found(String),
+    Missing,
+    Unknown,
 }
 
 // The kernel start time of `pid` (Linux `/proc/<pid>/stat` field 22); other
@@ -96,8 +96,8 @@ store_artifact_rfind: fn(haystack: [U8], needle: [U8]) -> Int Never! {
 // unchanged; a later process can therefore never remove a live lease by PID
 // coincidence.
 ArtifactLease: struct {
-    priv path_value: String
-    priv owner_value: ArtifactProcessIdentity
+    priv path_value: String,
+    priv owner_value: ArtifactProcessIdentity,
 
     path: fn(self) -> String Never! { self.path_value }
 
@@ -122,8 +122,8 @@ ArtifactLease: struct {
 // The held machine-wide store lock. Closing it removes the lock file only
 // while it still holds this owner's line.
 ArtifactStoreLock: struct {
-    path: String
-    owner_line: [U8]
+    path: String,
+    owner_line: [U8],
 
     impl Close {
         close: fn(&&self) -[FS]> {
@@ -138,8 +138,8 @@ ArtifactStoreLock: struct {
 
 // One parsed lease file: its owner and the entries it pins.
 ArtifactLeaseRecord: struct {
-    owner: ArtifactProcessIdentity
-    targets: [ArtifactEntryKey]
+    owner: ArtifactProcessIdentity,
+    targets: [ArtifactEntryKey],
 }
 
 // A lease file: the owner line, then one `kind|value` line per pinned entry.
@@ -209,10 +209,10 @@ store_artifact_lines: fn(text: String) -> [String] Never! {
 // (by `ArtifactEntryKey.identity`), the highest sequence, the file size, and
 // whether every record was valid. Replay stops at the first invalid record.
 ArtifactJournalState: struct {
-    last_use: [String:Int]
-    last_sequence: Int
-    bytes: Int
-    valid: Bool
+    last_use: [String:Int],
+    last_sequence: Int,
+    bytes: Int,
+    valid: Bool,
 
     last_use_of: fn(self, key: ArtifactEntryKey) -> Int Never! {
         self.last_use.get(key.identity()) ?? 0
@@ -262,10 +262,10 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
 // One verified journal record (Rust `(operation, key, sequence)`), with the
 // entry length it names.
 ArtifactJournalRecord: struct {
-    operation: String
-    key: ArtifactEntryKey
-    length: Int
-    sequence: Int
+    operation: String,
+    key: ArtifactEntryKey,
+    length: Int,
+    sequence: Int,
 }
 
 // One checksummed journal line (Rust parse_journal_line); None for a torn,

@@ -16,8 +16,8 @@ use {
 }
 
 PublicationBreakingChange: struct {
-    description: String
-    item_name: String
+    description: String,
+    item_name: String,
 }
 
 // A registry snapshot's rows; publication_read_api_snapshot has checked every
@@ -140,8 +140,8 @@ publication_api_addition_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem], 
 
 PublicationAPIEffects: struct {
     // The signature with its effect row cut out.
-    rest: String
-    effects: [String]
+    rest: String,
+    effects: [String],
 }
 
 // `f: fn(x: Int) -[IO, Net]> Int = _` as `f: fn(x: Int) Int = _` and [IO, Net].
@@ -171,8 +171,8 @@ publication_api_effects_narrowed: fn(old: PublicAPIItem, new: PublicAPIItem) -> 
 // `cap Receipt #FX(IO, !FS)` as its ceiling (the allowed effects, `Panic`
 // aside, as in the checker) and its denials.
 PublicationAPICap: struct {
-    allowed: [String]
-    denied: [String]
+    allowed: [String],
+    denied: [String],
 }
 
 publication_api_cap: fn(signature: String) -> PublicationAPICap? Never! {
@@ -245,12 +245,12 @@ publication_e1218: fn(old_version: String, new_version: String, bump: Publicatio
 }
 
 PublicationPrePublishGate: struct {
-    build_ok: Bool
-    tests_ok: Bool
-    breaking: [PublicationBreakingChange]
-    version: String
-    bump_kind: PublicationBumpKind
-    next_major: Int
+    build_ok: Bool,
+    tests_ok: Bool,
+    breaking: [PublicationBreakingChange],
+    version: String,
+    bump_kind: PublicationBumpKind,
+    next_major: Int,
 
     is_blocked: fn(self) -> Bool Never! {
         !self.build_ok || !self.tests_ok || (self.breaking.len() != 0 && self.bump_kind != .Major)

@@ -14,44 +14,44 @@
 // Hidden is editor policy only; `save` still writes a hidden field.
 Hidden: struct {
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
 Since: struct {
-    version: Int
+    version: Int,
 
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
 Edit: trait {
     // Sets `field` from `text`; false when no field has that name or the text
     // does not parse as the field's type.
-    set: fn(&self, field: String, text: String) -> Bool Never!
+    set: fn(&self, field: String, text: String) -> Bool Never!,
 }
 
 Inspect: trait {
     // One row per field the editor shows.
-    inspect: fn(self) -> [Row] Never!
+    inspect: fn(self) -> [Row] Never!,
 }
 
 Row: struct {
-    name: String
-    type: String
-    value: String
-    grey: Bool
+    name: String,
+    type: String,
+    value: String,
+    grey: Bool,
 }
 
 Change: struct {
-    field: String
-    before: String
-    after: String
+    field: String,
+    before: String,
+    after: String,
 }
 
 Patch: struct {
-    changes: [Change]
+    changes: [Change],
 }
 
 redo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
@@ -69,10 +69,10 @@ undo: fn<T: Edit>(entity: &T, patch: Patch) -> Bool {
 }
 
 Entity: struct {
-    version: Int
+    version: Int,
 
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) -[Meta.Generate]> {
             tname: target.name

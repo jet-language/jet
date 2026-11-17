@@ -32,54 +32,54 @@ MAX_INT: 9223372036854775807
 // is the identity of the character it was inserted after ("" = document
 // start). A deleted character stays as a tombstone so later merges agree.
 SyncTextAtom: struct {
-    replica: String
-    counter: Int
-    after: String
-    scalar: String
+    replica: String,
+    counter: Int,
+    after: String,
+    scalar: String,
     deleted: Bool
 }
 
 SyncText: struct {
-    atoms: [SyncTextAtom]
+    atoms: [SyncTextAtom],
     valid: Bool
 }
 
 CounterCount: struct {
-    positive: Int
+    positive: Int,
     negative: Int
 }
 
 SyncCounter: struct {
-    counts: [String:CounterCount]
+    counts: [String:CounterCount],
     valid: Bool
 }
 
 // One register of a SyncMap. A deleted entry stays as a tombstone so a merge
 // with a replica that still holds the old value cannot bring it back.
 LWW: struct {
-    value: String
-    clock: Int
-    writer: String
+    value: String,
+    clock: Int,
+    writer: String,
     deleted: Bool
 }
 
 SyncMap: struct {
-    entries: [String:LWW]
+    entries: [String:LWW],
     valid: Bool
 }
 
 RGAItem: struct {
-    replica: String
+    replica: String,
     value: String
 }
 
 SyncList: struct {
-    items: [RGAItem]
+    items: [RGAItem],
     valid: Bool
 }
 
 RowPolicy: struct {
-    allow: [String]
+    allow: [String],
     deny: [String]
 }
 

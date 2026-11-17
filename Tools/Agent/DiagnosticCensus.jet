@@ -81,7 +81,7 @@ BASELINE_HEADER: "# The gaps Tests/diagnostics_census.tsv shows that Tools/Agent
 
 #Error
 DiagnosticCensusError: struct {
-    message: String
+    message: String,
 }
 
 census_fail: fn(message: String) -> DiagnosticCensusError Never! {
@@ -89,34 +89,34 @@ census_fail: fn(message: String) -> DiagnosticCensusError Never! {
 }
 
 CensusRow: struct {
-    code: String
+    code: String,
     // The row's type path (`jet.FetchHashMismatch`), `-` for an unregistered code.
-    name: String
-    status: String
+    name: String,
+    status: String,
     // `compiler`, `tool` or `dead`.
-    emitter: String
-    carriage: String
+    emitter: String,
+    carriage: String,
 }
 
 // The codes and type paths a set of files shows.
 CensusTokens: struct {
-    codes: [String]
-    names: [String]
+    codes: [String],
+    names: [String],
 }
 
 // What the rendered outputs show, by carriage.
 CensusCarriers: struct {
-    ui: CensusTokens
-    fixture: CensusTokens
-    cases: CensusTokens
+    ui: CensusTokens,
+    fixture: CensusTokens,
+    cases: CensusTokens,
 }
 
 // A gap the baseline admits, and the card that owns it.
 BaselineRow: struct {
-    code: String
-    name: String
-    gap: String
-    owner: String
+    code: String,
+    name: String,
+    gap: String,
+    owner: String,
 }
 
 census_slice: fn(text: String, start: Int, end: Int) -> String Never! {
@@ -213,11 +213,11 @@ census_registered_rows: fn(text: String) -> [CensusRow] DiagnosticCensusError! {
                 code = ""
                 status = "active"
             }
-            line.starts_with("        code: \"") && line.ends_with("\"") -> {
-                code = census_slice(line, 15, line.count_bytes() - 1)
+            line.starts_with("        code: \"") && line.removesuffix(",").ends_with("\"") -> {
+                code = census_slice(line, 15, line.removesuffix(",").count_bytes() - 1)
             }
             line.starts_with("        status: .") -> {
-                status = census_slice(line, 17, line.count_bytes()).lower()
+                status = census_slice(line, 17, line.removesuffix(",").count_bytes()).lower()
             }
             line == "    }}" && status != "" -> {
                 if code == "" {
@@ -238,9 +238,9 @@ census_registered_rows: fn(text: String) -> [CensusRow] DiagnosticCensusError! {
 // Which files a walk keeps: a compiler source, a rendered snapshot or case,
 // or a rendered report text.
 CensusFiles: enum {
-    Sources
-    Snapshots
-    Reports
+    Sources,
+    Snapshots,
+    Reports,
 }
 
 census_keeps: fn(kind: CensusFiles, path: String) -> Bool Never! {
@@ -278,8 +278,8 @@ census_read: fn(path: String) -[FS]> String DiagnosticCensusError! {
 // What the compiler stages, and apart from them the tools, runtime, Jetpack
 // and Core, emit.
 CensusEmitters: struct {
-    compiler: CensusTokens
-    tool: CensusTokens
+    compiler: CensusTokens,
+    tool: CensusTokens,
 }
 
 census_tool_source: fn(path: String) -> Bool Never! {
@@ -641,8 +641,8 @@ census_test_entry: fn(code: String, gap: String) -> BaselineRow Never! {
 }
 
 #Test("the census classifies rows by emitter and first carriage, names their gaps, and round-trips its rendering") {
-    row_a: "A: struct {{\n    impl Diagnostic {{\n        code: \"E0001\"\n    }}\n}}\n"
-    registry: "{row_a.repeat(100)}B: struct {{\n    impl Diagnostic {{\n        code: \"E0002\"\n        status: .Retired\n    }}\n}}\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0003\"\n    }}\n}}\nD: struct {{\n    impl Diagnostic {{\n        code: \"E0004\"\n    }}\n}}\n"
+    row_a: "A: struct {{\n    impl Diagnostic {{\n        code: \"E0001\",\n    }}\n}}\n"
+    registry: "{row_a.repeat(100)}B: struct {{\n    impl Diagnostic {{\n        code: \"E0002\",\n        status: .Retired,\n    }}\n}}\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0003\",\n    }}\n}}\nD: struct {{\n    impl Diagnostic {{\n        code: \"E0004\"\n    }}\n}}\n"
     emitters: CensusEmitters{compiler: CensusTokens{codes: [String]{"E0003", "E0004"}, names: [String]{}}, tool: CensusTokens{codes: [String]{"E0009"}, names: [String]{"jet.B"}}}
     carriers: CensusCarriers{ui: CensusTokens{codes: [String]{"E0004"}, names: [String]{}}, fixture: CensusTokens{codes: [String]{"E0003"}, names: [String]{}}, cases: CensusTokens{codes: [String]{"E0001", "E0003"}, names: [String]{}}}
     rows: census_rows(registry, emitters, carriers) ?? panic(err.message)

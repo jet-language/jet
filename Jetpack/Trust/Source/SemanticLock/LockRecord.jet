@@ -10,23 +10,23 @@ use {
 }
 
 LockRecordKind: enum {
-    Package
-    SourceRef
-    WorkspaceMember
-    AdapterOutput
-    SourceBuild
-    CacheObject
-    Toolchain
-    SecretReference
-    ServicePackage
-    ImageInput
-    ReplacementOverlay
-    PackageOverlay
-    FlakeComposition
-    FlakeUnsupported
-    FlakeEvaluator
-    Variant
-    Future(String)
+    Package,
+    SourceRef,
+    WorkspaceMember,
+    AdapterOutput,
+    SourceBuild,
+    CacheObject,
+    Toolchain,
+    SecretReference,
+    ServicePackage,
+    ImageInput,
+    ReplacementOverlay,
+    PackageOverlay,
+    FlakeComposition,
+    FlakeUnsupported,
+    FlakeEvaluator,
+    Variant,
+    Future(String),
 
     // Selected typed variant domain (E4-JP15).
     // A kind this reader does not know, kept verbatim for round trips.
@@ -77,11 +77,11 @@ LockRecordKind: enum {
 }
 
 LockIdentity: struct {
-    kind: LockRecordKind
-    key: String
-    exact: String
-    hash: String
-    platform: String
+    kind: LockRecordKind,
+    key: String,
+    exact: String,
+    hash: String,
+    platform: String,
 
     // `kind:key`: the merge and explain key.
     semantic_key: fn(self) -> String Never! { "{self.kind.label()}:{self.key}" }
@@ -94,18 +94,18 @@ LockIdentity: struct {
 
 // Why a record exists and who asked for it. Never part of the identity.
 LockRationale: struct {
-    owner_package: String
-    reason: String
-    source_ref: String
-    provider: String
-    channel_input: String
-    exact_output: String
-    policy_fingerprint: String
-    recipe_id: String
-    adapter_id: String
-    signature: String
-    cache_provenance: String
-    update_command: String
+    owner_package: String,
+    reason: String,
+    source_ref: String,
+    provider: String,
+    channel_input: String,
+    exact_output: String,
+    policy_fingerprint: String,
+    recipe_id: String,
+    adapter_id: String,
+    signature: String,
+    cache_provenance: String,
+    update_command: String,
 
     empty: fn() -> LockRationale Never! {
         LockRationale{owner_package: "", reason: "", source_ref: "", provider: "", channel_input: "", exact_output: "", policy_fingerprint: "", recipe_id: "", adapter_id: "", signature: "", cache_provenance: "", update_command: ""}
@@ -132,10 +132,10 @@ LockRationale: struct {
 }
 
 SemanticRecord: struct {
-    identity: LockIdentity
-    rationales: [LockRationale]
+    identity: LockIdentity,
+    rationales: [LockRationale],
     // Fields written by a newer lock, kept by key for round trips.
-    future_fields: [String:String]
+    future_fields: [String:String],
 
     new: fn(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
         SemanticRecord{identity: identity, rationales: [LockRationale]{rationale}, future_fields: [String:String]{}}
@@ -144,21 +144,21 @@ SemanticRecord: struct {
 
 // One flake-style lock input with an optional `follows` edge (E4-JP13).
 LockInput: struct {
-    name: String
-    url: String
-    follows: String
+    name: String,
+    url: String,
+    follows: String,
 }
 
 // Package pattern -> allowed source authorities (dependency-confusion guard).
 SourceMapEntry: struct {
-    pattern: String
-    sources: [String]
+    pattern: String,
+    sources: [String],
 }
 
 SemanticLockFile: struct {
-    records: [SemanticRecord]
-    inputs: [LockInput]
-    source_maps: [SourceMapEntry]
+    records: [SemanticRecord],
+    inputs: [LockInput],
+    source_maps: [SourceMapEntry],
 
     empty: fn() -> SemanticLockFile Never! {
         SemanticLockFile{records: [SemanticRecord]{}, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}

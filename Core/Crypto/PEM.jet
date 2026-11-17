@@ -21,7 +21,7 @@ use {
 /// Why Base64 decoding failed (MBEDTLS_ERR_BASE64_*).
 #Error
 Base64Error: enum {
-    InvalidCharacter
+    InvalidCharacter,
 }
 
 /// A byte that is no Base64 digit, a space inside a line, misplaced or
@@ -31,15 +31,15 @@ Base64Error: enum {
 /// Why reading a PEM block failed (MBEDTLS_ERR_PEM_*).
 #Error
 PEMError: enum {
-    NoHeaderFooterPresent
-    InvalidData(Base64Error?)
-    InvalidEncIV
-    UnknownEncAlg
-    PasswordRequired
-    PasswordMismatch
-    BadInputData
-    DES(des.DESError)
-    AESInvalidInputLength
+    NoHeaderFooterPresent,
+    InvalidData(Base64Error?),
+    InvalidEncIV,
+    UnknownEncAlg,
+    PasswordRequired,
+    PasswordMismatch,
+    BadInputData,
+    DES(des.DESError),
+    AESInvalidInputLength,
 }
 
 /// The header or the footer is missing, out of order, or the header
@@ -67,8 +67,8 @@ impl des.DESError -> PEMError { PEMError.DES(self) }
 /// through the end of its footer line (mbedtls_pem_context and use_len).
 /// Closing wipes the body.
 PEMBlock: struct {
-    der: [U8]
-    used: Int
+    der: [U8],
+    used: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -80,11 +80,11 @@ PEMBlock: struct {
 
 // The DEK-Info ciphers (the MBEDTLS_CIPHER_* types PEM accepts).
 PEMCipher: enum {
-    DESEDE3CBC
-    DESCBC
-    AES128CBC
-    AES192CBC
-    AES256CBC
+    DESEDE3CBC,
+    DESCBC,
+    AES128CBC,
+    AES192CBC,
+    AES256CBC,
 }
 
 SPACE: U8{32}
@@ -280,9 +280,9 @@ locate: fn(data: [U8], pat: [U8]) -> Int? Never! {
 // Where the first header and the first footer of a block start, and the
 // length of the text (mbedtls_pem_read_buffer's strstr calls).
 PEMSpan: struct {
-    header: Int
-    footer: Int
-    n: Int
+    header: Int,
+    footer: Int,
+    n: Int,
 }
 
 // The header and footer of data's first block, as strstr finds them in the

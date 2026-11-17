@@ -4,27 +4,27 @@
 use core.mem
 
 #SingleUse Lease: struct {
-    name: String
+    name: String,
 }
 
 Holder: struct {
-    lease: Lease
-    count: Int
+    lease: Lease,
+    count: Int,
 }
 
 Nested: struct {
-    inner: Holder
+    inner: Holder,
 }
 
 Slot: enum {
-    Empty
-    Held(lease: Lease)
+    Empty,
+    Held(lease: Lease),
 
     label: fn(self) -> String { "slot" }
 }
 
 BlockHolder: struct {
-    block: mem.Block
+    block: mem.Block,
 }
 
 acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }

@@ -153,8 +153,8 @@ BUSY_TOTALS: [Int]{0, 1, 3, 8, 18, 33, 53, 78, 103, 128, 178, 228}
 // timeout is db->busyTimeout (0 means no handler), n_busy is nBusy. The
 // pager's lock loop and the checkpoint's walBusyLock both invoke it.
 BusyHandler: struct {
-    timeout: Int
-    n_busy: Int
+    timeout: Int,
+    n_busy: Int,
 }
 
 // sqlite3InvokeBusyHandler with sqliteDefaultBusyCallback (the HAVE_USLEEP
@@ -188,36 +188,36 @@ busy_invoke: fn(b: &BusyHandler) -[DB]> Bool Never! {
 // Wal pointer. The database file (pDbFd), whose shared memory holds the
 // wal-index, is passed to each call.
 Wal: struct {
-    open: Bool
+    open: Bool,
     // pWalFd and zWalName.
-    fd: file.SQLFile
-    name: String
+    fd: file.SQLFile,
+    name: String,
     // iCallback and mxWalSize.
-    callback: Int
-    mx_wal_size: Int
+    callback: Int,
+    mx_wal_size: Int,
     // apWiData: the region copies ([U8]{} is a null page), whether each is
     // current, and the byte range of each the writer changed.
-    wi: [[U8]]
-    wi_fresh: [Bool]
-    wi_lo: [Int]
-    wi_hi: [Int]
-    sz_page: Int
-    read_lock: Int
-    exclusive_mode: Int
-    write_lock: Bool
-    ckpt_lock: Bool
-    read_only: Int
-    truncate_on_commit: Bool
-    sync_header: Bool
-    pad_to_sector_boundary: Bool
-    shm_unreliable: Bool
+    wi: [[U8]],
+    wi_fresh: [Bool],
+    wi_lo: [Int],
+    wi_hi: [Int],
+    sz_page: Int,
+    read_lock: Int,
+    exclusive_mode: Int,
+    write_lock: Bool,
+    ckpt_lock: Bool,
+    read_only: Int,
+    truncate_on_commit: Bool,
+    sync_header: Bool,
+    pad_to_sector_boundary: Bool,
+    shm_unreliable: Bool,
     // hdr: the WalIndexHdr of the snapshot, 48 bytes in native order.
-    hdr: [U8]
-    min_frame: Int
-    re_cksum: Int
-    n_ckpt: Int
+    hdr: [U8],
+    min_frame: Int,
+    re_cksum: Int,
+    n_ckpt: Int,
     // The first shared-memory I/O error not yet returned.
-    shm_rc: Int
+    shm_rc: Int,
 }
 
 // The null Wal.
@@ -469,8 +469,8 @@ wal_index_page: fn(w: &Wal, db: &file.SQLFile, i: Int, present: &Bool) -[DB]> In
 // walChecksumBytes: two running sums over a[at..<at+n] (n a multiple of
 // 8), as 32-bit words in native (little-endian) or swapped order.
 WalCksum: struct {
-    s1: Int
-    s2: Int
+    s1: Int,
+    s2: Int,
 }
 
 wal_checksum: fn(native: Bool, a: [U8], at: Int, n: Int, s1_in: Int, s2_in: Int) -> WalCksum Never! {
@@ -586,9 +586,9 @@ wal_frame_page: fn(frame: Int) -> Int Never! {
 // WalHashLoc: region `page`, whose aPgno starts at byte pgno_at; zero is
 // one less than the first frame it indexes.
 WalHashLoc: struct {
-    page: Int
-    pgno_at: Int
-    zero: Int
+    page: Int,
+    pgno_at: Int,
+    zero: Int,
 }
 
 wal_hash_loc: fn() -> WalHashLoc Never! { WalHashLoc{page: 0, pgno_at: 0, zero: 0} }
@@ -810,8 +810,8 @@ wal_limit: fn(w: &Wal, limit: Int) Never! {
 // n_backfill's region start up to mxFrame, ascending, each with its last
 // frame.
 WalIterator: struct {
-    pages: [Int]
-    frames: [Int]
+    pages: [Int],
+    frames: [Int],
 }
 
 wal_iterator_init: fn(w: &Wal, db: &file.SQLFile, n_backfill: Int, iter: &WalIterator) -[DB]> Int Never! {
@@ -1370,9 +1370,9 @@ wal_restart_log: fn(w: &Wal, db: &file.SQLFile) -[DB]> Int Never! {
 
 // WalWriter.
 WalWriter: struct {
-    sync_point: Int
-    sync_flags: Int
-    sz_page: Int
+    sync_point: Int,
+    sync_flags: Int,
+    sz_page: Int,
 }
 
 // walWriteToLog: data[0..<amt] at offset, syncing when the write crosses

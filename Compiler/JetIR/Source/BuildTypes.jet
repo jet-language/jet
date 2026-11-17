@@ -1457,9 +1457,9 @@ ir_is_handle: fn(m: IRModule, row: Int) -> Bool Never! {
 // crosses a Word route as itself (Duration's `ns`): its field name, record
 // getter and record constructor. None for any other type row.
 IRWordRecord: struct {
-    field: String
-    getter: String
-    constructor: String
+    field: String,
+    getter: String,
+    constructor: String,
 }
 
 ir_word_record: fn(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
@@ -1649,10 +1649,10 @@ ir_unit_type: fn(ty: Type) -> Bool Never! {
 // text, the list and tuple separator and whether struct and variant labels
 // show.
 IRRender: enum {
-    Display
-    Show
-    Debug
-    Print
+    Display,
+    Show,
+    Debug,
+    Print,
 }
 
 // The String showing `slot`: a String renders as itself (not fresh); scalars
@@ -2147,11 +2147,11 @@ ir_nominal_name: fn(ty: Type) -> String? Never! {
 // Aggregate row) whose storage is a wrapper box pointer holding the value
 // (ir_edge_wrapped); `redact`: Debug display hides it.
 IRMember: struct {
-    name: String
-    offset: Int
-    ty: Int
-    boxed: Bool{false}
-    redact: Bool{false}
+    name: String,
+    offset: Int,
+    ty: Int,
+    boxed: Bool{false},
+    redact: Bool{false},
 }
 
 // The stored members of struct declaration `row` (applied to the instance
@@ -3374,12 +3374,12 @@ ir_widen_union_to: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, uni
 // in it, or at 0 in `wrapper` (-1 if none), the `wrapper_bytes` box of a
 // recursive union edge. After the call, ir_box_lends_end ends the box.
 IRBoxLend: struct {
-    boxed: Int
-    box_bytes: Int
-    wrapper: Int
-    wrapper_bytes: Int
-    row: Int
-    offset: Int
+    boxed: Int,
+    box_bytes: Int,
+    wrapper: Int,
+    wrapper_bytes: Int,
+    row: Int,
+    offset: Int,
 }
 
 // The read call argument `value` widened to the resolved union `union_ty`
@@ -3718,14 +3718,14 @@ ir_default_err: fn(p: IRProgram, ty: Type) -> Bool Never! {
 // its name: program code spells that type by its key, and Core's bare spelling
 // still names the row.
 IRCompilerOwnedRowClass: enum {
-    RuntimeEnum
-    CoreEnum
-    Record
+    RuntimeEnum,
+    CoreEnum,
+    Record,
 }
 
 IRCompilerOwnedTypeRow: struct {
-    class: IRCompilerOwnedRowClass
-    definition: TTypeDef
+    class: IRCompilerOwnedRowClass,
+    definition: TTypeDef,
 }
 
 // Every compiler-owned row, in program order, built when the compiler itself
@@ -4284,9 +4284,9 @@ ir_list_element_of: fn(m: &IRModule, p: IRProgram, list_row: Int) -> Int? Never!
 // Index reads and writes, walks and `len` use that storage directly; any
 // other List operation gets a List copy of it (ir_fixed_bridge).
 IRFixedShape: struct {
-    element: Int
-    count: Int
-    stride: Int
+    element: Int,
+    count: Int,
+    stride: Int,
 }
 
 // The inline shape of the type row `row`; None for any other row (a List,

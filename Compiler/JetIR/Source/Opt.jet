@@ -61,13 +61,13 @@ use jet_foundation.[CompilerThreads, NameRows, Type, compiler_take_rows, compile
 // functions whose IR before and after the passes the report carries (`dump`,
 // comma-separated, "" for none).
 IROptOptions: struct {
-    level: Int
-    small: Bool
-    inline: IROptInline
-    disabled: [String]
-    verify: Bool
-    stress: Bool
-    dump: String
+    level: Int,
+    small: Bool,
+    inline: IROptInline,
+    disabled: [String],
+    verify: Bool,
+    stress: Bool,
+    dump: String,
 }
 
 // Which callees the bottom-up inlining takes (the `inline` build option;
@@ -76,8 +76,8 @@ IROptOptions: struct {
 // `#Inline(Always)` are inlined under both, on every tier
 // (OptInline.jet ir_opt_inline_marked_module).
 IROptInline: enum {
-    Auto
-    Marked
+    Auto,
+    Marked,
 }
 
 // The `inline` build option's value as an IROptInline.
@@ -104,50 +104,50 @@ ir_opt_enabled: fn(options: IROptOptions, pass: String) -> Bool Never! {
 // function the rows of the first pass whose output breaks the IR, pass
 // "ir.opt.<pass>"; "ir.opt.prepare" for the body as the passes got it).
 IROptReport: struct {
-    level: Int
-    inlined_calls: Int
+    level: Int,
+    inlined_calls: Int,
     // One row per call site inlining took (OptInline.jet IROptInlined).
-    inlines: [IROptInlined]
-    direct_calls: Int
-    folded: Int
-    branches_folded: Int
-    compares_fused: Int
-    short_circuits: Int
-    copies_coalesced: Int
-    dead_removed: Int
-    unreachable_removed: Int
-    aggregates_replaced: Int
-    unique_hoisted: Int
-    int_facts: Int
-    ssa_functions: Int
-    ssa_changed: Int
-    ssa_moves: Int
-    ssa_fresh: Int
-    instructions_before: Int
-    instructions_after: Int
+    inlines: [IROptInlined],
+    direct_calls: Int,
+    folded: Int,
+    branches_folded: Int,
+    compares_fused: Int,
+    short_circuits: Int,
+    copies_coalesced: Int,
+    dead_removed: Int,
+    unreachable_removed: Int,
+    aggregates_replaced: Int,
+    unique_hoisted: Int,
+    int_facts: Int,
+    ssa_functions: Int,
+    ssa_changed: Int,
+    ssa_moves: Int,
+    ssa_fresh: Int,
+    instructions_before: Int,
+    instructions_after: Int,
     // Loops `reduce` handed to a leaf, and Loops with an Int total fed by
     // a load (a sum) or by an equality test of a loaded element (a count),
     // or with one Store of a value they do not change (a fill), that it did
     // not (`reductions`: one note per such Loop).
-    reduced: Int
-    reductions_declined: Int
-    reductions: [String]
+    reduced: Int,
+    reductions_declined: Int,
+    reductions: [String],
     // Indices a versioned Loop writes (OptVersion.jet ir_version_step):
     // those guarded once before it (`stepped`), those guarded at its head
     // (`steps_declined`); the factors of its Muls (ir_version_narrow):
     // those guarded to the product width (`factors`), those it writes
     // (`factors_declined`); one note each (`steps`).
-    stepped: Int
-    steps_declined: Int
-    factors: Int
-    factors_declined: Int
-    steps: [String]
+    stepped: Int,
+    steps_declined: Int,
+    factors: Int,
+    factors_declined: Int,
+    steps: [String],
     // Each scalar count of a constant text that simplify folded
     // (OptSimplify.jet ir_opt_fold_text), one note each.
-    text_lengths: [String]
+    text_lengths: [String],
     // IROptOptions.dump: each dumped function's IR before and after its passes.
-    dumps: [String]
-    lint: [IRLintFinding]
+    dumps: [String],
+    lint: [IRLintFinding],
 }
 
 ir_opt_report: fn(level: Int) -> IROptReport Never! {
@@ -398,14 +398,14 @@ ir_opt_module_bodies: fn(m: &IRModule, work: IROptBodyWork, options: IROptOption
 // the stop points' function rows, -1 for none). `serial` keeps every body
 // on the calling thread.
 IROptBodyWork: struct {
-    facts: Bool
-    versions: Bool
-    lint: Bool
-    drop: Bool
-    serial: Bool
-    poll: Int
-    trap: Int
-    turn: Int
+    facts: Bool,
+    versions: Bool,
+    lint: Bool,
+    drop: Bool,
+    serial: Bool,
+    poll: Int,
+    trap: Int,
+    turn: Int,
 }
 
 // The bodies of one ir_opt_bodies run, each in a cell of its own (taken out
@@ -413,24 +413,24 @@ IROptBodyWork: struct {
 // first, compiler_threads_heaviest_first) and the next unclaimed rank,
 // taken with one atomic add.
 IROptClaims: struct {
-    cells: [Shared<IROptCell>]
-    order: [Int]
-    next: Atomic<Int>
+    cells: [Shared<IROptCell>],
+    order: [Int],
+    next: Atomic<Int>,
 }
 
 // One body's report and IR Lint findings, kept apart when either holds a
 // row, so they join in function order.
 IROptBodyDone: struct {
-    id: Int
-    report: IROptReport
-    found: [IRLintFinding]
+    id: Int,
+    report: IROptReport,
+    found: [IRLintFinding],
 }
 
 // One thread's bodies: the counts of those with no rows, summed, and the
 // rest.
 IROptBodyPart: struct {
-    total: IROptReport
-    done: [IROptBodyDone]
+    total: IROptReport,
+    done: [IROptBodyDone],
 }
 
 // Runs `work` over `functions`, reading `view` and IR Lint's `lint` context
@@ -739,14 +739,14 @@ ir_opt_glue_table: fn(m: IRModule) -> [Int] Never! {
 // of them in function order. The per-type glue table (OptGlue.jet; empty
 // with "glue" off) and the module's function count every thread reads.
 IROptPart: struct {
-    functions: [IRFunction]
-    call_counts: [Int]
-    calls: [Int]
+    functions: [IRFunction],
+    call_counts: [Int],
+    calls: [Int],
 }
 
 IROptGlue: struct {
-    table: [Int]
-    functions: Int
+    table: [Int],
+    functions: Int,
 }
 
 // The module's direct Calls of module functions after ir_opt_prepare:
@@ -755,8 +755,8 @@ IROptGlue: struct {
 // counts (ir_opt_call_sites) and the schedule's edges (ir_opt_callee_edges)
 // read these instead of every instruction again.
 OptCalls: struct {
-    start: [Int]
-    to: [Int]
+    start: [Int],
+    to: [Int],
 }
 
 // Direct calls, then drop glue as calls, in every function before the call
@@ -914,12 +914,12 @@ ir_opt_split_module: fn(m: &IRModule, functions: &[IRFunction], threads: Compile
 // indexes among them of those it split; the module's type rows, in a module
 // of their own, every thread reads.
 IROptSplitPart: struct {
-    functions: [IRFunction]
-    split: [Int]
+    functions: [IRFunction],
+    split: [Int],
 }
 
 IROptTypes: struct {
-    views: [IRModule]
+    views: [IRModule],
 }
 
 // Runs a splitting thread per slot from `at`; returns how many functions
@@ -1187,30 +1187,30 @@ ir_opt_caller_edges: fn(count: Int, callee_start: [Int], callees: [Int], caller_
 // queue and the cells of the functions it claims. `lint` is IR Lint's view
 // of the module (empty unless the options verify).
 IROptGraph: struct {
-    views: [IRModule]
-    keys: [String]
-    recursive: [Bool]
-    sites: [Int]
-    options: IROptOptions
-    lint: IRLintContext
-    cells: [Shared<IROptCell>]
-    sizes: [IROptCount]
-    pending: [IROptCount]
-    ranks: [Int]
-    callee_start: [Int]
-    callees: [Int]
-    caller_start: [Int]
-    callers: [Int]
-    queue: Shared<IROptQueue>
-    changed: Condition
+    views: [IRModule],
+    keys: [String],
+    recursive: [Bool],
+    sites: [Int],
+    options: IROptOptions,
+    lint: IRLintContext,
+    cells: [Shared<IROptCell>],
+    sizes: [IROptCount],
+    pending: [IROptCount],
+    ranks: [Int],
+    callee_start: [Int],
+    callees: [Int],
+    caller_start: [Int],
+    callers: [Int],
+    queue: Shared<IROptQueue>,
+    changed: Condition,
 }
 
 IROptCell: struct {
-    body: [IRFunction]
+    body: [IRFunction],
 }
 
 IROptCount: struct {
-    value: Atomic<Int>
+    value: Atomic<Int>,
 }
 
 // The functions ready to claim, a binary heap with the highest rank on top
@@ -1221,10 +1221,10 @@ IROptCount: struct {
 // thread stopped (a panic) before every function was claimed. A thread
 // with nothing to claim waits on the queue's Condition (it does not spin).
 IROptQueue: struct {
-    heap: [Int]
-    claimed: Int
-    count: Int
-    failed: Bool
+    heap: [Int],
+    claimed: Int,
+    count: Int,
+    failed: Bool,
 }
 
 // The module's functions on `workers` threads in dependency order: a
@@ -1464,15 +1464,15 @@ ir_opt_size: fn(f: IRFunction) -> Int Never! {
 
 OptFacts: struct {
     // Writes per slot; parameters count one write at entry.
-    defs: [Int]
+    defs: [Int],
     // The one write of a slot written once (-1 for a parameter: the entry).
-    def_at: [Int]
+    def_at: [Int],
     // Reads per slot.
-    uses: [Int]
+    uses: [Int],
     // Region of each instruction, and each region's enclosing region (-1 for
     // the function body, region 0).
-    region: [Int]
-    parent: [Int]
+    region: [Int],
+    parent: [Int],
 }
 
 ir_opt_facts: fn(f: IRFunction) -> OptFacts Never! {
@@ -1706,18 +1706,18 @@ ir_opt_direct_calls: fn(f: &IRFunction) -> Int Never! {
 // that calls itself, is recursive and never inlined.
 
 OptOrder: struct {
-    order: [Int]
-    recursive: [Bool]
+    order: [Int],
+    recursive: [Bool],
 }
 
 OptTarjan: struct {
-    index: [Int]
-    low: [Int]
-    on_stack: [Bool]
-    stack: [Int]
-    next_index: Int
-    order: [Int]
-    recursive: [Bool]
+    index: [Int],
+    low: [Int],
+    on_stack: [Bool],
+    stack: [Int],
+    next_index: Int,
+    order: [Int],
+    recursive: [Bool],
 }
 
 ir_opt_bottom_up: fn(calls: OptCalls) -> OptOrder Never! {

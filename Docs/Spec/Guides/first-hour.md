@@ -132,7 +132,7 @@ greet: fn(name: String) -> String { "hello, {name}" }
 
 #CLI
 GreetingArgs: struct {
-    #Doc("name to greet") name: String{"Jet"}
+    #Doc("name to greet") name: String{"Jet"},
 }
 
 #Test("greet says hello") {

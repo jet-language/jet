@@ -65,14 +65,14 @@ ASN1_TAG_VALUE_MASK: 0x1F
 /// Why a DER item could not be read or written (MBEDTLS_ERR_ASN1_*).
 #Error
 ASN1Error: enum {
-    OutOfData
-    UnexpectedTag
-    InvalidLength
-    LengthMismatch
-    InvalidData
-    BufTooSmall
-    Stopped(Int)
-    Mpi(bn.MpiError)
+    OutOfData,
+    UnexpectedTag,
+    InvalidLength,
+    LengthMismatch,
+    InvalidData,
+    BufTooSmall,
+    Stopped(Int),
+    Mpi(bn.MpiError),
 }
 
 /// The input ends inside the item (OUT_OF_DATA).
@@ -89,9 +89,9 @@ impl bn.MpiError -> ASN1Error { ASN1Error.Mpi(self) }
 /// An item's tag and the offset and length of its content in the parsed
 /// buffer (mbedtls_asn1_buf). `p` is -1 for an absent item.
 ASN1Buf: struct {
-    tag_id: Int
-    p: Int
-    len: Int
+    tag_id: Int,
+    p: Int,
+    len: Int,
 }
 
 /// The absent item: no tag, no content.
@@ -99,19 +99,19 @@ asn1_none: fn() -> ASN1Buf Never! { ASN1Buf{tag_id: 0, p: -1, len: 0} }
 
 /// A BIT STRING's content after the unused-bits byte (mbedtls_asn1_bitstring).
 ASN1Bitstring: struct {
-    len: Int
-    unused_bits: Int
-    p: Int
+    len: Int,
+    unused_bits: Int,
+    p: Int,
 }
 
 /// An OID and its value, one attribute of a name or one extension
 /// (mbedtls_asn1_named_data). In a list the first entry is the head;
 /// `next_merged` joins an entry with the next into one multi-valued RDN.
 NamedData: struct {
-    oid: [U8]
-    val_tag: Int
-    val: [U8]
-    next_merged: Bool
+    oid: [U8],
+    val_tag: Int,
+    val: [U8],
+    next_merged: Bool,
 }
 
 /// Whether `tag_id` is one of the string types X.509 names may hold
@@ -257,7 +257,7 @@ get_bitstring_null: fn(data: [U8], p: &Int, end: Int) -> Int ASN1Error! {
 /// the entry's tag and the offset and length of its content. A result other
 /// than 0 ends the walk with ASN1Error.Stopped of that code.
 SequenceVisitor: trait {
-    visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never!
+    visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never!,
 }
 
 /// Walk a SEQUENCE that must end at `end`. Every entry's tag must satisfy
@@ -281,7 +281,7 @@ traverse_sequence_of: fn<V: SequenceVisitor>(data: [U8], p: &Int, end: Int, must
 
 /// Collects the entries of a SEQUENCE OF.
 SequenceItems: struct {
-    items: [ASN1Buf]
+    items: [ASN1Buf],
 
     impl SequenceVisitor {
         visit: fn(&self, tag_id: Int, start: Int, len: Int) -> Int Never! {

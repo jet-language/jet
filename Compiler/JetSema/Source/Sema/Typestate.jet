@@ -39,16 +39,16 @@ sema_state_task_spawn_method: fn() -> String Never! {
 // `results` come from state types (`self: Order.Draft`, `-> Order.Shipped`);
 // a state set is its names joined by `|`.
 SemaStateTable: struct {
-    keys: NameTable
+    keys: NameTable,
     // Per key id: its state-typed parameters' needs, its result's states (""
     // for none), and, for an enum with a state list, its states, which are
     // cases.
-    needs: [[SemaStateNeed]]
-    results: [String]
-    cases: [[String]]
+    needs: [[SemaStateNeed]],
+    results: [String],
+    cases: [[String]],
     // The keys of `needs` in declaration order, so a fix lists moves as the
     // type declares them.
-    typed_keys: [String]
+    typed_keys: [String],
 }
 
 // A table with no rows yet.
@@ -92,9 +92,9 @@ sema_state_task_move: fn(method: String) -> String? Never! {
 // A state type on one argument of a call: `arg` is the argument's position
 // in the call, or -1 for the receiver.
 SemaStateNeed: struct {
-    arg: Int
-    owner: String
-    states: String
+    arg: Int,
+    owner: String,
+    states: String,
 }
 
 // One function's walk: the facts at the current point, whether the current
@@ -104,15 +104,15 @@ SemaStateNeed: struct {
 // facts are columns by their ids.
 SemaStateWalk: struct {
     // The AST tables of the walked module.
-    tables: ASTTables
-    table: SemaStateTable
-    locals: NameTable
-    current: SemaStateFacts
-    ended: Bool
-    exits: [SemaStateFacts]
-    open_switches: [Span]
-    typed: Bool
-    diagnostics: [Diagnostic]
+    tables: ASTTables,
+    table: SemaStateTable,
+    locals: NameTable,
+    current: SemaStateFacts,
+    ended: Bool,
+    exits: [SemaStateFacts],
+    open_switches: [Span],
+    typed: Bool,
+    diagnostics: [Diagnostic],
 }
 
 // The facts one path carries to a join, by local id: each local's one known
@@ -120,8 +120,8 @@ SemaStateWalk: struct {
 // different states, in order (empty for none). Both columns have one length;
 // a local past it has neither.
 SemaStateFacts: struct {
-    states: [String]
-    mixed: [[String]]
+    states: [String],
+    mixed: [[String]],
 }
 
 // Facts that track no local.
@@ -180,9 +180,9 @@ sema_state_drop_met: fn(facts: &SemaStateFacts, id: Int) Never! {
 
 // Where two paths meet and leave `name` in two states.
 SemaStateSplit: struct {
-    name: String
-    one: String
-    other: String
+    name: String,
+    one: String,
+    other: String,
 }
 
 // The program's state table: every registered module's state-typed

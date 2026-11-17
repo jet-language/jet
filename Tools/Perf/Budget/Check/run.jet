@@ -70,7 +70,7 @@ USAGE: "usage: jet Tools/Perf/Budget/Check <trace> [--column 225K|500K|1M] [--cl
 
 #Error
 CheckError: struct {
-    lines: [String]
+    lines: [String],
     code: Int
 }
 
@@ -82,13 +82,13 @@ usage: fn(message: String) -> CheckError Never! {
 }
 
 Options: struct {
-    column: String
-    clock: String
-    lines: Float
-    lines_given: Bool
-    budget: String
-    strict: Bool
-    trace: String
+    column: String,
+    clock: String,
+    lines: Float,
+    lines_given: Bool,
+    budget: String,
+    strict: Bool,
+    trace: String,
     trace_given: Bool
 }
 
@@ -174,26 +174,26 @@ parse_args: fn(args: [String]) -> Options CheckError! {
 // ---- Trace ------------------------------------------------------------------
 
 Span: struct {
-    kind: String
-    kind_is_text: Bool
-    label: String
-    label_is_text: Bool
-    label_sort: String
-    start: Float
-    end: Float
-    closed: Bool
-    args: Dyn
+    kind: String,
+    kind_is_text: Bool,
+    label: String,
+    label_is_text: Bool,
+    label_sort: String,
+    start: Float,
+    end: Float,
+    closed: Bool,
+    args: Dyn,
     ancestors: [Int]
 }
 
 Counter: struct {
-    name: String
+    name: String,
     value: Float
 }
 
 Trace: struct {
-    spans: [Span]
-    counters: [Counter]
+    spans: [Span],
+    counters: [Counter],
     last_ts: Float
 }
 
@@ -323,7 +323,7 @@ span_ns: fn(span: Span, clock: String, notes: &[String]) -> Float Never! {
 }
 
 Measure: struct {
-    ns: Float
+    ns: Float,
     count: Int
 }
 
@@ -403,16 +403,16 @@ table: fn(header: [String], rows: [[String]]) -> String Never! {
 }
 
 Measured: struct {
-    row: Dyn
-    ns: Float
+    row: Dyn,
+    ns: Float,
     present: Bool
 }
 
 LabelEntry: struct {
-    label: String
-    sort: String
-    count: Int
-    ns: Float
+    label: String,
+    sort: String,
+    count: Int,
+    ns: Float,
     items: Float
 }
 
@@ -439,14 +439,14 @@ detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [Lab
 }
 
 CensusItem: struct {
-    name: String
-    kind: String
+    name: String,
+    kind: String,
     labelled: Bool
 }
 
 Outcome: struct {
-    out: [String]
-    err: [String]
+    out: [String],
+    err: [String],
     code: Int
 }
 
@@ -762,27 +762,27 @@ HELLO_USAGE: "usage: jet Tools/Perf/Budget/Check --hello [--jet PATH] [--runs N]
 OUTPUT_LIMIT: 16777216
 
 HelloOptions: struct {
-    jet: String
-    runs: Int
+    jet: String,
+    runs: Int,
     doc: String
 }
 
 // One row of the limit table: `value` is bytes for a size, ns for a time.
 GateLimit: struct {
-    measure: String
-    text: String
-    value: Float
+    measure: String,
+    text: String,
+    value: Float,
     time: Bool
 }
 
 GateLimits: struct {
-    size: GateLimit
+    size: GateLimit,
     start: GateLimit
 }
 
 // Hello's file size and its start times in ns, sorted.
 HelloMeasure: struct {
-    bytes: Int
+    bytes: Int,
     starts: [Int]
 }
 

@@ -110,13 +110,13 @@ UNREPORTED_CEILING: 14
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 
-STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
+STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String,?$"}
 
 IMPL_OPEN: "    impl Diagnostic {{"
 
 IMPL_CLOSE: "    }}"
 
-CONSTANT: Regex{"^        ([a-z_]+): (.+)$"}
+CONSTANT: Regex{"^        ([a-z_]+): (.+?),?$"}
 
 TEXT_LINE: Regex{"^        (what|why|fix): fn\(self\) -> String \{{ (\x22.*\x22) \}}$"}
 
@@ -146,7 +146,7 @@ DECISION_ID: Regex{"\bD-[A-Z0-9-]+|\bS[0-9]+\b"}
 
 #Error
 DiagnosticRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> DiagnosticRowsError Never! {
@@ -155,67 +155,67 @@ rows_fail: fn(message: String) -> DiagnosticRowsError Never! {
 
 // One `name: value` constant or one text body, as written.
 DiagnosticEntry: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // One diagnostic struct and its `impl Diagnostic` block as written.
 DiagnosticSource: struct {
-    name: String
-    fields: [String]
-    constants: [DiagnosticEntry]
-    texts: [DiagnosticEntry]
+    name: String,
+    fields: [String],
+    constants: [DiagnosticEntry],
+    texts: [DiagnosticEntry],
 }
 
 // One file with its text: a snapshot as read, or a copy as generated.
 TextFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // What one row gives the coverage baseline, its explain page and the safety audit.
 RowFacts: struct {
-    code: String
+    code: String,
     // The type path a report's header prints: `jet.` and the impl's type.
-    name: String
-    active: Bool
+    name: String,
+    active: Bool,
     // A `.Error` row, not a `.Lint`.
-    error: Bool
+    error: Bool,
     // `severity: .Lint`; the letter law reads it against the code.
-    lint: Bool
-    plane: String
+    lint: Bool,
+    plane: String,
     // A structured fix other than `CryptoMisuse`, which carries evidence, not an edit.
-    edit: Bool
+    edit: Bool,
     // A `no_fix` reason (`.Design` unless written `None`).
-    reason: Bool
-    what: String
-    why: String
-    fix: String
+    reason: Bool,
+    what: String,
+    why: String,
+    fix: String,
     // `Soundness`, `Opinion`, or "" when the row states no `safety_class`;
     // its `safety_reason` and `expert_path` as a reader sees them.
-    safety_class: String
-    safety_reason: String
-    expert_path: String
+    safety_class: String,
+    safety_reason: String,
+    expert_path: String,
 }
 
 RenderedRow: struct {
-    text: String
-    facts: RowFacts
+    text: String,
+    facts: RowFacts,
     // The row's breaks of the plain-words rubric, each naming its code.
-    rubric: [String]
+    rubric: [String],
 }
 
 RenderedRows: struct {
-    text: String
-    facts: [RowFacts]
+    text: String,
+    facts: [RowFacts],
 }
 
 // One plane's line of the coverage baseline.
 PlaneCount: struct {
-    plane: String
-    edits: Int
-    reasons: Int
-    total: Int
+    plane: String,
+    edits: Int,
+    reasons: Int,
+    total: Int,
 }
 
 entry: fn(entries: [DiagnosticEntry], name: String) -> String? Never! {
@@ -1211,11 +1211,11 @@ COPY_LINK: Regex{"More: jet-lang\.dev/e/([A-Z][A-Z]?[0-9][0-9][0-9][0-9])"}
 // the `path:line` that best shows where the compiler reports it, and
 // `site_ranks` to that line's site_rank.
 ReportSites: struct {
-    files: Int
-    copies: Int
-    problems: [String]
-    code_sites: [String:String]
-    site_ranks: [String:Int]
+    files: Int,
+    copies: Int,
+    problems: [String],
+    code_sites: [String:String],
+    site_ranks: [String:Int],
 }
 
 // The `.jet` and `.S` files under `directory`, outside test, fixture and
@@ -1500,9 +1500,9 @@ committed_audit: fn() -[FS]> String DiagnosticRowsError! {
 
 // What the spec-citation check read and found.
 SpecCitations: struct {
-    pages: Int
-    cited: Int
-    problems: [String]
+    pages: Int,
+    cited: Int,
+    problems: [String],
 }
 
 // Whether `byte` can continue a word: an ASCII letter, digit or `_`.
@@ -1666,11 +1666,11 @@ baseline_error: fn(source: String, committed: String) -> String Never! {
     }
 }
 
-MINIMAL_ROW: "BadPath: struct {{\n    path: String\n\n    impl Diagnostic {{\n        code: \"E9999\"\n        meaning: \"A route that doesn't start at the root\"\n        what: fn(self) -> String {{ \"route `{{self.path}}` must start with /\" }}\n        why: fn(self) -> String {{ \"routes are matched from the \\\"site\\\" root\" }}\n        fix: fn(self) -> String {{ \"write {{{{/path}}}}\" }}\n    }}\n}}\n"
+MINIMAL_ROW: "BadPath: struct {{\n    path: String,\n\n    impl Diagnostic {{\n        code: \"E9999\",\n        meaning: \"A route that doesn't start at the root\",\n        what: fn(self) -> String {{ \"route `{{self.path}}` must start with /\" }}\n        why: fn(self) -> String {{ \"routes are matched from the \\\"site\\\" root\" }}\n        fix: fn(self) -> String {{ \"write {{{{/path}}}}\" }}\n    }}\n}}\n"
 
-MINIMAL_CODE: "        code: \"E9999\"\n"
+MINIMAL_CODE: "        code: \"E9999\",\n"
 
-MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
+MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n"
 
 #Test("every generated copy matches its Prelude row") {
     if diagnostic_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
@@ -1686,12 +1686,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert(diagnostic_rows_error(row.replace("self.path", "self.route")).contains("reads no field"))
     assert(diagnostic_rows_error(row.replace("{{self.path}}", "{{path}}")).contains("other than a `self` field"))
     assert(diagnostic_rows_error(row.replace(code, "")).contains("states its `code`"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Lint\n")).contains("needs a `lint_name`"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Lint\n        status: .Retired\n")) == "")
-    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Warning\n")).contains("`.Error` or `.Lint`"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        colour: .Red\n")).contains("unknown constant"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Lint,\n")).contains("needs a `lint_name`"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Lint,\n        status: .Retired,\n")) == "")
+    assert(diagnostic_rows_error(row.replace(code, "{code}        severity: .Warning,\n")).contains("`.Error` or `.Lint`"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        colour: .Red,\n")).contains("unknown constant"))
     assert(diagnostic_rows_error(row.replace("    }}\n}}\n", "    }}\n    extra: fn() {{}}\n}}\n")).contains("last member"))
-    assert(diagnostic_rows_error(row.replace("    path: String\n\n", "")).contains("reads no field"))
+    assert(diagnostic_rows_error(row.replace("    path: String,\n\n", "")).contains("reads no field"))
     assert(diagnostic_rows_error("{row}{row}").contains("used twice"))
     assert(diagnostic_rows_error(row.replace("site", "si\\qte")).contains("backslash escape"))
 }
@@ -1700,10 +1700,10 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     row: MINIMAL_ROW
     code: MINIMAL_CODE
     assert((render_rows(row) ?? panic("the minimal row did not render: {err.message}")).text.contains("tier: DiagnosticTier.Error,"))
-    tidy: row.replace(code, "{code}        severity: .Lint\n        tier: .Tidy\n        lint_name: \"bad_path\"\n")
+    tidy: row.replace(code, "{code}        severity: .Lint,\n        tier: .Tidy,\n        lint_name: \"bad_path\",\n")
     assert((render_rows(tidy) ?? panic("the tidy row did not render: {err.message}")).text.contains("tier: DiagnosticTier.Tidy,"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Tidy\n")).contains("only a `.Lint` diagnostic is on the `.Tidy` tier"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Report\n")).contains("tier is `.Error` or `.Tidy`"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Tidy,\n")).contains("only a `.Lint` diagnostic is on the `.Tidy` tier"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        tier: .Report,\n")).contains("tier is `.Error` or `.Tidy`"))
 }
 
 #Test("a placeholder Why or a decision ID in a row's text is refused, naming every code") {
@@ -1722,14 +1722,14 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
 #Test("an active row with no written meaning, or one that repeats its What, is refused, naming every code") {
     row: MINIMAL_ROW
     missing: row.replace(MINIMAL_MEANING, "")
-    repeated: row.replace(MINIMAL_MEANING, "        meaning: \"route `x` must start with /\"\n").replace("E9999", "E9998").replace("{{self.path}}", "x").replace("    path: String\n\n", "")
+    repeated: row.replace(MINIMAL_MEANING, "        meaning: \"route `x` must start with /\",\n").replace("E9999", "E9998").replace("{{self.path}}", "x").replace("    path: String,\n\n", "")
     error: diagnostic_rows_error("{missing}{repeated}")
     assert(error.contains("2 row texts break the plain-words rubric"), error)
     assert(error.contains("E9999 states no meaning"), error)
     assert(error.contains("E9998 meaning repeats its what"), error)
     statuses: [String]{"Retired", "Reserved"}
     loop status in statuses {
-        assert_eq(diagnostic_rows_error(missing.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status}\n")), "")
+        assert_eq(diagnostic_rows_error(missing.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status},\n")), "")
     }
 }
 
@@ -1740,7 +1740,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert(error.contains("E9999 fix is a placeholder"), error)
     statuses: [String]{"Retired", "Reserved"}
     loop status in statuses {
-        assert_eq(diagnostic_rows_error(placeholder.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status}\n")), "")
+        assert_eq(diagnostic_rows_error(placeholder.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status},\n")), "")
     }
 }
 
@@ -1751,7 +1751,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
 }
 
 #Test("a code's letter follows its severity, and the frozen exceptions only shrink") {
-    lint_code: "{MINIMAL_CODE}        severity: .Lint\n        lint_name: \"bad_path\"\n"
+    lint_code: "{MINIMAL_CODE}        severity: .Lint,\n        lint_name: \"bad_path\",\n"
     blocking: (render_rows(MINIMAL_ROW) ?? panic(err.message)).facts
     loose_source: MINIMAL_ROW.replace(MINIMAL_CODE, lint_code.replace("E9999", "L9998")).replace("BadPath:", "LooseBadPath:")
     both: (render_rows("{MINIMAL_ROW}{loose_source}") ?? panic(err.message)).facts
@@ -1774,47 +1774,47 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
 #Test("a structured fix renders as its registry fix") {
     row: MINIMAL_ROW
     code: MINIMAL_CODE
-    replace: (render_rows(row.replace(code, "{code}        structured_fix: .Replace{{from: \"=\", to: \":\"}}\n        no_fix: None\n")) ?? panic(err.message)).text
+    replace: (render_rows(row.replace(code, "{code}        structured_fix: .Replace{{from: \"=\", to: \":\"}},\n        no_fix: None,\n")) ?? panic(err.message)).text
     assert(replace.contains("structured_fix: Val(DiagnosticRegistryFix.Replace{{from: \"=\", to: \":\"}}),"))
-    remove: (render_rows(row.replace(code, "{code}        structured_fix: .Remove{{text: \",\"}}\n        no_fix: None\n")) ?? panic(err.message)).text
+    remove: (render_rows(row.replace(code, "{code}        structured_fix: .Remove{{text: \",\"}},\n        no_fix: None,\n")) ?? panic(err.message)).text
     assert(remove.contains("structured_fix: Val(DiagnosticRegistryFix.Remove{{text: \",\"}}),"))
-    plain: (render_rows(row.replace(code, "{code}        structured_fix: .SourceEdit\n        no_fix: None\n")) ?? panic(err.message)).text
+    plain: (render_rows(row.replace(code, "{code}        structured_fix: .SourceEdit,\n        no_fix: None,\n")) ?? panic(err.message)).text
     assert(plain.contains("structured_fix: Val(DiagnosticRegistryFix.SourceEdit),"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Replace\n")).contains("is written `.Replace{{from:"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Remove\n")).contains("is written `.Remove{{text:"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        edit: .SourceEdit\n")).contains("unknown constant"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Replace,\n")).contains("is written `.Replace{{from:"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        structured_fix: .Remove,\n")).contains("is written `.Remove{{text:"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        edit: .SourceEdit,\n")).contains("unknown constant"))
 }
 
 #Test("only an active row has a stage") {
     row: MINIMAL_ROW
     code: MINIMAL_CODE
-    active: (render_rows(row.replace(code, "{code}        stage: [.Parse, .Sema]\n")) ?? panic(err.message)).text
+    active: (render_rows(row.replace(code, "{code}        stage: [.Parse, .Sema],\n")) ?? panic(err.message)).text
     assert(active.contains("        stage: \"parse/sema\","))
     assert((render_rows(row) ?? panic(err.message)).text.contains("        stage: \"sema\","))
     statuses: [String]{"Retired", "Reserved"}
     loop status in statuses {
-        inactive: (render_rows(row.replace(code, "{code}        status: .{status}\n")) ?? panic(err.message)).text
+        inactive: (render_rows(row.replace(code, "{code}        status: .{status},\n")) ?? panic(err.message)).text
         assert(inactive.contains("        stage: \"\","))
-        staged: row.replace(code, "{code}        status: .{status}\n        stage: [.Sema]\n")
+        staged: row.replace(code, "{code}        status: .{status},\n        stage: [.Sema],\n")
         assert(diagnostic_rows_error(staged).contains("a `.{status}` row runs in no stage"))
     }
 }
 
 #Test("an active error row in a classified range states its safety class, and the audit lists it") {
     row: MINIMAL_ROW.replace("E9999", "E0299")
-    code: "        code: \"E0299\"\n"
+    code: "        code: \"E0299\",\n"
     unclassified: diagnostic_rows_error(row)
     assert(unclassified.contains("is an active error row in a classified range"), unclassified)
-    opinion: "{code}        safety_class: .Opinion\n        safety_reason: \"it would run safely\"\n"
+    opinion: "{code}        safety_class: .Opinion,\n        safety_reason: \"it would run safely\",\n"
     assert(diagnostic_rows_error(row.replace(code, opinion)) == "")
-    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Opinion\n")).contains("come together"))
-    assert(diagnostic_rows_error(row.replace(code, "{opinion}        expert_path: \"an `#Unsafe` block\"\n")).contains("only one, states its `expert_path`"))
-    sound: "{code}        safety_class: .Soundness\n        safety_reason: \"a | b\"\n"
+    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Opinion,\n")).contains("come together"))
+    assert(diagnostic_rows_error(row.replace(code, "{opinion}        expert_path: \"an `#Unsafe` block\",\n")).contains("only one, states its `expert_path`"))
+    sound: "{code}        safety_class: .Soundness,\n        safety_reason: \"a | b\",\n"
     assert(diagnostic_rows_error(row.replace(code, sound)).contains("only one, states its `expert_path`"))
-    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Maybe\n        safety_reason: \"x\"\n")).contains("`.Soundness` or `.Opinion`"))
-    assert(diagnostic_rows_error(row.replace(code, "{opinion}        status: .Retired\n")).contains("only an active `.Error` row"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Maybe,\n        safety_reason: \"x\",\n")).contains("`.Soundness` or `.Opinion`"))
+    assert(diagnostic_rows_error(row.replace(code, "{opinion}        status: .Retired,\n")).contains("only an active `.Error` row"))
     sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
-    floor: (render_rows(row.replace(code, "{sound}        expert_path: \"none: nothing reaches it\"\n")) ?? panic(err.message)).facts
+    floor: (render_rows(row.replace(code, "{sound}        expert_path: \"none: nothing reaches it\",\n")) ?? panic(err.message)).facts
     assert(render_audit(floor, sites).contains("| E0299 | BadPath | nothing reaches it |"))
     sites.code_sites["E0299"] = "Compiler/JetSema/b.jet:7"
     audit: render_audit(floor, sites)
@@ -1831,7 +1831,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     }
     assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198 L0530 W0410")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
-    lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\"\n")) ?? panic(err.message)).facts
+    lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\",\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
     assert(render_audit((render_rows(row.replace("E0299", "E9999")) ?? panic(err.message)).facts, sites).contains("hold 1 active error rows with no class yet"))
 }
@@ -1843,7 +1843,7 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 1), [String]{})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 0), [String]{"UNREPORTED_CODES holds 1 codes, more than its ceiling of 0; the list only shrinks"})
     assert_eq(unreported_problems(facts, sites, [String]{"E9999", "E8888"}, 2), [String]{"E8888 is in UNREPORTED_CODES but names no active row; remove it from the list"})
-    retired: (render_rows(MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired\n")) ?? panic(err.message)).facts
+    retired: (render_rows(MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired,\n")) ?? panic(err.message)).facts
     assert_eq(unreported_problems(retired, sites, [String]{}, 0), [String]{})
     sites.code_sites["E9999"] = "Compiler/JetSema/b.jet:7"
     assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{})
@@ -1986,12 +1986,12 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert_eq(baseline_error(MINIMAL_ROW, ""), "")
     rows: render_rows(MINIMAL_ROW) ?? panic("the minimal row did not render: {err.message}")
     assert_eq(render_baseline(rows.facts, "") ?? panic(err.message), "{header}sema 0 1 1\n")
-    uncovered: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        no_fix: None\n")
+    uncovered: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        no_fix: None,\n")
     assert(baseline_error(uncovered, "").contains("up from 0"))
     assert(baseline_error(uncovered, "{header}sema 0 0 1\n") == "")
-    retired: uncovered.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired\n")
+    retired: uncovered.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired,\n")
     assert(baseline_error(retired, "") == "")
-    both: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        structured_fix: .Remove{{text: \"x\"}}\n")
+    both: MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        structured_fix: .Remove{{text: \"x\"}},\n")
     assert(baseline_error(both, "").contains("not both"))
     assert(baseline_error(MINIMAL_ROW, "sema 0 1\n").contains("unparsed line"))
 }

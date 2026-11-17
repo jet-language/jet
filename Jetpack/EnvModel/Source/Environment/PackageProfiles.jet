@@ -11,64 +11,64 @@ ENVMODEL_RESOLVER_BUDGET_NAME: "__jet_resolver_budget__:"
 // separate from `PresetSpec`, which is the environment-shell preset surface
 // and may select host/user variables.
 PackageProfileSpec: struct {
-    name: String{""}
-    extends: [String]{[String]{}}
+    name: String{""},
+    extends: [String]{[String]{}},
     // Canonical package refs as written by the shared package-sugar parser.
-    packages: [String]{[String]{}}
+    packages: [String]{[String]{}},
     // Exact path -> selected provider identity, from the ratified collision
     // map. The provider is checked against realized contenders later.
-    collisions: [String:String]{[String:String]{}}
+    collisions: [String:String]{[String:String]{}},
     // Source modules that contributed this equal declaration.
-    sources: [String]{[String]{}}
+    sources: [String]{[String]{}},
 }
 
 // One package ref after generation composition. `declared_by` keeps source
 // generation identity when equal package facts are de-duplicated.
 PackageProfilePackage: struct {
-    raw: String{""}
-    declared_by: [String]{[String]{}}
+    raw: String{""},
+    declared_by: [String]{[String]{}},
 }
 
 // One resolved generation view. It is still source-backed; generation
 // publication and activation consume this exact object later.
 ResolvedPackageProfile: struct {
-    name: String{""}
-    selected_profiles: [String]{[String]{}}
-    applied: [String]{[String]{}}
-    packages: [PackageProfilePackage]{[PackageProfilePackage]{}}
-    collisions: [String:String]{[String:String]{}}
-    sources: [String]{[String]{}}
+    name: String{""},
+    selected_profiles: [String]{[String]{}},
+    applied: [String]{[String]{}},
+    packages: [PackageProfilePackage]{[PackageProfilePackage]{}},
+    collisions: [String:String]{[String:String]{}},
+    sources: [String]{[String]{}},
 }
 
 // One resolved package fact with both the source spelling and the
 // realization identity that a lock, explain view, or generation writer must
 // preserve.
 PackageProfileFact: struct {
-    raw: String
-    target: String
-    source: String
-    upstream: String?{None}
-    provider: String
-    channel: String?{None}
-    declared_by: [String]{[String]{}}
+    raw: String,
+    target: String,
+    source: String,
+    upstream: String?{None},
+    provider: String,
+    channel: String?{None},
+    declared_by: [String]{[String]{}},
     // The provider identity, selector, typed facts, and native provenance
     // carried with this package. Consumers must not reconstruct it from `raw`
     // after planning.
-    provider_facts: ProviderFacts
+    provider_facts: ProviderFacts,
 }
 
 // The read-only, source-backed generation plan. Realization and activation
 // may consume this plan later; they must not reconstruct package identity
 // from the display string.
 PackageProfilePlan: struct {
-    name: String{""}
-    selected_profiles: [String]{[String]{}}
-    applied: [String]{[String]{}}
-    packages: [PackageProfileFact]{[PackageProfileFact]{}}
-    collisions: [String:String]{[String:String]{}}
-    sources: [String]{[String]{}}
-    fingerprint: String{""}
-    provider_facts: [String:ProviderFacts]{[String:ProviderFacts]{}}
+    name: String{""},
+    selected_profiles: [String]{[String]{}},
+    applied: [String]{[String]{}},
+    packages: [PackageProfileFact]{[PackageProfileFact]{}},
+    collisions: [String:String]{[String:String]{}},
+    sources: [String]{[String]{}},
+    fingerprint: String{""},
+    provider_facts: [String:ProviderFacts]{[String:ProviderFacts]{}},
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
@@ -111,9 +111,9 @@ envmodel_fingerprint_line: fn(key: String, value: String) -> String Never! {
 
 #Error
 PackageProfileError: enum {
-    Missing(String)
-    Cycle([String])
-    Conflict(String)
+    Missing(String),
+    Cycle([String]),
+    Conflict(String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -139,7 +139,7 @@ ENVMODEL_PROFILE_ENTERED: 1
 ENVMODEL_PROFILE_FINISHED: 2
 
 PackageProfileSet: struct {
-    profiles: [String:PackageProfileSpec]{[String:PackageProfileSpec]{}}
+    profiles: [String:PackageProfileSpec]{[String:PackageProfileSpec]{}},
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.

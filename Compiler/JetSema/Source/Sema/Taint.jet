@@ -53,70 +53,70 @@ SEMA_TAINT_ORIGIN_PROCESS: "$origin.process"
 SEMA_TAINT_ORIGIN_FFI: "$origin.ffi"
 
 SemaTaintTagFact: struct {
-    name: String
-    module_identity: ModuleID
-    deny: [String]
-    from: [String]
-    span: Span
-    visibility: Int
+    name: String,
+    module_identity: ModuleID,
+    deny: [String],
+    from: [String],
+    span: Span,
+    visibility: Int,
     // `timing: .Fixed` (core.compiler.lang TagTiming): a value carrying the
     // tag must not steer time or addresses (E0737, E0738, E0739).
-    fixed: Bool{false}
+    fixed: Bool{false},
     // `protects: .Integrity` (TagProtects): the tag guards what may flow in,
     // not where its value may flow.
-    integrity: Bool{false}
+    integrity: Bool{false},
 }
 
 SemaTaintTagList: struct {
-    tags: [String]
+    tags: [String],
 }
 
 SemaTaintCallableFact: struct {
-    module_identity: ModuleID
-    owner: String
-    name: String
-    parameter_tags: [SemaTaintTagList]
-    return_tags: [String]
-    return_type: Type?
-    scrub_tag: String?
-    ffi_origin: Bool
+    module_identity: ModuleID,
+    owner: String,
+    name: String,
+    parameter_tags: [SemaTaintTagList],
+    return_tags: [String],
+    return_type: Type?,
+    scrub_tag: String?,
+    ffi_origin: Bool,
     // The declared effect row (`FS.Read`, `Net`), in written order; an
     // extern function's effect root.
-    effects: [String]
+    effects: [String],
     // Whether it renders an encodable value as output (sema_taint_serializes).
-    serializes: Bool{false}
-    span: Span
+    serializes: Bool{false},
+    span: Span,
 }
 
 SemaTaintFieldFact: struct {
-    module_identity: ModuleID
-    owner_type: String
-    field: String
-    tags: [String]
-    type_name: String?
-    span: Span
+    module_identity: ModuleID,
+    owner_type: String,
+    field: String,
+    tags: [String],
+    type_name: String?,
+    span: Span,
 }
 
 SemaTaintBindingFact: struct {
-    name: String
-    tags: [String]
-    type_name: String?
+    name: String,
+    tags: [String],
+    type_name: String?,
 }
 
 SemaTaintCatalog: struct {
-    tags: [SemaTaintTagFact]
-    callables: [SemaTaintCallableFact]
-    fields: [SemaTaintFieldFact]
+    tags: [SemaTaintTagFact],
+    callables: [SemaTaintCallableFact],
+    fields: [SemaTaintFieldFact],
     // The function paths a tag's `from` may name, gathered only when one
     // names any (sema_taint_collect_known_sources).
-    known_sources: [String]
+    known_sources: [String],
     // Lookups kept beside the rows (SemaTaintIndex): callables by
     // "{owner}|{name}", fields by "{owner}|{field}", and each struct's first
     // field row by the struct's name; its fields follow that row.
-    callable_index: SemaTaintIndex
-    field_index: SemaTaintIndex
-    struct_index: SemaTaintIndex
-    known_source_slots: SemaTaintSlots
+    callable_index: SemaTaintIndex,
+    field_index: SemaTaintIndex,
+    struct_index: SemaTaintIndex,
+    known_source_slots: SemaTaintSlots,
 }
 
 // The first row of each key: `keys` interns the key (an open-addressing
@@ -124,8 +124,8 @@ SemaTaintCatalog: struct {
 // sorted entry list) and `rows[id]` is the row of that id (-1: none yet;
 // id 0, the empty key, starts with none).
 SemaTaintSlots: struct {
-    keys: NameTable
-    rows: [Int]
+    keys: NameTable,
+    rows: [Int],
 }
 
 sema_taint_slots: fn() -> SemaTaintSlots Never! {
@@ -159,12 +159,12 @@ sema_taint_slot: fn(slots: SemaTaintSlots, key: String) -> Int? Never! {
 // `entry_next` links a key's entries in the order their rows arrived, so its
 // first entry holds its first row of any module.
 SemaTaintIndex: struct {
-    names: NameTable
-    heads: [Int]
-    core_rows: [Int]
-    entry_rows: [Int]
-    entry_modules: [U32]
-    entry_next: [Int]
+    names: NameTable,
+    heads: [Int],
+    core_rows: [Int],
+    entry_rows: [Int],
+    entry_modules: [U32],
+    entry_next: [Int],
 }
 
 sema_taint_index: fn() -> SemaTaintIndex Never! {
@@ -227,116 +227,116 @@ sema_taint_index_first: fn(index: SemaTaintIndex, module_identity: ModuleID, key
 }
 
 SemaTaintImportAlias: struct {
-    alias: String
-    module_name: String
+    alias: String,
+    module_name: String,
     // The imported module an alias names ("": a binding's local name).
-    module_identity: ModuleID
+    module_identity: ModuleID,
 }
 
 // A module's imports (sema_taint_collect_imports) and the callables its
 // bare names reach beyond its own functions (sema_taint_callable_scope).
 SemaTaintModuleScope: struct {
-    imports: [SemaTaintImportAlias]
-    callable_scope: SemaTaintSlots
+    imports: [SemaTaintImportAlias],
+    callable_scope: SemaTaintSlots,
 }
 
 SemaTaintSnapshot: struct {
-    bindings: [SemaTaintBindingFact]
+    bindings: [SemaTaintBindingFact],
 }
 
 SemaTaintFlowState: struct {
-    catalog: SemaTaintCatalog
-    module_identity: ModuleID
+    catalog: SemaTaintCatalog,
+    module_identity: ModuleID,
     // The AST tables of the module walked now.
-    tables: ASTTables{ASTTables{}}
-    bindings: [SemaTaintBindingFact]
+    tables: ASTTables{ASTTables{}},
+    bindings: [SemaTaintBindingFact],
     // The scope (SemaTaintModuleScope) of each module the state walked,
     // built on its first walk and read by every later one: its row by module
     // identity, and the row of the module walked now (-1: none yet, whose
     // scope is empty).
-    scopes: [SemaTaintModuleScope]{[SemaTaintModuleScope]{}}
-    scope_rows: [U32:Int]{[U32:Int]{}}
-    scope_at: Int{-1}
-    diagnostics: [Diagnostic]
+    scopes: [SemaTaintModuleScope]{[SemaTaintModuleScope]{}},
+    scope_rows: [U32:Int]{[U32:Int]{}},
+    scope_at: Int{-1},
+    diagnostics: [Diagnostic],
     // The bundle's switch coverage reports so far (sema_taint_coverage_reports).
-    coverage_reports: [Diagnostic]
+    coverage_reports: [Diagnostic],
     // The `timing: .Fixed` tags the module sees by name (sema_taint_fixed_tags).
-    fixed_tags: [String]
+    fixed_tags: [String],
     // In a wrapping or saturating arithmetic mode (a function's marker or a
     // scope), or at the one operator of a `wrapping(...)` or
     // `saturating(...)` call: `+`, `-` and `*` there do not stop (E0739).
-    wrapping: Bool{false}
+    wrapping: Bool{false},
     // The masked branches found so far (sema_taint_mask_branch), and the
     // fixed tags of the masked branch tests enclosing the statement walked
     // now: a value bound or assigned there carries them.
-    masked: [Span]{[Span]{}}
-    under: [String]{[String]{}}
+    masked: [Span]{[Span]{}},
+    under: [String]{[String]{}},
     // The branches with an early return the walk of the current body found
     // (sema_taint_exit_arms), settled at its end (sema_taint_settle_exits):
     // each branch's span, its test's span and its fixed tag.
-    exits: [Span]{[Span]{}}
-    exit_tests: [Span]{[Span]{}}
-    exit_tags: [String]{[String]{}}
+    exits: [Span]{[Span]{}},
+    exit_tests: [Span]{[Span]{}},
+    exit_tags: [String]{[String]{}},
     // How many reports the walk had made when it reached each exit: a
     // refused exit's report goes there, in source order.
-    exit_marks: [Int]{[Int]{}}
+    exit_marks: [Int]{[Int]{}},
     // While the code early returns skip is checked (sema_taint_tail_index):
     // pairs of a counting loop's variable and the list whose length bounds
     // it (`""`: none), and pairs of lists a guard proved as long. tail_any
     // admits every index, for the walk's first look at an exit's arms.
-    tail_any: Bool{false}
-    tail_loops: [String]{[String]{}}
-    tail_same: [String]{[String]{}}
+    tail_any: Bool{false},
+    tail_loops: [String]{[String]{}},
+    tail_same: [String]{[String]{}},
     // The read list parameters of the body being settled: the only lists
     // whose `xs[i]` a tail loop proves in bounds.
-    tail_lists: [String]{[String]{}}
+    tail_lists: [String]{[String]{}},
     // A fixed value a call carries into an untagged parameter
     // (sema_taint_check_crossing) is looked up by the crossed parameter's
     // key ("module|owner|name|index|tag"). `crossings` holds the settled
     // ones: the path on which the callee's body steers on it ("": none),
     // the same whatever walk, program walk order or thread reaches it
     // (sema_taint_crossing_path).
-    crossings: [String:String]{[String:String]{}}
+    crossings: [String:String]{[String:String]{}},
     // The keys walked and not yet settled, in walk order (Tarjan's stack
     // over the crossings): each key's position, the call it names and the
     // lowest position its walk reached again; `cross_walks` holds the
     // positions of the walks in progress, innermost last.
-    cross_positions: [String:Int]{[String:Int]{}}
-    cross_calls: [SemaTaintCrossCall]{[SemaTaintCrossCall]{}}
-    cross_lows: [Int]{[Int]{}}
-    cross_walks: [Int]{[Int]{}}
+    cross_positions: [String:Int]{[String:Int]{}},
+    cross_calls: [SemaTaintCrossCall]{[SemaTaintCrossCall]{}},
+    cross_lows: [Int]{[Int]{}},
+    cross_walks: [Int]{[Int]{}},
     // While a cycle's keys are walked again (sema_taint_cycle_paths): the
     // path each found in an earlier round, "" for one with none yet.
-    cycle_paths: [String:String]{[String:String]{}}
+    cycle_paths: [String:String]{[String:String]{}},
     // Under a crossing walk (sema_taint_crossing_walk): its E0737, E0738
     // and E0739 findings, in walk order and raw, in place of reports; only
     // the walk's path reads them.
-    walking: Bool{false}
-    findings: [SemaTaintFinding]{[SemaTaintFinding]{}}
+    walking: Bool{false},
+    findings: [SemaTaintFinding]{[SemaTaintFinding]{}},
     // The crossing walk's first crossing finding: its index in `findings`
     // (-1: none yet) and its path, which a caller's path continues.
-    cross_at: Int{-1}
-    cross_path: String{""}
+    cross_at: Int{-1},
+    cross_path: String{""},
 }
 
 // The call a crossing key names (SemaTaintFlowState.cross_calls): its
 // callee is the first body of that name sema_taint_body_of finds, as every
 // crossing of a call finds it.
 SemaTaintCrossCall: struct {
-    module_identity: ModuleID
-    owner: String
-    name: String
-    index: Int
-    tag_value: String
+    module_identity: ModuleID,
+    owner: String,
+    name: String,
+    index: Int,
+    tag_value: String,
 }
 
 // A crossing walk's E0737, E0738 or E0739 finding, its prose as raised
 // (sema_taint_finding_what reads it as the report would print it).
 SemaTaintFinding: struct {
-    code: String
-    what: String
-    why: String
-    fix: String
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
 }
 
 // The E0307 reports of `diagnostics`: all that settles switch coverage for
@@ -3365,9 +3365,9 @@ sema_taint_join_reports: fn(reports: &[Diagnostic], existing_diagnostics: [Diagn
 // which nothing after the failure projection rewrites, so the finalization
 // builds it beside its other read-only checks (sema_finalize_side_checks).
 SemaTaintPrepared: struct {
-    catalog: SemaTaintCatalog
-    reports: [Diagnostic]
-    weights: [Int]
+    catalog: SemaTaintCatalog,
+    reports: [Diagnostic],
+    weights: [Int],
 }
 
 sema_taint_prepared_empty: fn() -> SemaTaintPrepared Never! {
@@ -3394,10 +3394,10 @@ sema_taint_prepare: fn(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
 // One walked module's reports, masked branches and fixed tags
 // (sema_finalize_walk_all).
 SemaTaintWalked: struct {
-    module_index: Int
-    found: [Diagnostic]
-    masked: [Span]
-    fixed_tags: [String]
+    module_index: Int,
+    found: [Diagnostic],
+    masked: [Span],
+    fixed_tags: [String],
 }
 
 sema_taint_has_diagnostic: fn(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {

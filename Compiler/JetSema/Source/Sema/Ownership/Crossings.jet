@@ -21,33 +21,33 @@ use jet_foundation.[
 ]
 
 SemaSendCrossing: enum {
-    TaskCapture
-    TaskResult
-    ChannelSend
-    ParallelWorker
-    HTTPHandler
-    Kernel
-    InterruptCallback
-    SharedStorage
-    FrozenSnapshot
+    TaskCapture,
+    TaskResult,
+    ChannelSend,
+    ParallelWorker,
+    HTTPHandler,
+    Kernel,
+    InterruptCallback,
+    SharedStorage,
+    FrozenSnapshot,
 }
 
 SemaSendProblemKind: enum {
-    ClosureNeedsTake
-    ClosureCaptures
-    CallableValue
-    TraitValue(name: String)
-    ThreadConfined(name: String)
-    LocalReactive(name: String)
-    ViewBorrow
-    SharedMutation
-    UnknownType(name: String)
+    ClosureNeedsTake,
+    ClosureCaptures,
+    CallableValue,
+    TraitValue(name: String),
+    ThreadConfined(name: String),
+    LocalReactive(name: String),
+    ViewBorrow,
+    SharedMutation,
+    UnknownType(name: String),
 }
 
 SemaSendabilityProblem: struct {
-    root: String?
-    path: [String]
-    kind: SemaSendProblemKind
+    root: String?,
+    path: [String],
+    kind: SemaSendProblemKind,
 }
 
 sema_ownership_crossing_new_problem: fn(kind: SemaSendProblemKind) -> SemaSendabilityProblem Never! {
@@ -71,24 +71,24 @@ sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSe
 // query (#3661); a walk that re-entered every path took minutes on the
 // compiler's own parser.
 SemaCrossingWalk: struct {
-    active: [String]
-    finished: NameTable
+    active: [String],
+    finished: NameTable,
     // The walk keys of `active`, in step. A nominal met while active under
     // another instantiation is assumed sendable unwalked; `widened` records
     // that the walk did so, and its finished set then serves no other query.
-    active_keys: [String]{[String]{}}
-    widened: Bool{false}
+    active_keys: [String]{[String]{}},
+    widened: Bool{false},
     // The checked function's own type parameters the walk reached: what
     // crosses there is decided by each call's type argument
     // (Ownership/GenericCrossings.jet).
-    generic: [SemaCrossingGenericReach]{[SemaCrossingGenericReach]{}}
+    generic: [SemaCrossingGenericReach]{[SemaCrossingGenericReach]{}},
 }
 
 // A type parameter a crossing reaches, and whether it is the crossing value's
 // whole type (not a field, element, or payload of it).
 SemaCrossingGenericReach: struct {
-    param: String
-    whole: Bool
+    param: String,
+    whole: Bool,
 }
 
 sema_ownership_crossing_walk_key: fn(identity: String, type_args: [Type]) -> String Never! {
@@ -432,8 +432,8 @@ sema_ownership_crossing_problem: fn(ty: Type, crossing: SemaSendCrossing, closur
 // that are sendable there under the body's environment and type parameters,
 // so the body's later walks at that crossing start from them.
 SemaCrossingBodyWalk: struct {
-    crossing: SemaSendCrossing
-    walk: SemaCrossingWalk
+    crossing: SemaSendCrossing,
+    walk: SemaCrossingWalk,
 }
 
 // sema_ownership_crossing_problem for a type argument of a call in the body

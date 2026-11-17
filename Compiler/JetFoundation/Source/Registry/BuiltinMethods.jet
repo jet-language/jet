@@ -10,18 +10,18 @@
 // `Self` is the (untagged) receiver type and `T` is the `Atomic<T>` scalar.
 
 BuiltinMethodReceiver: enum {
-    String
-    Bytes
-    Scalar
-    Float
-    Integer
-    ExactInt
-    FixedInt
-    Ordering
-    Range
-    Atomic
-    AtomicAdd
-    AtomicInt
+    String,
+    Bytes,
+    Scalar,
+    Float,
+    Integer,
+    ExactInt,
+    FixedInt,
+    Ordering,
+    Range,
+    Atomic,
+    AtomicAdd,
+    AtomicInt,
 }
 
 // Int, Float, Bool, Char, the fixed widths, F32 and inline ranges.
@@ -34,20 +34,20 @@ BuiltinMethodReceiver: enum {
 // scalar and `AtomicInt` an exact Int.
 
 BuiltinMethodLowering: enum {
-    Builtin(operation: TBuiltinOp)
-    StringSlice
-    StringRangeSlice
-    StringSplitOnce
-    StringCutLast
-    IntToRadix
-    Show
-    Predicate
-    BitCount
-    Arithmetic(operation: TBinaryOp)
-    Euclidean(remainder: Bool)
-    Overflow(prefix: String, operation: String)
-    Atomic
-    CoreSource(owner: String, member: String)
+    Builtin(operation: TBuiltinOp),
+    StringSlice,
+    StringRangeSlice,
+    StringSplitOnce,
+    StringCutLast,
+    IntToRadix,
+    Show,
+    Predicate,
+    BitCount,
+    Arithmetic(operation: TBinaryOp),
+    Euclidean(remainder: Bool),
+    Overflow(prefix: String, operation: String),
+    Atomic,
+    CoreSource(owner: String, member: String),
 }
 
 // `s.slice(a, b)`: TBuiltinOp.Slice carrying the receiver line.
@@ -66,13 +66,13 @@ BuiltinMethodLowering: enum {
 // spelling.
 
 BuiltinMethodRow: struct {
-    receiver: BuiltinMethodReceiver
-    name: String
-    parameters: [Type]
-    result: Type
+    receiver: BuiltinMethodReceiver,
+    name: String,
+    parameters: [Type],
+    result: Type,
     // Write rows mutate the receiver in place and record `Mem`.
-    access: AccessConvention
-    lowering: BuiltinMethodLowering
+    access: AccessConvention,
+    lowering: BuiltinMethodLowering,
 }
 
 // Rows are literal struct data so the table lands without a compile-time

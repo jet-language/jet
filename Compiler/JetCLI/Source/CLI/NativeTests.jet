@@ -14,34 +14,34 @@ use {
 // change of the process's environment or working directory, which every test
 // beside it in the batch would read, so it runs alone in its own process.
 JetNativeTestCase: struct {
-    id: U64
-    key: String
-    name: String
-    expected_failure: Bool
-    faults: [String]{[]}
-    isolated: Bool{false}
+    id: U64,
+    key: String,
+    name: String,
+    expected_failure: Bool,
+    faults: [String]{[]},
+    isolated: Bool{false},
 }
 
 JetNativeTestRecord: struct {
-    function: U64
-    wire: String
+    function: U64,
+    wire: String,
 }
 
 JetNativeTestCursor: struct {
-    bytes: [U8]
-    at: Int
+    bytes: [U8],
+    at: Int,
 }
 
 JetNativeTestChild: struct {
-    test: JetNativeTestCase
-    child: ProcessChild
-    path: String
+    test: JetNativeTestCase,
+    child: ProcessChild,
+    path: String,
 }
 
 JetNativeTestRun: struct {
-    receipt: ProcessReceipt
-    output: String
-    errors: String
+    receipt: ProcessReceipt,
+    output: String,
+    errors: String,
 }
 
 // One checked `#Pre`/`#Post` clause outcome a child observed: `held` or
@@ -53,21 +53,21 @@ JetNativeTestRun: struct {
 // the final failure before that test's record: the one a contract stop of
 // that test is. A failure no test record follows has no test.
 JetNativeTestContract: struct {
-    held: Bool
-    site: String
-    test_id: U64?
-    test: String
-    last: Bool
+    held: Bool,
+    site: String,
+    test_id: U64?,
+    test: String,
+    last: Bool,
 }
 
 // The outcome wires of one run (the selected tests' in their order, then any
 // unrun output check's), the children's raw streams, not yet reported, and
 // the contract outcomes every child observed, each once.
 JetNativeTestOutcomes: struct {
-    wires: [String]
-    outputs: [String]
-    errors: [String]
-    contracts: [JetNativeTestContract]
+    wires: [String],
+    outputs: [String],
+    errors: [String],
+    contracts: [JetNativeTestContract],
 }
 
 // One outcome wire's fields: `flags` as the runtime sets them (ok=1,
@@ -75,19 +75,19 @@ JetNativeTestOutcomes: struct {
 // uncaught runtime stop, not a failed assertion); `property` a property
 // test's run (the header's fifth field), None for any other test.
 JetNativeTestWire: struct {
-    flags: Int
-    name: String
-    stdout: String
-    stderr: String
-    property: JetNativeTestProperty?{None}
+    flags: Int,
+    name: String,
+    stdout: String,
+    stderr: String,
+    property: JetNativeTestProperty?{None},
 }
 
 // A property test's run: the generated cases that ran, the cases its `#Pre`
 // rejected (which didn't run), and its seed.
 JetNativeTestProperty: struct {
-    cases: Int
-    rejected: Int
-    seed: Int
+    cases: Int,
+    rejected: Int,
+    seed: Int,
 }
 
 jet_native_test_line: fn(cursor: &JetNativeTestCursor) -> String? Never! {
@@ -214,9 +214,9 @@ jet_native_test_shuffle_next: fn(state: &U64) -> U64 Never! {
 
 // The order the run sorts selected tests by: module, then source offset.
 JetNativeTestRow: struct {
-    test: JetNativeTestCase
-    module_name: String
-    start: Int
+    test: JetNativeTestCase,
+    module_name: String,
+    start: Int,
 }
 
 // The Core functions that change the process's own environment or working
@@ -338,8 +338,8 @@ jet_native_test_failure: fn(test: JetNativeTestCase, receipt: ProcessReceipt) ->
 // operating system's reason: the host's trouble (a full runtime directory is
 // ENOSPC), never a compiler bug, so `jet test` reports it as E2105.
 JetNativeTestRecordsFault: struct {
-    path: String
-    cause: String
+    path: String,
+    cause: String,
 }
 
 jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contracts: &[JetNativeTestContract], fault: &JetNativeTestRecordsFault?) -> [JetNativeTestRecord] Err! {

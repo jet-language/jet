@@ -179,14 +179,14 @@ LOADER_EXECUTOR: [Int]{
 // A mapped image. [low, high) holds its segments; `file` maps the whole ELF
 // file read-only. `failure` is "" for a loaded image, else why it isn't.
 X64LoadedImage: struct {
-    low: Int
-    high: Int
-    entry: Int
-    phdr: Int
-    phnum: Int
-    file: Int
-    file_size: Int
-    failure: String
+    low: Int,
+    high: Int,
+    entry: Int,
+    phdr: Int,
+    phnum: Int,
+    file: Int,
+    file_size: Int,
+    failure: String,
 }
 
 // What the program starts with besides its image: argv (argv[0] included),
@@ -200,32 +200,32 @@ X64LoadedImage: struct {
 // `read_scope`: when not empty, the only files and directories the program
 // may read (x64_confine_reads).
 X64Launch: struct {
-    argv: [String]
-    env: [String]?
-    executable: String
-    name: String
-    relaunch: [String]
-    parent_death: Bool
-    read_scope: [String]
+    argv: [String],
+    env: [String]?,
+    executable: String,
+    name: String,
+    relaunch: [String],
+    parent_death: Bool,
+    read_scope: [String],
 }
 
 // A process started from an image: its pid, else why it didn't start.
 X64Spawned: struct {
-    pid: Int
-    failure: String
+    pid: Int,
+    failure: String,
 }
 
 // The plan the executor runs (see LOADER_EXECUTOR): `plan` is the record
 // block, `executor` the code page, `data` a page of constants the records
 // point at, `stack_low`/`stack_size` the new main stack.
 LoaderPlan: struct {
-    plan: Int
-    plan_size: Int
-    executor: Int
-    data: Int
-    stack_low: Int
-    stack_size: Int
-    failure: String
+    plan: Int,
+    plan_size: Int,
+    executor: Int,
+    data: Int,
+    stack_low: Int,
+    stack_size: Int,
+    failure: String,
 }
 
 loader_u16: fn(bytes: [U8], at: Int) -> Int Never! { Int{bytes[at]} | Int{bytes[at + 1]} << 8 }
@@ -313,11 +313,11 @@ loader_pread: fn(fd: Int, address: Int, count: Int, offset: Int) -> String {
 // One PT_LOAD: `file_size` bytes at file `offset` go to `vaddr`, zeros up
 // to `memory_size`; `flags` is p_flags (4 read, 2 write, 1 execute).
 X64Segment: struct {
-    vaddr: Int
-    file_size: Int
-    memory_size: Int
-    flags: Int
-    offset: Int
+    vaddr: Int,
+    file_size: Int,
+    memory_size: Int,
+    flags: Int,
+    offset: Int,
 }
 
 // The load plan of an executable: its PT_LOADs (ascending, page-disjoint,
@@ -325,13 +325,13 @@ X64Segment: struct {
 // point and the program headers' address and count. `failure` is "" for a
 // valid image, else why it isn't one.
 X64Segments: struct {
-    segments: [X64Segment]
-    low: Int
-    high: Int
-    entry: Int
-    phdr: Int
-    phnum: Int
-    failure: String
+    segments: [X64Segment],
+    low: Int,
+    high: Int,
+    entry: Int,
+    phdr: Int,
+    phnum: Int,
+    failure: String,
 }
 
 loader_segments_failed: fn(failure: String) -> X64Segments Never! {
@@ -686,12 +686,12 @@ loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: In
 // (Image/MemoryLink.jet) nor the mapping reads (gap 0 when the image was
 // read whole).
 X64ImageFile: struct {
-    bytes: [U8]
-    at: Int
-    stamp: [Int]
-    gap_at: Int
-    gap: Int
-    failure: String
+    bytes: [U8],
+    at: Int,
+    stamp: [Int],
+    gap_at: Int,
+    gap: Int,
+    failure: String,
 }
 
 // Read the runtime image file `path`: its first page, and its bytes from
@@ -731,9 +731,9 @@ x64_image_file_read: fn(path: String) -> X64ImageFile {
 // the one descriptor the process holds of the file (x64_self_read). None
 // when it has no such part, can't be read or changed meanwhile.
 X64ImagePart: struct {
-    at: Int
-    size: Int
-    stamp: [Int]
+    at: Int,
+    size: Int,
+    stamp: [Int],
 }
 
 x64_image_part_file: fn(name: String) -> X64ImagePart? {
@@ -770,8 +770,8 @@ X64_SELF_EXECUTABLE: "/proc/self/exe"
 // The process's descriptor of X64_SELF_EXECUTABLE: unopened, then the
 // descriptor or -errno from its one open.
 LoaderSelf: struct {
-    opened: Bool
-    fd: Int
+    opened: Bool,
+    fd: Int,
 }
 
 LOADER_SELF: Shared{LoaderSelf{opened: false, fd: -1}}
@@ -929,9 +929,9 @@ x64_executable_image_head: fn(exe: &X64Executable, image: [U8]) Never! {
 
 // A cursor over a kept form's bytes; `failed` once a read ran past the end.
 LoaderKeptReader: struct {
-    bytes: [U8]
-    at: Int
-    failed: Bool
+    bytes: [U8],
+    at: Int,
+    failed: Bool,
 }
 
 loader_kept_next: fn(reader: &LoaderKeptReader) -> Int Never! {
@@ -1142,8 +1142,8 @@ loader_put_bytes: fn(at: Int, bytes: [U8]) -> Int {
 // An environment block: its NUL-terminated strings, in order, and where
 // each non-empty one starts (loader_environ_starts).
 LoaderEnviron: struct {
-    block: [U8]
-    starts: [Int]
+    block: [U8],
+    starts: [Int],
 }
 
 // The environment block `env` gives the program (X64Launch.env): given
@@ -1814,12 +1814,12 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
 // array at `envp`, and the strings they point at, `path`'s among them, at
 // its end. `failure` says why there is none.
 LoaderExecBlock: struct {
-    block: Int
-    size: Int
-    path: Int
-    argv: Int
-    envp: Int
-    failure: String
+    block: Int,
+    size: Int,
+    path: Int,
+    argv: Int,
+    envp: Int,
+    failure: String,
 }
 
 // The execve arguments of the image file `path` run with `argv` (argv[0]
@@ -1962,11 +1962,11 @@ LOADER_ESRCH: 3
 // the channel to it (-1 before they exist); `failure` says why the program
 // didn't start. x64_trace_close ends them all.
 X64Trace: struct {
-    pid: Int
-    scratch: Int
-    failure: String
-    helper: Int{-1}
-    channel: Int{-1}
+    pid: Int,
+    scratch: Int,
+    failure: String,
+    helper: Int{-1},
+    channel: Int{-1},
 }
 
 // Start the image file at `path` with `argv` (argv[0] included) and this
@@ -2146,8 +2146,8 @@ x64_trace_wait: fn(trace: X64Trace) -> Int {
 // How x64_trace_resume lets a stopped program go on: running, or for one
 // instruction.
 X64TraceResume: enum {
-    Run
-    Step
+    Run,
+    Step,
 }
 
 // Let the stopped program go on as `how` says, delivering `signal` (0:

@@ -50,17 +50,17 @@ TOPBIT: 9223372036854775808
 // struct WhereScan: an iteration over the terms whereScanInit matches.
 // coll_name None is C's NULL zCollName; aiCur and aiColumn have 11 slots.
 WhereScan: struct {
-    orig_wc: Int
-    wc: Int
-    coll_name: [U8]?
-    idx_expr: Int
-    k: Int
-    op_mask: Int
-    idxaff: Int
-    i_equiv: Int
-    n_equiv: Int
-    ai_cur: [Int]
-    ai_column: [Int]
+    orig_wc: Int,
+    wc: Int,
+    coll_name: [U8]?,
+    idx_expr: Int,
+    k: Int,
+    op_mask: Int,
+    idxaff: Int,
+    i_equiv: Int,
+    n_equiv: Int,
+    ai_cur: [Int],
+    ai_column: [Int],
 }
 
 scan_new: fn() -> WhereScan Never! {
@@ -70,13 +70,13 @@ scan_new: fn() -> WhereScan Never! {
 // struct WhereLoopBuilder: new is pNew, a loop of WhereInfo.loops; or_set
 // is *pOrSet while has_or_set.
 WhereLoopBuilder: struct {
-    wc: Int
-    new: Int
-    has_or_set: Bool
-    or_set: we.WhereOrSet
-    bld_flags1: Int
-    bld_flags2: Int
-    i_plan_limit: Int
+    wc: Int,
+    new: Int,
+    has_or_set: Bool,
+    or_set: we.WhereOrSet,
+    bld_flags1: Int,
+    bld_flags2: Int,
+    i_plan_limit: Int,
 }
 
 // The name of collating sequence `c`, BINARY (db->pDfltColl) for none.
@@ -1384,12 +1384,12 @@ where_usable_partial_index: fn(p: &cg.Parse, a: &ast.AST, wi: we.WhereInfo, i_ta
 // whereIsCoveringIndexWalkCallback over struct CoveringIndexCheck: cols
 // and col_exprs are the index's aiColumn and aColExpr (-1 for a column).
 CoveringIndexWalker: struct {
-    cur: Int
-    cols: [Int]
-    col_exprs: [Int]
-    has_expr: Bool
-    b_expr: Bool
-    b_unidx: Bool
+    cur: Int,
+    cols: [Int],
+    col_exprs: [Int],
+    has_expr: Bool,
+    b_expr: Bool,
+    b_unidx: Bool,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {
@@ -2386,7 +2386,7 @@ short_cut: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, b: &WhereLoopBuilder
 
 // exprNodeIsDeterministic, with sqlite3SelectWalkFail for subqueries.
 DeterministicWalker: struct {
-    code: Int
+    code: Int,
 
     impl SQLWalker {
         walk_expr_cb: fn(&self, a: &ast.AST, e: Int) -> Int Never! {

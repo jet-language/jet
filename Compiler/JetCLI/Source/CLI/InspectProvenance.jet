@@ -26,66 +26,66 @@ JET_CLI_LOCK_UNPORTED_SECTIONS: [String]{"[[workspace_member]]", "[[browser]]", 
 
 // The facts of one `LockedPackage` the provenance report reads.
 JetCLILockPackage: struct {
-    name: String
-    version: String
-    root: Bool
+    name: String,
+    version: String,
+    root: Bool,
     // The `source-hash` of a registry, CRAN, or LuaRocks source.
-    source_hash: String?
-    content_hash: String?
+    source_hash: String?,
+    content_hash: String?,
     // `locked.tree-hash`, when the record has a `locked` table.
-    tree_hash: String?
+    tree_hash: String?,
     // The realized-output envelope's `provenance`, when any envelope key was
     // written.
-    envelope_provenance: String?
-    effects: [String]
-    effect_grants: [String]
-    required_effects: [String]
-    granted_effects: [String]
-    denied_effects: [String]
-    effect_authority: String?
-    transparency: String?
-    publisher: String?
-    build: String?
+    envelope_provenance: String?,
+    effects: [String],
+    effect_grants: [String],
+    required_effects: [String],
+    granted_effects: [String],
+    denied_effects: [String],
+    effect_authority: String?,
+    transparency: String?,
+    publisher: String?,
+    build: String?,
 }
 
 // One `[[package]]` record while its lines are read.
 JetCLILockPartial: struct {
-    name: String?
-    version: String?
-    source_raw: String?
-    locked_raw: String?
-    content_hash: String?
-    envelope: Bool
-    envelope_provenance: String
-    effects: [String]
-    effect_grants: [String]
-    required_effects: [String]
-    granted_effects: [String]
-    denied_effects: [String]
-    effect_authority: String?
-    transparency: String?
-    publisher: String?
-    build: String?
+    name: String?,
+    version: String?,
+    source_raw: String?,
+    locked_raw: String?,
+    content_hash: String?,
+    envelope: Bool,
+    envelope_provenance: String,
+    effects: [String],
+    effect_grants: [String],
+    required_effects: [String],
+    granted_effects: [String],
+    denied_effects: [String],
+    effect_authority: String?,
+    transparency: String?,
+    publisher: String?,
+    build: String?,
 }
 
 JetCLILockLoad: enum {
-    Loaded(packages: [JetCLILockPackage])
-    Missing
-    Unported(shape: String)
+    Loaded(packages: [JetCLILockPackage]),
+    Missing,
+    Unported(shape: String),
 }
 
 // No lock, an unreadable one, or one `parse` rejects.
 
 JetCLILockStep: enum {
-    Ok
-    Missing
-    Unported(shape: String)
+    Ok,
+    Missing,
+    Unported(shape: String),
 }
 
 JetCLILockSource: enum {
-    Parsed(root: Bool, source_hash: String?)
-    Missing
-    Unported(shape: String)
+    Parsed(root: Bool, source_hash: String?),
+    Missing,
+    Unported(shape: String),
 }
 
 jet_cli_lock_partial: fn() -> JetCLILockPartial Never! {
@@ -455,21 +455,21 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
 }
 
 JetCLIProvenanceField: struct {
-    value: String
-    status: String
+    value: String,
+    status: String,
 }
 
 JetCLIProvenanceReport: struct {
-    name: String
-    version: String
-    integrity: JetCLIProvenanceField
-    transparency: JetCLIProvenanceField
-    publisher: JetCLIProvenanceField
-    build: JetCLIProvenanceField
-    required_effects: [String]
-    granted_effects: [String]
-    denied_effects: [String]
-    authority: String
+    name: String,
+    version: String,
+    integrity: JetCLIProvenanceField,
+    transparency: JetCLIProvenanceField,
+    publisher: JetCLIProvenanceField,
+    build: JetCLIProvenanceField,
+    required_effects: [String],
+    granted_effects: [String],
+    denied_effects: [String],
+    authority: String,
 }
 
 jet_cli_provenance_present: fn(value: String?) -> String? Never! {

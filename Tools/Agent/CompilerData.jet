@@ -33,14 +33,14 @@ COMPILER_DATA_HEADER: "# The compiler-data ledger (Tools/Agent/CompilerData.jet)
 
 #Error
 CompilerDataError: struct {
-    message: String
+    message: String,
 }
 
 // One file's counts.
 CompilerDataCounts: struct {
-    text_keys: Int
-    shared: Int
-    payload_enums: Int
+    text_keys: Int,
+    shared: Int,
+    payload_enums: Int,
 }
 
 compiler_data_occurrences: fn(text: String, needle: String) -> Int {
@@ -61,9 +61,9 @@ COMPILER_DATA_END: 0
 // One token: its kind and its bytes `start..<end`. Strings, character
 // literals and comments are OTHER, so their braces never count.
 CompilerDataToken: struct {
-    kind: Int
-    start: Int
-    end: Int
+    kind: Int,
+    start: Int,
+    end: Int,
 }
 
 compiler_data_at: fn(bytes: [U8], index: Int) -> Int {
@@ -429,8 +429,8 @@ compiler_data_compare_one: fn(path: String, what: String, found: Int, row: Int, 
 }
 
 CompilerDataDiff: struct {
-    rises: [String]
-    drops: [String]
+    rises: [String],
+    drops: [String],
 }
 
 compiler_data_diff: fn(found: [String:CompilerDataCounts], ledger: String) -> CompilerDataDiff {
@@ -515,7 +515,7 @@ run: fn() {
 }
 
 #Test("the census counts text-keyed lookups, Shared cells and payload enums") {
-    text: "A: struct {{\n    by_name: [String:Int]\n    rows: NameRows\n    seen: Set<String>\n    cell: Shared<X>\n}}\nKind: enum {{\n    Plain\n    // Boxed(note)\n}}\nNode<T>: enum {{\n    Leaf\n    Pair(left: T, right: T)\n}}\nm: module {{\n    Inner: enum {{\n        Boxed(x: Int)\n    }}\n}}\npriv Hidden: enum {{\n    Boxed(x: Int)\n}}\nNOTE: \"Fake: enum {{ Boxed(x: Int) }}\"\n"
+    text: "A: struct {{\n    by_name: [String:Int],\n    rows: NameRows,\n    seen: Set<String>,\n    cell: Shared<X>,\n}}\nKind: enum {{\n    Plain,\n    // Boxed(note)\n}}\nNode<T>: enum {{\n    Leaf,\n    Pair(left: T, right: T),\n}}\nm: module {{\n    Inner: enum {{\n        Boxed(x: Int),\n    }}\n}}\npriv Hidden: enum {{\n    Boxed(x: Int),\n}}\nNOTE: \"Fake: enum {{ Boxed(x: Int) }}\"\n"
     counts: compiler_data_counts(text)
     assert_eq(counts.text_keys, 3)
     assert_eq(counts.shared, 1)
@@ -525,16 +525,16 @@ run: fn() {
 // An enum counts the same however it is laid out.
 #Test("the payload enum census reads the same enum in any layout") {
     layouts: [String]{
-        "Wire: enum {{\n    Plain\n    Boxed(x: Int)\n    Other\n}}\n",
-        "Wire: enum {{ Plain Boxed(x: Int) Other }}\n",
+        "Wire: enum {{\n    Plain,\n    Boxed(x: Int),\n    Other,\n}}\n",
+        "Wire: enum {{ Plain, Boxed(x: Int), Other }}\n",
         "Wire: enum {{\n    Plain Boxed(x: Int) Other\n\n    show: fn(self) -> String {{ \"}}\" }}\n}}\n",
-        " Wire: enum {{\n        Plain\n        #Rename(\"b\") Boxed(x: Int)\n}}\n",
+        " Wire: enum {{\n        Plain,\n        #Rename(\"b\") Boxed(x: Int),\n}}\n",
         "#[Codable]\nWire: enum {{\n    Plain,\n    Boxed(\n        x: Int,\n    ),\n}}\n",
     }
     loop source in layouts -> assert_eq(compiler_data_payload_enums(source), 1)
     plain: [String]{
-        "Wire: enum {{ Plain Other }}\n",
-        "Wire: enum {{\n    Plain\n\n    make: fn(x: Int) -> Wire {{ Wire.Plain }}\n}}\n",
+        "Wire: enum {{ Plain, Other }}\n",
+        "Wire: enum {{\n    Plain,\n\n    make: fn(x: Int) -> Wire {{ Wire.Plain }}\n}}\n",
         "Wire: enum {{\n    Plain\n    impl Show {{\n        Boxed(x: Int)\n    }}\n}}\n",
     }
     loop source in plain -> assert_eq(compiler_data_payload_enums(source), 0)

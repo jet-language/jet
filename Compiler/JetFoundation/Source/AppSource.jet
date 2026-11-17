@@ -3,16 +3,16 @@ use unicode: core.text
 // Retained authority snapshot for convention-routing discovery. The host
 // supplies the complete immediate listing; an empty list is a real empty dir.
 AppAuthorizedDirectoryEntry: struct {
-    name: String
-    path: String
-    is_directory: Bool
+    name: String,
+    path: String,
+    is_directory: Bool,
     // Rust `_` opt-out applies only to a Unicode basename, never lossy text.
-    name_is_unicode: Bool
+    name_is_unicode: Bool,
 }
 
 AppAuthorizedDirectory: struct {
-    path: String
-    entries: [AppAuthorizedDirectoryEntry]
+    path: String,
+    entries: [AppAuthorizedDirectoryEntry],
 }
 
 // One `.routes(from:)` root a module names. The driver resolves `root`
@@ -20,16 +20,16 @@ AppAuthorizedDirectory: struct {
 // false when the snapshot holds no such directory, and `files` lists every
 // `.jet` file below it, sorted, relative to the root.
 AppRouteRoot: struct {
-    root: String
-    found: Bool
-    files: [AppRouteFile]
+    root: String,
+    found: Bool,
+    files: [AppRouteFile],
 }
 
 // One convention file: its root-relative path, and whether it parses to a
 // top-level `page: fn`.
 AppRouteFile: struct {
-    path: String
-    has_page: Bool
+    path: String,
+    has_page: Bool,
 }
 
 // The address of a convention page file at `relative` (relative to its
@@ -39,8 +39,8 @@ AppRouteFile: struct {
 // captures one address part as `:name`, the snake_case word key.
 // `bad_part` names a bracket part that is not one whole `[name]`.
 AppRouteAddress: struct {
-    path: String
-    bad_part: String?
+    path: String,
+    bad_part: String?,
 }
 
 app_route_file_address: fn(relative: String) -> AppRouteAddress {

@@ -3,8 +3,8 @@
 // `read_into` appends to the caller's buffer in place, and a generic struct
 // holds its source as a field.
 Chunks: struct {
-    data: [U8]
-    at: Int
+    data: [U8],
+    at: Int,
 
     impl Reader {
         read_bytes: fn(&self, limit: Int) -> [U8] IOError! {
@@ -26,8 +26,8 @@ Chunks: struct {
 }
 
 Sink: struct {
-    bytes: [U8]
-    flushes: Int
+    bytes: [U8],
+    flushes: Int,
 
     impl Writer {
         write_bytes: fn(&self, bytes: [U8]) IOError! {
@@ -62,8 +62,8 @@ pipe: fn<R: Reader, W: Writer>(source: &R, sink: &W) -> Int IOError! {
 
 // A pull stream over any source: its buffer refills in place.
 Pull: struct<R: Reader> {
-    input: R
-    buffer: [U8]
+    input: R,
+    buffer: [U8],
 
     fill: fn(&self) -> Int IOError! {
         self.buffer.clear()

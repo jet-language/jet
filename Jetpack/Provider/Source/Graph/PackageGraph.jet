@@ -5,9 +5,9 @@
 // edges a caller-owned surface already selected.
 
 PackageNode: struct {
-    name: String
-    direct_deps: [String]
-    transitive_deps: [String]
+    name: String,
+    direct_deps: [String],
+    transitive_deps: [String],
 
     new: fn(name: String) -> PackageNode Never! {
         PackageNode{name: name, direct_deps: [String]{}, transitive_deps: [String]{}}
@@ -27,42 +27,42 @@ PackageNode: struct {
 }
 
 CatalogEntry: struct {
-    logical_name: String
-    provider_ref: String
-    version_rule: String
-    allowed_packages: [String]
-    owner_workspace: String
-    rationale: String
+    logical_name: String,
+    provider_ref: String,
+    version_rule: String,
+    allowed_packages: [String],
+    owner_workspace: String,
+    rationale: String,
 }
 
 VisibleEdgeKind: enum {
-    DirectDep
-    Catalog
+    DirectDep,
+    Catalog,
 }
 
 VisibleEdge: struct {
-    owner_package: String
-    dependency: String
-    provider_ref: String
-    kind: VisibleEdgeKind
-    rationale: String
+    owner_package: String,
+    dependency: String,
+    provider_ref: String,
+    kind: VisibleEdgeKind,
+    rationale: String,
 }
 
 // How a package can make a hidden dependency visible.
 MissingDependencyFix: enum {
-    DirectAddPath(dep: String, path: String)
-    DirectAddGit(dep: String, url: String, tag_name: String)
-    CatalogData(logical_name: String, packages: [String])
-    DisambiguateMember(candidates: [String])
+    DirectAddPath(dep: String, path: String),
+    DirectAddGit(dep: String, url: String, tag_name: String),
+    CatalogData(logical_name: String, packages: [String]),
+    DisambiguateMember(candidates: [String]),
 }
 
 // A dependency a package asked for but cannot see.
 #Error
 MissingDependency: struct {
-    owner_package: String
-    requested: String
-    reason: String
-    fix: MissingDependencyFix
+    owner_package: String,
+    requested: String,
+    reason: String,
+    fix: MissingDependencyFix,
 
     // The fix as one teaching sentence.
     fix_text: fn(self) -> String Never! {
@@ -76,9 +76,9 @@ MissingDependency: struct {
 }
 
 PackageGraph: struct {
-    priv packages: [String:PackageNode]
-    priv catalogs: [CatalogEntry]
-    priv workspace_members: [String:[String]]
+    priv packages: [String:PackageNode],
+    priv catalogs: [CatalogEntry],
+    priv workspace_members: [String:[String]],
 
     new: fn() -> PackageGraph Never! {
         PackageGraph{packages: [String:PackageNode]{}, catalogs: [CatalogEntry]{}, workspace_members: [String:[String]]{}}

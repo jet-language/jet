@@ -1,7 +1,7 @@
 // A Close duty written in the type body owns one cleanup, like `impl T.Close`:
 // a binding moves the value, and each value closes once, after its last use.
 Stream: struct {
-    fd: Int
+    fd: Int,
 
     impl Close {
         close: fn(&&self) { print("closed {self.fd}") }
@@ -9,7 +9,7 @@ Stream: struct {
 }
 
 FileReader: struct {
-    stream: Stream
+    stream: Stream,
 }
 
 keep: fn(r: FileReader) -> Int { r.stream.fd }

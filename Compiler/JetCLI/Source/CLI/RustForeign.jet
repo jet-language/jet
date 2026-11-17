@@ -35,9 +35,9 @@ JET_CLI_RUST_PROVENANCE_SCHEMA: "jet-ffi-bridge-provenance-v1"
 JET_CLI_RUST_SANDBOX_POLICY: "filesystem=source-readonly,output-private-copy;process=private-pid,parent-death;network=declared-shared;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
 
 JetCLIRustForeignArtifact: struct {
-    plan: JetDriverRustForeignPlan
-    target_dir: String
-    release: String
+    plan: JetDriverRustForeignPlan,
+    target_dir: String,
+    release: String,
 }
 
 // The helper's exact StaticLibrary, which joins the program's native link.
@@ -647,8 +647,8 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
 // the run ends. The caller holds the full-key OS lock, so any other workspace
 // under the key is a killed run's leftover, removed before this one is made.
 JetCLIRustForeignWorkspace: struct {
-    path: String
-    retain: Bool
+    path: String,
+    retain: Bool,
 
     impl Close {
         close: fn(&&self) -[FS]> {
@@ -700,8 +700,8 @@ jet_cli_rust_foreign_registry: fn(plan: JetDriverRustForeignPlan) -[FS, Env]> St
 // Metadata writes Cargo.lock, not code: it runs on the private output's
 // source projection, never making host inputs writable.
 JetCLIRustForeignResolved: struct {
-    compile_time: Bool
-    lock: [U8]
+    compile_time: Bool,
+    lock: [U8],
 }
 
 jet_cli_rust_foreign_resolve: fn(plan: JetDriverRustForeignPlan, cache: String, bwrap: String, cargo: String, registry: String, private_source: cli_files.Directory, private_output: cli_files.Directory) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignResolved JetDriverRustForeignError! {
@@ -795,13 +795,13 @@ jet_cli_rust_foreign_publish_sidecars: fn(target_dir: String, release: String, c
 
 // The plan, cache key folder and shared release directory of one helper.
 JetCLIRustForeignKey: struct {
-    plan: JetDriverRustForeignPlan
-    toolchain: String
-    link_closure: String
-    cache: String
-    source: String
-    target_dir: String
-    release: String
+    plan: JetDriverRustForeignPlan,
+    toolchain: String,
+    link_closure: String,
+    cache: String,
+    source: String,
+    target_dir: String,
+    release: String,
 }
 
 jet_cli_rust_foreign_key: fn(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignKey JetDriverRustForeignError! {

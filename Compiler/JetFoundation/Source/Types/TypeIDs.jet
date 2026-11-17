@@ -37,100 +37,100 @@
 // in a fixed order; one input always gets the same ids.
 
 TypeID: struct {
-    id: U32
+    id: U32,
 }
 
 TypeKind: enum {
-    Int
-    Float
-    Bool
-    String
-    Char
-    List
-    Map
-    Shared
-    Option
-    Result
-    Fn
-    Named
-    Apply
-    TraitObject
-    Tuple
-    FixedList
-    IntN
-    InlineRange
-    Float32
-    Tagged
-    Union
-    Case
-    Quantity
-    Measure
+    Int,
+    Float,
+    Bool,
+    String,
+    Char,
+    List,
+    Map,
+    Shared,
+    Option,
+    Result,
+    Fn,
+    Named,
+    Apply,
+    TraitObject,
+    Tuple,
+    FixedList,
+    IntN,
+    InlineRange,
+    Float32,
+    Tagged,
+    Union,
+    Case,
+    Quantity,
+    Measure,
 }
 
 TypeColumns: struct {
     // Each row's TypeKind tag (type_kind_code); row 0, no type, holds 0.
-    kind: [U8]
-    a: [U32]
-    b: [U32]
-    side: [U32]
+    kind: [U8],
+    a: [U32],
+    b: [U32],
+    side: [U32],
     // Row `n`'s children are children[first[n]..<first[n] + count[n]].
-    first: [Int]
-    count: [Int]
-    children: [U32]
+    first: [Int],
+    count: [Int],
+    children: [U32],
     // Each row's type_row_hash: a probe compares rows only on equal hashes,
     // and a grow never hashes a row again.
-    hashes: [Int]
+    hashes: [Int],
     // Open-addressing slots: 0 is empty, otherwise the row plus one.
-    slots: [Int]
+    slots: [Int],
 }
 
 // Hash-consed side rows of one payload type: equal payloads are one row,
 // named by its index plus one (0 is none).
 TypeSides: struct<T> {
-    rows: [T]
-    hashes: [Int]
-    slots: [Int]
+    rows: [T],
+    hashes: [Int],
+    slots: [Int],
 }
 
 // An InlineRange type's bounds.
 TypeRange: struct {
-    lo: Int
-    hi: Int
+    lo: Int,
+    hi: Int,
 }
 
 Interner: struct {
-    names: NameTable
-    types: TypeColumns
-    key_spans: TypeSides<Span>
-    ranges: TypeSides<TypeRange>
-    measures: TypeSides<Measure>
-    dimensions: TypeSides<Dimension>
-    tags: TypeSides<TagMarker>
+    names: NameTable,
+    types: TypeColumns,
+    key_spans: TypeSides<Span>,
+    ranges: TypeSides<TypeRange>,
+    measures: TypeSides<Measure>,
+    dimensions: TypeSides<Dimension>,
+    tags: TypeSides<TagMarker>,
     // A Fn type with metadata (effects, contracts, call names, view
     // provenance) keeps its written form as its side row, for the metadata.
-    functions: TypeSides<Type>
+    functions: TypeSides<Type>,
     // A fork's first own row of each table: what interner_merge adds. All 0
     // for the compilation's interner.
-    from: InternerMarks{InternerMarks{}}
+    from: InternerMarks{InternerMarks{}},
 }
 
 InternerMarks: struct {
-    names: Int{0}
-    types: Int{0}
-    key_spans: Int{0}
-    ranges: Int{0}
-    measures: Int{0}
-    dimensions: Int{0}
-    tags: Int{0}
-    functions: Int{0}
+    names: Int{0},
+    types: Int{0},
+    key_spans: Int{0},
+    ranges: Int{0},
+    measures: Int{0},
+    dimensions: Int{0},
+    tags: Int{0},
+    functions: Int{0},
 }
 
 // The ids of a worker's own rows in the compilation's interner after
 // interner_merge, by own row (row - the fork's mark).
 InternerRemap: struct {
-    marks: InternerMarks
-    names: [Name]
-    types: [TypeID]
+    marks: InternerMarks,
+    names: [Name],
+    types: [TypeID],
 }
 
 TYPE_COLUMNS_INITIAL_SLOTS: 4096

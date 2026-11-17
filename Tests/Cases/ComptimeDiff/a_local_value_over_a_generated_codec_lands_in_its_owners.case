@@ -10,7 +10,7 @@
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
-write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(show(p.copy()))\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int, y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(show(p.copy()))\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
 step: jet run --trace main.jet
 exit: 0
 stdout: = "{\"x\":1,\"y\":5}\n{\"x\":3,\"y\":4}\n"

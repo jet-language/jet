@@ -29,8 +29,8 @@ ADDRESS: "server_a.addr"
 
 #Codable
 Flag: struct {
-    id: Int
-    open: Bool
+    id: Int,
+    open: Bool,
 }
 
 flags_in: fn(store: db.Store) -> db.Table<Int, Flag> {
@@ -38,8 +38,8 @@ flags_in: fn(store: db.Store) -> db.Table<Int, Flag> {
 }
 
 Board: struct {
-    store: db.Store
-    runs: Shared<Int>
+    store: db.Store,
+    runs: Shared<Int>,
 
     #App.Public is_open: fn(self) -> Bool {
         guard := self.runs.guard_edit()
@@ -54,9 +54,9 @@ Board: struct {
 // A server of the app: where it listens, how often it ran `is_open`, and
 // how many calls it has answered.
 Server: struct {
-    addr: String
-    runs: Shared<Int>
-    answered: Shared<Int>
+    addr: String,
+    runs: Shared<Int>,
+    answered: Shared<Int>,
 }
 
 // Starts a server over the file `path` that answers `calls` calls.

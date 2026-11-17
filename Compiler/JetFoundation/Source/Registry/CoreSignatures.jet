@@ -2,81 +2,81 @@
 // Core-call registry. These rows mirror the native Core signature authority;
 // an absent row is deliberately uncovered rather than inferred from arity.
 CoreCallDefault: enum {
-    Bool(value: Bool)
-    Int(value: Int)
-    Float(value: Float)
-    String(value: String)
-    EmptyList
-    Absent
-    StaticCall(type_name: String, method: String)
-    StaticEnum(type_name: String, variant: String)
+    Bool(value: Bool),
+    Int(value: Int),
+    Float(value: Float),
+    String(value: String),
+    EmptyList,
+    Absent,
+    StaticCall(type_name: String, method: String),
+    StaticEnum(type_name: String, variant: String),
 }
 
 CoreCallTypeConstraint: enum {
-    Any
-    Numeric
-    Integer
-    Floating
-    FloatingOrExact
-    SquareRootInput
-    Debuggable
-    VaultKey
+    Any,
+    Numeric,
+    Integer,
+    Floating,
+    FloatingOrExact,
+    SquareRootInput,
+    Debuggable,
+    VaultKey,
 }
 
 CoreCallResultRule: enum {
-    Declared
-    AbsoluteValue(parameter_index: Int)
-    FloatIfExactElseParameter(parameter_index: Int)
+    Declared,
+    AbsoluteValue(parameter_index: Int),
+    FloatIfExactElseParameter(parameter_index: Int),
 }
 
 CoreCallTypedParameter: struct {
-    name: String
-    label: String
-    zone: ParamZone
-    access: AccessConvention
-    ty: Type
-    default: CoreCallDefault?
+    name: String,
+    label: String,
+    zone: ParamZone,
+    access: AccessConvention,
+    ty: Type,
+    default: CoreCallDefault?,
 }
 
 CoreCallTypeParameter: struct {
-    name: String
-    bounds: [String]
-    constraint: CoreCallTypeConstraint
+    name: String,
+    bounds: [String],
+    constraint: CoreCallTypeConstraint,
 }
 
 CoreTypedCallSignature: struct {
-    module_name: String
-    member: String
-    min_arity: Int
-    max_arity: Int
-    parameters: [CoreCallTypedParameter]
-    return_type: Type?
-    type_parameters: [CoreCallTypeParameter]
-    result_rule: CoreCallResultRule
+    module_name: String,
+    member: String,
+    min_arity: Int,
+    max_arity: Int,
+    parameters: [CoreCallTypedParameter],
+    return_type: Type?,
+    type_parameters: [CoreCallTypeParameter],
+    result_rule: CoreCallResultRule,
     // A labeled tuple return's labels, or a Result return's labeled tuple
     // error's labels, in the native kernel's declared slot order (the order
     // `return_type` writes them in); empty for every other return. Rust
     // `core_call_native_return`.
-    native_return_labels: [String]
+    native_return_labels: [String],
 }
 
 CoreCallSignatureRequest: struct {
-    module_name: String
-    member: String
-    actual_arity: Int
-    actual_accesses: [AccessConvention]
-    type_args: [Type]
+    module_name: String,
+    member: String,
+    actual_arity: Int,
+    actual_accesses: [AccessConvention],
+    type_args: [Type],
 }
 
 CoreCallParameterContract: struct {
-    label: String
-    zone: ParamZone
-    default: CoreCallDefault?
+    label: String,
+    zone: ParamZone,
+    default: CoreCallDefault?,
 }
 
 CoreCallLabelRequirement: struct {
-    argument_index: Int
-    label: String
+    argument_index: Int,
+    label: String,
 }
 
 core_sig_parameter: fn(name: String, label: String, zone: ParamZone, access: AccessConvention, ty: Type, default: CoreCallDefault?) -> CoreCallTypedParameter Never! {

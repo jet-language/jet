@@ -167,19 +167,19 @@ BWRAP_TABLE: "NATIVE_SANDBOX_BWRAP_ASSETS"
 TRACKED_FAILURES: [String]{"KNOWN-FAILING", "SKIP-HOST", "OPT-IN"}
 
 AdmitOptions: struct {
-    commit: String
-    summary: String
-    dispositions: String
-    min_gains: Int
-    shards: Int
-    jobs: Int
-    timeout: Int
-    filter: String
-    reuse: String
-    seeds: String
-    work: String
-    check_gate: Bool
-    errors: [String]
+    commit: String,
+    summary: String,
+    dispositions: String,
+    min_gains: Int,
+    shards: Int,
+    jobs: Int,
+    timeout: Int,
+    filter: String,
+    reuse: String,
+    seeds: String,
+    work: String,
+    check_gate: Bool,
+    errors: [String],
 }
 
 is_count: fn(text: String) -> Bool Never! {
@@ -282,16 +282,16 @@ shard_pool: fn(options: AdmitOptions, processes: Int, slot_memory: String, slot_
 // --- pure helpers -----------------------------------------------------------
 
 Disposition: struct {
-    suite: String
-    id: String
-    tier: String
-    card: String
-    reason: String
+    suite: String,
+    id: String,
+    tier: String,
+    card: String,
+    reason: String,
 }
 
 Dispositions: struct {
-    rows: [Disposition]
-    errors: [String]
+    rows: [Disposition],
+    errors: [String],
 }
 
 is_card: fn(text: String) -> Bool Never! {
@@ -368,12 +368,12 @@ same_disposition: fn(left: Disposition, right: Disposition) -> Bool Never! {
 
 // One testkit result row, with the JSON it was read from.
 SuiteRow: struct {
-    suite: String
-    id: String
-    tier: String
-    status: String
-    detail: String
-    raw: Dyn
+    suite: String,
+    id: String,
+    tier: String,
+    status: String,
+    detail: String,
+    raw: Dyn,
 }
 
 suite_row: fn(raw: Dyn) -> SuiteRow Never! {
@@ -381,37 +381,37 @@ suite_row: fn(raw: Dyn) -> SuiteRow Never! {
 }
 
 LostRow: struct {
-    suite: String
-    id: String
-    tier: String
-    was: String
-    now: String
-    detail: String
-    disposed: Bool
-    disposition: Disposition
+    suite: String,
+    id: String,
+    tier: String,
+    was: String,
+    now: String,
+    detail: String,
+    disposed: Bool,
+    disposition: Disposition,
 }
 
 GainedRow: struct {
-    id: String
-    tier: String
-    status: String
-    was: String
+    id: String,
+    tier: String,
+    status: String,
+    was: String,
 }
 
 Compared: struct {
-    rows: Int
-    lost: [LostRow]
-    gained: [GainedRow]
-    added: [SuiteRow]
+    rows: Int,
+    lost: [LostRow],
+    gained: [GainedRow],
+    added: [SuiteRow],
     // Rows the candidate failed and then retried: `was` its first outcome,
     // `now` its retry's, `detail` the first run's; `disposed` when a
     // disposition names the card that owns the flake.
-    flaky: [LostRow]
-    untracked: [SuiteRow]
+    flaky: [LostRow],
+    untracked: [SuiteRow],
     // Failing rows a disposition tracks: each fails with the same status on
     // both columns (`was` the release's, `now` the candidate's).
-    carded: [LostRow]
-    release_untracked: Int
+    carded: [LostRow],
+    release_untracked: Int,
 }
 
 passes: fn(status: String) -> Bool Never! { status == "PASS" || status == "UNEXPECTED-PASS" }
@@ -472,8 +472,8 @@ disposition_for: fn(dispositions: [Disposition], suite: String, id: String, tier
 
 // Each key's last row, and the keys in first-seen order.
 Indexed: struct {
-    order: [String]
-    at: [String:Int]
+    order: [String],
+    at: [String:Int],
 }
 
 index_rows: fn(rows: [SuiteRow]) -> Indexed Never! {
@@ -584,9 +584,9 @@ jetpack_keys: fn(text: String) -> [String] Never! {
 }
 
 ChainRow: struct {
-    stage: String
-    status: String
-    note: String
+    stage: String,
+    status: String,
+    note: String,
 }
 
 // Tools/Agent/Chain.jet RESULT (TSV with a header) as rows by stage.
@@ -638,11 +638,11 @@ merge_tree_conflicts: fn(text: String) -> [String] Never! {
 // One row of a pinned-asset table: a C toolchain pack names its `platform`,
 // a bubblewrap its `arch`; the other field is "".
 PinnedAsset: struct {
-    platform: String
-    arch: String
-    file: String
-    sha256: String
-    size: Int
+    platform: String,
+    arch: String,
+    file: String,
+    sha256: String,
+    size: Int,
 }
 
 // The value of `name: "..."` or `name: N` among the comma- or line-separated
@@ -697,17 +697,17 @@ cache_key: fn(parts: [String]) -> String Never! {
 // as, else every way it differs (seed_info); `release_name` is the name its
 // RELEASE.json records.
 SeedRelease: struct {
-    dir: String
-    name: String
-    identity: String
-    jet: String
-    jet_sha: String
-    jetpack: String
-    source: String
-    commit: String
-    release_name: String
-    genuine: String
-    error: String
+    dir: String,
+    name: String,
+    identity: String,
+    jet: String,
+    jet_sha: String,
+    jetpack: String,
+    source: String,
+    commit: String,
+    release_name: String,
+    genuine: String,
+    error: String,
 }
 
 no_seed: fn(error: String) -> SeedRelease Never! {
@@ -792,17 +792,17 @@ baseline_info: fn(seeds: String, current: SeedRelease) -[Env, FS]> SeedRelease N
 }
 
 Pre: struct {
-    errors: [String]
-    root: String
-    seeds: String
-    work_root: String
-    sha: String
-    release: SeedRelease
-    baseline: SeedRelease
+    errors: [String],
+    root: String,
+    seeds: String,
+    work_root: String,
+    sha: String,
+    release: SeedRelease,
+    baseline: SeedRelease,
     // COMMIT's native suites (native_suites).
-    native: [String]
-    dispositions: [Disposition]
-    admission: Admission
+    native: [String],
+    dispositions: [Disposition],
+    admission: Admission,
 }
 
 absolute_or: fn(path: String) -[Env, FS]> String Never! { files.absolute(path) ?? path.copy() }
@@ -852,61 +852,61 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
 }
 
 GateRow: struct {
-    check: String
-    status: String
-    detail: String
+    check: String,
+    status: String,
+    detail: String,
 }
 
 // s2 of the chain, and the jetpack engine it built.
 Built: struct {
-    jet: String
-    runtime: String
-    sha: String
-    identity: String
-    jetpack: String
-    s2: String
-    s3: String
+    jet: String,
+    runtime: String,
+    sha: String,
+    identity: String,
+    jetpack: String,
+    s2: String,
+    s3: String,
 }
 
 SuiteResult: struct {
-    suite: String
-    compared: Compared
+    suite: String,
+    compared: Compared,
 }
 
 Ctx: struct {
-    options: AdmitOptions
-    root: String
-    seeds: String
-    work_root: String
-    work: String
-    sha: String
+    options: AdmitOptions,
+    root: String,
+    seeds: String,
+    work_root: String,
+    work: String,
+    sha: String,
     // COMMIT's compiler source identity (source_identity of the export), "" when unknown.
-    source: String
+    source: String,
     // The chain's seed (`current`), which builds s1.
-    release: SeedRelease
+    release: SeedRelease,
     // The release column: the suites and the Jetpack census compare the
     // candidate against this seed's jet on its own tree (baseline_info).
-    baseline: SeedRelease
-    vars: [Var]
+    baseline: SeedRelease,
+    vars: [Var],
     // COMMIT's native suites (native_suites): the kit suites and REGISTRY_SUITE.
-    native: [String]
-    dispositions: [Disposition]
-    next: String
-    tree: String
-    release_tree: String
-    log: String
-    built: Bool
-    candidate: Built
+    native: [String],
+    dispositions: [Disposition],
+    next: String,
+    tree: String,
+    release_tree: String,
+    log: String,
+    built: Bool,
+    candidate: Built,
     // The pinned assets admit built and checked (the C toolchain pack, the
     // bubblewrap), each named as its release asset; assemble ships them.
-    pinned: [String]
-    jetpack_fixed: [String]
-    jetpack_summary: String
-    suites: [SuiteResult]
-    rows: [GateRow]
+    pinned: [String],
+    jetpack_fixed: [String],
+    jetpack_summary: String,
+    suites: [SuiteResult],
+    rows: [GateRow],
     // A reused run's untracked failures as the prior run recorded them: each
     // was run again, and one that passes now passed only on its retry.
-    reused_failures: [SuiteRow]{[SuiteRow]{}}
+    reused_failures: [SuiteRow]{[SuiteRow]{}},
 }
 
 row: fn(ctx: &Ctx, check: String, status: String, detail: String) -[FS, IO, Time]> Never! {
@@ -1197,9 +1197,9 @@ clear_scratch: fn(worker: String) -[Env, Exec, FS, Time.Wait]> Never! {
 }
 
 Census: struct {
-    finished: Bool
-    keys: [String]
-    detail: String
+    finished: Bool,
+    keys: [String],
+    detail: String,
 }
 
 // One keep-going Jetpack/Bootstrap check with `jet` on the tree `root`.
@@ -1348,8 +1348,8 @@ hosted_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
 }
 
 SuiteRun: struct {
-    rows: [SuiteRow]
-    error: String
+    rows: [SuiteRow],
+    error: String,
 }
 
 rows_of: fn(items: [Dyn]) -> [SuiteRow] Never! {
@@ -1386,8 +1386,8 @@ CORPORA_PROFILE: "corpora"
 // serves them. A `label_tag` run (a `--cases` list in `extra`) takes no
 // --filter: its list comes from a run that did.
 SuiteBatch: struct {
-    labels: [String]
-    jobs: [Job]
+    labels: [String],
+    jobs: [Job],
 }
 
 suite_batch: fn(ctx: &Ctx, side: String, profile: String, label_tag: String, extra: [String], shards: Int) -[Env]> SuiteBatch Never! {
@@ -1478,10 +1478,10 @@ lost_shown: fn(lost: [LostRow], count: Int) -> String Never! {
 ROWS_SCHEMA: "jet.suite-rows.v1"
 
 RowFile: struct {
-    commit: String
-    source: String
-    compiler: String
-    rows: [SuiteRow]
+    commit: String,
+    source: String,
+    compiler: String,
+    rows: [SuiteRow],
 }
 
 row_file_text: fn(file: RowFile) -> String Never! {
@@ -1513,11 +1513,11 @@ reuse_file: fn(given: String) -[Env, FS]> String Never! {
 // rows, and the changed files each rerun row must cover. `error` stops every
 // suite.
 ReusePlan: struct {
-    active: Bool
-    prior: String
-    rows: [SuiteRow]
-    paths: [String]
-    error: String
+    active: Bool,
+    prior: String,
+    rows: [SuiteRow],
+    paths: [String],
+    error: String,
 }
 
 // Paths no suite reads; a change under them leaves every row as it was.
@@ -1689,9 +1689,9 @@ carried_stale: fn(rows: [SuiteRow], paths: [String], sources: [String:String], l
 // no change between their commit `from` ("" with no usable cache) and COMMIT
 // reaches (carried_stale), and how many it `dropped` as stale.
 Carried: struct {
-    rows: [SuiteRow]
-    from: String
-    dropped: Int
+    rows: [SuiteRow],
+    from: String,
+    dropped: Int,
 }
 
 no_carry: fn() -> Carried Never! { Carried{rows: [SuiteRow]{}, from: "", dropped: 0} }
@@ -1748,19 +1748,19 @@ ledger_owns: fn(known: [String:Bool], id: String) -> Bool Never! {
 // What picks the release column's rows (release_picks).
 ReleaseRule: struct {
     // Run every row: the files COMMIT changed are unknown.
-    every: Bool
+    every: Bool,
     // The files COMMIT changed since the release's commit.
-    paths: [String]
+    paths: [String],
     // The row IDs the release's own ledger (KNOWN_LEDGER in its tree) names.
-    known: [String:Bool]
+    known: [String:Bool],
     // Each row ID's sources (row_sources).
-    sources: [String:String]
+    sources: [String:String],
 }
 
 // A row ID the release column runs, and why.
 ReleasePick: struct {
-    id: String
-    reason: String
+    id: String,
+    reason: String,
 }
 
 // Whether `text` holds any of `names`.
@@ -1775,9 +1775,9 @@ names_any: fn(text: String, names: [String]) -> Bool Never! {
 // one, and the names of the changed tests/ or Examples/ files under no
 // directory of `rows`.
 ChangeIndex: struct {
-    changed: [String:Bool]
-    touched: [String:Bool]
-    names: [String]
+    changed: [String:Bool],
+    touched: [String:Bool],
+    names: [String],
 }
 
 change_index: fn(rows: [SuiteRow], paths: [String]) -> ChangeIndex Never! {
@@ -2272,17 +2272,17 @@ disposition_note: fn(ctx: &Ctx) -[FS, IO, Time]> Never! {
 }
 
 Resolution: struct {
-    path: String
-    pick: String
+    path: String,
+    pick: String,
 }
 
 MergePlan: struct {
-    checkout: String
-    conflicts: [String]
-    resolutions: [Resolution]
-    fast_forward: Bool
-    origin: String
-    error: String
+    checkout: String,
+    conflicts: [String],
+    resolutions: [Resolution],
+    fast_forward: Bool,
+    origin: String,
+    error: String,
 }
 
 merge_plan: fn(ctx: Ctx) -[Exec, Time.Wait]> MergePlan Never! {
@@ -2322,9 +2322,9 @@ merge_plan: fn(ctx: Ctx) -[Exec, Time.Wait]> MergePlan Never! {
 }
 
 Gains: struct {
-    suites: Int
-    jetpack: Int
-    total: Int
+    suites: Int,
+    jetpack: Int,
+    total: Int,
 }
 
 gains_of: fn(ctx: Ctx) -> Gains Never! {
@@ -2456,9 +2456,9 @@ release_record: fn(ctx: Ctx, plan: MergePlan, summary: String, scope: String, cr
 }
 
 Assembled: struct {
-    dest: String
-    summary: String
-    scope: String
+    dest: String,
+    summary: String,
+    scope: String,
 }
 
 write_all: fn(writes: [{path: String, text: String}]) -[FS]> String? Never! {
@@ -2546,13 +2546,13 @@ assemble: fn(ctx: Ctx, plan: MergePlan) -[Env, Exec, FS, Time, Time.Wait]> Assem
 }
 
 Published: struct {
-    ok: Bool
-    tagged: Bool
-    pushed: Bool
-    step: String
-    detail: String
-    log: String
-    left: [String]
+    ok: Bool,
+    tagged: Bool,
+    pushed: Bool,
+    step: String,
+    detail: String,
+    log: String,
+    left: [String],
 }
 
 // The publication of an assembled release (the header's Pass): each step

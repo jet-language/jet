@@ -22,16 +22,16 @@ use {
 // the compiler's existing record/enum rails, not service-specific handles.
 #Error
 ServiceError: enum {
-    Full(String)
-    Ambiguous(String)
-    Unknown(String)
-    NotStarted(String)
-    Policy(String)
-    Unavailable(String)
-    Partitioned(String)
-    Revoked(String)
-    Stale(String)
-    Expired(String)
+    Full(String),
+    Ambiguous(String),
+    Unknown(String),
+    NotStarted(String),
+    Policy(String),
+    Unavailable(String),
+    Partitioned(String),
+    Revoked(String),
+    Stale(String),
+    Expired(String),
 
     impl Display {
         display: fn(self) -> String { service_error_show(self) }
@@ -54,11 +54,11 @@ service_error_show: fn(error: ServiceError) -> String Never! {
 }
 
 DeliveryState: enum {
-    Pending
-    Accepted
-    Delivering
-    Delivered
-    DeadLettered
+    Pending,
+    Accepted,
+    Delivering,
+    Delivered,
+    DeadLettered,
     Cancelled
 }
 
@@ -74,16 +74,16 @@ delivery_state_show: fn(state: DeliveryState) -> String Never! {
 }
 
 DeliveryReceipt: struct {
-    id: String
-    state: DeliveryState
-    attempts: Int
-    retention_until: Int
-    deadline: Int
-    idempotency_key: String
-    duplicate: Bool
-    authority: String
-    generation: Int
-    signature: String
+    id: String,
+    state: DeliveryState,
+    attempts: Int,
+    retention_until: Int,
+    deadline: Int,
+    idempotency_key: String,
+    duplicate: Bool,
+    authority: String,
+    generation: Int,
+    signature: String,
 
     show: fn(self) -> String Never! { delivery_receipt_show(self) }
 
@@ -99,16 +99,16 @@ delivery_receipt_show: fn(receipt: DeliveryReceipt) -> String Never! {
 
 // The runtime's workflow provider reads and writes a status by position.
 TaskStatus: enum {
-    Running
-    Paused
+    Running,
+    Paused,
     CancelRequested
 }
 
 // How a workflow run or one of its activities ended: it finished, or it
 // failed the way a task's join fails. Its text is the failure's own text.
 TaskOutcome: enum {
-    Finished
-    Failed(TaskFailure)
+    Finished,
+    Failed(TaskFailure),
 
     impl Display {
         display: fn(self) -> String { task_outcome_show(self) }
@@ -601,18 +601,18 @@ observe: fn(tree: ServiceTree) -> String Never! {
 
 // Plain policy values; constructors and duration projection are below.
 ServiceRestart: enum {
-    OneForOne
-    OneForAll
+    OneForOne,
+    OneForAll,
     RestForOne
 }
 
 ServiceDelivery: enum {
-    AtMostOnce
+    AtMostOnce,
     DurableAtLeastOnce
 }
 
 ServiceRuntime: struct {
-    store: String
+    store: String,
     retention_ms: Int
 }
 
@@ -621,93 +621,93 @@ ServiceStateStore: struct {
 }
 
 ServiceTree: struct {
-    priv name: String
-    priv authority: String
-    priv generation: Int
-    priv delivery: ServiceDelivery
-    priv restart: ServiceRestart
-    priv budget_max: Int
-    priv budget_per_ms: Int
-    priv workers: [TreeWorker]
-    priv groups: [TreeGroup]
-    priv started: Bool
-    priv state_adapter: TreeStateAdapter
-    priv state_authority: TreeStateAuthority?
-    priv snapshot: String?
-    priv event_log: [String]
-    priv dead_letters: [String]
-    priv idempotency: [IdempotencyRecord]
-    priv directory: [DirectoryRecord]
-    priv draining: [String]
-    priv partitioned: [String]
-    priv workflows: [TreeWorkflowState]
-    priv chaos_fails: Int
-    priv previous_generation: Int
+    priv name: String,
+    priv authority: String,
+    priv generation: Int,
+    priv delivery: ServiceDelivery,
+    priv restart: ServiceRestart,
+    priv budget_max: Int,
+    priv budget_per_ms: Int,
+    priv workers: [TreeWorker],
+    priv groups: [TreeGroup],
+    priv started: Bool,
+    priv state_adapter: TreeStateAdapter,
+    priv state_authority: TreeStateAuthority?,
+    priv snapshot: String?,
+    priv event_log: [String],
+    priv dead_letters: [String],
+    priv idempotency: [IdempotencyRecord],
+    priv directory: [DirectoryRecord],
+    priv draining: [String],
+    priv partitioned: [String],
+    priv workflows: [TreeWorkflowState],
+    priv chaos_fails: Int,
+    priv previous_generation: Int,
     priv last_upgrade: ServiceUpgradeReceipt?
 }
 
 // Identity only: equality compares tree, worker, generation and authority.
 // The bounded channel lives in the process endpoint registry.
 ServiceEndpoint: struct {
-    priv tree: String
-    priv worker: String
-    priv generation: Int
+    priv tree: String,
+    priv worker: String,
+    priv generation: Int,
     priv authority: String
 }
 
 // A worker never runs a handler task in-process; the handler identity is
 // checked when the worker is declared and only its name is kept.
 priv TreeWorker: struct {
-    name: String
-    handler_name: String
-    endpoint: ServiceEndpoint
-    capacity: Int
-    channel: Shared<ServiceChannel>
-    restarts: [Int]
+    name: String,
+    handler_name: String,
+    endpoint: ServiceEndpoint,
+    capacity: Int,
+    channel: Shared<ServiceChannel>,
+    restarts: [Int],
     running: Bool
 }
 
 priv TreeGroup: struct {
-    name: String
-    restart: ServiceRestart
-    budget_max: Int
-    budget_per_ms: Int
+    name: String,
+    restart: ServiceRestart,
+    budget_max: Int,
+    budget_per_ms: Int,
     workers: [String]
 }
 
 priv TreeStateAdapter: enum {
-    Empty
-    Snapshot
+    Empty,
+    Snapshot,
     EventLog
 }
 
 priv TreeStateAuthority: struct {
-    store: String
-    schema: String
-    version: Int
-    migration: String
+    store: String,
+    schema: String,
+    version: Int,
+    migration: String,
     adapter: TreeStateAdapter
 }
 
 priv IdempotencyRecord: struct {
-    key: String
-    endpoint: ServiceEndpoint
+    key: String,
+    endpoint: ServiceEndpoint,
     message: String
 }
 
 priv DirectoryRecord: struct {
-    name: String
-    endpoint: ServiceEndpoint
+    name: String,
+    endpoint: ServiceEndpoint,
     proof: String
 }
 
 ServiceUpgradeReceipt: struct {
-    priv from_generation: Int
-    priv to_generation: Int
-    priv migration: String
-    priv rollback_store: String
-    priv rollback_available: Bool
-    priv pinned_shards: [String]
+    priv from_generation: Int,
+    priv to_generation: Int,
+    priv migration: String,
+    priv rollback_store: String,
+    priv rollback_available: Bool,
+    priv pinned_shards: [String],
 
     impl Display {
         display: fn(self) -> String { __upgrade_receipt_display(self) }
@@ -715,11 +715,11 @@ ServiceUpgradeReceipt: struct {
 }
 
 Delivery: struct {
-    priv id: String
-    priv store: String
-    priv duplicate: Bool
-    priv authority: String
-    priv generation: Int
+    priv id: String,
+    priv store: String,
+    priv duplicate: Bool,
+    priv authority: String,
+    priv generation: Int,
 
     show: fn(self) -> String Never! { "Delivery({self.id})" }
 
@@ -759,21 +759,21 @@ tree: fn(name: String) -> ServiceTree Never! {
 // Bounded FIFO shared by an endpoint's registry entry and its tree mailbox.
 // `head` indexes the oldest value; consumed slots are compacted lazily.
 priv ServiceChannel: struct {
-    capacity: Int
-    values: [String]
-    head: Int
+    capacity: Int,
+    values: [String],
+    head: Int,
     closed: Bool
 }
 
 priv ChannelSend: enum {
-    Sent
-    Full
+    Sent,
+    Full,
     Closed
 }
 
 priv ChannelReceive: enum {
-    Value(String)
-    Empty
+    Value(String),
+    Empty,
     Closed
 }
 
@@ -1012,7 +1012,7 @@ authority_validate_runtime: fn(runtime: ServiceRuntime) ServiceError! {
 // minutes is abandoned and removed; waiting past 30 seconds fails closed.
 // An empty path holds nothing: a tree without a state store has no journal.
 priv ServiceFileLock: struct {
-    path: String
+    path: String,
 
     impl Close {
         close: fn(&&self) {
@@ -1079,15 +1079,15 @@ authority_retention_deadline: fn(now: Int, retention_ms: Int) -> Int Never! {
 // Process endpoint registry. One row per issued (authority, worker,
 // generation); the row owns the authoritative route facts and the channel.
 priv EndpointState: struct {
-    tree: String
-    worker: String
-    authority: String
-    generation: Int
-    started: Bool
-    draining: Bool
-    partitioned: Bool
-    store: String?
-    store_generation: Int
+    tree: String,
+    worker: String,
+    authority: String,
+    generation: Int,
+    started: Bool,
+    draining: Bool,
+    partitioned: Bool,
+    store: String?,
+    store_generation: Int,
     channel: Shared<ServiceChannel>?
 }
 
@@ -1096,16 +1096,16 @@ priv ServiceRegistry: struct {
 }
 
 priv PendingEntry: struct {
-    id: String
-    message: String
+    id: String,
+    message: String,
     store: String
 }
 
 priv PendingQueue: struct {
-    store: String
-    authority: String
-    worker: String
-    generation: Int
+    store: String,
+    authority: String,
+    worker: String,
+    generation: Int,
     entries: [PendingEntry]
 }
 
@@ -1275,8 +1275,8 @@ __authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
 
 // Route facts read under the registry: started, draining and the channel.
 priv EndpointRoute: struct {
-    started: Bool
-    draining: Bool
+    started: Bool,
+    draining: Bool,
     channel: Shared<ServiceChannel>
 }
 
@@ -1710,8 +1710,8 @@ StatePathPlatform: struct {
 }
 
 StatePathPrefix: struct {
-    length: Int
-    verbatim: Bool
+    length: Int,
+    verbatim: Bool,
     implicit_root: Bool
 }
 
@@ -1877,7 +1877,7 @@ state_encode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, recor
 }
 
 priv StateCursor: struct {
-    bytes: [U8]
+    bytes: [U8],
     offset: Int
 }
 
@@ -2104,23 +2104,23 @@ state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
 // state, checksummed and published atomically beside the state store, so a
 // restarted controller resumes the same rollout instead of guessing.
 priv RolloutWorker: struct {
-    name: String
+    name: String,
     generation: Int
 }
 
 priv RolloutDirectory: struct {
-    name: String
-    worker: String
+    name: String,
+    worker: String,
     generation: Int
 }
 
 priv RolloutState: struct {
-    generation: Int
-    previous_generation: Int
-    last_upgrade: ServiceUpgradeReceipt?
-    workers: [RolloutWorker]
-    draining: [String]
-    partitioned: [String]
+    generation: Int,
+    previous_generation: Int,
+    last_upgrade: ServiceUpgradeReceipt?,
+    workers: [RolloutWorker],
+    draining: [String],
+    partitioned: [String],
     directory: [RolloutDirectory]
 }
 
@@ -2189,7 +2189,7 @@ rollout_encode: fn(tree_name: String, state: RolloutState) -> [U8] ServiceError!
 
 // Text lines as Rust `str::lines` yields them: a trailing `\r` is dropped.
 priv RolloutLines: struct {
-    lines: [String]
+    lines: [String],
     next: Int
 }
 
@@ -2538,28 +2538,28 @@ restore_rollout_state: fn(tree: &ServiceTree) ServiceError! {
 // Workflows. The durable `{store}.workflows` event log is the source of
 // truth; the tree's copy carries only a runtime replay cursor on top.
 priv ActivityOutcome: struct {
-    key: String
+    key: String,
     outcome: TaskOutcome
 }
 
 priv TreeWorkflowState: struct {
-    id: String
-    run_id: Int
-    version: Int
-    steps: [String]
-    history: [String]
-    replay_cursor: Int
-    status: TaskStatus
-    activity_outcomes: [ActivityOutcome]
+    id: String,
+    run_id: Int,
+    version: Int,
+    steps: [String],
+    history: [String],
+    replay_cursor: Int,
+    status: TaskStatus,
+    activity_outcomes: [ActivityOutcome],
     outcome: TaskOutcome?
 }
 
 // A handle detached from its tree: wait points append through the same
 // durable log under the workflow file lock.
 ServiceWorkflow: struct {
-    priv run_id: Int
-    priv authority: TreeStateAuthority
-    priv state: Shared<TreeWorkflowState>
+    priv run_id: Int,
+    priv authority: TreeStateAuthority,
+    priv state: Shared<TreeWorkflowState>,
 
     impl Display {
         display: fn(self) -> String { "{self.run_id}" }
@@ -2647,7 +2647,7 @@ workflow_field: fn(input: String, label: String) -> String ServiceError! {
 }
 
 priv WorkflowField: struct {
-    value: String
+    value: String,
     rest: String
 }
 
@@ -3270,10 +3270,10 @@ workflow_advance: fn(tree: &ServiceTree, index: Int, replaying: Bool, amount: In
 }
 
 WorkflowActivityDefinition: struct {
-    index: Int
-    activity: String
-    key: String
-    attempt: Int
+    index: Int,
+    activity: String,
+    key: String,
+    attempt: Int,
     max_attempts: Int
 }
 
@@ -3702,34 +3702,34 @@ full_tree_mailbox: fn(worker: String, capacity: Int) -> ServiceError Never! {
 // Durable delivery authority log. A line is an operation letter followed by
 // `|{byte length}:{hex}` per field; entries are a pure replay of the log.
 priv DeliveryRecord: struct {
-    op: String
+    op: String,
     fields: [String]
 }
 
 priv DeliveryEntry: struct {
-    id: String
-    key: String
-    tree: String
-    worker: String
-    authority: String
-    generation: Int
-    message: String
-    created: Int
-    expires: Int
-    retained_until: Int?
-    attempts: Int
-    state: DeliveryState
-    event_sequence: Int
-    delivered_to_worker: Bool
-    delivered: Bool
+    id: String,
+    key: String,
+    tree: String,
+    worker: String,
+    authority: String,
+    generation: Int,
+    message: String,
+    created: Int,
+    expires: Int,
+    retained_until: Int?,
+    attempts: Int,
+    state: DeliveryState,
+    event_sequence: Int,
+    delivered_to_worker: Bool,
+    delivered: Bool,
     dead: Bool
 }
 
 DeliveryEvent: struct {
-    sequence: Int
-    state: DeliveryState
-    attempts: Int
-    timestamp: Int
+    sequence: Int,
+    state: DeliveryState,
+    attempts: Int,
+    timestamp: Int,
     signature: String
 }
 
@@ -4113,18 +4113,18 @@ authority_enqueue: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, id: St
 }
 
 priv RouteCandidate: struct {
-    authority: String
-    tree: String
-    worker: String
-    generation: Int
+    authority: String,
+    tree: String,
+    worker: String,
+    generation: Int,
     store: String?
 }
 
 priv RouteScan: struct {
-    exact: RouteCandidate?
-    newer_exact: RouteCandidate?
-    candidates: [RouteCandidate]
-    exact_stopped: Bool
+    exact: RouteCandidate?,
+    newer_exact: RouteCandidate?,
+    candidates: [RouteCandidate],
+    exact_stopped: Bool,
     newer_generation: Bool
 }
 
@@ -4355,7 +4355,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
 }
 
 priv DeliveryRead: struct {
-    entry: DeliveryEntry
+    entry: DeliveryEntry,
     records: [DeliveryRecord]
 }
 
@@ -5541,8 +5541,8 @@ reconcile_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError
 
 // The pre-handoff state copy a reversible migration can roll back to.
 priv RollbackPlan: struct {
-    store: String
-    available: Bool
+    store: String,
+    available: Bool,
     migration: String
 }
 

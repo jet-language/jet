@@ -30,7 +30,7 @@ use {
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet: a
 /// record's LF is written before the next record, by `flush`, or by `finish`.
 JSONLWriter: struct<W: Writer> {
-    output: stream.JSONLinesPush<W>
+    output: stream.JSONLinesPush<W>,
 
     write: fn(&self, value: &&Dyn) -[IO]> EncodingError! { self.output.write(value) }
 
@@ -56,7 +56,7 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()})
 }
 
 JSONLReader: struct<R: Reader> {
-    input: stream.JSONLinesPull<R>
+    input: stream.JSONLinesPull<R>,
 
     next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! { self.input.next() }
 }
@@ -90,10 +90,10 @@ to_string: fn(rows: [Dyn]) -> String EncodingError! {
 // The record cursor of the whole-text calls: it parses no record beyond the
 // last one requested.
 JSONLRecords: struct {
-    text: String
-    offset: Int
-    line: Int
-    records_read: Int
+    text: String,
+    offset: Int,
+    line: Int,
+    records_read: Int,
 
     next: fn(&self) -> Dyn? EncodingError! {
         loop {
@@ -178,9 +178,9 @@ first: fn(text: String) -> Dyn? EncodingError! {
 // One line of the stream: its text without the line ending, its 1-based line
 // number, and the byte offset of its first byte in the whole text.
 JSONLRecord: struct {
-    text: String
-    line: Int
-    offset: Int
+    text: String,
+    line: Int,
+    offset: Int,
 }
 
 parse_record: fn(record: JSONLRecord, index: Int) -> Dyn EncodingError! {

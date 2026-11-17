@@ -54,8 +54,8 @@ serial_get: fn(buf: [U8], at: Int, t: Int, enc: Int) -> Mem Never! {
 // The header of a record: the serial type and body offset of each column.
 // `offsets` has one more entry than `types`: the end of the last value.
 RecordHeader: struct {
-    types: [Int]
-    offsets: [Int]
+    types: [Int],
+    offsets: [Int],
 }
 
 // Parse a record's header (fileformat2.html 2.1). A header that runs past
@@ -314,11 +314,11 @@ COLL_NONE: -1
 // The text encoding, key and total column counts, sort flags and
 // collations (COLL_NONE for a null aColl entry) of an index (KeyInfo).
 KeyInfo: struct {
-    enc: Int
-    n_key_field: Int
-    n_all_field: Int
-    sort_flags: [Int]
-    colls: [Int]
+    enc: Int,
+    n_key_field: Int,
+    n_all_field: Int,
+    sort_flags: [Int],
+    colls: [Int],
 }
 
 // A search key (UnpackedRecord): the values to compare (mem, of which
@@ -328,16 +328,16 @@ KeyInfo: struct {
 // for the fast comparisons; err_code becomes CORRUPT on a corrupt record
 // and eq_seen true once a comparison found its fields equal.
 UnpackedRecord: struct {
-    key_info: KeyInfo
-    mem: [Mem]
-    u_i: Int
-    u_z: [U8]
-    n_field: Int
-    default_rc: Int
-    err_code: Int
-    r1: Int
-    r2: Int
-    eq_seen: Bool
+    key_info: KeyInfo,
+    mem: [Mem],
+    u_i: Int,
+    u_z: [U8],
+    n_field: Int,
+    default_rc: Int,
+    err_code: Int,
+    r1: Int,
+    r2: Int,
+    eq_seen: Bool,
 }
 
 // sqlite3VdbeAllocUnpackedRecord: room for n_key_field + 1 values.

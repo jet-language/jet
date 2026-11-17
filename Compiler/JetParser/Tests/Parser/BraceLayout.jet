@@ -1,6 +1,10 @@
-// Data members of a trait or impl body (associated types, trait constants
-// and their values, requirements without a body) may end at a comma, on one
-// line or many; a method with a body takes none.
+// Data members of a brace body (struct fields, enum cases and case groups,
+// record entries and record type members, associated types, trait constants
+// and their values, requirements without a body, impl settings) are separated
+// by commas, on one line or many; the last may end at the closing `}`. A
+// member with a code body takes no comma. The formatter writes the comma after
+// every data member of a multi-line body and keeps a one-line body of data on
+// one line.
 use jet_foundation.[Program]
 
 brace_layout_trait_shape: fn(program: Program) -> String {
@@ -30,6 +34,20 @@ brace_layout_impl_shape: fn(program: Program) -> String {
         }
     }
     panic("expected an impl")
+}
+
+// `source` has one error: the missing comma after `member`, reported at the
+// member's end as the `what` it is.
+brace_layout_missing_comma: fn(source: String, member: String, what: String) {
+    errors := [String]{}
+    at := -1
+    loop diagnostic in parser_test_errors(source) {
+        if diagnostic.severity != 1 -> next
+        errors.push(diagnostic.what)
+        if diagnostic.span == .Val(span) -> at = span.start
+    }
+    assert_eq(errors.join(" | "), "Expected `,` after this {what}")
+    assert_eq(at, parser_test_find(source, member) + member.len())
 }
 
 #Test("trait data members end at a comma on many lines") {
@@ -80,7 +98,7 @@ brace_layout_impl_shape: fn(program: Program) -> String {
 #Test("marker, fact and effect settings end at a comma") {
     program: parser_test_program(
         `Inline: struct {
-    mode: Int
+    mode: Int,
 
     impl Marker {
         sites: [.Function, .Method],
@@ -114,18 +132,11 @@ run: fn() {}
     assert_eq(shape.join(", "), "marker 3, fact 2, parent Log")
 }
 
-// A `group:` setting ends at its line end or its comma like the other
-// settings, so a template and a stray method after it keep their own checks.
-#Test("a group setting ends at its line or its comma") {
+// A `group:` setting ends at its comma like the other settings, so a
+// template and a stray method after it keep their own checks, and one
+// without its comma is reported as such and nothing else is lost.
+#Test("a group setting ends at its comma") {
     sources: [String]{
-        `Traced: struct {
-    impl Marker {
-        group: #[Inline, Scalar]
-        expand: fn(self, target: Target) {}
-        render: fn(self) {}
-    }
-}
-`,
         `Traced: struct {
     impl Marker {
         group: #[Inline, Scalar],
@@ -134,10 +145,240 @@ run: fn() {}
     }
 }
 `,
+        `Traced: struct {
+    impl Marker {
+        group: #[Inline, Scalar]
+        expand: fn(self, target: Target) {}
+        render: fn(self) {}
     }
+}
+`,
+    }
+    found := [String]{}
     loop source in sources {
         codes := [String]{}
         loop diagnostic in parser_test_errors(source) -> codes.push(diagnostic.code)
-        assert_eq(codes, [String]{"E0907", "E0999"})
+        found.push(codes.join(" "))
     }
+    assert_eq(found, [String]{"E0907 E0999", "E0003 E0907 E0999"})
+}
+
+#Test("the last data member may end at the closing brace") {
+    _: parser_test_program(
+        `Point: struct { x: Int, y: Int }
+Size: struct {
+    w: Int,
+    h: Int
+}
+Mode: enum { Fast, Safe }
+Warn: enum {
+    Soft,
+    Loud { Low, High }
+}
+Pair: struct {
+    both: {a: Int, b: Int}
+}
+run: fn() {
+    p: Point{x: 1, y: 2}
+    s: Size{
+        w: 3,
+        h: 4
+    }
+}
+`,
+    )
+}
+
+#Test("a line break alone does not end a data member") {
+    brace_layout_missing_comma(
+        `Point: struct {
+    x: Int
+    y: Int
+}
+`,
+        "x: Int",
+        "field",
+    )
+    brace_layout_missing_comma(
+        `Mode: enum {
+    Fast
+    Safe
+}
+`,
+        "Fast",
+        "case",
+    )
+    brace_layout_missing_comma(
+        `Warn: enum {
+    Loud { Low High },
+}
+`,
+        "Low",
+        "case",
+    )
+    brace_layout_missing_comma(
+        `Point: struct { x: Int, y: Int }
+run: fn() {
+    p: Point{
+        x: 1
+        y: 2
+    }
+}
+`,
+        "x: 1",
+        "record entry",
+    )
+    brace_layout_missing_comma(
+        `Pair: struct {
+    both: {a: Int b: Int},
+}
+`,
+        "a: Int",
+        "record member",
+    )
+    brace_layout_missing_comma(
+        `Shape: trait {
+    Unit: type
+    area: fn(self) -> Int
+}
+`,
+        "Unit: type",
+        "associated type",
+    )
+    brace_layout_missing_comma(
+        `impl Square.Shape {
+    limit: 4
+
+    area: fn(self) -> Int { self.side * self.side }
+}
+`,
+        "limit: 4",
+        "trait constant",
+    )
+    brace_layout_missing_comma(
+        `Inline: struct {
+    impl Marker {
+        sites: [.Function]
+        repeatable: false
+    }
+}
+run: fn() {}
+`,
+        "sites: [.Function]",
+        "setting",
+    )
+}
+
+#Test("a data member before a method still takes its comma") {
+    brace_layout_missing_comma(
+        `Point: struct {
+    x: Int
+
+    get: fn(self) -> Int { self.x }
+}
+`,
+        "x: Int",
+        "field",
+    )
+    brace_layout_missing_comma(
+        `Shape: trait {
+    area: fn(self) -> Int
+
+    twice: fn(self) -> Int { self.area() * 2 }
+}
+`,
+        "area: fn(self) -> Int",
+        "requirement",
+    )
+}
+
+#Test("a comma ends a function-typed field before the next member") {
+    program: parser_test_program(
+        `Holder: struct {
+    callback: fn() -> Int,
+    value: fn(self) -> Int { 1 }
+}
+`,
+    )
+    program.items[0] == .Struct(holder) ?? panic("struct")
+    assert_eq(holder.fields.len(), 1)
+    assert_eq(holder.methods.len(), 1)
+}
+
+#Test("every missing comma of a body is reported in one parse") {
+    source: `Point: struct {
+    x: Int
+    y: Int
+    z: Int
+}
+`
+    errors := [String]{}
+    loop diagnostic in parser_test_errors(source) {
+        if diagnostic.severity == 1 -> errors.push(diagnostic.what)
+    }
+    assert_eq(errors.join(" | "), "Expected `,` after this field | Expected `,` after this field")
+}
+
+#Test("the formatter ends each data member of a multi-line body with a comma") {
+    assert_eq(
+        parser_test_stable(
+            `Size: struct {
+    w: Int,
+    h: Int // the second
+}
+
+Warn: enum {
+    Soft,
+    Loud { Low, High },
+    Grave {
+        Now,
+        Later
+    }
+}
+
+Shape: trait {
+    Unit: type,
+    limit: Int,
+    area: fn(self) -> Int
+}
+`,
+        ),
+        `Size: struct {
+    w: Int,
+    h: Int,  // the second
+}
+
+Warn: enum {
+    Soft,
+    Loud { Low, High },
+    Grave {
+        Now,
+        Later,
+    },
+}
+
+Shape: trait {
+    Unit: type,
+    limit: Int,
+    area: fn(self) -> Int,
+}
+`,
+    )
+}
+
+#Test("a one-line body of data stays on one line without a trailing comma") {
+    assert_eq(
+        parser_test_stable(
+            `Point: struct { x: Int, y: Int, }
+Mode: enum { Fast, Safe, }
+Warn: enum { Soft, Loud { Low, High } }
+`,
+        ),
+        `Point: struct { x: Int, y: Int }
+
+Mode: enum { Fast, Safe }
+
+Warn: enum { Soft, Loud { Low, High } }
+`,
+    )
 }

@@ -11,7 +11,7 @@ use {
 // Why receipt bytes are not a valid receipt, or a receipt can't be written.
 #Error
 JetDriverRunReceiptError: struct {
-    message: String
+    message: String,
 }
 
 jet_driver_run_receipt_error: fn(message: String) -> JetDriverRunReceiptError Never! {
@@ -19,38 +19,38 @@ jet_driver_run_receipt_error: fn(message: String) -> JetDriverRunReceiptError Ne
 }
 
 JetDriverRunReceiptInput: struct {
-    path: String
-    digest: String
+    path: String,
+    digest: String,
 }
 
 JetDriverRunReceiptClaim: struct {
-    verb: String
-    key: String
-    inputs: [JetDriverRunReceiptInput]
+    verb: String,
+    key: String,
+    inputs: [JetDriverRunReceiptInput],
 }
 
 JetDriverRunReceiptSection: struct {
-    name: String
-    type_name: String
-    schema_digest: String
-    payload_digest: String
-    bytes: [U8]
+    name: String,
+    type_name: String,
+    schema_digest: String,
+    payload_digest: String,
+    bytes: [U8],
 }
 
 JetDriverRecordLink: struct {
-    kind: String
-    artifact_id: String
+    kind: String,
+    artifact_id: String,
 }
 
 JetDriverRunReceipt: struct {
-    claim: JetDriverRunReceiptClaim
-    status: Int
-    stdout: [U8]
-    stderr: [U8]
-    sections: [JetDriverRunReceiptSection]
-    consumed: [JetDriverRecordLink]
-    produced: [JetDriverRecordLink]
-    digest: String
+    claim: JetDriverRunReceiptClaim,
+    status: Int,
+    stdout: [U8],
+    stderr: [U8],
+    sections: [JetDriverRunReceiptSection],
+    consumed: [JetDriverRecordLink],
+    produced: [JetDriverRecordLink],
+    digest: String,
 }
 
 // The wire markers include their final NUL, which is not a Jet string escape.
@@ -213,10 +213,10 @@ jet_driver_run_receipt_uint: fn(out: &[U8], number: Int, width: Int) Never! {
 }
 
 JetDriverRunReceiptCursor: struct {
-    bytes: [U8]
-    at: Int
-    prefix: String
-    maximum: Int
+    bytes: [U8],
+    at: Int,
+    prefix: String,
+    maximum: Int,
 }
 
 jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetDriverRunReceiptError! {

@@ -20,22 +20,22 @@ OBSERVERS: [String]{"print", "eprint", "assert"}
 TRACE_DEPTH: 8
 
 Sink: struct {
-    kind: String
-    operation: String
-    follow_up: String
-    via: String
-    result_class: String
+    kind: String,
+    operation: String,
+    follow_up: String,
+    via: String,
+    result_class: String,
 }
 
 WitnessCheck: struct {
-    sink: Sink?
-    errors: [String]
+    sink: Sink?,
+    errors: [String],
 }
 
 Probe: enum {
-    Member(alias: String, member: String)
-    Local(name: String)
-    Name(name: String)
+    Member(alias: String, member: String),
+    Local(name: String),
+    Name(name: String),
 }
 
 // One place the probe matched: the frames from the function body down to
@@ -43,10 +43,10 @@ Probe: enum {
 // `at` is the byte offset of the call's name: a desugared form such as
 // `if x() == { .Ok(ok) -> a, .Err(error) -> b }` reaches one call through two paths.
 Hit: struct {
-    chain: [String]
-    later: Bool
-    function: String
-    at: Int
+    chain: [String],
+    later: Bool,
+    function: String,
+    at: Int,
 }
 
 hit_at: fn(expression: Expr) -> Int Never! {
@@ -131,11 +131,11 @@ observed_chain: fn(chain: [String]) -> Bool Never! {
 }
 
 Reading: struct {
-    end: String
-    name: String
-    follow_up: String
-    operation: String
-    propagated: Bool
+    end: String,
+    name: String,
+    follow_up: String,
+    operation: String,
+    propagated: Bool,
 }
 
 is_observer: fn(name: String) -> Bool Never! {
@@ -218,9 +218,9 @@ fallback_frame: fn(fallback: OrFallback) -> String Never! {
 // What one walk looks for, whether an observer runs after the current
 // statement, and which function holds the walked code.
 Walk: struct {
-    probe: Probe
-    later: Bool
-    function: String
+    probe: Probe,
+    later: Bool,
+    function: String,
 }
 
 observed_later: fn(walk: Walk) -> Walk Never! {

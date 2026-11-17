@@ -22,27 +22,27 @@
 // (`action_timeout: 10min`, `--action-timeout=10min`,
 // `b.action_timeout(10min)`), whole milliseconds or more.
 BuildOptionKind: enum {
-    Choice
-    Level
-    Bool
-    Text
-    List
-    Duration
+    Choice,
+    Level,
+    Bool,
+    Text,
+    List,
+    Duration,
 }
 
 BuildOptionRow: struct {
-    name: String
-    kind: BuildOptionKind
+    name: String,
+    kind: BuildOptionKind,
     // The value spellings, as the profile field and the flag write them.
-    values: [String]
+    values: [String],
     // The stock value of `jet build`, and of `jet run`, `jet dev` and `jet test`.
-    stock_build: String
-    stock_run: String
+    stock_build: String,
+    stock_run: String,
     // The values that remove a runtime memory-safety check. Each is a
     // `check_removal` gate (GateKind.CheckRemoval) the owning policy can refuse
     // (E3415), and it applies only to code the built package wrote.
-    removes_check: [String]
-    help: String
+    removes_check: [String],
+    help: String,
 }
 
 JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
@@ -129,8 +129,8 @@ CHECKED_ALLOC_RUNTIME_EXPORTS: #run { [String]{"jet_rt_alloc_check_link", "jet_r
 // it to switch. A profile field, flag or `build: fn` call of one of these names
 // is refused with `law` instead of being an unknown name.
 BuildOptionRefusal: struct {
-    name: String
-    law: String
+    name: String,
+    law: String,
 }
 
 JET_BUILD_OPTION_REFUSALS: #run { [BuildOptionRefusal]{
@@ -156,10 +156,10 @@ build_option_flag_refusal: fn(argument: String) -> BuildOptionRefusal? {
 
 // The layer a value came from, in setting order.
 BuildOptionLayer: enum {
-    Stock
-    Profile
-    Code
-    Flag
+    Stock,
+    Profile,
+    Code,
+    Flag,
 }
 
 // One written value of a row. `written` is its spelling (`-O2`,
@@ -167,19 +167,19 @@ BuildOptionLayer: enum {
 // (`at build.jet:3`, "in profile `fast` of package.jet"); both are "" at the
 // stock layer and for a flag. `pinned` marks a `b.pin` call.
 BuildOptionChoice: struct {
-    name: String
-    value: String
-    layer: BuildOptionLayer
-    written: String
-    site: String
-    pinned: Bool
+    name: String,
+    value: String,
+    layer: BuildOptionLayer,
+    written: String,
+    site: String,
+    pinned: Bool,
 }
 
 // One `--set name=value` contribution to a declared package setting, the
 // value as written: the command-line writer of `#build.settings.<name>`.
 BuildSettingOverride: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // The options one command compiles under. `profile` is the selected profile
@@ -202,18 +202,18 @@ BuildSettingOverride: struct {
 // --target=<machine>` names: the program is checked for that machine, and no
 // image is written for it yet; "" builds for the host.
 BuildOptions: struct {
-    command: String
-    profile: String
-    written: [BuildOptionChoice]
-    values: [BuildOptionChoice]
-    settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
-    gates: [PolicyKey]{[PolicyKey]{}}
-    observe: Bool{false}
-    log: String{""}
-    locked: Bool{false}
-    deep_checks: DeepChecks{DeepChecks{}}
-    explain_partition: Bool{false}
-    target_machine: String{""}
+    command: String,
+    profile: String,
+    written: [BuildOptionChoice],
+    values: [BuildOptionChoice],
+    settings: [BuildSettingOverride]{[BuildSettingOverride]{}},
+    gates: [PolicyKey]{[PolicyKey]{}},
+    observe: Bool{false},
+    log: String{""},
+    locked: Bool{false},
+    deep_checks: DeepChecks{DeepChecks{}},
+    explain_partition: Bool{false},
+    target_machine: String{""},
 }
 
 // The deep checks one compile keeps (`--deep-checks` of run, dev, test, build,
@@ -224,16 +224,16 @@ BuildOptions: struct {
 // check, even beside a bare flag (deep_checks_unselected). Neither is the
 // default in every profile: every deep check is off.
 DeepChecks: struct {
-    all: Bool{false}
-    scopes: [String]{[String]{}}
+    all: Bool{false},
+    scopes: [String]{[String]{}},
 }
 
 DEEP_CHECKS_FLAG: "--deep-checks"
 
 // What argv asks of the deep checks, or the flag it refuses (E2119).
 DeepChecksRead: enum {
-    Read(request: DeepChecks)
-    Refused(argument: String)
+    Read(request: DeepChecks),
+    Refused(argument: String),
 }
 
 // The deep-check request of `argv`, up to `--`: each bare `--deep-checks`
@@ -324,8 +324,8 @@ deep_checks_selects: fn(scope: String, path: String) -> Bool Never! {
 // A scope that keeps no deep check. `selected` are the declarations it
 // names, none of which holds one; empty when it names no declaration.
 DeepChecksUnselected: struct {
-    scope: String
-    selected: [String]
+    scope: String,
+    selected: [String],
 }
 
 // Every scope of `request` that keeps no deep check, in argv order, given the
@@ -434,8 +434,8 @@ log_filter_module: fn(path: String) -> Bool Never! {
 }
 
 BuildOptionsResolved: enum {
-    Resolved(options: BuildOptions, notes: [String])
-    Refused(code: String, what: String, fix: String)
+    Resolved(options: BuildOptions, notes: [String]),
+    Refused(code: String, what: String, fix: String),
 }
 
 // `notes` are the stderr lines naming each value a flag replaced.

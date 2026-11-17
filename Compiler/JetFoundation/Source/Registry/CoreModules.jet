@@ -1,37 +1,37 @@
 CoreModuleExportNames: struct {
-    module_name: String
-    members: [String]
-    type_exports: [String]
+    module_name: String,
+    members: [String],
+    type_exports: [String],
 }
 
 CoreLeafKind: enum {
-    Plain
-    Enum(variants: [String])
-    Generic(arity: Int)
-    CryptoNominal
+    Plain,
+    Enum(variants: [String]),
+    Generic(arity: Int),
+    CryptoNominal,
 }
 
 CoreModuleTypeExport: struct {
-    name: String
-    kind: CoreLeafKind
+    name: String,
+    kind: CoreLeafKind,
 }
 
 // One variant of a compiler-owned Core enum family (authored in
 // CoreEnumPayloadRows.jet): its positional payload types in slot order (an
 // empty payload is a unit variant).
 CoreEnumPayloadRow: struct {
-    enum_name: String
-    variant: String
-    payload: [Type]
+    enum_name: String,
+    variant: String,
+    payload: [Type],
 }
 
 // One Core.rows `module` line; `line` is its Core.rows line.
 CoreModuleDeclaration: struct {
-    module_name: String
-    members: [String]
-    type_exports: [CoreModuleTypeExport]
-    dependencies: [String]
-    line: Int
+    module_name: String,
+    members: [String],
+    type_exports: [CoreModuleTypeExport],
+    dependencies: [String],
+    line: Int,
 }
 
 core_module_export: fn(module_name: String) -> CoreModuleExportNames? {
@@ -108,8 +108,8 @@ core_enum_cases: fn(name: String) -> [String]? {
 // One source-owned Core nominal (`source_module … types { … }` in
 // Prelude/Core.rows; Rust `CoreModuleExports::CoreSourceOwnedType`).
 CoreSourceOwnedType: struct {
-    path: String
-    name: String
+    path: String,
+    name: String,
 }
 
 // Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
@@ -200,9 +200,9 @@ core_source_receiver_method: fn(identity: String, method: String, nargs: Int) ->
 // `pub use Date: core.time.LocalDate`); otherwise the bare spelling is the
 // declared name.
 CoreBareSourceModule: struct {
-    name: String
-    module_name: String
-    declared: String{""}
+    name: String,
+    module_name: String,
+    declared: String{""},
 }
 
 CORE_BARE_SOURCE_MODULES: [CoreBareSourceModule]{
@@ -433,18 +433,18 @@ core_module_enum_cases: fn(module_name: String, name: String) -> [String]? {
 // and the first match wins. A `core_only` field is private storage: only Core
 // source reads or writes it, and user code sees no such field.
 CoreRecordFieldRow: struct {
-    owner: String
-    field: String
-    ty: Type
-    core_only: Bool{false}
+    owner: String,
+    field: String,
+    ty: Type,
+    core_only: Bool{false},
 }
 
 // The declared field list of a Core record users can build with a struct
 // literal (Rust `core_constructable_fields`), in declaration order.
 CoreRecordLiteralRow: struct {
-    owner: String
-    fields: [TypeTupleField]
-    core_only: Bool{false}
+    owner: String,
+    fields: [TypeTupleField],
+    core_only: Bool{false},
 }
 
 // The Core module a Core declaration key or module identity names

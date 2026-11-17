@@ -6,20 +6,20 @@ use jet_foundation.[RuntimeLayer, jet_ring_parse_manifest_layer]
 
 // The lock section the reader is currently filling.
 LockParseSection: enum {
-    Preamble
-    Root
-    BuildStamp
-    ComptimeInput
-    Package
-    WorkspaceMember
-    Toolchain
-    Browser
-    SourceChannel
-    BuildContribution
-    WorkspaceOverlay
-    WorkspaceOverlayPackage
-    WorkspaceBuildGrant
-    Semantic
+    Preamble,
+    Root,
+    BuildStamp,
+    ComptimeInput,
+    Package,
+    WorkspaceMember,
+    Toolchain,
+    Browser,
+    SourceChannel,
+    BuildContribution,
+    WorkspaceOverlay,
+    WorkspaceOverlayPackage,
+    WorkspaceBuildGrant,
+    Semantic,
 
     // Top-level keys before the first header.
     // A Trust SemanticLock block. Those sections live in the same unified
@@ -128,38 +128,38 @@ pkg_lock_oversized_file_message: fn() -> String Never! {
 
 // The reader state: finished records plus the one record being filled.
 LockParser: struct {
-    version: Int?
-    packages: [LockedPackage]
-    root_dependencies: [String]
-    authority: PackageAuthority?
-    workspace_members: [LockedWorkspaceMember]
-    workspace_source_digest: String?
-    overlays: [PartialWorkspaceOverlay]
-    overlay_packages: [PartialWorkspaceOverlayPackage]
-    build_grants: [PartialWorkspaceBuildGrant]
-    policy_allow_unfree: [String]
-    policy_build_deny: [String]
-    comptime_inputs: [ComptimeInput]
-    toolchains: [LockedToolchain]
-    browsers: [LockedBrowser]
-    source_channels: [LockedSourceChannel]
-    build_contributions: [LockedBuildContribution]
-    build_stamp: BuildStamp?
-    section: LockParseSection
-    comptime_input: PartialComptimeInput
-    package: PartialPackage
-    workspace_member: PartialWorkspaceMember
-    toolchain: PartialToolchain
-    browser: PartialBrowser
-    source_channel: PartialSourceChannel
-    build_contribution: PartialBuildContribution
-    overlay: PartialWorkspaceOverlay
-    overlay_package: PartialWorkspaceOverlayPackage
-    build_grant: PartialWorkspaceBuildGrant
+    version: Int?,
+    packages: [LockedPackage],
+    root_dependencies: [String],
+    authority: PackageAuthority?,
+    workspace_members: [LockedWorkspaceMember],
+    workspace_source_digest: String?,
+    overlays: [PartialWorkspaceOverlay],
+    overlay_packages: [PartialWorkspaceOverlayPackage],
+    build_grants: [PartialWorkspaceBuildGrant],
+    policy_allow_unfree: [String],
+    policy_build_deny: [String],
+    comptime_inputs: [ComptimeInput],
+    toolchains: [LockedToolchain],
+    browsers: [LockedBrowser],
+    source_channels: [LockedSourceChannel],
+    build_contributions: [LockedBuildContribution],
+    build_stamp: BuildStamp?,
+    section: LockParseSection,
+    comptime_input: PartialComptimeInput,
+    package: PartialPackage,
+    workspace_member: PartialWorkspaceMember,
+    toolchain: PartialToolchain,
+    browser: PartialBrowser,
+    source_channel: PartialSourceChannel,
+    build_contribution: PartialBuildContribution,
+    overlay: PartialWorkspaceOverlay,
+    overlay_package: PartialWorkspaceOverlayPackage,
+    build_grant: PartialWorkspaceBuildGrant,
     // Whether the current line belongs to the SemanticLock tail, and that
     // tail's raw lines (blank lines and comments included).
-    in_semantic: Bool
-    semantic_lines: [String]
+    in_semantic: Bool,
+    semantic_lines: [String],
 
     new: fn() -> LockParser Never! {
         LockParser{
@@ -379,8 +379,8 @@ pkg_lock_semantic_text: fn(lines: [String]) -> String Never! {
 }
 
 PartialComptimeInput: struct {
-    path: String?{None}
-    hash: String?{None}
+    path: String?{None},
+    hash: String?{None},
 
     assign: fn(&self, key: String, value: String) Never! {
         if key == {
@@ -399,13 +399,13 @@ PartialComptimeInput: struct {
 }
 
 PartialBuildContribution: struct {
-    package: String?{None}
-    key: String?{None}
-    value: String?{None}
-    scope: String?{None}
-    layer: String?{None}
-    source: String?{None}
-    reason: String?{None}
+    package: String?{None},
+    key: String?{None},
+    value: String?{None},
+    scope: String?{None},
+    layer: String?{None},
+    source: String?{None},
+    reason: String?{None},
 
     assign: fn(&self, key: String, value: String) LockError! {
         text: pkg_lock_unescape(value)
@@ -441,11 +441,11 @@ pkg_lock_required_contribution_field: fn(name: String, value: String?) -> String
 }
 
 PartialWorkspaceMember: struct {
-    name: String?{None}
-    path: String?{None}
-    source_digest: String?{None}
-    canonical_path: String?{None}
-    package_digest: String?{None}
+    name: String?{None},
+    path: String?{None},
+    source_digest: String?{None},
+    canonical_path: String?{None},
+    package_digest: String?{None},
 
     assign: fn(&self, key: String, value: String) Never! {
         if key == {
@@ -476,9 +476,9 @@ pkg_lock_required_member_field: fn(name: String, value: String?) -> String LockE
 }
 
 PartialWorkspaceOverlay: struct {
-    name: String?{None}
-    provider: String?{None}
-    channel: String?{None}
+    name: String?{None},
+    provider: String?{None},
+    channel: String?{None},
 
     assign: fn(&self, key: String, value: String) LockError! {
         if key == {
@@ -499,16 +499,16 @@ PartialWorkspaceOverlay: struct {
 }
 
 PartialWorkspaceOverlayPackage: struct {
-    overlay: String?{None}
-    package: String?{None}
-    source: String?{None}
-    version: String?{None}
-    flags: [String]{[String]{}}
-    priority: Int?{None}
-    field_priorities: [String]{[String]{}}
-    env: [String]{[String]{}}
-    patches: [String]{[String]{}}
-    allow_unfree: Bool{false}
+    overlay: String?{None},
+    package: String?{None},
+    source: String?{None},
+    version: String?{None},
+    flags: [String]{[String]{}},
+    priority: Int?{None},
+    field_priorities: [String]{[String]{}},
+    env: [String]{[String]{}},
+    patches: [String]{[String]{}},
+    allow_unfree: Bool{false},
 
     assign: fn(&self, key: String, value: String) LockError! {
         if key == {
@@ -549,8 +549,8 @@ PartialWorkspaceOverlayPackage: struct {
 }
 
 PartialWorkspaceBuildGrant: struct {
-    package: String?{None}
-    effects: [String]{[String]{}}
+    package: String?{None},
+    effects: [String]{[String]{}},
 
     assign: fn(&self, key: String, value: String) LockError! {
         if key == {
@@ -649,25 +649,25 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
 }
 
 PartialPackage: struct {
-    name: String?{None}
-    version: String?{None}
-    source_raw: String?{None}
-    locked_raw: String?{None}
-    fingerprint: String?{None}
-    content_hash: String?{None}
-    dependencies: [String]{[String]{}}
-    layer: RuntimeLayer?{None}
-    inferred_layer: RuntimeLayer?{None}
-    effects: [String]{[String]{}}
-    effect_grants: [String]{[String]{}}
-    required_effects: [String]{[String]{}}
-    granted_effects: [String]{[String]{}}
-    denied_effects: [String]{[String]{}}
-    effect_authority: String?{None}
-    envelope: LockEnvelope?{None}
-    nix_closure: PartialNixClosure?{None}
-    receipt: String?{None}
-    provenance: DependencyProvenance?{None}
+    name: String?{None},
+    version: String?{None},
+    source_raw: String?{None},
+    locked_raw: String?{None},
+    fingerprint: String?{None},
+    content_hash: String?{None},
+    dependencies: [String]{[String]{}},
+    layer: RuntimeLayer?{None},
+    inferred_layer: RuntimeLayer?{None},
+    effects: [String]{[String]{}},
+    effect_grants: [String]{[String]{}},
+    required_effects: [String]{[String]{}},
+    granted_effects: [String]{[String]{}},
+    denied_effects: [String]{[String]{}},
+    effect_authority: String?{None},
+    envelope: LockEnvelope?{None},
+    nix_closure: PartialNixClosure?{None},
+    receipt: String?{None},
+    provenance: DependencyProvenance?{None},
 
     assign: fn(&self, key: String, value: String) LockError! {
         if key.starts_with("nix-") -> return self.assign_nix_closure(key, value)
@@ -809,19 +809,19 @@ pkg_lock_validate_package_nix: fn(source: LockSource, nix_closure: NixClosureRec
 }
 
 PartialNixClosure: struct {
-    channel: String?{None}
-    revision: String?{None}
-    system: String?{None}
-    index_authority: String?{None}
-    derivation: String?{None}
-    output: String?{None}
-    nar_hash: String?{None}
-    size: Int?{None}
-    compression: String?{None}
-    references: [String]?{None}
-    upstream_proof: String?{None}
-    cache_key: String?{None}
-    project_cas_bundle: String?{None}
+    channel: String?{None},
+    revision: String?{None},
+    system: String?{None},
+    index_authority: String?{None},
+    derivation: String?{None},
+    output: String?{None},
+    nar_hash: String?{None},
+    size: Int?{None},
+    compression: String?{None},
+    references: [String]?{None},
+    upstream_proof: String?{None},
+    cache_key: String?{None},
+    project_cas_bundle: String?{None},
 
     finish: fn(self) -> NixClosureRecord LockError! {
         record: NixClosureRecord{
@@ -849,10 +849,10 @@ pkg_lock_nix_closure_missing: fn(field: String) -> LockError Never! {
 }
 
 PartialToolchain: struct {
-    id: String?{None}
-    channel: String?{None}
-    version: String?{None}
-    envelope: LockEnvelope{LockEnvelope.empty()}
+    id: String?{None},
+    channel: String?{None},
+    version: String?{None},
+    envelope: LockEnvelope{LockEnvelope.empty()},
 
     assign: fn(&self, key: String, value: String) Never! {
         if key == {
@@ -869,14 +869,14 @@ PartialToolchain: struct {
 }
 
 PartialBrowser: struct {
-    engine: String?{None}
-    version: String?{None}
-    binary: String?{None}
-    protocol: String?{None}
-    size: Int?{None}
-    driver: String{""}
-    driver_size: Int{0}
-    envelope: LockEnvelope{LockEnvelope.empty()}
+    engine: String?{None},
+    version: String?{None},
+    binary: String?{None},
+    protocol: String?{None},
+    size: Int?{None},
+    driver: String{""},
+    driver_size: Int{0},
+    envelope: LockEnvelope{LockEnvelope.empty()},
 
     assign: fn(&self, key: String, value: String) LockError! {
         if key == {
@@ -910,9 +910,9 @@ PartialBrowser: struct {
 }
 
 PartialSourceChannel: struct {
-    name: String?{None}
-    channel: String?{None}
-    exact: String?{None}
+    name: String?{None},
+    channel: String?{None},
+    exact: String?{None},
 
     assign: fn(&self, key: String, value: String) Never! {
         if key == {

@@ -18,13 +18,13 @@ JET_CLI_PROVE_AUTHORITY_FILES: [String]{"package.jet", "pkg.jet", "workspace.jet
 // One `jet prove` refusal: the report, and the exit class it ends with.
 #Error
 JetCLIProveRefusal: struct {
-    code: String
-    what: String
-    why: String
-    fix: String
-    exit_code: Int
+    code: String,
+    what: String,
+    why: String,
+    fix: String,
+    exit_code: Int,
     // Plain lines printed after Fix, such as the file a refusal is about.
-    detail: String?{None}
+    detail: String?{None},
 }
 
 jet_cli_prove_refusal: fn(code: String, what: String, fix: String, exit_code: Int) -> JetCLIProveRefusal Never! {
@@ -33,26 +33,26 @@ jet_cli_prove_refusal: fn(code: String, what: String, fix: String, exit_code: In
 
 // `--capture[=ARTIFACT]` or `--capture-sensitive[=ARTIFACT]`.
 JetCLIProveCapture: struct {
-    path: String?
-    sensitive: Bool
+    path: String?,
+    sensitive: Bool,
 }
 
 // The parsed invocation: one target word and the flags that shape the run.
 JetCLIProveRequest: struct {
-    target: String
-    lenses: [String]
-    capture: JetCLIProveCapture?
-    replay: String?
-    save: String?
-    unsave: String?
+    target: String,
+    lenses: [String],
+    capture: JetCLIProveCapture?,
+    replay: String?,
+    save: String?,
+    unsave: String?,
 }
 
 // The resolved target: `kind` is file, package or workspace; `members` are
 // the normalized `.jet` paths in UTF-8 byte order.
 JetCLIProveTarget: struct {
-    kind: String
-    root: String
-    members: [String]
+    kind: String,
+    root: String,
+    members: [String],
 }
 
 // `jet prove` after the front: `words` are the argv words after `prove`.

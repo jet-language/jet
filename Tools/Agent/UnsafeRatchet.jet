@@ -181,150 +181,150 @@ CLOSE_BRACE: 125
 
 #Error
 RatchetError: struct {
-    message: String
+    message: String,
 }
 
 ratchet_fail: fn(message: String) -> RatchetError { RatchetError{message: message} }
 
 Options: struct {
-    root: String
-    baseline: String
-    update: Bool
-    check: Bool
-    help: Bool
+    root: String,
+    baseline: String,
+    update: Bool,
+    check: Bool,
+    help: Bool,
     // Print the memory inventory instead of ratcheting; as JSON when `json`.
-    inventory: Bool
-    json: Bool
+    inventory: Bool,
+    json: Bool,
 }
 
 Region: struct {
-    package: String
-    file: String
-    line: Int
-    column: Int
-    reason: String
+    package: String,
+    file: String,
+    line: Int,
+    column: Int,
+    reason: String,
 }
 
 PackageCount: struct {
-    name: String
-    count: Int
+    name: String,
+    count: Int,
 }
 
 // The scanned or recorded rows: regions in baseline order, counts by package name.
 Census: struct {
-    total: Int
-    counts: [PackageCount]
-    regions: [Region]
+    total: Int,
+    counts: [PackageCount],
+    regions: [Region],
 }
 
 Baseline: struct {
-    text: String
-    census: Census
+    text: String,
+    census: Census,
 }
 
 UnsafeArguments: struct {
-    end: Int
-    reason: String?
+    end: Int,
+    reason: String?,
 }
 
 UnsafeMarker: struct {
-    end: Int
-    reason: String
+    end: Int,
+    reason: String,
 }
 
 MarkerGroup: struct {
-    end: Int
+    end: Int,
     // Markers named Unsafe, not negated, with a plain reason literal; the
     // first one's reason.
-    reasoned_unsafe: Int
-    reason: String
+    reasoned_unsafe: Int,
+    reason: String,
 }
 
 // A region's marker in the source: its `#` offset, the offset past its
 // arguments, and its reason.
 RegionMarker: struct {
-    start: Int
-    end: Int
-    reason: String
+    start: Int,
+    end: Int,
+    reason: String,
 }
 
 LineCursor: struct {
-    offset: Int
-    line: Int
-    line_start: Int
+    offset: Int,
+    line: Int,
+    line_start: Int,
 }
 
 Frame: struct {
-    name: String
-    is_unsafe: Bool
-    line: Int
-    depth: Int
-    gates: [Int]
+    name: String,
+    is_unsafe: Bool,
+    line: Int,
+    depth: Int,
+    gates: [Int],
 }
 
 Abstraction: struct {
-    file: String
-    function: String
-    line: Int
-    gates: [Int]
+    file: String,
+    function: String,
+    line: Int,
+    gates: [Int],
 }
 
 Violation: struct {
-    file: String
-    line: Int
-    column: Int
-    operation: String
+    file: String,
+    line: Int,
+    column: Int,
+    operation: String,
 }
 
 RawHit: struct {
-    index: Int
-    operation: Int
+    index: Int,
+    operation: Int,
 }
 
 AbstractionRow: struct {
-    file: String
-    function: String
+    file: String,
+    function: String,
 }
 
 CoreLibScan: struct {
-    abstractions: [Abstraction]
-    violations: [Violation]
+    abstractions: [Abstraction],
+    violations: [Violation],
 }
 
 RowChanges: struct {
-    added: [Region]
-    removed: [Region]
+    added: [Region],
+    removed: [Region],
 }
 
 CountChange: struct {
-    name: String
-    before: Int
-    after: Int
+    name: String,
+    before: Int,
+    after: Int,
 }
 
 // One region of the memory inventory.
 MemoryRow: struct {
-    file: String
-    line: Int
+    file: String,
+    line: Int,
     // An index into MEMORY_AREA_NAMES.
-    area: Int
+    area: Int,
     // One flag per MEMORY_ACTIONS entry.
-    actions: [Bool]
+    actions: [Bool],
     // The file is one of its package's kernel files, or no package.jet holds
     // it (a loose file is its own kernel).
-    kernel: Bool
+    kernel: Bool,
 }
 
 // The kernel declaration of a package that holds inventory regions.
 KernelPackage: struct {
     // The package directory, relative to the root.
-    directory: String
+    directory: String,
     // The paths `policy.memory` names, relative to the package; empty when it
     // names none.
-    paths: [String]
+    paths: [String],
     // The package sits under a Tests/ directory: its kernel files are test
     // witnesses that never ship.
-    test_only: Bool
+    test_only: Bool,
 }
 
 usage: fn() -> String {

@@ -115,129 +115,129 @@ CLOSE_BRACE: 125
 
 #Error
 CoverageError: struct {
-    message: String
+    message: String,
 }
 
 fail: fn(message: String) -> CoverageError Never! { CoverageError{message: message.copy()} }
 
 // One lexed token and its byte offset in the source it came from.
 Token: struct {
-    value: String
-    offset: Int
+    value: String,
+    offset: Int,
 }
 
 // One public declaration. `return_type` is "" when the head declares none
 // this census can spell; the evidence lists hold `file:line` places.
 Function: struct {
-    unit: String
-    name: String
-    id: String
-    signature: String
-    file: String
-    line: Int
-    return_type: String
-    doctests: [String]
-    examples: [String]
-    tests: [String]
+    unit: String,
+    name: String,
+    id: String,
+    signature: String,
+    file: String,
+    line: Int,
+    return_type: String,
+    doctests: [String],
+    examples: [String],
+    tests: [String],
     // An extern declaration: its body is a foreign symbol, not Jet.
-    foreign: Bool
+    foreign: Bool,
     // Declared in a compiler-private source part (PARTS).
-    part: Bool
+    part: Bool,
 }
 
 ModuleRow: struct {
-    unit: String
-    public: Int
-    doctests: Int
-    examples: Int
-    tests: Int
-    uncovered: Int
+    unit: String,
+    public: Int,
+    doctests: Int,
+    examples: Int,
+    tests: Int,
+    uncovered: Int,
 }
 
 Report: struct {
-    modules: [ModuleRow]
-    total_public: Int
-    total_uncovered: Int
-    functions: [Function]
+    modules: [ModuleRow],
+    total_public: Int,
+    total_uncovered: Int,
+    functions: [Function],
     // Declarations outside the user-callable surface (outside_surface).
-    excluded: [Function]
+    excluded: [Function],
 }
 
 // What call resolution needs from the inventory: each id's row, each row's
 // result type, the owner types that have methods and the prelude aliases.
 Table: struct {
-    ids: [String]
-    by_id: [String:Int]
-    returns: [String]
-    types: [String:Bool]
+    ids: [String],
+    by_id: [String:Int],
+    returns: [String],
+    types: [String:Bool],
     // Each owner type's last name and the one owner type of that name, or ""
     // when two modules declare one.
-    tails: [String:String]
-    units: [String]
-    names: [String]
+    tails: [String:String],
+    units: [String],
+    names: [String],
 }
 
 Call: struct {
-    index: Int
-    offset: Int
+    index: Int,
+    offset: Int,
 }
 
 // The owner a `{` opens: a type, an impl, a module, a private module, or
 // nothing (kind "").
 Owner: struct {
-    name: String
-    kind: String
+    name: String,
+    kind: String,
 }
 
 // A name a program starts with and the declaration it stands for.
 Alias: struct {
-    name: String
-    target: String
+    name: String,
+    target: String,
 }
 
 Chain: struct {
-    found: Bool
-    parts: [String]
-    end: Int
+    found: Bool,
+    parts: [String],
+    end: Int,
 }
 
 // A scoped alias or receiver binding replaced inside a block, restored when
 // the block closes.
 Binding: enum {
-    Alias
-    Receiver
+    Alias,
+    Receiver,
 }
 
 Undo: struct {
-    binding: Binding
-    key: String
-    previous: String
+    binding: Binding,
+    key: String,
+    previous: String,
 }
 
 Untested: struct {
-    unit: String
-    name: String
-    signature: String
-    file: String
-    line: Int
+    unit: String,
+    name: String,
+    signature: String,
+    file: String,
+    line: Int,
 }
 
 Entry: struct {
-    unit: String
-    name: String
-    signature: String
+    unit: String,
+    name: String,
+    signature: String,
 }
 
 Previous: struct {
-    present: Bool
-    entries: [Entry]
+    present: Bool,
+    entries: [Entry],
 }
 
 Decision: struct {
-    passes: Bool
-    unlisted: [Untested]
-    removable: Int
-    next: [Entry]
+    passes: Bool,
+    unlisted: [Untested],
+    removable: Int,
+    next: [Entry],
 }
 
 run: fn() {
@@ -1553,10 +1553,10 @@ compare_bytes: fn(left: [U8], right: [U8]) -> Ordering Never! {
 }
 
 Keyed: struct {
-    entry: Entry
-    unit_key: [U8]
-    name_key: [U8]
-    signature_key: [U8]
+    entry: Entry,
+    unit_key: [U8],
+    name_key: [U8],
+    signature_key: [U8],
 }
 
 // The version 2 ratchet against the untested rows. A row is listed by an entry
@@ -1841,7 +1841,7 @@ fixture_rows: fn() -> [Function] Never! {
     rows.extend(public_functions("Core/Text/Text.jet", "trim: fn(x: String) -> String Never! {{ x }}\n    split: fn<T>(x: T) -> String Never! {{ \"\" }}\n    unused: fn() {{}}"))
     rows.extend(public_functions("Core/Math/Math.jet", "trim: fn() -> Int Never! {{ 1 }}\n    impl Float.Roundable {{ rounded: fn(self) -> Float Never! {{ self }} }}"))
     rows.extend(public_functions("Core/Crypto/Crypto.jet", "Hasher: struct {{\n    new: fn() -> Hasher Never! {{ {{}} }}\n    digest: fn(self) -> String Never! {{ \"\" }}\n  }}\n  new: fn() -> Hasher Never! {{ Hasher.new() }}"))
-    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String]\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}\n  block: fn() -> Block Never! {{ panic(\"none\") }}"))
+    rows.extend(public_functions("Core/Process/Process.jet", "Sh: struct {{\n    argv: [String],\n    ok: fn(self) -> Bool Never! {{ true }}\n  }}\n  block: fn() -> Block Never! {{ panic(\"none\") }}"))
     rows.extend(public_functions("Core/Mem/Mem.jet", "Region: struct {{\n    claim: fn(&self) -> Block? Never! {{ None }}\n    next: fn(self) -> Region Never! {{ self }}\n    last: fn(self) -> Block Never! {{ Block{{}} }}\n  }}\n  Block: struct {{\n    address: fn(self) -> Int Never! {{ 0 }}\n    impl Display {{ display: fn(self) -> String {{ \"\" }} }}\n  }}\n  Window: struct<T> {{\n    len: fn(self) -> Int Never! {{ 0 }}\n  }}\n  reserve: fn() -> Region Never! {{ Region{{}} }}\n  window: fn<T>() -> Window<T> Never! {{ Window<T>{{}} }}"))
     rows
 }
@@ -1874,7 +1874,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a bare impl inside a type belongs to it, and operator overloads share one row") {
-    found: public_functions("Core/Demo/Demo.jet", "Kind: enum {{\n      One\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    Vec: struct {{ impl Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }} }}\n    impl Vec.Mul {{ mul: fn(self, rhs: Vec) -> Vec Never! {{ rhs }} }}\n    impl Vec.Mul(Float) {{ mul: fn(self, rhs: Float) -> Vec Never! {{ self }} }}\n  ")
+    found: public_functions("Core/Demo/Demo.jet", "Kind: enum {{\n      One,\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    Vec: struct {{ impl Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }} }}\n    impl Vec.Mul {{ mul: fn(self, rhs: Vec) -> Vec Never! {{ rhs }} }}\n    impl Vec.Mul(Float) {{ mul: fn(self, rhs: Float) -> Vec Never! {{ self }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Kind.display", "core.demo.Vec.debug", "core.demo.Vec.mul"})
 }
 
@@ -1885,7 +1885,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.i
 }
 
 #Test("a priv type's methods, in its body and its impls, are no surface") {
-    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n  ")
+    found: public_functions("Core/Demo/Demo.jet", "priv Cursor: struct {{\n      next: fn(&self) -> Bool Never! {{ true }}\n      impl Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n    }}\n    impl Cursor {{ reset: fn(&self) {{}} }}\n    impl Cursor.Debug {{ debug: fn(&&self) -> String Never! {{ \"\" }} }}\n    priv(package) Mode: enum {{\n      On,\n      flip: fn(self) -> Mode Never! {{ self }}\n    }}\n    Reader: struct {{ open: fn(&self) -> Cursor Never! {{ Cursor{{}} }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.open"})
 }
 
@@ -2019,7 +2019,7 @@ find_function: fn(report: Report, name: String) -> Function Never! {
 
 #Test("a prelude type is in scope unqualified, so a call through its value is credited") {
     root: files.mkdtemp("core-coverage-prelude") ?? panic("a temporary directory cannot be made: {err}")
-    put(root, "Core/Prelude/Prelude.jet", "Place: struct {{\n    file: String\n}}\nimpl Place.Display {{ display: fn(self) -> String {{ self.file }} }}\n")
+    put(root, "Core/Prelude/Prelude.jet", "Place: struct {{\n    file: String,\n}}\nimpl Place.Display {{ display: fn(self) -> String {{ self.file }} }}\n")
     put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n")
     put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
     put(root, "Tests/place.jet", "run: fn() {{\n    at: Place{{file: \"a.jet\"}}\n    print(at.display())\n}}\n")

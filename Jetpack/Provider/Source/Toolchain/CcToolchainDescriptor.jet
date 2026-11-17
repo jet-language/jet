@@ -47,8 +47,8 @@ CC_TOOLCHAIN_MAX_TARGET_BYTES: 128
 // directory, or a target entry holding the sysroot whose tools live in the
 // C toolchain pack object.
 CcToolchainLayout: enum {
-    Fixture
-    Pack
+    Fixture,
+    Pack,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -69,8 +69,8 @@ CcToolchainLayout: enum {
 // The mounted role roots of a pack-layout toolchain under its virtual root:
 // the pack (compiler, linker and their resources) and the target sysroot.
 CcToolchainRole: enum {
-    Compiler
-    Sysroot
+    Compiler,
+    Sysroot,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -86,10 +86,10 @@ CcToolchainRole: enum {
 // pack copy (origin, expected, actual) that was refused and deleted.
 #Error
 CcToolchainError: enum {
-    MissingDescriptor(String)
-    Invalid(String)
-    UncoveredTarget(String)
-    PackHashMismatch(origin: String, expected: String, actual: String)
+    MissingDescriptor(String),
+    Invalid(String),
+    UncoveredTarget(String),
+    PackHashMismatch(origin: String, expected: String, actual: String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -110,37 +110,37 @@ CcToolchainError: enum {
 }
 
 CcMount: struct {
-    store_path: String
-    digest: String
-    source: String
-    destination: String
+    store_path: String,
+    digest: String,
+    source: String,
+    destination: String,
 }
 
 CcToolchainDescriptor: struct {
-    entry_id: String
-    root: String
-    host: String
-    target: String
-    version: String
-    abi: String
-    compiler: String
-    compiler_sha256: String
-    cxx: String
-    cxx_sha256: String
-    linker: String
-    linker_sha256: String
-    sysroot: String
-    sysroot_sha256: String
-    bundle_sha256: String
-    layout: CcToolchainLayout
-    compiler_root: String
-    cxx_root: String
-    linker_root: String
-    sysroot_root: String
-    mounts: [CcMount]
-    references: [String]
-    envelope: Envelope
-    producer: ProducerRecord
+    entry_id: String,
+    root: String,
+    host: String,
+    target: String,
+    version: String,
+    abi: String,
+    compiler: String,
+    compiler_sha256: String,
+    cxx: String,
+    cxx_sha256: String,
+    linker: String,
+    linker_sha256: String,
+    sysroot: String,
+    sysroot_sha256: String,
+    bundle_sha256: String,
+    layout: CcToolchainLayout,
+    compiler_root: String,
+    cxx_root: String,
+    linker_root: String,
+    sysroot_root: String,
+    mounts: [CcMount],
+    references: [String],
+    envelope: Envelope,
+    producer: ProducerRecord,
 
     virtual_root: fn(self) -> String Never! {
         files.join(CC_TOOLCHAIN_VIRTUAL_BASE, self.bundle_sha256)
@@ -228,21 +228,21 @@ CcToolchainDescriptor: struct {
 // A fixture bundle manifest (`jet-cc-toolchain[-<target>].json`), already
 // shape-checked by `parse`.
 CcBundleManifest: struct {
-    host: String
-    target: String
-    version: String
-    abi: String
-    bundle: String
-    compiler: String
-    compiler_sha256: String
-    cxx: String
-    cxx_sha256: String
-    linker: String
-    linker_sha256: String
-    sysroot: String
-    sysroot_sha256: String
-    bundle_sha256: String
-    source: String
+    host: String,
+    target: String,
+    version: String,
+    abi: String,
+    bundle: String,
+    compiler: String,
+    compiler_sha256: String,
+    cxx: String,
+    cxx_sha256: String,
+    linker: String,
+    linker_sha256: String,
+    sysroot: String,
+    sysroot_sha256: String,
+    bundle_sha256: String,
+    source: String,
 
     // Parse and validate manifest text read from `file_name` for the
     // normalized `target`. `host` is this machine's target triple.

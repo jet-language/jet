@@ -25,101 +25,101 @@ use {
 }
 
 DocumentStart: struct {
-    encoding: Dyn
-    bom: Dyn
+    encoding: Dyn,
+    bom: Dyn,
 }
 
 CanonicalAttribute: struct {
-    namespace_uri: String
-    local: String
-    raw: String
-    value: String
+    namespace_uri: String,
+    local: String,
+    raw: String,
+    value: String,
 }
 
 NamespaceBinding: struct {
-    prefix: String?
-    uri: String
+    prefix: String?,
+    uri: String,
 }
 
 LimitCheck: struct {
-    name: String
-    value: Int
-    minimum: Int
-    maximum: Int
+    name: String,
+    value: Int,
+    minimum: Int,
+    maximum: Int,
 }
 
 TokenBoundary: struct {
-    count: Int
-    kind: TokenKind
+    count: Int,
+    kind: TokenKind,
 }
 
 MarkupEnd: struct {
-    lead: String
-    end: String
+    lead: String,
+    end: String,
 }
 
 SplitName: struct {
-    prefix: String?
-    local: String
+    prefix: String?,
+    local: String,
 }
 
 DoctypeFields: struct {
-    name: String
-    public_id: String?
-    system_id: String?
-    internal_subset: String?
+    name: String,
+    public_id: String?,
+    system_id: String?,
+    internal_subset: String?,
 }
 
 DeclaredEntityTable: struct {
-    names: [String:DeclaredEntityKind]
-    count: Int
+    names: [String:DeclaredEntityKind],
+    count: Int,
 }
 
 DeclarationFields: struct {
-    version: String
-    encoding: String?
-    standalone: Bool?
+    version: String,
+    encoding: String?,
+    standalone: Bool?,
 }
 
 StringField: struct {
-    key: String
-    value: String
+    key: String,
+    value: String,
 }
 
 TakenText: struct {
-    raw: String
-    body: String
+    raw: String,
+    body: String,
 }
 
 Reference: struct {
-    raw: String
-    name: String
-    resolved: String?
+    raw: String,
+    name: String,
+    resolved: String?,
 }
 
 ParsedParts: struct {
-    parts: [Part]
-    normalized: String?
+    parts: [Part],
+    normalized: String?,
 }
 
 RawAttribute: struct {
-    key: String
-    value: String
-    source_base: Int
-    quote: String
-    raw: String
+    key: String,
+    value: String,
+    source_base: Int,
+    quote: String,
+    raw: String,
 }
 
 DeclaredNamespace: struct {
-    prefix: String?
-    uri: String
-    quote: String
-    raw: String
+    prefix: String?,
+    uri: String,
+    quote: String,
+    raw: String,
 }
 
 NamespaceScope: struct {
-    default_uri: String?
-    named: [String:String]
+    default_uri: String?,
+    named: [String:String],
 
     new: fn() -> NamespaceScope Never! {
         NamespaceScope{default_uri: None, named: [String:String]{}}
@@ -149,8 +149,8 @@ NamespaceScope: struct {
 }
 
 NamespaceSet: struct {
-    default_present: Bool
-    named: [String:Bool]
+    default_present: Bool,
+    named: [String:Bool],
 
     new: fn() -> NamespaceSet Never! {
         NamespaceSet{default_present: false, named: [String:Bool]{}}
@@ -174,8 +174,8 @@ NamespaceSet: struct {
 }
 
 ExpandedNames: struct {
-    no_namespace: [String:Bool]
-    namespaced: [String:[String:Bool]]
+    no_namespace: [String:Bool],
+    namespaced: [String:[String:Bool]],
 
     new: fn() -> ExpandedNames Never! {
         ExpandedNames{no_namespace: [String:Bool]{}, namespaced: [String:[String:Bool]]{}}
@@ -212,8 +212,8 @@ compare_prefixes: fn(a: String?, b: String?) -> Ordering Never! {
 
 // The Rust original uses &str byte coordinates, not Jet's scalar String coordinates.
 UTF8Scalar: struct {
-    value: Int
-    width: Int
+    value: Int,
+    width: Int,
 }
 
 utf8_scalar: fn(bytes: View<U8>, offset: Int) -> UTF8Scalar Never! {
@@ -292,45 +292,45 @@ scalar_count: fn(bytes: View<U8>, end: Int) -> Int Never! {
 }
 
 Name: struct {
-    raw: String
-    prefix: String?
-    local: String
-    namespace_uri: String?
+    raw: String,
+    prefix: String?,
+    local: String,
+    namespace_uri: String?,
 }
 
 Namespace: struct {
-    prefix: String?
-    namespace_uri: String
-    quote: String
-    raw: String
+    prefix: String?,
+    namespace_uri: String,
+    quote: String,
+    raw: String,
 }
 
 Part: enum {
-    Text(value: String, raw: String)
-    Entity(name: String, resolved: String?, raw: String)
+    Text(value: String, raw: String),
+    Entity(name: String, resolved: String?, raw: String),
 }
 
 Attribute: struct {
-    name: Name
-    parts: [Part]
-    normalized: String?
-    quote: String
-    raw: String
+    name: Name,
+    parts: [Part],
+    normalized: String?,
+    quote: String,
+    raw: String,
 }
 
 ScanEvent: enum {
-    DocumentStart
-    Declaration(version: String, encoding: String?, standalone: Bool?, raw: String)
-    DocumentWhitespace(value: String, raw: String)
-    Doctype(name: String, public_id: String?, system_id: String?, internal_subset: String?, raw: String)
-    ElementStart(name: Name, namespaces: [Namespace], attributes: [Attribute], empty: Bool, raw: String)
-    Text(value: String, raw: String)
-    Cdata(value: String, raw: String)
-    EntityRef(name: String, resolved: String?, raw: String)
-    Comment(value: String, raw: String)
-    ProcessingInstruction(target: String, value: String, raw: String)
-    ElementEnd(name: Name, raw: String)
-    DocumentEnd
+    DocumentStart,
+    Declaration(version: String, encoding: String?, standalone: Bool?, raw: String),
+    DocumentWhitespace(value: String, raw: String),
+    Doctype(name: String, public_id: String?, system_id: String?, internal_subset: String?, raw: String),
+    ElementStart(name: Name, namespaces: [Namespace], attributes: [Attribute], empty: Bool, raw: String),
+    Text(value: String, raw: String),
+    Cdata(value: String, raw: String),
+    EntityRef(name: String, resolved: String?, raw: String),
+    Comment(value: String, raw: String),
+    ProcessingInstruction(target: String, value: String, raw: String),
+    ElementEnd(name: Name, raw: String),
+    DocumentEnd,
 }
 
 text: fn(value: String) -> Dyn Never! { Dyn.Text(value.copy()) }
@@ -821,20 +821,20 @@ leaf_event: fn(kind: String, fields: &&[{key: String, value: Dyn}], raw: &&[U8])
 }
 
 ElementFrame: struct {
-    name: Name
-    namespaces: [Dyn]
-    attributes: [Dyn]
-    children: [Dyn]
-    open_raw: String
+    name: Name,
+    namespaces: [Dyn],
+    attributes: [Dyn],
+    children: [Dyn],
+    open_raw: String,
 }
 
 ByteElementFrame: struct {
-    name: Dyn
-    namespaces: Dyn
-    attributes: Dyn
-    children: [Dyn]
-    empty_style: Dyn
-    open_lexical: Dyn
+    name: Dyn,
+    namespaces: Dyn,
+    attributes: Dyn,
+    children: [Dyn],
+    empty_style: Dyn,
+    open_lexical: Dyn,
 }
 
 finish_element: fn(frame: &&ElementFrame, close_raw: String?) -> Dyn Never! {
@@ -1337,29 +1337,29 @@ render_document: fn(value: Dyn) -> String XMLFault! {
 }
 
 RenderEncoding: enum {
-    UTF8
-    UTF8Bom
-    UTF16Le
-    UTF16Be
+    UTF8,
+    UTF8Bom,
+    UTF16Le,
+    UTF16Be,
 }
 
 LexicalPolicy: enum {
-    PreserveValid
-    Deterministic
+    PreserveValid,
+    Deterministic,
 }
 
 StreamWriter: struct {
-    encoding: RenderEncoding
-    lexical: LexicalPolicy
-    started: Bool
-    declaration: Bool
-    doctype: Bool
-    root_seen: Bool
-    root_closed: Bool
-    ended: Bool
-    source_matches: Bool
-    stack: [Name]
-    namespaces: [NamespaceScope]
+    encoding: RenderEncoding,
+    lexical: LexicalPolicy,
+    started: Bool,
+    declaration: Bool,
+    doctype: Bool,
+    root_seen: Bool,
+    root_closed: Bool,
+    ended: Bool,
+    source_matches: Bool,
+    stack: [Name],
+    namespaces: [NamespaceScope],
 
     new: fn(encoding: RenderEncoding, lexical: LexicalPolicy) -> StreamWriter Never! {
         StreamWriter{
@@ -1803,14 +1803,14 @@ ascii_equal: fn(left: String, right: String) -> Bool Never! {
 }
 
 CanonicalMode: enum {
-    Inclusive11
-    Exclusive10
+    Inclusive11,
+    Exclusive10,
 }
 
 CanonicalOptions: struct {
-    mode: CanonicalMode
-    comments: Bool
-    inclusive_prefixes: [String]
+    mode: CanonicalMode,
+    comments: Bool,
+    inclusive_prefixes: [String],
 }
 
 canonical_document: fn(value: Dyn, options: CanonicalOptions) -> String XMLFault! {
@@ -2254,12 +2254,12 @@ project_document_for_decode: fn(document: Dyn) -> Dyn XMLFault! {
 
 #Error
 XMLFault: struct {
-    kind: Reason
-    offset: Int
-    line: Int?
-    column: Int?
-    path: String
-    reason: String
+    kind: Reason,
+    offset: Int,
+    line: Int?,
+    column: Int?,
+    path: String,
+    reason: String,
 
     shape: fn(reason: String) -> XMLFault Never! { XMLFault.at_kind(0, Reason.Shape, reason) }
 
@@ -2304,29 +2304,29 @@ XMLFault: struct {
 }
 
 Reason: enum {
-    InvalidEncoding
-    Malformed
-    MismatchedTag
-    InvalidName
-    Namespace
-    DuplicateAttribute
-    Entity
-    EntityCycle
-    Limit
-    Canonicalization
-    Shape
-    Unsupported
+    InvalidEncoding,
+    Malformed,
+    MismatchedTag,
+    InvalidName,
+    Namespace,
+    DuplicateAttribute,
+    Entity,
+    EntityCycle,
+    Limit,
+    Canonicalization,
+    Shape,
+    Unsupported,
 }
 
 Limits: struct {
-    max_depth: Int
-    max_nodes: Int
-    max_attributes_per_element: Int
-    max_name_bytes: Int
-    max_text_bytes: Int
-    max_entity_declarations: Int
-    max_entity_depth: Int
-    max_entity_replacement_bytes: Int
+    max_depth: Int,
+    max_nodes: Int,
+    max_attributes_per_element: Int,
+    max_name_bytes: Int,
+    max_text_bytes: Int,
+    max_entity_declarations: Int,
+    max_entity_depth: Int,
+    max_entity_replacement_bytes: Int,
 
     safe: fn() -> Limits Never! {
         Limits{max_depth: 256, max_nodes: 1_000_000, max_attributes_per_element: 1024, max_name_bytes: 4096, max_text_bytes: 16_777_216, max_entity_declarations: 1024, max_entity_depth: 32, max_entity_replacement_bytes: 8_388_608}
@@ -2358,14 +2358,14 @@ Limits: struct {
 }
 
 EntityPolicy: enum {
-    Preserve
-    Reject
-    Resolve([String:String])
+    Preserve,
+    Reject,
+    Resolve([String:String]),
 }
 
 ParseOptions: struct {
-    entities: EntityPolicy
-    limits: Limits
+    entities: EntityPolicy,
+    limits: Limits,
 
     safe: fn() -> ParseOptions Never! {
         ParseOptions{entities: EntityPolicy.Preserve, limits: Limits.safe()}
@@ -2373,41 +2373,41 @@ ParseOptions: struct {
 }
 
 WireEncoding: enum {
-    UTF8
-    UTF16Le
-    UTF16Be
+    UTF8,
+    UTF16Le,
+    UTF16Be,
 }
 
 TokenKind: enum {
-    Text
-    Entity
-    Markup
+    Text,
+    Entity,
+    Markup,
 }
 
 ByteToken: struct {
-    kind: TokenKind
-    text: String
-    raw_bytes: [U8]
-    scalar_bytes: [Int]
+    kind: TokenKind,
+    text: String,
+    raw_bytes: [U8],
+    scalar_bytes: [Int],
 }
 
 DecodedUnit: struct {
-    scalar: Int
-    raw: [U8]
+    scalar: Int,
+    raw: [U8],
 }
 
 // Retains one complete token and at most four undecoded scalar bytes.
 ByteLexer: struct {
-    encoding: WireEncoding?
-    bom: [U8]
-    undecided: [U8]
-    pending: [U8]
-    units: [DecodedUnit]
-    retained_bytes: Int
-    max_item_bytes: Int
-    wire_offset: Int
-    eof: Bool
-    terminal: XMLFault?
+    encoding: WireEncoding?,
+    bom: [U8],
+    undecided: [U8],
+    pending: [U8],
+    units: [DecodedUnit],
+    retained_bytes: Int,
+    max_item_bytes: Int,
+    wire_offset: Int,
+    eof: Bool,
+    terminal: XMLFault?,
 
     new: fn(max_item_bytes: Int) -> ByteLexer Never! {
         ByteLexer{encoding: None, bom: [], undecided: [], pending: [], units: [], retained_bytes: 0, max_item_bytes: max_item_bytes, wire_offset: 0, eof: false, terminal: None}
@@ -2634,30 +2634,30 @@ unit_prefix: fn(units: View<DecodedUnit>, start: Int, needle: String) -> Bool Ne
 }
 
 StreamEvent: struct {
-    event: ScanEvent
-    raw_bytes: [U8]
-    encoding: WireEncoding
-    bom: [U8]
+    event: ScanEvent,
+    raw_bytes: [U8],
+    encoding: WireEncoding,
+    bom: [U8],
 }
 
 StreamScanner: struct {
-    lexer: ByteLexer
-    options: ParseOptions
-    started: Bool
-    ended: Bool
-    root_seen: Bool
-    root_closed: Bool
-    declaration_seen: Bool
-    doctype_seen: Bool
-    declared_entities: [String:DeclaredEntityKind]
-    stack: [Frame]
-    nodes: Int
-    text_bytes: Int
-    entity_replacement_bytes: Int
-    wire_consumed: Int
-    line: Int
-    column: Int
-    terminal: XMLFault?
+    lexer: ByteLexer,
+    options: ParseOptions,
+    started: Bool,
+    ended: Bool,
+    root_seen: Bool,
+    root_closed: Bool,
+    declaration_seen: Bool,
+    doctype_seen: Bool,
+    declared_entities: [String:DeclaredEntityKind],
+    stack: [Frame],
+    nodes: Int,
+    text_bytes: Int,
+    entity_replacement_bytes: Int,
+    wire_consumed: Int,
+    line: Int,
+    column: Int,
+    terminal: XMLFault?,
 
     new: fn(max_item_bytes: Int, options: ParseOptions) -> StreamScanner XMLFault! {
         options.limits.validate() ?? return Err(err)
@@ -2759,26 +2759,26 @@ StreamScanner: struct {
 }
 
 Frame: struct {
-    name: Name
-    namespaces: [NamespaceBinding]
+    name: Name,
+    namespaces: [NamespaceBinding],
 }
 
 Scanner: struct {
-    source: [U8]
-    wire_encoding: WireEncoding?
-    offset: Int
-    started: Bool
-    ended: Bool
-    root_seen: Bool
-    root_closed: Bool
-    declaration_seen: Bool
-    doctype_seen: Bool
-    declared_entities: [String:DeclaredEntityKind]
-    stack: [Frame]
-    options: ParseOptions
-    nodes: Int
-    text_bytes: Int
-    entity_replacement_bytes: Int
+    source: [U8],
+    wire_encoding: WireEncoding?,
+    offset: Int,
+    started: Bool,
+    ended: Bool,
+    root_seen: Bool,
+    root_closed: Bool,
+    declaration_seen: Bool,
+    doctype_seen: Bool,
+    declared_entities: [String:DeclaredEntityKind],
+    stack: [Frame],
+    options: ParseOptions,
+    nodes: Int,
+    text_bytes: Int,
+    entity_replacement_bytes: Int,
 
     new: fn(source: [U8]) -> Scanner Never! {
         Scanner{
@@ -3599,8 +3599,8 @@ doctype_fields: fn(inside: String) -> DoctypeFields XMLFault! {
 }
 
 DeclaredEntityKind: enum {
-    Internal
-    External
+    Internal,
+    External,
 }
 
 take_entity_literal: fn(source: View<U8>, cursor: &Int) -> String XMLFault! {
@@ -3662,9 +3662,9 @@ general_entity_refs: fn(value: String) -> [String] Never! {
 }
 
 Color: enum {
-    White
-    Gray
-    Black
+    White,
+    Gray,
+    Black,
 }
 
 visit: fn(node: String, edges: &[String:[String]], color: &[String:Color]) -> Bool Never! {

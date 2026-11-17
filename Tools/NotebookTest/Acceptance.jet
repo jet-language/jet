@@ -26,7 +26,7 @@ C_POLL_MS: 80
 
 #Error
 Failure: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message }
@@ -35,9 +35,9 @@ Failure: struct {
 
 // The launched session and the BiDi context id of the notebook tab.
 Driver: struct {
-    session: Browser
-    bidi: BrowserProtocol
-    context: String
+    session: Browser,
+    bidi: BrowserProtocol,
+    context: String,
 }
 
 C_SOURCE: "#FX(authority: IO, FS) {{\n    eprint(\"ambient-eprint\")\n    name: input.first() ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"browser-notebook.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"browser-notebook.txt\"))\n    assert_eq(file_exists(\"browser-notebook.txt\"), true)\n    print(read_file(Path.from(\"browser-notebook.txt\")) ?? panic(\"read failed\"))\n}}"

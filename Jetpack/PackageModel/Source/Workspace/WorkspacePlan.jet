@@ -27,33 +27,33 @@ use {
 // the index; another top-level declaration establishes an
 // authority boundary but is not a workspace index.
 WorkspaceSourceRole: enum {
-    Index
-    Authority
+    Index,
+    Authority,
 }
 
 // The one declaration-resolved workspace source every authority lookup
 // uses. Consumers revalidate `checked` before authority-sensitive work.
 WorkspaceSource: struct {
-    path: String
-    source: String
-    role: WorkspaceSourceRole
-    checked: CheckedFile
+    path: String,
+    source: String,
+    role: WorkspaceSourceRole,
+    checked: CheckedFile,
 }
 
 // The result of evaluating a workspace declaration.
 WorkspacePlan: struct {
     // Member packages in source order (the order `members:` produced them).
-    members: [WorkspacePlanMember]
+    members: [WorkspacePlanMember],
     // Tier-1: content-addressed inputs a `members:` expression
     // pulled in during evaluation, recorded so the index is reproducible.
-    comptime_inputs: [ComptimeInput]
+    comptime_inputs: [ComptimeInput],
     // Reviewed overlay/override policy from the workspace
     // declaration; commands may draft this source but never hide override
     // state.
-    overlay_policy: OverlayPolicy
+    overlay_policy: OverlayPolicy,
     // Digest of the workspace source that produced this plan; a lock is
     // reusable only while the source bytes keep this identity.
-    source_digest: String
+    source_digest: String,
 
     empty: fn() -> WorkspacePlan Never! {
         WorkspacePlan{members: [WorkspacePlanMember]{}, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: ""}
@@ -63,19 +63,19 @@ WorkspacePlan: struct {
 // One workspace member package (Rust `WorkspacePlan::WorkspaceMember`).
 WorkspacePlanMember: struct {
     // Package name read from the member's `package.jet` (or its path).
-    name: String
+    name: String,
     // Package directory relative to the workspace root.
-    path: String
+    path: String,
     // Checkout-relative canonical directory identity used by the workspace
     // lock, so a committed lock stays portable after a checkout moves.
-    canonical_path: String
+    canonical_path: String,
 }
 
 // A workspace source that could not be resolved, as its registered
 // diagnostic.
 #Error
 WorkspaceSourceError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 
     message: fn(self) -> String Never! { self.diagnostic.what }
 }
@@ -115,9 +115,9 @@ pkg_e0995_no_workspace_module: fn() -> Diagnostic Never! {
 // What one lex of a workspace candidate source says about its declaration.
 WorkspaceDeclarationProbe: struct {
     // A top-level `workspace: module` declaration is present.
-    declares_module: Bool
+    declares_module: Bool,
     // That declaration's source also names the `members:` index field.
-    declares_members: Bool
+    declares_members: Bool,
 }
 
 // Root discovery shares this owned cache across its workspace-source probes;
@@ -130,14 +130,14 @@ WorkspaceDeclarationProbe: struct {
 // it holds Jet source (pkg_authority_has_candidate), keyed by its path, and
 // the package roots a walk from it finds (pkg_find_package_roots_checked).
 WorkspaceDeclarationCache: struct {
-    priv probes: [String:WorkspaceDeclarationProbe]
-    priv presence: [String:Bool]
-    priv candidates: [String:Bool]{[String:Bool]{}}
-    priv package_roots: [String:PkgPackageRoots]{[String:PkgPackageRoots]{}}
+    priv probes: [String:WorkspaceDeclarationProbe],
+    priv presence: [String:Bool],
+    priv candidates: [String:Bool]{[String:Bool]{}},
+    priv package_roots: [String:PkgPackageRoots]{[String:PkgPackageRoots]{}},
     // Lexes actually performed by this session, excluding memo hits.
-    lexes: Int{0}
+    lexes: Int{0},
     // Directories actually listed by this session, excluding memo hits.
-    listings: Int{0}
+    listings: Int{0},
 
     new: fn() -> WorkspaceDeclarationCache Never! {
         WorkspaceDeclarationCache{probes: [String:WorkspaceDeclarationProbe]{}, presence: [String:Bool]{}}

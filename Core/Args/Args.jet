@@ -331,11 +331,11 @@ has: fn(tree: Dyn, key: String) -> Bool Never! {
 }
 
 ArgDef: struct {
-    name: String
-    dest: String
-    help: String
-    flag: Bool
-    required: Bool
+    name: String,
+    dest: String,
+    help: String,
+    flag: Bool,
+    required: Bool,
     default_text: String
 }
 
@@ -489,48 +489,48 @@ CLI_BOOL: 4
 // also fills from bare argv in declaration order. `env` is the
 // value of the input's environment variable when it names one that is set.
 CLIInput: struct {
-    name: String
-    short: String
-    flag: Bool
-    kind: Int
-    choices: [String]
-    default: String?
-    env: String?
-    required: Bool
+    name: String,
+    short: String,
+    flag: Bool,
+    kind: Int,
+    choices: [String],
+    default: String?,
+    env: String?,
+    required: Bool,
     positional: Bool
 }
 
 // One command word: a method or bound function of the program struct. `help`
 // is its help text after the program name.
 CLICommand: struct {
-    name: String
-    help: String
+    name: String,
+    help: String,
     inputs: [CLIInput]
 }
 
 // `help` is the root help text after the program name.
 CLISpec: struct {
-    help: String
-    version: String?
-    inputs: [CLIInput]
+    help: String,
+    version: String?,
+    inputs: [CLIInput],
     commands: [CLICommand]
 }
 
 // One parse level: the root spec, or one command with the root inputs
 // inherited (they parse at the command level but stay out of its help).
 CLILevel: struct {
-    program: String
-    help: String
-    accepts_version: Bool
-    inherited: [CLIInput]
-    local: [CLIInput]
+    program: String,
+    help: String,
+    accepts_version: Bool,
+    inherited: [CLIInput],
+    local: [CLIInput],
     commands: [CLICommand]
 }
 
 // Text values by input name. A spec has a handful of inputs, so a list
 // lookup replaces a hash map.
 CLIValues: struct {
-    names: [String]
+    names: [String],
     values: [String]
 }
 
@@ -538,19 +538,19 @@ CLIValues: struct {
 // other status prints `message` to stderr and exits with it. `explicit` names
 // the inputs argv gave.
 CLIParsed: struct {
-    flag_names: [String]
-    flags: [Bool]
-    options: CLIValues
-    explicit: [String]
-    positionals: [String]
-    command: String
-    status: Int
+    flag_names: [String],
+    flags: [Bool],
+    options: CLIValues,
+    explicit: [String],
+    positionals: [String],
+    command: String,
+    status: Int,
     message: String
 }
 
 CLITableCursor: struct {
-    table: String
-    raw: [U8]
+    table: String,
+    raw: [U8],
     at: Int
 }
 
@@ -1171,27 +1171,27 @@ ARG_COMMAND: 3
 // CLI_TEXT / CLI_INT / CLI_FLOAT / CLI_CHOICE kind; `nested` is a command's
 // level.
 ArgEntry: struct {
-    kind: Int
-    name: String
-    short: String?
-    help: String
-    meta: String
-    default: String?
-    env: String?
-    required: Bool
-    repeat: Bool
-    value: Int
-    choices: [String]
+    kind: Int,
+    name: String,
+    short: String?,
+    help: String,
+    meta: String,
+    default: String?,
+    env: String?,
+    required: Bool,
+    repeat: Bool,
+    value: Int,
+    choices: [String],
     nested: Int
 }
 
 // One spec. `inherited` holds the parent inputs a command parses but keeps
 // out of its help and completion.
 ArgsLevel: struct {
-    entries: [ArgEntry]
-    inherited: [ArgEntry]
-    description: String?
-    version: String?
+    entries: [ArgEntry],
+    inherited: [ArgEntry],
+    description: String?,
+    version: String?,
     inherited_version: Bool
 }
 
@@ -1200,11 +1200,11 @@ ArgsSpec: struct {
 }
 
 ParsedArgs: struct {
-    flags: [String:Bool]
-    options: [String:[String]]
-    positionals: [String]
-    subcommand: String?
-    explicit_flags: [String:Bool]
+    flags: [String:Bool],
+    options: [String:[String]],
+    positionals: [String],
+    subcommand: String?,
+    explicit_flags: [String:Bool],
     explicit_options: [String:Bool]
 }
 

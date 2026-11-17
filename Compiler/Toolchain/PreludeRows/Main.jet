@@ -54,7 +54,7 @@ fixed_int: fn(name: String) -> Bool Never! {
 
 #Error
 PreludeRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> PreludeRowsError Never! {
@@ -64,44 +64,44 @@ rows_fail: fn(message: String) -> PreludeRowsError Never! {
 // A struct field or named variant field: whether its literal may leave it out
 // (it has a default) is `defaulted`.
 RowField: struct {
-    name: String
-    ty: Type
-    defaulted: Bool
+    name: String,
+    ty: Type,
+    defaulted: Bool,
 }
 
 // An enum variant: no payload (`unit`), one positional payload (`single`), or
 // named fields.
 RowVariant: struct {
-    name: String
-    unit: Bool
-    single: Type?
-    fields: [RowField]
+    name: String,
+    unit: Bool,
+    single: Type?,
+    fields: [RowField],
 }
 
 // A declared struct or enum. A name declared more than once is `twice`, and
 // a value of it is refused; `used` marks one the generated file names.
 RowShape: struct {
-    is_enum: Bool
-    fields: [RowField]
-    variants: [RowVariant]
-    twice: Bool
-    used: Bool
+    is_enum: Bool,
+    fields: [RowField],
+    variants: [RowVariant],
+    twice: Bool,
+    used: Bool,
 }
 
 RowsOut: struct {
-    shapes: [RowShape]
+    shapes: [RowShape],
     // Each declared name's position in `shapes`.
-    index: [String:Int]
-    nodes: [String]
+    index: [String:Int],
+    nodes: [String],
     // How deep the constructors of the literal last written nest.
-    height: Int
+    height: Int,
 }
 
 // One generated constant: its name, its declared type and its value.
 RowsConstant: struct {
-    name: String
-    ty: Type
-    value: Dyn
+    name: String,
+    ty: Type,
+    value: Dyn,
 }
 
 // The struct and enum declarations of every file under SHAPES_ROOT.

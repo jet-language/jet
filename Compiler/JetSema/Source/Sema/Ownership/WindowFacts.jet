@@ -30,27 +30,27 @@ use jet_foundation.[
 ]
 
 SemaWindowEdge: struct {
-    callee: String
-    index: Int
+    callee: String,
+    index: Int,
 }
 
 SemaWindowScan: struct {
-    resizes: Bool
-    onward: [SemaWindowEdge]
+    resizes: Bool,
+    onward: [SemaWindowEdge],
 }
 
 SemaWindowCandidate: struct {
-    key: String
-    onward: [String]
+    key: String,
+    onward: [String],
 }
 
 // One declared function's name, parameter names and which parameters write,
 // in bundle order: all the census and onward-edge keys read, so no function
 // (body included) is copied.
 SemaWindowFunctionRow: struct {
-    name: String
-    params: [String]
-    writes: [Bool]
+    name: String,
+    params: [String],
+    writes: [Bool],
 }
 
 // The proven-set key of the callee parameter an onward pass reaches. Calls
@@ -119,8 +119,8 @@ sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow],
 // answers both the ambiguity count and every onward-edge lookup. `rows` is
 // indexed by the name's id in `names`; id 0, the empty name, has none.
 SemaWindowPositions: struct {
-    names: NameTable
-    rows: [[Int]]
+    names: NameTable,
+    rows: [[Int]],
 }
 
 sema_window_positions: fn(rows: [SemaWindowFunctionRow]) -> SemaWindowPositions Never! {

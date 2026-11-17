@@ -243,31 +243,31 @@ U32_MASK: 4294967295
 // `fd` is negative is not open: sqlite3_file with no pMethods.
 DBFile: struct {
     // unixFile.h, the descriptor.
-    fd: Int
+    fd: Int,
     // unixFile.zPath; empty for a temporary file, which is unlinked at open.
-    path: String
+    path: String,
     // unixFile.eFileLock, one of LOCK_*.
-    lock: Int
+    lock: Int,
     // unixFile.ctrlFlags, UNIXFILE_* bits.
-    ctrl: Int
+    ctrl: Int,
     // unixFile.lastErrno, the errno of the last failed system call.
-    last_errno: Int
+    last_errno: Int,
     // unixFile.szChunk (SQLITE_FCNTL_CHUNK_SIZE).
-    chunk: Int
+    chunk: Int,
     // unixFile.sectorSize and deviceCharacteristics, filled by the first
     // xSectorSize or xDeviceCharacteristics call.
-    sector_size: Int
-    device: Int
+    sector_size: Int,
+    device: Int,
     // pInode->fileId.ino of a locking (main database) file, else -1.
-    inode: Int
+    inode: Int,
     // unixFile.mmapSizeMax (SQLITE_FCNTL_MMAP_SIZE).
-    mmap_size_max: Int
+    mmap_size_max: Int,
     // The SQLITE_OPEN_* flags the open settled on (xOpen's *pOutFlags).
-    flags: Int
+    flags: Int,
     // sqlite3_uri_boolean(zPath, "readonly_shm", 0).
-    readonly_shm: Bool
+    readonly_shm: Bool,
     // unixFile.pShm: this connection's shared-memory (-shm) file.
-    shm: DBShm
+    shm: DBShm,
 }
 
 // A file that is not open (memset to zero, pMethods 0).
@@ -281,8 +281,8 @@ os_is_open: fn(file: DBFile) -> Bool Never! { file.fd >= 0 }
 // The result of xFullPathname: the canonical path, and whether a symbolic
 // link was followed (SQLITE_OK_SYMLINK).
 FullPath: struct {
-    path: String
-    symlink: Bool
+    path: String,
+    symlink: Bool,
 }
 
 // sqliteErrorFromPosixError: the result code of a failed lock call.
@@ -745,11 +745,11 @@ os_access: fn(path: String, flags: Int) -[DB]> Bool Never! {
 // unixFullPathname's path under construction (struct DBPath). `out` holds
 // the zOut bytes in use.
 DBPath: struct {
-    rc: Int
-    symlinks: Int
-    out: [U8]
+    rc: Int,
+    symlinks: Int,
+    out: [U8],
     // nOut: the output buffer's size (mxPathname + 1).
-    capacity: Int
+    capacity: Int,
 }
 
 // appendOnePathElement: append name (not "." and not empty) to the path,
@@ -872,19 +872,19 @@ SHM_EXTEND_PAGE: 4096
 // memory barrier, which is all unixShmBarrier provides).
 DBShm: struct {
     // pShm != 0.
-    open: Bool
+    open: Bool,
     // unixShmNode.hShm and zFilename.
-    fd: Int
-    path: String
+    fd: Int,
+    path: String,
     // unixShmNode.isReadonly and isUnlocked.
-    readonly: Bool
-    unlocked: Bool
+    readonly: Bool,
+    unlocked: Bool,
     // unixShmNode.nRegion: regions known to lie inside the file.
-    n_region: Int
-    sz_region: Int
+    n_region: Int,
+    sz_region: Int,
     // unixShm.sharedMask and exclMask.
-    shared_mask: Int
-    excl_mask: Int
+    shared_mask: Int,
+    excl_mask: Int,
 }
 
 // No shared memory (pShm 0).
@@ -1081,7 +1081,7 @@ os_unix_ms: fn() -[DB]> Int Never! { core.db.__vfs_now_ms() }
 
 // The process-wide sqlite3_temp_directory (PRAGMA temp_store_directory).
 OSTempDirectory: struct {
-    dir: String?
+    dir: String?,
 }
 
 init_os_temp_directory: fn() -> Shared<OSTempDirectory> Never! {
@@ -1147,9 +1147,9 @@ os_get_tempname: fn() -[DB]> String SQLError! {
 // `s` is the 16-word state, `out` the current 64-byte block and `n` the
 // bytes of it not yet handed out (taken from its end).
 OSPrng: struct {
-    s: [Int]
-    out: [U8]
-    n: Int
+    s: [Int],
+    out: [U8],
+    n: Int,
 }
 
 init_os_prng: fn() -> Shared<OSPrng> Never! {

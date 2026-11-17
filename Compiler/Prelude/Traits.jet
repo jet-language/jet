@@ -49,59 +49,59 @@
 
 // `a + b`.
 Add: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"+"}
-    commutative: Bool{true}
-    Rhs: type
-    Output: type
-    add: fn(self, rhs: Rhs) -> Output Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"+"},
+    commutative: Bool{true},
+    Rhs: type,
+    Output: type,
+    add: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a - b`.
 Sub: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"-"}
-    Rhs: type
-    Output: type
-    sub: fn(self, rhs: Rhs) -> Output Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"-"},
+    Rhs: type,
+    Output: type,
+    sub: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a * b`.
 Mul: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"*"}
-    commutative: Bool{true}
-    Rhs: type
-    Output: type
-    mul: fn(self, rhs: Rhs) -> Output Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"*"},
+    commutative: Bool{true},
+    Rhs: type,
+    Output: type,
+    mul: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a / b`.
 Div: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"/"}
-    Rhs: type
-    Output: type
-    div: fn(self, rhs: Rhs) -> Output Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"/"},
+    Rhs: type,
+    Output: type,
+    div: fn(self, rhs: Rhs) -> Output Never!,
 }
 
 // `a == b` and `a != b`.
 Equatable: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"== !="}
-    auto_derive: Bool{true}
-    Rhs: type
-    equal: fn(self, rhs: Rhs) -> Bool Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"== !="},
+    auto_derive: Bool{true},
+    Rhs: type,
+    equal: fn(self, rhs: Rhs) -> Bool Never!,
     #Test reflexive: fn(a: Self) {
         assert(a == a)
     }
@@ -112,14 +112,14 @@ Equatable: trait {
 
 // `a <=> b` and the orderings `<`, `>`, `<=`, `>=`.
 Comparable: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    operators: String{"<=> < > <= >="}
-    auto_derive: Bool{true}
-    bundle: Bool{true}
-    Rhs: type
-    compare: fn(self, rhs: Rhs) -> Ordering Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    operators: String{"<=> < > <= >="},
+    auto_derive: Bool{true},
+    bundle: Bool{true},
+    Rhs: type,
+    compare: fn(self, rhs: Rhs) -> Ordering Never!,
     #Test agrees_with_equal: fn(a: Self, b: Self) {
         assert((a.compare(b) == .Equal) == (a == b))
     }
@@ -130,136 +130,136 @@ Comparable: trait {
 
 // The one value that decides `==`, ordering, Map lookup and Set membership.
 KeyBy: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    requires: String{"Equatable Comparable"}
-    Key: type
-    key: fn(self) -> Key Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    requires: String{"Equatable Comparable"},
+    Key: type,
+    key: fn(self) -> Key Never!,
 }
 
 // The value as its dynamic encoding tree.
 Encode: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    codec: Bool{true}
-    auto_derive_family: String{"Codable"}
-    through_elements: Bool{true}
-    encode: fn(self) -> Dyn Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    codec: Bool{true},
+    auto_derive_family: String{"Codable"},
+    through_elements: Bool{true},
+    encode: fn(self) -> Dyn Never!,
 }
 
 // A value read back from its dynamic encoding tree.
 Decode: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    codec: Bool{true}
-    auto_derive_family: String{"Codable"}
-    through_elements: Bool{true}
-    decode: fn(tree: Dyn) -> Self [FieldError]!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    codec: Bool{true},
+    auto_derive_family: String{"Codable"},
+    through_elements: Bool{true},
+    decode: fn(tree: Dyn) -> Self [FieldError]!,
 }
 
 // `Target{value}` and `Target.from(value)`: a `Target` made from a `Source`.
 // The impl names its source after the trait, `impl Celsius.From(Float)`, and
 // a type takes one impl per source.
 From: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    conversion: Bool{true}
-    Source: type
-    from: fn(value: Source) -> Self Err!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    conversion: Bool{true},
+    Source: type,
+    from: fn(value: Source) -> Self Err!,
 }
 
 Literal: module {
     // A nominal type written as an integer literal, built while compiling.
     Int: trait {
-        from_literal: fn(value: Int) -> Self Never!
+        from_literal: fn(value: Int) -> Self Never!,
     }
 
     // A nominal type written as a float literal, built from its digits.
     Float: trait {
-        from_literal: fn(value: String) -> Self Never!
+        from_literal: fn(value: String) -> Self Never!,
     }
 }
 
 // A `distinct String` type whose text is checked (Core/prelude.jet).
 CheckedText: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    checked_text: Bool{true}
+    local: Bool{true},
+    bare_bound: Bool{true},
+    checked_text: Bool{true},
 }
 
 // The value inside `{}` interpolation, derived from the type.
 Printable: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    derived: Bool{true}
-    auto_derive: Bool{true}
-    bundle: Bool{true}
+    local: Bool{true},
+    bare_bound: Bool{true},
+    derived: Bool{true},
+    auto_derive: Bool{true},
+    bundle: Bool{true},
 }
 
 // The value in a wire format, derived from the type.
 Serialize: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    derived: Bool{true}
-    through_elements: Bool{true}
+    local: Bool{true},
+    bare_bound: Bool{true},
+    derived: Bool{true},
+    through_elements: Bool{true},
 }
 
 // The value as a view, derived from the type.
 Renderable: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    derived: Bool{true}
+    local: Bool{true},
+    bare_bound: Bool{true},
+    derived: Bool{true},
 }
 
 // User-facing text for `{}` interpolation.
 Display: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    through_elements: Bool{true}
-    display: fn(self) -> String Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    through_elements: Bool{true},
+    display: fn(self) -> String Never!,
 }
 
 // Developer-facing text for `{value:Debug}` interpolation.
 Debug: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    raw_return: Bool{true}
-    through_elements: Bool{true}
-    any_receiver: Bool{true}
-    auto_derive: Bool{true}
-    debug: fn(self) -> String Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    raw_return: Bool{true},
+    through_elements: Bool{true},
+    any_receiver: Bool{true},
+    auto_derive: Bool{true},
+    debug: fn(self) -> String Never!,
 }
 
 // Consuming, infallible cleanup.
 Close: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    close: fn(&&self) Never!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    close: fn(&&self) Never!,
 }
 
 // Arithmetic with a zero and a one; a `#Numeric` distinct type has it.
 Numeric: trait {
-    local: Bool{true}
-    requires: String{"Add Sub Mul Comparable"}
-    bare_bound: Bool{true}
-    bundle: Bool{true}
-    zero: fn() -> Self Never!
-    one: fn() -> Self Never!
+    local: Bool{true},
+    requires: String{"Add Sub Mul Comparable"},
+    bare_bound: Bool{true},
+    bundle: Bool{true},
+    zero: fn() -> Self Never!,
+    one: fn() -> Self Never!,
 }
 
 // The typed-SQL driver contract of `core.db`. A driver is a handle to shared
 // connection state, so its calls read the value they're made on.
 Driver: trait {
-    local: Bool{true}
-    bare_bound: Bool{true}
-    query: fn(self, sql: SQL) -> [[String:DBValue]] DBError!
-    query_one: fn(self, sql: SQL) -> [String:DBValue]? DBError!
-    execute: fn(self, sql: SQL) -> Int DBError!
-    begin: fn(self) -> DBTransaction DBError!
+    local: Bool{true},
+    bare_bound: Bool{true},
+    query: fn(self, sql: SQL) -> [[String:DBValue]] DBError!,
+    query_one: fn(self, sql: SQL) -> [String:DBValue]? DBError!,
+    execute: fn(self, sql: SQL) -> Int DBError!,
+    begin: fn(self) -> DBTransaction DBError!,
 }
 
 // A byte source: core.files's FileReader, and any type the streaming codecs
@@ -267,9 +267,9 @@ Driver: trait {
 // an empty list at the end of the input; `read_into` appends at most `limit`
 // bytes to `buffer` and answers how many, 0 at the end of the input.
 Reader: trait {
-    bare_bound: Bool{true}
-    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
-    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
+    bare_bound: Bool{true},
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!,
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,
 }
 
 // A byte sink: core.files's FileWriter, the screen, and any type the
@@ -278,9 +278,9 @@ Reader: trait {
 // and `write_line` take text, and by default write its bytes through
 // `write_bytes`.
 Writer: trait {
-    bare_bound: Bool{true}
-    write_bytes: fn(&self, bytes: [U8]) IOError!
-    flush: fn(&self) IOError!
+    bare_bound: Bool{true},
+    write_bytes: fn(&self, bytes: [U8]) IOError!,
+    flush: fn(&self) IOError!,
     write: fn(&self, text: String) IOError! {
         self.write_bytes(text.bytes())
     }
@@ -291,33 +291,33 @@ Writer: trait {
 
 // A value a transaction restores on rollback.
 Rollback: trait {
-    Snapshot: type
-    snapshot: fn(self) -> Snapshot Never!
-    restore: fn(&self, snap: Snapshot) Never!
+    Snapshot: type,
+    snapshot: fn(self) -> Snapshot Never!,
+    restore: fn(&self, snap: Snapshot) Never!,
 }
 
 // A cursor: `loop x in cursor`.
 Iterator: trait {
-    Item: type
-    next: fn(&self) -> Item? Never!
+    Item: type,
+    next: fn(&self) -> Item? Never!,
 }
 
 // Zero-copy `loop x in value`.
 Iterable: trait {
-    raw_return: Bool{true}
-    Iter: type
-    iter: fn(&&self) -> Iter Never!
+    raw_return: Bool{true},
+    Iter: type,
+    iter: fn(&&self) -> Iter Never!,
 }
 
 // `value[key]`.
 Index: trait {
-    Key: type
-    Value: type
-    get: fn(self, k: Key) -> Value? Never!
+    Key: type,
+    Value: type,
+    get: fn(self, k: Key) -> Value? Never!,
 }
 
 // `value[key] = v`, with the key and value types of the type's `Index`.
 IndexMut: trait {
-    shares: String{"Index"}
-    set: fn(&self, k: Key, v: Value) Never!
+    shares: String{"Index"},
+    set: fn(&self, k: Key, v: Value) Never!,
 }

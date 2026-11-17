@@ -136,8 +136,8 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(call.core_top, "Builtins/Builtins.jet")
     assert_eq(call.core_after, "\"Kind: enum {{\"")
     assert_eq(kit_ui_invocation("// @check_core Builtins/Builtins.jet\n", "Tests/UI/roles/main.jet", false).core_after, "")
-    below: "// kinds\nKind: enum {{\n    First\n}}\n"
-    assert_eq(kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "", "// kinds\nKind: enum {{\n    Probe\n    First\n}}\n")
+    below: "// kinds\nKind: enum {{\n    First,\n}}\n"
+    assert_eq(kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "", "// kinds\nKind: enum {{\n    Probe,\n    First,\n}}\n")
     assert_eq(kit_ui_core_insert("    Probe\n", "Kind: enum {{", "B.jet", "\"Kind: enum {{\"") ?? "", "Kind: enum {{\n    Probe\n")
     // An error comes back as its text, never as a prepended file.
     missing: kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Mode: enum {{\"") ?? "{err}"
@@ -413,7 +413,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))
     assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
     assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
-    parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\"\n        structured_fix: .CryptoMisuse\n        no_fix: None\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String\n\n    impl Diagnostic {{\n        code: \"E0001\"\n        stage: [.Jet, .Parse]\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\"\n        status: .Retired\n    }}\n}}\n")
+    parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\",\n        structured_fix: .CryptoMisuse,\n        no_fix: None,\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String,\n\n    impl Diagnostic {{\n        code: \"E0001\",\n        stage: [.Jet, .Parse],\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\",\n        status: .Retired,\n    }}\n}}\n")
     assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")
     assert_eq(parsed[0].name, "jet.A")

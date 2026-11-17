@@ -55,111 +55,111 @@ GLYPH_CLASS_MARK: 3
 /// One point of a glyph outline in font units, y up. `on` is false for the
 /// control point of a quadratic curve.
 OutlinePoint: struct {
-    x: Int
-    y: Int
-    on: Bool
+    x: Int,
+    y: Int,
+    on: Bool,
 }
 
 /// A glyph's closed contours in font units, with the components of a
 /// composite glyph placed.
 GlyphOutline: struct {
-    contours: [[OutlinePoint]]
+    contours: [[OutlinePoint]],
 }
 
 /// A face's vertical metrics at a size, in pixels: the ascent above the
 /// baseline, the descent below it (negative) and the extra gap between lines.
 FaceMetrics: struct {
-    ascent: Float
-    descent: Float
-    line_gap: Float
-    units_per_em: Int
+    ascent: Float,
+    descent: Float,
+    line_gap: Float,
+    units_per_em: Int,
 }
 
 /// A glyph placed on a line: `x` from the line's start and `y` from the
 /// baseline (down is positive), in pixels. `cluster` is the byte offset of
 /// the text it draws.
 PlacedGlyph: struct {
-    id: Int
-    cluster: Int
-    x: Float
-    y: Float
-    advance: Float
+    id: Int,
+    cluster: Int,
+    x: Float,
+    y: Float,
+    advance: Float,
 }
 
 /// A line of placed glyphs and its total advance in pixels.
 TextRun: struct {
-    glyphs: [PlacedGlyph]
-    advance: Float
+    glyphs: [PlacedGlyph],
+    advance: Float,
 }
 
 /// One line of wrapped text: the bytes `start..<end` of the text and their
 /// width in pixels. Spaces at a break belong to no line.
 TextLine: struct {
-    start: Int
-    end: Int
-    width: Float
+    start: Int,
+    end: Int,
+    width: Float,
 }
 
 // Sorted glyph ranges with a value each: a coverage table (the value is
 // the coverage index of the range's first glyph) or a class definition (the
 // value is the class).
 Ranges: struct {
-    starts: [Int]
-    ends: [Int]
-    values: [Int]
+    starts: [Int],
+    ends: [Int],
+    values: [Int],
 }
 
 // A pair adjustment: placement and advance for the first and second glyph.
 Adjust: struct {
-    x_place1: Int
-    y_place1: Int
-    x_advance1: Int
-    x_place2: Int
-    y_place2: Int
-    x_advance2: Int
+    x_place1: Int,
+    y_place1: Int,
+    x_advance1: Int,
+    x_place2: Int,
+    y_place2: Int,
+    x_advance2: Int,
 }
 
 // A GPOS PairPos subtable. Format 1 lists second glyphs per coverage index
 // (`set_starts`, `seconds`, `adjusts`); format 2 indexes `adjusts` by
 // class1 * class2_count + class2.
 PairSubtable: struct {
-    format: Int
-    coverage: Ranges
-    set_starts: [Int]
-    seconds: [Int]
-    adjusts: [Adjust]
-    class1: Ranges
-    class2: Ranges
-    class2_count: Int
-    takes_second: Bool
+    format: Int,
+    coverage: Ranges,
+    set_starts: [Int],
+    seconds: [Int],
+    adjusts: [Adjust],
+    class1: Ranges,
+    class2: Ranges,
+    class2_count: Int,
+    takes_second: Bool,
 }
 
 PairLookup: struct {
-    skip_mask: Int
-    subtables: [PairSubtable]
+    skip_mask: Int,
+    subtables: [PairSubtable],
 }
 
 /// A TrueType font face.
 Face: struct {
-    priv bytes: [U8]
-    priv glyph_count: Int
-    priv units: Int
-    priv ascent: Int
-    priv descent: Int
-    priv line_gap: Int
-    priv long_loca: Bool
-    priv loca: Int
-    priv glyf: Int
-    priv glyf_length: Int
-    priv hmtx: Int
-    priv hmetrics: Int
-    priv cmap: Int
-    priv cmap_format: Int
-    priv cmap_count: Int
-    priv lookups: [PairLookup]
-    priv kern_pairs: [Int:Int]
-    priv classes: Ranges
-    priv fingerprint: Int
+    priv bytes: [U8],
+    priv glyph_count: Int,
+    priv units: Int,
+    priv ascent: Int,
+    priv descent: Int,
+    priv line_gap: Int,
+    priv long_loca: Bool,
+    priv loca: Int,
+    priv glyf: Int,
+    priv glyf_length: Int,
+    priv hmtx: Int,
+    priv hmetrics: Int,
+    priv cmap: Int,
+    priv cmap_format: Int,
+    priv cmap_count: Int,
+    priv lookups: [PairLookup],
+    priv kern_pairs: [Int:Int],
+    priv classes: Ranges,
+    priv fingerprint: Int,
 
     /// How many glyphs the face has. Glyph ids run from 0, the glyph drawn
     /// for a missing character.
@@ -261,14 +261,14 @@ Face: struct {
 
 // A table's place in the font.
 TableSpan: struct {
-    offset: Int
-    length: Int
+    offset: Int,
+    length: Int,
 }
 
 /// Why a font cannot be used: the table and the fault, in words.
 #Error
 FontError: struct {
-    reason: String
+    reason: String,
 }
 
 /// Reads a TrueType font. A font this reader cannot use, or a damaged one,
@@ -371,18 +371,18 @@ license: fn() -> String { data.FONT_LICENSE }
 // ---- metrics -------------------------------------------------------------
 
 Vertical: struct {
-    ascent: Int
-    descent: Int
-    line_gap: Int
+    ascent: Int,
+    descent: Int,
+    line_gap: Int,
 }
 
 // ---- cmap ----------------------------------------------------------------
 
 CmapPick: struct {
-    offset: Int
-    format: Int
-    count: Int
-    rank: Int
+    offset: Int,
+    format: Int,
+    count: Int,
+    rank: Int,
 }
 
 // ---- kerning -------------------------------------------------------------
@@ -390,28 +390,28 @@ CmapPick: struct {
 // The value record of `format` at `at`: its placement and advance fields
 // (device tables are for hinting and are skipped); `size` is its length.
 ValueRecord: struct {
-    x_place: Int
-    y_place: Int
-    x_advance: Int
+    x_place: Int,
+    y_place: Int,
+    x_advance: Int,
 }
 
 // ---- layout --------------------------------------------------------------
 
 Decoded: struct {
-    scalar: Int
-    next: Int
+    scalar: Int,
+    next: Int,
 }
 
 // A text's glyphs and the byte offset each draws from.
 Shaped: struct {
-    ids: [Int]
-    clusters: [Int]
+    ids: [Int],
+    clusters: [Int],
 }
 
 Positions: struct {
-    advances: [Int]
-    x_offsets: [Int]
-    y_offsets: [Int]
+    advances: [Int],
+    x_offsets: [Int],
+    y_offsets: [Int],
 }
 
 // ---- rasterizing -----------------------------------------------------------
@@ -421,11 +421,11 @@ Positions: struct {
 /// (linear, not gamma-encoded). Its top-left pixel sits `left` pixels right
 /// of the glyph's origin and `top` pixels above the baseline.
 GlyphMask: struct {
-    width: Int
-    height: Int
-    left: Int
-    top: Int
-    coverage: [U8]
+    width: Int,
+    height: Int,
+    left: Int,
+    top: Int,
+    coverage: [U8],
 }
 
 /// Glyph masks kept by face, glyph, size and quarter-pixel position, within
@@ -434,11 +434,11 @@ GlyphMask: struct {
 /// older one and the previous older one is dropped. So the cache holds at
 /// most about its budget, and drops masks unused for longest first.
 GlyphCache: struct {
-    priv faces: [Int]
-    priv recent: [Int:GlyphMask]
-    priv older: [Int:GlyphMask]
-    priv recent_bytes: Int
-    priv budget: Int
+    priv faces: [Int],
+    priv recent: [Int:GlyphMask],
+    priv older: [Int:GlyphMask],
+    priv recent_bytes: Int,
+    priv budget: Int,
 
     /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
     /// pixel, drawn the first time and kept.
@@ -463,10 +463,10 @@ cache_within: fn(budget: Int) -> GlyphCache {
 // heights of the edges crossing a cell, `area` those heights times twice
 // their mean distance from the cell's left side, in 1/SUBPIXEL pixels.
 Cells: struct {
-    width: Int
-    height: Int
-    cover: [Int]
-    area: [Int]
+    width: Int,
+    height: Int,
+    cover: [Int],
+    area: [Int],
 }
 
 // ---- painting --------------------------------------------------------------

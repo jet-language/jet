@@ -23,30 +23,30 @@ use {
 // Why a C header could not produce a binding cache.
 #Error
 CBindError: struct {
-    message: String
+    message: String,
 }
 
 // Result of translating a header: the cache source plus what was bound.
 CBindResult: struct {
     // The `#Bindgen c.<lib>.__bindgen__: module` cache file text.
-    source: String
+    source: String,
     // Function names successfully bound.
-    bound: [String]
+    bound: [String],
     // Prototypes skipped because a type is not bindable, with the reason.
-    skipped: [{name: String, reason: String}]
+    skipped: [{name: String, reason: String}],
     // Opaque typedefs that became owned nominal Jet handle facts.
-    handles: [HandleFact]
+    handles: [HandleFact],
     // Opaque typedefs withheld because ownership was not resolvable.
-    handle_skipped: [{reason: String, typedef_name: String}]
+    handle_skipped: [{reason: String, typedef_name: String}],
     // Explicit primary plus transitive native libraries for this binding.
-    link_closure: LinkClosure
+    link_closure: LinkClosure,
     // Exact descriptor identity embedded in the generated cache.
-    descriptor_stamp: String
+    descriptor_stamp: String,
     // The one boundary row consumed by binders, sema, inspect, and
     // comparison views; the foreign source stays authoritative.
-    boundary: ForeignBoundaryContract
+    boundary: ForeignBoundaryContract,
     // Caller-selected adaptation plans whose boundary digest matches.
-    plans: [BindingPlan]
+    plans: [BindingPlan],
 }
 
 // The bind hash for a header + cflags pair (cache invalidation):
@@ -85,24 +85,24 @@ pkg_cbind_write_bind_hash: fn(cache_path: String, header_src: String, cflags: St
 // What one header bind writes beside its `<lib>.jet` cache.
 CBindFiles: struct {
     // The `#Bindgen` cache text.
-    cache: String
+    cache: String,
     // The `<lib>.metadata` handle and link facts; None when the binding
     // records no handle and no link beyond the library itself.
-    metadata: String?
+    metadata: String?,
     // The `<lib>.hash` text: the bind hash of the header bytes.
-    hash: String
+    hash: String,
     // Function names bound, and prototypes skipped with their reason.
-    bound: [String]
-    skipped: [{name: String, reason: String}]
+    bound: [String],
+    skipped: [{name: String, reason: String}],
     // Opaque typedefs withheld because their ownership was not resolvable;
     // neither the command nor the compiler publishes a bind that has any.
-    handle_skipped: [{reason: String, typedef_name: String}]
+    handle_skipped: [{reason: String, typedef_name: String}],
     // What the `<lib>.provenance` record adds (pkg_cbind_provenance): the
     // handle facts' stable keys (sorted, unique), the link closure's stable
     // key, and the boundary row the cache stamps.
-    handle_keys: [String]
-    link_closure: String
-    boundary: ForeignBoundaryContract
+    handle_keys: [String],
+    link_closure: String,
+    boundary: ForeignBoundaryContract,
 }
 
 // The one C header bind: `jet inspect bind <header.h>` and the compiler's

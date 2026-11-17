@@ -89,8 +89,8 @@ JET_CLI_CORE_LOWERED: [String]{
 // check's phases and the library's `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`
 // and `ir.object` go to `trace_sink`, as the runtime library's do.
 JetCLICoreLibrary: struct {
-    bytes: [U8]
-    problem: String
+    bytes: [U8],
+    problem: String,
 }
 
 // The Core library's IR (jet_cli_core_library_ir): built from its own Core
@@ -99,8 +99,8 @@ JetCLICoreLibrary: struct {
 // (`{prefix}.bodies`), and the threads its machine code compiles on. Else
 // the problem that stopped the Core check.
 JetCLICoreLibraryIR: enum {
-    Stopped(problem: String)
-    Built(library: IRCoreLibrary, issues: [String], seal: String, bodies: [U8], threads: CompilerThreads)
+    Stopped(problem: String),
+    Built(library: IRCoreLibrary, issues: [String], seal: String, bodies: [U8], threads: CompilerThreads),
 }
 
 // The Core library's check, IR build, lint and O2 optimizer, as the
@@ -185,8 +185,8 @@ jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: 
 // what is wrong with it (None when nothing is), as the `runtime.core.bodies`
 // span.
 JetCLICoreBodiesFile: struct {
-    bytes: [U8]
-    problem: String?
+    bytes: [U8],
+    problem: String?,
 }
 
 // A compile reads only the header of the bodies file and the records it
@@ -280,8 +280,8 @@ jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThread
 // inputs leave behind drops on a detached task while the library's IR builds
 // (JetDriverCompileRequest.release_state_aside), not as the check returns.
 JetCLICoreChecked: enum {
-    Checked(inputs: JetDriverLoweringInputs)
-    Stopped(output: JetDriverVerbOutput)
+    Checked(inputs: JetDriverLoweringInputs),
+    Stopped(output: JetDriverVerbOutput),
 }
 
 // The compiler build's `runtime` step gives the `jet-bare` it just linked

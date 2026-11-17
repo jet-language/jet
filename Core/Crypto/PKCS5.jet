@@ -27,11 +27,11 @@ use {
 /// The scheme is the one the caller called.
 #Error
 PBEError: enum {
-    BadInput
-    InvalidFormat(asn1.ASN1Error?)
-    FeatureUnavailable
-    PasswordMismatch
-    Cipher(layer.CipherLayerError)
+    BadInput,
+    InvalidFormat(asn1.ASN1Error?),
+    FeatureUnavailable,
+    PasswordMismatch,
+    Cipher(layer.CipherLayerError),
 }
 
 /// An argument out of range: an iteration count or key length outside
@@ -54,9 +54,9 @@ impl layer.CipherLayerError -> PBEError { PBEError.Cipher(self) }
 
 /// PBKDF2-params: the salt, the iteration count and the PRF's digest.
 PBKDF2Params: struct {
-    salt: [U8]
-    iterations: Int
-    md: hashes.Md
+    salt: [U8],
+    iterations: Int,
+    md: hashes.Md,
 }
 
 /// The CBC cipher a PBES2 encryptionScheme OID names, as mbedtls 3.6.7's

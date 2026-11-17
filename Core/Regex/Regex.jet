@@ -52,8 +52,8 @@ use prefilter.[needle_absent]
 /// (Unicode scalar) position in the pattern where the problem is.
 #Error
 RegexError: struct {
-    offset: Int
-    reason: String
+    offset: Int,
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { "invalid regex at position {self.offset}: {self.reason}" }
@@ -69,9 +69,9 @@ RegexError: struct {
 /// Displays as its inline-flag letters: `i` ignore_case, `m` multiline,
 /// `s` dot_matches_newline (`"im"`; `""` for the defaults).
 RegexFlags: struct {
-    ignore_case: Bool
-    multiline: Bool
-    dot_matches_newline: Bool
+    ignore_case: Bool,
+    multiline: Bool,
+    dot_matches_newline: Bool,
 
     impl Display {
         display: fn(self) -> String {
@@ -88,30 +88,30 @@ RegexFlags: struct {
 /// `needle`, `prefix` and `dfa` are search accelerators derived from the
 /// program; they never change which match is reported.
 Regex: struct {
-    pattern: String
-    flags: RegexFlags
-    priv ops: [Int]
-    priv args: [Int]
-    priv ends: [Int]
-    priv negs: [Bool]
-    priv xs: [Int]
-    priv ys: [Int]
-    priv kinds: [Int]
-    priv los: [Int]
-    priv his: [Int]
-    priv start: Int
-    priv anchored_start: Bool
-    priv groups: Int
-    priv names: [String]
-    priv needle: [U8]
-    priv needle_text: String
-    priv prefix: [U8]
-    priv dfa: Dfa
+    pattern: String,
+    flags: RegexFlags,
+    priv ops: [Int],
+    priv args: [Int],
+    priv ends: [Int],
+    priv negs: [Bool],
+    priv xs: [Int],
+    priv ys: [Int],
+    priv kinds: [Int],
+    priv los: [Int],
+    priv his: [Int],
+    priv start: Int,
+    priv anchored_start: Bool,
+    priv groups: Int,
+    priv names: [String],
+    priv needle: [U8],
+    priv needle_text: String,
+    priv prefix: [U8],
+    priv dfa: Dfa,
     // Each lookaround: its body's first instruction, whether it looks behind
     // (a lookahead's body is compiled reversed), and whether it is negated.
-    priv look_starts: [Int]
-    priv look_behind: [Bool]
-    priv look_neg: [Bool]
+    priv look_starts: [Int],
+    priv look_behind: [Bool],
+    priv look_neg: [Bool],
 
     is_match: fn(self, text: String) -> Bool Never! { is_match(self, text) }
 
@@ -167,12 +167,12 @@ Regex: struct {
 /// `groups` holds each capture group's text, `""` for a group that took no
 /// part; `group`, `group_start` and `group_end` tell the two apart.
 Match: struct {
-    start: Int
-    end: Int
-    text: String
-    groups: [String]
-    priv spans: [Int]
-    priv names: [String]
+    start: Int,
+    end: Int,
+    text: String,
+    groups: [String],
+    priv spans: [Int],
+    priv names: [String],
 
     /// Group `n`'s text: 0 is the whole match; None when the pattern has no
     /// group `n` or the group took no part in this match.
@@ -652,32 +652,32 @@ K_NUMBER: 6
 K_NEGATED: 8
 
 Node: struct {
-    kind: Int
-    a: Int
-    b: Int
-    left: Int
-    neg: Bool
-    lo: Int
+    kind: Int,
+    a: Int,
+    b: Int,
+    left: Int,
+    neg: Bool,
+    lo: Int,
     hi: Int
 }
 
 PatternParser: struct {
-    cps: [Int]
-    i: Int
-    depth: Int
-    nodes: [Node]
-    kids: [Int]
-    kinds: [Int]
-    los: [Int]
-    his: [Int]
-    groups: Int
-    names: [String]
+    cps: [Int],
+    i: Int,
+    depth: Int,
+    nodes: [Node],
+    kids: [Int],
+    kinds: [Int],
+    los: [Int],
+    his: [Int],
+    groups: Int,
+    names: [String],
     // Each lookaround's body node, in the order they close (a nested one
     // before the one around it), whether it looks behind, and whether it is
     // negated.
-    looks: [Int]
-    look_behind: [Bool]
-    look_neg: [Bool]
+    looks: [Int],
+    look_behind: [Bool],
+    look_neg: [Bool],
 
     /// Arms in priority order. `open` is the position of the group's `(`,
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
@@ -1147,23 +1147,23 @@ OP_MATCH: 6
 
 // A fragment's dangling exits: `inst` patches `xs`, `-inst - 1` patches `ys`.
 Frag: struct {
-    start: Int
+    start: Int,
     outs: [Int]
 }
 
 Compiler: struct {
-    nodes: [Node]
-    kids: [Int]
-    ops: [Int]
-    args: [Int]
-    ends: [Int]
-    negs: [Bool]
-    xs: [Int]
-    ys: [Int]
-    too_big: Bool
+    nodes: [Node],
+    kids: [Int],
+    ops: [Int],
+    args: [Int],
+    ends: [Int],
+    negs: [Bool],
+    xs: [Int],
+    ys: [Int],
+    too_big: Bool,
     // Whether the node being compiled is a lookahead's body, which the
     // lookaround pass reads backward: its sequences run last part first.
-    reverse: Bool
+    reverse: Bool,
 
     push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
@@ -1319,9 +1319,9 @@ Compiler: struct {
 // The scan looks for `needle` (the UTF-8 of `best`) once before it builds
 // its VM, and while no thread is live it jumps to the next `prefix`.
 LitFacts: struct {
-    exact: Bool
-    text: [Int]
-    prefix: [Int]
+    exact: Bool,
+    text: [Int],
+    prefix: [Int],
     best: [Int]
 }
 
@@ -1433,12 +1433,12 @@ find_bytes: fn(text: [U8], needle: [U8], from: Int) -> Int Never! {
 // to the program; past either, the pattern has no DFA (`width` 0). A text
 // byte above 127 hands the question to the VM, which reads scalars.
 Dfa: struct {
-    width: Int
-    next: [I64]
-    match_now: [Bool]
-    match_end: [Bool]
-    dead: [Bool]
-    search: Int
+    width: Int,
+    next: [I64],
+    match_now: [Bool],
+    match_end: [Bool],
+    dead: [Bool],
+    search: Int,
     pinned: Int
 }
 
@@ -1456,23 +1456,23 @@ no_dfa: fn() -> Dfa Never! {
 /// `ends` are scratch rows reused by every closure, and `work` counts
 /// closure steps and comparisons against `budget`.
 DfaBuilder: struct {
-    buckets: [Int:Int]
-    chain: [Int]
-    pcs: [Int]
-    los: [Int]
-    his: [Int]
-    restarts: [Bool]
-    match_now: [Bool]
-    match_end: [Bool]
-    mark: [Int]
-    epoch: Int
-    stack: [Int]
-    seeds: [Int]
-    out: [Int]
-    ends: [Int]
-    work: Int
-    budget: Int
-    too_big: Bool
+    buckets: [Int:Int],
+    chain: [Int],
+    pcs: [Int],
+    los: [Int],
+    his: [Int],
+    restarts: [Bool],
+    match_now: [Bool],
+    match_end: [Bool],
+    mark: [Int],
+    epoch: Int,
+    stack: [Int],
+    seeds: [Int],
+    out: [Int],
+    ends: [Int],
+    work: Int,
+    budget: Int,
+    too_big: Bool,
 
     /// Walks epsilon edges from `stack`, appending consuming pcs to `out`
     /// and the targets of `$` to `ends` (only `at_end`, which walks them
@@ -1709,26 +1709,26 @@ dfa_verdict: fn(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Int Never!
 /// thread copies one Int. `hi` is the text's end; under `full` a thread
 /// matches only there.
 VM: struct {
-    seen: [Int]
-    epoch: Int
-    hi: Int
-    full: Bool
-    sp: Int
-    spc: [Int]
-    sstart: [Int]
-    scaps: [Int]
-    nt: Int
-    tpc: [Int]
-    tstart: [Int]
-    tcaps: [Int]
-    m_pc: Int
-    m_start: Int
-    m_caps: Int
-    aslot: [Int]
-    apos: [Int]
-    aprev: [Int]
+    seen: [Int],
+    epoch: Int,
+    hi: Int,
+    full: Bool,
+    sp: Int,
+    spc: [Int],
+    sstart: [Int],
+    scaps: [Int],
+    nt: Int,
+    tpc: [Int],
+    tstart: [Int],
+    tcaps: [Int],
+    m_pc: Int,
+    m_start: Int,
+    m_caps: Int,
+    aslot: [Int],
+    apos: [Int],
+    aprev: [Int],
     // The lookaround rows of `look_tables` for this text.
-    looks: [Bool]
+    looks: [Bool],
 
     /// Drop every thread and capture record; the scan restarts afresh.
     reset: fn(&self) Never! {
@@ -1847,8 +1847,8 @@ VM: struct {
 }
 
 Run: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
     caps: [Int]
 }
 
@@ -2442,8 +2442,8 @@ decode_all: fn(raw: [U8]) -> [Int] Never! {
 
 /// Byte offset -> character position, moving forward through one text.
 CharCursor: struct {
-    byte: Int
-    count: Int
+    byte: Int,
+    count: Int,
 
     at: fn(&self, raw: [U8], byte: Int) -> Int Never! {
         if byte < self.byte {

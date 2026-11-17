@@ -13,42 +13,42 @@ DEBUG_HISTORY_MAX_WATCHES: 32
 // Rust DebugEvent: one post-statement source event already projected into
 // safe Jet terms; no generated-code addresses or host objects cross here.
 DebugEvent: struct {
-    sequence: Int
-    function: String
-    line: Int
-    depth: Int
-    stack: [FrameSnapshot]
-    locals: [ValueSnapshot]
-    writes: [DebugWrite]
+    sequence: Int,
+    function: String,
+    line: Int,
+    depth: Int,
+    stack: [FrameSnapshot],
+    locals: [ValueSnapshot],
+    writes: [DebugWrite],
 }
 
 // Rust DebugWrite: one source-level write observed at a statement boundary.
 DebugWrite: struct {
-    line: Int
-    place: String
-    old_value: String
-    new_value: String
+    line: Int,
+    place: String,
+    old_value: String,
+    new_value: String,
 }
 
 // Rust DebugCheckpoint: authority captured before a live session starts; a
 // repair can only rebind while it stays identical.
 DebugCheckpoint: struct {
-    source_identity: String
-    shape: String
-    sequence: Int
+    source_identity: String,
+    shape: String,
+    sequence: Int,
 }
 
 // Rust DebugHistory: bounded, indexed recorded-stop history.
 DebugHistory: struct {
-    events: [DebugEvent]
-    checkpoint: DebugCheckpoint?
-    cursor: Int?
-    capped: Bool
+    events: [DebugEvent],
+    checkpoint: DebugCheckpoint?,
+    cursor: Int?,
+    capped: Bool,
     // Canonical checked IR decision ledger carried with the recorded run.
     // It is opaque receipt-associated evidence here: ProveReplay validates it
     // before a receipt or inspect view uses it; this model never parses,
     // synthesizes or rewrites it.
-    decision_ledger: String?
+    decision_ledger: String?,
 
     // Rust derived Default.
     default: fn() -> DebugHistory Never! {
@@ -124,17 +124,17 @@ DebugHistory: struct {
 
 // Rust RecordedAct: one post-statement state in a recorded run receipt.
 RecordedAct: struct {
-    sequence: Int
-    function: String
-    line: Int
-    locals: [ValueSnapshot]
+    sequence: Int,
+    function: String,
+    line: Int,
+    locals: [ValueSnapshot],
 }
 
 // Rust RecordedRun: bounded causal evidence attached to a `.jetproof-replay`
 // receipt, with the optional checked IR decision ledger captured alongside.
 RecordedRun: struct {
-    acts: [RecordedAct]
-    decision_ledger: String?
+    acts: [RecordedAct],
+    decision_ledger: String?,
 
     // Rust derived Default.
     default: fn() -> RecordedRun Never! {
@@ -144,11 +144,11 @@ RecordedRun: struct {
 
 // Rust IndexedWrite: one derived write keyed by its act sequence.
 DebugIndexedWrite: struct {
-    sequence: Int
-    line: Int
-    place: String
-    old_value: String
-    new_value: String
+    sequence: Int,
+    line: Int,
+    place: String,
+    old_value: String,
+    new_value: String,
 }
 
 // Rust snapshot_map: place name -> snapshot, where a later duplicate name

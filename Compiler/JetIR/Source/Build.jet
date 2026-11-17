@@ -7,23 +7,23 @@ use {
 }
 
 IRBuildFailure: struct {
-    key: String
-    name: String
-    message: String
-    source_file: String
-    span: Span
+    key: String,
+    name: String,
+    message: String,
+    source_file: String,
+    span: Span,
 }
 
 IRBuildResult: struct {
-    program: IRModule
-    failures: [IRBuildFailure]
+    program: IRModule,
+    failures: [IRBuildFailure],
 }
 
 // A build that hands its checked program back (ir_build_roots_in): the
 // program serves the next build over the same declarations.
 IRBuildKept: struct {
-    result: IRBuildResult
-    program: IRProgram
+    result: IRBuildResult,
+    program: IRProgram,
 }
 
 // A visible name: `slot` holds the variable named `name`. `indirect` is the
@@ -41,24 +41,24 @@ IRBuildKept: struct {
 // `cleanup`: an entry that names no variable but a `defer` body, its row in
 // IRBuilder.defers, which runs where the entry would drop (-1: none).
 IRBinding: struct {
-    name: String
-    slot: Int
-    indirect: Int{-1}
-    owned: Bool{false}
-    symbol: SymbolID{symbol_none()}
-    write: Bool{false}
-    carrier: Int{-1}
-    live: Int{-1}
-    cleanup: Int{-1}
+    name: String,
+    slot: Int,
+    indirect: Int{-1},
+    owned: Bool{false},
+    symbol: SymbolID{symbol_none()},
+    write: Bool{false},
+    carrier: Int{-1},
+    live: Int{-1},
+    cleanup: Int{-1},
 }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`. A temporary given the cell as its
 // place (`ends`) ends once read back (ir_write_backs).
 IRWriteBack: struct {
-    cell: Int
-    slot: Int
-    ends: Bool{false}
+    cell: Int,
+    slot: Int,
+    ends: Bool{false},
 }
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
@@ -70,22 +70,22 @@ IRWriteBack: struct {
 // `value` (-1: a statement loop). `edge` is the word each `break` sets to
 // tell its path apart where the loop's exits meet (ir_loop_edge; -1: none).
 IRLoopFrame: struct {
-    label: String?
-    exit: Int
-    next: Int
-    mark: Int
-    guards: Int
-    value: Int{-1}
-    edge: Int{-1}
+    label: String?,
+    exit: Int,
+    next: Int,
+    mark: Int,
+    guards: Int,
+    value: Int{-1},
+    edge: Int{-1},
 }
 
 // A `break` out of the loop whose edge word is `edge`: the id it set that
 // word to and the ownership where it left of the variables bound before
 // the loop (IRLoopFrame.mark), which its drops left as they were.
 IRLoopEdge: struct {
-    edge: Int
-    id: Int
-    states: [IROwnState]
+    edge: Int,
+    id: Int,
+    states: [IROwnState],
 }
 
 // A guard a temporary in the statement being built took, or a temporary
@@ -95,11 +95,11 @@ IRLoopEdge: struct {
 // ends it only where it is held. `glue` closes the temporary first (-1: it
 // only drops); `drops` is whether its type has a drop.
 IRStatementGuard: struct {
-    slot: Int
-    opener: Int
-    part: Int
-    glue: Int{-1}
-    drops: Bool{true}
+    slot: Int,
+    opener: Int,
+    part: Int,
+    glue: Int{-1},
+    drops: Bool{true},
 }
 
 // An open `.expect_fail` region (BuildTests.jet ir_scope_member): `scope`
@@ -107,10 +107,10 @@ IRStatementGuard: struct {
 // `mark` the bindings and `transactions` the open #Transact blocks when it
 // opened.
 IRCatchFrame: struct {
-    scope: Int
-    exit: Int
-    mark: Int
-    transactions: Int
+    scope: Int,
+    exit: Int,
+    mark: Int,
+    transactions: Int,
 }
 
 // A `#Memo` function's store (BuildMemo.jet): `cell` the slot holding its
@@ -118,183 +118,183 @@ IRCatchFrame: struct {
 // (the arguments' copies at `offsets`, typed `rows`; the result at
 // `value_offset`; `size` bytes in all), `bound` its entry bound (-1: none).
 IRMemo: struct {
-    cell: Int
-    entry: Int
-    rows: [Int]
-    offsets: [Int]
-    value_offset: Int
-    size: Int
-    bound: Int
+    cell: Int,
+    entry: Int,
+    rows: [Int],
+    offsets: [Int],
+    value_offset: Int,
+    size: Int,
+    bound: Int,
 }
 
 // Per-function build state. `fresh[slot]` marks a temporary that holds a
 // value nobody else owns yet (a call result, a built String): a borrowing
 // consumer drops it after use.
 IRBuilder: struct {
-    f: IRFunction
-    bindings: [IRBinding]
-    scopes: [Int]
-    loops: [IRLoopFrame]
-    fresh: [Bool]
+    f: IRFunction,
+    bindings: [IRBinding],
+    scopes: [Int],
+    loops: [IRLoopFrame],
+    fresh: [Bool],
     // The subject slots of the open switches (innermost last).
-    subjects: [Int]
+    subjects: [Int],
     // Pattern bindings of the condition being built, bound when its If opens.
-    pending: [IRPending]
+    pending: [IRPending],
     // The address a write window's inline Option subject was read from, by
     // the subject slot (BuildExpr.jet ir_borrow): its payload binds there.
-    windows: [Int:Int]{[Int:Int]{}}
+    windows: [Int:Int]{[Int:Int]{}},
     // The allocator storage an allocator view was read from, by the view
     // slot (BuildAllocators.jet): a variable bound to the view aliases it.
-    views: [Int:Int]{[Int:Int]{}}
-    line: Int
-    error: String
-    error_span: Span
+    views: [Int:Int]{[Int:Int]{}},
+    line: Int,
+    error: String,
+    error_span: Span,
     // The function's executable return (None: Unit), its failure carrier, and
     // whether it hands back the plain success of a `T Never!` carrier.
-    ret: Type?
-    failure: TFailureCarrier
-    plain: Bool
+    ret: Type?,
+    failure: TFailureCarrier,
+    plain: Bool,
     // Variables some closure of this body writes: they live in frame cells
     // from their declaration, so every read sees the closure's writes.
-    cells: [String]
+    cells: [String],
     // Calls emitted where the program is only read (display impls): their
     // callee ids are resolved when the function is done.
-    deferred: [IRDeferredCall]
+    deferred: [IRDeferredCall],
     // The variables that close their values when their scopes end, the
     // values read out of such a value, and the parts moved out of one
     // (BuildOwn.jet).
-    closes: [IRClose]
-    places: [IRPlace]
-    moved: [IRMovedPart]
-    part_closes: [IRPartClose]
+    closes: [IRClose],
+    places: [IRPlace],
+    moved: [IRMovedPart],
+    part_closes: [IRPartClose],
     // The open `#Transact` blocks (innermost last) an early exit unwinds.
-    transactions: [IRTxFrame]
+    transactions: [IRTxFrame],
     // The `defer` bodies built so far, by IRBinding.cleanup row.
-    defers: [[Int]]{[[Int]]{}}
+    defers: [[Int]]{[[Int]]{}},
     // The open contract scopes (innermost last) whose `post` clauses a
     // return checks.
-    contracts: [IRContractFrame]
+    contracts: [IRContractFrame],
     // The variable slot an explicit move (`x.move()`) just read (-1: none): that
     // read moves even where a plain read of the variable would share.
-    moving: Int{-1}
+    moving: Int{-1},
     // The Bool slot the arm of a masked branch being built runs under (-1:
     // none): an assignment there keeps its old value where it is false
     // (BuildMask.jet).
-    mask: Int{-1}
+    mask: Int{-1},
     // A function with masked early returns (BuildMask.jet ir_masked_exits):
     // the Bool variable no masked return has run yet and the variable
     // holding the value one chose (-1: none), and whether the code being
     // built may run after one, so its assignments are masked by `live`.
-    live: Int{-1}
-    exit_value: Int{-1}
-    exiting: Bool{false}
+    live: Int{-1},
+    exit_value: Int{-1},
+    exiting: Bool{false},
     // Per type of the checked body's type table, whether it is fixed
     // (BuildMask.jet ir_fixed_types; empty when none is): a scalar slot of
     // such a type is marked fixed (IRFunction.slot_fixed).
-    fixed_ids: [Bool]{[Bool]{}}
+    fixed_ids: [Bool]{[Bool]{}},
     // The `#Impure` blocks open around the code being built: a build host
     // call made inside one may touch the ambient world (ir_host_method).
-    impure: Int{0}
+    impure: Int{0},
     // The checked function whose body tree (FnBody.tree) holds the nodes and
     // statements this body reads (-1: glue with no checked body), and the
     // nodes and statements the builder made itself (ir_node, ir_stmt_node)
     // with the next node id it hands out.
-    row: Int{-1}
-    made: BodyTree{BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}}
-    next_node: Int{IR_FIRST_NODE_ID}
+    row: Int{-1},
+    made: BodyTree{BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}},
+    next_node: Int{IR_FIRST_NODE_ID},
     // How many closures of each kind this body created so far
     // (ir_closure_key).
-    lambdas: [String:Int]
+    lambdas: [String:Int],
     // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
-    stopping: Bool{false}
+    stopping: Bool{false},
     // A body the runtime calls for a status word and trusts without a stop
     // check of its own (a line source's next: IterSources.jet
     // iter_source_pull): its stop edges return -1, the stopped status, not
     // whatever the last call left in the result register.
-    stop_status: Bool{false}
+    stop_status: Bool{false},
     // The open `.expect_fail` regions (innermost last) whose catch a stop
     // edge tries first (ir_stop_catches).
-    catches: [IRCatchFrame]{[IRCatchFrame]{}}
+    catches: [IRCatchFrame]{[IRCatchFrame]{}},
     // A `#Memo` function's result store: each return files its result
     // (ir_memo_file).
-    memo: IRMemo?{None}
+    memo: IRMemo?{None},
     // The slot and instruction counts where the innermost open
     // `#Context(allocator: a)` block of this body began (0 with none open:
     // all of this body's frame is younger than every block open when it
     // runs): storage it reserved after them is younger than the block
     // (BuildRoutes.jet ir_list_grow_buffer).
-    young_slots: Int{0}
-    young_ops: Int{0}
+    young_slots: Int{0},
+    young_ops: Int{0},
     // Building the program entry itself (IRProgram.entry, not a lambda or a
     // generic instance in it): its end and each return first report the
     // entry returning (ir_entry_ending), so its drops can leave the heap to
     // the kernel (#5478).
-    entry: Bool{false}
+    entry: Bool{false},
     // The checked program, set while a `#Transact` block with snapshots is
     // built (ir_transact): its stop edges restore them (ir_stop_return),
     // which builds their Rollback calls and assignments.
-    program: IRProgram?{None}
+    program: IRProgram?{None},
     // What a failed bounds check of this body does (ir_checked_address):
     // the program's mode in a function of a module IRChecks names, else Fatal.
-    bounds: IRBoundsMode{IRBoundsMode.Fatal}
+    bounds: IRBoundsMode{IRBoundsMode.Fatal},
     // The index nodes (AutoVectorizationFacts.proven_indexes) of the loops
     // being built (ir_range_loop), each with the row of its loop's proof
     // (IRFunction.loop_proofs; -1: the loop is done): the access at such an
     // index has no bounds check (ir_checked_element).
-    proven_index: [Int:Int]{[Int:Int]{}}
+    proven_index: [Int:Int]{[Int:Int]{}},
     // Guards taken by a temporary in the statement being built
     // (`store.guard_edit().value.items[key] = text`), and temporaries with
     // cleanup lent to a read parameter (`show(open("x"))`): they end with
     // the statement (ir_stmt), or on an early exit out of it
     // (ir_exit_statement_guards).
-    statement_guards: [IRStatementGuard]{[IRStatementGuard]{}}
+    statement_guards: [IRStatementGuard]{[IRStatementGuard]{}},
     // How many constructs were open when the statement being built began
     // (-1: none is being built). A temporary made deeper, in a branch or a
     // loop condition of the statement, ends where it is made instead
     // (ir_close_temporary).
-    statement_depth: Int{-1}
+    statement_depth: Int{-1},
     // Values the body only borrows, which it never closes (ir_lent): a
     // `Val`/`Ok`/`Err` carrier or aggregate built around a value it does not
     // own (a variable or parameter, or another lent value), the result of a
     // call that returns a view (`-> T from self | x`), and any part, binding
     // or `?` payload of a lent value. Their owner closes them.
-    lent: [Int:Bool]{[Int:Bool]{}}
+    lent: [Int:Bool]{[Int:Bool]{}},
     // The instance this body builds (IRInstance; none for a body that is no
     // generic instance).
-    instance: IRInstance{IRInstance{names: [String]{}, args: [Type]{}, types: [Type]{}}}
+    instance: IRInstance{IRInstance{names: [String]{}, args: [Type]{}, types: [Type]{}}},
     // The failures of the statements of the body's outermost block kept so
     // far (ir_stmt_collecting), and the binders those statements declared,
     // whose later reads follow from those failures.
-    failures: [IRFailureRow]{[IRFailureRow]{}}
-    poisoned: [String]{[String]{}}
+    failures: [IRFailureRow]{[IRFailureRow]{}},
+    poisoned: [String]{[String]{}},
     // A generator's producer body (BuildGenerator.jet): the slot holding its
     // runtime state, which each `yield` hands its value to (-1: no producer).
-    generator: Int{-1}
+    generator: Int{-1},
     // The `Err(...)` nodes a `return` being built hands back from the tail of
     // a valued `if` or block (ir_return): building one starts its failure's
     // journey there, as `return Err(...)` does.
-    origins: [Int]{[Int]{}}
+    origins: [Int]{[Int]{}},
     // The probe a Map entry update made before building its value
     // (BuildMaps.jet ir_map_update): a `get` of that map and key in the value
     // answers from the entry it found.
-    probe: IRMapProbe?{None}
+    probe: IRMapProbe?{None},
     // The `Let` of a Map group update being built (BuildMaps.jet
     // ir_map_take_fuses; -1: none): its `group` binds the write window of
     // the map's entry (ir_map_take).
-    map_take: Int{-1}
+    map_take: Int{-1},
     // The stores of the group updates being built (`map[key] = group`):
     // the window already wrote the entry, so each builds nothing.
-    map_stores: [Int]{[Int]{}}
+    map_stores: [Int]{[Int]{}},
     // The statement being built spawns a grouped task the next statement
     // joins first (BuildCoreClosures.jet ir_spawn_joined_next): its spawn
     // defers the task to that join (ir_task_spawn).
-    spawn_joined: Bool{false}
+    spawn_joined: Bool{false},
     // A task body (ir_task_spawn): a failure that leaves it stops the task,
     // which its join reports as TaskFailure.Panicked (ir_try_failure).
-    task_body: Bool{false}
+    task_body: Bool{false},
     // The breaks built so far (ir_loop_jump), whose ownership meets that of
     // their loop's other exits after it (ir_loop_join).
-    loop_edges: [IRLoopEdge]{[IRLoopEdge]{}}
+    loop_edges: [IRLoopEdge]{[IRLoopEdge]{}},
     // A `??` or `?` that reads its operand's success straight from a Result
     // route's words (ir_expr_split): `split_armed` holds from the operand's
     // dispatch to the closing route call of its handle method or Core call
@@ -305,27 +305,27 @@ IRBuilder: struct {
     // (BuildRoutes.jet ir_route_result). `split` holds at most that one
     // call; it is a list so the `??` or `?` pops it out of the builder
     // without a copy.
-    split_armed: Bool{false}
-    split_ty: Type{Type.Int}
-    split: [IRRouteSplit]{[IRRouteSplit]{}}
+    split_armed: Bool{false},
+    split_ty: Type{Type.Int},
+    split: [IRRouteSplit]{[IRRouteSplit]{}},
     // The operand of the `??` whose payload a place-borrowing Let binds
     // (JetSema PlaceBorrows.jet; -1: none): ir_or_fallback lends the payload
     // where its place holds it instead of copying it into a value of its own.
-    or_lend: Int{-1}
+    or_lend: Int{-1},
 }
 
 // One failure of a body: its message and the span it names.
 IRFailureRow: struct {
-    message: String
-    span: Span
+    message: String,
+    span: Span,
 }
 
 // The entry `found` (negative: none) a probe of the map in slot `map` for the
 // key in slot `key` found.
 IRMapProbe: struct {
-    map: Int
-    key: Int
-    found: Int
+    map: Int,
+    key: Int,
+    found: Int,
 }
 
 // A generic instance being built: the type parameters it binds
@@ -334,18 +334,18 @@ IRMapProbe: struct {
 // (jet_sema sema_instance_types). The builder reads an instance type by row
 // and never substitutes one (ir_fact_type).
 IRInstance: struct {
-    names: [String]
-    args: [Type]
-    types: [Type]
+    names: [String],
+    args: [Type],
+    types: [Type],
 }
 
 // The Call at instruction `at` of function `function` (-1: the function
 // being built) names the checked function `key` applied to `args`.
 IRDeferredCall: struct {
-    at: Int
-    key: String
-    function: Int{-1}
-    args: [Type]{[Type]{}}
+    at: Int,
+    key: String,
+    function: Int{-1},
+    args: [Type]{[Type]{}},
 }
 
 // The `bounds` build option (JetFoundation BuildOptions.jet): what a failed
@@ -353,9 +353,9 @@ IRDeferredCall: struct {
 // Report writes the failure (ir_list_bounds_report) and goes on with the
 // access; Off drops the check.
 IRBoundsMode: enum {
-    Fatal
-    Report
-    Off
+    Fatal,
+    Report,
+    Off,
 }
 
 // The runtime checks a program keeps, and what else of the build options the
@@ -367,15 +367,15 @@ IRBoundsMode: enum {
 // `dead_code: keep` option: every non-generic function of `modules` is built
 // as a root next to the entry (ir_build_program).
 IRChecks: struct {
-    bounds: IRBoundsMode
-    modules: [U32:Bool]
-    backtrace: IRBacktrace
-    keep: Bool
+    bounds: IRBoundsMode,
+    modules: [U32:Bool],
+    backtrace: IRBacktrace,
+    keep: Bool,
     // The entry package's `allocator:` policy: Val(cap) wraps the system
     // heap in the counting allocator capped at `cap` bytes (0: no cap), so a
     // fallible allocation past the cap fails (ir_entry_function passes it to
     // jet_rt_program_allocator_configure); None keeps the system heap.
-    counting: Int?{None}
+    counting: Int?{None},
     // The jobs the program's first word can select ahead of
     // the entry; the entry function calls each (ir_entry_function). The word
     // of a `passthrough_jobs` job (an `.Internal` one, or one with typed
@@ -383,37 +383,37 @@ IRChecks: struct {
     // entry that parses no argv of its own) and a job that is not stripped,
     // any other first word is the unknown-job report (E1294), which lists
     // `declared_jobs`.
-    jobs: [IRJob]{[IRJob]{}}
-    passthrough_jobs: [String]{[String]{}}
-    declared_jobs: [String]{[String]{}}
-    unknown_jobs: Bool{false}
+    jobs: [IRJob]{[IRJob]{}},
+    passthrough_jobs: [String]{[String]{}},
+    declared_jobs: [String]{[String]{}},
+    unknown_jobs: Bool{false},
     // `--checked-alloc` (the `checked_alloc` build option): the entry calls
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
-    checked_alloc: Bool{false}
+    checked_alloc: Bool{false},
     // `jet run --observe`: the entry calls jet_rt_observe_link, so the link
     // keeps the runtime's observation start (ir_observe_link).
-    observe: Bool{false}
+    observe: Bool{false},
     // The entry package's `log:` field and `jet run --log`: the level
     // filters the entry passes to the runtime (ir_log_configure).
-    log_package: String{""}
-    log_flag: String{""}
+    log_package: String{""},
+    log_flag: String{""},
     // The entry package's name in a program that links the device store
     // (JetRuntime World.jet): the entry passes it to the runtime first, which
     // keeps the store under it (ir_device_package).
-    entry_package: String{""}
+    entry_package: String{""},
     // The entry package's `policy.harden` or the `hardened` profile: a
     // release build keeps the memory sentry (ir_checks_sentries), and when
     // a function holds a `timing: .Fixed` value, the entry first calls
     // jet_rt_timing_admit, which ends the program on an unconfirmed host
     // (ir_timing_admitted).
-    harden: Bool{false}
+    harden: Bool{false},
     // A release build (the `release` or `hardened` profile): an
     // `#Off(.Release)` body emits no code (ir_stmt).
-    release: Bool{false}
+    release: Bool{false},
     // `--deep-checks`: the checked functions, by key, whose `#On(.Deep)`
     // bodies emit code (ir_deep_checks_on); every other one emits none.
-    deep: [String:Bool]{[String:Bool]{}}
+    deep: [String:Bool]{[String:Bool]{}},
     // A program bound to the prelinked runtime image that carries Core's
     // code (#6328 c22 S7b-1, JetCLI Host.jet jet_cli_native_executable):
     // the image's Core exports. Its direct calls of an exported Core
@@ -421,29 +421,29 @@ IRChecks: struct {
     // the image's (ir_core_cells_bind), when its functions build as the
     // library's (ir_core_image_fits). None builds every Core function it
     // calls.
-    core: IRCoreImage?{None}
+    core: IRCoreImage?{None},
     // A build with debug information: each DebugView implementation's
     // `debug_view` is built as a root next to the entry (ir_build_program),
     // so a debugger can call it on a stopped program's value.
-    debug_views: Bool{false}
+    debug_views: Bool{false},
 }
 
 // An argv-selectable job: the checked function `key` that the program word
 // `name` runs instead of the entry. A `stripped` job is one a release build
 // does not ship (any but `#Job(.Ship)`): its word is an unknown job.
 IRJob: struct {
-    key: String
-    name: String
-    stripped: Bool
+    key: String,
+    name: String,
+    stripped: Bool,
 }
 
 // The `backtrace` build option: what a native fault report prints after its
 // first line (JetRuntime Fault.jet). Its word is the order here, the value
 // jet_rt_fault_backtrace takes.
 IRBacktrace: enum {
-    Full
-    Brief
-    Off
+    Full,
+    Brief,
+    Off,
 }
 
 ir_checks_stock: fn() -> IRChecks Never! {
@@ -490,111 +490,111 @@ ir_deep_checks_on: fn(p: IRProgram, row: Int) -> Bool Never! {
 // (queue, instances, substitution) lives in IRModule. A generic function is
 // built once per distinct list of concrete type arguments (monomorphized).
 IRProgram: struct {
-    functions: [FnBody]
+    functions: [FnBody],
     // Each function key's first row in `functions` (ir_first_function_rows).
-    rows: NameRows
+    rows: NameRows,
     // The run's symbol table: the key of each run-wide SymbolID a checked
     // declaration or body names (ir_symbol_key).
-    symbols: SymbolTable
-    types: [TTypeDef]
-    type_rows: [String:Int]
+    symbols: SymbolTable,
+    types: [TTypeDef],
+    type_rows: [String:Int],
     // Checked constants (ConstRef / CtLit values): each key's row in
     // `constant_defs`. A read borrows the row in place; the map holds no
     // definition, so neither a read nor a landed value copies one.
-    constants: [String:Int]
-    constant_defs: [TConstantDef]
+    constants: [String:Int],
+    constant_defs: [TConstantDef],
     // A selected Display (`display`), Printable (`show`) or user Comparable
     // (`compare`) implementation method by "<trait>|<rendered type key>".
-    render_impls: [String:Int]
+    render_impls: [String:Int],
     // The selected Close implementation method (`close`) by rendered type
     // key.
-    close_methods: [String:Int]
+    close_methods: [String:Int],
     // The implementation methods a dynamic trait call may select, by
     // "<trait>|<method>" (function rows; see ir_trait_methods).
-    trait_methods: [String:[Int]]
+    trait_methods: [String:[Int]],
     // The host target's trait implementations, read once by
     // ir_program_declared: the traits each implementing method serves, by
     // "<module>|<owner key>|<method>" (`impl_slots` rows of `impl_traits`),
     // and the Display, Printable, Close and user Comparable implementations
     // (`impl_methods`) whose methods ir_program_bind selects among the bound
     // functions.
-    impl_slots: [String:Int]
-    impl_traits: [[String]]
-    impl_methods: [IRImplMethod]
+    impl_slots: [String:Int],
+    impl_traits: [[String]],
+    impl_methods: [IRImplMethod],
     // The payload key of each type a trait implementation is declared for
     // (ir_trait_key_table, read by ir_trait_key), found once by
     // ir_program_declared.
-    trait_keys: IRTraitKeys{IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}}
+    trait_keys: IRTraitKeys{IRTraitKeys{keys: [String:Int]{}, held: [Int:Bool]{}}},
     // The host target's trait implementations that declare no method (an
     // empty trait's): no function names their owner, so ir_trait_implementers
     // reads the owner here.
-    empty_impls: [IREmptyImpl]{[IREmptyImpl]{}}
+    empty_impls: [IREmptyImpl]{[IREmptyImpl]{}},
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
-    source_bytes: [[U8]]
-    source_lines: [[Int]]
-    source_rows: [String:Int]
+    source_bytes: [[U8]],
+    source_lines: [[Int]],
+    source_rows: [String:Int],
     // The checked foreign functions a call may name, by function key.
-    foreign: [String:SemaCheckedForeignFunction]
+    foreign: [String:SemaCheckedForeignFunction],
     // The intrinsics by function key (BuildLibrary.jet): a call of one is
     // its machine operation, never a call. A program has Core's
     // (ir_core_intrinsics); a runtime library adds its own.
-    intrinsics: [String:IRRuntimeIntrinsic]
+    intrinsics: [String:IRRuntimeIntrinsic],
     // Cutover B L2b: by DeclID row, each declaration's first function row
     // (-1: none) and its checked foreign row in `foreign_rows` (-1: none).
     // A direct call (NodeKind.Call) finds its callee here, by no key.
-    decl_rows: [Int]{[Int]{}}
-    decl_foreign: [Int]{[Int]{}}
-    foreign_rows: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
+    decl_rows: [Int]{[Int]{}},
+    decl_foreign: [Int]{[Int]{}},
+    foreign_rows: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}},
     // The C handle types the foreign functions name, by nominal name, with
     // their close (BuildForeign.jet ir_foreign_handle_row).
-    foreign_handles: [String:IRForeignHandle]{[String:IRForeignHandle]{}}
+    foreign_handles: [String:IRForeignHandle]{[String:IRForeignHandle]{}},
     // Whether the modules built from it check for a runtime stop after each
     // call that can deliver one (IRModule.stop_points); false only for the
     // runtime library (ir_build_library).
-    stop_points: Bool{true}
+    stop_points: Bool{true},
     // Whether `#FFI(asm)` leaves may be the runtime's closed rails (the fiber
     // switch, GS base write and signal return, X64/InlineAsm.jet): true only for a library
     // that defines the fiber entry the switch starts fresh stacks in
     // (ir_build_library), never for a program.
-    asm_rails: Bool{false}
+    asm_rails: Bool{false},
     // Whether `#Unsafe` scopes enter the runtime sentry and raw accesses are
     // checked by it (BuildSentry.jet): for a program or test image, as its
     // checks have it (ir_checks_sentries, in ir_build_program and
     // ir_build_tests); false for the runtime library the sentry is part of
     // and for compile-time evaluation.
-    sentries: Bool{false}
+    sentries: Bool{false},
     // Whether the modules built from it serve the program's own values
     // (IRModule.user_values): a program, test or Core image, whatever its
     // checks; false for the runtime library and compile-time evaluation.
-    user_values: Bool{false}
+    user_values: Bool{false},
     // Whether each checked `#Pre`/`#Post` clause reports its outcome to the
     // runtime's contract records (BuildContracts.jet ir_contract,
     // JetRuntime TestContracts.jet): true only for a test image
     // (ir_build_tests), whose records `jet prove` reads.
-    contract_records: Bool{false}
+    contract_records: Bool{false},
     // `jet test --coverage`: the functions whose entry records its line
     // (ir_coverage_probe), by checked function key; empty for every other
     // build.
-    coverage: [String:Int]{[String:Int]{}}
+    coverage: [String:Int]{[String:Int]{}},
     // The ordinal of each `task` spawn site among its file's spawn sites in
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
-    spawn_sites: [String:Int]{[String:Int]{}}
+    spawn_sites: [String:Int]{[String:Int]{}},
     // By ir_codec_decode_helpers index, that Core decode helper's function
     // row (-1: the program does not hold it), found once by ir_program_bind
     // (BuildDyn.jet ir_codec_decode_key).
-    decode_helpers: [Int]{[Int]{}}
+    decode_helpers: [Int]{[Int]{}},
     // The function rows of the Core functions that fill a jet_builtins role
     // (FnBody.role), in row order, found once by ir_program_bind: a precise
     // operation finds its helper among them (ir_core_role_row).
-    core_roles: [Int]{[Int]{}}
+    core_roles: [Int]{[Int]{}},
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
     // call that reads ambient host or process state with no system call the
     // comptime child's filter could refuse is refused when evaluation
     // reaches it (ir_comptime_ambient_refusal).
-    comptime_values: Bool{false}
+    comptime_values: Bool{false},
     // Whether this program is a build invocation (fn build, fn dev) the
     // evaluator runs in its runtime child: each Core or function call inside
     // an `#Impure` block is bracketed by the host routes `Impure.enter` and
@@ -602,35 +602,35 @@ IRProgram: struct {
     // `--gate impure=allow` the child admits the file calls it makes, and a
     // system call the child's filter refuses there is that block's Tier-2
     // effect, not an unsupported one.
-    invocation: Bool{false}
+    invocation: Bool{false},
     // The program entry's function row (ir_build_program; -1: no entry): its
     // returns tell the runtime the process is ending (ir_emit_return).
-    entry: Int{-1}
+    entry: Int{-1},
     // The runtime checks the built functions keep (ir_bounds_mode).
-    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Full, keep: false}}
+    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Full, keep: false}},
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
 // method it selects, its trait's short name and its owner's rendered type key.
 IRImplMethod: struct {
-    method: String
-    trait_short: String
-    owner_key: String
+    method: String,
+    trait_short: String,
+    owner_key: String,
 }
 
 // A trait implementation that declares no method: its trait's short name
 // and its owner type.
 IREmptyImpl: struct {
-    trait_short: String
-    owner: Type
+    trait_short: String,
+    owner: Type,
 }
 
 // The checked source files (`path` -> text) as rows of bytes and line starts:
 // IRProgram's `source_bytes`, `source_lines` and `source_rows`.
 IRSourceIndex: struct {
-    bytes: [[U8]]
-    lines: [[Int]]
-    rows: [String:Int]
+    bytes: [[U8]],
+    lines: [[Int]],
+    rows: [String:Int],
 }
 
 // The source bytes (all files) worth indexing on a thread of their own
@@ -699,10 +699,10 @@ ir_source_line_text: fn(p: IRProgram, path: String, line: Int) -> String? Never!
 // A function waiting to be built: its checked row, IR id and type
 // arguments, or the lambda job it builds (`lambda` >= 0).
 IRQueued: struct {
-    row: Int
-    id: Int
-    args: [Type]
-    lambda: Int{-1}
+    row: Int,
+    id: Int,
+    args: [Type],
+    lambda: Int{-1},
 }
 
 // A lambda body to build as its own function: the box holds its captures
@@ -711,15 +711,15 @@ IRQueued: struct {
 // made (IRBuilder `row`, `made`, `next_node`); whether it is a task body
 // (IRBuilder `task_body`).
 IRLambdaJob: struct {
-    lambda: BodyLambda
-    captures: [IRCaptureSlot]
-    source_file: String
-    line: Int
-    instance: IRInstance
-    row: Int
-    made: BodyTree
-    next_node: Int
-    task_body: Bool{false}
+    lambda: BodyLambda,
+    captures: [IRCaptureSlot],
+    source_file: String,
+    line: Int,
+    instance: IRInstance,
+    row: Int,
+    made: BodyTree,
+    next_node: Int,
+    task_body: Bool{false},
 }
 
 // One closure capture: the name the body reads, its byte offset in the box,
@@ -727,20 +727,20 @@ IRLambdaJob: struct {
 // body writes) instead of its value, and whether the body owns the value (a
 // task body, which runs once: ir_build_lambda) instead of the box.
 IRCaptureSlot: struct {
-    name: String
-    offset: Int
-    row: Int
-    by_ref: Bool
+    name: String,
+    offset: Int,
+    row: Int,
+    by_ref: Bool,
     // The row the box owns and drops when it isn't `row`, the row the body
     // reads: a window the lambda keeps past its owner is held as a List of
     // its elements, read through the same header.
-    owned_row: Int{-1}
-    body_owned: Bool{false}
+    owned_row: Int{-1},
+    body_owned: Bool{false},
     // The close glue of a capture taken from its variable or owned by a
     // task body (-1: nothing closes): the release helper runs it for a
     // capture the box took, and for a body-owned one when the body never
     // started.
-    close: Int{-1}
+    close: Int{-1},
 }
 
 ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
@@ -1029,9 +1029,9 @@ ir_core_role_row: fn(p: IRProgram, role: String) -> Int? {
 // mapping, a region's reserve and release of fresh pages, and
 // `context.allocator`'s take, give and room of a block, which take none.
 IRCoreIntrinsicRow: struct {
-    module_name: String
-    name: String
-    intrinsic: IRRuntimeIntrinsic
+    module_name: String,
+    name: String,
+    intrinsic: IRRuntimeIntrinsic,
 }
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
@@ -1424,8 +1424,8 @@ ir_generic_names: fn(p: IRProgram, function: FnBody) -> [String] Never! {
 // A type parameter of a generic owner a method binds, at argument `index`
 // of its owner pattern.
 IROwnerBinder: struct {
-    index: Int
-    name: String
+    index: Int,
+    name: String,
 }
 
 // The owner type parameters a method of a generic type declaration binds:
@@ -2066,14 +2066,14 @@ ir_resolve_deferred: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 // `window`: the subject is a write window (`if &place == ...`), so the name
 // binds the payload's storage and an assignment to it lands in the box.
 IRPending: struct {
-    name: String
-    slot: Int
-    subject: Int
-    offset: Int
-    selector: Int{-1}
-    boxed: Bool{false}
-    loaded: Bool{false}
-    window: Bool{false}
+    name: String,
+    slot: Int,
+    subject: Int,
+    offset: Int,
+    selector: Int{-1},
+    boxed: Bool{false},
+    loaded: Bool{false},
+    window: Bool{false},
 }
 
 // Opens the If of a condition and binds its pending payloads in it.
@@ -2554,8 +2554,8 @@ ir_reown: fn(b: &IRBuilder, binding: IRBinding) Never! {
 // A variable's ownership on one path: whether it owns its value, and its
 // live flag (IRBinding.live).
 IROwnState: struct {
-    owned: Bool
-    live: Int{-1}
+    owned: Bool,
+    live: Int{-1},
 }
 
 // The ownership of the variables bound before `count`.
@@ -3093,11 +3093,11 @@ ir_recursion_checks_parted: fn(m: &IRModule, workers: Int) Never! {
 // a call through a function value), and the functions whose address any of
 // them takes.
 IRRecursionPart: struct {
-    functions: [IRFunction]
-    start: Int
-    calls: [Int]
-    ends: [Int]
-    taken: [Int]
+    functions: [IRFunction],
+    start: Int,
+    calls: [Int],
+    ends: [Int],
+    taken: [Int],
 }
 
 // Walks `parts` (ir_recursion_part), in part order: the last part on its
@@ -3984,10 +3984,10 @@ ir_list_length: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
 // over an Iter (ir_pull_open) also has the block its item was pulled into:
 // an Option box, or the runtime's 8-byte block for an inline Option.
 IRWalk: struct {
-    index: Int
-    item: Int
-    pulled: Int{-1}
-    inline: Bool{false}
+    index: Int,
+    item: Int,
+    pulled: Int{-1},
+    inline: Bool{false},
 }
 
 // Opens a loop over the elements of the list at `list` in order;

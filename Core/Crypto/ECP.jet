@@ -57,15 +57,15 @@ A_GENERAL: 2
 /// Why an elliptic-curve operation failed (MBEDTLS_ERR_ECP_*).
 #Error
 EcpError: enum {
-    BadInput
-    BufferTooSmall
-    FeatureUnavailable
-    VerifyFailed
-    AllocFailed
-    RandomFailed
-    InvalidKey
-    SigLenMismatch
-    Mpi(bn.MpiError)
+    BadInput,
+    BufferTooSmall,
+    FeatureUnavailable,
+    VerifyFailed,
+    AllocFailed,
+    RandomFailed,
+    InvalidKey,
+    SigLenMismatch,
+    Mpi(bn.MpiError),
 }
 
 /// An argument outside the function's domain (BAD_INPUT_DATA).
@@ -88,43 +88,43 @@ random_error: fn(e: bn.MpiError) -> EcpError Never! {
 
 /// The supported curves, in mbedtls_ecp_group_id order.
 GroupID: enum {
-    Unknown
-    Secp192r1
-    Secp224r1
-    Secp256r1
-    Secp384r1
-    Secp521r1
-    Bp256r1
-    Bp384r1
-    Bp512r1
-    Curve25519
-    Secp192k1
-    Secp224k1
-    Secp256k1
-    Curve448
+    Unknown,
+    Secp192r1,
+    Secp224r1,
+    Secp256r1,
+    Secp384r1,
+    Secp521r1,
+    Bp256r1,
+    Bp384r1,
+    Bp512r1,
+    Curve25519,
+    Secp192k1,
+    Secp224k1,
+    Secp256k1,
+    Curve448,
 }
 
 /// The curve shape: y^2 = x^3 + a x + b, or the Montgomery form
 /// y^2 = x^3 + A x^2 + x, of which only x is used.
 CurveType: enum {
-    Unknown
-    ShortWeierstrass
-    Montgomery
+    Unknown,
+    ShortWeierstrass,
+    Montgomery,
 }
 
 /// The point encodings of SEC 1 section 2.3.3.
 PointFormat: enum {
-    Uncompressed
-    Compressed
+    Uncompressed,
+    Compressed,
 }
 
 /// A curve's names and sizes (mbedtls_ecp_curve_info).
 CurveInfo: struct {
-    grp_id: GroupID
+    grp_id: GroupID,
     /// The TLS NamedGroup code point (RFC 8422, RFC 7919 registry).
-    tls_id: Int
-    bit_size: Int
-    name: String
+    tls_id: Int,
+    bit_size: Int,
+    name: String,
 }
 
 /// The supported curves, strongest first, as mbedtls_ecp_curve_list orders
@@ -215,9 +215,9 @@ curve_type: fn(id: GroupID) -> CurveType Never! {
 /// A point in Jacobian coordinates (X/Z^2, Y/Z^3); Z = 0 is the point at
 /// infinity. Montgomery points use X and Z only, Y empty.
 Point: struct {
-    x: bn.Mpi
-    y: bn.Mpi
-    z: bn.Mpi
+    x: bn.Mpi,
+    y: bn.Mpi,
+    z: bn.Mpi,
 }
 
 /// The point with every coordinate empty (mbedtls_ecp_point_init).
@@ -258,62 +258,62 @@ point_cmp: fn(p: Point, q: Point) EcpError! {
 
 /// Which reduction a field uses after a schoolbook product.
 FieldKind: enum {
-    P192
-    P224
-    P256
-    P384
-    P521
-    P255
-    P448
-    K192
-    K224
-    K256
-    Mont
+    P192,
+    P224,
+    P256,
+    P384,
+    P521,
+    P255,
+    P448,
+    K192,
+    K224,
+    K256,
+    Mont,
 }
 
 /// The base field in fixed-width limbs, `n` limbs per element. Elements are
 /// kept in [0, p); a Mont field keeps them times R = 2^(64 n).
 Field: struct {
-    kind: FieldKind
-    n: Int
-    p: [U64]
+    kind: FieldKind,
+    n: Int,
+    p: [U64],
     /// -p^-1 mod 2^64, R^2 mod p and R^3 mod p for a Mont field.
-    mm: U64
-    rr: [U64]
-    r3: [U64]
+    mm: U64,
+    rr: [U64],
+    r3: [U64],
     /// 1 in field form.
-    one: [U64]
+    one: [U64],
     /// a in field form (Weierstrass), or (A + 2) / 4 plain (Montgomery).
-    a: [U64]
-    a_kind: Int
+    a: [U64],
+    a_kind: Int,
 }
 
 /// An elliptic-curve group (mbedtls_ecp_group): the curve, its generator G
 /// of prime order N and cofactor h, and the comb table of G.
 EcpGroup: struct {
-    id: GroupID
-    p: bn.Mpi
+    id: GroupID,
+    p: bn.Mpi,
     /// a; empty for a = -3. For Montgomery curves (A + 2) / 4.
-    a: bn.Mpi
+    a: bn.Mpi,
     /// b; empty for Montgomery curves.
-    b: bn.Mpi
-    g: Point
-    n: bn.Mpi
-    pbits: Int
+    b: bn.Mpi,
+    g: Point,
+    n: bn.Mpi,
+    pbits: Int,
     /// The bit length of N; for Montgomery curves the private-key top bit.
-    nbits: Int
-    h: Int
-    f: Field
+    nbits: Int,
+    h: Int,
+    f: Field,
     /// The comb table of G: X then Y of each point in field form.
-    t: [U64]
-    t_size: Int
+    t: [U64],
+    t_size: Int,
 }
 
 /// An elliptic-curve key pair (mbedtls_ecp_keypair): private d, public Q.
 Keypair: struct {
-    grp: EcpGroup
-    d: bn.Mpi
-    q: Point
+    grp: EcpGroup,
+    d: bn.Mpi,
+    q: Point,
 }
 
 /// The group with no curve (mbedtls_ecp_group_init).
@@ -1014,11 +1014,11 @@ derive_y: fn(grp: EcpGroup, x: bn.Mpi, parity: Int) -> bn.Mpi EcpError! {
 /// Scratch of the field arithmetic: the double-width product and the
 /// reduction and inversion temporaries.
 FeWork: struct {
-    wide: [U64]
-    m: [U64]
-    q: [U64]
-    g: [U64]
-    i: [U64]
+    wide: [U64],
+    m: [U64],
+    q: [U64],
+    g: [U64],
+    i: [U64],
 }
 
 fe_work: fn(n: Int) -> FeWork Never! {
@@ -1035,10 +1035,10 @@ fe_work_wipe: fn(w: &FeWork) Never! {
 
 /// The temporaries of the point formulas (mbedtls's tmp[4]).
 FeTmp: struct {
-    t0: [U64]
-    t1: [U64]
-    t2: [U64]
-    t3: [U64]
+    t0: [U64],
+    t1: [U64],
+    t2: [U64],
+    t3: [U64],
 }
 
 fe_tmp: fn(n: Int) -> FeTmp Never! {
@@ -1211,9 +1211,9 @@ fe_to_mpi: fn(f: Field, w: &FeWork, a: [U64]) -> bn.Mpi Never! {
 
 /// A Jacobian point with coordinates in field form; Z = 0 is infinity.
 JacPoint: struct {
-    x: [U64]
-    y: [U64]
-    z: [U64]
+    x: [U64],
+    y: [U64],
+    z: [U64],
 }
 
 jac_new: fn(n: Int) -> JacPoint Never! {

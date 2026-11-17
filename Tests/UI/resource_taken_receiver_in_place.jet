@@ -5,20 +5,20 @@
 use files: core.files
 
 Lease: struct {
-    handle: files.Directory?
+    handle: files.Directory?,
 
     release: fn(&&self) {}
 }
 
 Package: struct {
-    name: String
-    lease: Lease
+    name: String,
+    lease: Lease,
 }
 
 element_field: fn(packages: &&[Package]) { packages[0].lease.release() }
 
 Holder: struct {
-    lease: Lease
+    lease: Lease,
 
     read_receiver: fn(self) { self.lease.release() }
 }

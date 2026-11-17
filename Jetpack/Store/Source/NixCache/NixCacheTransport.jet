@@ -35,17 +35,17 @@ STORE_NIX_STORE_HASH_ALPHABET: "0123456789abcdfghijklmnpqrsvwxyz"
 
 // Which admission check refused a closure.
 NixCacheErrorKind: enum {
-    Metadata
-    WrongKey
-    Signature
-    Transport
-    UnsupportedCompression
-    CompressedCorruption
-    NarCorruption
-    MissingReference
-    PathTraversal
-    DuplicateEntry
-    Admission
+    Metadata,
+    WrongKey,
+    Signature,
+    Transport,
+    UnsupportedCompression,
+    CompressedCorruption,
+    NarCorruption,
+    MissingReference,
+    PathTraversal,
+    DuplicateEntry,
+    Admission,
 
     stage: fn(self) -> String Never! {
         if self == {
@@ -67,8 +67,8 @@ NixCacheErrorKind: enum {
 // The one native Nix cache admission failure (diagnostic E1350).
 #Error
 NixCacheError: struct {
-    kind: NixCacheErrorKind
-    detail: String
+    kind: NixCacheErrorKind,
+    detail: String,
 
     new: fn(kind: NixCacheErrorKind, detail: String) -> NixCacheError Never! {
         NixCacheError{kind: kind, detail: detail}
@@ -109,14 +109,14 @@ store_nix_store_error: fn(error: StoreError) -> NixCacheError Never! {
 
 // Signed narinfo plus the exact bytes that were verified for it.
 FetchedInfo: struct {
-    info: NixNarInfo
-    fingerprint: [U8]
-    key_id: String
-    signature: [U8]
+    info: NixNarInfo,
+    fingerprint: [U8],
+    key_id: String,
+    signature: [U8],
 }
 
 CacheInfo: struct {
-    store_dir: String
+    store_dir: String,
 }
 
 // One configured binary cache: its endpoint and the keys it must be signed
@@ -124,8 +124,8 @@ CacheInfo: struct {
 // no destination-address policy, so the Rust pin of each host's checked
 // addresses (its DNS-rebinding defence) is not enforced here.
 NixCacheEndpoint: struct {
-    endpoint: String
-    trusted_keys: [NixPublicKey]
+    endpoint: String,
+    trusted_keys: [NixPublicKey],
 
     from_roots: fn(roots: HangarRoots) -[FS]> NixCacheEndpoint NixCacheError! {
         endpoint_path: files.join(roots.root, STORE_NIX_ENDPOINT_CONFIG)

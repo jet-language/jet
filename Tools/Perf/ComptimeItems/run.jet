@@ -45,77 +45,77 @@ Refusal: struct {
 }
 
 Options: struct {
-    trace: String
-    top: Int
+    trace: String,
+    top: Int,
     json: Bool
 }
 
 // The event fields this report reads; the writer's others are not read.
 #Codable(only: .Decode)
 Args: struct {
-    file: String?
-    item: String?
+    file: String?,
+    item: String?,
     cpu_ns: Int?
 }
 
 #Codable(only: .Decode)
 Event: struct {
-    name: String?
-    cat: String?
-    ph: String
+    name: String?,
+    cat: String?,
+    ph: String,
     // 0 where the writer leaves it out: only its metadata (`M`) events.
-    ts: Int{0}
+    ts: Int{0},
     // A lane is the exact JSON value: 1 and "1" are two.
-    tid: Dyn
+    tid: Dyn,
     args: Args?
 }
 
 // An open span: its kind (`cat`, else `name`), the begin's name, args and ts.
 Open: struct {
-    kind: String?
-    label: String?
-    args: Args?
+    kind: String?,
+    label: String?,
+    args: Args?,
     ts: Int
 }
 
 // A closed span: wall µs and the end's CPU ns.
 Span: struct {
-    kind: String
-    label: String?
-    args: Args?
-    wall: Int
+    kind: String,
+    label: String?,
+    args: Args?,
+    wall: Int,
     cpu: Int
 }
 
 #Codable(only: .Encode)
 Kind: struct {
-    kind: String
-    count: Int{0}
-    wall: Int{0}
+    kind: String,
+    count: Int{0},
+    wall: Int{0},
     cpu: Int{0}
 }
 
 // A per-file or per-item row; `steps` is its wall per STEPS.
 Row: struct {
-    key: String
-    count: Int{0}
-    wall: Float{0.0}
-    cpu: Float{0.0}
+    key: String,
+    count: Int{0},
+    wall: Float{0.0},
+    cpu: Float{0.0},
     steps: [Float]{[0.0, 0.0, 0.0, 0.0, 0.0]}
 }
 
 Summary: struct {
-    phase: Span?
-    kinds: [Kind]
-    files: [Row]
+    phase: Span?,
+    kinds: [Kind],
+    files: [Row],
     items: [Row]
 }
 
 #Codable(only: .Encode)
 Report: struct {
-    phase: Dyn
-    kinds: [Kind]
-    files: [Dyn]
+    phase: Dyn,
+    kinds: [Kind],
+    files: [Dyn],
     items: [Dyn]
 }
 

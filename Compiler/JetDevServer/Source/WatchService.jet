@@ -53,10 +53,10 @@ impl ChangeKind {
 // What one path looked like at one poll: a file carries the digest of its
 // bytes, so a save that keeps the size and time is still seen.
 PathStamp: struct {
-    exists: Bool
-    modified_ns: Int?
-    size: Int?
-    digest: String?
+    exists: Bool,
+    modified_ns: Int?,
+    size: Int?,
+    digest: String?,
 
     changed_since: fn(self, newer: PathStamp) -> Bool Never! {
         if self.exists != newer.exists -> return true
@@ -115,8 +115,8 @@ watch_directories: fn(paths: [String]) -> [String] {
 // One file watch per existing directory that holds a watched path; a
 // directory that cannot be watched is left out.
 WatchEvents: struct {
-    directories: [String]
-    handles: [WatchHandle]
+    directories: [String],
+    handles: [WatchHandle],
 
     open: fn(paths: [String]) -> WatchEvents {
         events := WatchEvents{directories: [String]{}, handles: [WatchHandle]{}}
@@ -166,22 +166,22 @@ WatchEvents: struct {
 }
 
 DevWatchEntry: struct {
-    path: String
-    change_kind: String
-    game_kind: String
-    old_digest: String?
-    new_digest: String?
+    path: String,
+    change_kind: String,
+    game_kind: String,
+    old_digest: String?,
+    new_digest: String?,
 }
 
 InvalidationReceipt: struct {
-    generation: Int
-    changed: [String]
-    closure: [String]
-    kinds: [String]
-    change_kinds: [String]
-    content_digests: [String?]
-    dev_entries: [DevWatchEntry]
-    edit_to_visible_ms: Int?
+    generation: Int,
+    changed: [String],
+    closure: [String],
+    kinds: [String],
+    change_kinds: [String],
+    content_digests: [String?],
+    dev_entries: [DevWatchEntry],
+    edit_to_visible_ms: Int?,
 
     render: fn(self) -> String Never! {
         elapsed: if self.edit_to_visible_ms == .Val(ms) -> "{ms}" else -> "null"
@@ -214,19 +214,19 @@ watch_json_dev_entries: fn(entries: [DevWatchEntry]) -> String Never! {
 }
 
 WatchNode: struct {
-    path: String
-    kind: RootKind
-    stamp: PathStamp
-    is_dir: Bool
+    path: String,
+    kind: RootKind,
+    stamp: PathStamp,
+    is_dir: Bool,
 }
 
 WatchGraph: struct {
-    nodes: [String:WatchNode]
-    asset_roots: [String:Bool]
-    runtime_input_roots: [String:Bool]
-    reverse: [String:[String:Bool]]
-    forward: [String:[String:Bool]]
-    entry: String?
+    nodes: [String:WatchNode],
+    asset_roots: [String:Bool],
+    runtime_input_roots: [String:Bool],
+    reverse: [String:[String:Bool]],
+    forward: [String:[String:Bool]],
+    entry: String?,
 
     new: fn() -> WatchGraph Never! {
         WatchGraph{
@@ -616,13 +616,13 @@ watch_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 }
 
 RuntimeFileInput: struct {
-    path: String
-    is_dir: Bool
+    path: String,
+    is_dir: Bool,
 }
 
 WatchQuoted: struct {
-    value: String
-    end: Int
+    value: String,
+    end: Int,
 }
 
 // The literal paths a source hands to the file-reading calls, each marked
@@ -810,26 +810,26 @@ watch_first_word: fn(text: String) -> String Never! {
 
 // One path a poll saw change, and how.
 WatchChange: struct {
-    path: String
-    kind: ChangeKind
+    path: String,
+    kind: ChangeKind,
 }
 
 // One settled change, with what it was and what it is now.
 WatchSettled: struct {
-    path: String
-    change_kind: ChangeKind
-    root_kind: RootKind
-    old_digest: String?
-    new_digest: String?
+    path: String,
+    change_kind: ChangeKind,
+    root_kind: RootKind,
+    old_digest: String?,
+    new_digest: String?,
 }
 
 WatchSession: struct {
-    graph: WatchGraph
-    generation: Int
-    applied_generation: Int
-    coalesce_ms: Int
-    edit_started: Stopwatch?
-    events: WatchEvents
+    graph: WatchGraph,
+    generation: Int,
+    applied_generation: Int,
+    coalesce_ms: Int,
+    edit_started: Stopwatch?,
+    events: WatchEvents,
 
     open: fn(entry: String, checker: LSPChecker) -> WatchSession {
         WatchSession.from_graph(WatchGraph.discover(entry, checker))

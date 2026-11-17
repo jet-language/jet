@@ -78,7 +78,7 @@ yield_now: fn() -[Time.Wait]> Never! { host_yield() }
 /// from every other running task's; a finished task's identity can be reused.
 /// Outside a scheduled task it identifies the calling thread.
 TaskID: struct {
-    priv value: Int
+    priv value: Int,
 
     impl Display {
         display: fn(self) -> String { "task {self.value}" }
@@ -92,7 +92,7 @@ current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()
 /// while the work runs waits for it to finish, so after `call` returns the work
 /// has run.
 Once: struct {
-    priv done: Shared<Bool>
+    priv done: Shared<Bool>,
 
     new: fn() -> Once Never! { {done: Shared{false}} }
 
@@ -118,8 +118,8 @@ Once: struct {
 /// waiting for one when none is free; `release` returns one and wakes one
 /// waiter.
 Semaphore: struct {
-    priv count: Shared<Int>
-    priv changed: Condition
+    priv count: Shared<Int>,
+    priv changed: Condition,
 
     /// A semaphore holding `count` units (none when `count` is negative).
     new: fn(count: Int) -> Semaphore Never! {
@@ -280,10 +280,10 @@ cancel: fn<T>(rx: Receiver<T>) -[Time]> Receiver<T> Never! {
 }
 
 TaskState: struct {
-    values: [Int]
-    capacity: Int
-    closed: Bool
-    locked: Bool
+    values: [Int],
+    capacity: Int,
+    closed: Bool,
+    locked: Bool,
     generation: Int
 }
 

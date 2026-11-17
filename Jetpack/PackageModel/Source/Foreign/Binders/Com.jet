@@ -21,8 +21,8 @@ COM_OPERATION_FAILED: "the Windows COM operation failed"
 
 // Where the type library comes from: a file, or a registered library.
 ComTypeLibraryInput: enum {
-    File(String)
-    Registered(guid: String, major: Int, minor: Int, lcid: Int)
+    File(String),
+    Registered(guid: String, major: Int, minor: Int, lcid: Int),
 
     kind: fn(self) -> String Never! {
         if self == {
@@ -33,20 +33,20 @@ ComTypeLibraryInput: enum {
 }
 
 ComBindResult: struct {
-    source: String
-    archive: String
-    provenance: String
-    methods: [String]
+    source: String,
+    archive: String,
+    provenance: String,
+    methods: [String],
 }
 
 ComKind: enum {
-    Unit
-    Int
-    Float
-    Bool
-    Text
-    Data
-    Object(String)
+    Unit,
+    Int,
+    Float,
+    Bool,
+    Text,
+    Data,
+    Object(String),
 
     // An inspector type token; `object=<Name>` names a projected interface.
     parse: fn(value: String) -> ComKind? Never! {
@@ -96,24 +96,24 @@ ComKind: enum {
 }
 
 ComParam: struct {
-    name: String
-    kind: ComKind
+    name: String,
+    kind: ComKind,
 }
 
 ComMethod: struct {
-    interface: String
-    jet: String
-    dispid: Int
-    flags: Int
-    result: ComKind
-    params: [ComParam]
+    interface: String,
+    jet: String,
+    dispid: Int,
+    flags: Int,
+    result: ComKind,
+    params: [ComParam],
 
     name: fn(self) -> String Never! { "{self.interface}_{self.jet}" }
 }
 
 // The per-bind scratch directory, removed on every exit path.
 ComBuildDirectory: struct {
-    path: String
+    path: String,
 
     impl Close {
         close: fn(&&self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
@@ -121,11 +121,11 @@ ComBuildDirectory: struct {
 }
 
 ComSchema: struct {
-    name: String
-    guid: String
-    class_guid: String
-    root_interface: String
-    methods: [ComMethod]
+    name: String,
+    guid: String,
+    class_guid: String,
+    root_interface: String,
+    methods: [ComMethod],
 }
 
 // Inspect the type library on a Windows host, build the automation bridge
@@ -583,7 +583,7 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     out = "{out}}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\n"
     interfaces: pkg_com_interfaces(schema)
     loop interface in interfaces -> out = "{out}{interface}: struct {{ value: Int }}\n"
-    out = "{out}#Error\nComError: enum {{ WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }}\n\n"
+    out = "{out}#Error\nComError: enum {{ WrongApartment, InvalidHandle, InvalidArgument, MemberFailed, TypeMismatch, Limit }}\n\n"
     out = "{out}open: fn() -[FFI.Com]> {root} ComError! {{\n    value: abi.open()\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({root}{{ value: value }})\n}}\n\n"
     out = "{out}close: fn(&&object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
     loop interface in interfaces {

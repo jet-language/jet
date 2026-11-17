@@ -13,12 +13,12 @@ use jetpack_nix_eval.[
 ]
 
 NixDerivationOutput: struct {
-    name: String
-    path: String
+    name: String,
+    path: String,
     // Empty for input-addressed; `sha256`, `r:sha256`, ... for fixed; a
     // floating output has an algorithm and an empty hash.
-    method_algo: String
-    hash_hex: String
+    method_algo: String,
+    hash_hex: String,
 
     is_fixed: fn(self) -> Bool Never! {
         self.method_algo != "" && self.hash_hex != "impure" && self.hash_hex != ""
@@ -32,21 +32,21 @@ NixDerivationOutput: struct {
 }
 
 NixInputDrv: struct {
-    path: String
+    path: String,
     // Sorted and unique.
-    outputs: [String]
+    outputs: [String],
 }
 
 NixDerivation: struct {
-    outputs: [String:NixDerivationOutput]
+    outputs: [String:NixDerivationOutput],
     // Ordered by store path.
-    input_drvs: [NixInputDrv]
+    input_drvs: [NixInputDrv],
     // Sorted and unique.
-    input_srcs: [String]
-    platform: String
-    builder: String
-    args: [String]
-    env: [String:String]
+    input_srcs: [String],
+    platform: String,
+    builder: String,
+    args: [String],
+    env: [String:String],
 
     // Parse a stable `Derive(...)` ATerm; `DrvWithVersion` (dynamic
     // derivations) is unsupported.
@@ -199,8 +199,8 @@ nix_aterm_input: fn(path: String, outputs: [String]) -> String Never! {
 // Byte cursor over an ATerm; `position` is a byte offset and diagnostics
 // name the Unicode scalar at it.
 NixATermCursor: struct {
-    bytes: [U8]
-    position: Int
+    bytes: [U8],
+    position: Int,
 
     peek: fn(self) -> String? Never! {
         if self.position >= self.bytes.len() -> return None

@@ -24,8 +24,8 @@ ECDSA_MAX_LEN: 139
 /// Why reading or writing an encoded signature failed.
 #Error
 ECDSAError: enum {
-    Ecp(ecp.EcpError)
-    BadEncoding(asn1.ASN1Error)
+    Ecp(ecp.EcpError),
+    BadEncoding(asn1.ASN1Error),
 }
 
 /// The curve arithmetic or the verification failed.
@@ -36,8 +36,8 @@ impl ecp.EcpError -> ECDSAError { ECDSAError.Ecp(self) }
 
 /// A signature (r, s).
 ECDSASignature: struct {
-    r: bn.Mpi
-    s: bn.Mpi
+    r: bn.Mpi,
+    s: bn.Mpi,
 }
 
 /// Whether ECDSA works on curve `id`: every short Weierstrass curve, not
@@ -346,8 +346,8 @@ ecdsa_read_signature: fn(key: ecp.Keypair, hash: [U8], sig: [U8]) ECDSAError! {
 
 /// A generator of `left` draws from `inner`, then failures.
 FailingAfter: struct {
-    left: Int
-    inner: drbg.HMACDrbg
+    left: Int,
+    inner: drbg.HMACDrbg,
 
     impl RNG {
         fill: fn(&self, out: &[U8]) -> Bool Never! {

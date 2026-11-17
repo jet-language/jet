@@ -27,14 +27,14 @@ use jet_foundation.[
 // A verdict's diagnostic is None when the lint is already reported by the
 // check that found it (an unused local binding), so only its fact is new.
 SemaLivenessVerdict: struct {
-    code: String
-    diagnostic: Diagnostic?
-    fact: StructureFact
+    code: String,
+    diagnostic: Diagnostic?,
+    fact: StructureFact,
 }
 
 SemaLivenessResult: struct {
-    diagnostics: [Diagnostic]
-    facts: [StructureFact]
+    diagnostics: [Diagnostic],
+    facts: [StructureFact],
 }
 
 sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
@@ -170,19 +170,19 @@ sema_liveness_note_import: fn(program: Program, foreign_aliases: [String], name:
 // (user) modules are judged; every module's references count.
 
 SemaLivenessCandidate: struct {
-    module_index: Int
-    body: Span
-    package_identity: String
-    private: Bool
+    module_index: Int,
+    body: Span,
+    package_identity: String,
+    private: Bool,
 }
 
 // The candidates by symbol id: `ids` maps an id to its row in `rows` and
 // `reached`. A later candidate of the same id replaces the earlier one in
 // its row.
 SemaLivenessCandidates: struct {
-    ids: [U32:Int]
-    rows: [SemaLivenessCandidate]
-    reached: [Bool]
+    ids: [U32:Int],
+    rows: [SemaLivenessCandidate],
+    reached: [Bool],
 }
 
 sema_liveness_add_candidate: fn(candidates: &SemaLivenessCandidates, id: SymbolID, candidate: &&SemaLivenessCandidate) Never! {

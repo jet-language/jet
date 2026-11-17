@@ -58,31 +58,31 @@ limits_checked: fn(limits: EncodingLimits) EncodingError! {
 }
 
 ReadFrame: struct {
-    object: Bool
-    remaining: U64?
-    index: U64
-    expecting_key: Bool
-    key: U64?
-    keys: [String]
-    keys_heap: U64
+    object: Bool,
+    remaining: U64?,
+    index: U64,
+    expecting_key: Bool,
+    key: U64?,
+    keys: [String],
+    keys_heap: U64,
 }
 
 // `byte` holds the Reader's last read: one byte is asked for at a time, so a
 // failure surfaces at the exact offset it interrupts, and `at` steps through
 // whatever the read returned.
 CBORPull: struct<R: Reader> {
-    input: R
-    byte: [U8]
-    at: Int
-    limits: EncodingLimits
-    total: Int
-    terminal: EncodingError?
-    eof: Bool
-    root_done: Bool
-    lookahead: U8?
-    frames: [ReadFrame]
-    retained: Int
-    allocation: stream.AllocationBudget
+    input: R,
+    byte: [U8],
+    at: Int,
+    limits: EncodingLimits,
+    total: Int,
+    terminal: EncodingError?,
+    eof: Bool,
+    root_done: Bool,
+    lookahead: U8?,
+    frames: [ReadFrame],
+    retained: Int,
+    allocation: stream.AllocationBudget,
 
     discard: fn(&self) Never! {
         nested := 0
@@ -416,10 +416,10 @@ reader: fn<R: Reader>(input: &&R, limits: EncodingLimits) -> CBORPull<R> Encodin
 }
 
 WriteFrame: struct {
-    object: Bool
-    items: [[U8]]
-    entries: [{key: [U8], value: [U8]}]
-    key: [U8]?
+    object: Bool,
+    items: [[U8]],
+    entries: [{key: [U8], value: [U8]}],
+    key: [U8]?,
 }
 
 length_size: fn(n: Int) -> Int Never! {
@@ -511,15 +511,15 @@ frame_heap: fn(frame: WriteFrame) -> Int Never! {
 }
 
 CBORPush: struct<W: Writer> {
-    output: W
-    limits: EncodingLimits
-    terminal: EncodingError?
-    total: Int
-    frames: [WriteFrame]
-    root_written: Bool
-    finished: Bool
-    retained: Int
-    allocation: stream.AllocationBudget
+    output: W,
+    limits: EncodingLimits,
+    terminal: EncodingError?,
+    total: Int,
+    frames: [WriteFrame],
+    root_written: Bool,
+    finished: Bool,
+    retained: Int,
+    allocation: stream.AllocationBudget,
 
     discard: fn(&self) Never! {
         nested := 0

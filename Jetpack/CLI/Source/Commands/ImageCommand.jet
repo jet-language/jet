@@ -8,8 +8,8 @@ use files: core.files
 
 // Where `--push` sends the built layout.
 ImagePushDestination: enum {
-    Local(String)
-    Registry(String)
+    Local(String),
+    Registry(String),
 }
 
 // The projection record of an integration whose secret-bearing facts stay
@@ -296,7 +296,7 @@ cli_write_image_projection: fn(from_environment: Bool, out_dir: String, manifest
 // The resolved `--push` destination (None without `--push`); a refused
 // reference is rendered and returns None from the outer optional.
 ImagePushChoice: struct {
-    destination: ImagePushDestination?
+    destination: ImagePushDestination?,
 }
 
 cli_image_push_destination: fn(theme: Theme, name: String, push: String?) -[IO, Time.Wait]> ImagePushChoice? Never! {
@@ -319,7 +319,7 @@ cli_image_push_destination: fn(theme: Theme, name: String, push: String?) -[IO, 
 // The verified local base layout directory (None path without `base:`); a
 // refused base is rendered and returns None from the outer optional.
 ImageBaseChoice: struct {
-    path: String?
+    path: String?,
 }
 
 cli_image_base_directory: fn(theme: Theme, dir: String, base: String?) -[IO, FS, Time.Wait]> ImageBaseChoice? Never! {
@@ -481,8 +481,8 @@ cli_read_project_image_file: fn(root: String, relative: String) -[FS, Env]> [U8]
 // The supervised services of an environment image in dependency order, as
 // their foreground run commands and names.
 ImageServiceProjection: struct {
-    commands: [[String]]
-    names: [String]
+    commands: [[String]],
+    names: [String],
 }
 
 cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [LayerFile]) -> ImageServiceProjection CLIError! {
@@ -758,8 +758,8 @@ cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: 
 
 // One realized executable: its name and bytes.
 RealizedBinary: struct {
-    name: String
-    data: [U8]
+    name: String,
+    data: [U8],
 }
 
 // The regular files of the entry's real bin directory, by name.

@@ -140,11 +140,11 @@ CoreProvider: struct {
 
 // What a realized core package contributes and how it was produced.
 CoreArtifact: struct {
-    bin: String
-    rlib: String
-    recipe_id: String
-    sandbox_class: String
-    sandbox_policy: String
+    bin: String,
+    rlib: String,
+    recipe_id: String,
+    sandbox_class: String,
+    sandbox_policy: String,
 }
 
 // An executable stages its prebuilt `bin/`; a library stages source for
@@ -215,11 +215,11 @@ provider_toolchain_pinned: fn(toolchain: CargoToolchain?) -> Bool Never! {
 
 // A core source identity resolved from current repository bytes.
 CoreResolvedSource: struct {
-    upstream: String
-    src_dir: String
-    manifest: PackageFacts?
-    canonical: PackageFacts?
-    kind: PackageKind
+    upstream: String,
+    src_dir: String,
+    manifest: PackageFacts?,
+    canonical: PackageFacts?,
+    kind: PackageKind,
 }
 
 // Resolve the repository, canonical Package or module source, and kind the
@@ -266,7 +266,7 @@ provider_core_approval_facts: fn(spec: RefSpec, table: SourceTable, ctx: Provide
 // `<hangar>/<build scratch>/<key>-<pid>-<nonce>` with a live marker, removed
 // by its owner when the build ends and swept by Hangar cleanup after a crash.
 CargoBuildScratch: struct {
-    path: String
+    path: String,
 
     new: fn(hangar_dir: String, key: String) -[FS, Env, Time]> CargoBuildScratch CargoBuildError! {
         if key == "" || key.contains("/") || key.contains("\\") || key == "." || key == ".." {
@@ -314,15 +314,15 @@ CargoBuildScratch: struct {
 
 // The rlib a sandboxed cargo build produced and the actual sandbox receipt.
 CargoBuildReceipt: struct {
-    rlib: String
-    sandbox_class: String
-    sandbox_policy: String
+    rlib: String,
+    sandbox_class: String,
+    sandbox_policy: String,
 }
 
 #Error
 CargoBuildError: enum {
-    SandboxUnavailable(String)
-    Failed(String)
+    SandboxUnavailable(String),
+    Failed(String),
 
     message: fn(self) -> String Never! {
         if self == {

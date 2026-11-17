@@ -11,44 +11,44 @@ use {
 
 // A projected bin and the executable member it copies.
 ToolBinPair: struct {
-    bin: String
-    member: String
+    bin: String,
+    member: String,
 }
 
 // One moving source a user-tools update re-pins.
 ToolSourceUpdate: struct {
-    name: String
-    before: String
-    after: String
-    package_count: Int
-    download_bytes: Int?
+    name: String,
+    before: String,
+    after: String,
+    package_count: Int,
+    download_bytes: Int?,
 }
 
 UserToolsUpdateOutcome: enum {
-    NoChange
-    Cancelled
-    Applied(changed: Bool)
-    Failed(Int)
+    NoChange,
+    Cancelled,
+    Applied(changed: Bool),
+    Failed(Int),
 }
 
 // An installed tool whose identity no longer matches its manifest pin.
 ToolDrift: struct {
-    name: String
-    installed_reference: String
-    installed_version: String
-    pinned_reference: String
-    pinned_version: String
+    name: String,
+    installed_reference: String,
+    installed_version: String,
+    pinned_reference: String,
+    pinned_version: String,
 }
 
 // The positional generation `profile rollback tools <n>` names, if any.
 ToolProfileTarget: struct {
-    generation: Int?
+    generation: Int?,
 }
 
 ToolVerb: enum {
-    Install
-    List
-    Uninstall
+    Install,
+    List,
+    Uninstall,
 
     parse: fn(word: String) -> ToolVerb? Never! {
         if word == {
@@ -61,11 +61,11 @@ ToolVerb: enum {
 }
 
 ProfileVerb: enum {
-    Plan
-    Build
-    Switch
-    Rollback
-    Generations
+    Plan,
+    Build,
+    Switch,
+    Rollback,
+    Generations,
 
     parse: fn(word: String) -> ProfileVerb? Never! {
         if word == {
@@ -210,15 +210,15 @@ cli_tool_rollback_locked: fn(verification: &StoreVerification, target: Int?) -[F
 
 // One generation's number, disk bytes, and whether it is current.
 ToolGenerationUsage: struct {
-    generation: Int
-    bytes: Int
-    current: Bool
+    generation: Int,
+    bytes: Int,
+    current: Bool,
 }
 
 ToolProfileUsage: struct {
-    generations: [ToolGenerationUsage]
-    state_bytes: Int
-    bin_bytes: Int
+    generations: [ToolGenerationUsage],
+    state_bytes: Int,
+    bin_bytes: Int,
 }
 
 cli_tool_profile_usage_locked: fn(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> ToolProfileUsage CLIError! {
@@ -477,8 +477,8 @@ cli_report_collide: fn(theme: Theme, bin: String, job: String, path: String, raw
 
 // A project `#Job fn` named `bin` and the file declaring it.
 ToolJobCollision: struct {
-    job: String
-    path: String
+    job: String,
+    path: String,
 }
 
 // Scan project `.jet` sources (four levels deep, skipping build output and
@@ -701,8 +701,8 @@ cli_render_tool_update_plan: fn(theme: Theme, updates: [ToolSourceUpdate]) -[IO,
 
 // Whether any source moved, and the moves to show in a plan.
 ToolManifestRefresh: struct {
-    changed: Bool
-    updates: [ToolSourceUpdate]
+    changed: Bool,
+    updates: [ToolSourceUpdate],
 }
 
 // Move the manifest's channel sources: `#auto` always (unless offline),
@@ -837,8 +837,8 @@ cli_realize_tool_manifest: fn(verification: &StoreVerification, theme: Theme, pa
 
 // The generation an install published and the installed version.
 ToolInstallResult: struct {
-    generation: Int
-    version: String
+    generation: Int,
+    version: String,
 }
 
 // Replace the tool (and any tool owning one of its bins) in the current

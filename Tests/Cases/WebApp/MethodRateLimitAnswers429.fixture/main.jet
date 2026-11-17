@@ -10,8 +10,8 @@ use {
 
 #Error
 LookupError: enum {
-    NotFound
-    Unreachable(String)
+    NotFound,
+    Unreachable(String),
 }
 
 impl app.CallError -> LookupError {
@@ -24,7 +24,7 @@ impl app.CallError -> LookupError {
 }
 
 Crew: struct {
-    name: String
+    name: String,
 
     // Any caller looks a task up, twice a minute.
     #App.Public(limit: 2, per: 1min) lookup: fn(self, id: Int) -> Int LookupError! {

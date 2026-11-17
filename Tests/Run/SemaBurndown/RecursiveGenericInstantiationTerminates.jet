@@ -3,23 +3,23 @@
 // GCState<O>) or through its own field (Tree<T>). Each instance is keyed by
 // its type identity, so a cycle reuses the instance already in flight.
 Subject: struct {
-    name: String
+    name: String,
 }
 
 Key: struct {
-    subject: Subject
-    rev: Int
+    subject: Subject,
+    rev: Int,
 }
 
 Memo: struct<T> {
-    value: T
-    deps: [Key]
-    rev: Int
+    value: T,
+    deps: [Key],
+    rev: Int,
 }
 
 QueryEngine: struct<T> {
-    memos: [Key:Memo<T>]
-    revision: Int
+    memos: [Key:Memo<T>],
+    revision: Int,
 
     new: fn() -> QueryEngine<T> { QueryEngine<T>{memos: [Key:Memo<T>]{}, revision: 0} }
 
@@ -44,12 +44,12 @@ QueryEngine: struct<T> {
 }
 
 GCEntry: struct<O> {
-    object: O
-    marked: Bool
+    object: O,
+    marked: Bool,
 }
 
 GCState: struct<O> {
-    entries: [U64:GCEntry<O>]
+    entries: [U64:GCEntry<O>],
 
     new: fn() -> GCState<O> { GCState<O>{entries: [U64:GCEntry<O>]{}} }
 
@@ -61,12 +61,12 @@ GCState: struct<O> {
 }
 
 GCTestObject: struct {
-    n: Int
+    n: Int,
 }
 
 Tree: struct<T> {
-    value: T
-    children: [Tree<T>]
+    value: T,
+    children: [Tree<T>],
 
     count: fn(self) -> Int {
         total := 1

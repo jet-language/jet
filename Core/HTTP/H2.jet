@@ -346,15 +346,15 @@ HPACK_EOS: 256
 /// One header field. A request's names and every decoded name are lower
 /// case.
 H2Header: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 /// Why an exchange failed: the server broke the protocol, refused or reset
 /// the stream, or went away before it.
 #Error
 H2Error: struct {
-    reason: String
+    reason: String,
 
     impl Display {
         display: fn(self) -> String { self.reason }
@@ -365,10 +365,10 @@ H2Error: struct {
 /// length n, `count[n]` how many there are, and `at[n]` where they start in
 /// `symbols`, which lists the symbols by code.
 HpackHuffman: struct {
-    first: [Int]
-    count: [Int]
-    at: [Int]
-    symbols: [Int]
+    first: [Int],
+    count: [Int],
+    at: [Int],
+    symbols: [Int],
 }
 
 /// An HPACK decoder (RFC 7541 section 3): the static table, the dynamic
@@ -376,12 +376,12 @@ HpackHuffman: struct {
 /// value bytes and 32), its maximum size, and the most a size update may
 /// set it to.
 HpackDecoder: struct {
-    statics: [H2Header]
-    dynamic: [H2Header]
-    size: Int
-    max: Int
-    limit: Int
-    huffman: HpackHuffman
+    statics: [H2Header],
+    dynamic: [H2Header],
+    size: Int,
+    max: Int,
+    limit: Int,
+    huffman: HpackHuffman,
 }
 
 /// One request on a connection of its own, and the response it got.
@@ -389,31 +389,31 @@ HpackDecoder: struct {
 /// is whole once `done`: `status`, its header fields (the pseudo-header
 /// fields and any trailers left out) and `body`.
 H2Exchange: struct {
-    out: [U8]
-    done: Bool
-    status: Int
-    headers: [H2Header]
-    body: [U8]
-    decoder: HpackDecoder
+    out: [U8],
+    done: Bool,
+    status: Int,
+    headers: [H2Header],
+    body: [U8],
+    decoder: HpackDecoder,
     // The server's bytes not yet a whole frame, from `input_at`.
-    input: [U8]
-    input_at: Int
+    input: [U8],
+    input_at: Int,
     // A header block that CONTINUATION frames still add to: its stream (0
     // for none), its bytes, and whether its HEADERS ended the stream.
-    block_stream: Int
-    block: [U8]
-    block_ends: Bool
+    block_stream: Int,
+    block: [U8],
+    block_ends: Bool,
     // The bytes all of the response's header blocks had.
-    block_bytes: Int
+    block_bytes: Int,
     // The request body, sent up to `sent`.
-    request_body: [U8]
-    sent: Int
+    request_body: [U8],
+    sent: Int,
     // The send windows of the connection and of the stream, the window a
     // stream starts with and the largest frame, as the server set them.
-    connection_window: Int
-    stream_window: Int
-    initial_window: Int
-    max_frame: Int
+    connection_window: Int,
+    stream_window: Int,
+    initial_window: Int,
+    max_frame: Int,
 }
 
 /// Starts the exchange of the request `method` `path` on `authority` over
@@ -864,20 +864,20 @@ hpack_decode: fn(d: &HpackDecoder, block: [U8]) -> [H2Header] H2Error! {
 
 /// An integer read from a block and the index after it.
 priv HpackInteger: struct {
-    value: Int
-    next: Int
+    value: Int,
+    next: Int,
 }
 
 /// A literal field read from a block and the index after it.
 priv HpackLiteral: struct {
-    field: H2Header
-    next: Int
+    field: H2Header,
+    next: Int,
 }
 
 /// A string read from a block and the index after it.
 priv HpackString: struct {
-    text: String
-    next: Int
+    text: String,
+    next: Int,
 }
 
 /// Reads the integer with a `prefix`-bit prefix at `at`.

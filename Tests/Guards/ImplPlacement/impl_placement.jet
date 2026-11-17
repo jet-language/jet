@@ -57,9 +57,9 @@ ip_tracked_sources: fn() -> [String] {
 }
 
 #Test("the impl placement rule flags a planted detached impl and skips one with a head error") {
-    planted: "Tile: struct {{\n    size: Int\n}}\n\nimpl Tile {{\n    area: fn(self) -> Int {{ self.size * self.size }}\n}}\n"
+    planted: "Tile: struct {{\n    size: Int,\n}}\n\nimpl Tile {{\n    area: fn(self) -> Int {{ self.size * self.size }}\n}}\n"
     assert_eq(ip_findings("planted.jet", planted), [String]{"planted.jet:5: `impl Tile` sits outside the body of `Tile`"})
-    nested: "Tile: struct {{\n    size: Int\n\n    area: fn(self) -> Int {{ self.size * self.size }}\n}}\n"
+    nested: "Tile: struct {{\n    size: Int,\n\n    area: fn(self) -> Int {{ self.size * self.size }}\n}}\n"
     assert_eq(ip_findings("nested.jet", nested).len(), 0)
     broken: "Tile: struct {{\n    size: Int\n}}\n\nimpl Tile. {{\n    area: fn(self) -> Int {{ self.size }}\n}}\n"
     assert_eq(ip_findings("broken.jet", broken).len(), 0)

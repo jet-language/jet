@@ -9,9 +9,9 @@ use {
 
 // The view, the byte offset a positional request names, and its 0-based line.
 LSPAt: struct {
-    view: LSPView
-    offset: Int
-    line: Int
+    view: LSPView,
+    offset: Int,
+    line: Int,
 }
 
 lsp_at: fn(server: LSPServer, params: Dyn?) -> LSPAt? {
@@ -143,9 +143,9 @@ lsp_document_highlight_response: fn(server: LSPServer, params: Dyn?, id: Dyn) ->
 // What a rename may change: a declaration in an open document, so every file
 // the rename edits is one the editor holds.
 LSPRenameTarget: struct {
-    def: SemDef
+    def: SemDef,
     // The name's span under the cursor.
-    span: Span
+    span: Span,
 }
 
 lsp_rename_target: fn(server: LSPServer, at: LSPAt) -> LSPRenameTarget LSPRPCError! {
@@ -227,10 +227,10 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
 // which argument the cursor is in. Brackets nest; strings and comments are
 // single tokens, so their commas never count.
 LSPActiveCall: struct {
-    callee: Token
-    argument: Int
+    callee: Token,
+    argument: Int,
     // The label the active argument spells (`name: value`), if any.
-    label: String?
+    label: String?,
 }
 
 lsp_active_call: fn(lexed: Lexed, offset: Int) -> LSPActiveCall? Never! {

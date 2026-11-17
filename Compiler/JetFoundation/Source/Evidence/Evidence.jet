@@ -5,123 +5,123 @@
 
 #[Specified, Layout(U8)]
 EvidenceProducerKind: enum {
-    Test = 0
-    Prove = 1
-    Compile = 2
-    Runtime = 3
+    Test = 0,
+    Prove = 1,
+    Compile = 2,
+    Runtime = 3,
 }
 
 #[Specified, Layout(U8)]
 EvidenceKind: enum {
-    Unit = 0
-    Contract = 1
-    Runtime = 2
-    Property = 3
-    Doctest = 4
+    Unit = 0,
+    Contract = 1,
+    Runtime = 2,
+    Property = 3,
+    Doctest = 4,
 }
 
 #[Specified, Layout(U8)]
 EvidenceFacet: enum {
-    All = 0
-    Refinements = 1
-    Effects = 2
-    Taint = 3
-    Contracts = 4
-    Tests = 5
-    Budgets = 6
-    Replay = 7
-    Solver = 8
+    All = 0,
+    Refinements = 1,
+    Effects = 2,
+    Taint = 3,
+    Contracts = 4,
+    Tests = 5,
+    Budgets = 6,
+    Replay = 7,
+    Solver = 8,
 }
 
 #[Specified, Layout(U8)]
 EvidenceOutcome: enum {
-    Proved = 0
-    Generated = 1
-    Passed = 2
-    Failed = 3
-    Checked = 4
-    Unchecked = 5
-    Unavailable = 6
-    Incomplete = 7
-    NotObserved = 8
-    Skipped = 9
-    Error = 10
+    Proved = 0,
+    Generated = 1,
+    Passed = 2,
+    Failed = 3,
+    Checked = 4,
+    Unchecked = 5,
+    Unavailable = 6,
+    Incomplete = 7,
+    NotObserved = 8,
+    Skipped = 9,
+    Error = 10,
 }
 
 EvidenceExpectation: enum {
-    Ordinary
-    ExpectedFailure
+    Ordinary,
+    ExpectedFailure,
 }
 
 EvidenceCompleteness: enum {
-    Complete
-    Incomplete(reason: String)
-    Unavailable(reason: String)
+    Complete,
+    Incomplete(reason: String),
+    Unavailable(reason: String),
 }
 
 EvidenceIdentity: struct {
-    report_id: String
-    claim_id: String
-    evidence_id: String
+    report_id: String,
+    claim_id: String,
+    evidence_id: String,
 }
 
 EvidenceSource: struct {
-    path: String
-    line: U32
-    column: U32
+    path: String,
+    line: U32,
+    column: U32,
 }
 
 EvidenceBuild: struct {
-    toolchain: String
-    target: String
-    profile: String
+    toolchain: String,
+    target: String,
+    profile: String,
 }
 
 EvidenceRevision: struct {
-    source: String
-    build: String
-    revision: String
+    source: String,
+    build: String,
+    revision: String,
 }
 
 EvidenceAttachment: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 EvidenceDiagnostic: struct {
-    code: String
-    message: String
-    source: EvidenceSource?
+    code: String,
+    message: String,
+    source: EvidenceSource?,
 }
 
 EvidenceChainLink: struct {
-    evidence_id: String
-    relation: String
+    evidence_id: String,
+    relation: String,
 }
 
 EvidenceRecord: struct {
-    identity: EvidenceIdentity
-    kind: EvidenceKind
-    facet: EvidenceFacet
-    producer: EvidenceProducerKind
-    outcome: EvidenceOutcome
-    expectation: EvidenceExpectation
-    count: U64
-    source: EvidenceSource
-    build: EvidenceBuild
-    revision: EvidenceRevision
-    detail: String
-    attachments: [EvidenceAttachment]
-    diagnostics: [EvidenceDiagnostic]
-    completeness: EvidenceCompleteness
-    chain: [EvidenceChainLink]
+    identity: EvidenceIdentity,
+    kind: EvidenceKind,
+    facet: EvidenceFacet,
+    producer: EvidenceProducerKind,
+    outcome: EvidenceOutcome,
+    expectation: EvidenceExpectation,
+    count: U64,
+    source: EvidenceSource,
+    build: EvidenceBuild,
+    revision: EvidenceRevision,
+    detail: String,
+    attachments: [EvidenceAttachment],
+    diagnostics: [EvidenceDiagnostic],
+    completeness: EvidenceCompleteness,
+    chain: [EvidenceChainLink],
     // Interned reason link; the containing report holds the canonical payload.
-    derivation: DerivationRef?
+    derivation: DerivationRef?,
 }
 
 #Error
 EvidenceExpectationError: enum {
-    InvalidOutcome(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
+    InvalidOutcome(expectation: EvidenceExpectation, outcome: EvidenceOutcome),
 }
 
 // Rust `EvidenceOutcome::as_str`.

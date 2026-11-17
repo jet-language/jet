@@ -104,21 +104,21 @@ store_broker_valid_reference: fn(reference: String) -> Bool Never! {
 
 // One labeled wire field.
 BrokerField: struct {
-    key: String
-    value: String
+    key: String,
+    value: String,
 }
 
 // The eight provenance facts one write is bound to. The broker re-derives
 // them from the admitted archive and refuses any disagreement.
 ProvenanceBinding: struct {
-    reference: String
-    source: String
-    builder: String
-    action: String
-    output: String
-    platform: String
-    sandbox: String
-    policy: String
+    reference: String,
+    source: String,
+    builder: String,
+    action: String,
+    output: String,
+    platform: String,
+    sandbox: String,
+    policy: String,
 
     // Wire order of the binding fields.
     fields: fn(self) -> [BrokerField] Never! {
@@ -143,34 +143,34 @@ ProvenanceBinding: struct {
 
 // A write request's header: the archive bytes follow it on the stream.
 BrokerWriteHeader: struct {
-    length: Int
-    binding: ProvenanceBinding
-    credential: String
+    length: Int,
+    binding: ProvenanceBinding,
+    credential: String,
 }
 
 BrokerHeader: enum {
-    Write(BrokerWriteHeader)
-    Read(String)
+    Write(BrokerWriteHeader),
+    Read(String),
 }
 
 // A complete write request (header plus archive bytes).
 BrokerWriteRequest: struct {
-    archive: [U8]
-    binding: ProvenanceBinding
-    credential: String
+    archive: [U8],
+    binding: ProvenanceBinding,
+    credential: String,
 }
 
 BrokerRequest: enum {
-    Write(BrokerWriteRequest)
-    Read(String)
+    Write(BrokerWriteRequest),
+    Read(String),
 }
 
 // The byte source of one broker exchange: an accepted or connected Unix
 // stream, or in-memory bytes for protocol checks.
 BrokerWireReader: struct {
-    priv stream: UnixStream?
-    priv bytes: [U8]
-    priv position: Int
+    priv stream: UnixStream?,
+    priv bytes: [U8],
+    priv position: Int,
 
     memory: fn(bytes: [U8]) -> BrokerWireReader Never! {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
@@ -420,17 +420,17 @@ store_broker_read_archive_response: fn(reader: &BrokerWireReader) -> [U8]? Store
 // One enrolled user's authority. Allowlists are ordered sets of the exact
 // provenance facts a writer may publish.
 WriterGrant: struct {
-    read: Bool
-    write: Bool
-    expires: Int?
-    credential: String?
-    sources: [String]
-    builders: [String]
-    actions: [String]
-    outputs: [String]
-    platforms: [String]
-    sandboxes: [String]
-    policies: [String]
+    read: Bool,
+    write: Bool,
+    expires: Int?,
+    credential: String?,
+    sources: [String],
+    builders: [String],
+    actions: [String],
+    outputs: [String],
+    platforms: [String],
+    sandboxes: [String],
+    policies: [String],
 
     empty: fn() -> WriterGrant Never! {
         WriterGrant{read: false, write: false, expires: None, credential: None, sources: [String]{}, builders: [String]{}, actions: [String]{}, outputs: [String]{}, platforms: [String]{}, sandboxes: [String]{}, policies: [String]{}}
@@ -487,8 +487,8 @@ WriterGrant: struct {
 }
 
 BrokerAllowlist: struct {
-    label: String
-    allowed: [String]
+    label: String,
+    allowed: [String],
 }
 
 // Rust `parse_writer_grant`.

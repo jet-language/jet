@@ -19,10 +19,10 @@ NIX_BUILDER_SCRATCH_SEQUENCE: Shared{ProcessSequence{next: 1}}
 // only in the producer provenance.
 #Error
 NativeNixBuildError: enum {
-    SandboxUnavailable(String)
-    Invalid(String)
-    Failed(String)
-    Store(String)
+    SandboxUnavailable(String),
+    Invalid(String),
+    Failed(String),
+    Store(String),
 
     code: fn(self) -> String Never! {
         if self == {
@@ -84,16 +84,16 @@ impl NativeNixBuildError -> ProviderError {
 
 // One output after the builder ran, before Hangar promotion.
 NativeNixOutput: struct {
-    name: String
-    store_path: String
-    path: String
-    digest: String
+    name: String,
+    store_path: String,
+    path: String,
+    digest: String,
 }
 
 // A private build tree under the Hangar build scratch root, marked live for
 // scratch sweeps and removed once its outputs are promoted or rejected.
 NixBuildScratch: struct {
-    path: String
+    path: String,
 
     new: fn(hangar: String, drv_path: String) -[FS, Env]> NixBuildScratch NativeNixBuildError! {
         nix_builder_create_real_directory(hangar, "Hangar root")
@@ -116,11 +116,11 @@ NixBuildScratch: struct {
 // The native builder result. Its scratch keeps the output paths alive until
 // the caller promotes this result into Hangar.
 NativeNixBuild: struct {
-    drv_path: String
-    outputs: [String:NativeNixOutput]
-    sandbox_mechanism: String
-    sandbox_policy: String
-    priv scratch: NixBuildScratch
+    drv_path: String,
+    outputs: [String:NativeNixOutput],
+    sandbox_mechanism: String,
+    sandbox_policy: String,
+    priv scratch: NixBuildScratch,
 }
 
 // Execute one evaluated derivation in the shared native sandbox.

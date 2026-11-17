@@ -110,9 +110,9 @@ JET_EVAL_NATIVE_PREFIX: "__jet_comptime_"
 // runs compile-time code (every effect refused), `runtime` fn build, fn dev
 // and `jet eval` (standard output admitted).
 JetEvalNativeSession: struct {
-    image: Shared<JetEvalNativeImage>
-    sealed: Shared<JetEvalNativeChild>
-    runtime: Shared<JetEvalNativeChild>
+    image: Shared<JetEvalNativeImage>,
+    sealed: Shared<JetEvalNativeChild>,
+    runtime: Shared<JetEvalNativeChild>,
 }
 
 // The runtime image file, read when a batch first needs it, so a compile
@@ -125,19 +125,19 @@ JetEvalNativeSession: struct {
 // has the identity `stamp`. A bind takes it out and puts it back
 // (jet_eval_native_bind).
 JetEvalNativeImage: struct {
-    file: String
-    reader: JetEvalNativeImageReader
-    read: Bool
-    bytes: [[U8]]
-    at: Int
-    stamp: [Int]
-    gap_at: Int
-    gap: Int
+    file: String,
+    reader: JetEvalNativeImageReader,
+    read: Bool,
+    bytes: [[U8]],
+    at: Int,
+    stamp: [Int],
+    gap_at: Int,
+    gap: Int,
 }
 
 // The host's read of the runtime image file; `None` when it can't be read.
 JetEvalNativeImageReader: trait {
-    read: fn(self, file: String) -[FS.Read, Env, FFI.Asm]> X64ImageFile?
+    read: fn(self, file: String) -[FS.Read, Env, FFI.Asm]> X64ImageFile?,
 }
 
 // One child: the entry program bound to the image (`stub`, bound once,
@@ -145,11 +145,11 @@ JetEvalNativeImageReader: trait {
 // page the next batch loads at, `generation` counting the child's spawns,
 // so a batch knows when it must load again.
 JetEvalNativeChild: struct {
-    child: X64ComptimeChild
-    stub: X64Executable
-    base: Int
-    generation: Int
-    failure: String
+    child: X64ComptimeChild,
+    stub: X64Executable,
+    base: Int,
+    generation: Int,
+    failure: String,
 }
 
 // One loaded batch: per item its wrapper's address (0: none), result row
@@ -157,74 +157,74 @@ JetEvalNativeChild: struct {
 // in which host values intern their rows, and `layouts` (its one row) the
 // program the batch was built from.
 JetEvalNativeProgram: struct {
-    types: Shared<IRModule>
-    layouts: Shared<[IRProgram]>
-    entries: [Int]
-    results: [Int]
-    sizes: [Int]
-    params: [[Int]]
-    code: X64ComptimeCode
-    generation: Int
-    runtime_execution: Bool
+    types: Shared<IRModule>,
+    layouts: Shared<[IRProgram]>,
+    entries: [Int],
+    results: [Int],
+    sizes: [Int],
+    params: [[Int]],
+    code: X64ComptimeCode,
+    generation: Int,
+    runtime_execution: Bool,
     // Why the batch can't run ("" when it can); `missing` when the
     // toolchain has no runtime image.
-    failure: String
-    missing: Bool
+    failure: String,
+    missing: Bool,
     // The bound batch's functions by start address, each with its symbol's
     // id (x64_comptime_functions), and each id's function name: a stack
     // overflow the child reports by address only, as its location table has
     // no batch code, is named from them (jet_eval_native_overflow_name).
-    functions: [X64ComptimeFunction]{[X64ComptimeFunction]{}}
-    function_names: [String]{[String]{}}
+    functions: [X64ComptimeFunction]{[X64ComptimeFunction]{}},
+    function_names: [String]{[String]{}},
 }
 
 // One call's state: the child (taken from the session for the call) and
 // the pages of its memory read since its last command.
 JetEvalIRState: struct {
-    child: X64ComptimeChild
-    pages: [[U8]]
-    page_rows: [Int:Int]
-    budget: Int
-    stdout: String
-    stderr: String
+    child: X64ComptimeChild,
+    pages: [[U8]],
+    page_rows: [Int:Int],
+    budget: Int,
+    stdout: String,
+    stderr: String,
     // JetEvalIRResult.debug_trace.
-    debug_trace: String{""}
-    max_depth: Int
-    runtime_execution: Bool
+    debug_trace: String{""},
+    max_depth: Int,
+    runtime_execution: Bool,
     // config.eval_entry: ambient effects other than the runtime child's
     // standard output are refused as `jet eval` refuses them.
-    eval_entry: Bool
+    eval_entry: Bool,
     // config.impure: a Tier-2 effect of an item inside `#Impure` is refused
     // for the missing invocation gate (E3411); config.impure_gate: the gate
     // was opened, so the child admits the file calls the item makes
     // (jet_eval_native_admit).
-    impure: Bool
-    impure_gate: Bool
+    impure: Bool,
+    impure_gate: Bool,
     // The `#Impure` calls of a build invocation now running (the host marks
     // Impure.enter and Impure.leave, IRProgram.invocation): the child admits
     // their file calls under the gate, and a system call refused inside one
     // is refused as `impure` refuses it.
-    impure_sites: Int{0}
+    impure_sites: Int{0},
     // config.effect_call: the call a refused system call is named by.
-    effect_call: String?{None}
-    span: Span
-    failure: JetEvalError?
-    internal_problem: JetEvalInternalProblem?
-    exit_code: Int?
+    effect_call: String?{None},
+    span: Span,
+    failure: JetEvalError?,
+    internal_problem: JetEvalInternalProblem?,
+    exit_code: Int?,
     // The compiler's answer to `embed_file` / `embed_bytes` / `find`.
-    inputs: JetEvalComptimeInputAdapter?
+    inputs: JetEvalComptimeInputAdapter?,
     // The compiler's answer to a `core.compiler` query.
-    compiler: JetEvalCompilerQueryHost?{None}
+    compiler: JetEvalCompilerQueryHost?{None},
     // The batch's type rows and layouts host values are read and written
     // by, the build host of a fn-build or fn-dev invocation, and the
     // compiler values its code holds (a host word is index + 1).
-    host_types: Shared<IRModule>?{None}
-    host_layouts: Shared<[IRProgram]>?{None}
-    host_adapter: JetEvalBuildHostAdapter?{None}
-    host_values: [TComptimeValue]{[TComptimeValue]{}}
+    host_types: Shared<IRModule>?{None},
+    host_layouts: Shared<[IRProgram]>?{None},
+    host_adapter: JetEvalBuildHostAdapter?{None},
+    host_values: [TComptimeValue]{[TComptimeValue]{}},
     // The address an E3012 stop of the call names no function at (-1:
     // none), named once the call ends (jet_eval_native_overflow_name).
-    overflow_at: Int{-1}
+    overflow_at: Int{-1},
 }
 
 jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {

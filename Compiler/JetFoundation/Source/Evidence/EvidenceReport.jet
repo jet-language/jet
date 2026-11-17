@@ -6,47 +6,47 @@ EVIDENCE_REPORT_VERSION: U16{3}
 EVIDENCE_REPORT_MAGIC: "JETEVID3"
 
 EvidenceReport: struct {
-    schema_version: U16
-    identity: EvidenceIdentity
-    producer: EvidenceProducerKind
-    source: EvidenceSource
-    build: EvidenceBuild
-    revision: EvidenceRevision
-    records: [EvidenceRecord]
-    derivations: [DerivationRecord]
-    attachments: [EvidenceAttachment]
-    diagnostics: [EvidenceDiagnostic]
-    completeness: EvidenceCompleteness
+    schema_version: U16,
+    identity: EvidenceIdentity,
+    producer: EvidenceProducerKind,
+    source: EvidenceSource,
+    build: EvidenceBuild,
+    revision: EvidenceRevision,
+    records: [EvidenceRecord],
+    derivations: [DerivationRecord],
+    attachments: [EvidenceAttachment],
+    diagnostics: [EvidenceDiagnostic],
+    completeness: EvidenceCompleteness,
 }
 
 EvidenceProjection: struct {
-    evidence_id: String
-    claim_id: String
-    kind: EvidenceKind
-    facet: EvidenceFacet
-    producer: EvidenceProducerKind
-    expectation: EvidenceExpectation
-    outcome: EvidenceOutcome
-    source: EvidenceSource
-    completeness: EvidenceCompleteness
-    chain: [EvidenceChainLink]
-    derivation: DerivationRef?
+    evidence_id: String,
+    claim_id: String,
+    kind: EvidenceKind,
+    facet: EvidenceFacet,
+    producer: EvidenceProducerKind,
+    expectation: EvidenceExpectation,
+    outcome: EvidenceOutcome,
+    source: EvidenceSource,
+    completeness: EvidenceCompleteness,
+    chain: [EvidenceChainLink],
+    derivation: DerivationRef?,
 }
 
 #Error
 EvidenceMergeError: enum {
-    Empty
-    SchemaConflict(expected: U16, found: U16)
-    IdentityConflict(field: String, expected: String, found: String)
-    RecordConflict(String)
-    MissingDerivation(evidence_id: String, derivation_id: String)
-    InvalidDerivation(String)
-    InvalidExpectation(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
+    Empty,
+    SchemaConflict(expected: U16, found: U16),
+    IdentityConflict(field: String, expected: String, found: String),
+    RecordConflict(String),
+    MissingDerivation(evidence_id: String, derivation_id: String),
+    InvalidDerivation(String),
+    InvalidExpectation(expectation: EvidenceExpectation, outcome: EvidenceOutcome),
 }
 
 #Error
 EvidenceCodecError: struct {
-    message: String
+    message: String,
 }
 
 evidence_producer_name: fn(value: EvidenceProducerKind) -> String Never! {

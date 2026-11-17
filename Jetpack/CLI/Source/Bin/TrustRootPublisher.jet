@@ -10,11 +10,11 @@ TRUST_ROOT_MAX_PUBLIC_KEY_BYTES: 4096
 
 // The `export` options, each taking one path.
 TrustRootExportOption: enum {
-    Output
-    Bootstrap
-    IndexKey
-    CacheKey
-    ToolchainKey
+    Output,
+    Bootstrap,
+    IndexKey,
+    CacheKey,
+    ToolchainKey,
 
     parse: fn(flag: String) -> TrustRootExportOption? Never! {
         if flag == {
@@ -40,11 +40,11 @@ TrustRootExportOption: enum {
 
 // The parsed `export` request. Every slot keeps the last value given.
 TrustRootExportRequest: struct {
-    output: String?
-    bootstrap: String?
-    index_key: String?
-    cache_key: String?
-    toolchain_key: String?
+    output: String?,
+    bootstrap: String?,
+    index_key: String?,
+    cache_key: String?,
+    toolchain_key: String?,
 
     parse: fn(args: [String]) -> TrustRootExportRequest CLIToolError! {
         if (args.get(0) ?? "") != "export" -> return Err(CLIToolError.new(cli_trust_root_usage()))

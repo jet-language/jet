@@ -140,59 +140,59 @@ print(ns, maxrss, os.waitstatus_to_exitcode(status))
 """
 
 Options: struct {
-    here: String
-    jet: String
-    out: String
-    runs: Int
-    cpu: String
-    modes: [String]
-    cells: [String]?
-    perf: String
-    gate: Bool
-    candidate: String?
-    older: String?
-    best: Int
+    here: String,
+    jet: String,
+    out: String,
+    runs: Int,
+    cpu: String,
+    modes: [String],
+    cells: [String]?,
+    perf: String,
+    gate: Bool,
+    candidate: String?,
+    older: String?,
+    best: Int,
     gains: String?
 }
 
 #Codable(only: .Decode)
 Fixture: struct {
-    script: String
-    out: String
+    script: String,
+    out: String,
     fresh: Bool{false}
 }
 
 #Codable(only: .Decode)
 Server: struct {
-    script: String
-    port: Int
+    script: String,
+    port: Int,
     delay_ms: Int
 }
 
 // The cell fields this tool reads; `what` and `gauntlet` are for its readers.
 #Codable(only: .Decode)
 Bench: struct {
-    name: String
-    jet: String
-    args: [String]{[String]{}}
-    steps: [[String]]?
-    expect: String?
-    expect_file: String?
-    fixture: Fixture?
-    server: Server?
-    service: Bool{false}
+    name: String,
+    jet: String,
+    args: [String]{[String]{}},
+    steps: [[String]]?,
+    expect: String?,
+    expect_file: String?,
+    fixture: Fixture?,
+    server: Server?,
+    service: Bool{false},
     scriptbench: [String]{[String]{}}
 }
 
 #Codable(only: .Decode)
 Served: struct {
-    port: Int
+    port: Int,
     delay_ms: Int
 }
 
 #Codable(only: .Decode)
 Workload: struct {
-    id: String
+    id: String,
     servers: [Served]{[Served]{}}
 }
 
@@ -204,79 +204,79 @@ Manifest: struct {
 // A cell's directories, run plan (one argument list per step), input and
 // expected stdout.
 Setup: struct {
-    dir: String
-    cwd: String
-    plan: [[String]]
-    steps: Bool
-    fixture: Fixture?
+    dir: String,
+    cwd: String,
+    plan: [[String]],
+    steps: Bool,
+    fixture: Fixture?,
     expect: String?
 }
 
 Variant: struct {
-    label: String
+    label: String,
     exe: String
 }
 
 // One run's stdout; `ok` when every step exited 0, else the failing step's
 // status and signal.
 Output: struct {
-    stdout: String
-    ok: Bool
-    status: Int
+    stdout: String,
+    ok: Bool,
+    status: Int,
     signal: Int?
 }
 
 Counts: struct {
-    cycles: Int
+    cycles: Int,
     instructions: Int
 }
 
 Pace: struct {
-    cycles: Float
-    instructions: Float
-    cycles_min: Float
+    cycles: Float,
+    instructions: Float,
+    cycles_min: Float,
     cycles_max: Float
 }
 
 // A table row, written to results.json with the original's keys in its order.
 #Codable(only: .Encode)
 Row: struct {
-    cell: String
-    variant: String
-    args: String
-    bytes: Int
-    cycles: Float
-    instructions: Float
-    cycles_min: Float
-    cycles_max: Float
-    output: String
-    size_x: Float
-    cycles_x: Float
-    instructions_x: Float
-    size_gate: String
+    cell: String,
+    variant: String,
+    args: String,
+    bytes: Int,
+    cycles: Float,
+    instructions: Float,
+    cycles_min: Float,
+    cycles_max: Float,
+    output: String,
+    size_x: Float,
+    cycles_x: Float,
+    instructions_x: Float,
+    size_gate: String,
     cycles_gate: String
 }
 
 #Codable(only: .Encode)
 Gates: struct {
-    size: Float
+    size: Float,
     cycles: Float
 }
 
 #Codable(only: .Encode)
 Results: struct {
-    runs: Int
-    interleaved: Bool
-    statistic: String
-    cpu: String
-    gates: Gates
+    runs: Int,
+    interleaved: Bool,
+    statistic: String,
+    cpu: String,
+    gates: Gates,
     rows: [Row]
 }
 
 #Codable(only: .Encode)
 Timed: struct {
-    ns: Int
-    rss: Int
+    ns: Int,
+    rss: Int,
     code: Int
 }
 
@@ -284,9 +284,9 @@ Timed: struct {
 // size and every run.
 #Codable(only: .Encode)
 Measured: struct {
-    ns: Int
-    rss: Int
-    bytes: Int
+    ns: Int,
+    rss: Int,
+    bytes: Int,
     runs: [Timed]
 }
 
@@ -294,24 +294,24 @@ Measured: struct {
 // every row.
 #Codable(only: .Encode)
 Gains: struct {
-    best_of: Int
-    interleaved: Bool
-    cpu: String
-    compilers: Dyn
+    best_of: Int,
+    interleaved: Bool,
+    cpu: String,
+    compilers: Dyn,
     rows: [Dyn]
 }
 
 Compiler: struct {
-    label: String
+    label: String,
     path: String
 }
 
 // One cell in one mode; `variants` in the order they were built.
 GainRow: struct {
-    mode: String
-    cell: String
-    args: String
-    wrong: [String]
+    mode: String,
+    cell: String,
+    args: String,
+    wrong: [String],
     variants: [{label: String, gains: Measured}]
 }
 

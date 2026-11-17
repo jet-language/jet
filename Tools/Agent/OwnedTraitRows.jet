@@ -65,7 +65,7 @@ FAMILY_COLUMN: "auto_derive_family"
 
 #Error
 OwnedTraitRowsError: struct {
-    message: String
+    message: String,
 }
 
 rows_fail: fn(message: String) -> OwnedTraitRowsError Never! {
@@ -74,51 +74,51 @@ rows_fail: fn(message: String) -> OwnedTraitRowsError Never! {
 
 // One `column: Bool{true}` or `column: String{"…"}` fact; a flag's value is "true".
 TraitFact: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // A parameter as written: `ty` keeps its access sigil (`&[U8]`).
 TraitParam: struct {
-    name: String
-    ty: String
+    name: String,
+    ty: String,
 }
 
 // One `name: fn(…)` requirement as written.
 TraitMethod: struct {
-    name: String
+    name: String,
     // "" for a static method, else `self`, `&self` or `&&self`.
-    receiver: String
-    params: [TraitParam]
+    receiver: String,
+    params: [TraitParam],
     // The written return type, "" when the method writes no `->`.
-    returns: String
+    returns: String,
     // `Never` or the written error type.
-    error: String
+    error: String,
     // A default: the method, header and body, at no indent; "" for none.
-    default_source: String{""}
+    default_source: String{""},
 }
 
 // One `#Test name: fn(…) {` law as written, header and body, at no indent.
 TraitLaw: struct {
-    name: String
-    source: String
+    name: String,
+    source: String,
 }
 
 // One `Name: trait` block as written.
 TraitSource: struct {
-    name: String
-    line: Int
+    name: String,
+    line: Int,
     // Declared inside `Literal: module`.
-    literal: Bool
-    facts: [TraitFact]
-    associated: [String]
-    methods: [TraitMethod]
-    laws: [TraitLaw]
+    literal: Bool,
+    facts: [TraitFact],
+    associated: [String],
+    methods: [TraitMethod],
+    laws: [TraitLaw],
 }
 
 TextFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 fact: fn(source: TraitSource, name: String) -> String? Never! {
@@ -219,7 +219,7 @@ read_traits: fn(source_text: String) -> [TraitSource] OwnedTraitRowsError! {
             if !member.starts_with(member_indent) || member.remove_prefix(member_indent).starts_with(" ") {
                 return Err(rows_fail("line {index}: {context}: members sit one level in, found `{member}`"))
             }
-            body: member.remove_prefix(member_indent)
+            body: member.remove_prefix(member_indent).remove_suffix(",")
             if {
                 FLAG.match(body) == .Val(column) -> {
                     if !FLAG_COLUMNS.contains(column.groups[0]) {
@@ -683,7 +683,7 @@ rows_error: fn(source: String) -> String Never! {
     }
 }
 
-MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    operators: String{{\"+\"}}\n    Rhs: type\n    Output: type\n    add: fn(self, rhs: Rhs) -> Output Never!\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}}\n    auto_derive_family: String{{\"Bundle\"}}\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!\n    close: fn(&&self) IOError!\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!\n    }}\n}}\n"
+MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    operators: String{{\"+\"}},\n    Rhs: type,\n    Output: type,\n    add: fn(self, rhs: Rhs) -> Output Never!,\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}},\n    auto_derive_family: String{{\"Bundle\"}},\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!,\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,\n    close: fn(&&self) IOError!,\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!,\n    }}\n}}\n"
 
 #Test("every generated copy matches its Prelude declaration") {
     if owned_trait_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
@@ -702,7 +702,7 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    ope
     assert(block.contains("text: \"On a struct or enum, derives `Driver` from its fields; `#!Bundle` refuses it.\""))
 }
 
-SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!\n    say: fn(&self, text: String) IOError! {{\n        self.put(\"{{text}}\".bytes())\n    }}\n}}\n"
+SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!,\n    say: fn(&self, text: String) IOError! {{\n        self.put(\"{{text}}\".bytes())\n    }}\n}}\n"
 
 #Test("a default carries its method as written, and calls no default") {
     rendered: render_rows(SINK_TRAIT, true) ?? panic("the sink trait did not render: {err.message}")
@@ -715,15 +715,15 @@ SINK_TRAIT: "Sink: trait {{\n    put: fn(&self, bytes: [U8]) IOError!\n    say: 
 
 #Test("a declaration that breaks the source rules is refused") {
     traits: MINIMAL_TRAITS
-    assert(rows_error(traits.replace("    local: Bool{{true}}\n", "    local: Bool{{false}}\n")).contains("expected a fact column"))
-    assert(rows_error(traits.replace("    local: Bool{{true}}\n", "    lokal: Bool{{true}}\n")).contains("not a flag column"))
-    assert(rows_error(traits.replace("    operators", "    codec: Bool{{true}}\n    operators")).contains("select different contracts"))
+    assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    local: Bool{{false}},\n")).contains("expected a fact column"))
+    assert(rows_error(traits.replace("    local: Bool{{true}},\n", "    lokal: Bool{{true}},\n")).contains("not a flag column"))
+    assert(rows_error(traits.replace("    operators", "    codec: Bool{{true}},\n    operators")).contains("select different contracts"))
     assert(rows_error(traits.replace("Driver: trait", "Add: trait")).contains("declared twice"))
     assert(rows_error(traits.replace("(self, rhs: Rhs)", "(self, other: Int)")).contains("an operator hook is"))
     assert(rows_error(traits.replace(" -> Output Never!", " -> Output")).contains("ends `Never!`"))
     assert(rows_error(traits.replace("String{{\"Bundle\"}}", "String{{\"Add\"}}")).contains("also a trait name"))
-    assert(rows_error(traits.replace("    auto_derive: Bool{{true}}\n", "    requires: String{{\"Missing\"}}\n")).contains("not another trait here"))
-    assert(rows_error(traits.replace("    auto_derive: Bool{{true}}\n", "    commutative: Bool{{true}}\n    auto_derive: Bool{{true}}\n")).contains("belongs to an operator trait"))
+    assert(rows_error(traits.replace("    auto_derive: Bool{{true}},\n", "    requires: String{{\"Missing\"}},\n")).contains("not another trait here"))
+    assert(rows_error(traits.replace("    auto_derive: Bool{{true}},\n", "    commutative: Bool{{true}},\n    auto_derive: Bool{{true}},\n")).contains("belongs to an operator trait"))
     assert(rows_error(traits.replace("Literal: module", "Other: module")).contains("only `Literal: module`"))
     assert(rows_error(traits.replace("value: Int)", "value: (Int))")).contains("cannot read the type"))
 }

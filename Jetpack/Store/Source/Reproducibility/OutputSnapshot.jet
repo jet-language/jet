@@ -13,26 +13,26 @@ use {
 
 // Which property two outputs of one action first disagreed on.
 DifferenceKind: enum {
-    ActionIdentity
-    CanonicalOutput
-    NodeKind
-    Mode
-    Bytes
-    SymlinkTarget
-    Hardlink
-    Xattrs
-    MissingLeft
-    MissingRight
-    Provenance
-    SourceFingerprint
-    RecipeFingerprint
-    PolicyFingerprint
-    Platform
-    PlatformArtifactKind
-    NamedOutput
-    NamedOutputPath
-    ProducerProvenance
-    References
+    ActionIdentity,
+    CanonicalOutput,
+    NodeKind,
+    Mode,
+    Bytes,
+    SymlinkTarget,
+    Hardlink,
+    Xattrs,
+    MissingLeft,
+    MissingRight,
+    Provenance,
+    SourceFingerprint,
+    RecipeFingerprint,
+    PolicyFingerprint,
+    Platform,
+    PlatformArtifactKind,
+    NamedOutput,
+    NamedOutputPath,
+    ProducerProvenance,
+    References,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -61,16 +61,16 @@ DifferenceKind: enum {
 }
 
 FirstDifference: struct {
-    path: String
-    kind: DifferenceKind
-    left: String
-    right: String
+    path: String,
+    kind: DifferenceKind,
+    left: String,
+    right: String,
 }
 
 ObservedNodeKind: enum {
-    Directory
-    Symlink
-    File
+    Directory,
+    Symlink,
+    File,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -82,12 +82,12 @@ ObservedNodeKind: enum {
 }
 
 NodeObservation: struct {
-    kind: ObservedNodeKind
-    mode: Int
-    digest: String?
-    target: String?
-    hardlink: String?
-    xattrs: [String]
+    kind: ObservedNodeKind,
+    mode: Int,
+    digest: String?,
+    target: String?,
+    hardlink: String?,
+    xattrs: [String],
 
     // `kind=…;mode=…;digest=…;target=…;hardlink=…;xattrs=…` evidence text.
     value: fn(self) -> String Never! {
@@ -101,8 +101,8 @@ NodeObservation: struct {
 // One output's canonical digest plus every observed node, keyed by the
 // node's path relative to the output root (`""` is the root itself).
 OutputSnapshot: struct {
-    digest: String
-    nodes: [String:NodeObservation]
+    digest: String,
+    nodes: [String:NodeObservation],
 }
 
 store_repro_invalid: fn(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }

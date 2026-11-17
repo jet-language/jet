@@ -1,0 +1,14 @@
+# `.background` is native background work. A browser runs nothing for a
+# closed page, so the same graph built for the web output is a compile error,
+# never a silent no-op, and the error names the server jobs that replace it
+# (`#App.Every`, `#App.Job`). The native build of the graph checks.
+fixture: BackgroundOnTheWebOutputIsACompileError.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.background` needs target `native`, but the resolved target is `Web`." # the web output refuses it
+stderr: ~ "main.jet:9:" # at the `.background` call
+stderr: ~ "#App.Every" # a schedule replaces it
+stderr: ~ "#App.Job" # or a queued job

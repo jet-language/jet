@@ -6,7 +6,7 @@
 PROVIDER_PLAN_FACTS_HEADER: "jet-build-plan-replay-v1"
 
 ProviderPlanFacts: struct {
-    priv entries: [String:String]
+    priv entries: [String:String],
 
     // Facts with non-empty keys.
     from_facts: fn(facts: [String:String]) -> ProviderPlanFacts ProviderPlanFactsError! {
@@ -49,13 +49,13 @@ ProviderPlanFacts: struct {
 
 #Error
 ProviderPlanFactsError: enum {
-    EmptyKey
-    UnsupportedVersion
-    TruncatedFact
-    TruncatedField
-    NotLowercaseHex
-    NotUTF8
-    DuplicateFact(String)
+    EmptyKey,
+    UnsupportedVersion,
+    TruncatedFact,
+    TruncatedField,
+    NotLowercaseHex,
+    NotUTF8,
+    DuplicateFact(String),
 
     message: fn(self) -> String Never! {
         if self == {

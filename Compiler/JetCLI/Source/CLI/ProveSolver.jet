@@ -40,39 +40,39 @@ JET_CLI_SOLVER_LITERAL_MIN: -578960446186580977117854925043439539266349923328202
 // `machine_overflow`.
 #Error
 JetCLISolverUnknown: struct {
-    reason: String
+    reason: String,
     // Plain words for an `unsupported_formula`: what the solver can't read.
-    detail: String{""}
+    detail: String{""},
 }
 
 JetCLISolverTerm: struct {
-    variable: String
-    coefficient: Int
+    variable: String,
+    coefficient: Int,
 }
 
 // `constant + sum(coefficient * variable)`, terms sorted by variable bytes,
 // no zero coefficient.
 JetCLISolverAffine: struct {
-    constant: Int
-    terms: [JetCLISolverTerm]
+    constant: Int,
+    terms: [JetCLISolverTerm],
 }
 
 // `affine <relation> 0` with relation `le`, `eq` or `ne`.
 JetCLISolverAtom: struct {
-    affine: JetCLISolverAffine
-    relation: String
+    affine: JetCLISolverAffine,
+    relation: String,
 }
 
 JetCLISolverBool: enum {
-    Constant(Bool)
-    Atom(JetCLISolverAtom)
-    And([JetCLISolverBool])
-    Or([JetCLISolverBool])
+    Constant(Bool),
+    Atom(JetCLISolverAtom),
+    And([JetCLISolverBool]),
+    Or([JetCLISolverBool]),
 }
 
 JetCLISolverFormula: struct {
-    assumptions: JetCLISolverBool
-    claim: JetCLISolverBool
+    assumptions: JetCLISolverBool,
+    claim: JetCLISolverBool,
 }
 
 jet_cli_solver_unknown: fn(reason: String) -> JetCLISolverUnknown Never! {
@@ -229,12 +229,12 @@ jet_cli_solver_formula: fn(assumptions: [JetCLISolverBool], claim: [JetCLISolver
 // constant (numeric), then relation; other nodes after, by canonical bytes.
 // `node` indexes the child list, so the sort moves only these keys.
 JetCLISolverKeyed: struct {
-    rank: Int
-    key: String
-    constant: Int
-    relation: String
-    text: String
-    node: Int
+    rank: Int,
+    key: String,
+    constant: Int,
+    relation: String,
+    text: String,
+    node: Int,
 }
 
 jet_cli_solver_keyed_order: fn(left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> Ordering Never! {
@@ -333,8 +333,8 @@ jet_cli_solver_term_count: fn(node: JetCLISolverBool) -> Int Never! {
 // Step accounting: one step is charged before each action, and the limit is
 // checked first.
 JetCLISolverSteps: struct {
-    used: Int
-    limit: Int
+    used: Int,
+    limit: Int,
 }
 
 jet_cli_solver_charge: fn(steps: &JetCLISolverSteps) -> Bool JetCLISolverUnknown! {
@@ -397,21 +397,21 @@ jet_cli_solver_formula_branches: fn(formula: JetCLISolverFormula, steps: &JetCLI
 // One derived inequality and the nonnegative multipliers of the branch's
 // inequalities that sum to it.
 JetCLISolverDerived: struct {
-    affine: JetCLISolverAffine
-    multipliers: [Int]
+    affine: JetCLISolverAffine,
+    multipliers: [Int],
 }
 
 JetCLISolverValue: struct {
-    name: String
-    value: Int
+    name: String,
+    value: Int,
 }
 
 // One search over a branch: refuted, satisfied, or split on a variable that
 // has no integer between its bounds.
 JetCLISolverSearch: enum {
-    Unsat([Int])
-    Sat([JetCLISolverValue])
-    Split(JetCLISolverValue)
+    Unsat([Int]),
+    Sat([JetCLISolverValue]),
+    Split(JetCLISolverValue),
 }
 
 jet_cli_solver_coefficient: fn(value: JetCLISolverAffine, variable: String) -> Int Never! {
@@ -545,44 +545,44 @@ jet_cli_solver_pick: fn(lo: Int?, hi: Int?) -> Int? Never! {
 }
 
 JetCLISolverProof: enum {
-    Pending
-    Contradiction([Int])
-    Split(JetCLISolverSplit)
+    Pending,
+    Contradiction([Int]),
+    Split(JetCLISolverSplit),
 }
 
 JetCLISolverSplit: struct {
-    variable: String
-    pivot: Int
-    left: Int
-    right: Int
+    variable: String,
+    pivot: Int,
+    left: Int,
+    right: Int,
 }
 
 JetCLISolverTask: struct {
-    node: Int
-    ineqs: [JetCLISolverAffine]
+    node: Int,
+    ineqs: [JetCLISolverAffine],
 }
 
 // A backend answer: `proved` with its certificate, `disproved` with every
 // formula variable's value, or `unknown` with its reason.
 JetCLISolverOutcome: enum {
-    Proved(JetCLISolverProved)
-    Disproved(JetCLISolverDisproved)
-    Unknown(JetCLISolverUnknownAt)
+    Proved(JetCLISolverProved),
+    Disproved(JetCLISolverDisproved),
+    Unknown(JetCLISolverUnknownAt),
 }
 
 JetCLISolverProved: struct {
-    certificate: String
-    steps: Int
+    certificate: String,
+    steps: Int,
 }
 
 JetCLISolverDisproved: struct {
-    values: [JetCLISolverValue]
-    steps: Int
+    values: [JetCLISolverValue],
+    steps: Int,
 }
 
 JetCLISolverUnknownAt: struct {
-    reason: String
-    steps: Int
+    reason: String,
+    steps: Int,
 }
 
 // The structural limits are checked before any search step: a formula over

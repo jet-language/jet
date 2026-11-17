@@ -163,8 +163,8 @@ sema_expression_core_enum_name: fn(name: String) -> Bool Never! {
 }
 
 SemaExpressionEnumPath: struct {
-    enum_name: String
-    variant: String
+    enum_name: String,
+    variant: String,
 }
 
 sema_expression_path_segments: fn(expression: Expr) -> [String]? {
@@ -310,8 +310,8 @@ sema_expression_same_nominal_head: fn(left: String, right: String, environment: 
 }
 
 SemaExpressionResolvedType: struct {
-    ty: Type
-    owner: Symbol
+    ty: Type,
+    owner: Symbol,
 }
 
 sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExpressionResolvedType? {
@@ -392,12 +392,12 @@ sema_atomic_field_initializer: fn(field_ty: Type, value: TExpr, source: Expr, pr
 // owner's generic arguments substituted, whether that type is a string view,
 // the field's symbol and whether its edge is boxed.
 SemaStructFieldFact: struct {
-    field_ty: Type
-    string_view: Bool
-    symbol: Symbol
-    boxed: Bool
+    field_ty: Type,
+    string_view: Bool,
+    symbol: Symbol,
+    boxed: Bool,
     // The field type holds a view (sema_check_type_contains_view).
-    holds_view: Bool
+    holds_view: Bool,
 }
 
 sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> SemaStructFieldFact {
@@ -1189,9 +1189,9 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
 // parameter per payload slot, labeled for a named payload ("" for a
 // positional one), and the enum the call builds.
 SemaEnumConstructorSignature: struct {
-    labels: [String]
-    params: [Type]
-    result: Type
+    labels: [String],
+    params: [Type],
+    result: Type,
 }
 
 // A qualified payload case read without a call (`Message.Text`) is its
@@ -1721,16 +1721,16 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
 // encoded holes; without it the type is a `distinct String` and the literal
 // is the joined text.
 SemaExpressionCheckedTextTarget: struct {
-    owner: Symbol
-    implementation_module_identity: ModuleID
-    check: SemaRegistrationFunction
-    encode_hole: SemaRegistrationFunction
-    build: SemaRegistrationFunction?
+    owner: Symbol,
+    implementation_module_identity: ModuleID,
+    check: SemaRegistrationFunction,
+    encode_hole: SemaRegistrationFunction,
+    build: SemaRegistrationFunction?,
 }
 
 SemaExpressionCheckedTextLiteral: struct {
-    handled: Bool
-    value: TExpr?
+    handled: Bool,
+    value: TExpr?,
 }
 
 // A boundary head the program has not imported (`DateTime`, or the `Path`
@@ -2451,8 +2451,8 @@ sema_expression_typed_literal_whole: fn(head: Type, value: Expr, expected: Type?
 }
 
 SemaExpressionVariantHead: struct {
-    enum_name: String
-    variant: String
+    enum_name: String,
+    variant: String,
 }
 
 // `Enum.Variant{field: value}` constructs a

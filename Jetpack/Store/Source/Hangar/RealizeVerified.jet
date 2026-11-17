@@ -12,10 +12,10 @@ use {
 // terminal owns rendering, so callbacks carry its IO/Env/wait effects. Rust
 // installed it thread-locally; the provider context carries it explicitly here.
 ProgressHandle: struct {
-    discovered_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!
-    transferred_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!
-    phase: fn(String) -[IO, Env, Time.Wait]> Never!
-    object_progress: fn(Int, Int) -[IO, Env, Time.Wait]> Never!
+    discovered_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!,
+    transferred_bytes: fn(Int) -[IO, Env, Time.Wait]> Never!,
+    phase: fn(String) -[IO, Env, Time.Wait]> Never!,
+    object_progress: fn(Int, Int) -[IO, Env, Time.Wait]> Never!,
 
     silent: fn() -> ProgressHandle Never! {
         ProgressHandle{
@@ -28,22 +28,22 @@ ProgressHandle: struct {
 }
 
 CacheExpectation: struct {
-    identity: CacheIdentity
-    owned_output: String?
-    allow_unsigned_local: Bool
+    identity: CacheIdentity,
+    owned_output: String?,
+    allow_unsigned_local: Bool,
 }
 
 RealizeRequest: enum {
-    Package(spec: RefSpec, table: SourceTable)
-    Adapter(plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation)
+    Package(spec: RefSpec, table: SourceTable),
+    Adapter(plan: AdapterPlan, table: SourceTable, expectation: CacheExpectation),
 }
 
 // Controls a source-only independent-root reproducibility certification. A
 // retry always starts both builds in fresh roots. `cancelled` is polled
 // between build/promotion boundaries; a cancelled run never enters Hangar.
 IndependentRootOptions: struct {
-    retries: Int
-    cancelled: (fn() -[FS]> Bool)?
+    retries: Int,
+    cancelled: (fn() -[FS]> Bool)?,
 
     default: fn() -> IndependentRootOptions Never! {
         IndependentRootOptions{retries: 1, cancelled: None}
@@ -52,15 +52,15 @@ IndependentRootOptions: struct {
 
 // The durable result of a successful independent-root certification.
 IndependentRootCertification: struct {
-    entry: StoreEntry
-    action_key: String
-    attestation: String
+    entry: StoreEntry,
+    action_key: String,
+    attestation: String,
 }
 
 VerifiedRealization: struct {
-    priv entry: StoreEntry
-    priv source_state_value: SourceState
-    priv lease: CacheLease
+    priv entry: StoreEntry,
+    priv source_state_value: SourceState,
+    priv lease: CacheLease,
 
     metadata: fn(self) -> StoreEntry Never! { self.entry }
 
@@ -79,10 +79,10 @@ VerifiedRealization: struct {
 
 #Error
 RealizeError: enum {
-    Provider(ProviderError)
-    LockedNix(StoreError)
-    Store(StoreError)
-    Integrity(IntegrityFailure)
+    Provider(ProviderError),
+    LockedNix(StoreError),
+    Store(StoreError),
+    Integrity(IntegrityFailure),
 
     // A project lock named the Nix closure, but its portable bytes or
     // identity could not be replayed. Kept distinct from generic Hangar
@@ -99,13 +99,13 @@ RealizeError: enum {
 }
 
 IntegrityFailure: struct {
-    package: String
-    version: String
-    expected: String
-    actual: String
-    reason: String
-    disposition: String
-    priv fix_text: String
+    package: String,
+    version: String,
+    expected: String,
+    actual: String,
+    reason: String,
+    disposition: String,
+    priv fix_text: String,
 
     what: fn(self) -> String Never! {
         "Integrity check failed for `{self.package}` `{self.version}` — expected `{self.expected}`, got `{self.actual}`."

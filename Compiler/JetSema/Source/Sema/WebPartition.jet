@@ -20,28 +20,28 @@ use jet_foundation.[CompilerThreads, Diagnostic, EffectRowEntry, EnumDef, FnBody
 // ones checked; any other function's is empty. `declared` says which placed
 // roots (sema_web_placed_root) its written effect row holds.
 SemaWebMeta: struct {
-    key: String
-    name: String
-    name_span: Span
-    marker: WebPartitionMarker?
-    ceiling: WebBucket?
-    params: [Type]
-    ret: Type?
-    slot: Int
-    row: Int
-    registration: Int
-    declared: [Bool]
+    key: String,
+    name: String,
+    name_span: Span,
+    marker: WebPartitionMarker?,
+    ceiling: WebBucket?,
+    params: [Type],
+    ret: Type?,
+    slot: Int,
+    row: Int,
+    registration: Int,
+    declared: [Bool],
 }
 
 // The struct and enum declarations of every module, the first of each name,
 // for the `#Codable` ABI rule: `names` interns the names, and `struct_at` and
 // `enum_at` hold a name id's row in `structs` and `enums` (-1 for none).
 SemaWebTypes: struct {
-    names: NameTable
-    struct_at: [Int]
-    enum_at: [Int]
-    structs: [StructDef]
-    enums: [EnumDef]
+    names: NameTable,
+    struct_at: [Int],
+    enum_at: [Int],
+    structs: [StructDef],
+    enums: [EnumDef],
 }
 
 // The id of `name` in `types`, with its columns grown to cover it.
@@ -314,8 +314,8 @@ SEMA_WEB_EDGES_PER_THREAD: 16384
 // Each meta's call edges as metas, in meta order:
 // callees[first[at]..<first[at + 1]].
 SemaWebEdges: struct {
-    first: [Int]
-    callees: [Int]
+    first: [Int],
+    callees: [Int],
 }
 
 // The call edges of `metas`' checked bodies, each resolved through `keys`
@@ -493,8 +493,8 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
 // A module's checked bodies by source span: each body's span, and the first
 // body of each span start.
 SemaWebRows: struct {
-    spans: [Span]
-    starts: [Int:Int]
+    spans: [Span],
+    starts: [Int:Int],
 }
 
 sema_web_rows: fn(functions: [FnBody]) -> SemaWebRows Never! {

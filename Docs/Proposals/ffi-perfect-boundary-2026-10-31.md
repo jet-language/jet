@@ -79,7 +79,7 @@ The simplest case: one header, one call.
 ```jet
 // cosine.jet
 package {
-    name: "cosine"
+    name: "cosine",
     authority: { allow: [FFI, IO] }
 }
 
@@ -136,9 +136,9 @@ themselves, and text and rows are safe.
 ```jet
 // notes.jet
 package {
-    name: "notes"
-    authority: { allow: [FFI, IO, FS, Mem.Alloc] }
-    deps: { sqlite3: c@nixpkgs:sqlite }
+    name: "notes",
+    authority: { allow: [FFI, IO, FS, Mem.Alloc] },
+    deps: { sqlite3: c,@nixpkgs:sqlite }
 }
 
 use sql :: c.sqlite3
@@ -307,9 +307,9 @@ void  geom_scale(float *pts __counted_by(n), size_t n, float k);  // counted buf
 ```jet
 // shapes.jet
 package {
-    name: "shapes"
-    authority: { allow: [FFI, IO] }
-    deps: { geom: c@"native/geom" }
+    name: "shapes",
+    authority: { allow: [FFI, IO] },
+    deps: { geom: c,@"native/geom" }
 }
 
 use g :: c.geom
@@ -405,7 +405,7 @@ PROPOSED. D-FFI-CMAP1 ratified the `T?` and list mapping.
 ```jet
 // sort.jet
 package {
-    name: "sort"
+    name: "sort",
     authority: { allow: [FFI, IO] }
 }
 
@@ -465,9 +465,9 @@ The second half of the entry is an event loop that calls back from its own threa
 ```jet
 // ticker.jet
 package {
-    name: "ticker"
-    authority: { allow: [FFI, IO, Time] }
-    deps: { ticker: c@"native/ticker" }
+    name: "ticker",
+    authority: { allow: [FFI, IO, Time] },
+    deps: { ticker: c,@"native/ticker" }
 }
 
 use tk :: c.ticker
@@ -549,9 +549,9 @@ png_structp png_create_read_struct(...);              // library-owned; destroy 
 ```jet
 // owners.jet
 package {
-    name: "owners"
-    authority: { allow: [FFI, IO, Env, FS, Mem.Alloc] }
-    deps: { png: c@nixpkgs:libpng }
+    name: "owners",
+    authority: { allow: [FFI, IO, Env, FS, Mem.Alloc] },
+    deps: { png: c,@nixpkgs:libpng }
 }
 
 use {
@@ -653,9 +653,9 @@ template <typename T> T clamp_to(T v, T lo, T hi);
 ```jet
 // shop.jet
 package {
-    name: "shop"
-    authority: { allow: [FFI, IO, Mem.Alloc] }
-    deps: { inventory: cpp@"native" }
+    name: "shop",
+    authority: { allow: [FFI, IO, Mem.Alloc] },
+    deps: { inventory: cpp,@"native" }
 }
 
 use inv :: cpp.inventory
@@ -738,9 +738,9 @@ Status: **PARTIAL**. A clang-based C++ binder exists:
 ```jet
 // grep.jet
 package {
-    name: "grep"
-    authority: { allow: [FFI, IO, FS] }
-    deps: { regex: rust@"regex@1.11" }
+    name: "grep",
+    authority: { allow: [FFI, IO, FS] },
+    deps: { regex: rust,@"regex@1.11" }
 }
 
 use re :: rust.regex
@@ -807,9 +807,9 @@ iterators and `dyn` traits.
 ```jet
 // stats.jet
 package {
-    name: "stats"
-    authority: { allow: [FFI, IO] }
-    deps: { numpy: py@">=1.26" }
+    name: "stats",
+    authority: { allow: [FFI, IO] },
+    deps: { numpy: py,@">=1.26" }
 }
 
 use np :: py.numpy
@@ -871,9 +871,9 @@ The sidecar supervisor exists too: `WorkerSupervisor.jet`. Arrays, stubs, shared
 ```jet
 // chart.jet  (web target)
 package {
-    name: "chart"
-    authority: { allow: [Browser, Net, FFI] }
-    deps: { chartjs: js@"chart.js@4.4" }
+    name: "chart",
+    authority: { allow: [Browser, Net, FFI] },
+    deps: { chartjs: js,@"chart.js@4.4" }
 }
 
 use {
@@ -981,7 +981,7 @@ enum TallyError {
 name: "tally"
 version: "0.1.0"
 outputs: {
-    core: .Library{ name: "tally", native: true, bindings: [c, python] }
+    core: .Library{ name: "tally", native: true, bindings: [c, python] },
 }
 ```
 
@@ -1158,7 +1158,7 @@ returns status codes and passes records as dicts. Ballot D-FFI-EXPORT2.
 name: "thumbs"
 version: "0.1.0"
 authority: { allow: [FFI, FS, IO, Mem.Alloc] }
-deps: { fastimg: c@"vendor/fastimg" }
+deps: { fastimg: c,@"vendor/fastimg" }
 isolate: { fastimg: .Wasm }          // PROPOSED: the only line that changed
 ```
 
@@ -1250,7 +1250,7 @@ languages.
 ```jet
 // popcount.jet
 package {
-    name: "popcount"
+    name: "popcount",
     authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
 }
 
@@ -1319,7 +1319,7 @@ PROPOSED in D-FFI-VOUCH2, because D-FFI-INLINE1 requires "the enclosing `#Unsafe
 ```jet
 // host.jet
 package {
-    name: "host"
+    name: "host",
     authority: { allow: [FFI, FS, IO] }
 }
 
@@ -1579,7 +1579,7 @@ Status: **PROPOSED**. D-FFI-PRIMS1=A ratified `core.ffi`. The `--expand` output,
 name: "dodge"
 version: "0.1.0"
 authority: { allow: [FFI, GPU, IO, FS, Time, Rand, Mem.Alloc] }
-deps: { raylib: c@nixpkgs:raylib }
+deps: { raylib: c,@nixpkgs:raylib }
 ```
 
 ```jet
@@ -1923,10 +1923,10 @@ table:
 ```jet
 // package.jet (PROPOSED key)
 isolate: {
-    fastimg: .Wasm         // C/C++/Rust source compiled to wasm, translated to native at link
-    oldcodec: .Process     // any library, including closed binaries, in a supervised child
-    zlib: .Contained       // in-process, tracked pointers (today's policy contain: list)
-    numpy: .InProcess      // Python embedded (today's py@embed)
+    fastimg: .Wasm,         // C/C++/Rust source compiled to wasm, translated to native at link
+    oldcodec: .Process,     // any library, including closed binaries, in a supervised child
+    zlib: .Contained,       // in-process, tracked pointers (today's policy contain: list)
+    numpy: .InProcess,      // Python embedded (today's py@embed)
 }
 ```
 

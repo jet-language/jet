@@ -27,9 +27,9 @@ RUNTIME_LOCK_POLL_MS: 1
 
 // Kernel state of one managed-root lock domain.
 RuntimeLockState: enum {
-    Absent
-    Held
-    Idle
+    Absent,
+    Held,
+    Idle,
 }
 
 // A held process lock. `owner` is the FILELOCK1 lock on the canonical managed
@@ -37,13 +37,13 @@ RuntimeLockState: enum {
 // inode that `path` must keep naming. Scope exit releases the kernel lock; both
 // files always stay on disk.
 RuntimeLock: struct {
-    path: String
-    owner_path: String
-    owner: FileLock
-    marker: FileReader
-    authority: FoundationDirectoryAuthority
-    marker_parent: FoundationDirectoryAuthority
-    marker_name: String
+    path: String,
+    owner_path: String,
+    owner: FileLock,
+    marker: FileReader,
+    authority: FoundationDirectoryAuthority,
+    marker_parent: FoundationDirectoryAuthority,
+    marker_name: String,
 
     revalidate: fn(self) -[FS]> IOError! {
         self.authority.revalidate()
@@ -58,11 +58,11 @@ RuntimeLock: struct {
 }
 
 RuntimeLockScope: struct {
-    authority: FoundationDirectoryAuthority
-    marker_parent: FoundationDirectoryAuthority
-    marker: FileReader
-    name: String
-    path: String
+    authority: FoundationDirectoryAuthority,
+    marker_parent: FoundationDirectoryAuthority,
+    marker: FileReader,
+    name: String,
+    path: String,
 }
 
 // Rust `lock_path_for_scope`.
@@ -268,9 +268,9 @@ env_runtime_project_lock: fn(project: String, scope: String) -[FS, Env, Time]> R
 // One nested lock claim. `lock` is None when an outer claim of the same
 // session already holds this root's domain.
 RuntimeLockGuard: struct {
-    root: String
-    identity: FileID
-    lock: RuntimeLock?
+    root: String,
+    identity: FileID,
+    lock: RuntimeLock?,
 }
 
 // Rust HELD_LOCK_ROOTS: all scopes for one managed root share one kernel lock
@@ -278,7 +278,7 @@ RuntimeLockGuard: struct {
 // outer guard instead of waiting on itself. Jet carries the held set
 // explicitly instead of in thread-local state.
 RuntimeLockSession: struct {
-    held_roots: [FileID]
+    held_roots: [FileID],
 
     new: fn() -> RuntimeLockSession Never! { RuntimeLockSession{held_roots: [FileID]{}} }
 

@@ -1,7 +1,7 @@
 // A trait block in a struct or enum body gets the trait's default methods,
 // for a trait in the same module and for one in another module.
 Greet: trait {
-    name: fn(self) -> String
+    name: fn(self) -> String,
     hello: fn(self) -> String {
         "hello {self.name()}"
     }
@@ -9,7 +9,7 @@ Greet: trait {
 
 far: module {
     Wave: trait {
-        who: fn(self) -> String
+        who: fn(self) -> String,
         wave: fn(self) -> String {
             "wave {self.who()}"
         }
@@ -17,7 +17,7 @@ far: module {
 }
 
 Inner: struct {
-    n: String
+    n: String,
 
     impl Greet {
         name: fn(self) -> String { self.n }
@@ -29,8 +29,8 @@ Inner: struct {
 }
 
 Pet: enum {
-    Cat
-    Dog
+    Cat,
+    Dog,
 
     impl Greet {
         name: fn(self) -> String { if self == .Cat -> "cat" else -> "dog" }

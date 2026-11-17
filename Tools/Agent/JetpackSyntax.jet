@@ -27,18 +27,18 @@ USAGE: "usage: jet Tools/Agent/JetpackSyntax.jet [--check|--write]"
 
 // One generated copy of the registry and the unit it serves.
 SyntaxTarget: struct {
-    output: String
+    output: String,
     // The unit's name in the generated file's header.
-    unit: String
+    unit: String,
     // The assembly lists that name the unit's sources; with none, the unit
     // is every `.jet` file under `unit_dir`.
-    unit_lists: [String]
-    unit_dir: String
+    unit_lists: [String],
+    unit_dir: String,
     // How an import list from the unit's foundation package opens.
-    import_list: String
+    import_list: String,
     // Where a unit source that declares a registry name is a hand copy, or
     // "" when the unit's own declarations are allowed to stand.
-    owned_prefix: String
+    owned_prefix: String,
 }
 
 JETPACK_TARGET: SyntaxTarget{
@@ -72,7 +72,7 @@ VALUE_STARTS: [String]{"\"", "'", "-", "[String]{{", "[Int]{{", "#run {{", "Stri
 
 #Error
 JetpackSyntaxError: struct {
-    message: String
+    message: String,
 }
 
 syntax_fail: fn(message: String) -> JetpackSyntaxError Never! {
@@ -82,15 +82,15 @@ syntax_fail: fn(message: String) -> JetpackSyntaxError Never! {
 // One top-level constant of the registry: the comment lines right above it
 // and its declaration lines, each newline-terminated.
 RegistryConstant: struct {
-    name: String
-    comments: String
-    declaration: String
+    name: String,
+    comments: String,
+    declaration: String,
 }
 
 // A registry file's path and its source.
 SourceFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 byte_tail: fn(text: String, start: Int) -> String Never! {
@@ -452,7 +452,7 @@ jetpack_syntax_main: fn(args: [String]) -[FS]> String JetpackSyntaxError! {
 run: fn() { print(jetpack_syntax_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("a registry constant keeps its comments and its continued declaration") {
-    source: "// Section.\n\n/// The first.\nFIRST: \"a\" // S1\nLIST: [String]{{\n    FIRST,\n}}\nType: struct {{\n    x: Int\n}}\nlower: \"b\"\n"
+    source: "// Section.\n\n/// The first.\nFIRST: \"a\" // S1\nLIST: [String]{{\n    FIRST,\n}}\nType: struct {{\n    x: Int,\n}}\nlower: \"b\"\n"
     constants: registry_constants(source)
     // FIRST and LIST; `Type` and `lower` are not constants.
     assert_eq(constants.len(), 2)

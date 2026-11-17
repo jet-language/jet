@@ -67,9 +67,9 @@ graph_json_for_entry_source_with_live_pid: fn(checker: LSPChecker, entry: String
 // One field of a runtime event observation: `key` is its observation word,
 // `name` its Canvas JSON member, and `text` marks a quoted value.
 RuntimeEventField: struct {
-    name: String
-    key: String
-    text: Bool
+    name: String,
+    key: String,
+    text: Bool,
 }
 
 runtime_event_fields: fn() -> [RuntimeEventField] Never! {
@@ -323,9 +323,9 @@ core_catalog_json_for_entry: fn(entry: String, query: String) -> String Err! {
 
 // The Git text state of one project file.
 GitFileState: struct {
-    status: String
-    diff: String
-    dirty: Bool
+    status: String,
+    diff: String,
+    dirty: Bool,
 }
 
 git_file_state: fn(root: String, path: String, src: String) -> GitFileState {
@@ -395,10 +395,10 @@ proof_payload: fn(checker: LSPChecker, entry: String, source_id: String?, comman
 
 // The `jet` command a Canvas command action runs, and what it may write.
 CommandPlan: struct {
-    title: String
-    args: [String]
-    writes: String
-    requires_confirmation: Bool
+    title: String,
+    args: [String],
+    writes: String,
+    requires_confirmation: Bool,
 }
 
 command_plan: fn(action_id: String, source: String, request: String) -> CommandPlan? Never! {
@@ -423,12 +423,12 @@ command_plan: fn(action_id: String, source: String, request: String) -> CommandP
 
 // What one Canvas command run reported.
 CommandOutcome: struct {
-    success: Bool
+    success: Bool,
     // None when a signal ended the command.
-    exit_code: Int?
-    stdout: String
-    stderr: String
-    diagnostics: String
+    exit_code: Int?,
+    stdout: String,
+    stderr: String,
+    diagnostics: String,
 }
 
 command_receipt_json_for_entry: fn(checker: LSPChecker, entry: String, request: String) -> String Err! {

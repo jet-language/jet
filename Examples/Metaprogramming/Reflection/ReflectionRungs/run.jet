@@ -9,10 +9,10 @@
 // of its file module, its name, identity, types, functions and markers, the
 // same way.
 Label: struct {
-    text: String
+    text: String,
 
     impl Marker {
-        sites: [.Type, .Function]
+        sites: [.Type, .Function],
     }
 }
 
@@ -21,7 +21,7 @@ Rungs: struct {}
 // The marker-body rung: its `expand` adds a method to `Rungs`.
 FromMarker: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) {
             label: target.marker(Label)?.text ?? "none"
@@ -37,7 +37,7 @@ FromMarker: struct {
 // package's PackageInfo and adds a method to `Rungs`.
 FromPackage: struct {
     impl Marker {
-        sites: [.Package]
+        sites: [.Package],
 
         expand: fn(self, target: Target) {
             seen: "{target.name} {target.version} modules={target.modules.len()} types={target.types.len()}"
@@ -55,7 +55,7 @@ FromPackage: struct {
 // The derive rung: a marker that adds a method to the type it marks.
 Describe: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) {
             tname: target.name
@@ -70,13 +70,13 @@ Describe: struct {
 
 #[FromMarker, Describe, Label("pt")]
 Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 }
 
 #Describe
 Plain: struct {
-    value: Int
+    value: Int,
 }
 
 // The comptime and fn build rungs share one ordinary function.

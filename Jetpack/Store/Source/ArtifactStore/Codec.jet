@@ -17,7 +17,7 @@ use {
 // Why an action or artifact envelope was refused (the Rust `String` error).
 #Error
 ArtifactEnvelopeError: struct {
-    reason: String
+    reason: String,
 }
 
 // `jet.store.v1\0action\0`
@@ -149,9 +149,9 @@ store_artifact_is_executable: fn(info: files.Stat) -> Bool Never! { ((info.mode)
 
 // The outcome of reading one store entry.
 ArtifactRawRead: enum {
-    Missing
-    Bytes([U8])
-    Corrupt(String)
+    Missing,
+    Bytes([U8]),
+    Corrupt(String),
 }
 
 // Read a regular store file, refusing links, special files, and a file that
@@ -336,8 +336,8 @@ store_artifact_unique_token: fn() -[Rand]> String ArtifactStoreError! {
 
 // Filesystem capacity of the volume holding a path.
 ArtifactDiskStats: struct {
-    total_bytes: Int
-    available_bytes: Int
+    total_bytes: Int,
+    available_bytes: Int,
 }
 
 // POSIX `df -Pk` of `path`; None when df fails or reports an unexpected row.

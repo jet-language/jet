@@ -17,24 +17,24 @@ STORE_CACHE_RECEIPT_MAGIC: "jet-cache-receipt-v1"
 
 // One completed cache transfer.
 CacheTransferReport: struct {
-    role: String
-    mirror: String
-    entry: String
-    output_hash: String
+    role: String,
+    mirror: String,
+    entry: String,
+    output_hash: String,
     // Jetpack's digest of the canonical NAR bytes.
-    nar_hash: String
+    nar_hash: String,
     // Public signature identity, never secret credential material.
-    signed_fingerprint: String
+    signed_fingerprint: String,
     // Provenance identities carried in the signed cache admission decision.
-    builder: String
-    provenance: String
+    builder: String,
+    provenance: String,
     // The signed admission receipt accepted for this transfer, when the
     // endpoint uses Jetpack's native cache receipt protocol.
-    witness: String?
-    receipt_version: Int?
-    receipt_expires_unix: Int?
-    credential_provider: String?
-    bytes: Int
+    witness: String?,
+    receipt_version: Int?,
+    receipt_expires_unix: Int?,
+    credential_provider: String?,
+    bytes: Int,
 
     // `jet.status/v1` for a cache transfer operation.
     json: fn(self, operation: String) -> String ReportError! {
@@ -45,10 +45,10 @@ CacheTransferReport: struct {
 
 // Summary of a local cache publication tree prepared from Hangar.
 CacheStageReport: struct {
-    role: String
-    destination: String
-    entries: Int
-    bytes: Int
+    role: String,
+    destination: String,
+    entries: Int,
+    bytes: Int,
 
     json: fn(self, operation: String) -> String ReportError! {
         fields: StatusFields.new().with("operation", Dyn.Text(operation.copy())).with("role", Dyn.Text(self.role.copy())).with("destination", Dyn.Text(self.destination.copy())).with("entries", Dyn.Int(self.entries)).with("bytes", Dyn.Int(self.bytes))
@@ -60,22 +60,22 @@ CacheStageReport: struct {
 // admission pin, not a new cache decision path. Transfer still performs the
 // full signature, provenance, freshness, and output checks.
 CacheAdmission: struct {
-    role: String
-    decision: CacheAdmissionDecision
-    builder: String
-    provenance: String
-    receipt_version: Int?
-    receipt_expires_unix: Int?
-    reason: String
+    role: String,
+    decision: CacheAdmissionDecision,
+    builder: String,
+    provenance: String,
+    receipt_version: Int?,
+    receipt_expires_unix: Int?,
+    reason: String,
 }
 
 // The explain view of one role's admission for one output.
 CacheAdmissionDecision: enum {
-    Accepted
-    Expired
-    NotAccepted
-    Invalid
-    Denied
+    Accepted,
+    Expired,
+    NotAccepted,
+    Invalid,
+    Denied,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -90,24 +90,24 @@ CacheAdmissionDecision: enum {
 
 // A fetched cache object set: signed narinfo, NAR bytes, trust receipt.
 CacheArtifact: struct {
-    info: NarInfo
-    nar: [U8]
-    receipt: CacheReceipt
+    info: NarInfo,
+    nar: [U8],
+    receipt: CacheReceipt,
 }
 
 // What a publication proved about the written objects.
 CacheTransferProof: struct {
-    signed_fingerprint: String
-    witness: String?
-    receipt_version: Int?
-    receipt_expires_unix: Int?
+    signed_fingerprint: String,
+    witness: String?,
+    receipt_version: Int?,
+    receipt_expires_unix: Int?,
 }
 
 // An accepted receipt pin: the newest version admitted for one role and
 // output.
 CacheReceiptPin: struct {
-    version: Int
-    expires_unix: Int
+    version: Int,
+    expires_unix: Int,
 }
 
 // Publish one reproducible Hangar entry to the first bound mirror that

@@ -216,13 +216,13 @@ sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, p
 // (sema_core_demand_waves), whether any round found a Core body that
 // waits for demand, and the keys the reads named (`names`).
 SemaCoreDemandTally: struct {
-    read_functions: [Int]
-    read_facts: [Int]
-    checked: Int
-    waves: Int
-    rounds: Int
-    demanded: Bool
-    names: SemaCoreDemandNames
+    read_functions: [Int],
+    read_facts: [Int],
+    checked: Int,
+    waves: Int,
+    rounds: Int,
+    demanded: Bool,
+    names: SemaCoreDemandNames,
 }
 
 sema_core_demand_tally_new: fn() -> SemaCoreDemandTally Never! {
@@ -248,16 +248,16 @@ sema_core_demand_tally_new: fn() -> SemaCoreDemandTally Never! {
 // runs again without stand-ins (a key checked as a stand-in was then named
 // where none will do), else "".
 SemaCoreDemandNames: struct {
-    keys: [String]
-    symbols: [U32:Bool]
-    decls: [Int:Bool]
-    full: [String]{[String]{}}
-    values: [String]{[String]{}}
-    full_rows: [Int:Bool]{[Int:Bool]{}}
-    pending: [DeclID]{[DeclID]{}}
-    stood_in: [Int:Bool]{[Int:Bool]{}}
-    valued: Bool{false}
-    rerun: String{""}
+    keys: [String],
+    symbols: [U32:Bool],
+    decls: [Int:Bool],
+    full: [String]{[String]{}},
+    values: [String]{[String]{}},
+    full_rows: [Int:Bool]{[Int:Bool]{}},
+    pending: [DeclID]{[DeclID]{}},
+    stood_in: [Int:Bool]{[Int:Bool]{}},
+    valued: Bool{false},
+    rerun: String{""},
 }
 
 sema_core_demand_names_new: fn() -> SemaCoreDemandNames Never! {
@@ -909,11 +909,11 @@ SEMA_CORE_DEMAND_READ_NODES_PER_THREAD: 32768
 // names the functions hold in walk order (`reads`), each module's ending
 // at `ends`.
 SemaCoreDemandPart: struct {
-    first: Int
-    from: [Int]
-    counts: [Int]
-    reads: SemaCoreDemandReads
-    ends: [Int]
+    first: Int,
+    from: [Int],
+    counts: [Int],
+    reads: SemaCoreDemandReads,
+    ends: [Int],
 }
 
 // The names read bodies hold, in walk order (sema_core_demand_body_reads),
@@ -923,21 +923,21 @@ SemaCoreDemandPart: struct {
 // once the read ends (sema_core_demand_reads_end), so demanding them in
 // walk order pops each.
 SemaCoreDemandReads: struct {
-    names: [SemaCoreDemandRead]
-    conversions: [String]
-    decls: [Int:Bool]
-    symbols: [U32:Bool]
+    names: [SemaCoreDemandRead],
+    conversions: [String],
+    decls: [Int:Bool],
+    symbols: [U32:Bool],
 }
 
 // One name a body holds: a declaration row, a run-wide symbol, or the next
 // key of a declared error conversion. `full`: named where a stand-in will
 // not do; `value`: named as a function value.
 SemaCoreDemandRead: struct {
-    decl: DeclID?
-    symbol: SymbolID?
-    conversion: Bool
-    full: Bool{false}
-    value: Bool{false}
+    decl: DeclID?,
+    symbol: SymbolID?,
+    conversion: Bool,
+    full: Bool{false},
+    value: Bool{false},
 }
 
 sema_core_demand_reads_new: fn() -> SemaCoreDemandReads Never! {
@@ -1094,8 +1094,8 @@ sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, names: &Sem
 // A deferred body that joined a wave (sema_core_demand_add): its callable
 // row, and the module whose scope resolves its calls.
 SemaCoreDemandJoin: struct {
-    row: SemaRegistrationCallableRow
-    module_index: Int
+    row: SemaRegistrationCallableRow,
+    module_index: Int,
 }
 
 // The fewest joined bodies whose calls a thread reads: reading one body's
@@ -1108,15 +1108,15 @@ SEMA_CORE_DEMAND_CALLEES_PER_THREAD: 64
 // `qualified` each `alias.name(…)` call, and `locals` every parameter and
 // binding name in the function, which may shadow a module name.
 SemaCoreDemandCalls: struct {
-    plain: [String]
-    qualified: [SemaCoreDemandQualified]
-    locals: [NamedSpan]
+    plain: [String],
+    qualified: [SemaCoreDemandQualified],
+    locals: [NamedSpan],
 }
 
 // An `alias.name(…)` call.
 SemaCoreDemandQualified: struct {
-    alias: String
-    name: String
+    alias: String,
+    name: String,
 }
 
 // The keys of the deferred bodies not yet checked that the bodies of

@@ -35,7 +35,7 @@ modules: fn(n: Int, r: &Seeded) -> [String:String] {
         b: r.int(2, 31)
         files["modules/part_{i}.jet"] = """
         Record{i}: struct {{
-            id: Int
+            id: Int,
             weight: Int
         }}
 
@@ -172,7 +172,7 @@ wide_enums: fn(n: Int, r: &Seeded) -> [String:String] {
     decl := [String]{"Opcode: enum {{"}
     loop i in 0..<n {
         v: "{kinds[i % 4]}{i}"
-        decl.push(["    {v}", "    {v}(Int)", "    {v}(start: Int, width: Int)", "    {v}(String)"][i % 4])
+        decl.push(["    {v},", "    {v}(Int),", "    {v}(start: Int, width: Int),", "    {v}(String),"][i % 4])
     }
     decl.extend(["}}", ""])
     cost := [String]{"opcode_cost: fn(op: Opcode) -> Int {{", "    if op == {{"}
@@ -234,7 +234,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
             lines(
                 """
                 {named}{k}: trait {{
-                    measure_{k}: fn(self) -> Int
+                    measure_{k}: fn(self) -> Int,
                     label_{k}: fn(self) -> String
                 }}
 
@@ -251,7 +251,7 @@ impls_traits: fn(n: Int, r: &Seeded) -> [String:String] {
     types := [[String]]{}
     entries := [String]{}
     loop i in 0..<n {
-        body := [String]{"Entity{i}: struct {{", "    id: Int", "    name: String", "}}", ""}
+        body := [String]{"Entity{i}: struct {{", "    id: Int,", "    name: String,", "}}", ""}
         chosen := [Int]{}
         loop j in 0..<4 {
             k: (i * 4 + j) % trait_count
@@ -302,7 +302,7 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
     entries := [String]{}
     text := """
     Slot: struct<T> {{
-        value: T
+        value: T,
         mark: Int
     }}
 
@@ -333,7 +333,7 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
         text = """
         {text}
         Thing{i}: struct {{
-            id: Int
+            id: Int,
             weight: Int
         }}
 
@@ -407,8 +407,8 @@ data_tables: fn(n: Int, r: &Seeded) -> [String:String] {
         lines(
             """
             Row: struct {{
-                id: Int
-                weight: Int
+                id: Int,
+                weight: Int,
                 name: String
             }}
 
@@ -504,8 +504,8 @@ errors: fn(n: Int, r: &Seeded) -> [String:String] {
         family: if i % 16 == 0 -> """
         #Error
         Fault{k}: enum {{
-            Missing
-            Invalid(Int)
+            Missing,
+            Invalid(Int),
             Overflow(limit: Int, seen: Int)
         }}
 
@@ -632,17 +632,17 @@ fan_in: fn(n: Int, r: &Seeded) -> [String:String] {
 // ---------------------------------------------------------------- registry
 
 ShapeKind: enum {
-    Stress
-    Domain
+    Stress,
+    Domain,
 }
 
 // A registered shape; `make(n, seed)` writes its files at size `n`.
 Shape: struct {
-    name: String
-    kind: ShapeKind
-    dimension: String
-    base: Int
-    make: fn(Int, Int) -> [String:String] Err!
+    name: String,
+    kind: ShapeKind,
+    dimension: String,
+    base: Int,
+    make: fn(Int, Int) -> [String:String] Err!,
 }
 
 stress: fn(name: String, dimension: String, base: Int, make: &&fn(Int, Int) -> [String:String] Err!) -> Shape {
@@ -679,11 +679,11 @@ shapes: fn() -> [Shape] {
 shape_names: fn() -> String { shapes().map(fn(shape) { shape.name.copy() }).join(", ") }
 
 Corpus: struct {
-    kind: ShapeKind
-    files: [String:String]
-    diagnostics: Int
-    code_lines: Int
-    source_sha256: String
+    kind: ShapeKind,
+    files: [String:String],
+    diagnostics: Int,
+    code_lines: Int,
+    source_sha256: String,
 }
 
 // The registered shape `name`, when `n` is a valid size for it.

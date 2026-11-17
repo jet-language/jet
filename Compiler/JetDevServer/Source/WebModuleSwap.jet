@@ -2,30 +2,30 @@
 // Sema owns compatibility and retention; this adapter never re-derives either.
 
 WebModuleSwapIdentity: struct {
-    module_ref: String
-    page: String
+    module_ref: String,
+    page: String,
 
     new: fn(module_ref: String, page: String) -> WebModuleSwapIdentity { WebModuleSwapIdentity{module_ref, page} }
     is_valid: fn(self) -> Bool { self.module_ref.len() > 0 && self.page.len() > 0 }
     matches: fn(self, other: WebModuleSwapIdentity) -> Bool { self.module_ref == other.module_ref && self.page == other.page }
 }
 WebPageFact: struct {
-    identity: String
-    artifact: String
+    identity: String,
+    artifact: String,
 
     new: fn(identity: String, artifact: String) -> WebPageFact { WebPageFact{identity, artifact} }
 }
 WebModuleFact: struct {
-    identity: String
-    interface_fingerprint: String
-    body_fingerprint: String
+    identity: String,
+    interface_fingerprint: String,
+    body_fingerprint: String,
 
     new: fn(identity: String, interface_fingerprint: String, body_fingerprint: String) -> WebModuleFact {
         WebModuleFact{identity, interface_fingerprint, body_fingerprint}
     }
 }
 WebStateValue: enum {
-    Text(String) Integer(I64) Unsigned(U64) Boolean(Bool) Bytes([U8])
+    Text(String), Integer(I64), Unsigned(U64), Boolean(Bool), Bytes([U8]),
 
     kind: fn(self) -> String {
         if self == {
@@ -64,58 +64,58 @@ impl WebStateKind {
 }
 
 WebSignalFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebSignalFact { WebSignalFact{key, type_fingerprint, value} }
 }
 WebStoreFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebStoreFact { WebStoreFact{key, type_fingerprint, value} }
 }
 WebQueryCacheFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebQueryCacheFact { WebQueryCacheFact{key, type_fingerprint, value} }
 }
 WebFormDraftFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFormDraftFact { WebFormDraftFact{key, type_fingerprint, value} }
 }
 WebScrollFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebScrollFact { WebScrollFact{key, type_fingerprint, value} }
 }
 WebFocusFact: struct {
-    key: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, type_fingerprint: String, value: WebStateValue) -> WebFocusFact { WebFocusFact{key, type_fingerprint, value} }
 }
 WebIslandFact: struct {
-    key: String
-    identity: String
-    type_fingerprint: String
-    value: WebStateValue
+    key: String,
+    identity: String,
+    type_fingerprint: String,
+    value: WebStateValue,
 
     new: fn(key: String, identity: String, type_fingerprint: String, value: WebStateValue) -> WebIslandFact { WebIslandFact{key, identity, type_fingerprint, value} }
 }
 WebModuleSwapStateFact: enum {
-    Signal(WebSignalFact) Store(WebStoreFact) QueryCache(WebQueryCacheFact) FormDraft(WebFormDraftFact)
-    Scroll(WebScrollFact) Focus(WebFocusFact) Island(WebIslandFact)
+    Signal(WebSignalFact), Store(WebStoreFact), QueryCache(WebQueryCacheFact), FormDraft(WebFormDraftFact),
+    Scroll(WebScrollFact), Focus(WebFocusFact), Island(WebIslandFact),
 
     kind: fn(self) -> WebStateKind {
         if self == {
@@ -182,12 +182,12 @@ WebModuleSwapStateFact: enum {
     same_slot: fn(self, other: WebModuleSwapStateFact) -> Bool { self.kind() == other.kind() && self.key() == other.key() }
 }
 WebModuleSwapSnapshot: struct {
-    identity: WebModuleSwapIdentity
-    source_revision: String
-    build_revision: String
-    page: WebPageFact
-    modules: [WebModuleFact]
-    state: [WebModuleSwapStateFact]
+    identity: WebModuleSwapIdentity,
+    source_revision: String,
+    build_revision: String,
+    page: WebPageFact,
+    modules: [WebModuleFact],
+    state: [WebModuleSwapStateFact],
 
     new: fn(identity: WebModuleSwapIdentity, source_revision: String, build_revision: String, page: WebPageFact, modules: [WebModuleFact], state: [WebModuleSwapStateFact]) -> WebModuleSwapSnapshot WebModuleSwapError! {
         snapshot := WebModuleSwapSnapshot{identity, source_revision, build_revision, page, modules, state}
@@ -262,7 +262,7 @@ impl WebModuleSwapReasonCode {
 impl WebModuleSwapReasonCode.Display { display: fn(self) -> String { self.as_str() } }
 
 WebModuleSwapCompatibility: enum {
-    Compatible Incompatible(reason_codes: [WebModuleSwapReasonCode])
+    Compatible, Incompatible(reason_codes: [WebModuleSwapReasonCode]),
 
     is_compatible: fn(self) -> Bool {
         if self == {
@@ -278,20 +278,20 @@ WebModuleSwapCompatibility: enum {
     }
 }
 WebModuleSwapResetFact: struct {
-    state: WebModuleSwapStateFact
-    prior_identity: String?
-    prior_type_fingerprint: String?
-    reason: WebModuleSwapReasonCode
+    state: WebModuleSwapStateFact,
+    prior_identity: String?,
+    prior_type_fingerprint: String?,
+    reason: WebModuleSwapReasonCode,
 }
 
 WebModuleSwapPlan: struct {
-    base: WebModuleSwapSnapshot
-    candidate: WebModuleSwapSnapshot
-    compatibility: WebModuleSwapCompatibility
-    changed_modules: [String]
-    preserved: [WebModuleSwapStateFact]
-    reset: [WebModuleSwapResetFact]
-    reason_codes: [WebModuleSwapReasonCode]
+    base: WebModuleSwapSnapshot,
+    candidate: WebModuleSwapSnapshot,
+    compatibility: WebModuleSwapCompatibility,
+    changed_modules: [String],
+    preserved: [WebModuleSwapStateFact],
+    reset: [WebModuleSwapResetFact],
+    reason_codes: [WebModuleSwapReasonCode],
 
     // A plan reads Sema's checked hot-swap decision, which this compiler
     // does not produce yet, so the swap refuses once both snapshots check.
@@ -351,19 +351,19 @@ impl WebModuleSwapReceiptStatus {
 }
 
 WebModuleSwapReceipt: struct {
-    operation: WebModuleSwapOperation
-    status: WebModuleSwapReceiptStatus
-    phase: WebModuleSwapPhase
-    identity: WebModuleSwapIdentity
-    candidate_identity: WebModuleSwapIdentity
-    source_revision: String
-    build_revision: String
-    changed_modules: [String]
-    reason_codes: [WebModuleSwapReasonCode]
-    preserved: [WebModuleSwapStateFact]
-    reset: [WebModuleSwapResetFact]
-    committed_page: WebPageFact
-    active_page: WebPageFact
+    operation: WebModuleSwapOperation,
+    status: WebModuleSwapReceiptStatus,
+    phase: WebModuleSwapPhase,
+    identity: WebModuleSwapIdentity,
+    candidate_identity: WebModuleSwapIdentity,
+    source_revision: String,
+    build_revision: String,
+    changed_modules: [String],
+    reason_codes: [WebModuleSwapReasonCode],
+    preserved: [WebModuleSwapStateFact],
+    reset: [WebModuleSwapResetFact],
+    committed_page: WebPageFact,
+    active_page: WebPageFact,
 
     changed_module_set: fn(self) -> [String] { self.changed_modules }
     preserved_facts: fn(self) -> [WebModuleSwapStateFact] { self.preserved }
@@ -383,13 +383,13 @@ WebModuleSwapReceipt: struct {
 }
 #Error
 WebModuleSwapError: enum {
-    InvalidSnapshot(detail: String)
-    IdentityMismatch(expected: WebModuleSwapIdentity, found: WebModuleSwapIdentity)
-    StalePlan(expected_source_revision: String, found_source_revision: String, expected_build_revision: String, found_build_revision: String)
-    Incompatible(reason_codes: [WebModuleSwapReasonCode])
-    InvalidTransition(operation: WebModuleSwapOperation, phase: WebModuleSwapPhase)
-    NoPendingPlan NoAppliedPlan NoCommittedPage
-    Unavailable(feature: String)
+    InvalidSnapshot(detail: String),
+    IdentityMismatch(expected: WebModuleSwapIdentity, found: WebModuleSwapIdentity),
+    StalePlan(expected_source_revision: String, found_source_revision: String, expected_build_revision: String, found_build_revision: String),
+    Incompatible(reason_codes: [WebModuleSwapReasonCode]),
+    InvalidTransition(operation: WebModuleSwapOperation, phase: WebModuleSwapPhase),
+    NoPendingPlan, NoAppliedPlan, NoCommittedPage,
+    Unavailable(feature: String),
 
     impl Display {
         display: fn(self) -> String {
@@ -408,10 +408,10 @@ WebModuleSwapError: enum {
     }
 }
 WebModuleSwapState: struct {
-    committed_snapshot: WebModuleSwapSnapshot
-    pending_plan: WebModuleSwapPlan?
-    active_snapshot: WebModuleSwapSnapshot
-    current_phase: WebModuleSwapPhase
+    committed_snapshot: WebModuleSwapSnapshot,
+    pending_plan: WebModuleSwapPlan?,
+    active_snapshot: WebModuleSwapSnapshot,
+    current_phase: WebModuleSwapPhase,
 
     new: fn(snapshot: WebModuleSwapSnapshot) -> WebModuleSwapState WebModuleSwapError! {
         checked := snapshot

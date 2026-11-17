@@ -41,7 +41,7 @@ use {
 // diagnostics.
 #Error
 ProjectFileError: struct {
-    diagnostics: [Diagnostic]
+    diagnostics: [Diagnostic],
 }
 
 project_file_error: fn(diagnostic: Diagnostic) -> ProjectFileError Never! {
@@ -49,60 +49,60 @@ project_file_error: fn(diagnostic: Diagnostic) -> ProjectFileError Never! {
 }
 
 ProjectFileRec: struct {
-    path: String
-    revision: String
-    kind: String
+    path: String,
+    revision: String,
+    kind: String,
 }
 
 ProjectContext: struct {
-    entry_path: String
-    project_root: String
-    manifest_root: String?
-    ecosystem_root: String?
-    workspace_root: String?
-    files: [ProjectFileRec]
-    project_revision: String
-    authority_diagnostic: Diagnostic?
+    entry_path: String,
+    project_root: String,
+    manifest_root: String?,
+    ecosystem_root: String?,
+    workspace_root: String?,
+    files: [ProjectFileRec],
+    project_revision: String,
+    authority_diagnostic: Diagnostic?,
 }
 
 TouchedProjectFile: struct {
-    path: String
-    revision: String
+    path: String,
+    revision: String,
 }
 
 ProjectChange: struct {
-    path: String
-    rel: String
-    before: String
-    after: String
-    existed: Bool
+    path: String,
+    rel: String,
+    before: String,
+    after: String,
+    existed: Bool,
 }
 
 WorkspaceBoundary: struct {
-    root: String
-    member_root: String?
-    malformed: Bool
-    diagnostic: Diagnostic?
+    root: String,
+    member_root: String?,
+    malformed: Bool,
+    diagnostic: Diagnostic?,
 }
 
 // The workspace source at a root and, for an index source, its evaluated
 // members. `source_failed` marks a source that could not be resolved at all.
 WorkspaceView: struct {
-    source_path: String?
-    members: [WorkspacePlanMember]
-    diagnostic: Diagnostic?
-    source_failed: Bool
+    source_path: String?,
+    members: [WorkspacePlanMember],
+    diagnostic: Diagnostic?,
+    source_failed: Bool,
 }
 
 ProjectFiles: struct {
-    records: [ProjectFileRec]
-    diagnostic: Diagnostic?
+    records: [ProjectFileRec],
+    diagnostic: Diagnostic?,
 }
 
 EnvProjectJSON: struct {
-    envs: String
-    services: String
-    diagnostics: String
+    envs: String,
+    services: String,
+    diagnostics: String,
 }
 
 project_file: fn(checker: LSPChecker, path: String) -> Projection ProjectFileError! {

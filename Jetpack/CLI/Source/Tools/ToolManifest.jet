@@ -27,22 +27,22 @@ cli_tool_policy_from_marker: fn(marker: String) -> ChannelPolicy? Never! {
 
 // One declared source of the user-tools profile.
 ToolManifestSource: struct {
-    name: String
-    upstream: String
-    provider: ProviderKind
-    policy: ChannelPolicy
-    raw: String
+    name: String,
+    upstream: String,
+    provider: ProviderKind,
+    policy: ChannelPolicy,
+    raw: String,
 }
 
 // One declared tool: the reference as written, the exact reference the
 // current channel pin resolved it to, its movement tier, and its bins.
 ToolManifestEntry: struct {
-    name: String
-    reference: String
-    resolved: String
-    tier: ChannelPolicy
-    bins: [String]
-    members: [String]
+    name: String,
+    reference: String,
+    resolved: String,
+    tier: ChannelPolicy,
+    bins: [String],
+    members: [String],
 
     // Canonical order: name, then resolved reference.
     before: fn(self, other: ToolManifestEntry) -> Bool Never! {
@@ -52,8 +52,8 @@ ToolManifestEntry: struct {
 }
 
 ToolManifest: struct {
-    sources: [ToolManifestSource]
-    tools: [ToolManifestEntry]
+    sources: [ToolManifestSource],
+    tools: [ToolManifestEntry],
 
     empty: fn() -> ToolManifest Never! {
         ToolManifest{sources: [ToolManifestSource]{}, tools: [ToolManifestEntry]{}}

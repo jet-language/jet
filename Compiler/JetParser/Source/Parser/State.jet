@@ -73,118 +73,118 @@ use {
 }
 
 JetParserState: struct {
-    tokens: [Token]
-    position: Int
-    diagnostics: [Diagnostic]
-    source_end: Int
-    block_spans: [Span]
-    pending_type_gt: Bool
-    pending_type_gt_span: Span
+    tokens: [Token],
+    position: Int,
+    diagnostics: [Diagnostic],
+    source_end: Int,
+    block_spans: [Span],
+    pending_type_gt: Bool,
+    pending_type_gt_span: Span,
     // Byte offset where the statement being parsed starts; a retired `++`/`--`
     // that spans the whole statement gets a Safe compound-assignment edit.
-    statement_start: Int
+    statement_start: Int,
     // Byte offsets where each source line starts, when the source text is
     // known; E0083 names the opener's line from it.
-    line_starts: [Int]{[Int]{}}
+    line_starts: [Int]{[Int]{}},
     // E0641: the `else` arm of every dispatch table parsed so far.
-    else_arms: [ElseArmSpan]{[ElseArmSpan]{}}
+    else_arms: [ElseArmSpan]{[ElseArmSpan]{}},
     // Block `#Policy(...) { … }` declarations, joined to the
     // program's policy declarations after the parse.
-    block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
-    statement_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}}
+    block_policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}},
+    statement_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}},
     // An authored `;` reports E0373 once per file.
-    explicit_semicolon_reported: Bool{false}
+    explicit_semicolon_reported: Bool{false},
     // The source text, when known; L0507 and E0373 build their edits from it.
     // One row, so an interpolation hole can borrow it (parser_lend_hole) the
     // way it borrows `tables`; empty only while lent.
-    sources: [[U8]]{[[U8]]{[U8]{}}}
+    sources: [[U8]]{[[U8]]{[U8]{}}},
     // Rust stops a statement or item at its first fatal error and resumes at
     // the next boundary, so one mistake reports once. `abort_mark` is the
     // diagnostics length just after that error (0 = none; a rewind below it
     // cancels the abort); `abort_position` is the cursor where it was found.
-    abort_mark: Int{0}
-    abort_position: Int{0}
+    abort_mark: Int{0},
+    abort_position: Int{0},
     // An interpolation hole's own parser: its end is the hole's closing `}`.
-    in_hole: Bool{false}
+    in_hole: Bool{false},
     // Depth of one-statement `->` bodies; their statement may end before `else`.
-    adjacent_if_body_depth: Int{0}
+    adjacent_if_body_depth: Int{0},
     // Depth of one-statement arm-table bodies; their statement may end before
     // a `#Through` (parser_parse_arm_through).
-    arm_body_depth: Int{0}
+    arm_body_depth: Int{0},
     // The block depth of a braceless arm body in an arm table (-1 = none);
     // its statement may end before the `,` that separates compact arms.
-    table_arm_block_depth: Int{-1}
+    table_arm_block_depth: Int{-1},
     // The headers of the hole tables (`if n % <> == 0 { … }`) whose arms are
     // being read, innermost last, each grouped over its written span; an arm
     // atom fills the innermost one.
-    dispatch_hole_headers: [Expr]{[Expr]{}}
+    dispatch_hole_headers: [Expr]{[Expr]{}},
     // Where the last value hole table read starts (-1 = none). A callable
     // body's final `if` whose value reading is one keeps that reading, so a
     // missing `else` is reported as such (parser_parse_tail_if).
-    hole_value_table: Int{-1}
+    hole_value_table: Int{-1},
     // Rust `block_depth`: braced statement lists entered so far. Value
     // blocks read their lines at the enclosing depth, as in Rust.
-    block_depth: Int{0}
+    block_depth: Int{0},
     // Rust `callable_tail_block_depth`: the block depth of the innermost
     // callable body (-1 = none). Its last line may be a bare value.
-    callable_tail_depth: Int{-1}
+    callable_tail_depth: Int{-1},
     // Rust `callable_tail_expects_value`: that body's callable has a declared
     // result, so an audited region at its tail keeps the value grammar.
-    callable_tail_value: Bool{false}
+    callable_tail_value: Bool{false},
     // Rust `derive_template_depth`: derive, marker and declaration-loop
     // template bodies entered so far. A `#loop` inside one is a
     // template loop the derive expansion unrolls.
-    derive_template_depth: Int{0}
+    derive_template_depth: Int{0},
     // Code and generic module bodies entered so far; 0 is a file's top
     // level, where `priv` already keeps a declaration inside the package.
-    module_depth: Int{0}
+    module_depth: Int{0},
     // Rust `allow_environment_reads`: a Jetpack config surface reads `$NAME`
     // as the typed environment read ordinary source
     // rejects the same token with E0003.
-    allow_environment_reads: Bool{false}
+    allow_environment_reads: Bool{false},
     // The lexed source's names and literal facts, as one row. A nested state
     // (an interpolation, a pattern hole) borrows the row while it parses and
     // hands it back (`parser_lend_tables` / `parser_return_tables`).
-    tables: [TokenTables]{[TokenTables]{}}
+    tables: [TokenTables]{[TokenTables]{}},
     // AST NodeIds (`parser_node_id`): the current top-level unit's first
     // byte, shifted past the unit-local count, plus the next unit-local
     // number. A nested state numbers on from its parent's count.
-    node_base: Int{0}
-    next_node: Int{0}
+    node_base: Int{0},
+    next_node: Int{0},
     // The block depth of the function body whose own lines may be
     // `#X: value` markers (-1 = none), and the markers read there so far.
-    inbody_marker_depth: Int{-1}
-    inbody_markers: [Marker]{[Marker]{}}
+    inbody_marker_depth: Int{-1},
+    inbody_markers: [Marker]{[Marker]{}},
     // The markers this file declares, with where each bare name resolves to
     // it (parser_marker_scopes); a written marker there reaches no hook.
-    marker_scopes: [ParserMarkerScope]{[ParserMarkerScope]{}}
+    marker_scopes: [ParserMarkerScope]{[ParserMarkerScope]{}},
     // Pipes (`head |> step`): each token's bracket depth (built on first use),
     // the depths whose expression already owns its `|>` steps, and the open
     // steps, innermost last, with how many times each has read its `<>`.
-    token_depths: [Int]{[Int]{}}
-    pipe_owner_depths: [Int]{[Int]{}}
-    pipe_step_names: [String]{[String]{}}
-    pipe_step_reads: [Int]{[Int]{}}
+    token_depths: [Int]{[Int]{}},
+    pipe_owner_depths: [Int]{[Int]{}},
+    pipe_step_names: [String]{[String]{}},
+    pipe_step_reads: [Int]{[Int]{}},
     // Where the body of the typed literal being read starts
     // (parser_mark_head_body); quoted text there is the head's body.
-    head_text_at: Int{-1}
+    head_text_at: Int{-1},
     // A loop header's step is being read: an update operator such as `~=`
     // after its target is the step's own, not a mistyped comparison.
-    reading_loop_step: Bool{false}
+    reading_loop_step: Bool{false},
 }
 
 // One authored piece of a classic branch chain: an arm's condition and body,
 // or the final `else` body. The L0507 fix rebuilds the chain from these.
 ParserBranchPart: struct {
-    is_else: Bool
-    cond: Span
-    body: Span
+    is_else: Bool,
+    cond: Span,
+    body: Span,
 }
 
 ParsedBlock: struct {
-    span: Span
-    statements: [Stmt]
-    tail: Expr?
+    span: Span,
+    statements: [Stmt],
+    tail: Expr?,
 }
 
 parser_synthetic_token: fn(kind: Int, span: Span) -> Token Never! { token_synthetic(kind, span) }

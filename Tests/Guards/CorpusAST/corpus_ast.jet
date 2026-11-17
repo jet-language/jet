@@ -84,10 +84,10 @@ policy_site: fn(kind: String, span: Span) -> String { "{kind}@{span.start}..{spa
 
 // Match the Rust corpus walk's preorder without recursion through source depth.
 PolicyWalkNode: enum {
-    Expression(value: Expr)
-    Statement(value: Stmt)
-    MatchPattern(value: Pattern)
-    Fallback(value: OrFallback)
+    Expression(value: Expr),
+    Statement(value: Stmt),
+    MatchPattern(value: Pattern),
+    Fallback(value: OrFallback),
 }
 
 policy_push_body: fn(stack: &[PolicyWalkNode], body: [Stmt]) {
@@ -1127,20 +1127,20 @@ policy_ascii_equal: fn(left: String, right: String) -> Bool {
 }
 
 PolicySpanFact: struct {
-    span: Span
-    matches: Bool
+    span: Span,
+    matches: Bool,
 }
 
 PolicyStatementFacts: struct {
-    task_groups: [PolicySpanFact]
-    counted_loops: [PolicySpanFact]
-    manual_counter_loops: [Span]
-    file_walks: [Span]
+    task_groups: [PolicySpanFact],
+    counted_loops: [PolicySpanFact],
+    manual_counter_loops: [Span],
+    file_walks: [Span],
 }
 
 PolicyPendingBody: enum {
-    Body(body: [Stmt])
-    Single(statement: Stmt)
+    Body(body: [Stmt]),
+    Single(statement: Stmt),
 }
 
 policy_indexes_sequence: fn(init: Binding, body: [Stmt]) -> Bool {
@@ -2152,10 +2152,10 @@ policy_ast_test_protocol_override: fn() PolicyError! {
 }
 
 PolicyShapeCase: struct {
-    path: String
-    source: String
-    rule: String
-    present: Bool
+    path: String,
+    source: String,
+    rule: String,
+    present: Bool,
 }
 
 policy_check_shapes: fn(cases: [PolicyShapeCase]) PolicyError! {
@@ -2172,7 +2172,7 @@ policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
         PolicyShapeCase{path: "Examples/Basics/Hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
         PolicyShapeCase{path: "Docs/Spec/Guides/first-hour.md", source: "jet build Examples/Basics/FirstHour.jet", rule: "first-hour-doc-recipe", present: true},
         PolicyShapeCase{path: "Examples/Types/TypedLiteralForms.jet", source: "run: fn() {{ print(\"jet build Examples/Types/TypedLiteralForms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
-        PolicyShapeCase{path: "Examples/Data/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
+        PolicyShapeCase{path: "Examples/Data/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int,\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
         PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{\n    delay: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
         PolicyShapeCase{path: "Examples/Basics/reintroduced_effect.jet", source: "use fs: core.files\nrun: fn() -[FS, IO]> {{\n    path: \"input.txt\"\n    text: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
         PolicyShapeCase{path: "Examples/Concurrency/Parallel/ParallelScan.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
@@ -2448,10 +2448,10 @@ policy_planted_ascii_ladder: fn() -> String {
 }
 
 PolicyPlantedPair: struct {
-    rule: String
-    kind: String
-    rejected: String
-    clean: String
+    rule: String,
+    kind: String,
+    rejected: String,
+    clean: String,
 }
 
 policy_ast_test_planted_rule_pairs: fn() PolicyError! {

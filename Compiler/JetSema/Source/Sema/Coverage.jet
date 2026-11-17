@@ -23,8 +23,8 @@ use jet_foundation.[
 ]
 
 SemaCoverageTable: struct {
-    subject: TExpr
-    shapes: [TPatternShape]
+    subject: TExpr,
+    shapes: [TPatternShape],
 }
 
 // The pattern shape's contribution to the covered set. A variant with a range
@@ -781,8 +781,8 @@ sema_coverage_is_closed_set: fn(ty: Type, environment: SemaScopeEnvironment, pro
 // arm covers; a guarded arm (`.Val(x) && x > 0 ->`) tests the subject but
 // covers no case, so its shape is None.
 SemaCoverageElseHead: struct {
-    subject: TExpr
-    shape: TPatternShape?
+    subject: TExpr,
+    shape: TPatternShape?,
 }
 
 sema_coverage_else_head_of_expr: fn(condition: TExpr) -> SemaCoverageElseHead? {
@@ -1042,18 +1042,18 @@ sema_coverage_report_closed_else: fn(arm: ElseArmSpan, shown: String, fixed_case
 }
 
 SemaPatternCoverageCell: enum {
-    Any
-    Shape(shape: TPatternShape)
-    Refutable
+    Any,
+    Shape(shape: TPatternShape),
+    Refutable,
 }
 
 SemaPatternCoverageRow: struct {
-    cells: [SemaPatternCoverageCell]
+    cells: [SemaPatternCoverageCell],
 }
 
 SemaPatternCoverageConstructor: struct {
-    name: String
-    payload: [Type]
+    name: String,
+    payload: [Type],
 }
 
 sema_pattern_matrix_slot: fn(slot: TPatternBinding) -> SemaPatternCoverageCell Never! {

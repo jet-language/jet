@@ -12,18 +12,18 @@ use query_text: core.text
 // #4397: the frozen Rust emission omitted required Ord/Eq derives for these
 // key-eligible structs. Keep canonical structural keys; fix the compiler seam.
 FileKey: struct {
-    path: String
+    path: String,
 
     new: fn(path: String) -> FileKey Never! { FileKey{path: path} }
 }
 
 QuerySubject: struct {
-    is_file: Bool
-    name: String
+    is_file: Bool,
+    name: String,
 }
 
 InputKey: struct {
-    subject: QuerySubject
+    subject: QuerySubject,
 
     new: fn(name: String) -> InputKey Never! {
         InputKey{subject: QuerySubject{is_file: false, name: name}}
@@ -35,8 +35,8 @@ InputKey: struct {
 }
 
 QueryKey: struct {
-    kind: String
-    subject: QuerySubject
+    kind: String,
+    subject: QuerySubject,
 
     new: fn(kind: String, name: String) -> QueryKey Never! {
         QueryKey{kind: kind, subject: QuerySubject{is_file: false, name: name}}
@@ -49,56 +49,56 @@ QueryKey: struct {
 
 // Rust InputCell/DepKey/Dep/MemoEntry and the dependency stack helper family.
 QueryInputCell: struct {
-    revision: Int
-    text: String
-    byte_count: Int
+    revision: Int,
+    text: String,
+    byte_count: Int,
 }
 
 QueryDepKey: struct {
-    is_input: Bool
-    kind: String
-    subject: QuerySubject
+    is_input: Bool,
+    kind: String,
+    subject: QuerySubject,
 }
 
 QueryDep: enum {
-    Input(key: InputKey, revision: Int?)
-    Query(key: QueryKey, generation: Int)
+    Input(key: InputKey, revision: Int?),
+    Query(key: QueryKey, generation: Int),
 }
 
 QueryMemoEntry: struct {
-    deps: [QueryDep]
-    result_kind: String
-    generation: Int
+    deps: [QueryDep],
+    result_kind: String,
+    generation: Int,
 }
 
 QueryComputeFrame: struct {
-    key: QueryKey
-    result_kind: String
-    deps: [QueryDepKey]
+    key: QueryKey,
+    result_kind: String,
+    deps: [QueryDepKey],
 }
 
 // Rust QueryStats: cumulative work and currently retained memory/history.
 QueryStats: struct {
-    hits: Int
-    recomputes: Int
-    live_inputs: Int
-    live_input_bytes: Int
-    live_memos: Int
-    live_query_counters: Int
+    hits: Int,
+    recomputes: Int,
+    live_inputs: Int,
+    live_input_bytes: Int,
+    live_memos: Int,
+    live_query_counters: Int,
 }
 
 QueryEngine: struct<T> {
-    revision: Int
-    inputs: [InputKey:QueryInputCell]
+    revision: Int,
+    inputs: [InputKey:QueryInputCell],
     // #4390: a nested generic map value QueryMemoEntry<T> overflows the
     // compiler stack. Keep typed payloads beside the one metadata graph;
     // every eviction uses remove_memo to release both synchronized rows.
-    memo: [QueryKey:QueryMemoEntry]
-    values: [QueryKey:T]
-    recompute_by_key: [QueryKey:Int]
-    dep_stack: [QueryComputeFrame]
-    hits: Int
-    recomputes: Int
+    memo: [QueryKey:QueryMemoEntry],
+    values: [QueryKey:T],
+    recompute_by_key: [QueryKey:Int],
+    dep_stack: [QueryComputeFrame],
+    hits: Int,
+    recomputes: Int,
 
     // Rust QueryEngine::new/default.
     new: fn() -> QueryEngine<T> Never! {

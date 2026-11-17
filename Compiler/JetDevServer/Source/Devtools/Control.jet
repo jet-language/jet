@@ -13,11 +13,11 @@ JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS: Int{30000}
 // One database EXPLAIN request. SQL text, bindings, credentials and authority
 // facts stay in the owning runtime.
 JetDevtoolsDatabaseExplainRequest: struct {
-    session_id: String
-    request_id: String
-    statement_identity: String
-    timeout_ms: Int
-    max_rows: Int
+    session_id: String,
+    request_id: String,
+    statement_identity: String,
+    timeout_ms: Int,
+    max_rows: Int,
 
     new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
         request: JetDevtoolsDatabaseExplainRequest{session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), timeout_ms: timeout_ms, max_rows: max_rows}
@@ -40,9 +40,9 @@ JetDevtoolsDatabaseExplainRequest: struct {
 // One redacted structural EXPLAIN row: never SQL literals, parameter values
 // or credentials.
 JetDevtoolsDBPlanRow: struct {
-    id: String
-    parent: String?
-    detail: String
+    id: String,
+    parent: String?,
+    detail: String,
 
     new: fn(&&id: String, &&parent: String?, &&detail: String) -> JetDevtoolsDBPlanRow Err! {
         row: JetDevtoolsDBPlanRow{id: id.move(), parent: parent.move(), detail: detail.move()}
@@ -63,16 +63,16 @@ JetDevtoolsDBPlanRow: struct {
 // The typed result a database handler returns. Driver and authority state
 // stay out of it; errors are bounded, redacted text.
 JetDevtoolsDatabaseExplainResult: struct {
-    session_id: String
-    request_id: String
-    statement_identity: String
-    status: String
-    elapsed_ns: Int
-    truncated: Bool
-    row_count: Int
-    plan_rows: [JetDevtoolsDBPlanRow]
-    error_code: String?
-    error_message: String?
+    session_id: String,
+    request_id: String,
+    statement_identity: String,
+    status: String,
+    elapsed_ns: Int,
+    truncated: Bool,
+    row_count: Int,
+    plan_rows: [JetDevtoolsDBPlanRow],
+    error_code: String?,
+    error_message: String?,
 
     new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, &&status: String, elapsed_ns: Int, truncated: Bool, row_count: Int, &&plan_rows: [JetDevtoolsDBPlanRow], &&error_code: String?, &&error_message: String?) -> JetDevtoolsDatabaseExplainResult Err! {
         if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
@@ -149,24 +149,24 @@ impl JetDevtoolsGameControlKind {
 // operation that owns it; validation rejects missing provenance before the
 // request enters the session queue or the generated runtime.
 JetDevtoolsGameControlRequest: struct {
-    session_id: String
-    request_id: String
-    kind: JetDevtoolsGameControlKind
-    source_id: String?
-    revision: String?
-    world_id: String?
-    actor_id: String?
-    component_id: String?
-    authored_instance_id: String?
-    source_span_start: Int?
-    source_span_end: Int?
-    field: String?
-    value: String?
-    category: String?
-    expression: String?
-    required_authority: String?
-    frame_id: Int?
-    budget: Int?
+    session_id: String,
+    request_id: String,
+    kind: JetDevtoolsGameControlKind,
+    source_id: String?,
+    revision: String?,
+    world_id: String?,
+    actor_id: String?,
+    component_id: String?,
+    authored_instance_id: String?,
+    source_span_start: Int?,
+    source_span_end: Int?,
+    field: String?,
+    value: String?,
+    category: String?,
+    expression: String?,
+    required_authority: String?,
+    frame_id: Int?,
+    budget: Int?,
 
     new: fn(&&session_id: String, &&request_id: String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
         request: JetDevtoolsGameControlRequest{
@@ -243,9 +243,9 @@ JetDevtoolsGameControlRequest: struct {
 // loop. The revision is admission-bound: the driver never reads it as an
 // evaluator or a file-mtime hint.
 JetDevtoolsProjectRebuildRequest: struct {
-    session_id: String
-    request_id: String
-    expected_revision: String
+    session_id: String,
+    request_id: String,
+    expected_revision: String,
 
     new: fn(&&session_id: String, &&request_id: String, &&expected_revision: String) -> JetDevtoolsProjectRebuildRequest Err! {
         request: JetDevtoolsProjectRebuildRequest{session_id: session_id.move(), request_id: request_id.move(), expected_revision: expected_revision.move()}
@@ -306,12 +306,12 @@ impl JetDevtoolsCommand {
 
 // One bounded admission or dispatch receipt for a host command.
 JetDevtoolsCommandReceipt: struct {
-    sequence: Int
-    session_id: String
-    request_id: String
-    kind: String
-    status: String
-    error: String?
+    sequence: Int,
+    session_id: String,
+    request_id: String,
+    kind: String,
+    status: String,
+    error: String?,
 
     validate: fn(self) Err! {
         devtools_control_text(self.session_id, "command receipt session_id")
@@ -330,10 +330,10 @@ JetDevtoolsCommandReceipt: struct {
 // commands share the FIFO, so polling one family never consumes another.
 // Receipt sequences are this session's own counter.
 JetDevtoolsCommandQueue: struct {
-    session_id: String
-    command_list: [JetDevtoolsCommand]
-    receipt_list: [JetDevtoolsCommandReceipt]
-    next_receipt_sequence: Int
+    session_id: String,
+    command_list: [JetDevtoolsCommand],
+    receipt_list: [JetDevtoolsCommandReceipt],
+    next_receipt_sequence: Int,
 
     new: fn(&&session_id: String) -> JetDevtoolsCommandQueue Never! {
         JetDevtoolsCommandQueue{session_id: session_id.move(), command_list: [JetDevtoolsCommand]{}, receipt_list: [JetDevtoolsCommandReceipt]{}, next_receipt_sequence: 1}
@@ -423,9 +423,9 @@ JetDevtoolsCommandQueue: struct {
 // JetDevtoolsEnvelope. Its direction is always `host_to_runtime`: runtime to
 // host traffic is events only.
 JetDevtoolsCommandEnvelope: struct {
-    session_id: String
-    started_at_ms: Int
-    command_list: [JetDevtoolsCommand]
+    session_id: String,
+    started_at_ms: Int,
+    command_list: [JetDevtoolsCommand],
 
     new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
         JetDevtoolsCommandEnvelope{session_id: session_id.move(), started_at_ms: started_at_ms, command_list: [JetDevtoolsCommand]{}}
@@ -461,8 +461,8 @@ JetDevtoolsCommandEnvelope: struct {
 // A decoded transport has one direction and one payload kind; the host
 // decoder rejects mixed envelopes before a session sees them.
 JetDevtoolsDecodedEnvelope: enum {
-    Events(envelope: JetDevtoolsEnvelope)
-    Commands(envelope: JetDevtoolsCommandEnvelope)
+    Events(envelope: JetDevtoolsEnvelope),
+    Commands(envelope: JetDevtoolsCommandEnvelope),
 
     validate: fn(self) Err! {
         if self == {

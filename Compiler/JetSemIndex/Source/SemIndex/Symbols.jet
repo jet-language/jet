@@ -36,53 +36,53 @@ use {
 }
 
 SemSymbolKind: enum {
-    Module
-    Function
-    Type
-    Member
-    Constant
-    Local
-    Parameter
-    Keyword
+    Module,
+    Function,
+    Type,
+    Member,
+    Constant,
+    Local,
+    Parameter,
+    Keyword,
 }
 
 // `SemanticProvenance` (the session and command-registry rows belong to the
 // REPL).
 SemSymbolProvenance: enum {
-    Source(module_path: String)
-    Builtin(module_name: String)
+    Source(module_path: String),
+    Builtin(module_name: String),
 }
 
 SemSymbolScope: struct {
-    identity: String
-    structural_parent: Int
-    structural_slot: String
-    span: Span
-    depth: Int
-    declaration_offset: Int
+    identity: String,
+    structural_parent: Int,
+    structural_slot: String,
+    span: Span,
+    depth: Int,
+    declaration_offset: Int,
 }
 
 SemSymbol: struct {
-    identity: String
-    name: String
-    qualified_name: String
-    owner: String?
-    module_path: String
-    kind: SemSymbolKind
-    signature: String
-    summary: String
-    examples: [String]
-    provenance: SemSymbolProvenance
-    span: Span?
-    lexical_scope: SemSymbolScope?
+    identity: String,
+    name: String,
+    qualified_name: String,
+    owner: String?,
+    module_path: String,
+    kind: SemSymbolKind,
+    signature: String,
+    summary: String,
+    examples: [String],
+    provenance: SemSymbolProvenance,
+    span: Span?,
+    lexical_scope: SemSymbolScope?,
 }
 
 // One `BUILTIN_METHODS` row; `example` is "" when it has none.
 SemSymbolBuiltin: struct {
-    qualified_name: String
-    signature: String
-    summary: String
-    example: String
+    qualified_name: String,
+    signature: String,
+    summary: String,
+    example: String,
 }
 
 SEMINDEX_SYMBOL_BUILTIN_METHODS: [SemSymbolBuiltin]{
@@ -327,8 +327,8 @@ semindex_symbol_checked_text_error: fn(items: [Item], owner: String) -> String? 
 
 // The conversion methods one distinct declares and the source each reads.
 SemSymbolConversion: struct {
-    method: String
-    source: String
+    method: String,
+    source: String,
 }
 
 semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool, checked_text_error: String?, module_path: String, scope_identity: String, span: Span, lexical_scope: SemSymbolScope?, symbols: &[SemSymbol]) Never! {
@@ -452,11 +452,11 @@ semindex_symbol_smallest: fn(nodes: [SemNode], start: Int, end: Int, items_only:
 // from the module's structural nodes in start order (a node that ends before
 // one definition can never enclose a later one).
 SemSymbolScopes: struct {
-    enclosing: [String:Int]
-    enclosing_item: [String:Int]
-    first_lexical_child: [String:Int]
-    boundaries: [String:Span]
-    nodes_by_id: [String:SemNode]
+    enclosing: [String:Int],
+    enclosing_item: [String:Int],
+    first_lexical_child: [String:Int],
+    boundaries: [String:Span],
+    nodes_by_id: [String:SemNode],
 }
 
 semindex_symbol_scope_key: fn(module_path: String, start: Int, end: Int) -> String Never! {
@@ -586,8 +586,8 @@ semindex_symbol_scope: fn(scopes: SemSymbolScopes, module_path: String, def_span
 
 // The kind and signature of one definition.
 SemSymbolShape: struct {
-    kind: SemSymbolKind
-    signature: String
+    kind: SemSymbolKind,
+    signature: String,
 }
 
 semindex_symbol_shape: fn(name: String, kind: SemKind, owner: String?) -> SemSymbolShape Never! {

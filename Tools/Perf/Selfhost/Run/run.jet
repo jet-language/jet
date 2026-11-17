@@ -77,117 +77,117 @@ USAGE: [String]{
 // The part of manifest.json the driver reads; the rest is passed on as it is.
 #Rename(.Camel)
 Manifest: struct {
-    study: String
-    source_boundary: Dyn
-    evidence_policy: Dyn
-    defaults: Defaults
-    workloads: [Workload]
+    study: String,
+    source_boundary: Dyn,
+    evidence_policy: Dyn,
+    defaults: Defaults,
+    workloads: [Workload],
 }
 
 Defaults: struct {
-    limits: Limits
+    limits: Limits,
 }
 
 #Rename(.Camel)
 Limits: struct {
-    check_timeout_ms: Int
-    run_timeout_ms: Int
-    build_timeout_ms: Int
+    check_timeout_ms: Int,
+    run_timeout_ms: Int,
+    build_timeout_ms: Int,
 }
 
 #Rename(.Camel)
 Workload: struct {
-    id: String
-    title: String
-    directory: String
-    entry: String
-    oracle: String
-    cases: [Case]
-    supported_modes: [String]
-    targets: Dyn
-    limits: Limits?
-    contract: Dyn
-    reasoning: [Task]
-    native: NativePlan?
-    repair: RepairPlan?
+    id: String,
+    title: String,
+    directory: String,
+    entry: String,
+    oracle: String,
+    cases: [Case],
+    supported_modes: [String],
+    targets: Dyn,
+    limits: Limits?,
+    contract: Dyn,
+    reasoning: [Task],
+    native: NativePlan?,
+    repair: RepairPlan?,
 }
 
 // A case of `kind` "check" is a diagnostic: it is checked, never run.
 Case: struct {
-    id: String
-    kind: String?
-    program: String?
-    expected: Dyn
+    id: String,
+    kind: String?,
+    program: String?,
+    expected: Dyn,
 }
 
 #Rename(.Camel)
 Task: struct {
-    id: String
-    prompt: String?
-    expected_observations: Dyn?
+    id: String,
+    prompt: String?,
+    expected_observations: Dyn?,
 }
 
 NativePlan: struct {
-    build: String
-    artifact: String
-    trust: String?
+    build: String,
+    artifact: String,
+    trust: String?,
 }
 
 #Rename(.Camel)
 RepairPlan: struct {
-    program: String
-    replacement: Replacement
-    expected_program: String
-    expected_exit: Int
+    program: String,
+    replacement: Replacement,
+    expected_program: String,
+    expected_exit: Int,
 }
 
 #Rename(.Camel)
 Replacement: struct {
-    start: Int
-    end: Int
-    new_text: String
+    start: Int,
+    end: Int,
+    new_text: String,
 }
 
 Expected: struct {
-    exit: Int
-    stdout: String?
-    stderr: String?
-    diagnostic: ExpectedDiagnostic?
+    exit: Int,
+    stdout: String?,
+    stderr: String?,
+    diagnostic: ExpectedDiagnostic?,
 }
 
 #Rename(.Camel)
 ExpectedDiagnostic: struct {
-    code: String
-    file: String
-    line: Int
-    col: Int
-    span: Span
-    fix_text: String
+    code: String,
+    file: String,
+    line: Int,
+    col: Int,
+    span: Span,
+    fix_text: String,
 }
 
 Span: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 // The fields of a reported diagnostic that a case's expected one is held to.
 SeenDiagnostic: struct {
-    code: String?
-    file: String?
-    line: Int?
-    col: Int?
-    span: Span?
-    fix_edits: [FixEdit]?
+    code: String?,
+    file: String?,
+    line: Int?,
+    col: Int?,
+    span: Span?,
+    fix_edits: [FixEdit]?,
 }
 
 FixEdit: struct {
-    new_text: String?
-    span: Span?
+    new_text: String?,
+    span: Span?,
 }
 
 #Error
 Refusal: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }
@@ -195,112 +195,112 @@ Refusal: struct {
 }
 
 Study: struct {
-    repo: String
-    home: String
-    jet_env: String
-    manifest: Manifest
+    repo: String,
+    home: String,
+    jet_env: String,
+    manifest: Manifest,
 }
 
 Options: struct {
-    list: Bool{false}
-    all: Bool{false}
-    help: Bool{false}
-    workloads: [String]{[String]{}}
-    phase: String?{None}
-    mode: String?{None}
-    reasoning_file: String?{None}
-    output: String?{None}
+    list: Bool{false},
+    all: Bool{false},
+    help: Bool{false},
+    workloads: [String]{[String]{}},
+    phase: String?{None},
+    mode: String?{None},
+    reasoning_file: String?{None},
+    output: String?{None},
 }
 
 // One command's run: what it printed and how it ended.
 Ran: struct {
-    status: String
-    command: String
-    identity: Dyn
-    args: [String]
-    exit_code: Int?
-    signal: String?
-    stdout: String
-    stderr: String
-    latency_ms: Float
-    peak_rss_bytes: Int?
+    status: String,
+    command: String,
+    identity: Dyn,
+    args: [String],
+    exit_code: Int?,
+    signal: String?,
+    stdout: String,
+    stderr: String,
+    latency_ms: Float,
+    peak_rss_bytes: Int?,
 }
 
 // A command's run held to a case's expectation.
 #Rename(.Camel)
 Comparison: struct {
-    expected_exit: Int
-    actual_exit: Int?
-    stdout_exact: Bool?
-    stderr_exact: Bool?
-    diagnostic_exact: Bool?
+    expected_exit: Int,
+    actual_exit: Int?,
+    stdout_exact: Bool?,
+    stderr_exact: Bool?,
+    diagnostic_exact: Bool?,
 }
 
 Compared: struct {
-    comparison: Comparison
-    matches: Bool
+    comparison: Comparison,
+    matches: Bool,
 }
 
 // An evidence record: its status and the receipt tree that shows it.
 Record: struct {
-    status: String
-    tree: Dyn
+    status: String,
+    tree: Dyn,
 }
 
 // A Jet case's run, and whether it counts toward its mode.
 CaseRun: struct {
-    tree: Dyn
-    applicable: Bool
-    matches: Bool
-    unavailable: Bool
+    tree: Dyn,
+    applicable: Bool,
+    matches: Bool,
+    unavailable: Bool,
 }
 
 ModeRow: struct {
-    mode: String
-    status: String
-    record: Dyn?
+    mode: String,
+    status: String,
+    record: Dyn?,
 }
 
 Evaluated: struct {
-    tree: Dyn
-    complete: Bool
+    tree: Dyn,
+    complete: Bool,
 }
 
 #Rename(.Camel)
 Shape: struct {
-    path: String
-    bytes: Int
-    lines: Int
-    comments: Int
-    declarations: Int
-    control_forms: Int
+    path: String,
+    bytes: Int,
+    lines: Int,
+    comments: Int,
+    declarations: Int,
+    control_forms: Int,
 }
 
 #Rename(.Camel)
 Totals: struct {
-    bytes: Int
-    lines: Int
-    comments: Int
-    declarations: Int
-    control_forms: Int
+    bytes: Int,
+    lines: Int,
+    comments: Int,
+    declarations: Int,
+    control_forms: Int,
 }
 
 #Rename(.Camel)
 TemplateTask: struct {
-    id: String
-    status: String
-    evidence_class: String
-    prompt: String
-    expected_observations: Dyn
+    id: String,
+    status: String,
+    evidence_class: String,
+    prompt: String,
+    expected_observations: Dyn,
 }
 
 #Rename(.Camel)
 ObservedTask: struct {
-    id: String
-    status: String
-    evidence_class: String
-    observation: String
-    source: Dyn
+    id: String,
+    status: String,
+    evidence_class: String,
+    observation: String,
+    source: Dyn,
 }
 
 set_option: fn(options: &Options, option: String, value: String) {
@@ -466,8 +466,8 @@ timeout_ms: fn(study: Study, workload: Workload, phase: String) -> Int {
 
 // An environment variable a command runs with.
 Setting: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // The variables a command runs with beyond the caller's: its stores and

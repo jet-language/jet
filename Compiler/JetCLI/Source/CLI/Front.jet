@@ -79,72 +79,72 @@ use {
 }
 
 JetCLIPlan: enum {
-    Done(output: JetDriverVerbOutput)
-    Refused(report: Diagnostic, color: Bool, exit_code: Int, notice: String)
-    Diagnostics(file: String, source: String, report: Diagnostic, color: Bool, notice: String)
-    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, target: String)
-    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String, style: Bool)
-    CheckPrelude(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, json: Bool)
-    CheckCore(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool)
-    Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool)
-    LockedBuild(check: [String], build: [String])
-    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, locked: [String]?)
-    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
-    RunRemote(target: JetCLIRemoteRunTarget, jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, verbose: Bool, threads: Int?)
-    NativeSource(file: String, level: Int, run: Bool, program_args: [String], color: Bool)
-    DevWeb(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, port: Int)
-    DevCanvas(file: String, source: String, color: Bool, host: String, port: Int, notice: String)
-    Jobs(file: String, color: Bool, json: Bool, notice: String)
-    Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
-    TestWorkspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], quiet: Bool)
-    TestProfile(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool)
-    New(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool)
-    NewApp(request: JetCLINewApp)
-    Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
-    Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?)
-    Eval(file: String, pure: Bool, color: Bool, json: Bool, notice: String)
-    Fill(target: String, json: Bool, color: Bool)
-    Structural(argv: [String], command: String, json: Bool)
-    Review(argv: [String], json: Bool, color: Bool)
-    Keygen(registry: String, force: Bool, color: Bool)
-    KeyBackup(registry: String, dest: String, color: Bool)
-    Publish(force: Bool, no_sign: Bool, quiet: Bool, color: Bool)
-    Yank(version: String, message: String?, color: Bool)
-    Lint(file: String, source: String, color: Bool, notice: String, category: String, raw: [String], json: Bool)
-    Fmt(request: JetCLIFmtRequest)
-    FmtLang(argv: [String], color: Bool)
-    Fix(file: String, dry_run: Bool, all: Bool, markers: String, mode: JetCLIFixMode, color: Bool, quiet: Bool, json: Bool, notice: String)
-    Inspect(job: JetCLIInspectJob)
-    InspectB(plan: JetCLIInspectBPlan)
-    ForeignBind(binder: JetCLIForeignBinder, args: [String], color: Bool)
-    Perf(argv: [String], color: Bool)
-    Semindex(file: String, color: Bool, json: Bool)
-    Find(file: String?, query: String, mode: JetCLIFindMode, json: Bool)
-    Cache(args: [String], json: Bool)
-    Remote(argv: [String], json: Bool, color: Bool)
-    Comparison(target: String, argv: [String], json: Bool)
-    Try(plan_path: String, keep: Bool, json: Bool)
-    Maintenance(action: String, args: [String], color: Bool, json: Bool)
-    Completion(shell: String, program: String, name: String)
-    Schema(action: String, root: String, before: String, color: Bool, json: Bool)
-    Codemod(action: String, path: String, yes: Bool, color: Bool, json: Bool)
-    PolicyExplain(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool)
-    DiagnosticTypeExplain(name: String, file: String, color: Bool, json: Bool)
-    BuildFactExplain(key: String, file: String, profile: String, settings: [BuildSettingOverride], module_value: JetCLIModuleValue?, color: Bool, json: Bool)
-    Gates(file: String, args: [String], color: Bool, json: Bool, notice: String)
-    Output(file: String, address: String?, color: Bool, json: Bool)
-    Doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
-    UpdateJet(root: String, channel: String?, color: Bool, json: Bool, quiet: Bool)
-    AuditCopies(file: String, source: String, color: Bool, json: Bool, notice: String)
-    AuditWrites(file: String, source: String, color: Bool, json: Bool, notice: String)
-    AuditForeign(file: String, source: String, color: Bool, json: Bool, notice: String)
-    CompilerService(op: String)
-    Repl(project: String?, preload: String?, options: JetCLIReplOptions, color: Bool)
-    LSP
-    ReplChild(invocation: JetCLIInvocationAuthority?)
-    EvalExpression(source: String, color: Bool, json: Bool)
-    Prove(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool)
-    Budget(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool)
+    Done(output: JetDriverVerbOutput),
+    Refused(report: Diagnostic, color: Bool, exit_code: Int, notice: String),
+    Diagnostics(file: String, source: String, report: Diagnostic, color: Bool, notice: String),
+    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, style: Bool, target: String),
+    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String, style: Bool),
+    CheckPrelude(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, json: Bool),
+    CheckCore(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool),
+    Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool),
+    LockedBuild(check: [String], build: [String]),
+    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, locked: [String]?),
+    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?),
+    RunRemote(target: JetCLIRemoteRunTarget, jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, verbose: Bool, threads: Int?),
+    NativeSource(file: String, level: Int, run: Bool, program_args: [String], color: Bool),
+    DevWeb(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, port: Int),
+    DevCanvas(file: String, source: String, color: Bool, host: String, port: Int, notice: String),
+    Jobs(file: String, color: Bool, json: Bool, notice: String),
+    Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions),
+    TestWorkspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], quiet: Bool),
+    TestProfile(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool),
+    New(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool),
+    NewApp(request: JetCLINewApp),
+    Doc(file: String, source: String, color: Bool, json: Bool, check: Bool),
+    Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?),
+    Eval(file: String, pure: Bool, color: Bool, json: Bool, notice: String),
+    Fill(target: String, json: Bool, color: Bool),
+    Structural(argv: [String], command: String, json: Bool),
+    Review(argv: [String], json: Bool, color: Bool),
+    Keygen(registry: String, force: Bool, color: Bool),
+    KeyBackup(registry: String, dest: String, color: Bool),
+    Publish(force: Bool, no_sign: Bool, quiet: Bool, color: Bool),
+    Yank(version: String, message: String?, color: Bool),
+    Lint(file: String, source: String, color: Bool, notice: String, category: String, raw: [String], json: Bool),
+    Fmt(request: JetCLIFmtRequest),
+    FmtLang(argv: [String], color: Bool),
+    Fix(file: String, dry_run: Bool, all: Bool, markers: String, mode: JetCLIFixMode, color: Bool, quiet: Bool, json: Bool, notice: String),
+    Inspect(job: JetCLIInspectJob),
+    InspectB(plan: JetCLIInspectBPlan),
+    ForeignBind(binder: JetCLIForeignBinder, args: [String], color: Bool),
+    Perf(argv: [String], color: Bool),
+    Semindex(file: String, color: Bool, json: Bool),
+    Find(file: String?, query: String, mode: JetCLIFindMode, json: Bool),
+    Cache(args: [String], json: Bool),
+    Remote(argv: [String], json: Bool, color: Bool),
+    Comparison(target: String, argv: [String], json: Bool),
+    Try(plan_path: String, keep: Bool, json: Bool),
+    Maintenance(action: String, args: [String], color: Bool, json: Bool),
+    Completion(shell: String, program: String, name: String),
+    Schema(action: String, root: String, before: String, color: Bool, json: Bool),
+    Codemod(action: String, path: String, yes: Bool, color: Bool, json: Bool),
+    PolicyExplain(key: PolicyKey, file: String, site: String?, line: U64?, color: Bool, json: Bool),
+    DiagnosticTypeExplain(name: String, file: String, color: Bool, json: Bool),
+    BuildFactExplain(key: String, file: String, profile: String, settings: [BuildSettingOverride], module_value: JetCLIModuleValue?, color: Bool, json: Bool),
+    Gates(file: String, args: [String], color: Bool, json: Bool, notice: String),
+    Output(file: String, address: String?, color: Bool, json: Bool),
+    Doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool),
+    UpdateJet(root: String, channel: String?, color: Bool, json: Bool, quiet: Bool),
+    AuditCopies(file: String, source: String, color: Bool, json: Bool, notice: String),
+    AuditWrites(file: String, source: String, color: Bool, json: Bool, notice: String),
+    AuditForeign(file: String, source: String, color: Bool, json: Bool, notice: String),
+    CompilerService(op: String),
+    Repl(project: String?, preload: String?, options: JetCLIReplOptions, color: Bool),
+    LSP,
+    ReplChild(invocation: JetCLIInvocationAuthority?),
+    EvalExpression(source: String, color: Bool, json: Bool),
+    Prove(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool),
+    Budget(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool),
 }
 
 // The command finished: write these bytes and exit with this status.
@@ -338,53 +338,53 @@ JetCLIPlan: enum {
 // One native `jet fmt` invocation (`"fmt"` -> `run_fmt`).
 JetCLIFmtRequest: struct {
     // Explicit file/directory targets; empty formats the project root.
-    paths: [String]
+    paths: [String],
     // `-`: format stdin to stdout under the `stdin_path` label.
-    stdin_mode: Bool
-    stdin_path: String?
+    stdin_mode: Bool,
+    stdin_path: String?,
     // `--check`/`--dry-run` report instead of writing; `diff` adds unified diffs.
-    check: Bool
-    diff: Bool
+    check: Bool,
+    diff: Bool,
     // `--changed`: only the VCS-changed `.jet` files (git).
-    changed: Bool
+    changed: Bool,
     // `--explicit-copies`: write `.copy()` at each implicit copy site sema reports.
-    explicit_copies: Bool
+    explicit_copies: Bool,
     // `--explicit-failures`: write `?` at each call sema reports can pass a failure up.
-    explicit_failures: Bool
-    simplify: Bool
-    color: Bool
-    quiet: Bool
+    explicit_failures: Bool,
+    simplify: Bool,
+    color: Bool,
+    quiet: Bool,
     // `--json`: the Rust status envelopes (`--check` clean/dirty/diff, preflight errors).
-    json: Bool{false}
+    json: Bool{false},
 }
 
 // The `jet test` options the Jet host carries out. `capture` is `failed`,
 // `all`, or `none`; `status` is the stderr status text the Rust host writes
 // before the compile.
 JetCLITestOptions: struct {
-    build: BuildOptions
-    capture: String
-    filter: String?
-    shuffle_seed: String?
-    serial: Bool
-    trace_tiers: Bool
-    update_snapshots: Bool
+    build: BuildOptions,
+    capture: String,
+    filter: String?,
+    shuffle_seed: String?,
+    serial: Bool,
+    trace_tiers: Bool,
+    update_snapshots: Bool,
     // `--docs`: run only the doctest claims (Doctests.jet).
-    docs: Bool
+    docs: Bool,
     // `--measure`: run only the measured claims, timed (Measure.jet), under
     // `profile`; `--json` prints its records as JSON lines.
-    measure: Bool
-    json: Bool
-    profile: String
-    project_root: String?
-    status: String
+    measure: Bool,
+    json: Bool,
+    profile: String,
+    project_root: String?,
+    status: String,
     // The decided `jet test` settings (TestSettingLayers.jet), for those
     // the harness run reads itself: shard, list, results, time_limit.
-    settings: [TestSetting]{[TestSetting]{}}
+    settings: [TestSetting]{[TestSetting]{}},
     // `--show-default`: the stock harness, never the package's `test: fn`.
-    stock: Bool{false}
+    stock: Bool{false},
     // `--quiet`: no status lines on stderr.
-    quiet: Bool{false}
+    quiet: Bool{false},
 }
 
 // Commands that validate their own flags.
@@ -1132,8 +1132,8 @@ jet_cli_threads: fn(jet_argv: [String], command: String, color: Bool) -> JetCLIT
 }
 
 JetCLIThreads: enum {
-    Cap(threads: Int?)
-    Refused(plan: JetCLIPlan)
+    Cap(threads: Int?),
+    Refused(plan: JetCLIPlan),
 }
 
 #Test("every jet test setting flag gets past the compiler's --jobs and -j refusal") {
@@ -1373,8 +1373,8 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
 }
 
 JetCLICheckProfile: enum {
-    Given(profile: String)
-    Refused(plan: JetCLIPlan)
+    Given(profile: String),
+    Refused(plan: JetCLIPlan),
 }
 
 // The `--profile` a check compiles under, resolved against each checked
@@ -1404,9 +1404,9 @@ jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
 }
 
 JetCLITargetFlag: enum {
-    Absent
-    Missing
-    Named(name: String)
+    Absent,
+    Missing,
+    Named(name: String),
 }
 
 // `--target` with no value, or with a flag where the value belongs.
@@ -1430,8 +1430,8 @@ jet_cli_target_flag: fn(jet_argv: [String]) -> JetCLITargetFlag Never! {
 }
 
 JetCLIBuildOptions: enum {
-    Selected(options: BuildOptions, notes: String)
-    Refused(plan: JetCLIPlan)
+    Selected(options: BuildOptions, notes: String),
+    Refused(plan: JetCLIPlan),
 }
 
 // `notes` is the stderr text naming each value a flag replaced.
@@ -1614,8 +1614,8 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
 }
 
 JetCLISettingFlags: enum {
-    Given(settings: [BuildSettingOverride])
-    Refused(plan: JetCLIPlan)
+    Given(settings: [BuildSettingOverride]),
+    Refused(plan: JetCLIPlan),
 }
 
 // `--set name=value` and `--set=name=value`, in argv order: each the
@@ -1644,8 +1644,8 @@ jet_cli_setting_flags: fn(jet_argv: [String], color: Bool) -> JetCLISettingFlags
 }
 
 JetCLIGateFlags: enum {
-    Given(gates: [PolicyKey])
-    Refused(plan: JetCLIPlan)
+    Given(gates: [PolicyKey]),
+    Refused(plan: JetCLIPlan),
 }
 
 // `--gate name=allow` and `--gate=name=allow`, in argv order: each opens one
@@ -1745,8 +1745,8 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
 }
 
 JetCLIAuthorityFlags: enum {
-    Rows(invocation: JetCLIInvocationAuthority?)
-    Refused(plan: JetCLIPlan)
+    Rows(invocation: JetCLIInvocationAuthority?),
+    Refused(plan: JetCLIPlan),
 }
 
 // The invocation rows (`None` when neither flag is given).

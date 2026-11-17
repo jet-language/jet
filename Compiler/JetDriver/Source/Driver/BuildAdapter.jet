@@ -24,12 +24,12 @@ use {
 }
 
 JetDriverBuildAdapter: struct {
-    session: BuildSession
+    session: BuildSession,
     // The host's raw build-input transport and the build file's canonical
     // directory, against which a step's `.arg` text is tested for naming a
     // package file.
-    inputs: JetDriverSharedBuildInputs?
-    base_dir: String
+    inputs: JetDriverSharedBuildInputs?,
+    base_dir: String,
 
     impl JetEvalBuildHostAdapter {
         // Fork the adapter without changing its invocation-owned session authority.
@@ -331,7 +331,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
                     return jet_driver_meta_type_refusal(span, written, spelled)
                 }
             }
-            source = "{source}    {written}: {type_name(jet_driver_meta_type_renamed(ty, seen))}\n"
+            source = "{source}    {written}: {type_name(jet_driver_meta_type_renamed(ty, seen))},\n"
         }
         source = "{source}}}\n"
         home_module: if args[3] == .String(text) -> text.copy() else -> {

@@ -2,7 +2,7 @@
 // doesn't start at the site root with `web.BadPath`, and warns about a
 // trailing slash with `web.TrailingSlash`, which `#Allow` can silence.
 BadPath: struct {
-    path: String
+    path: String,
 
     impl Diagnostic {
         what: fn(self) -> String { "route path `{self.path}` doesn't start with `/`" }
@@ -14,10 +14,10 @@ BadPath: struct {
 }
 
 TrailingSlash: struct {
-    path: String
+    path: String,
 
     impl Diagnostic {
-        severity: .Warning
+        severity: .Warning,
 
         what: fn(self) -> String { "route path `{self.path}` ends with `/`" }
 
@@ -32,10 +32,10 @@ TrailingSlash: struct {
 }
 
 Route: struct {
-    path: String
+    path: String,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
 
         expand: fn(self, target: Target) {
             if !self.path.starts_with("/") -> reject(BadPath{path: self.path})

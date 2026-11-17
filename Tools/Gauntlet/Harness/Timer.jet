@@ -28,11 +28,11 @@ use {
 
 // One command's times from its start; a sample's are its commands' summed.
 Times: struct {
-    wall_time_ns: Int
-    wall_seconds: Float
-    exit_code: Int
-    time_to_first_stdout_ns: Int?
-    time_to_first_stdout_seconds: Float?
+    wall_time_ns: Int,
+    wall_seconds: Float,
+    exit_code: Int,
+    time_to_first_stdout_ns: Int?,
+    time_to_first_stdout_seconds: Float?,
 }
 
 // The one JSON object the timer prints: the times at its top level, beside
@@ -40,22 +40,22 @@ Times: struct {
 // user-mode cycles when the launcher counted every command, a sequence's
 // steps and a command's error.
 Sample: struct {
-    schema: String
-    clock: Dyn
-    #Codable(.Flatten) times: Times
-    peak_rss_kb: Int
-    cycles_u: Int?
-    steps: [Times]?
-    error: String?
+    schema: String,
+    clock: Dyn,
+    #Codable(.Flatten) times: Times,
+    peak_rss_kb: Int,
+    cycles_u: Int?,
+    steps: [Times]?,
+    error: String?,
 }
 
 // What the launcher reports of one command; `cycles` is None when its
 // counter could not open.
 Launched: struct {
-    times: Times
-    peak_kb: Int
-    exec_errno: Int
-    cycles: Int?
+    times: Times,
+    peak_kb: Int,
+    exec_errno: Int,
+    cycles: Int?,
 }
 
 // Times the commands one after another as one sample: its wall time is the

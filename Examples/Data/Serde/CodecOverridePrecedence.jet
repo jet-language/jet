@@ -13,7 +13,7 @@ use core.encoding.json
 // wire form is "$D.CC" text, never `{"cents": N}`.
 #Codable
 Money: struct {
-    cents: Int
+    cents: Int,
 
     impl Encode {
         encode: fn(self) -> Dyn {
@@ -38,15 +38,15 @@ Money: struct {
 
 // A generic target: each `T` decodes through `T`'s own codec.
 Pair: struct<T> {
-    left: T
-    right: T
+    left: T,
+    right: T,
 }
 
 // A hand-written container codec supplies its own context: each line is
 // an Object member named for it, and `FieldError.under` puts a line's
 // errors under that name.
 Ledger: struct {
-    lines: [{name: String, amount: Money}]
+    lines: [{name: String, amount: Money}],
 
     impl Encode {
         encode: fn(self) -> Dyn {
@@ -79,17 +79,17 @@ Ledger: struct {
 
 // No marker and no codec: the derived default writes the field names.
 Tip: struct {
-    tip_cents: Int
+    tip_cents: Int,
 }
 
 #Rename(.Kebab)
 Invoice: struct {
     // The field's marker wins over the type's kebab case.
-    #Rename("amount_due") total_due: Money
-    line_count: Int{1}
-    split: Pair<Money>
-    tip_jar: Tip
-    ledger: Ledger
+    #Rename("amount_due") total_due: Money,
+    line_count: Int{1},
+    split: Pair<Money>,
+    tip_jar: Tip,
+    ledger: Ledger,
 }
 
 show: fn(label: String, errors: [FieldError]) {

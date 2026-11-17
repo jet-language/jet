@@ -18,20 +18,20 @@ use {
 /// Why an OID lookup failed (MBEDTLS_ERR_OID_*).
 #Error
 OIDError: enum {
-    NotFound
+    NotFound,
 }
 
 /// No table row has this OID or this algorithm (NOT_FOUND).
 
 /// The public-key algorithm an OID names (mbedtls_pk_type_t, without NONE).
 PKType: enum {
-    RSA
-    ECKey
-    ECKeyDH
-    ECDSA
-    RSAAlt
-    RSASSAPSS
-    Opaque
+    RSA,
+    ECKey,
+    ECKeyDH,
+    ECDSA,
+    RSAAlt,
+    RSASSAPSS,
+    Opaque,
 }
 
 /// One bit per X.509 v3 extension (MBEDTLS_OID_X509_EXT_*), the set a
@@ -352,9 +352,9 @@ certificate_policies: fn(data: [U8], buf: asn1.ASN1Buf) -> String OIDError! {
 /// A signature algorithm: its digest (None for RSASSA-PSS, whose digest is
 /// in the parameters), its key type and its description.
 SigAlg: struct {
-    md: hashes.Md?
-    pk: PKType
-    description: String
+    md: hashes.Md?,
+    pk: PKType,
+    description: String,
 }
 
 /// The signature algorithm an OID names (mbedtls_oid_get_sig_alg and

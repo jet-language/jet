@@ -7,39 +7,39 @@ use files: core.files
 STORE_RECEIPTS_DIR: "receipts"
 
 ClosureObject: struct {
-    digest: String
-    path: String
-    external: Bool
+    digest: String,
+    path: String,
+    external: Bool,
 }
 
 ClosureRecord: struct {
-    id: String
-    primary: String
-    action_key: String
-    outputs: [String:String]
+    id: String,
+    primary: String,
+    action_key: String,
+    outputs: [String:String],
     // Sorted and unique (Rust `BTreeSet`).
-    references: [String]
+    references: [String],
     // Canonical versioned producer replay record.
-    producer_record: String
+    producer_record: String,
     // Exact package metadata projection recoverable from committed WAL.
-    package_meta: String
+    package_meta: String,
 }
 
 CanonicalActionRecord: struct {
-    outputs: [String:String]
-    references: [String]
+    outputs: [String:String],
+    references: [String],
 }
 
 CleanReport: struct {
-    removed_objects: Int
-    removed_bytes: Int
-    quarantined_objects: Int
-    removed_receipts: Int
-    removed_receipt_bytes: Int
-    swept_tmp: Int
-    swept_tmp_bytes: Int
-    optimized_files: Int
-    optimized_bytes: Int
+    removed_objects: Int,
+    removed_bytes: Int,
+    quarantined_objects: Int,
+    removed_receipts: Int,
+    removed_receipt_bytes: Int,
+    swept_tmp: Int,
+    swept_tmp_bytes: Int,
+    optimized_files: Int,
+    optimized_bytes: Int,
 
     empty: fn() -> CleanReport Never! {
         CleanReport{removed_objects: 0, removed_bytes: 0, quarantined_objects: 0, removed_receipts: 0, removed_receipt_bytes: 0, swept_tmp: 0, swept_tmp_bytes: 0, optimized_files: 0, optimized_bytes: 0}
@@ -53,15 +53,15 @@ CleanReport: struct {
 // How a registration proves its outputs: native ingest shares payloads with
 // the machine CAS; admitted Nix objects stay root-local.
 RegistrationMode: enum {
-    Native
-    AdmittedNix
+    Native,
+    AdmittedNix,
 }
 
 ClosureGraph: struct {
-    objects: [String:ClosureObject]
-    records: [String:ClosureRecord]
+    objects: [String:ClosureObject],
+    records: [String:ClosureRecord],
     // Sorted and unique (Rust `BTreeSet`).
-    deleted_records: [String]
+    deleted_records: [String],
 
     empty: fn() -> ClosureGraph Never! {
         ClosureGraph{objects: [String:ClosureObject]{}, records: [String:ClosureRecord]{}, deleted_records: [String]{}}

@@ -12,32 +12,32 @@ use {
 
 #[Codable, Comparable]
 MemberKey: struct {
-    project: Int
-    account: auth.AccountID
+    project: Int,
+    account: auth.AccountID,
 }
 
 #Codable
 Member: struct {
-    project: Int
-    account: auth.AccountID
+    project: Int,
+    account: auth.AccountID,
 }
 
 #Codable
 Task: struct {
-    id: Int
-    project: Int
-    title: String
+    id: Int,
+    project: Int,
+    title: String,
 }
 
 // The task screen's state: its address is `/tasks/:id`.
 TaskView: struct {
-    id: Int
+    id: Int,
 }
 
 #Error
 ViewError: enum {
-    NotFound
-    Unreadable
+    NotFound,
+    Unreadable,
 }
 
 task_screen: fn(view: TaskView) -> Int Never! { view.id }
@@ -71,7 +71,7 @@ task_policy: fn(row: Task, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> 
 // The store the tables open from. A lambda owns what it captures, so each
 // call opens the tables rather than capturing them.
 Stores: struct {
-    store: db.Store?
+    store: db.Store?,
 }
 
 STORE: Shared{Stores{store: None}}

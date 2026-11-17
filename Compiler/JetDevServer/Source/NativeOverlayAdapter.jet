@@ -10,10 +10,10 @@ EVENT_LOG_NODES_PER_EVENT: Int{7}
 NativeOverlayCursor: struct { sequence: Int }
 
 NativeOverlayIdentity: struct {
-    protocol: String
-    session_id: String
-    revision: String
-    cursor: NativeOverlayCursor?
+    protocol: String,
+    session_id: String,
+    revision: String,
+    cursor: NativeOverlayCursor?,
 }
 
 impl NativeOverlayUnavailableReason {
@@ -33,56 +33,56 @@ impl NativeOverlayUnavailableReason {
 NativeOverlayUnavailableFact: struct { subject: String, reason: NativeOverlayUnavailableReason }
 
 NativeOverlayActionRequest: struct {
-    protocol: String
-    session_id: String
-    revision: String
-    sequence: Int
-    panel_id: String
-    node_id: String
-    action_id: String
-    required_grant: NativeOverlayGrant
+    protocol: String,
+    session_id: String,
+    revision: String,
+    sequence: Int,
+    panel_id: String,
+    node_id: String,
+    action_id: String,
+    required_grant: NativeOverlayGrant,
 
     cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
 NativeOverlaySelectionRequest: struct {
-    protocol: String
-    session_id: String
-    revision: String
-    sequence: Int
-    panel_id: String
-    item_key: String
+    protocol: String,
+    session_id: String,
+    revision: String,
+    sequence: Int,
+    panel_id: String,
+    item_key: String,
 
     cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
 // Event is absent only for an empty canonical cursor; never synthesize a sequence.
 NativeOverlayUpdate: struct {
-    identity: NativeOverlayIdentity
-    event: NativeOverlayEvent?
-    reset: Bool
-    truncation: Bool
-    selection: NativeOverlaySelectionRequest?
-    unavailable: [NativeOverlayUnavailableFact]
+    identity: NativeOverlayIdentity,
+    event: NativeOverlayEvent?,
+    reset: Bool,
+    truncation: Bool,
+    selection: NativeOverlaySelectionRequest?,
+    unavailable: [NativeOverlayUnavailableFact],
 }
 
 #Error
 NativeOverlayAdapterError: enum {
-    InvalidProtocol(expected: String, received: String)
-    SessionMismatch(expected: String, received: String)
-    InvalidRevision
-    InvalidSequence(sequence: Int)
-    StaleRevision(expected: String, received: String)
-    StaleSequence(expected: Int, received: Int)
-    InvalidText(field: String)
-    DuplicatePanel(panel_id: String)
-    ReservedPanel(panel_id: String)
-    InvalidPanel(message: String)
-    InvalidNode(message: String)
-    HostRejected(message: String)
-    MissingProjection
-    UnknownPanel(panel_id: String)
-    UnknownNode(node_id: String)
-    ActionUnavailable(node_id: String)
-    ActionMismatch(action_id: String)
+    InvalidProtocol(expected: String, received: String),
+    SessionMismatch(expected: String, received: String),
+    InvalidRevision,
+    InvalidSequence(sequence: Int),
+    StaleRevision(expected: String, received: String),
+    StaleSequence(expected: Int, received: Int),
+    InvalidText(field: String),
+    DuplicatePanel(panel_id: String),
+    ReservedPanel(panel_id: String),
+    InvalidPanel(message: String),
+    InvalidNode(message: String),
+    HostRejected(message: String),
+    MissingProjection,
+    UnknownPanel(panel_id: String),
+    UnknownNode(node_id: String),
+    ActionUnavailable(node_id: String),
+    ActionMismatch(action_id: String),
 
     message: fn(self) -> String {
         if self == {
@@ -111,15 +111,15 @@ NativeOverlayContext: struct { revision: String, sequence: Int }
 NativeOverlayRenderedPanels: struct { panels: [NativeOverlayPanelFact], dropped_for_nodes: Bool }
 
 NativeOverlayAdapter: struct {
-    session_id: String
-    revision: String?
-    sequence: Int?
-    release_build: Bool
+    session_id: String,
+    revision: String?,
+    sequence: Int?,
+    release_build: Bool,
     // Oldest first; bounded by MAX_NATIVE_OVERLAY_EVENTS.
-    event_facts: [JetDevtoolsEvent]
-    typed_panels: [String: NativeOverlayPanelFact]
-    history_truncated: Bool
-    last_update: NativeOverlayUpdate?
+    event_facts: [JetDevtoolsEvent],
+    typed_panels: [String: NativeOverlayPanelFact],
+    history_truncated: Bool,
+    last_update: NativeOverlayUpdate?,
 
     new: fn(session_id: String) -> NativeOverlayAdapter {
         NativeOverlayAdapter{session_id: session_id, revision: None, sequence: None, release_build: false,

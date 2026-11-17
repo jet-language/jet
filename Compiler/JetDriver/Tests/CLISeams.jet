@@ -226,7 +226,7 @@ seams_checked_projection: fn() {
     }
     seams_require(chain && !impure.complete, "eval pure root rejects effect")
     // Build's E0910 uses the populated semantic graph, not advisory status.
-    schema := seams_request("#Codable(published) Account: struct {{\n    name: String\n    verified: Bool\n}}\nrun: fn() {{ }}", JetDriverCompileMode.Doc)
+    schema := seams_request("#Codable(published) Account: struct {{\n    name: String,\n    verified: Bool,\n}}\nrun: fn() {{ }}", JetDriverCompileMode.Doc)
     baseline: SchemaSnapshot{schema_version: U32{1}, type_name: "Account", published_version: "1.0.0", squashed_before: None, fields: [SnapshotField]{SnapshotField{name: "name", ty: "String"}}}
     schema.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
     breaking: jet_driver_compile(schema)
@@ -235,7 +235,7 @@ seams_checked_projection: fn() {
         if diagnostic.code == "E0910" -> schema_error = true
     }
     seams_require(schema_error && !breaking.complete, "schema fails in the checker")
-    schema_check := seams_request("#Codable(published) Account: struct {{\n    name: String\n    verified: Bool\n}}\nserve: fn() {{ }}", JetDriverCompileMode.Program)
+    schema_check := seams_request("#Codable(published) Account: struct {{\n    name: String,\n    verified: Bool,\n}}\nserve: fn() {{ }}", JetDriverCompileMode.Program)
     schema_check.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
     schema_retained: jet_driver_checked_projection(schema_check)
     seams_require(!schema_retained.compile.complete && schema_retained.source_modules.len() == 0, "retained schema failure is still a checker failure")
@@ -246,7 +246,7 @@ seams_checked_projection: fn() {
         }
         .Cache(_, _) -> panic("supplied schema map was confused with a disk cache read")
     }
-    parsed: parse_source("#Codable(published) Account: struct {{\n    name: String\n    verified: Bool\n}}".bytes())
+    parsed: parse_source("#Codable(published) Account: struct {{\n    name: String,\n    verified: Bool,\n}}".bytes())
     pending: jet_driver_schema_pending_breaks([[Item]{parsed.program.items[0]}], [String:SchemaSnapshot]{"Account": baseline})
     seams_require(pending == ([String]{"Account"}), "status reuses advisory sema diff")
 }

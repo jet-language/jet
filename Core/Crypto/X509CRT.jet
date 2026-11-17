@@ -31,9 +31,9 @@ use {
 /// and the authorityCertIssuer GeneralNames with the
 /// authorityCertSerialNumber, which come together or not at all.
 X509Authority: struct {
-    key_identifier: asn1.ASN1Buf
-    authority_cert_issuer: [asn1.ASN1Buf]
-    authority_cert_serial_number: asn1.ASN1Buf
+    key_identifier: asn1.ASN1Buf,
+    authority_cert_issuer: [asn1.ASN1Buf],
+    authority_cert_serial_number: asn1.ASN1Buf,
 }
 
 /// One parsed certificate (mbedtls_x509_crt).
@@ -46,36 +46,36 @@ X509Authority: struct {
 /// - `sig_md`, `sig_pk`, `sig_opts`: the signature algorithm, with the
 ///   RSASSA-PSS options when it is RSASSA-PSS.
 X509Crt: struct {
-    raw: [U8]
-    tbs: asn1.ASN1Buf
-    version: Int
-    serial: asn1.ASN1Buf
-    sig_oid: asn1.ASN1Buf
-    issuer_raw: asn1.ASN1Buf
-    subject_raw: asn1.ASN1Buf
-    issuer: [asn1.NamedData]
-    subject: [asn1.NamedData]
-    valid_from: x509.X509Time
-    valid_to: x509.X509Time
-    pk_raw: asn1.ASN1Buf
-    pk: pk.PKContext
-    issuer_id: asn1.ASN1Buf
-    subject_id: asn1.ASN1Buf
-    v3_ext: asn1.ASN1Buf
-    subject_alt_names: [asn1.ASN1Buf]
-    subject_key_id: asn1.ASN1Buf
-    authority_key_id: X509Authority
-    certificate_policies: [asn1.ASN1Buf]
-    ext_types: Int
-    ca_istrue: Bool
-    max_pathlen: Int
-    key_usage: Int
-    ext_key_usage: [asn1.ASN1Buf]
-    ns_cert_type: Int
-    sig: asn1.ASN1Buf
-    sig_md: hashes.Md?
-    sig_pk: oids.PKType?
-    sig_opts: pk.PSSOptions?
+    raw: [U8],
+    tbs: asn1.ASN1Buf,
+    version: Int,
+    serial: asn1.ASN1Buf,
+    sig_oid: asn1.ASN1Buf,
+    issuer_raw: asn1.ASN1Buf,
+    subject_raw: asn1.ASN1Buf,
+    issuer: [asn1.NamedData],
+    subject: [asn1.NamedData],
+    valid_from: x509.X509Time,
+    valid_to: x509.X509Time,
+    pk_raw: asn1.ASN1Buf,
+    pk: pk.PKContext,
+    issuer_id: asn1.ASN1Buf,
+    subject_id: asn1.ASN1Buf,
+    v3_ext: asn1.ASN1Buf,
+    subject_alt_names: [asn1.ASN1Buf],
+    subject_key_id: asn1.ASN1Buf,
+    authority_key_id: X509Authority,
+    certificate_policies: [asn1.ASN1Buf],
+    ext_types: Int,
+    ca_istrue: Bool,
+    max_pathlen: Int,
+    key_usage: Int,
+    ext_key_usage: [asn1.ASN1Buf],
+    ns_cert_type: Int,
+    sig: asn1.ASN1Buf,
+    sig_md: hashes.Md?,
+    sig_pk: oids.PKType?,
+    sig_opts: pk.PSSOptions?,
 }
 
 /// A handler for the extensions mbedtls does not know
@@ -84,7 +84,7 @@ X509Crt: struct {
 /// data[p..<end]. An error fails the parse when the extension is critical.
 /// The handler is pure, so the TLS engine can parse with it.
 X509ExtCallback: struct {
-    call: fn(X509Crt, [U8], asn1.ASN1Buf, Bool, Int, Int) -[]> x509.X509Error!
+    call: fn(X509Crt, [U8], asn1.ASN1Buf, Bool, Int, Int) -[]> x509.X509Error!,
 }
 
 // The SEQUENCE tag, constructed.
@@ -584,10 +584,10 @@ x509_crt_check_extended_key_usage: fn(crt: X509Crt, usage_oid: [U8]) x509.X509Er
 /// x509_id_flag bits of their mbedtls numbers, and the shortest RSA key in
 /// bits.
 X509CrtProfile: struct {
-    allowed_mds: Int
-    allowed_pks: Int
-    allowed_curves: Int
-    rsa_min_bitlen: Int
+    allowed_mds: Int,
+    allowed_pks: Int,
+    allowed_curves: Int,
+    rsa_min_bitlen: Int,
 }
 
 /// The mask bit of an mbedtls digest, key type or curve number
@@ -1012,11 +1012,11 @@ x509_crt_is_revoked: fn(serial: [U8], crl: x509crl.X509Crl) -> Bool Never! {
 // A signature as its signer's key checks it: the digest of the signed
 // bytes, None when the algorithm names no digest, and the algorithm.
 X509Signed: struct {
-    hash: [U8]?
-    md: hashes.Md?
-    kind: oids.PKType?
-    opts: pk.PSSOptions?
-    sig: [U8]
+    hash: [U8]?,
+    md: hashes.Md?,
+    kind: oids.PKType?,
+    opts: pk.PSSOptions?,
+    sig: [U8],
 }
 
 // The digest of `tbs` under `md`, None without one.
@@ -1100,9 +1100,9 @@ x509_crt_check_parent: fn(issuer: [asn1.NamedData], parent: X509Crt, top: Bool) 
 // whether it is a trusted root, and whether its key verifies the child's
 // signature.
 X509Parent: struct {
-    index: Int
-    trusted: Bool
-    signature_is_good: Bool
+    index: Int,
+    trusted: Bool,
+    signature_is_good: Bool,
 }
 
 // x509_crt_find_parent_in: the first suitable parent in cands[from..] that
@@ -1163,9 +1163,9 @@ x509_crt_time_flags: fn(crt: X509Crt, now: x509.X509Time) -> Int Never! {
 /// (mbedtls_x509_crt_verify_chain_item): trust_ca[index] when `trusted`,
 /// else chain[index], with the flags found for it.
 X509ChainItem: struct {
-    trusted: Bool
-    index: Int
-    flags: Int
+    trusted: Bool,
+    index: Int,
+    flags: Int,
 }
 
 // x509_crt_verify_chain: the chain from chain[0] up to a trusted root, or
@@ -1234,7 +1234,7 @@ x509_crt_signer_flags: fn(list: &[X509Crt], at: Int, serial: [U8], ca_crl: [x509
 /// stops verification and is its result, CertVerifyFailed turned into
 /// FatalError. The callback is pure, so the TLS engine can verify with it.
 X509VerifyCallback: struct {
-    call: fn(X509Crt, Int, Int) -[]> Int x509.X509Error!
+    call: fn(X509Crt, Int, Int) -[]> Int x509.X509Error!,
 }
 
 // One callback call for the chain item at `depth`.

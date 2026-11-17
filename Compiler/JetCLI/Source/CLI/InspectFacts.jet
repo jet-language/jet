@@ -61,18 +61,18 @@ JET_CLI_FACTS_RUN_ANSWER: ENV_JET_FACTS_ANSWER
 // What a query program returned: its rows and their text lines, or the
 // MetadataError it failed with and that error's text.
 JetCLIFactsAnswer: struct {
-    rows: TComptimeValue
-    lines: String
-    failure: TComptimeValue
-    failure_text: String
+    rows: TComptimeValue,
+    lines: String,
+    failure: TComptimeValue,
+    failure_text: String,
 }
 
 // The checked query program's answer and the identity of the snapshot it
 // read (the schema's identity, the program's revision, the run receipt's
 // digest); or why there is no answer.
 JetCLIFactsOutcome: enum {
-    Answered(answer: JetCLIFactsAnswer, snapshot: String)
-    Failed(reason: String)
+    Answered(answer: JetCLIFactsAnswer, snapshot: String),
+    Failed(reason: String),
 }
 
 // The store that answered: its `--store` spelling, and the snapshot it read
@@ -81,11 +81,11 @@ JetCLIFactsOutcome: enum {
 // identity under its own name (the program's `revision`, the receipt's
 // `digest`; "" for the schema, whose identity is its name).
 JetCLIFactsStore: struct {
-    store: String
-    field: String
-    snapshot: String
-    identity_field: String
-    identity: String
+    store: String,
+    field: String,
+    snapshot: String,
+    identity_field: String,
+    identity: String,
 }
 
 jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{false}) -> JetCLIPlan Never! {
@@ -356,7 +356,7 @@ jet_cli_facts_program_query: fn(kind: String) -> String Never! {
 // The answer record the program and run stores' programs return: the rows,
 // one text line per row, the failure and its text, and the identity of the
 // snapshot the query read.
-JET_CLI_FACTS_ANSWER_TYPE: "JetFactsAnswer: struct {{\n    rows: [compiler.Fact]\n    lines: String\n    failure: compiler.MetadataError?\n    failure_text: String\n    identity: String\n}}"
+JET_CLI_FACTS_ANSWER_TYPE: "JetFactsAnswer: struct {{\n    rows: [compiler.Fact],\n    lines: String,\n    failure: compiler.MetadataError?,\n    failure_text: String,\n    identity: String,\n}}"
 
 // The run store's program: its build-time constant reads the receipt at
 // `path` with `compiler.receipt` and makes the query over it; a receipt the

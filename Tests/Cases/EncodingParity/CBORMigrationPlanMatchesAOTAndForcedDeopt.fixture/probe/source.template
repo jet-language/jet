@@ -11,9 +11,9 @@ ScoreRank: struct { value: Int }
 // v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
 #[Codable(published), Rename(.Camel)]
 Profile: struct {
-    display_name: String
-    score: ScoreRank
-    host_name: String
+    display_name: String,
+    score: ScoreRank,
+    host_name: String,
 }
 
 migration Profile {
@@ -37,7 +37,7 @@ decode_old: fn() -[]> String {
         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
         0x18, 0x5f,
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-        0x09
+        0x09,
     }
     profile: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
@@ -52,7 +52,7 @@ forced_deopt: fn() -[]> String {
         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
         0x18, 0x5f,
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-        0x09
+        0x09,
     }
     profile: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
@@ -66,7 +66,7 @@ failed_change: fn() -[]> String {
         0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
         0x63, 0x62, 0x61, 0x64,
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
-        0x09
+        0x09,
     }
     if cbor.decode<Profile>(bytes.copy()) == {
         .Ok(_value) -> return "accepted"

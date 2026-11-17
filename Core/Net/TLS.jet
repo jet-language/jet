@@ -28,12 +28,12 @@ use {
 // and every error message. The TCPStream keeps owning the socket.
 
 ClientConfig: struct {
-    host: String{""}
-    alpn: [String]{[]}
-    trust: TLSClientTrust{TLSClientTrust.System}
-    identity: ClientIdentity?{None}
-    min_version: TLSVersion{TLSVersion.TLS12}
-    max_version: TLSVersion{TLSVersion.TLS13}
+    host: String{""},
+    alpn: [String]{[]},
+    trust: TLSClientTrust{TLSClientTrust.System},
+    identity: ClientIdentity?{None},
+    min_version: TLSVersion{TLSVersion.TLS12},
+    max_version: TLSVersion{TLSVersion.TLS13},
 
     // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
     default: fn() -> ClientConfig Never! { ClientConfig{} }
@@ -63,8 +63,8 @@ ClientConfig: struct {
 // `from_pem` stores the validated PEM text; `identity(cert, key)` is a plain
 // carrier that the handshake validates.
 ClientIdentity: struct {
-    cert: String{""}
-    key: String{""}
+    cert: String{""},
+    key: String{""},
 
     // Validates a PEM certificate chain and the leaf's PEM private key.
     from_pem: fn(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
@@ -75,8 +75,8 @@ ClientIdentity: struct {
 
 // `from_pem` stores validated PEM roots; `roots(path)` names a bundle file.
 RootCertificates: struct {
-    path: String{""}
-    pem: String{""}
+    path: String{""},
+    pem: String{""},
 
     // Validates one or more PEM CERTIFICATE blocks and nothing else.
     from_pem: fn(pem: [U8]) -> RootCertificates IOError! {
@@ -86,40 +86,40 @@ RootCertificates: struct {
 }
 
 TLSClientTrust: enum {
-    System
-    SystemPlus(RootCertificates)
-    CustomOnly(RootCertificates)
+    System,
+    SystemPlus(RootCertificates),
+    CustomOnly(RootCertificates),
 }
 
 TLSCertificate: struct {
-    der: [U8]
-    sha256: [U8]
-    spki_sha256: [U8]
-    dns_names: [String]
-    valid_from_unix_ms: Int
-    valid_until_unix_ms: Int
-    subject: String
-    issuer: String
+    der: [U8],
+    sha256: [U8],
+    spki_sha256: [U8],
+    dns_names: [String],
+    valid_from_unix_ms: Int,
+    valid_until_unix_ms: Int,
+    subject: String,
+    issuer: String,
 }
 
 TLSPeerIdentity: struct {
-    verified_server_name: String
-    leaf: TLSCertificate
-    certificate_chain: [TLSCertificate]
-    cipher_suite: String
-    tls_version: TLSVersion
+    verified_server_name: String,
+    leaf: TLSCertificate,
+    certificate_chain: [TLSCertificate],
+    cipher_suite: String,
+    tls_version: TLSVersion,
 }
 
 // Numbered as the protocol's version field (RFC 8446 section 4.1.2).
 #[Specified, Layout(U16)]
 TLSVersion: enum {
-    TLS12 = 771
-    TLS13 = 772
+    TLS12 = 771,
+    TLS13 = 772,
 }
 
 // A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
 TLSStream: struct {
-    state: Shared<TLSState>?{None}
+    state: Shared<TLSState>?{None},
 
     read_bytes: fn(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
         if max_bytes <= 0 {
@@ -211,22 +211,22 @@ TLSStream: struct {
 // A configuration before setup: the engine's config, the roots loaded so
 // far, and the generator the connection draws from.
 priv TLSContext: struct {
-    conf: ssldefs.SSLConfig
-    ca: [x509crt.X509Crt]
-    rng: drbg.HMACDrbg
+    conf: ssldefs.SSLConfig,
+    ca: [x509crt.X509Crt],
+    rng: drbg.HMACDrbg,
 }
 
 priv TLSState: struct {
-    ssl: ssldefs.SSLContext
-    rng: drbg.HMACDrbg
-    tcp: TCPStream
+    ssl: ssldefs.SSLContext,
+    rng: drbg.HMACDrbg,
+    tcp: TCPStream,
     // The plaintext buffer the engine reads into, C_RECORD_BYTES long.
-    buffer: [U8]
-    peer: TLSPeerIdentity?
-    pending: [U8]
-    read_eof: Bool
-    write_closed: Bool
-    closed: Bool
+    buffer: [U8],
+    peer: TLSPeerIdentity?,
+    pending: [U8],
+    read_eof: Bool,
+    write_closed: Bool,
+    closed: Bool,
 
     // The engine's secrets and the plaintext the stream holds die wiped: when the
     // last handle to the state goes, after a failed handshake included, the
@@ -254,13 +254,13 @@ priv release: fn(tls: &TLSState) Never! {
 
 // One engine read: the byte count or the status, and the bytes read.
 priv Got: struct {
-    status: Int
-    bytes: [U8]
+    status: Int,
+    bytes: [U8],
 }
 
 #Error
 priv TLSFailure: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }

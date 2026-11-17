@@ -98,8 +98,8 @@ GROUPS_REDIRECT: 2
 /// Key repeat timing from wl_keyboard.repeat_info: `rate` repeats per second
 /// (0 disables repeat) after the key has been held `delay` milliseconds.
 Repeat: struct {
-    rate: Int
-    delay: Int
+    rate: Int,
+    delay: Int,
 
     /// How many repeats a key held `held_ms` milliseconds has produced in
     /// total: the first at `delay`, then one every 1000 / `rate` ms.
@@ -115,134 +115,134 @@ Repeat: struct {
 }
 
 Token: struct {
-    kind: Int
-    text: String
-    value: Int
-    line: Int
+    kind: Int,
+    text: String,
+    value: Int,
+    line: Int,
 }
 
 TypeEntry: struct {
-    mods: Int
-    mask: Int
-    level: Int
-    preserve: Int
-    preserve_mask: Int
+    mods: Int,
+    mask: Int,
+    level: Int,
+    preserve: Int,
+    preserve_mask: Int,
 }
 
 KeyType: struct {
-    name: String
-    mods: Int
-    mask: Int
-    levels: Int
-    entries: [TypeEntry]
+    name: String,
+    mods: Int,
+    mask: Int,
+    levels: Int,
+    entries: [TypeEntry],
 }
 
 Action: struct {
-    kind: Int
-    mods: Int
-    mask: Int
-    modmap: Bool
-    group: Int
-    absolute: Bool
-    clear_locks: Bool
-    latch_to_lock: Bool
-    lock: Bool
-    unlock: Bool
+    kind: Int,
+    mods: Int,
+    mask: Int,
+    modmap: Bool,
+    group: Int,
+    absolute: Bool,
+    clear_locks: Bool,
+    latch_to_lock: Bool,
+    lock: Bool,
+    unlock: Bool,
 }
 
 Interp: struct {
-    sym: Int
-    any: Bool
-    match: Int
-    mods: Int
-    action: Action
-    vmod: Int
-    level_one: Bool
-    repeat: Bool
+    sym: Int,
+    any: Bool,
+    match: Int,
+    mods: Int,
+    action: Action,
+    vmod: Int,
+    level_one: Bool,
+    repeat: Bool,
 }
 
 Group: struct {
-    type_name: String
-    explicit_type: Bool
-    type: Int
-    levels: [[Int]]
-    actions: [Action]
+    type_name: String,
+    explicit_type: Bool,
+    type: Int,
+    levels: [[Int]],
+    actions: [Action],
 }
 
 KeyDef: struct {
-    name: String
-    code: Int
-    groups: [Group]
-    explicit_actions: Bool
-    repeat: Int
-    vmods: Int
-    explicit_vmods: Bool
-    modmap: Int
-    vmodmap: Int
-    out_of_range: Int
-    redirect: Int
-    repeats: Bool
+    name: String,
+    code: Int,
+    groups: [Group],
+    explicit_actions: Bool,
+    repeat: Int,
+    vmods: Int,
+    explicit_vmods: Bool,
+    modmap: Int,
+    vmodmap: Int,
+    out_of_range: Int,
+    redirect: Int,
+    repeats: Bool,
 }
 
 ModmapEntry: struct {
-    mod: Int
-    key: String
-    sym: Int
+    mod: Int,
+    key: String,
+    sym: Int,
 }
 
 Filter: struct {
-    code: Int
-    action: Action
-    refcnt: Int
-    saved: Int
-    latch: Int
-    active: Bool
+    code: Int,
+    action: Action,
+    refcnt: Int,
+    saved: Int,
+    latch: Int,
+    active: Bool,
 }
 
 Parser: struct {
-    toks: [Token]
-    at: Int
-    names: [String:Int]
-    synthetic: [String:Int]
-    codes: [String:Int]
-    aliases: [String:String]
-    vmods: [String]
-    vmod_fixed: [Int]
-    types: [KeyType]
-    interps: [Interp]
-    default_repeat: Bool
-    default_level_one: Bool
-    keys: [KeyDef]
-    key_index: [String:Int]
-    modmap: [ModmapEntry]
-    layouts: [String]
+    toks: [Token],
+    at: Int,
+    names: [String:Int],
+    synthetic: [String:Int],
+    codes: [String:Int],
+    aliases: [String:String],
+    vmods: [String],
+    vmod_fixed: [Int],
+    types: [KeyType],
+    interps: [Interp],
+    default_repeat: Bool,
+    default_level_one: Bool,
+    keys: [KeyDef],
+    key_index: [String:Int],
+    modmap: [ModmapEntry],
+    layouts: [String],
 }
 
 /// A compiled keymap and the keyboard state it tracks.
 Keymap: struct {
-    priv keys: [KeyDef]
-    priv by_code: [Int]
-    priv types: [KeyType]
-    priv group_count: Int
-    priv base_mods: Int
-    priv latched_mods: Int
-    priv locked_mods: Int
-    priv base_group: Int
-    priv latched_group: Int
-    priv locked_group: Int
-    priv mods: Int
-    priv group: Int
-    priv set_mods: Int
-    priv clear_mods: Int
-    priv mod_counts: [Int]
-    priv filters: [Filter]
-    priv server: Bool
-    priv compose: Int
+    priv keys: [KeyDef],
+    priv by_code: [Int],
+    priv types: [KeyType],
+    priv group_count: Int,
+    priv base_mods: Int,
+    priv latched_mods: Int,
+    priv locked_mods: Int,
+    priv base_group: Int,
+    priv latched_group: Int,
+    priv locked_group: Int,
+    priv mods: Int,
+    priv group: Int,
+    priv set_mods: Int,
+    priv clear_mods: Int,
+    priv mod_counts: [Int],
+    priv filters: [Filter],
+    priv server: Bool,
+    priv compose: Int,
     // Group names (name[GroupN]), virtual modifier names and their real masks.
-    priv layouts: [String]
-    priv vmod_names: [String]
-    priv vmod_masks: [Int]
-    priv sym_names: [Int:String]
+    priv layouts: [String],
+    priv vmod_names: [String],
+    priv vmod_masks: [Int],
+    priv sym_names: [Int:String],
 
     /// Sets the state from the compositor's wl_keyboard.modifiers event.
     /// From then on the compositor owns the state and `press` stops

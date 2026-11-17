@@ -19,19 +19,19 @@ use {
 
 // The catchable POSIX signals, in signal-number order.
 ProcessSignal: enum {
-    Hup
-    Int
-    Quit
-    Usr1
-    Usr2
-    Pipe
-    Alrm
-    Term
-    Chld
-    Cont
-    Tstp
-    Ttin
-    Ttou
+    Hup,
+    Int,
+    Quit,
+    Usr1,
+    Usr2,
+    Pipe,
+    Alrm,
+    Term,
+    Chld,
+    Cont,
+    Tstp,
+    Ttin,
+    Ttou,
     Winch
 }
 
@@ -39,8 +39,8 @@ ProcessSignal: enum {
 // `receiver` instead of taking its earlier effect, at most one pending per
 // kind; every open subscription that holds a signal receives it.
 SignalSubscription: struct {
-    id: Int
-    receiver: Receiver<ProcessSignal>
+    id: Int,
+    receiver: Receiver<ProcessSignal>,
 
     // Ends the subscription: a signal no other subscription holds takes its
     // earlier effect again, and `receiver` ends once its pending signals are read.
@@ -74,7 +74,7 @@ signals: fn(kinds: [ProcessSignal]) -[Exec]> SignalSubscription IOError! {
 // (`$(…)`), `run()` for the whole receipt, and `spec()` when it needs a
 // directory, environment or limit first.
 Sh: struct {
-    argv: [String]
+    argv: [String],
 
     impl Display {
         display: fn(self) -> String { self.argv.join(" ") }
@@ -139,8 +139,8 @@ Sh: struct {
     // A checked `Sh{…}` literal: literal text splits on whitespace and each
     // hole's display text is one argv item.
     impl CheckedText {
-        Error: Never
-        Hole: String
+        Error: Never,
+        Hole: String,
 
         check: fn(_text: String) -[]> Never! { return Ok() }
 
@@ -763,37 +763,37 @@ args_from_argv: fn(values: [String]) -> [String] Never! {
 // writes as it runs, the parent's own stream, a pipe collected into the
 // receipt, or (for stderr) the child's stdout.
 ProcessStreamMode: enum {
-    Stream
-    Inherit
-    Capture
+    Stream,
+    Inherit,
+    Capture,
     Stdout
 }
 
 // The line discipline of a spawned child's pseudo-terminal.
 TerminalMode: enum {
-    Raw
+    Raw,
     Cooked
 }
 
 // Temporary native-carrier layout. This is not a second public builder API:
 // the canonical ProcessSpec stays opaque and its existing methods stay intact.
 ProcessFields: struct {
-    argv: [String]
-    cwd: String?
-    env_clear: Bool
-    env_names: [String]
-    env_values: [String]
-    env_remove: [String]
-    stdin: ProcessStreamMode?
-    stdout: ProcessStreamMode
-    stderr: ProcessStreamMode
-    timeout_ms: Int?
-    output_limit: Int?
-    cpu_time_limit_ms: Int?
-    memory_limit_bytes: Int?
-    open_file_limit: Int?
-    detached: Bool
-    terminal: TerminalPolicy?
+    argv: [String],
+    cwd: String?,
+    env_clear: Bool,
+    env_names: [String],
+    env_values: [String],
+    env_remove: [String],
+    stdin: ProcessStreamMode?,
+    stdout: ProcessStreamMode,
+    stderr: ProcessStreamMode,
+    timeout_ms: Int?,
+    output_limit: Int?,
+    cpu_time_limit_ms: Int?,
+    memory_limit_bytes: Int?,
+    open_file_limit: Int?,
+    detached: Bool,
+    terminal: TerminalPolicy?,
     policy_wire: String?
 }
 
@@ -862,12 +862,12 @@ __stderr_next_line: fn(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? 
 /// yields each non-empty piece of at most `size` bytes. The loop ends at end of
 /// input or at the first failed read; a size below one fails before any read.
 ProcessChunks: struct {
-    __stdout: ProcessStdoutStream?{None}
-    __stderr: ProcessStderrStream?{None}
-    __size: Int
+    __stdout: ProcessStdoutStream?{None},
+    __stderr: ProcessStderrStream?{None},
+    __size: Int,
 
     impl Iterable {
-        Iter: ProcessChunkCursor
+        Iter: ProcessChunkCursor,
 
         iter: fn(&&self) -> ProcessChunkCursor {
             ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
@@ -876,13 +876,13 @@ ProcessChunks: struct {
 }
 
 priv ProcessChunkCursor: struct {
-    stdout: ProcessStdoutStream?
-    stderr: ProcessStderrStream?
-    size: Int
-    done: Bool
+    stdout: ProcessStdoutStream?,
+    stderr: ProcessStderrStream?,
+    size: Int,
+    done: Bool,
 
     impl Iterator {
-        Item: [U8]
+        Item: [U8],
 
         next: fn(&self) -[Exec, Time.Wait]> [U8]? {
             if self.done -> return None

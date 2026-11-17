@@ -118,8 +118,8 @@ ir_opt_fold_shape_of: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldSh
 // The functions of one thread of ir_opt_fold_shapes, in order, and their
 // shapes.
 IROptFoldPart: struct {
-    functions: [IRFunction]
-    shapes: [IROptFoldShape]
+    functions: [IRFunction],
+    shapes: [IROptFoldShape],
 }
 
 // Parts `at` on, in part order, each shaped on its own thread and the last
@@ -158,20 +158,20 @@ ir_opt_fold_part: fn(m: IRModule, rows: [Int], functions: &&[IRFunction]) -> IRO
 IROptFoldGroups: struct {
     // Per function its class (-1: no candidate), its shape's number (the
     // first body of its shape; empty until the first walk), and its shape.
-    first: [Int]
-    shape_of: [Int]
-    shapes: [IROptFoldShape]
-    workers: Int
+    first: [Int],
+    shape_of: [Int],
+    shapes: [IROptFoldShape],
+    workers: Int,
     // The walks so far: 0 groups shapes, a later one is a round.
-    rounds: Int
+    rounds: Int,
 }
 
 // One bucket of a walk: its candidates in order, with the first of their
 // group, and how many groups it found.
 IROptFoldBucket: struct {
-    ids: [Int]
-    firsts: [Int]
-    keys: Int
+    ids: [Int],
+    firsts: [Int],
+    keys: Int,
 }
 
 // Groups the candidates once (shapes, then a round), taking the first
@@ -295,9 +295,9 @@ ir_opt_fold_runtime: fn(m: IRModule, symbol: String) -> String Never! {
 // lists those functions in that order, and `spread` is a hash of the text
 // (ir_opt_fold_spread).
 IROptFoldShape: struct {
-    text: String
-    reached: [Int]
-    spread: Int
+    text: String,
+    reached: [Int],
+    spread: Int,
 }
 
 ir_opt_fold_shape: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape Never! {

@@ -3,82 +3,82 @@
 use jet_foundation.[Diagnostic, MARKER_UNSAFE, Span, Expr, Call, CallArg, Field, Func, ImplDef, Item, Program, Stmt, Type, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
 
 SemaGateModule: struct {
-    source: String
-    program: Program
+    source: String,
+    program: Program,
     // Outer package/organization declarations, supplied by the package owner.
-    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}},
     // A path relative to the owning package; None for compiler/private sources.
-    policy_path: String?{None}
-    unsafe_paths: [String]?{None}
+    policy_path: String?{None},
+    unsafe_paths: [String]?{None},
     // `policy.memory`: the package-relative kernel files, the only ones whose
     // gates may hold a raw memory operation (E3113). None: no kernel rule (a
     // single program, Core, compiler-private sources); empty: no kernel file.
-    memory_kernel: [String]?{None}
-    expert: Bool?{None}
+    memory_kernel: [String]?{None},
+    expert: Bool?{None},
     // The owning package's loader identity ("" for none); the mapping-keeper
     // rule reads it (sema_unsafe_mapping_keepers).
-    package_identity: String{""}
+    package_identity: String{""},
     // A composed runtime unit's sources (sema_unsafe_unit_map): the kernel
     // rule reads each operation's own source path, not the unit's.
-    unit: SemaUnitMap?{None}
+    unit: SemaUnitMap?{None},
 }
 
 // One source of a composed unit: its path as its `// [unit source: PATH]`
 // mark names it, the byte offset where its first line starts, and that
 // line's number in the unit.
 SemaUnitSource: struct {
-    path: String
-    start: Int
-    line: Int
+    path: String,
+    start: Int,
+    line: Int,
 }
 
 SemaUnitMap: struct {
-    sources: [SemaUnitSource]
+    sources: [SemaUnitSource],
     // The byte offset each unit line starts at.
-    line_starts: [Int]
+    line_starts: [Int],
 }
 
 UnsafeInspection: struct {
-    gates: [UnsafeGateInspection]
-    diagnostics: [UnsafeDiagnostic]
+    gates: [UnsafeGateInspection],
+    diagnostics: [UnsafeDiagnostic],
 }
 
 UnsafeDiagnostic: struct {
-    source: String
-    diagnostic: Diagnostic
+    source: String,
+    diagnostic: Diagnostic,
 }
 
 UnsafeGateInspection: struct {
-    source: String
-    span: Span
-    reason: String?
-    mode: String
-    provenance: [String]
-    operations: [UnsafeOperationInspection]
+    source: String,
+    span: Span,
+    reason: String?,
+    mode: String,
+    provenance: [String],
+    operations: [UnsafeOperationInspection],
     // The gate's raw memory operations that carry no obligation (a
     // `core.mem` call, pointer stepping); the kernel rule reads them with
     // `operations`.
-    memory_operations: [SemaUnsafeOperation]{[SemaUnsafeOperation]{}}
+    memory_operations: [SemaUnsafeOperation]{[SemaUnsafeOperation]{}},
 }
 
 UnsafeOperationInspection: struct {
-    kind: String
-    span: Span
-    required: [String]
-    asserted: [String]
-    discharged: Bool
+    kind: String,
+    span: Span,
+    required: [String],
+    asserted: [String],
+    discharged: Bool,
     // The names the operation's address is computed from (sema_unsafe_address_roots).
-    address: [String]{[String]{}}
+    address: [String]{[String]{}},
 }
 
 SemaUnsafeOperation: struct {
-    kind: String
-    span: Span
-    required: [String]
+    kind: String,
+    span: Span,
+    required: [String],
     // The names the operation's address is computed from: locals and
     // parameters, and `self.field` for a field of the receiver. Empty for an
     // operation that takes no address (`alloc_raw`, `mem.address_of`).
-    address: [String]{[String]{}}
+    address: [String]{[String]{}},
 }
 
 // How a raw memory operation is written: a method on any receiver
@@ -98,13 +98,13 @@ SEMA_RAW_CALL: "call"
 // only when its first argument is one of `syscalls`: a number or an
 // `OS_SYS_` constant of the memory family.
 SemaRawOperation: struct {
-    name: String
-    form: String
-    prefix: Bool
-    kind: String
-    required: [String]
-    pointers: Int
-    syscalls: [String]
+    name: String,
+    form: String,
+    prefix: Bool,
+    kind: String,
+    required: [String],
+    pointers: Int,
+    syscalls: [String],
 }
 
 // Every raw memory operation sema reads: the obligation pass discharges the

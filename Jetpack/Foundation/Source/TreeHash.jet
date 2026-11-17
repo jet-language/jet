@@ -24,7 +24,7 @@ FOUNDATION_U64_SHIFTS: [Int]{56, 48, 40, 32, 24, 16, 8, 0}
 // Incremental SHA-256 for tool identities: core.crypto.Hasher, which holds
 // at most one partial 64-byte block, so large artifacts are never read whole.
 StreamingSHA256: struct {
-    priv hasher: crypto.Hasher
+    priv hasher: crypto.Hasher,
 
     new: fn() -> StreamingSHA256 Never! { StreamingSHA256{hasher: crypto.Hasher.new()} }
 
@@ -36,11 +36,11 @@ StreamingSHA256: struct {
 // Failure while proving a source tree's contents.
 #Error
 TreeHashError: enum {
-    IO(path: String, detail: String)
-    Symlink(String)
-    Special(String)
-    InvalidName(String)
-    TooLarge(path: String, limit: Int)
+    IO(path: String, detail: String),
+    Symlink(String),
+    Special(String),
+    InvalidName(String),
+    TooLarge(path: String, limit: Int),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -56,14 +56,14 @@ TreeHashError: enum {
 // One regular file found by a tree walk: its `/`-separated path relative to
 // the tree root and the identity observed while walking.
 TreeHashFile: struct {
-    relative: String
-    path: String
-    stat: Stat
+    relative: String,
+    path: String,
+    stat: Stat,
 }
 
 // The walk budget shared across one tree.
 TreeHashBudget: struct {
-    nodes: Int
+    nodes: Int,
 }
 
 // A canonical tree hash of a source directory: every included regular file
@@ -204,8 +204,8 @@ foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &Stre
 // link, ancestors resolve as ordinary OS paths, and the no-follow handle must
 // name the same regular file. One opener shared by hashing and bounded reads.
 FoundationNofollowFile: struct {
-    handle: FileReader
-    expected: Stat
+    handle: FileReader,
+    expected: Stat,
 }
 
 foundation_open_regular_nofollow: fn(path: String) -[FS]> FoundationNofollowFile IOError! {
@@ -315,54 +315,54 @@ foundation_open_or_create_directory: fn(parent: Directory, name: String) -[FS]> 
 // Keep every ancestor open, not just the last parent: a rename must not publish
 // into a detached tree after a pathname swap. Rust rooted_authority::open_root.
 FoundationPublicationDirectory: struct {
-    handle: Directory
-    path: String
-    publication_parent: Bool
+    handle: Directory,
+    path: String,
+    publication_parent: Bool,
 }
 
 // Typed publication policy; defaults preserve every existing caller's 0600,
 // replace-regular-file, refuse-links behavior. Signing uses create-new or force
 // replacement of a symlink BINDING (never its referent) and public mode 0644.
 FoundationPublicationCreate: enum {
-    Replace
-    CreateNew
+    Replace,
+    CreateNew,
 }
 
 FoundationPublicationLinks: enum {
-    Refuse
-    ReplaceBinding
+    Refuse,
+    ReplaceBinding,
 }
 
 FoundationPublicationPolicy: struct {
-    mode: Int{384}
-    create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
-    destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse}
-    create_root: Bool{false}
+    mode: Int{384},
+    create: FoundationPublicationCreate{FoundationPublicationCreate.Replace},
+    destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse},
+    create_root: Bool{false},
 }
 
 // Phase is recorded at the producing operation, never guessed from IO text.
 // All callers share this one publisher; callers needing only IO project error.
 FoundationPublicationPhase: enum {
-    PreparePath
-    OpenRoot
-    OpenParent
-    InspectDestination
-    CreateStage
-    WriteStage
-    SetMode
-    SyncStage
-    InspectStage
-    ValidateSource
-    ValidateAuthority
-    Rename
-    SyncParent
-    ValidatePublished
+    PreparePath,
+    OpenRoot,
+    OpenParent,
+    InspectDestination,
+    CreateStage,
+    WriteStage,
+    SetMode,
+    SyncStage,
+    InspectStage,
+    ValidateSource,
+    ValidateAuthority,
+    Rename,
+    SyncParent,
+    ValidatePublished,
 }
 
 #Error
 FoundationPublicationError: struct {
-    phase: FoundationPublicationPhase
-    error: IOError
+    phase: FoundationPublicationPhase,
+    error: IOError,
 }
 
 // Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
@@ -451,11 +451,11 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
 // a replacement bound at its path. A handle-only revalidation cannot see the
 // last two.
 FoundationFileAuthority: struct {
-    priv directories: [FoundationPublicationDirectory]
-    priv handle: FileReader
-    priv relative: String
-    path: String
-    priv identity: Stat
+    priv directories: [FoundationPublicationDirectory],
+    priv handle: FileReader,
+    priv relative: String,
+    path: String,
+    priv identity: Stat,
 
     // Rust Authority::ensure_paths_current: every held directory and the file
     // are still the objects bound at their paths (path metadata never follows
@@ -525,7 +525,7 @@ FoundationFileAuthority: struct {
 // A directory-operation carrier retaining the ORIGINAL canonical held chain.
 // No public descriptor/vector escapes, and no second walker or lock authority.
 FoundationDirectoryAuthority: struct {
-    priv directories: [FoundationPublicationDirectory]
+    priv directories: [FoundationPublicationDirectory],
 
     revalidate: fn(self) -[FS]> IOError! { foundation_ensure_directories_current(self.directories) }
 
@@ -703,9 +703,9 @@ foundation_source_tree_ignored: fn(name: String) -> Bool Never! {
 }
 
 FoundationHeldTreeFile: struct {
-    relative: String
-    reader: FileReader
-    identity: Stat
+    relative: String,
+    reader: FileReader,
+    identity: Stat,
 }
 
 foundation_held_tree_names: fn(directory: Directory) -[FS]> [String] IOError! {

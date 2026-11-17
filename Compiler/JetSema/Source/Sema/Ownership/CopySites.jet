@@ -21,10 +21,10 @@ use jet_foundation.[
 ]
 
 SemaCopySite: struct {
-    name: String
-    span: Span
-    ty: Type
-    borrowed: Bool
+    name: String,
+    span: Span,
+    ty: Type,
+    borrowed: Bool,
 }
 
 // `Val(x)`, `Ok(x)` and `Err(x)` are owning constructors: the field rule
@@ -130,17 +130,17 @@ sema_copy_site_check_view_binding: fn(value: TExpr, environment: SemaScopeEnviro
 
 // Where the owned walk is in its owning position's value.
 SemaCopySiteWalk: struct {
-    exact_move: Bool
+    exact_move: Bool,
     // Below a `.Move`: the `.move()`'s own checks govern the place.
-    taken: Bool
+    taken: Bool,
     // Below a form that hands its operand's value on unchanged (`x ??
     // fallback`, an `if` or match arm tail, a block tail): a bare read or
     // write parameter there is the caller's value, which the bare-name audits
     // (sema_copy_site_refuse_borrowed_copy, the binding and return E0120)
     // never see, so the walk refuses it.
-    forwarded: Bool
+    forwarded: Bool,
     // The position is a `:` view binding (sema_copy_site_check_view_binding).
-    binds_view: Bool
+    binds_view: Bool,
 }
 
 sema_copy_site_check_owned_walk: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
@@ -296,8 +296,8 @@ sema_copy_site_place_root: fn(value: TExpr) -> TExpr? {
 }
 
 SemaCopySitePatternBinding: struct {
-    fact: TPatternBindingFact
-    subject: TExpr
+    fact: TPatternBindingFact,
+    subject: TExpr,
 }
 
 // The binding fact a condition's pattern declares for `name`, with the

@@ -40,13 +40,13 @@ CFFI_ALWAYS_LINKED_LIBC: [String]{"c", "m", "pthread", "dl", "rt", "util"}
 
 // Native-library link inputs for rustc.
 LinkFlags: struct {
-    include_dirs: [String]
-    lib_dirs: [String]
+    include_dirs: [String],
+    lib_dirs: [String],
     // Names passed to `-l` (e.g. `z`).
-    link_names: [String]
+    link_names: [String],
     // Dirs baked into the binary's runtime search path (`-Wl,-rpath`), so a
     // shared library realized into `/nix/store` is found at run time.
-    rpath_dirs: [String]
+    rpath_dirs: [String],
 
     empty: fn() -> LinkFlags Never! {
         LinkFlags{include_dirs: [String]{}, lib_dirs: [String]{}, link_names: [String]{}, rpath_dirs: [String]{}}
@@ -420,9 +420,9 @@ pkg_cffi_nix_spawn_reason: fn(error: IOError) -> String Never! {
 
 // The outcome of one `pkg-config` probe.
 PkgConfigOutcome: enum {
-    Found(LinkFlags)
-    NotFound
-    Unavailable
+    Found(LinkFlags),
+    NotFound,
+    Unavailable,
 }
 
 // `pkg-config --cflags --libs <lib>` parsed into link flags.

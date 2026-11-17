@@ -31,31 +31,31 @@ use {
 }
 
 BuildProbeFact: struct {
-    name: String
-    success: Bool
-    detail: String
-    reproducibility: ReproducibilityClass
-    toolchain: ToolchainHandle
-    toolchain_provenance: ContentDigest
+    name: String,
+    success: Bool,
+    detail: String,
+    reproducibility: ReproducibilityClass,
+    toolchain: ToolchainHandle,
+    toolchain_provenance: ContentDigest,
 }
 
 BuildExecutionResult: struct {
-    report: BuildExecutionReport
-    probes: [BuildProbeFact]
+    report: BuildExecutionReport,
+    probes: [BuildProbeFact],
 }
 
 #Error
 BuildExecutionError: enum {
-    MissingGrant(action: String, capability: BuildEffect)
-    SandboxUnavailable(reason: String)
-    IO(action: String, detail: String)
-    TimedOut(action: String, limit_ms: Int)
-    OverCPU(action: String, limit_ms: Int, cores: Int, used_ms: Int)
-    ProbeFailed(probe: String, detail: String)
-    FolderNotFound(probe: String, file: String, searched: [String])
-    Reported(report: DiagnosticBuildError)
-    InvalidGraph(HermeticBuildError)
-    HandEdited(action: String, path: String)
+    MissingGrant(action: String, capability: BuildEffect),
+    SandboxUnavailable(reason: String),
+    IO(action: String, detail: String),
+    TimedOut(action: String, limit_ms: Int),
+    OverCPU(action: String, limit_ms: Int, cores: Int, used_ms: Int),
+    ProbeFailed(probe: String, detail: String),
+    FolderNotFound(probe: String, file: String, searched: [String]),
+    Reported(report: DiagnosticBuildError),
+    InvalidGraph(HermeticBuildError),
+    HandEdited(action: String, path: String),
 
     // No native sandbox can run the action here; `reason` says why.
     // The action ran past its wall-clock limit, in milliseconds, and was
@@ -234,17 +234,17 @@ build_action_shares_network: fn(grants: [BuildEffect], caps: [BuildEffect]) -> B
 // One action keyed, looked up and staged in its fresh private work tree,
 // ready to run under the native sandbox.
 BuildActionRun: struct {
-    action: HermeticBuildAction
-    key: String
-    sandbox: String
-    rebuild_status: ActionCacheStatus
-    command: NativeSandboxCommand
+    action: HermeticBuildAction,
+    key: String,
+    sandbox: String,
+    rebuild_status: ActionCacheStatus,
+    command: NativeSandboxCommand,
     // The store the run is published to: set only for a reused action.
-    reuse: BuildArtifactStoreHandle?
+    reuse: BuildArtifactStoreHandle?,
     // The CPU time, in ms on each of the host's cores, the action's process
     // tree may use; 0 where the host cannot read a tree's CPU time, and the
     // command's wall-clock timeout is the step's limit.
-    cpu_limit_ms: Int
+    cpu_limit_ms: Int,
 }
 
 // The wall-clock guard on an action with a CPU limit is this many times the
@@ -260,17 +260,17 @@ BUILD_CPU_SAMPLE_NS: 100000000
 // the last sample (ns), whether the watch killed it, and whether it still
 // runs.
 BuildActionWatch: struct {
-    run: Int
-    due_ns: Int
-    limit_ns: Int
-    used_ns: Int
-    stopped: Bool
-    live: Bool
+    run: Int,
+    due_ns: Int,
+    limit_ns: Int,
+    used_ns: Int,
+    stopped: Bool,
+    live: Bool,
 }
 
 BuildActionStart: enum {
-    Restored
-    Ready(run: BuildActionRun)
+    Restored,
+    Ready(run: BuildActionRun),
 }
 
 // A cached record restored the action's outputs.

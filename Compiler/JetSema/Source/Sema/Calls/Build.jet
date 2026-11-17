@@ -7,8 +7,8 @@ use {
 }
 
 SemaBuildContextMethodContract: struct {
-    parameters: [Type]
-    result: Type
+    parameters: [Type],
+    result: Type,
 }
 
 sema_build_result: fn(name: String) -> Type Never! {
@@ -866,15 +866,15 @@ sema_call_compiler_report_finding: fn(receiver: Expr, receiver_value: TExpr, arg
 // The code and tier a reported finding's `impl Diagnostic` declares, and the
 // `syntax.rewrite(callee: f, replacement: g)` its `structured_fix` writes.
 SemaCompilerReportFacts: struct {
-    code: String
-    tier: String
-    rewrite: SemaCompilerReportRewrite?
+    code: String,
+    tier: String,
+    rewrite: SemaCompilerReportRewrite?,
 }
 
 // A finding's `syntax.rewrite`: the callee and replacement as written.
 SemaCompilerReportRewrite: struct {
-    callee: Expr
-    replacement: Expr
+    callee: Expr,
+    replacement: Expr,
 }
 
 // The `impl Diagnostic` of a finding's type `ty`, written inside the type's
@@ -961,9 +961,9 @@ sema_compiler_report_rewrite: fn(value: Expr) -> SemaCompilerReportRewrite? Neve
 // the replacement as written, with `refusal` empty; or, when the
 // replacement can't take the callee's place, the callee as written and why.
 SemaCompilerReportRewriteCheck: struct {
-    callee: String
-    replacement: String
-    refusal: String
+    callee: String,
+    replacement: String,
+    refusal: String,
 }
 
 sema_compiler_report_rewrite_check: fn(rewrite: SemaCompilerReportRewrite, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCompilerReportRewriteCheck {
@@ -1058,8 +1058,8 @@ sema_compiler_report_returned: fn(ret: Type?) -> String Never! {
 // What a `meta.events` watch names: the marker value `m` of
 // `.Functions{marked: m}`, or the callee `f` of `.Calls{to: f}` (`calls`).
 SemaCompilerEventsWatch: struct {
-    calls: Bool
-    value: Expr
+    calls: Bool,
+    value: Expr,
 }
 
 // The watch of `meta.events(watch: …, handler)`, or None when the call has
@@ -1195,10 +1195,10 @@ sema_call_compiler_producer: fn(environment: SemaScopeEnvironment, program: Sema
 // Jet literal. In a `#code` value the local is a String, bound as text: the
 // marker stands as the name or type it pastes, replaced by the local's text.
 SemaBuildGenerateSplices: struct {
-    source: String
-    markers: [Int]
-    args: [CallArg]
-    values: [TExpr]
+    source: String,
+    markers: [Int],
+    args: [CallArg],
+    values: [TExpr],
 }
 
 // The first splice marker, a 19-digit Int; every marker shares the prefix,
@@ -1297,10 +1297,10 @@ sema_build_generate_splice_type: fn(ty: Type) -> Bool Never! {
 // `flag:` puts a prefix such as `"--in="` before that path in one argument.
 // `kept: true` on an output keeps the file it makes in git.
 SemaBuildStepContract: struct {
-    parameters: [Type]
-    result: Type
-    flag: Bool
-    kept: Bool
+    parameters: [Type],
+    result: Type,
+    flag: Bool,
+    kept: Bool,
 }
 
 SEMA_BUILD_STEP_METHODS: "input, output, file, arg, reads, writes, timeout, toolchain or sign"

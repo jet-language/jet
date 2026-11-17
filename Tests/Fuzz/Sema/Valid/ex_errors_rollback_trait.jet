@@ -2,11 +2,11 @@
 // A type implementing `Rollback` supplies a cheap `snapshot`/`restore` pair
 // used instead of a full clone. `Ledger` records only the balance on entry.
 Ledger: struct {
-    balance: Int
-    name: String
+    balance: Int,
+    name: String,
 
     impl Rollback {
-        Snapshot: LedgerSnap
+        Snapshot: LedgerSnap,
 
         snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
 
@@ -15,12 +15,12 @@ Ledger: struct {
 }
 
 LedgerSnap: struct {
-    balance: Int
+    balance: Int,
 }
 
 #Error
 TxnErr: enum {
-    Overdraft
+    Overdraft,
 }
 
 transfer: fn(from: &Ledger, to: &Ledger, amount: Int) -> Int TxnErr! {

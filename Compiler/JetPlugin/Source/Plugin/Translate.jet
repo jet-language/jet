@@ -154,17 +154,17 @@ PLUG_RUNTIME_NAMES: [
 
 // The IR type rows of the guest's values: i64 and references are words.
 PlugRows: struct {
-    word: Int
-    i32: Int
-    u32: Int
-    u64: Int
-    i8: Int
-    u8: Int
-    i16: Int
-    u16: Int
-    f32: Int
-    f64: Int
-    flag: Int
+    word: Int,
+    i32: Int,
+    u32: Int,
+    u64: Int,
+    i8: Int,
+    u8: Int,
+    i16: Int,
+    u16: Int,
+    f32: Int,
+    f64: Int,
+    flag: Int,
 }
 
 plug_rows: fn(m: &IRModule) -> PlugRows Never! {
@@ -195,41 +195,41 @@ plug_row: fn(rows: PlugRows, value: Int) -> Int Never! {
 // thunks (`thunk_base` + op) and the indirect-call dispatchers
 // (`dispatch_base` + signature class).
 PlugKit: struct {
-    artifact: String
-    rows: PlugRows
-    names: [String:Int]
-    base: Int
-    thunk_base: Int
-    dispatch_base: Int
+    artifact: String,
+    rows: PlugRows,
+    names: [String:Int],
+    base: Int,
+    thunk_base: Int,
+    dispatch_base: Int,
 }
 
 // One instantiated module's view of the flat instance: its types and their
 // signature classes, and its function, table, memory, global and segment
 // indexes mapped to the flat ones.
 PlugScope: struct {
-    types: [WasmFuncType]
-    type_sigs: [Int]
-    funcs: [Int]
-    callee_types: [WasmFuncType]
-    tables: [Int]
-    memory: Int
-    globals: [Int]
-    global_types: [Int]
-    data_base: Int
-    elem_base: Int
+    types: [WasmFuncType],
+    type_sigs: [Int],
+    funcs: [Int],
+    callee_types: [WasmFuncType],
+    tables: [Int],
+    memory: Int,
+    globals: [Int],
+    global_types: [Int],
+    data_base: Int,
+    elem_base: Int,
 }
 
 // An open wasm block: its IR opener, the operand height below its params,
 // its value types and the slots its params and results cross in.
 PlugFrame: struct {
-    kind: Int
-    opener: Int
-    height: Int
-    params: [Int]
-    results: [Int]
-    param_slots: [Int]
-    result_slots: [Int]
-    has_else: Bool
+    kind: Int,
+    opener: Int,
+    height: Int,
+    params: [Int],
+    results: [Int],
+    param_slots: [Int],
+    result_slots: [Int],
+    has_else: Bool,
 }
 
 // One function's translation state. `out` is the hidden out area of a
@@ -238,20 +238,20 @@ PlugFrame: struct {
 // tests the Bool. `dead` is set after an unconditional transfer until the
 // enclosing block's else or end (`skip` counts the blocks opened meanwhile).
 PlugCx: struct {
-    f: IRFunction
-    rows: PlugRows
-    names: [String:Int]
-    fid: Int
-    inst: Int
-    out: Int
-    locals: [Int]
-    stack: [Int]
-    frames: [PlugFrame]
-    flags: [Int:Int]
-    dead: Bool
-    skip: Int
-    dummy: Int
-    at: Int
+    f: IRFunction,
+    rows: PlugRows,
+    names: [String:Int],
+    fid: Int,
+    inst: Int,
+    out: Int,
+    locals: [Int],
+    stack: [Int],
+    frames: [PlugFrame],
+    flags: [Int:Int],
+    dead: Bool,
+    skip: Int,
+    dummy: Int,
+    at: Int,
 
     temp: fn(&self, row: Int) -> Int Never! { ir_slot(self.f, row, IRSlotKind.Temp, -1, 0) }
 

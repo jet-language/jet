@@ -39,7 +39,7 @@ C_MAX_SERVER_LOG_BYTES: 65536
 
 #Error
 BrowserError: struct {
-    kind: String
+    kind: String,
 
     impl Display {
         display: fn(self) -> String {
@@ -63,18 +63,18 @@ BrowserError: struct {
 }
 
 BrowserTimeout: struct {
-    milliseconds: Int
+    milliseconds: Int,
 }
 
 BrowserProfile: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
 }
 
 BrowserAbilities: struct {
-    bidi: Bool
-    cdp: Bool
-    profile: String
+    bidi: Bool,
+    cdp: Bool,
+    profile: String,
 
     bidi: fn(self) -> Bool Never! { self.bidi }
 
@@ -86,9 +86,9 @@ BrowserAbilities: struct {
 // Privacy defaults of a connected session: isolated user contexts, redacted
 // receipts, and no shared profiles.
 BrowserPrivacy: struct {
-    isolated_profiles: Bool
-    redact_receipts: Bool
-    shared_profiles: Bool
+    isolated_profiles: Bool,
+    redact_receipts: Bool,
+    shared_profiles: Bool,
 
     isolated_profiles: fn(self) -> Bool Never! { self.isolated_profiles }
 
@@ -100,22 +100,22 @@ BrowserPrivacy: struct {
 // One bounded, redacted event: method name, request facts, debugger facts, and
 // hashes only.
 BrowserEvent: struct {
-    method: String
-    request_id: String
-    request_method: String
-    url_hash: String
-    is_blocked: Bool
-    status_code: Int
-    download_id: String
-    suggested_filename_hash: String
-    frame_line: Int
-    frame_column: Int
-    frame_function_hash: String
-    source_map_url_hash: String
+    method: String,
+    request_id: String,
+    request_method: String,
+    url_hash: String,
+    is_blocked: Bool,
+    status_code: Int,
+    download_id: String,
+    suggested_filename_hash: String,
+    frame_line: Int,
+    frame_column: Int,
+    frame_function_hash: String,
+    source_map_url_hash: String,
     // The CDP session a `goog:cdp` event came from, "" for a BiDi event. A
     // page's CDP handle takes only its own session's events; the session
     // never leaves Core.
-    __session: String
+    __session: String,
 
     kind: fn(self) -> String Never! { self.method }
 
@@ -147,7 +147,7 @@ BrowserEvent: struct {
 }
 
 BrowserTrace: struct {
-    entries: [String]
+    entries: [String],
 
     entry_count: fn(self) -> Int Never! { self.entries.len() }
 
@@ -157,9 +157,9 @@ BrowserTrace: struct {
 }
 
 BrowserReceipt: struct {
-    entries: [String]
-    isolated: Bool
-    cleaned: Bool
+    entries: [String],
+    isolated: Bool,
+    cleaned: Bool,
 
     entry_count: fn(self) -> Int Never! { self.entries.len() }
 
@@ -175,17 +175,17 @@ BrowserReceipt: struct {
 // The session's one WebSocket and its protocol state, shared by every copy of
 // a handle; the last copy closes the socket.
 priv BrowserState: struct {
-    conn: WsConn
-    next_id: Int
-    closed: Bool
-    session_started: Bool
-    timeout_ms: Int
-    profile: String
-    cdp: Bool
-    trace: [String]
-    trace_bytes: Int
-    events: [BrowserEvent]
-    engine: BrowserEngine?
+    conn: WsConn,
+    next_id: Int,
+    closed: Bool,
+    session_started: Bool,
+    timeout_ms: Int,
+    profile: String,
+    cdp: Bool,
+    trace: [String],
+    trace_bytes: Int,
+    events: [BrowserEvent],
+    engine: BrowserEngine?,
 
     // The last copy of a Browser that was never closed ends its session as
     // `close` does, best effort: it sends `session.end` and waits for its
@@ -220,9 +220,9 @@ priv BrowserState: struct {
 // a killed chromedriver, so close deletes that session (which quits the
 // browser) before stopping the driver.
 priv BrowserEngine: struct {
-    child: ProcessChild
-    profile: String
-    session_url: String
+    child: ProcessChild,
+    profile: String,
+    session_url: String,
 
     impl Close {
         close: fn(&&self) {
@@ -241,12 +241,12 @@ priv BrowserEngine: struct {
 // The id and closed fact of one BiDi resource (user context, browsing
 // context, frame, or intercept), shared by every copy of its handle.
 priv BrowserScope: struct {
-    id: String
-    closed: Bool
+    id: String,
+    closed: Bool,
 }
 
 Browser: struct {
-    __state: Shared<BrowserState>
+    __state: Shared<BrowserState>,
 
     abilities: fn(self) -> BrowserAbilities Never! {
         guard: self.__state.guard_read()
@@ -369,8 +369,8 @@ Browser: struct {
 }
 
 BrowserContext: struct {
-    __browser: Browser
-    __scope: Shared<BrowserScope>
+    __browser: Browser,
+    __scope: Shared<BrowserScope>,
 
     page: fn(self) -[Net, Time]> BrowserPage BrowserError! { context_create_tab(self) }
 
@@ -393,9 +393,9 @@ BrowserContext: struct {
 }
 
 BrowserPage: struct {
-    __browser: Browser
-    __context: Shared<BrowserScope>
-    __scope: Shared<BrowserScope>
+    __browser: Browser,
+    __context: Shared<BrowserScope>,
+    __scope: Shared<BrowserScope>,
 
     goto: fn(self, url: String) -[Env, Net, Time]> BrowserError! {
         page_live(self)
@@ -559,10 +559,10 @@ BrowserPage: struct {
 
 // A browsing-context frame (main or child). Listing frames never closes them.
 BrowserFrame: struct {
-    __browser: Browser
-    __context: Shared<BrowserScope>
-    __page: Shared<BrowserScope>
-    __scope: Shared<BrowserScope>
+    __browser: Browser,
+    __context: Shared<BrowserScope>,
+    __page: Shared<BrowserScope>,
+    __scope: Shared<BrowserScope>,
 
     close: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
@@ -580,13 +580,13 @@ BrowserFrame: struct {
 
 // A semantic BiDi locator: `accessibility`, `css`, or `innerText`.
 BrowserLocator: struct {
-    __browser: Browser
-    __context: Shared<BrowserScope>
-    __page: Shared<BrowserScope>
-    __kind: String
-    __role: String
-    __name: String
-    __value: String
+    __browser: Browser,
+    __context: Shared<BrowserScope>,
+    __page: Shared<BrowserScope>,
+    __kind: String,
+    __role: String,
+    __name: String,
+    __value: String,
 
     wait: fn(self, timeout: BrowserTimeout) -[Net, Time, Time.Wait]> BrowserError! {
         started: time.instant()
@@ -672,8 +672,8 @@ BrowserLocator: struct {
 }
 
 BrowserIntercept: struct {
-    __browser: Browser
-    __scope: Shared<BrowserScope>
+    __browser: Browser,
+    __scope: Shared<BrowserScope>,
 
     remove: fn(self) -[Net, Time]> BrowserError! {
         if scope_closed(self.__scope) -> return Ok()
@@ -691,12 +691,12 @@ BrowserIntercept: struct {
 // session and takes only that session's events; a browser's handle has empty
 // page and session ids.
 BrowserProtocol: struct {
-    __browser: Browser
-    __kind: String
-    __context: Shared<BrowserScope>
-    __page: Shared<BrowserScope>
+    __browser: Browser,
+    __kind: String,
+    __context: Shared<BrowserScope>,
+    __page: Shared<BrowserScope>,
     // The page's CDP session, asked of the driver on first use.
-    __session: Shared<BrowserScope>
+    __session: Shared<BrowserScope>,
 
     send: fn(self, method: String, params_json: String) -[Net, Time]> String BrowserError! {
         params: json.parse(params_json) ?? return Err(BrowserError{kind: "protocol"})
@@ -773,16 +773,16 @@ priv protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? Brows
 }
 
 BrowserLocked: struct {
-    engine: String
-    version: String
-    binary: String
-    protocol: String
-    size: Int
-    output_hash: String
+    engine: String,
+    version: String,
+    binary: String,
+    protocol: String,
+    size: Int,
+    output_hash: String,
     // The WebDriver driver a launch goes through ("" when the engine serves
     // BiDi itself) and its locked size.
-    driver: String
-    driver_size: Int
+    driver: String,
+    driver_size: Int,
 
     engine: fn(self) -> String Never! { self.engine }
 
@@ -801,24 +801,24 @@ BrowserLocked: struct {
 }
 
 BrowserTestConfig: struct {
-    engines: [String]
-    retries: Int
-    timeout: BrowserTimeout
-    filter: String
-    reporter: String
-    ui: Bool
-    visual: Bool
-    watch: Bool
-    trace_on_retry: Bool
-    trace_all: Bool
-    trace_payloads: Bool
-    server_url: String
-    server_command: [String]
-    server_reuse: Bool
-    server_cwd: String
-    artifact_dir: String
-    report_path: String
-    source_root: String
+    engines: [String],
+    retries: Int,
+    timeout: BrowserTimeout,
+    filter: String,
+    reporter: String,
+    ui: Bool,
+    visual: Bool,
+    watch: Bool,
+    trace_on_retry: Bool,
+    trace_all: Bool,
+    trace_payloads: Bool,
+    server_url: String,
+    server_command: [String],
+    server_reuse: Bool,
+    server_cwd: String,
+    artifact_dir: String,
+    report_path: String,
+    source_root: String,
 
     engines: fn(self) -> [String] Never! { self.engines }
 
@@ -844,71 +844,71 @@ BrowserTestConfig: struct {
 // The report data model a browser run records. Lines, columns, sequences and
 // byte counts are the Rust u32/usize facts.
 BrowserTestSource: struct {
-    path: String
-    line: Int
-    column: Int
+    path: String,
+    line: Int,
+    column: Int,
 }
 
 BrowserTestAction: struct {
-    sequence: Int
-    kind: String
-    fact: String
+    sequence: Int,
+    kind: String,
+    fact: String,
 }
 
 BrowserTestSnapshot: struct {
-    kind: String
-    hash: String
-    bytes: Int
-    path: String
-    source: BrowserTestSource
+    kind: String,
+    hash: String,
+    bytes: Int,
+    path: String,
+    source: BrowserTestSource,
 }
 
 BrowserTestEventFact: struct {
-    kind: String
-    request_id_hash: String
-    request_method: String
-    url_hash: String
-    status_code: Int
-    is_blocked: Bool
+    kind: String,
+    request_id_hash: String,
+    request_method: String,
+    url_hash: String,
+    status_code: Int,
+    is_blocked: Bool,
 }
 
 BrowserTestArtifact: struct {
-    name: String
-    path: String
-    mime: String
-    bytes: Int
-    hash: String
-    source: BrowserTestSource
+    name: String,
+    path: String,
+    mime: String,
+    bytes: Int,
+    hash: String,
+    source: BrowserTestSource,
 }
 
 BrowserTestAttempt: struct {
-    test: String
-    engine: String
-    attempt: Int
-    passed: Bool
-    expected_failure: Bool
-    duration_ms: Int
-    source: BrowserTestSource
-    actions: [BrowserTestAction]
-    snapshots: [BrowserTestSnapshot]
-    events: [BrowserTestEventFact]
-    artifacts: [BrowserTestArtifact]
-    trace: [String]
-    error: String
+    test: String,
+    engine: String,
+    attempt: Int,
+    passed: Bool,
+    expected_failure: Bool,
+    duration_ms: Int,
+    source: BrowserTestSource,
+    actions: [BrowserTestAction],
+    snapshots: [BrowserTestSnapshot],
+    events: [BrowserTestEventFact],
+    artifacts: [BrowserTestArtifact],
+    trace: [String],
+    error: String,
 }
 
 BrowserTestCase: struct {
-    name: String
-    selected: Bool
-    attempts: [BrowserTestAttempt]
+    name: String,
+    selected: Bool,
+    attempts: [BrowserTestAttempt],
 }
 
 BrowserTestReport: struct {
-    source_root: String
-    reporter: String
-    ui: Bool
-    watch: Bool
-    cases: [BrowserTestCase]
+    source_root: String,
+    reporter: String,
+    ui: Bool,
+    watch: Bool,
+    cases: [BrowserTestCase],
 
     json: fn(self) -> String Never! { report_json(self) }
 
@@ -924,21 +924,21 @@ BrowserTestReport: struct {
 // One named test attempt's live session: its browser, isolated context, and
 // first page, subscribed to the console and network events a report records.
 BrowserTestFixture: struct {
-    __browser: Browser
-    __context: BrowserContext
-    __page: BrowserPage
+    __browser: Browser,
+    __context: BrowserContext,
+    __page: BrowserPage,
 }
 
 priv BrowserServerState: struct {
-    child: ProcessChild?
-    logs: String
+    child: ProcessChild?,
+    logs: String,
 }
 
 // The test web server: a spawned command, or a reused server already
 // listening at the configured URL.
 BrowserTestServer: struct {
-    __url: String
-    __state: Shared<BrowserServerState>
+    __url: String,
+    __state: Shared<BrowserServerState>,
 
     url: fn(self) -> String Never! { self.__url }
 

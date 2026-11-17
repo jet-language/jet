@@ -20,8 +20,8 @@ JET_CLI_EFFECT_MODULE: #run EFFECT_CANONICAL_MODULE
 
 // One embedded Core asset, by repository path.
 JetCLICoreAsset: struct {
-    path: String
-    bytes: [U8]
+    path: String,
+    bytes: [U8],
 }
 
 JET_CLI_CORE_SOURCES: #run { loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")} }
@@ -89,7 +89,7 @@ JetCLICoreSealRead: struct {
 // record pages is mapped. The header, table and keys a lookup reads stay
 // lent from the mapped image (jet_cli_runtime_part).
 JetCLICoreBodiesRecords: struct {
-    at: Int
+    at: Int,
 
     impl SemaCoreBodiesRecords {
         read: fn(self, at: Int, size: Int) -[FS, FFI.Asm]> [U8]? {

@@ -12,36 +12,36 @@ use jet_foundation.[ModuleID, Span, Type, symbol_table_key]
 // `impl` names, in `type_key`, the type or implementing type whose row it
 // adds.
 SemaEffectTypeSource: struct {
-    kind: String
-    label: String
-    effects: [String]
-    type_key: String
-    span: Span
-    function_key: String{""}
+    kind: String,
+    label: String,
+    effects: [String],
+    type_key: String,
+    span: Span,
+    function_key: String{""},
 }
 
 // The sources one module writes for one struct, enum or trait, keyed by its
 // symbol key. Methods or impls written in other modules add shapes with the
 // same key; the solver joins them.
 SemaEffectTypeShape: struct {
-    key: String
-    span: Span
-    sources: [SemaEffectTypeSource]
+    key: String,
+    span: Span,
+    sources: [SemaEffectTypeSource],
 }
 
 // The first source, by index into the row's joined sources, that brings the
 // effect `name` into the row.
 SemaEffectTypeReach: struct {
-    name: String
-    source: Int
+    name: String,
+    source: Int,
 }
 
 SemaEffectTypeRow: struct {
-    key: String
-    span: Span
-    sources: [SemaEffectTypeSource]
-    effects: [String]
-    reaches: [SemaEffectTypeReach]
+    key: String,
+    span: Span,
+    sources: [SemaEffectTypeSource],
+    effects: [String],
+    reaches: [SemaEffectTypeReach],
 }
 
 // The shapes of the types `source_module` declares, and of those it adds
@@ -198,8 +198,8 @@ sema_effect_type_row_add: fn(row: &SemaEffectTypeRow, effect_name: String, sourc
 // Where a function's solved row is published:
 // `modules[module_row].functions[function_row]`.
 SemaEffectTypeSolvedAt: struct {
-    module_row: Int
-    function_row: Int
+    module_row: Int,
+    function_row: Int,
 }
 
 // The inferred row of every struct and enum `graph` declares, and of every

@@ -555,8 +555,8 @@ ir_precise_expr_helper: fn(expression: BodyNode) -> String? Never! {
 // run. A comptime closure holds only explicitly called functions, so it adds
 // these (`jet_driver_comptime_function_closure`).
 IRPreciseHelpers: struct {
-    names: [String]
-    roles: [String]
+    names: [String],
+    roles: [String],
 }
 
 ir_precise_helper_names: fn(tree: BodyTree, roots: [Int], body: [Int]) -> IRPreciseHelpers Never! {
@@ -651,9 +651,9 @@ ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
 // and Sema records no call fact for either, so a compile-time body queues
 // them itself (jet_driver_comptime_codec_refs).
 IRComptimeCodecTarget: struct {
-    ty: Type
-    encode: Bool
-    decode: Bool
+    ty: Type,
+    encode: Bool,
+    decode: Bool,
 }
 
 ir_comptime_codec_targets: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [IRComptimeCodecTarget] Never! {
@@ -916,8 +916,8 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
 // a helper name's id in `names` indexes its function key in `keys` (id 0,
 // the empty name, holds "").
 IRReachSources: struct {
-    names: NameTable
-    keys: [String]
+    names: NameTable,
+    keys: [String],
 }
 
 // Records `key` as the function key of source helper `name`; a later
@@ -952,25 +952,25 @@ ir_core_reach_has: fn(table: NameTable, text: String) -> Bool Never! {
 // functions each constant's landed value holds, each the one row of its
 // list, and the function rows by DeclID row.
 IRReachShared: struct {
-    functions: [[FnBody]]
-    symbols: [SymbolTable]
-    by_key: [NameRows]
-    source_keys: [IRReachSources]
-    decl_rows: [Int]
-    held: [[String:[String]]]
+    functions: [[FnBody]],
+    symbols: [SymbolTable],
+    by_key: [NameRows],
+    source_keys: [IRReachSources],
+    decl_rows: [Int],
+    held: [[String:[String]]],
 }
 
 // Where a wave stands in the trace's `lower` progress: the rows the waves
 // before it read, of `total` candidate rows.
 IRReachProgress: struct {
-    read: Int
-    total: Int
+    read: Int,
+    total: Int,
 }
 
 // The rows one part of a wave names: its number and the rows.
 IRReachPart: struct {
-    part: Int
-    targets: [Int]
+    part: Int,
+    targets: [Int],
 }
 
 // A wave's source bytes per admitted reachability thread.

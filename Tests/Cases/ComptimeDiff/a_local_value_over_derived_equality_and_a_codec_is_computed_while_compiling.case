@@ -7,8 +7,8 @@
 # too; a module value over `show` is computed the same way.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nsame: fn(a: Point, b: Point) -> Bool { a == b }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(\"{same(p.copy(), p.copy())} {show(p.copy())}\")\n    text: \"{same(Point{x: 1, y: 2}, Point{x: 1, y: 3})} {show(Point{x: 3, y: 4})}\"\n    print(text)\n}\n"
-write: value.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nSHOWN: #run show(Point{x: 3, y: 4})\n\nrun: fn() {\n    print(SHOWN)\n    print(show(Point{x: 3, y: 4}))\n}\n"
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int, y: Int }\n\nsame: fn(a: Point, b: Point) -> Bool { a == b }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(\"{same(p.copy(), p.copy())} {show(p.copy())}\")\n    text: \"{same(Point{x: 1, y: 2}, Point{x: 1, y: 3})} {show(Point{x: 3, y: 4})}\"\n    print(text)\n}\n"
+write: value.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int, y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nSHOWN: #run show(Point{x: 3, y: 4})\n\nrun: fn() {\n    print(SHOWN)\n    print(show(Point{x: 3, y: 4}))\n}\n"
 step: jet build --trace main.jet
 exit: 0
 stderr: ~ "comptime.eval text" # the local value is computed while compiling (a build: `jet check` computes no local value)

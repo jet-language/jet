@@ -28,16 +28,16 @@ use {
 /// own codes; the rest are the module codes mbedtls passes through.
 #Error
 CipherLayerError: enum {
-    FeatureUnavailable
-    BadInputData
-    InvalidPadding
-    FullBlockExpected
-    AuthFailed
-    AESInvalidInputLength
-    GCMBadInput
-    CCMBadInput
-    ChaChaPolyBadState
-    ChaCha20BadInput
+    FeatureUnavailable,
+    BadInputData,
+    InvalidPadding,
+    FullBlockExpected,
+    AuthFailed,
+    AESInvalidInputLength,
+    GCMBadInput,
+    CCMBadInput,
+    ChaChaPolyBadState,
+    ChaCha20BadInput,
 }
 
 /// MBEDTLS_ERR_CIPHER_FEATURE_UNAVAILABLE (-0x6080): the call does not
@@ -69,49 +69,49 @@ impl block128.BlockError -> CipherLayerError { CipherLayerError.BadInputData }
 
 /// The block cipher or stream cipher family (mbedtls_cipher_id_t).
 CipherID: enum {
-    Null
-    AES
-    DES
-    DES3
-    Camellia
-    ARIA
-    ChaCha20
+    Null,
+    AES,
+    DES,
+    DES3,
+    Camellia,
+    ARIA,
+    ChaCha20,
 }
 
 /// How the cipher is run (mbedtls_cipher_mode_t). `Stream` is ChaCha20 and
 /// the NULL cipher.
 CipherMode: enum {
-    ECB
-    CBC
-    CFB
-    OFB
-    CTR
-    GCM
-    Stream
-    CCM
-    CCMStarNoTag
-    XTS
-    ChaChaPoly
-    KW
-    KWP
+    ECB,
+    CBC,
+    CFB,
+    OFB,
+    CTR,
+    GCM,
+    Stream,
+    CCM,
+    CCMStarNoTag,
+    XTS,
+    ChaChaPoly,
+    KW,
+    KWP,
 }
 
 /// The direction setkey fixes (mbedtls_operation_t).
 CipherOperation: enum {
-    Encrypt
-    Decrypt
+    Encrypt,
+    Decrypt,
 }
 
 /// One row of the cipher table (mbedtls_cipher_info_t). `iv_size` is the
 /// default IV length; `variable_iv` lets set_iv take another.
 CipherInfo: struct {
-    name: String
-    id: CipherID
-    mode: CipherMode
-    key_bits: Int
-    iv_size: Int
-    block_size: Int
-    variable_iv: Bool
+    name: String,
+    id: CipherID,
+    mode: CipherMode,
+    key_bits: Int,
+    iv_size: Int,
+    block_size: Int,
+    variable_iv: Bool,
 }
 
 /// The ciphers in the order of mbedtls's mbedtls_cipher_definitions.
@@ -220,35 +220,35 @@ cipher_info_from_values: fn(id: CipherID, key_bits: Int, mode: CipherMode) -> Ci
 
 /// GCM's key and its operation in flight over a 128-bit cipher.
 GCMContext: struct<K> {
-    key: aead.GCMKey<K>
-    st: aead.GCM
+    key: aead.GCMKey<K>,
+    st: aead.GCM,
 }
 
 /// CCM's encryption key and its state machine over a 128-bit cipher.
 CCMContext: struct<K> {
-    key: K
-    st: aead.CCM
+    key: K,
+    st: aead.CCM,
 }
 
 /// The keyed state a context runs on, one variant per cipher_wrap.c base
 /// (mbedtls_cipher_base_t). `Unset` until setkey; the NULL cipher keeps
 /// it, having no key.
 CipherBase: enum {
-    Unset
-    AES(cipher.AESKey)
-    XTS(cipher.XTSKey)
-    DES(des.DESKey)
-    Camellia(block128.CamelliaKey)
-    ARIA(block128.ARIAKey)
-    GCMAES(GCMContext<cipher.AESKey>)
-    GCMCamellia(GCMContext<block128.CamelliaKey>)
-    GCMARIA(GCMContext<block128.ARIAKey>)
-    CCMAES(CCMContext<cipher.AESKey>)
-    CCMCamellia(CCMContext<block128.CamelliaKey>)
-    CCMARIA(CCMContext<block128.ARIAKey>)
-    ChaCha20(aead.ChaCha20)
-    ChaChaPoly(aead.ChaChaPoly)
-    KW(cipher.AESKey)
+    Unset,
+    AES(cipher.AESKey),
+    XTS(cipher.XTSKey),
+    DES(des.DESKey),
+    Camellia(block128.CamelliaKey),
+    ARIA(block128.ARIAKey),
+    GCMAES(GCMContext<cipher.AESKey>),
+    GCMCamellia(GCMContext<block128.CamelliaKey>),
+    GCMARIA(GCMContext<block128.ARIAKey>),
+    CCMAES(CCMContext<cipher.AESKey>),
+    CCMCamellia(CCMContext<block128.CamelliaKey>),
+    CCMARIA(CCMContext<block128.ARIAKey>),
+    ChaCha20(aead.ChaCha20),
+    ChaChaPoly(aead.ChaChaPoly),
+    KW(cipher.AESKey),
 }
 
 /// A cipher in use (mbedtls_cipher_context_t).
@@ -259,14 +259,14 @@ CipherBase: enum {
 /// - `unprocessed`: a cached partial CBC block, or CTR's keystream block;
 ///   `unprocessed_len` is its length, or the CFB, OFB and CTR offset.
 CipherContext: struct {
-    info: CipherInfo
-    base: CipherBase
-    operation: CipherOperation?
-    padding: cipher.CBCPadding?
-    iv: [U8]
-    iv_size: Int
-    unprocessed: [U8]
-    unprocessed_len: Int
+    info: CipherInfo,
+    base: CipherBase,
+    operation: CipherOperation?,
+    padding: cipher.CBCPadding?,
+    iv: [U8],
+    iv_size: Int,
+    unprocessed: [U8],
+    unprocessed_len: Int,
 }
 
 /// A context for `info` with no key (mbedtls_cipher_setup). As in 3.6.7,

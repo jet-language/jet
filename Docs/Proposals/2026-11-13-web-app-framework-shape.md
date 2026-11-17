@@ -5632,13 +5632,13 @@ use {
 // endpoint only under one of these markers.
 SignedIn: struct {
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 Public: struct {
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -5658,13 +5658,13 @@ Webhook: struct {
     key: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 SigningKey: struct {
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -5679,7 +5679,7 @@ UploadCheck: struct {
     method: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -5693,7 +5693,7 @@ Job: struct {
     retries: Int{5},
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -5702,14 +5702,14 @@ Every: struct {
     cron: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
 // A screen-state field that lives after `?` in the address.
 Query: struct {
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 

@@ -56,20 +56,20 @@ SSL_TICKET_MIN_LEN: 34
 /// in seconds since the epoch, its lifetime in seconds (0 for no limit) and
 /// its AEAD context, None before setup.
 SSLTicketKey: struct {
-    name: [U8]
-    generation_time: Int
-    lifetime: Int
-    cipher: layer.CipherContext?
+    name: [U8],
+    generation_time: Int,
+    lifetime: Int,
+    cipher: layer.CipherContext?,
 }
 
 /// The ticket keys (mbedtls_ssl_ticket_context): the two keys, the index of
 /// the active one, the lifetime of the tickets it makes in seconds, and the
 /// random source of keys and IVs, None before setup.
 SSLTicketContext: struct {
-    keys: [SSLTicketKey]
-    active: Int
-    ticket_lifetime: Int
-    rng: drbg.HMACDrbg?
+    keys: [SSLTicketKey],
+    active: Int,
+    ticket_lifetime: Int,
+    rng: drbg.HMACDrbg?,
 }
 
 ssl_ticket_key_init: fn() -> SSLTicketKey Never! {

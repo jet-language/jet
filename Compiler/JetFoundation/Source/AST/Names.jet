@@ -8,22 +8,22 @@
 // source range interns without building a String first.
 
 Name: struct {
-    id: U32
+    id: U32,
 }
 
 NameTable: struct {
     // The spelling of each id, resolved without decoding bytes again.
-    texts: [String]
+    texts: [String],
     // Every spelling's bytes, back to back; id `n` ends at `ends[n]` and
     // starts where id `n - 1` ends.
-    bytes: [U8]
-    ends: [Int]
+    bytes: [U8],
+    ends: [Int],
     // Each id's `name_hash`: a probe compares bytes only against an entry
     // with the same hash, and a grow never hashes a spelling again.
-    hashes: [Int]
+    hashes: [Int],
     // Open-addressing slots: 0 is empty, otherwise the id plus one.
-    slots: [Int]
-    mask: Int
+    slots: [Int],
+    mask: Int,
 }
 
 NAME_TABLE_INITIAL_SLOTS: 1024
@@ -263,11 +263,11 @@ name_table_merge: fn(into: &NameTable, from: NameTable, first: Int) -> [Name] Ne
 // The id's top bit marks a Core source's identity (`<corelib>/...`), so the
 // Core test needs no table; the low 31 bits are the table row.
 ModuleID: struct {
-    id: U32
+    id: U32,
 }
 
 ModuleTable: struct {
-    identities: NameTable
+    identities: NameTable,
 }
 
 MODULE_CORE_PREFIX: "<corelib>/"
@@ -324,12 +324,12 @@ name_rows_hash: fn(text: String) -> Int Never! { Int{text.hash() & U64{0x3ffffff
 // binary-searching String keys, and one hash serves every map a lookup
 // visits. Values are non-negative rows; -1 marks a removed key.
 NameRows: struct {
-    texts: [String]
-    hashes: [Int]
-    rows: [Int]
+    texts: [String],
+    hashes: [Int],
+    rows: [Int],
     // Open-addressing slots: 0 is empty, otherwise the key index plus one.
-    slots: [Int]
-    mask: Int
+    slots: [Int],
+    mask: Int,
 }
 
 NAME_ROWS_INITIAL_SLOTS: 16

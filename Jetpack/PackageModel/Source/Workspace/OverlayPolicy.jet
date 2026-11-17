@@ -3,14 +3,14 @@
 // overlays, and the stable identities the semantic lock records.
 
 OverlayPolicy: struct {
-    overlays: [OverlaySet]
-    allow_unfree: [String]
+    overlays: [OverlaySet],
+    allow_unfree: [String],
     // This rule workspace ceiling for programmable builds.
-    build_deny: [String]
+    build_deny: [String],
     // This rule per-package/dependency grants inside the workspace
     // ceiling. The package name is the authority subject, never a path or an
     // arbitrary value supplied by build code.
-    build_grants: [BuildGrant]
+    build_grants: [BuildGrant],
 
     empty: fn() -> OverlayPolicy Never! {
         OverlayPolicy{overlays: [OverlaySet]{}, allow_unfree: [String]{}, build_deny: [String]{}, build_grants: [BuildGrant]{}}
@@ -116,14 +116,14 @@ OverlayPolicy: struct {
 
 // One subject-scoped `policy.grants` entry: the package and its effects.
 BuildGrant: struct {
-    subject: String
-    effects: [String]
+    subject: String,
+    effects: [String],
 }
 
 OverlaySet: struct {
-    name: String
-    provider: ProviderOverride?
-    packages: [PackageOverride]
+    name: String,
+    provider: ProviderOverride?,
+    packages: [PackageOverride],
 
     find_package: fn(self, package: String) -> PackageOverride? Never! {
         loop candidate in self.packages {
@@ -153,20 +153,20 @@ OverlaySet: struct {
 }
 
 ProviderOverride: struct {
-    provider: String
-    channel: String?
+    provider: String,
+    channel: String?,
 }
 
 // One typed environment override fact.
 OverrideEnv: struct {
-    key: String
-    value: String
+    key: String,
+    value: String,
 }
 
 // The two scalar package facts that resolve by field priority.
 OverrideScalarField: enum {
-    Source
-    Version
+    Source,
+    Version,
 
     name: fn(self) -> String Never! {
         if self == {
@@ -177,22 +177,22 @@ OverrideScalarField: enum {
 }
 
 PackageOverride: struct {
-    package: String
-    source: String?
-    version: String?
-    flags: [String]
+    package: String,
+    source: String?,
+    version: String?,
+    flags: [String],
     // This rule tier for scalar/environment facts in this record.
     // Ordinary is `0`; `Default`, `Force`, and `Priority(n)` are explicit.
-    priority: Int
+    priority: Int,
     // Priority attaches to the contribution that carries it, not to the whole
     // record. `priority` remains the aggregate maximum for display;
     // resolution reads this map first.
-    field_priorities: [String:Int]
+    field_priorities: [String:Int],
     // Environment overrides as typed key/value facts. The keyed-record parser
     // and the dotted spelling both lower here.
-    env: [OverrideEnv]
-    patches: [String]
-    allow_unfree: Bool
+    env: [OverrideEnv],
+    patches: [String],
+    allow_unfree: Bool,
 
     new: fn(package: String) -> PackageOverride Never! {
         PackageOverride{package: package, source: None, version: None, flags: [String]{}, priority: 0, field_priorities: [String:Int]{}, env: [OverrideEnv]{}, patches: [String]{}, allow_unfree: false}
@@ -316,16 +316,16 @@ PackageOverride: struct {
 }
 
 ResolvedPackageOverride: struct {
-    package: String
-    source: String?
-    version: String?
-    flags: [String]
-    priority: Int
-    env: [OverrideEnv]
-    patches: [String]
-    allow_unfree: Bool
-    field_priorities: [String:Int]
-    provenance: [OverrideProvenance]
+    package: String,
+    source: String?,
+    version: String?,
+    flags: [String],
+    priority: Int,
+    env: [OverrideEnv],
+    patches: [String],
+    allow_unfree: Bool,
+    field_priorities: [String:Int],
+    provenance: [OverrideProvenance],
 
     scalar: fn(self, field: OverrideScalarField) -> String? Never! {
         if field == {
@@ -372,32 +372,32 @@ ResolvedPackageOverride: struct {
 }
 
 OverrideProvenance: struct {
-    overlay: String
-    order: Int
-    field: String
-    value: String
-    priority: Int
+    overlay: String,
+    order: Int,
+    field: String,
+    value: String,
+    priority: Int,
 }
 
 PatchApplication: struct {
-    path: String
-    added: Int
-    removed: Int
+    path: String,
+    added: Int,
+    removed: Int,
 }
 
 // The winning (priority, overlay order) for one resolved field.
 OverrideWinner: struct {
-    priority: Int
-    order: Int
+    priority: Int,
+    order: Int,
 }
 
 #Error
 OverlayError: enum {
-    Malformed(String)
-    UnsupportedPolicy(String)
-    Conflict(package: String, field: String, priority: Int, left_overlay: String, right_overlay: String, left: String, right: String)
-    IO(String)
-    Patch(String)
+    Malformed(String),
+    UnsupportedPolicy(String),
+    Conflict(package: String, field: String, priority: Int, left_overlay: String, right_overlay: String, left: String, right: String),
+    IO(String),
+    Patch(String),
 
     message: fn(self) -> String Never! {
         if self == {

@@ -313,11 +313,11 @@ apply_edit_function_signature: fn(checker: LSPChecker, path: String, src: String
 // source, the scope the trait's display path names, and the closing brace
 // of the code module that holds it.
 TraitLocation: struct {
-    has_assoc_types: Bool
-    methods_source: String
-    scope: String
-    module_close: Int
-    trait_start: Int
+    has_assoc_types: Bool,
+    methods_source: String,
+    scope: String,
+    module_close: Int,
+    trait_start: Int,
 }
 
 apply_create_trait_impl: fn(checker: LSPChecker, path: String, src: String, type_name: String, trait_name: String) -> String Err! {
@@ -345,11 +345,11 @@ apply_create_trait_impl: fn(checker: LSPChecker, path: String, src: String, type
 // The trait a create_trait_impl request names, as source writes it and as
 // its last segment under its dotted scope.
 TraitRequest: struct {
-    name: String
-    local_name: String
-    scope: String
-    module_index: Int
-    module_alias: String
+    name: String,
+    local_name: String,
+    scope: String,
+    module_index: Int,
+    module_alias: String,
 }
 
 // `scope` is the enclosing code modules' dotted prefix, `""` at the top;
@@ -477,14 +477,14 @@ graph_anchor: fn(anchors: [GraphEditAnchor], graph_id: String) -> GraphEditAncho
 
 // Where a new statement goes and the text it starts with.
 InsertTarget: struct {
-    offset: Int
-    indent: String
+    offset: Int,
+    indent: String,
 }
 
 // The node a pin id names and whether the pin is its input or output.
 PinNode: struct {
-    node_id: String
-    direction: String
+    node_id: String,
+    direction: String,
 }
 
 pin_node: fn(pin_id: String) -> PinNode? Never! {
@@ -496,8 +496,8 @@ pin_node: fn(pin_id: String) -> PinNode? Never! {
 // The widest node of the graph with `node_id`, or, when `suffixed`, one
 // whose id ends in `:node_id`.
 NodeHit: struct {
-    node_id: String
-    span: Span
+    node_id: String,
+    span: Span,
 }
 
 widest_node: fn(nodes: [NodeQueryRef], graph_id: String, node_id: String, suffixed: Bool) -> NodeHit? Never! {
@@ -553,9 +553,9 @@ call_insert_target: fn(src: String, graph_id: String, projection: Projection, an
 
 // The wire an inserted call takes its argument from or replaces.
 CallWire: struct {
-    inline_expr_id: String?
-    expression: String?
-    origin_pin_id: String?
+    inline_expr_id: String?,
+    expression: String?,
+    origin_pin_id: String?,
 }
 
 apply_insert_call: fn(checker: LSPChecker, path: String, src: String, graph_id: String, callee: String, args: [String], bind: String?, wire: CallWire, module_path: String?) -> String Err! {
@@ -581,8 +581,8 @@ apply_insert_call: fn(checker: LSPChecker, path: String, src: String, graph_id: 
 // The callee an inserted call spells and the `use` line a core module it
 // names still needs.
 InsertCallPlan: struct {
-    callee: String
-    import: TextEdit?
+    callee: String,
+    import: TextEdit?,
 }
 
 insert_call_plan: fn(src: String, callee: String, module_path: String?) -> InsertCallPlan {
@@ -595,8 +595,8 @@ insert_call_plan: fn(src: String, callee: String, module_path: String?) -> Inser
 }
 
 CoreCallTarget: struct {
-    module_ref: String
-    member: String
+    module_ref: String,
+    member: String,
 }
 
 // The core module and member a dotted callee names: through the request's
@@ -637,8 +637,8 @@ imported_core_prefix: fn(src: String, module_ref: String) -> String? {
 }
 
 CoreImport: struct {
-    module_ref: String
-    alias: String
+    module_ref: String,
+    alias: String,
 }
 
 // A `use` line or a row of a `use {` block: `alias: core.x`, or `core.x`
@@ -686,8 +686,8 @@ default_core_alias: fn(module_ref: String) -> String {
 // Where a new `use` line goes: after the leading imports, where a `use {`
 // block's rows and closing brace count as import lines.
 CoreImportPoint: struct {
-    offset: Int
-    joins_use_block: Bool
+    offset: Int,
+    joins_use_block: Bool,
 }
 
 core_import_insert_point: fn(src: String) -> CoreImportPoint {

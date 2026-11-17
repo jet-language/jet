@@ -11,11 +11,11 @@ use {
 PUBLICATION_U64_MAX: 18446744073709551615
 
 PublicationSemVer: struct {
-    major: Int
-    minor: Int
-    patch: Int
-    pre: String?
-    build: String?
+    major: Int,
+    minor: Int,
+    patch: Int,
+    pre: String?,
+    build: String?,
 
     impl Equatable {
         equal: fn(self, rhs: PublicationSemVer) -> Bool {
@@ -151,10 +151,10 @@ publication_semver_display: fn(version: PublicationSemVer) -> String Never! {
 }
 
 PublicationBumpKind: enum {
-    Major
-    Minor
-    Patch
-    Same
+    Major,
+    Minor,
+    Patch,
+    Same,
 }
 
 publication_classify_bump: fn(old: PublicationSemVer, new: PublicationSemVer) -> PublicationBumpKind Never! {
@@ -177,16 +177,16 @@ publication_release_may_break: fn(old: PublicationSemVer, new: PublicationSemVer
 }
 
 PublicationOp: enum {
-    Lt
-    Lte
-    Gt
-    Gte
-    Eq
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+    Eq,
 }
 
 PublicationComparator: struct {
-    op: PublicationOp
-    version: PublicationSemVer
+    op: PublicationOp,
+    version: PublicationSemVer,
 
     impl Equatable {
         equal: fn(self, rhs: PublicationComparator) -> Bool {
@@ -196,8 +196,8 @@ PublicationComparator: struct {
 }
 
 PublicationVersionReq: struct {
-    sets: [[PublicationComparator]]
-    raw: String
+    sets: [[PublicationComparator]],
+    raw: String,
 
     impl Equatable {
         equal: fn(self, rhs: PublicationVersionReq) -> Bool {
@@ -247,11 +247,11 @@ publication_version_req_display: fn(requirement: PublicationVersionReq) -> Strin
 }
 
 PublicationPartial: struct {
-    major: Int?
-    minor: Int?
-    patch: Int?
-    pre: String?
-    build: String?
+    major: Int?,
+    minor: Int?,
+    patch: Int?,
+    pre: String?,
+    build: String?,
 }
 
 publication_parse_partial: fn(input: String) -> PublicationPartial? Never! {
@@ -465,8 +465,8 @@ publication_set_matches: fn(set: [PublicationComparator], version: PublicationSe
 }
 
 PublicationReleaseBounds: struct {
-    lower: PublicationSemVer
-    upper: PublicationSemVer
+    lower: PublicationSemVer,
+    upper: PublicationSemVer,
 }
 
 // Rust set_satisfiable/tighten_lower/tighten_upper (:717-771), with the

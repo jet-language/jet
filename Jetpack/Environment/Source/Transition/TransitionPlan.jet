@@ -13,9 +13,9 @@ use {
 }
 
 SplitTarget: enum {
-    Environment
-    Package(String)
-    Hosts(String)
+    Environment,
+    Package(String),
+    Hosts(String),
 
     operation: fn(self) -> String Never! {
         if self == {
@@ -27,9 +27,9 @@ SplitTarget: enum {
 }
 
 ChangeAction: enum {
-    Create
-    Remove
-    Update
+    Create,
+    Remove,
+    Update,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -41,31 +41,31 @@ ChangeAction: enum {
 }
 
 ChangeSummary: struct {
-    path: String
-    action: ChangeAction
+    path: String,
+    action: ChangeAction,
 }
 
 TransitionSummary: struct {
-    operation: String
-    changes: [ChangeSummary]
-    before_fingerprint: String
-    after_fingerprint: String
-    journal: String
+    operation: String,
+    changes: [ChangeSummary],
+    before_fingerprint: String,
+    after_fingerprint: String,
+    journal: String,
 }
 
 TransitionResult: struct {
-    summary: TransitionSummary
+    summary: TransitionSummary,
 }
 
 TransitionPlan: struct {
-    root: String
-    operation: String
-    changes: [TransitionFileChange]
-    journal_path: String
-    journal: [U8]
-    before_fingerprint: String
-    after_fingerprint: String
-    reverse: Bool
+    root: String,
+    operation: String,
+    changes: [TransitionFileChange],
+    journal_path: String,
+    journal: [U8],
+    before_fingerprint: String,
+    after_fingerprint: String,
+    reverse: Bool,
 
     summary: fn(self) -> TransitionSummary Never! {
         changes := [ChangeSummary]{}
@@ -177,8 +177,8 @@ TransitionPlan: struct {
 
 // One path's state just before an apply attempt.
 TransitionSnapshot: struct {
-    path: String
-    state: [U8]?
+    path: String,
+    state: [U8]?,
 }
 
 // Plan and apply one of the ratified `jet split` transitions.
@@ -317,8 +317,8 @@ env_transition_fold_plan: fn(root: String, path: String) -[FS, Env]> TransitionP
 }
 
 TransitionJournalMatch: struct {
-    path: String
-    journal: TransitionJournal
+    path: String,
+    journal: TransitionJournal,
 }
 
 env_transition_forward_plan: fn(root: String, operation: String, changes: [TransitionFileChange], before_fingerprint: String, after_fingerprint: String) -> TransitionPlan EnvironmentError! {

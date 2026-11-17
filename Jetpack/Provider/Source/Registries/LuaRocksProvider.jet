@@ -17,31 +17,31 @@ LUAROCKS_DEFAULT_REPOSITORY: "https://luarocks.org"
 
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
 LuaRocksDependency: struct {
-    name: String
-    requirements: [{operator: String, wanted: String}]
+    name: String,
+    requirements: [{operator: String, wanted: String}],
 }
 
 // The rockspec facts the provider installs from.
 LuaRockspec: struct {
-    name: String
-    version: String
-    source_url: String
+    name: String,
+    version: String,
+    source_url: String,
     // Lowercase SHA-256 of the source archive.
-    source_hash: String
+    source_hash: String,
     // Sorted by name.
-    dependencies: [LuaRocksDependency]
+    dependencies: [LuaRocksDependency],
     // Builtin module name -> relative `.lua` path.
-    modules: [String:String]
-    platforms: [String]
+    modules: [String:String],
+    platforms: [String],
 }
 
 // A fetched rockspec and source archive of the closure.
 LuaRocksArtifact: struct {
-    spec: LuaRockspec
-    rockspec_path: String
-    source_path: String
-    rockspec_hash: String
-    source_hash: String
+    spec: LuaRockspec,
+    rockspec_path: String,
+    source_path: String,
+    rockspec_hash: String,
+    source_hash: String,
 }
 
 LuaRocksProvider: struct {
@@ -236,12 +236,12 @@ provider_luarocks_valid_component: fn(value: String) -> Bool Never! {
 // version satisfying its constraints. One closure selects one version per
 // rock; a cycle is refused.
 LuaRocksResolver: struct {
-    authority: RegistryAuthority
-    repository: String
-    manifest: String
-    scratch: String
-    specs: [String:LuaRockspec]
-    active: [String]
+    authority: RegistryAuthority,
+    repository: String,
+    manifest: String,
+    scratch: String,
+    specs: [String:LuaRockspec],
+    active: [String],
 
     resolve: fn(&self, name: String, version: String) -[FS, Net, Time.Wait, Env]> RegistryError! {
         if self.specs.get(name) == {
@@ -374,10 +374,10 @@ provider_luarocks_dependency_order: fn(root: String, specs: [String:LuaRockspec]
 }
 
 LuaRocksOrderWalk: struct {
-    specs: [String:LuaRockspec]
-    active: [String]
-    done: [String]
-    out: [String]
+    specs: [String:LuaRockspec],
+    active: [String],
+    done: [String],
+    out: [String],
 
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) {

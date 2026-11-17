@@ -5,31 +5,31 @@ use {
 }
 
 ImpactEdge: struct {
-    depth: Int
-    caller: String
-    callee: String
-    module_path: String
-    span_start: Int
-    span_end: Int
+    depth: Int,
+    caller: String,
+    callee: String,
+    module_path: String,
+    span_start: Int,
+    span_end: Int,
 }
 
 ImpactRef: struct {
-    depth: Int
-    name: String
-    module_path: String
-    span_start: Int
-    span_end: Int
+    depth: Int,
+    name: String,
+    module_path: String,
+    span_start: Int,
+    span_end: Int,
 }
 
 ImpactReport: struct {
-    symbol: String
-    found: Bool
-    depth_limit: Int
-    definition_module: String?
-    references: [ImpactRef]
-    call_sites: [ImpactEdge]
-    upstream_callers: [ImpactEdge]
-    downstream_callees: [ImpactEdge]
+    symbol: String,
+    found: Bool,
+    depth_limit: Int,
+    definition_module: String?,
+    references: [ImpactRef],
+    call_sites: [ImpactEdge],
+    upstream_callers: [ImpactEdge],
+    downstream_callees: [ImpactEdge],
 
     // Rust ImpactReport::analyze (44–72) over one checked program's index.
     analyze: fn(index: SemIndex, symbol: String, depth_limit: Int) -> ImpactReport Never! {
@@ -148,13 +148,13 @@ impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String
 // Named records avoid tuple Debug/Show emission defect #4357; no location is
 // part of identity. Queue is Core's ring buffer, not a shifting front removal.
 ImpactEdgeKey: struct {
-    caller: String
-    callee: String
+    caller: String,
+    callee: String,
 }
 
 ImpactFrontier: struct {
-    name: String
-    depth: Int
+    name: String,
+    depth: Int,
 }
 
 // Breadth-first over the call rows from `start`: `upstream` follows calls into

@@ -2,11 +2,11 @@
 // canonical recorded Display text, not evaluator values.
 
 CLIValueKind: enum {
-    Bool
-    Int
-    Float
-    String
-    Path
+    Bool,
+    Int,
+    Float,
+    String,
+    Path,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -20,8 +20,8 @@ CLIValueKind: enum {
 }
 
 CLIDefault: enum {
-    TypeDefault
-    Recorded(value: String)
+    TypeDefault,
+    Recorded(value: String),
 
     display: fn(self) -> String Never! {
         if self == {
@@ -32,19 +32,19 @@ CLIDefault: enum {
 }
 
 CLIInputShape: enum {
-    Flag
-    Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?)
+    Flag,
+    Value(kind: CLIValueKind, optional: Bool, default: CLIDefault?),
 }
 
 CLIInputSchema: struct {
-    field: String
-    flag: String
-    short: String?
-    env: String?
-    help: String
-    metavar: String?
-    shape: CLIInputShape
-    positional: U16?
+    field: String,
+    flag: String,
+    short: String?,
+    env: String?,
+    help: String,
+    metavar: String?,
+    shape: CLIInputShape,
+    positional: U16?,
 
     required: fn(self) -> Bool Never! {
         if self.shape == {
@@ -69,19 +69,19 @@ CLIInputSchema: struct {
 }
 
 CLISubcommandSchema: struct {
-    name: String
-    description: String?
-    inputs: [CLIInputSchema]
+    name: String,
+    description: String?,
+    inputs: [CLIInputSchema],
 }
 
 JobArgumentSchema: struct {
-    name: String
-    label: String
-    ty: String
-    required: Bool
-    default: String?
-    variadic: Bool
-    zone: ParamZone
+    name: String,
+    label: String,
+    ty: String,
+    required: Bool,
+    default: String?,
+    variadic: Bool,
+    zone: ParamZone,
 
     display: fn(self) -> String Never! {
         "{self.label}: {if self.variadic -> "..." else -> ""}{self.ty}"
@@ -89,20 +89,20 @@ JobArgumentSchema: struct {
 }
 
 JobFact: struct {
-    name: String
-    scope: JobScope
-    doc: String?
-    arguments: [JobArgumentSchema]
-    after: [String]
-    packages: [String]
-    cwd: String?
-    inputs: [String]
-    outputs: [String]
-    skip: JobSkip?
-    cache: JobCachePolicy
-    parallel: Int
-    limits: [StringMapEntry]
-    schedule: String?
+    name: String,
+    scope: JobScope,
+    doc: String?,
+    arguments: [JobArgumentSchema],
+    after: [String],
+    packages: [String],
+    cwd: String?,
+    inputs: [String],
+    outputs: [String],
+    skip: JobSkip?,
+    cache: JobCachePolicy,
+    parallel: Int,
+    limits: [StringMapEntry],
+    schedule: String?,
 
     scope_name: fn(self) -> String Never! {
         if self.scope == {
@@ -119,14 +119,14 @@ JobFact: struct {
 
 #Error
 CLIJobGraphError: struct {
-    message: String
+    message: String,
 }
 
 // The registry is an owned metadata projection, not evidence that a job was
 // checked or run. Driver callers must supply the actual successful entry
 // projection; importing a helper module never extends the job argv namespace.
 JobRegistry: struct {
-    jobs: [JobFact]
+    jobs: [JobFact],
 
     from_items: fn(items: [Item]) -> JobRegistry Never! {
         jobs := [JobFact]{}
@@ -217,8 +217,8 @@ JobRegistry: struct {
 }
 
 CLIJobVisit: struct {
-    row: Int
-    dependency: Int
+    row: Int,
+    dependency: Int,
 }
 
 cli_schema_job_index: fn(jobs: [JobFact]) -> [String:Int] Never! {
@@ -384,13 +384,13 @@ cli_schema_job_fact: fn(function: Func) -> JobFact Never! {
 }
 
 CLICommandSchema: struct {
-    entry_type: String
-    description: String?
-    inputs: [CLIInputSchema]
-    commands: [CLISubcommandSchema]
-    jobs: [JobFact]
-    standard: Bool
-    version: String?
+    entry_type: String,
+    description: String?,
+    inputs: [CLIInputSchema],
+    commands: [CLISubcommandSchema],
+    jobs: [JobFact],
+    standard: Bool,
+    version: String?,
 
     standard_completion_words: fn(self) -> [String] Never! {
         if !self.standard -> return [String]{}

@@ -15,10 +15,10 @@ JET_CLI_RUN_INPUT_HELP: "\nA program reads its input through `input`; `jet help 
 // JET_CLI_FLAG_TYPED_REASONS row that says why it is typed each time instead;
 // `value` is how it and its setting are written.
 JetCLIFlagSpec: struct {
-    long: String
-    help: String
-    value: JetCLIFlagValue{JetCLIFlagValue.Switch}
-    typed: String{""}
+    long: String,
+    help: String,
+    value: JetCLIFlagValue{JetCLIFlagValue.Switch},
+    typed: String{""},
 }
 
 // How a flag is written on the command line, and its setting's value.
@@ -30,18 +30,18 @@ JetCLIFlagSpec: struct {
 // flag, as often as needed (`--deny=Net --deny=FS`); the setting a list of
 // strings.
 JetCLIFlagValue: enum {
-    Switch
-    Bool
-    Value
-    Optional
-    Repeated
+    Switch,
+    Bool,
+    Value,
+    Optional,
+    Repeated,
 }
 
 // One reason a flag is typed on each command line that means it, and is never
 // a setting: a flag row's `typed` is its `name`, and E2117 says its `reason`.
 JetCLIFlagTypedReason: struct {
-    name: String
-    reason: String
+    name: String,
+    reason: String,
 }
 
 JET_CLI_FLAG_TYPED_REASONS: #run { [JetCLIFlagTypedReason]{
@@ -67,19 +67,19 @@ jet_cli_flag_typed_reason: fn(name: String) -> JetCLIFlagTypedReason? Never! {
 // `HandlerKey` variant; `dispatch_word` is the handler word a grouped argv
 // is normalized to unless `keeps_group` keeps the group word in front.
 JetCLIHandlerSpec: struct {
-    key: String
-    dispatch_word: String
-    keeps_group: Bool
+    key: String,
+    dispatch_word: String,
+    keeps_group: Bool,
 }
 
 // One canonical nested spelling under a group (`jet registry publish`).
 // `usage` holds one form per line; `handler` is a `JetCLIHandlerSpec.key`.
 JetCLIActionSpec: struct {
-    name: String
-    usage: String
-    summary: String
-    handler: String
-    also_canonical_top_level: Bool
+    name: String,
+    usage: String,
+    summary: String,
+    handler: String,
+    also_canonical_top_level: Bool,
 }
 
 // One top-level command: a bare leaf (`build`) or a group with nested
@@ -88,12 +88,12 @@ JetCLIActionSpec: struct {
 // `os`, `env`, and `db` expose a wider downstream verb surface.
 // `usage` is the positional shape; None renders the generic `[args]`.
 JetCLICommandSpec: struct {
-    name: String
-    summary: String
-    frequency_rank: Int
-    exhaustive: Bool
-    usage: String?
-    actions: [JetCLIActionSpec]
+    name: String,
+    summary: String,
+    frequency_rank: Int,
+    exhaustive: Bool,
+    usage: String?,
+    actions: [JetCLIActionSpec],
 }
 
 JET_CLI_HANDLERS: #run { [JetCLIHandlerSpec]{
@@ -738,10 +738,10 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
 // census runs (`<file>` is a scratch program); a form it cannot reach from an
 // empty directory has none.
 JetCLIFormSpec: struct {
-    form: String
-    ported: Bool
-    card: Int
-    argv: [String]
+    form: String,
+    ported: Bool,
+    card: Int,
+    argv: [String],
 }
 
 // The command model. The usage page, completions and man leave out every form

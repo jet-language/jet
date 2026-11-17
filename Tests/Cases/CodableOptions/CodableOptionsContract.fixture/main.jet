@@ -3,52 +3,52 @@ use json: core.encoding.json
 // `only: .Encode` writes without reading; `.Skip` keeps a field off the wire.
 #Codable(only: .Encode)
 Report: struct {
-    title: String
-    #Codable(.Skip) cache: Int{7}
+    title: String,
+    #Codable(.Skip) cache: Int{7},
 }
 
 // `only: .Decode` reads without writing.
 #Codable(only: .Decode)
 Request: struct {
-    id: Int
+    id: Int,
 }
 
 Address: struct {
-    city: String
-    zip: String
+    city: String,
+    zip: String,
 }
 
 // `unknown: .Deny` refuses unlisted keys; flattened keys count as listed.
 #Codable(unknown: .Deny)
 Customer: struct {
-    name: String
-    #Codable(.Flatten) address: Address
+    name: String,
+    #Codable(.Flatten) address: Address,
 }
 
 // `published` locks the wire shape and still honors the other options.
 #Codable(unknown: .Deny, published) Account: struct {
-    name: String
+    name: String,
 }
 
 // `tag: .Field("kind")` names the case under one key beside its fields.
 #Codable(tag: .Field("kind"))
 Shape: enum {
-    Circle(radius: Int)
-    Dot
+    Circle(radius: Int),
+    Dot,
 }
 
 // `tag: .None` writes the payload alone.
 #Codable(tag: .None)
 Reading: enum {
-    Number(Int)
-    Label(String)
+    Number(Int),
+    Label(String),
 }
 
 // No `tag:` keeps the case name as the outer key.
 #Codable
 Switch: enum {
-    On
-    Level(Int)
+    On,
+    Level(Int),
 }
 
 // A distinct type codes as its base type with no option.
@@ -56,7 +56,7 @@ Meters: distinct Int
 
 #Codable
 Trip: struct {
-    length: Meters
+    length: Meters,
 }
 
 attempt_customer: fn(label: String, raw: String) {

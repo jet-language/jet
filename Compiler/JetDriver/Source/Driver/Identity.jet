@@ -65,43 +65,43 @@ use {
 }
 
 JetDriverAuthorizedSourceFile: struct {
-    path: String
-    relative_path: String
-    identity: String
-    source: String
+    path: String,
+    relative_path: String,
+    identity: String,
+    source: String,
 }
 
 JetDriverAuthorizedSourceRoot: struct {
-    canonical_path: String
-    identity: String
-    allow_hardlinks: Bool
-    files: [JetDriverAuthorizedSourceFile]
-    foreign_cache_files: [JetDriverAuthorizedSourceFile]
-    directories: [AppAuthorizedDirectory]{[AppAuthorizedDirectory]{}}
+    canonical_path: String,
+    identity: String,
+    allow_hardlinks: Bool,
+    files: [JetDriverAuthorizedSourceFile],
+    foreign_cache_files: [JetDriverAuthorizedSourceFile],
+    directories: [AppAuthorizedDirectory]{[AppAuthorizedDirectory]{}},
 }
 
 // An offline script admission binds an import to an already opened root.
 // The selector and full tree hash remain distinct from package manifests.
 JetDriverScriptDependency: struct {
-    name: String
-    selector: String
-    resolved_version: String
-    content_hash: String
-    root_identity: String
-    span: Span
+    name: String,
+    selector: String,
+    resolved_version: String,
+    content_hash: String,
+    root_identity: String,
+    span: Span,
 }
 
 JetDriverAuthorizedSourceSnapshot: struct {
-    roots: [JetDriverAuthorizedSourceRoot]
-    entry_root_identity: String
-    entry_path: String
-    script_dependencies: [JetDriverScriptDependency]{[JetDriverScriptDependency]{}}
+    roots: [JetDriverAuthorizedSourceRoot],
+    entry_root_identity: String,
+    entry_path: String,
+    script_dependencies: [JetDriverScriptDependency]{[JetDriverScriptDependency]{}},
 }
 
 JetDriverHostFacts: struct {
-    target_triple: String?
-    active_os: String?
-    compiler_identity: String?
+    target_triple: String?,
+    active_os: String?,
+    compiler_identity: String?,
 }
 
 // Rust `CompileMode`: `Program` compiles a package for check, build, or run
@@ -122,13 +122,13 @@ JetDriverHostFacts: struct {
 // No Core reachability pruning and no C export rows; the entry and the
 // foreign facts are still resolved, so their diagnostics are the same.
 JetDriverCompileMode: enum {
-    Program
-    Check
-    Test
-    Doc
-    Comptime
-    Eval
-    RootRun
+    Program,
+    Check,
+    Test,
+    Doc,
+    Comptime,
+    Eval,
+    RootRun,
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -142,33 +142,33 @@ JetDriverCompileMode: enum {
 // summaries and the name ledger's references); the name ledger's `symbols`
 // names the call facts' callee ids.
 JetDriverDocModule: struct {
-    path: String
-    physical_path: String
-    alias: String
-    source: String
-    items: [Item]
-    block_spans: [Span]{[Span]{}}
-    imports: [ImportDecl]{[ImportDecl]{}}
+    path: String,
+    physical_path: String,
+    alias: String,
+    source: String,
+    items: [Item],
+    block_spans: [Span]{[Span]{}},
+    imports: [ImportDecl]{[ImportDecl]{}},
     // The AST tables `items` index (Nodes.jet).
-    tables: ASTTables{ASTTables{}}
-    module_name: String{""}
-    functions: [FnBody]{[FnBody]{}}
-    name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}}
-    call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}}
+    tables: ASTTables{ASTTables{}},
+    module_name: String{""},
+    functions: [FnBody]{[FnBody]{}},
+    name_references: [SemaNameReferenceFact]{[SemaNameReferenceFact]{}},
+    call_facts: [SemaCallSiteFact]{[SemaCallSiteFact]{}},
     // Shared once per checked bundle; module positions retain Sema's ordering.
-    name_ledger: Shared<NameLedger>?{None}
-    gate_ledger: Shared<GateLedger>?{None}
-    memory_facts: Shared<SemaCheckedMemoryFacts>?{None}
-    module_identity: String{""}
-    module_id: ModuleID{ModuleID{id: U32{0}}}
-    target_triple: String{""}
-    target_layout: JetTargetLayout?{None}
-    layout_facts: [SemaLayoutProjectionRow]{[SemaLayoutProjectionRow]{}}
-    name_module_index: Int{-1}
+    name_ledger: Shared<NameLedger>?{None},
+    gate_ledger: Shared<GateLedger>?{None},
+    memory_facts: Shared<SemaCheckedMemoryFacts>?{None},
+    module_identity: String{""},
+    module_id: ModuleID{ModuleID{id: U32{0}}},
+    target_triple: String{""},
+    target_layout: JetTargetLayout?{None},
+    layout_facts: [SemaLayoutProjectionRow]{[SemaLayoutProjectionRow]{}},
+    name_module_index: Int{-1},
     // The `.routes(from:)` convention roots the loader read for this module.
-    app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
+    app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}},
     // The `#FX(…)` written at the head of the file, when one is.
-    file_cap: ModuleCap?{None}
+    file_cap: ModuleCap?{None},
 }
 
 // The key text of `fact`'s callee in the bundle's `symbols`; None when the
@@ -201,13 +201,13 @@ jet_driver_doc_kind_rank: fn(kind: String) -> Int Never! {
 // and may import other runtime units; only an exact runtime entry keeps tests.
 // `text` holds the module's source; read it with `source()`.
 JetDriverCoreSource: struct {
-    module_name: String
-    alias: String
-    path: String
-    owner: String
-    owned_members: [String]
-    runtime: Bool
-    text: Shared<JetDriverCoreText>
+    module_name: String,
+    alias: String,
+    path: String,
+    owner: String,
+    owned_members: [String],
+    runtime: Bool,
+    text: Shared<JetDriverCoreText>,
 
     source: fn(self) -> String Never! {
         permit: self.text.guard_edit()
@@ -227,17 +227,17 @@ JetDriverCoreSource: struct {
 // all 9.7 MB. Copies of a row share this cell, so each file is read at most
 // once.
 JetDriverCoreText: struct {
-    file: String
-    reader: JetDriverCoreSourceReader?
-    text: String?
+    file: String,
+    reader: JetDriverCoreSourceReader?,
+    text: String?,
 }
 
 // The host's read of one Core file; `None` when it can't be read. A Core
 // file's comptime inputs (`embed_bytes`, `embed_file`) are files beside it,
 // read with `read_bytes`.
 JetDriverCoreSourceReader: trait {
-    read: fn(self, file: String) -[FS.Read]> String?
-    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
+    read: fn(self, file: String) -[FS.Read]> String?,
+    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!,
 }
 
 // The host's `core.interface` (CoreInterface.jet): its `size` bytes from
@@ -246,9 +246,9 @@ JetDriverCoreSourceReader: trait {
 // to `size` when it is shorter, false when `read` would give None; `size`
 // is how many bytes it has (0 when none).
 JetDriverCoreInterfaceReader: trait {
-    read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]?
-    read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool
-    size: fn(self) -[Env]> Int
+    read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]?,
+    read_into: fn(self, at: Int, into: &[U8], size: Int) -[Env, FFI.Asm]> Bool,
+    size: fn(self) -[Env]> Int,
 }
 
 jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
@@ -262,93 +262,93 @@ jet_driver_core_text_file: fn(file: String, reader: &&JetDriverCoreSourceReader)
 // Selected build output is compiler-produced source, never a fabricated
 // authorized disk file. The loader keeps its exact bytes and virtual origin.
 JetDriverGeneratedModule: struct {
-    package_identity: String
-    name: String
-    relative_path: String
-    source: String
+    package_identity: String,
+    name: String,
+    relative_path: String,
+    source: String,
     // A `meta.rewrite_body` module holds a function that replaces one in an
     // authorized file: the loader blanks that function there.
-    replaces: JetDriverReplacedFunction?{None}
+    replaces: JetDriverReplacedFunction?{None},
     // A module a `Compiler` value made: the `Meta` effect it was made under
     // and, for a dependency's function, the package the root's consent named
     // ("" when none). Both are inputs of the module's check node.
-    authority: String{""}
-    consent: String{""}
+    authority: String{""},
+    consent: String{""},
 }
 
 // The bytes `start..<end` of the authorized file at `path` (its physical
 // path), a function declaration a generated module replaces. Blanking keeps
 // every other offset in the file, so its other reports stay in place.
 JetDriverReplacedFunction: struct {
-    path: String
-    start: Int
-    end: Int
+    path: String,
+    start: Int,
+    end: Int,
 }
 
 JetDriverCompileRequest: struct {
-    authorized_sources: JetDriverAuthorizedSourceSnapshot
+    authorized_sources: JetDriverAuthorizedSourceSnapshot,
     // The compiler-owned canonical effect module, made while the compiler
     // builds (JetFoundation EFFECT_CANONICAL_MODULE); no effects for none.
-    canonical_effects: EffectModuleSource
-    core_sources: [JetDriverCoreSource]
-    host_facts: JetDriverHostFacts
-    eval_config: JetEvalConfig
-    record_store: JetDriverRecordStore?
+    canonical_effects: EffectModuleSource,
+    core_sources: [JetDriverCoreSource],
+    host_facts: JetDriverHostFacts,
+    eval_config: JetEvalConfig,
+    record_store: JetDriverRecordStore?,
     // Where a load reads the interface of built-in Core units that the
     // program reaches by use (CoreInterface.jet); `None` parses every Core
     // unit whole.
-    core_interface: JetDriverCoreInterfaceReader?{None}
+    core_interface: JetDriverCoreInterfaceReader?{None},
     // Captured snapshots override the canonical project schema cache; absence
     // reads that cache once through the same ordinary populated checker.
-    schema_snapshots: [String:SchemaSnapshot]?{None}
+    schema_snapshots: [String:SchemaSnapshot]?{None},
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
-    trace_sink: CompilerTraceSink?
+    trace_sink: CompilerTraceSink?,
     // The compiler threads this compile may use (`--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
-    compiler_threads: CompilerThreads
-    mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    compiler_threads: CompilerThreads,
+    mode: JetDriverCompileMode{JetDriverCompileMode.Program},
     // A Test compile where a package without #Tests is no E0601: a code suite
     // of test.jet (`jet test --profile`'s JET_TEST_SUITE child, which runs
     // that suite and no #Test) or a member a test profile runs, whose rows are
     // then none.
-    tests_optional: Bool{false}
+    tests_optional: Bool{false},
     // A Doc compile whose reader takes only the user modules' diagnostics and
     // facts (`jet fix`, the editor's check, the build plan's checked
     // projection in BuildQueries.jet): its Core bodies are checked on demand, as a Check
     // compile's are (CoreDemand.jet). `jet doc` and the other Doc readers
     // check every body.
-    doc_core_on_demand: Bool{false}
+    doc_core_on_demand: Bool{false},
     // The build plan's staging compile of `build: fn` (BuildQueries.jet):
     // the entry package loads the members the build file reaches by name,
     // not every member (Loader.jet jet_driver_build_entry_members), so a
     // member the build never names (a heavy `test.jet`) is neither loaded
     // nor checked to run the build. `jet check`, `jet test` and the target
     // compiles load every member.
-    build_entry_reach: Bool{false}
+    build_entry_reach: Bool{false},
     // `jet check --prelude`: the entry unit is a Compiler/Prelude source,
     // parsed and checked as the compiler embeds it (Loader.jet
     // jet_driver_parse_prelude_source), not as an ordinary user module.
-    prelude_entry: Bool{false}
+    prelude_entry: Bool{false},
     // The entry is a root the toolchain writes to reach Core itself: `jet
     // check Core`'s and the Core library's one import of each public Core
     // module (JetCLI jet_cli_core_check_source), and `jet test` of a Core
     // source's import of its module. It imports as a Core source does, so
     // jet_builtins loads for it (Loader.jet `importer_core`), whatever path
     // the root was written to.
-    core_entry: Bool{false}
+    core_entry: Bool{false},
     // `jet -e CODE`: the entry is the file that holds CODE as the body of
     // `run: fn`, whose last statement's value is shown (JetSema Calls/Direct.jet
     // sema_eval_entry_show).
-    eval_entry: Bool{false}
+    eval_entry: Bool{false},
     // `jet check Core`: every declaration of each loaded Core module loads
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
-    every_core_body: Bool{false}
+    every_core_body: Bool{false},
     // The Core library's check (JetCLI CoreLibrary.jet): with every Core
     // body checked, sema also writes the Core seal, each Core function's
     // summary a bound program may take for its reach (JetSema CoreSeal.jet),
     // as JetDriverLoweringInputs.core_seal.
-    core_seal: Bool{false}
+    core_seal: Bool{false},
     // A traced run with per-function spans whose Core is the Core built
     // into this jet: the keys of the Core functions the Core facts seal
     // (JetCLI Host.jet jet_cli_core_facts), and each other Core function's
@@ -356,119 +356,119 @@ JetDriverCompileRequest: struct {
     // BuildCore.jet IR_CORE_EXCLUSIONS), which the driver counts the Core
     // demand's checks against (JetSema CoreDemand.jet
     // sema_core_bound_counters). Empty otherwise.
-    core_bound_keys: [String]{[String]{}}
-    core_excluded_keys: [String]{[String]{}}
-    core_excluded_reasons: [String]{[String]{}}
+    core_bound_keys: [String]{[String]{}},
+    core_excluded_keys: [String]{[String]{}},
+    core_excluded_reasons: [String]{[String]{}},
     // `jet check Core`: Core's `layers:` table (Core/package.jet), lowest
     // first; each loaded Core module's name of a higher layer's module is an
     // E1012 (CoreLayers.jet). Empty: no layer check.
-    core_layers: [ModuleLayer]{[ModuleLayer]{}}
+    core_layers: [ModuleLayer]{[ModuleLayer]{}},
     // JET_RECHECK_VERIFY=1, a compiler test's switch: each body comptime
     // pass that splices its local values (JetSema Comptime/LocalSplice.jet)
     // also finalizes again, and any difference between the two results is an
     // internal problem (BodyComptime.jet jet_driver_recheck_differences).
-    recheck_verify: Bool{false}
+    recheck_verify: Bool{false},
     // A `jet check` whose host ends the process with the result still held
     // (JetCLI Host.jet jet_cli_compile_check with `finish`): the check's
     // compile state moves into the result (JetDriverCompileResult.held)
     // rather than dropping as the stages return, so the process exit hands
     // the state back to the kernel and nothing walks it.
-    hold_check_state: Bool{false}
+    hold_check_state: Bool{false},
     // A native build (JetCLI Request.jet jet_cli_compile_executable), the
     // runtime library build (jet_cli_runtime_library) and the Core library's
     // check (CoreLibrary.jet jet_cli_core_checked): the compile state the
     // lowering inputs leave behind drops on a detached task (Pipeline.jet
     // jet_driver_release_aside) while the host builds IR, not on the
     // compile's thread as the stages return.
-    release_state_aside: Bool{false}
+    release_state_aside: Bool{false},
     // `jet test` of a Core source: the Core row path (`Core/Encoding/CBOR.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),
     // with Core's privileges. Every declaration of each loaded Core module
     // loads, as under `every_core_body`, so a private part loads with its
     // owner. "": none.
-    core_tests: String{""}
+    core_tests: String{""},
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
-    output_intent: SemaOutputIntent{SemaOutputIntent.Check}
-    output_address: String?{None}
-    gate_set: GateSet{GateSet{}}
-    gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
+    output_intent: SemaOutputIntent{SemaOutputIntent.Check},
+    output_address: String?{None},
+    gate_set: GateSet{GateSet{}},
+    gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}},
     // The organization's audited-gate floor (`JET_ORG_UNSAFE_POLICY`, read by
     // the host): the outermost rung of every loaded file's policy chain.
-    organization_policy: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    organization_policy: [PolicyDeclaration]{[PolicyDeclaration]{}},
     // The effects the organization policy's `authority: { deny: [...] }`
     // denies: the root package's modules are held to them as to its own
     // `authority.deny`, and no package row lifts them.
-    organization_deny: [String]{[String]{}}
+    organization_deny: [String]{[String]{}},
     // The organization policy file the denial names ("" when none is set).
-    organization_source: String{""}
+    organization_source: String{""},
     // External lock/trust/forced-build writers use the canonical gate row.
-    external_gate_entries: [GateEntry]{[GateEntry]{}}
+    external_gate_entries: [GateEntry]{[GateEntry]{}},
     // Explicit callable shared by named jobs, generation and evaluation.
-    selected_entry: String?{None}
-    profile: String{JET_BUILD_DEFAULT_PROFILE}
+    selected_entry: String?{None},
+    profile: String{JET_BUILD_DEFAULT_PROFILE},
     // A shipped artifact (`jet build`), or the `jet fix` pass that removes
     // what one refuses: sema rejects every remaining `debug` trace (E3405),
     // as a release-profile compile does.
-    artifact_build: Bool{false}
+    artifact_build: Bool{false},
     // `dead_code: remove` on the executable route (`jet build`, `jet run`, a
     // script, `jet dev`): the entry package's top-level bodies lower only when
     // its roots reach them (Pipeline.jet jet_driver_entry_root_keys), as a
     // dependency's do. false lowers every one, as `dead_code: keep` and every
     // other compile do.
-    lower_reached_only: Bool{false}
+    lower_reached_only: Bool{false},
     // The OS an OS-less build option selects (`os: web`), which `#build.target.os`
     // folds on instead of the host triple's; empty for a native build.
-    build_os: String{""}
+    build_os: String{""},
     // The declared machine a build or check names (`--target=board.sensor_v1`,
     // Pipeline.jet jet_driver_target_machine_by_name), which the program is
     // checked for in place of the host's; empty for the host.
-    target_machine: String{""}
-    capture_build_program: Bool{false}
-    capture_build_nodes: Bool{false}
-    build_output_names: [String]{[String]{}}
-    capture_cost_report: Bool{false}
+    target_machine: String{""},
+    capture_build_program: Bool{false},
+    capture_build_nodes: Bool{false},
+    build_output_names: [String]{[String]{}},
+    capture_cost_report: Bool{false},
     // A Doc compile builds its shared GateLedger (GateProjection.jet
     // jet_driver_doc_gate_projection) only for the verbs that read it: `jet
     // inspect structure` and `jet review`. Every other Doc compile (the build
     // plan, the runtime library, `jet doc` itself) skips the projection.
-    capture_gate_ledger: Bool{false}
-    generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    capture_gate_ledger: Bool{false},
+    generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}},
     // The package-relative sources the build targets being compiled list
     // (`b.add_executable("app", ["main.jet", "helper.jet"])`): in a package
     // without a manifest each joins the entry's namespace, as the modules its
     // `build: fn` generates do (jet_driver_build_source_catalog).
-    target_sources: [String]{[String]{}}
+    target_sources: [String]{[String]{}},
     // Raw transports remain distinct from ordinary comptime IO.
-    build_inputs: JetDriverSharedBuildInputs?{None}
-    build_http_inputs: JetDriverSharedBuildHTTPInputs?{None}
+    build_inputs: JetDriverSharedBuildInputs?{None},
+    build_http_inputs: JetDriverSharedBuildHTTPInputs?{None},
     // The words after `--` on `jet build`: what the build entry's `b.args()`
     // returns (jet_driver_query_build_plan).
-    build_args: [String]{[String]{}}
+    build_args: [String]{[String]{}},
     // When set, every Tier-1 comptime input this compile reads (path and
     // SHA-256), in read order, for the comptime input lock.
-    comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
+    comptime_input_log: Shared<JetDriverComptimeInputLog>?{None},
     // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host:
     // the provenance `#build.stamp.*` folds. None keeps the default stamp
     // (jet_driver_build_facts).
-    build_stamp: BuildStamp?{None}
+    build_stamp: BuildStamp?{None},
     // The `[[build.contribution]]` rows of that lock: what
     // `build: fn` contributed to declared settings, which
     // jet_driver_build_settings folds over the defaults and profile values.
-    build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
+    build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}},
     // The `--set name=value` writers, the command-line layer of that fold
     // (BuildFactChain.jet).
-    setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}},
     // The `--deep-checks` request (BuildOptions.deep_checks): the deep checks
     // this compile keeps. Every scope must keep one, or the compile fails
     // (Pipeline.jet jet_driver_deep_checks). Off for a compile no
     // options input reaches.
-    deep_checks: DeepChecks{DeepChecks{}}
+    deep_checks: DeepChecks{DeepChecks{}},
     // The toolchain tree `toolchain:` comptime inputs read, and the reader of
     // which packages may read it (JetDriverToolchainTree). None: every
     // `toolchain:` read refuses (E0945).
-    toolchain_tree: Shared<JetDriverToolchainTree>?{None}
+    toolchain_tree: Shared<JetDriverToolchainTree>?{None},
 }
 
 // The toolchain tree of a compile's `toolchain:` comptime inputs. `root` is
@@ -483,9 +483,9 @@ JetDriverCompileRequest: struct {
 // reads the tree when the package it is in (its nearest package directory)
 // is one of them.
 JetDriverToolchainTree: struct {
-    root: String?
-    reader: JetDriverToolchainPackageReader
-    packages: [String:[String]]
+    root: String?,
+    reader: JetDriverToolchainPackageReader,
+    packages: [String:[String]],
 }
 
 // The host's census of the toolchain's own packages under `root` (the
@@ -494,16 +494,16 @@ JetDriverToolchainTree: struct {
 // the tree that holds a physical file (the nearest directory above it
 // holding `Core/` and `Compiler/Prelude/`).
 JetDriverToolchainPackageReader: trait {
-    packages: fn(self, root: String) -[FS.Read]> [String]
-    package_of: fn(self, root: String, file: String) -[FS.Read]> String?
-    tree_of: fn(self, file: String) -[FS.Read]> String?
+    packages: fn(self, root: String) -[FS.Read]> [String],
+    package_of: fn(self, root: String, file: String) -[FS.Read]> String?,
+    tree_of: fn(self, file: String) -[FS.Read]> String?,
 }
 
 JetDriverGatePolicy: struct {
-    package_identity: String
-    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
-    unsafe_paths: [String]?{None}
-    expert: Bool?{None}
+    package_identity: String,
+    declarations: [PolicyDeclaration]{[PolicyDeclaration]{}},
+    unsafe_paths: [String]?{None},
+    expert: Bool?{None},
 }
 
 // The compiler's record store, reached only through the host, which owns
@@ -516,9 +516,9 @@ JetDriverGatePolicy: struct {
 // writes the store's files, so each call declares that row (an undeclared
 // dynamic dispatch is the maximal row).
 JetDriverRecordStore: trait {
-    record: fn(self, schema: String, key: String) -[FS]> [U8]?
-    put_record: fn(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool
-    stamp: fn(self, path: String) -[FS]> String?
+    record: fn(self, schema: String, key: String) -[FS]> [U8]?,
+    put_record: fn(self, schema: String, key: String, bytes: [U8]) -[FS]> Bool,
+    stamp: fn(self, path: String) -[FS]> String?,
 }
 
 // The raw build-input transport a host supplies for comptime inputs (`find`,
@@ -530,16 +530,16 @@ JetDriverRecordStore: trait {
 // own text for the failed operation.
 #Error
 JetDriverBuildInputError: struct {
-    message: String
+    message: String,
 }
 
 JetDriverBuildInputs: trait {
-    resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError!
-    entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError!
-    read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
+    resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError!,
+    entries: fn(self, directory: String) -[FS.Read]> [JetDriverBuildEntry] JetDriverBuildInputError!,
+    read: fn(self, path: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!,
     // Open each component relative to one retained root with nofollow; read
     // the same opened regular file, bounded before and during the read.
-    read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!
+    read_rooted: fn(self, root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetDriverBuildInputError!,
 }
 
 // A single raw HTTP GET. No redirects, status interpretation, digest checks
@@ -547,22 +547,22 @@ JetDriverBuildInputs: trait {
 // supplied by the checked-build consumer, not chosen by a provider.
 #Error
 JetDriverBuildHTTPError: struct {
-    message: String
+    message: String,
 }
 
 JetDriverBuildHTTPInputs: trait {
-    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!
-    get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError!,
+    get: fn(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError!,
 }
 
 // The invocation owns each raw transport once. Adapter clones share that
 // same authority cell; they never duplicate or mint a raw host trait value.
 JetDriverBuildInputsStorage: struct {
-    transport: JetDriverBuildInputs
+    transport: JetDriverBuildInputs,
 }
 
 JetDriverSharedBuildInputs: struct {
-    storage: Shared<JetDriverBuildInputsStorage>
+    storage: Shared<JetDriverBuildInputsStorage>,
 
     resolve: fn(self, path: String) -[FS.Read]> JetDriverBuildPath JetDriverBuildInputError! {
         permit: self.storage.guard_read()
@@ -590,11 +590,11 @@ jet_driver_shared_build_inputs: fn(transport: &&JetDriverBuildInputs) -> JetDriv
 }
 
 JetDriverBuildHTTPInputsStorage: struct {
-    transport: JetDriverBuildHTTPInputs
+    transport: JetDriverBuildHTTPInputs,
 }
 
 JetDriverSharedBuildHTTPInputs: struct {
-    storage: Shared<JetDriverBuildHTTPInputsStorage>
+    storage: Shared<JetDriverBuildHTTPInputsStorage>,
 
     resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
         permit: self.storage.guard_read()
@@ -612,262 +612,262 @@ jet_driver_shared_build_http_inputs: fn(transport: &&JetDriverBuildHTTPInputs) -
 }
 
 JetDriverBuildHTTPResponse: struct {
-    status: Int
-    headers: [[U8]]
-    body: [U8]
+    status: Int,
+    headers: [[U8]],
+    body: [U8],
 }
 
 // Where an absolute path resolves with every link followed (`exists` false
 // when it names nothing), and what it is there.
 JetDriverBuildPath: struct {
-    exists: Bool
-    path: String
-    file: Bool
-    links: Int
+    exists: Bool,
+    path: String,
+    file: Bool,
+    links: Int,
 }
 
 // One directory entry, described without following a link.
 JetDriverBuildEntry: struct {
-    name: String
-    directory: Bool
-    file: Bool
+    name: String,
+    directory: Bool,
+    file: Bool,
 }
 
 JetDriverSourceUnit: struct {
-    root_index: Int
-    file_index: Int
-    root_identity: String
-    package_identity: String
-    module_name: String
-    path: String
-    relative_path: String
-    source_segments: [SemaSourceSegment]
-    source_origin: SemaSourceOrigin
+    root_index: Int,
+    file_index: Int,
+    root_identity: String,
+    package_identity: String,
+    module_name: String,
+    path: String,
+    relative_path: String,
+    source_segments: [SemaSourceSegment],
+    source_origin: SemaSourceOrigin,
     // A file of a `package.jet` package shares its package's
     // namespace. Loose files, one-file (inline Package) packages, embedded
     // Core sources, and synthetic modules have none.
-    in_namespace: Bool
+    in_namespace: Bool,
 }
 
 JetDriverPackageDependency: struct {
-    name: String
-    source: String
-    source_path: String
-    span: Span?
-    target_root_index: Int
-    script_version: String?{None}
+    name: String,
+    source: String,
+    source_path: String,
+    span: Span?,
+    target_root_index: Int,
+    script_version: String?{None},
 }
 
 JetDriverPackageEntry: struct {
-    module_alias: String?
-    function_name: String
-    source_path: String
-    span: Span?
+    module_alias: String?,
+    function_name: String,
+    source_path: String,
+    span: Span?,
 }
 
 // One declared `settings:` entry of a manifest (`tls: Bool = true`): its
 // type as written, its default's text (a string's decoded text) and the
 // entry's span in the manifest.
 JetDriverPackageSetting: struct {
-    name: String
-    ty: String
-    default: String
-    span: Span
+    name: String,
+    ty: String,
+    default: String,
+    span: Span,
 }
 
 // One `build: { <profile>: Build{ settings: { key: value } } }` entry: the
 // value the profile gives a declared setting, as text, and the entry's span
 // in the manifest.
 JetDriverProfileSetting: struct {
-    profile: String
-    name: String
-    value: String
-    span: Span
+    profile: String,
+    name: String,
+    value: String,
+    span: Span,
 }
 
 JetDriverPackageInfo: struct {
-    root_index: Int
-    root_path: String
-    identity: String
-    name: String
-    version: String?
-    edition: String
-    runtime_ceiling: RuntimeLayer?
-    allocator_policy: AllocatorPolicy
+    root_index: Int,
+    root_path: String,
+    identity: String,
+    name: String,
+    version: String?,
+    edition: String,
+    runtime_ceiling: RuntimeLayer?,
+    allocator_policy: AllocatorPolicy,
     // The `log:` field: the package's level filter, checked
     // (jet_driver_log_field); "" when it has none.
-    log_filter: String{""}
-    authority_allow: [String]?
-    authority_deny: [String]?
-    authority_needs: [String]
+    log_filter: String{""},
+    authority_allow: [String]?,
+    authority_deny: [String]?,
+    authority_needs: [String],
     // `authority.grants`: per-dependency rights the effect budget adds to
     // `allow` for that dependency's code.
-    authority_grants: [PackageGrant]{[PackageGrant]{}}
+    authority_grants: [PackageGrant]{[PackageGrant]{}},
     // The absolute paths `authority_allow`'s `FS.Read("<path>")` grants
     // confine the package's runs' reads to, each resolved at load against the
     // directory holding its manifest (Loader.jet jet_driver_package_read_scope).
-    authority_read_scope: [String]{[String]{}}
-    entry: JetDriverPackageEntry?
-    manifest_path: String?
+    authority_read_scope: [String]{[String]{}},
+    entry: JetDriverPackageEntry?,
+    manifest_path: String?,
     // The canonical Package policy reader's declarations; their source is the
     // physical manifest/carrier path, not the module's display path.
-    policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
-    policy_unsafe_paths: [String]?{None}
+    policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}},
+    policy_unsafe_paths: [String]?{None},
     // `policy.memory`: the package's kernel files; empty for a `package.jet`
     // that names none, None for a single program (no manifest, or an inline
     // package that names none), which is its own kernel.
-    policy_memory_kernel: [String]?{None}
-    policy_expert: Bool?{None}
+    policy_memory_kernel: [String]?{None},
+    policy_expert: Bool?{None},
     // `policy.lints.deny`: lint names that fail this package's build (E1293).
-    policy_lints_deny: [String]{[String]{}}
+    policy_lints_deny: [String]{[String]{}},
     // `policy.harden`: the package's fixed-timing code starts only on a
     // confirmed host (jet_driver_entry_harden).
-    policy_harden: Bool{false}
+    policy_harden: Bool{false},
     // The Package comes from a leading inline `package: { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
-    inline_package: Bool
+    inline_package: Bool,
     // Manifest inputs compose package facts, never ordinary source bindings.
-    configs: [String]
-    dependencies: [JetDriverPackageDependency]
+    configs: [String],
+    dependencies: [JetDriverPackageDependency],
     // The kinds the manifest's `outputs:` declare. A package
     // that declares a Library and no Executable has no `run: fn` (E0625).
-    outputs: JetDriverPackageOutputs
+    outputs: JetDriverPackageOutputs,
     // The declared `settings:` and the values `build:` profiles give them
     // (`#build.settings.*`, jet_driver_build_facts).
-    settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
-    profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
+    settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}},
+    profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}},
     // `boundaries: { deny: [...] }`: denied import edges
     // between this package's modules and any loaded module (Boundaries.jet).
-    boundaries: [ImportBoundary]{[ImportBoundary]{}}
+    boundaries: [ImportBoundary]{[ImportBoundary]{}},
     // The markers `package.jet`'s header writes on the package record, in
     // order, as the Jet parser reads them (spans in `manifest_path`); the
     // package site's rules (sema_marker_package_check).
-    markers: [Marker]{[Marker]{}}
+    markers: [Marker]{[Marker]{}},
 }
 
 JetDriverPackageOutputs: struct {
-    library: Bool
-    executable: Bool
+    library: Bool,
+    executable: Bool,
     // Owner ruling B: each Executable `entry: stem.run` names a member file
     // whose `run` stays its own, so it never joins the package namespace.
-    entry_modules: [String]
+    entry_modules: [String],
 }
 
 JetDriverSourceIndex: struct {
-    by_identity: [String:Int]
-    by_module_name: [String:Int]
-    ambiguous_module_names: [String:Bool]
-    by_path: [String:Int]
+    by_identity: [String:Int],
+    by_module_name: [String:Int],
+    ambiguous_module_names: [String:Bool],
+    by_path: [String:Int],
 }
 
 JetDriverSourceIndexResult: struct {
-    index: JetDriverSourceIndex
-    diagnostics: [Diagnostic]
-    complete: Bool
+    index: JetDriverSourceIndex,
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 JetDriverSourceFileCollection: struct {
-    files: [SourceFile]
-    diagnostics: [Diagnostic]
-    complete: Bool
+    files: [SourceFile],
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 JetDriverSourceCatalogResult: struct {
-    packages: [JetDriverPackageInfo]
-    source_units: [JetDriverSourceUnit]
-    entry_package_identity: String
-    diagnostics: [Diagnostic]
-    complete: Bool
+    packages: [JetDriverPackageInfo],
+    source_units: [JetDriverSourceUnit],
+    entry_package_identity: String,
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 JetDriverStage: enum {
-    Collect
-    Parse
-    Load
-    Check
-    Comptime
-    Lower
-    Assemble
-    Pass
-    Emit
+    Collect,
+    Parse,
+    Load,
+    Check,
+    Comptime,
+    Lower,
+    Assemble,
+    Pass,
+    Emit,
 }
 
 JetDriverLoadedModule: struct {
-    source_unit_index: Int
-    source_identity: String
-    package_identity: String
-    module_identity: ModuleID
-    module_name: String
-    program: Program
+    source_unit_index: Int,
+    source_identity: String,
+    package_identity: String,
+    module_identity: ModuleID,
+    module_name: String,
+    program: Program,
     // The dotted path of the `name: module` declarations that reach this
     // file from its package's root (`cache.store`); "" for a file no such
     // declaration names, which sits at the package root. SourceLocation's
     // `module` starts from it.
-    declared_module: String{""}
+    declared_module: String{""},
     // (jet_driver_bind_package_namespaces): the package
     // namespace of a member file ("" outside one), the names it contributes
     // in declaration order, the names it keeps to itself (a named entry's or
     // a command home's own command function), and the names of other members
     // its source can reach (jet_driver_namespace_reach).
-    namespace: String{""}
-    namespace_names: [String]{[String]{}}
-    namespace_private: [String]{[String]{}}
-    namespace_refs: [String]{[String]{}}
+    namespace: String{""},
+    namespace_names: [String]{[String]{}},
+    namespace_private: [String]{[String]{}},
+    namespace_refs: [String]{[String]{}},
     // A Core module's mentions of the catalog units, read from the Core
     // interface (CoreInterface.jet) in place of scanning its text; None
     // for a module whose text registration scans.
-    units_mentions: SemaUnitSourceMentions?{None}
+    units_mentions: SemaUnitSourceMentions?{None},
 }
 
 JetDriverCompileTrace: struct {
-    stdout: [String]
-    stderr: [String]
+    stdout: [String],
+    stderr: [String],
     // Each comptime item's JetEvalIRResult.debug_trace.
-    debug_trace: [String]{[String]{}}
-    soft_stop: Bool
-    exit_code: Int?
+    debug_trace: [String]{[String]{}},
+    soft_stop: Bool,
+    exit_code: Int?,
 }
 
 JetDriverLoadResult: struct {
-    package_identity: String
-    packages: [JetDriverPackageInfo]
-    source_units: [JetDriverSourceUnit]
-    entry_source_identity: String
-    entry_module_identity: ModuleID
+    package_identity: String,
+    packages: [JetDriverPackageInfo],
+    source_units: [JetDriverSourceUnit],
+    entry_source_identity: String,
+    entry_module_identity: ModuleID,
     // Every module identity the load met (loaded modules and import
     // targets), interned as met: each `module_identity` here and downstream
     // is an id into this table.
-    module_table: ModuleTable
-    modules: [JetDriverLoadedModule]
-    imports: [SemaRegistrationImportEdge]
-    source_files: [SourceFile]
-    generated_source_files: [SourceFile]
-    diagnostics: [Diagnostic]
-    failed_stage: JetDriverStage?
-    complete: Bool
+    module_table: ModuleTable,
+    modules: [JetDriverLoadedModule],
+    imports: [SemaRegistrationImportEdge],
+    source_files: [SourceFile],
+    generated_source_files: [SourceFile],
+    diagnostics: [Diagnostic],
+    failed_stage: JetDriverStage?,
+    complete: Bool,
     // A load the compiler itself got wrong (a restored Core function with no
     // body, CoreInterface.jet jet_driver_core_restore_check): the compile
     // reports it as an internal compiler error.
-    internal_problem: String?{None}
+    internal_problem: String?{None},
     // Canonical parser/load facts, available without checking callable bodies;
     // only a source query fills it (SourceQueries `jet_driver_load_with_names`).
-    names: NameLedger?{None}
+    names: NameLedger?{None},
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
-    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
-    build_program: TComptimeValue?{None}
+    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}},
+    build_program: TComptimeValue?{None},
     // Whether a loaded unit outside Core spells the word `program` or
     // `compiler` outside its comments, strings included (Loader.jet). A body
     // reads the whole-program view only by naming the Build context's
     // `program` field, or through the `Compiler` value `b.compiler` makes,
     // whose `meta.events` hears that program's functions; the staging
     // compile of `build: fn` snapshots the view only then.
-    spells_program: Bool{true}
-    build_nodes: [BuildGraphNode]?{None}
+    spells_program: Bool{true},
+    build_nodes: [BuildGraphNode]?{None},
     // The entry package's member files that declare a top-level `run: fn`
     // (Loader.jet `jet_driver_run_member_paths`).
-    run_member_paths: [String]{[String]{}}
+    run_member_paths: [String]{[String]{}},
     // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal.
-    typed_goals: Bool{false}
+    typed_goals: Bool{false},
 }
 
 // The entry package's written authority policy, for the host's application
@@ -876,111 +876,111 @@ JetDriverLoadResult: struct {
 // `inline_package` marks a leading `package: { … }` block, whose carrier file is
 // `manifest_path`.
 JetDriverAuthorityPolicy: struct {
-    manifest_path: String?
-    inline_package: Bool
-    allow: [String]?
-    deny: [String]?
+    manifest_path: String?,
+    inline_package: Bool,
+    allow: [String]?,
+    deny: [String]?,
     // The package's declared name: the subject a workspace build grant names.
-    subject: String{""}
+    subject: String{""},
     // The absolute paths the package's `FS.Read("<path>")` grants confine its
     // runs' reads to (JetDriverPackageInfo.authority_read_scope).
-    read_scope: [String]{[String]{}}
+    read_scope: [String]{[String]{}},
     // `authority.needs`: the rights a plugin's host imports may use.
-    needs: [String]{[String]{}}
+    needs: [String]{[String]{}},
 }
 
 JetDriverCompileResult: struct {
-    diagnostics: [Diagnostic]
-    generated_source_files: [SourceFile]
-    package_identity: String
-    entry_module_identity: String
+    diagnostics: [Diagnostic],
+    generated_source_files: [SourceFile],
+    package_identity: String,
+    entry_module_identity: String,
     // The effects the checked entry function requires: its own declared
     // effects and those of every function it reaches through call edges.
-    entry_effects: [String]{[String]{}}
+    entry_effects: [String]{[String]{}},
     // A build's or a run's inferred effect row of each package the entry
     // reaches (`root` the building package), when the build has a dependency
     // or writes a package effect budget; the project lock records each
     // dependency's (Jetpack pkg_lock_record_effect_rows).
-    package_effects: [PackageEffects]{[PackageEffects]{}}
-    comptime_stdout: String
-    comptime_stderr: String
+    package_effects: [PackageEffects]{[PackageEffects]{}},
+    comptime_stdout: String,
+    comptime_stderr: String,
     // The `debug` trace lines compile-time code printed while compiling, in
     // evaluation order; the CLI writes them to stderr (Request.jet
     // jet_cli_comptime_debug_trace).
-    comptime_debug_trace: String{""}
-    soft_stop: Bool
-    exit_code: Int?
-    failed_stage: JetDriverStage?
-    complete: Bool
-    internal_problem: String?
+    comptime_debug_trace: String{""},
+    soft_stop: Bool,
+    exit_code: Int?,
+    failed_stage: JetDriverStage?,
+    complete: Bool,
+    internal_problem: String?,
     // JET_KEEP_GOING (jet_driver_compile_keep_going): every failure the
     // compile recorded, one TSV row each: phase, item, code, message, span.
-    keep_going_rows: [String]{[String]{}}
-    authority_policy: JetDriverAuthorityPolicy?{None}
+    keep_going_rows: [String]{[String]{}},
+    authority_policy: JetDriverAuthorityPolicy?{None},
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
-    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}},
     // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal, so
     // `jet check` prints the goal cards from a Doc projection.
-    typed_goals: Bool{false}
+    typed_goals: Bool{false},
     // `JetDriverCompileMode.Doc` that fails after registration: the structure
     // facts the registration graph already proved (Sema
     // `sema_name_structure_facts`), so `jet inspect structure` prints them
     // ahead of the failure diagnostics. A complete Doc compile carries the
     // same rows in its modules' NameLedger instead; other modes leave this empty.
-    structure_facts: [StructureFact]{[StructureFact]{}}
+    structure_facts: [StructureFact]{[StructureFact]{}},
     // `JetDriverCompileMode.Comptime`: every build-time value the comptime
     // stage produced, constants included. Empty in the other modes.
-    comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
-    build_program: TComptimeValue?{None}
-    build_nodes: [BuildGraphNode]?{None}
-    cost_report: TCostReport?{None}
-    cost_gaps: [String]{[String]{}}
+    comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}},
+    build_program: TComptimeValue?{None},
+    build_nodes: [BuildGraphNode]?{None},
+    cost_report: TCostReport?{None},
+    cost_gaps: [String]{[String]{}},
     // Checked signature facts retain helper identity order. Realization for
     // check/run/build is a CLI host action, never a compiler process probe.
-    rust_foreign: JetDriverRustForeignFacts{jet_driver_rust_foreign_empty()}
+    rust_foreign: JetDriverRustForeignFacts{jet_driver_rust_foreign_empty()},
     // The native link facts of the checked foreign declarations (C provider
     // libraries, inline C bodies), read by the host's C link closure.
-    foreign_link: JetDriverForeignLinkFacts{jet_driver_foreign_link_empty()}
+    foreign_link: JetDriverForeignLinkFacts{jet_driver_foreign_link_empty()},
     // The request's trace sink, handed back by the host's compile
     // (JetCLI Request.jet `jet_cli_compile_prepared`) so the host's own
     // phases after it (the native backend route) trace through the same sink.
-    trace_sink: CompilerTraceSink?{None}
+    trace_sink: CompilerTraceSink?{None},
     // The request's compiler threads, handed back by the host's compile
     // (JetCLI Request.jet `jet_cli_compile_prepared`) so the native backend
     // route after it compiles on the same threads.
-    compiler_threads: CompilerThreads{compiler_threads_single()}
+    compiler_threads: CompilerThreads{compiler_threads_single()},
     // The entry package's member files that declare a top-level `run: fn`,
     // from the load's parse (JetDriverLoadResult.run_member_paths).
-    run_member_paths: [String]{[String]{}}
+    run_member_paths: [String]{[String]{}},
     // The entry package's `allocator:` policy (jet_driver_entry_allocator).
-    allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
+    allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault},
     // The entry package's `log:` level filter (jet_driver_entry_log).
-    log_filter: String{""}
+    log_filter: String{""},
     // The entry package's `policy.harden` (jet_driver_entry_harden).
-    harden: Bool{false}
+    harden: Bool{false},
     // A compile through assembly: the encoded JetCommandSchema record its
     // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
-    command_record: [U8]{[U8]{}}
+    command_record: [U8]{[U8]{}},
     // Every comptime input the compile read (`embed_file`, `embed_bytes`,
     // `find`), in read order, when the host logged them (JetCLI Request.jet
     // jet_cli_compile_executable): the `jet build` store key and `jet dev`'s
     // change test cover each, so editing one rebuilds.
-    comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
+    comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}},
     // The check's compile state under `hold_check_state`
     // (Pipeline.jet JetDriverHeldState); None otherwise. Nothing reads it.
-    held: JetDriverHeldState?{None}
+    held: JetDriverHeldState?{None},
     // Whether the compile's Core is the Core this jet was built with: the
     // jet carries its runtime image and no toolchain tree's Core differs
     // (JetCLI Request.jet jet_cli_compile_executable). Only then is its Core
     // the code the runtime image carries, so only then does the native route
     // bind its Core calls there (JetCLI Host.jet).
-    core_built_in: Bool{false}
+    core_built_in: Bool{false},
     // The first pass of a program with a root `#loop` over a module value
     // computed while building (JetSema UserTemplates.jet
     // SemaRootLoopValue): the values it computed, which the compile's
     // second pass expands the loops over (Pipeline.jet
     // jet_driver_compile_stages). None for every other compile.
-    root_loop_values: [SemaRootLoopValue]?{None}
+    root_loop_values: [SemaRootLoopValue]?{None},
 }
 
 // The `allocator:` policy of the entry package of `load`
@@ -1017,7 +1017,7 @@ JetDriverKeepGoing: struct {
     // `<phase>:<name>@<position>`: `lower` positions index the lowering
     // list, `emit` positions the optimized program's functions (the
     // `index` of the trace's `lower.function`/`emit.function` spans).
-    skip: [String]
+    skip: [String],
 }
 
 jet_driver_source_identity: fn(package_identity: String, path: String) -> String Never! {
@@ -1194,8 +1194,8 @@ jet_driver_build_source_index: fn(source_units: [JetDriverSourceUnit]) -> JetDri
 // root identity, root-relative path, and SHA-256 of its exact bytes. Equal
 // digests mean the recorded diagnostics are this request's diagnostics.
 JetDriverReceipt: struct {
-    closure: String
-    diagnostics: [Diagnostic]
+    closure: String,
+    diagnostics: [Diagnostic],
 }
 
 jet_driver_receipt_field: fn(label: String, value: String) -> String Never! {

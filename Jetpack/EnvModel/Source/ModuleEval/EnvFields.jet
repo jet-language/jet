@@ -53,13 +53,13 @@ use {
 
 // Everything one `env.<name>` contribution produced besides dev services.
 EnvCapture: struct {
-    entry: EntryContribution
-    secrets: [SecretSpec]
-    adapters: [AdapterPlan]
-    lifecycle: EnvironmentLifecycle
-    presets: [PresetSpec]
-    languages: [LanguageSpec]
-    files: [ManagedFile]
+    entry: EntryContribution,
+    secrets: [SecretSpec],
+    adapters: [AdapterPlan],
+    lifecycle: EnvironmentLifecycle,
+    presets: [PresetSpec],
+    languages: [LanguageSpec],
+    files: [ManagedFile],
 }
 
 // Files one `env.<name>` capture: its environment-scoped facts under `path`,
@@ -83,14 +83,14 @@ envmodel_file_env_capture: fn(capture: &&EnvCapture, path: String, reads: &&[Env
 
 // How one `Env` field is lowered.
 EnvFieldKind: enum {
-    Packages
-    Prompt
-    Secrets
-    Presets
-    Languages
-    Files
-    Lifecycle
-    Setting
+    Packages,
+    Prompt,
+    Secrets,
+    Presets,
+    Languages,
+    Files,
+    Lifecycle,
+    Setting,
 
     classify: fn(name: String) -> EnvFieldKind Never! {
         if name == {
@@ -382,9 +382,9 @@ envmodel_expression_name: fn(expr: Expr) -> String Never! {
 
 // The fixed fields of a structured `Prompt{ … }` record.
 PromptField: enum {
-    Label
-    Path
-    Strip
+    Label,
+    Path,
+    Strip,
 
     parse: fn(name: String) -> PromptField? Never! {
         if name == {

@@ -24,10 +24,10 @@ OVERLAY_NO_NEWLINE_MARKER: "\\ No newline at end of file"
 
 // Pinned identity of one opened input.
 OverlayInputIdentity: struct {
-    length: Int
-    modified_ns: Int
-    id: FileID
-    links: Int
+    length: Int,
+    modified_ns: Int,
+    id: FileID,
+    links: Int,
 }
 
 ENV_OVERLAY_HARD_LINKED: "is hard-linked (multiple directory entries)"
@@ -45,30 +45,30 @@ env_overlay_io: fn(cause: String) -> IOError Never! {
 
 // One opened input file and the bytes read from that same handle.
 OverlayHeldFile: struct {
-    path: String
-    parent: CheckedDirectory
-    name: String
-    handle: FileReader
-    identity: OverlayInputIdentity
-    mode: Int
-    bytes: [U8]
+    path: String,
+    parent: CheckedDirectory,
+    name: String,
+    handle: FileReader,
+    identity: OverlayInputIdentity,
+    mode: Int,
+    bytes: [U8],
 }
 
 // One patched file waiting for commit: its original and patched bytes.
 OverlayStagedFile: struct {
-    path: String
-    parent: CheckedDirectory
-    name: String
-    input: FileReader
-    identity: OverlayInputIdentity
-    mode: Int
-    original: [U8]
-    output: [U8]
+    path: String,
+    parent: CheckedDirectory,
+    name: String,
+    input: FileReader,
+    identity: OverlayInputIdentity,
+    mode: Int,
+    original: [U8],
+    output: [U8],
 }
 
 // The staged files of one application, keyed by normalized relative path.
 OverlayStage: struct {
-    entries: [String:OverlayStagedFile]
+    entries: [String:OverlayStagedFile],
 
     new: fn() -> OverlayStage Never! { OverlayStage{entries: [String:OverlayStagedFile]{}} }
 
@@ -83,7 +83,7 @@ OverlayStage: struct {
 
 // A held authority root: patches and patched files open below it only.
 OverlayAuthority: struct {
-    resolver: AuthorityResolver
+    resolver: AuthorityResolver,
 
     open: fn(path: String, label: String) -[FS, Env]> OverlayAuthority OverlayError! {
         resolver: AuthorityResolver.open(path) ?? return Err(OverlayError.IO("could not open {label} authority `{path}`: {err.message()}"))

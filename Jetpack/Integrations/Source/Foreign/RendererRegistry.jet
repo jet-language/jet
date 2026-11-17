@@ -14,8 +14,8 @@ use jet_pkg_model.[
 // Shared response protocol used by generated worker bindings: a
 // machine-readable response plus a human-readable explanation for the CLI.
 DecoderProtocol: enum {
-    StandardEnvelope
-    LuaRawJSON
+    StandardEnvelope,
+    LuaRawJSON,
 }
 
 // Supervised workers return `{ok, value}` and use the shared status map.
@@ -71,11 +71,11 @@ pkg_render_lua_decode_status: fn(error: String) -> String Never! {
 // One active generated response binder: its canonical descriptor key, its
 // response protocol, and the probe that renders a representative binding.
 RendererDescriptor: struct {
-    language: ForeignLanguage
-    runtime: BinderRuntime
-    stub_kind: BindingStubKind
-    protocol: DecoderProtocol
-    render_probe: fn() -> String
+    language: ForeignLanguage,
+    runtime: BinderRuntime,
+    stub_kind: BindingStubKind,
+    protocol: DecoderProtocol,
+    render_probe: fn() -> String,
 }
 
 // One entry per active generated response binder. A function, not a `#run`

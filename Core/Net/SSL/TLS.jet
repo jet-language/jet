@@ -1255,8 +1255,8 @@ ssl_sig_alg_is_offered: fn(ssl: ssldefs.SSLContext, proposed_sig_alg: Int) -> Bo
 
 /// A signature algorithm's key type and digest.
 SSLSigAlgParts: struct {
-    pk_type: oids.PKType
-    md_alg: hashes.Md
+    pk_type: oids.PKType,
+    md_alg: hashes.Md,
 }
 
 /// The key type and digest of a signature algorithm
@@ -2263,8 +2263,8 @@ ssl_parse_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
 
 // An alert to send and the error to fail with.
 SSLAlertFailure: struct {
-    alert: Int
-    reason: ssldefs.SSLError
+    alert: Int,
+    reason: ssldefs.SSLError,
 }
 
 // The Finished message's checks: a Finished of the right length whose
@@ -2788,11 +2788,11 @@ vec_wycheproof_pin: fn(name: String) -> String Never! {
 /// because the DER reader takes BER lengths and INTEGERs without their sign
 /// byte, as the C reader does.
 VecTally: struct {
-    what: String
-    pass: Int
-    fail: Int
-    lenient: Int
-    failures: [String]
+    what: String,
+    pass: Int,
+    fail: Int,
+    lenient: Int,
+    failures: [String],
 }
 
 vec_tally: fn(what: String) -> VecTally Never! {
@@ -2861,9 +2861,9 @@ vec_rng: fn() -> drbg.HMACDrbg Never! {
 /// One blank-line-separated paragraph of a response file: the bracketed
 /// header lines of its section, joined, and its lines in order.
 VecRecord: struct {
-    section: String
-    names: [String]
-    values: [String]
+    section: String,
+    names: [String],
+    values: [String],
 }
 
 /// The paragraphs of Tests/Vectors/Nist/`file` that hold fields.
@@ -3832,7 +3832,7 @@ vec_expert_ed25519_verifies: fn(public: [U8], msg: [U8], sig: [U8]) -> Bool {
 /// xorshift64 (Marsaglia 2003) picks the classes and makes the random inputs:
 /// they must not correlate with the timings, and need not be unpredictable.
 CtRand: struct {
-    s: U64
+    s: U64,
 
     // The same xorshift as a premaster's random source, for timings that must
     // not carry an HMAC_DRBG's own spread.
@@ -4310,9 +4310,9 @@ ct_rsa_kx_after_private: fn<R: RNG>(ssl: &ssldefs.SSLContext, block: [U8], rng: 
 /// The blocks a timing after the private operation takes in turn: 16 good
 /// and 16 bad, of each kind in turn.
 CtKxBlocks: struct {
-    good: [[U8]]
-    bad: [[U8]]
-    turn: Int
+    good: [[U8]],
+    bad: [[U8]],
+    turn: Int,
 }
 
 /// One timed run: the input (255, 255), the fixed class's, takes the next
@@ -4420,10 +4420,10 @@ ct_oaep_sealed: fn(key: &rsa.RSAContext, r: &CtRand, label: [U8], kind: Int) -> 
 /// The blocks an OAEP timing after the private operation takes in turn: 16
 /// good and 16 bad, of each kind in turn.
 CtOaepBlocks: struct {
-    good: [[U8]]
-    bad: [[U8]]
-    turn: Int
-    label: [U8]
+    good: [[U8]],
+    bad: [[U8]],
+    turn: Int,
+    label: [U8],
 }
 
 /// One timed run: the input (255, 255), the fixed class's, takes the next

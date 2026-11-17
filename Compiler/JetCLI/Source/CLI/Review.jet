@@ -45,157 +45,157 @@ use {
 
 // `kind` and `alignment` hold the stable names (`added`, `matched`...).
 JetCLIReviewOp: struct {
-    kind: String
-    stable_id: String
-    identity: String
-    before: String?
-    after: String?
-    before_identity: String?
-    after_identity: String?
-    alignment: String
-    source_operation: String?
+    kind: String,
+    stable_id: String,
+    identity: String,
+    before: String?,
+    after: String?,
+    before_identity: String?,
+    after_identity: String?,
+    alignment: String,
+    source_operation: String?,
 }
 
 JetCLIReviewPair: struct {
-    before_index: Int
-    after_index: Int
+    before_index: Int,
+    after_index: Int,
 }
 
 JetCLIReviewInput: struct {
-    path: String
-    digest: String
+    path: String,
+    digest: String,
 }
 
 // Each list is a sorted set.
 JetCLIReviewFact: struct {
-    key: String
-    display: [String]
-    granted: [String]
-    denied: [String]
-    terms: [String]
+    key: String,
+    display: [String],
+    granted: [String],
+    denied: [String],
+    terms: [String],
 }
 
 JetCLIReviewAuthorityChange: struct {
-    status: String
-    key: String
-    before: String?
-    after: String?
+    status: String,
+    key: String,
+    before: String?,
+    after: String?,
 }
 
 JetCLIReviewSide: struct {
-    path: String
-    inputs: [JetCLIReviewInput]
-    closure: String
-    index: SemIndex
-    failures: [JetCLIFailureFunction]
-    authority: [JetCLIReviewFact]
-    source_hash: String
-    semantic_ops: [JetCLISemOp]
+    path: String,
+    inputs: [JetCLIReviewInput],
+    closure: String,
+    index: SemIndex,
+    failures: [JetCLIFailureFunction],
+    authority: [JetCLIReviewFact],
+    source_hash: String,
+    semantic_ops: [JetCLISemOp],
 }
 
 JetCLIReviewLoaded: enum {
-    Loaded(side: JetCLIReviewSide)
-    Failed(message: String)
-    Refused(output: JetDriverVerbOutput)
+    Loaded(side: JetCLIReviewSide),
+    Failed(message: String),
+    Refused(output: JetDriverVerbOutput),
 }
 
 JetCLIReviewIdentity: struct {
-    source: String
-    build: String
-    run: String
-    target: String
+    source: String,
+    build: String,
+    run: String,
+    target: String,
 }
 
 // Its observation is present when it names an event or (only without one) a
 // counterexample.
 JetCLIReviewDerivation: struct {
-    id: String
-    subject: String
-    claim: String
-    producer: String
-    method: String
-    rule: String
-    premises: [String]
-    identity: JetCLIReviewIdentity
-    assumptions: [String]
-    disposition: String
-    event: String?
-    counterexample: String?
+    id: String,
+    subject: String,
+    claim: String,
+    producer: String,
+    method: String,
+    rule: String,
+    premises: [String],
+    identity: JetCLIReviewIdentity,
+    assumptions: [String],
+    disposition: String,
+    event: String?,
+    counterexample: String?,
 }
 
 JetCLIReviewObservation: struct {
-    contract: String
-    inputs: String
-    environment: String
-    premises: String
-    event: String?
-    result: String
-    source: String
-    identity: JetCLIReviewIdentity?
-    order: Int
+    contract: String,
+    inputs: String,
+    environment: String,
+    premises: String,
+    event: String?,
+    result: String,
+    source: String,
+    identity: JetCLIReviewIdentity?,
+    order: Int,
 }
 
 JetCLIReviewClaim: struct {
-    key: String
-    label: String
-    outcome: String
-    state: String
-    proven: Bool
-    derivation: JetCLIReviewDerivation?
-    observation: JetCLIReviewObservation?
-    order: Int
+    key: String,
+    label: String,
+    outcome: String,
+    state: String,
+    proven: Bool,
+    derivation: JetCLIReviewDerivation?,
+    observation: JetCLIReviewObservation?,
+    order: Int,
 }
 
 JetCLIReviewProof: struct {
-    path: String
-    digest: String
+    path: String,
+    digest: String,
 }
 
 // `claims` is sorted by key.
 JetCLIReviewReceipt: struct {
-    recorded: Bool
-    claims: [JetCLIReviewClaim]
-    claim_key: String?
-    proof: JetCLIReviewProof?
+    recorded: Bool,
+    claims: [JetCLIReviewClaim],
+    claim_key: String?,
+    proof: JetCLIReviewProof?,
 }
 
 JetCLIReviewChange: struct {
-    status: String
-    key: String
-    before: JetCLIReviewClaim?
-    after: JetCLIReviewClaim?
+    status: String,
+    key: String,
+    before: JetCLIReviewClaim?,
+    after: JetCLIReviewClaim?,
 }
 
 JetCLIReviewComparison: struct {
-    status: String
-    key: String
-    reason: String
-    before: JetCLIReviewObservation?
-    after: JetCLIReviewObservation?
-    subject: String?
-    source_operation: String?
+    status: String,
+    key: String,
+    reason: String,
+    before: JetCLIReviewObservation?,
+    after: JetCLIReviewObservation?,
+    subject: String?,
+    source_operation: String?,
 }
 
 JetCLIReviewDiff: struct {
-    base_recorded: Bool
-    head_recorded: Bool
-    gained: Int
-    lost: Int
-    changed: Int
-    retained: Int
-    changes: [JetCLIReviewChange]
-    preserved: [JetCLIReviewChange]
-    changed_contracts: [JetCLIReviewChange]
-    first_difference: JetCLIReviewComparison?
-    sampled_agreements: [JetCLIReviewComparison]
-    unknown: [JetCLIReviewComparison]
-    unproved: [JetCLIReviewComparison]
+    base_recorded: Bool,
+    head_recorded: Bool,
+    gained: Int,
+    lost: Int,
+    changed: Int,
+    retained: Int,
+    changes: [JetCLIReviewChange],
+    preserved: [JetCLIReviewChange],
+    changed_contracts: [JetCLIReviewChange],
+    first_difference: JetCLIReviewComparison?,
+    sampled_agreements: [JetCLIReviewComparison],
+    unknown: [JetCLIReviewComparison],
+    unproved: [JetCLIReviewComparison],
 }
 
 // The receipt flag's value, or the usage problem that refused it.
 JetCLIReviewOption: struct {
-    value: String?
-    problem: String?
+    value: String?,
+    problem: String?,
 }
 
 JET_CLI_REVIEW_NO_ORDER: 9223372036854775807
@@ -1397,33 +1397,33 @@ jet_cli_review_verdict: fn(authority: [JetCLIReviewAuthorityChange], receipts: J
 // propagates by `?`, `?(text)` or by itself. `callee` names the function the
 // call reaches; `site` is `file:line`, at byte `offset` of the file.
 JetCLIFailurePoint: struct {
-    callee: String
-    site: String
-    offset: Int
+    callee: String,
+    site: String,
+    offset: Int,
 }
 
 // One checked function, `module.local`: whether its solved failure carrier
 // lets it fail, and its failure points in source order.
 JetCLIFailureFunction: struct {
-    function: String
-    can_fail: Bool
-    points: [JetCLIFailurePoint]
+    function: String,
+    can_fail: Bool,
+    points: [JetCLIFailurePoint],
 }
 
 // `status` is `new`, `kept` or `gone`.
 JetCLIFailurePointChange: struct {
-    status: String
-    callee: String
-    site: String
+    status: String,
+    callee: String,
+    site: String,
 }
 
 // A function that fails differently after the change: whether it can fail on
 // each side (None on a side without it) and its failure points on both.
 JetCLIFailureChange: struct {
-    function: String
-    before: Bool?
-    after: Bool?
-    points: [JetCLIFailurePointChange]
+    function: String,
+    before: Bool?,
+    after: Bool?,
+    points: [JetCLIFailurePointChange],
 }
 
 jet_cli_failure_carrier_fails: fn(carrier: TFailureCarrier) -> Bool Never! {
@@ -1903,44 +1903,44 @@ jet_cli_review_json: fn(base: JetCLIReviewSide, head: JetCLIReviewSide, base_rec
 // ---- `--diagnostics` (run_diagnostic_review) ----
 
 JetCLIReviewDiagnosticSide: struct {
-    path: String
-    source_hash: String
-    scope_root: String?
-    entry_scope: String
-    revisions: [String:String]
-    diagnostics: [Diagnostic]
-    valid: Bool
-    complete: Bool
+    path: String,
+    source_hash: String,
+    scope_root: String?,
+    entry_scope: String,
+    revisions: [String:String],
+    diagnostics: [Diagnostic],
+    valid: Bool,
+    complete: Bool,
 }
 
 JetCLIReviewDiagnosticLoaded: enum {
-    Loaded(side: JetCLIReviewDiagnosticSide)
-    Failed(message: String)
-    Refused(output: JetDriverVerbOutput)
+    Loaded(side: JetCLIReviewDiagnosticSide),
+    Failed(message: String),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // One diagnostic of a side (`index` into its diagnostics) with its scope and,
 // when it has a span, its occurrence identity.
 JetCLIReviewOccurrence: struct {
-    index: Int
-    code: String
-    scope: String
-    identity: String?
+    index: Int,
+    code: String,
+    scope: String,
+    identity: String?,
 }
 
 // A relation between occurrences, by index into each side's occurrences.
 JetCLIReviewRelation: struct {
-    status: String
-    reason: String
-    base: Int?
-    head: Int?
+    status: String,
+    reason: String,
+    base: Int?,
+    head: Int?,
 }
 
 JetCLIReviewDiagnosticDiff: struct {
-    new: [JetCLIReviewRelation]
-    existing: [JetCLIReviewRelation]
-    resolved: [JetCLIReviewRelation]
-    unknown: [JetCLIReviewRelation]
+    new: [JetCLIReviewRelation],
+    existing: [JetCLIReviewRelation],
+    resolved: [JetCLIReviewRelation],
+    unknown: [JetCLIReviewRelation],
 }
 
 jet_cli_review_diagnostics: fn(argv: [String], json: Bool, color: Bool) -> JetDriverVerbOutput {

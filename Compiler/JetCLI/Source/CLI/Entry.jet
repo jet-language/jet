@@ -83,23 +83,23 @@ JET_CLI_STOCK_ENTRIES: [String]{"run.jet", "src/run.jet"}
 // One resolved entry: the file and, when a Package rule chose it, the function
 // the command starts.
 JetCLIEntry: struct {
-    path: String
-    callable: String?
+    path: String,
+    callable: String?,
 }
 
 JetCLIEntryFound: enum {
-    Entry(entry: JetCLIEntry)
-    Absent
-    Refused(plan: JetCLIPlan)
+    Entry(entry: JetCLIEntry),
+    Absent,
+    Refused(plan: JetCLIPlan),
 }
 
 // What a workspace check compiles: the entry of each member no other member
 // depends on, or the refusal that stopped the scan. Absent when the
 // directory is not a workspace index.
 JetCLIWorkspaceCheck: enum {
-    Absent
-    Members(entries: [String])
-    Refused(plan: JetCLIPlan)
+    Absent,
+    Members(entries: [String]),
+    Refused(plan: JetCLIPlan),
 }
 
 // No package, workspace, or stock entry applies.
@@ -107,71 +107,71 @@ JetCLIWorkspaceCheck: enum {
 // A command target after resolution: the file to read, its callable, and the
 // stderr notices resolution wrote (a migrated retired entry).
 JetCLITarget: enum {
-    File(path: String, callable: String?, notice: String)
-    Refused(plan: JetCLIPlan)
+    File(path: String, callable: String?, notice: String),
+    Refused(plan: JetCLIPlan),
 }
 
 // The Package facts entry resolution reads from `package.jet` (or an inline
 // `package: { }` body): its name, its member references, its typed outputs,
 // and the `defaults:` run selection. `origin` is the manifest path.
 JetCLIManifest: struct {
-    name: String
-    origin: String
-    members: [JetCLIMemberRef]
-    outputs: [JetCLIOutputFact]
-    default_run: String?
+    name: String,
+    origin: String,
+    members: [JetCLIMemberRef],
+    outputs: [JetCLIOutputFact],
+    default_run: String?,
     // `build: { fast: Build{ optimize: O2 } }`: each profile's fields that
     // name a build-option row (JET_BUILD_OPTIONS), as written.
-    profiles: [JetCLIBuildProfile]
+    profiles: [JetCLIBuildProfile],
 }
 
 JetCLIBuildProfile: struct {
-    name: String
-    fields: [JetCLIProfileField]
+    name: String,
+    fields: [JetCLIProfileField],
 }
 
 JetCLIProfileField: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
     // `libs: ["z", "bz2"]`: a list of strings, its value the items joined by
     // newlines (a List build option's value, build_option_list_value).
-    list: Bool
+    list: Bool,
 }
 
 JetCLIMemberRef: struct {
-    path: String
-    find: Bool
+    path: String,
+    find: Bool,
 }
 
 JetCLIOutputFact: struct {
-    name: String
-    kind: String
-    entry: String?
+    name: String,
+    kind: String,
+    entry: String?,
 }
 
 JetCLIWorkspaceMember: struct {
-    name: String
-    path: String
+    name: String,
+    path: String,
 }
 
 JetCLIWorkspaceSource: enum {
-    Absent
-    Index(path: String)
-    Authority(path: String)
-    Failed(plan: JetCLIPlan)
+    Absent,
+    Index(path: String),
+    Authority(path: String),
+    Failed(plan: JetCLIPlan),
 }
 
 // The member index (`package.jet` with `members:`, or `workspace.jet`).
 // A `workspace: module` authority with no member list.
 JetCLIRootFound: enum {
-    Root(path: String)
-    Absent
-    Refused(plan: JetCLIPlan)
+    Root(path: String),
+    Absent,
+    Refused(plan: JetCLIPlan),
 }
 
 JetCLIWorkspacePlan: enum {
-    Members(members: [JetCLIWorkspaceMember])
-    Refused(plan: JetCLIPlan)
+    Members(members: [JetCLIWorkspaceMember]),
+    Refused(plan: JetCLIPlan),
 }
 
 // `root` joined with a root-relative path.
@@ -626,10 +626,10 @@ jet_cli_relative_parent: fn(relative: String) -> String Never! {
 jet_cli_runnable_kind: fn(kind: String) -> Bool Never! { kind == "Executable" || kind == "Service" }
 
 JetCLIStockEntry: enum {
-    Found(entry: JetCLIEntry)
-    Absent
-    Failed(message: String)
-    Unported(shape: String)
+    Found(entry: JetCLIEntry),
+    Absent,
+    Failed(message: String),
+    Unported(shape: String),
 }
 
 // The Package rule failed with this message. A shape this port does not read
@@ -1167,14 +1167,14 @@ jet_cli_workspace_member_entry: fn(member_root: String, scanned: JetCLIEntry, fr
 // the entry each runs and whether its stock entry (not a command override)
 // chose it.
 JetCLIWorkspaceRunnable: struct {
-    members: [JetCLIWorkspaceMember]
-    entries: [JetCLIEntry]
-    stocks: [Bool]
+    members: [JetCLIWorkspaceMember],
+    entries: [JetCLIEntry],
+    stocks: [Bool],
 }
 
 JetCLIWorkspaceRunnableFound: enum {
-    Found(runnable: JetCLIWorkspaceRunnable)
-    Refused(plan: JetCLIPlan)
+    Found(runnable: JetCLIWorkspaceRunnable),
+    Refused(plan: JetCLIPlan),
 }
 
 // The runnable members of `members` (a workspace rooted at `root`). The
@@ -1332,9 +1332,9 @@ jet_cli_workspace_check_entries: fn(dir: String, color: Bool, notices: &[String]
 // index order. Absent when the directory is not a workspace index or at
 // most one member can run, which resolves as a bare `jet test` does.
 JetCLIWorkspaceTest: enum {
-    Absent
-    Members(names: [String], directories: [String])
-    Refused(plan: JetCLIPlan)
+    Absent,
+    Members(names: [String], directories: [String]),
+    Refused(plan: JetCLIPlan),
 }
 
 jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {

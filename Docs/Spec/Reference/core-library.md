@@ -658,10 +658,10 @@ ordering, Map lookup and Set membership:
 
 ```jet
 Email: struct {
-    address: String
+    address: String,
 
     impl KeyBy {
-        Key: String
+        Key: String,
 
         key: fn(self) -> String { self.address.lower() }
     }
@@ -1130,13 +1130,13 @@ They are bare bounds, so `fn<R: Reader>` needs no import:
 
 ```jet
 Reader: trait {
-    read_bytes: fn(&self, limit: Int) -> [U8] IOError!
-    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
+    read_bytes: fn(&self, limit: Int) -> [U8] IOError!,
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!,
 }
 
 Writer: trait {
-    write_bytes: fn(&self, bytes: [U8]) IOError!
-    flush: fn(&self) IOError!
+    write_bytes: fn(&self, bytes: [U8]) IOError!,
+    flush: fn(&self) IOError!,
     write: fn(&self, text: String) IOError! {
         self.write_bytes(text.bytes())
     }
@@ -2488,8 +2488,8 @@ through.
 
 ```jet
 Sale: struct {
-    item: String
-    amount: Float
+    item: String,
+    amount: Float,
 }
 
 run: fn() {
@@ -2590,8 +2590,8 @@ values rather than pre-rendering them.
 use reflect: core.reflect
 
 Point: struct {
-    x: Int
-    y: Int
+    x: Int,
+    y: Int,
 
     impl Display {
         display: fn(self) -> String { "({self.x}, {self.y})" }
@@ -4476,8 +4476,8 @@ use data: core.data
 
 #Codable
 Ticket: struct {
-    team: String
-    minutes: Float
+    team: String,
+    minutes: Float,
 }
 
 run: fn() {
@@ -6119,7 +6119,13 @@ it. When a piece asks `at_login`, `launch` installs the app's XDG autostart
 entry, its desktop entry at `{config}/autostart/{id}.desktop`, and the
 desktop starts the app when the user logs in. A launch whose graph asks no
 piece to run at login removes that entry. `every` must be positive; any
-other value panics.
+other value panics. A browser runs nothing for a page that is closed, so
+`.background` in a graph built for the web output
+(`jet build --target web`, a `#Target(Web)` file, or code pinned to
+`#Target(JS)` or `#Target(Wasm)`) is a compile error, E-APP-TARGET-FEATURE.
+On the web, the work is a server job: a service method marked
+`#App.Every(cron: …)` runs on its schedule, and an `#App.Job` method is
+work a call queues.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

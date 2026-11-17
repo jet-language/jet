@@ -1,5 +1,5 @@
 BadPath: struct {
-    path: String
+    path: String,
 
     impl Diagnostic {
         what: fn(self) -> String { "route path `{self.path}` doesn't start with `/`" }
@@ -11,10 +11,10 @@ BadPath: struct {
 }
 
 Route: struct {
-    path: String
+    path: String,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
 
         expand: fn(self, target: Target) {
             if !self.path.starts_with("/") -> reject(BadPath{path: self.path})

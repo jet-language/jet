@@ -20,10 +20,10 @@ PUBLICATION_ADVISORY_FEED_MAGIC: "jet-advisory-feed-v1"
 PUBLICATION_DEFAULT_MATURITY_SECONDS: 86400
 
 PublicationSeverity: enum {
-    Low
-    Medium
-    High
-    Critical
+    Low,
+    Medium,
+    High,
+    Critical,
 }
 
 publication_parse_severity: fn(raw: String) -> PublicationSeverity Never! {
@@ -44,9 +44,9 @@ publication_severity_label: fn(value: PublicationSeverity) -> String Never! {
 }
 
 PublicationSourceClass: enum {
-    ThirdParty
-    FirstParty
-    Workspace
+    ThirdParty,
+    FirstParty,
+    Workspace,
 }
 
 publication_parse_source_class: fn(raw: String) -> PublicationSourceClass? Never! {
@@ -66,12 +66,12 @@ publication_source_class_label: fn(value: PublicationSourceClass) -> String Neve
 }
 
 PublicationAdvisory: struct {
-    id: String
-    package: String
-    affected: PublicationVersionReq
-    fixed: PublicationSemVer?
-    title: String
-    severity: PublicationSeverity
+    id: String,
+    package: String,
+    affected: PublicationVersionReq,
+    fixed: PublicationSemVer?,
+    title: String,
+    severity: PublicationSeverity,
 }
 
 publication_advisory_affects: fn(advisory: PublicationAdvisory, version: PublicationSemVer) -> Bool Never! {
@@ -81,76 +81,76 @@ publication_advisory_affects: fn(advisory: PublicationAdvisory, version: Publica
 }
 
 PublicationAdvisoryRelease: struct {
-    package: String
-    version: PublicationSemVer
-    first_seen: Int
-    source_class: PublicationSourceClass
+    package: String,
+    version: PublicationSemVer,
+    first_seen: Int,
+    source_class: PublicationSourceClass,
 }
 
 PublicationAdvisoryException: struct {
-    package: String
-    version: PublicationSemVer
-    reason: String
-    reviewer: String
-    expires_at: Int
+    package: String,
+    version: PublicationSemVer,
+    reason: String,
+    reviewer: String,
+    expires_at: Int,
 }
 
 PublicationAdvisoryFeed: struct {
-    sequence: Int
-    issued_at: Int
-    expires_at: Int
-    maturity_seconds: Int
-    key_id: String
-    public_key: String
-    signature: String
-    releases: [PublicationAdvisoryRelease]
-    advisories: [PublicationAdvisory]
-    exceptions: [PublicationAdvisoryException]
+    sequence: Int,
+    issued_at: Int,
+    expires_at: Int,
+    maturity_seconds: Int,
+    key_id: String,
+    public_key: String,
+    signature: String,
+    releases: [PublicationAdvisoryRelease],
+    advisories: [PublicationAdvisory],
+    exceptions: [PublicationAdvisoryException],
 }
 
 PublicationAdvisoryTrustRoot: struct {
-    public_key: String{""}
-    min_sequence: Int{0}
-    accepted_digest: String?{None}
-    revoked_keys: [String]{[String]{}}
+    public_key: String{""},
+    min_sequence: Int{0},
+    accepted_digest: String?{None},
+    revoked_keys: [String]{[String]{}},
 }
 
 PublicationAdvisoryReceipt: struct {
-    sequence: Int
-    digest: String
-    key_id: String
-    issued_at: Int
-    expires_at: Int
-    maturity_seconds: Int
+    sequence: Int,
+    digest: String,
+    key_id: String,
+    issued_at: Int,
+    expires_at: Int,
+    maturity_seconds: Int,
 }
 
 PublicationAuditMatch: struct {
-    severity: PublicationSeverity
-    diagnostic: Diagnostic
+    severity: PublicationSeverity,
+    diagnostic: Diagnostic,
 }
 
 PublicationPolicyAudit: struct {
-    receipt: PublicationAdvisoryReceipt
-    matches: [PublicationAuditMatch]
-    maturity: [Diagnostic]
-    source_exceptions: [String]
+    receipt: PublicationAdvisoryReceipt,
+    matches: [PublicationAuditMatch],
+    maturity: [Diagnostic],
+    source_exceptions: [String],
 }
 
 PublicationAdvisoryPolicy: struct {
-    feed: PublicationAdvisoryFeed
-    trust: PublicationAdvisoryTrustRoot
-    receipt: PublicationAdvisoryReceipt
-    now: Int
+    feed: PublicationAdvisoryFeed,
+    trust: PublicationAdvisoryTrustRoot,
+    receipt: PublicationAdvisoryReceipt,
+    now: Int,
 }
 
 PublicationAdvisoryTarget: struct {
-    package: String
-    version: PublicationSemVer
+    package: String,
+    version: PublicationSemVer,
 }
 
 PublicationLockMaturity: struct {
-    maturity: [Diagnostic]
-    source_exceptions: [String]
+    maturity: [Diagnostic],
+    source_exceptions: [String],
 }
 
 publication_advisory_feed_path: fn(root: String) -[FS, Env]> String? Never! {

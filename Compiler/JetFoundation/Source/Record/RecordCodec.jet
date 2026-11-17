@@ -56,118 +56,118 @@ RECORD_TAG_DIGEST: 8
 // One self-describing record value. `Map` fields may be given in any order;
 // the encoder writes them sorted by name bytes and rejects a repeated name.
 RecordValue: enum {
-    Null
-    Bool(value: Bool)
-    Int(value: Int)
-    Str(value: String)
-    Bytes(value: [U8])
-    List(values: [RecordValue])
-    Map(fields: [RecordField])
-    Digest(value: [U8])
+    Null,
+    Bool(value: Bool),
+    Int(value: Int),
+    Str(value: String),
+    Bytes(value: [U8]),
+    List(values: [RecordValue]),
+    Map(fields: [RecordField]),
+    Digest(value: [U8]),
 }
 
 RecordField: struct {
-    name: String
-    value: RecordValue
+    name: String,
+    value: RecordValue,
 }
 
 // One tagged section: an indexed list of elements.
 RecordSection: struct {
-    id: Int
-    elements: [RecordValue]
+    id: Int,
+    elements: [RecordValue],
 }
 
 // A fully decoded record. `digest` is the trailing SHA-256, the record's
 // content digest.
 Record: struct {
-    schema: String
-    sections: [RecordSection]
-    digest: [U8]
+    schema: String,
+    sections: [RecordSection],
+    digest: [U8],
 }
 
 RecordEncodeResult: struct {
-    bytes: [U8]?
-    problem: String?
+    bytes: [U8]?,
+    problem: String?,
 }
 
 RecordDecodeResult: struct {
-    record: Record?
-    problem: String?
+    record: Record?,
+    problem: String?,
 }
 
 // A verified record whose elements decode on demand. Section `s` has id
 // `ids[s]`; `bounds[firsts[s]..]` holds the start of each of its elements
 // followed by the end of the last one.
 RecordReader: struct {
-    schema: String
-    digest: [U8]
-    bytes: [U8]
-    strings: [String]
-    ids: [Int]
-    section_positions: [Int:Int]
-    firsts: [Int]
-    bounds: [Int]
+    schema: String,
+    digest: [U8],
+    bytes: [U8],
+    strings: [String],
+    ids: [Int],
+    section_positions: [Int:Int],
+    firsts: [Int],
+    bounds: [Int],
 }
 
 RecordReaderResult: struct {
-    reader: RecordReader?
-    problem: String?
+    reader: RecordReader?,
+    problem: String?,
 }
 
 RecordValueResult: struct {
-    value: RecordValue?
-    problem: String?
+    value: RecordValue?,
+    problem: String?,
 }
 
 // Typed views carry the same explicit problem as the binary reader.
 RecordStringResult: struct {
-    value: String?
-    problem: String?
+    value: String?,
+    problem: String?,
 }
 
 RecordOptionalStringResult: struct {
-    value: String?
-    problem: String?
+    value: String?,
+    problem: String?,
 }
 
 RecordIntResult: struct {
-    value: Int?
-    problem: String?
+    value: Int?,
+    problem: String?,
 }
 
 RecordBoolResult: struct {
-    value: Bool?
-    problem: String?
+    value: Bool?,
+    problem: String?,
 }
 
 RecordListResult: struct {
-    value: [RecordValue]?
-    problem: String?
+    value: [RecordValue]?,
+    problem: String?,
 }
 
 RecordMapResult: struct {
-    value: [RecordField]?
-    problem: String?
+    value: [RecordField]?,
+    problem: String?,
 }
 
 RecordDigestResult: struct {
-    value: [U8]?
-    problem: String?
+    value: [U8]?,
+    problem: String?,
 }
 
 RecordCountResult: struct {
-    value: Int?
-    problem: String?
+    value: Int?,
+    problem: String?,
 }
 
 RecordStringsResult: struct {
-    value: [String]?
-    problem: String?
+    value: [String]?,
+    problem: String?,
 }
 
 RecordElementsResult: struct {
-    value: [RecordValue]?
-    problem: String?
+    value: [RecordValue]?,
+    problem: String?,
 }
 
 record_value_kind: fn(value: RecordValue) -> String Never! {
@@ -395,8 +395,8 @@ record_sorted_order: fn(names: [[U8]]) -> [Int] Never! {
 }
 
 RecordStringTable: struct {
-    order: [String]
-    index: [String:Int]
+    order: [String],
+    index: [String:Int],
 }
 
 record_intern: fn(table: &RecordStringTable, value: String) Never! {
@@ -551,9 +551,9 @@ record_encode: fn(schema: String, sections: [RecordSection]) -> RecordEncodeResu
 // A read position over `bytes[at..end]`. The first problem sticks; every read
 // after it returns a neutral value.
 RecordCursor: struct {
-    at: Int
-    end: Int
-    problem: String?
+    at: Int,
+    end: Int,
+    problem: String?,
 }
 
 record_fail: fn(cursor: &RecordCursor, problem: String) Never! {
@@ -844,9 +844,9 @@ record_element: fn(reader: RecordReader, id: Int, index: Int) -> RecordValueResu
 // Where the bytes of a `Bytes` element lie in `reader.bytes`: its payload
 // from `start` up to `end`, found without copying it.
 RecordSpanResult: struct {
-    start: Int
-    end: Int
-    problem: String?
+    start: Int,
+    end: Int,
+    problem: String?,
 }
 
 record_element_bytes_span: fn(reader: RecordReader, id: Int, index: Int) -> RecordSpanResult Never! {

@@ -114,7 +114,7 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
             }
             return Val("{marker}\nhelper: fn() {{\n}}\n\nrun: fn() {{\n}}\n")
         }
-        "Method" -> return Val("W: struct {{\n    a: Int\n\n    {marker}\n    helper: fn(self) {{\n    }}\n}}\n\nrun: fn() {{\n}}\n")
+        "Method" -> return Val("W: struct {{\n    a: Int,\n\n    {marker}\n    helper: fn(self) {{\n    }}\n}}\n\nrun: fn() {{\n}}\n")
         "Type" -> {
             if marker.starts_with("#UnitFamily") {
                 return Val("{marker} {{ meter }}\n\nrun: fn() {{\n}}\n")
@@ -125,7 +125,7 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
                 return Val("#CLI\nW: struct {{\n    {marker} a: String\n}}\n\nrun: fn() {{\n}}\n")
             } else { return Val("W: struct {{\n    {marker} a: Int\n}}\n\nrun: fn() {{\n}}\n") }
         }
-        "Variant" -> return Val("E: enum {{\n    {marker} A\n    B\n}}\n\nrun: fn() {{\n}}\n")
+        "Variant" -> return Val("E: enum {{\n    {marker} A,\n    B,\n}}\n\nrun: fn() {{\n}}\n")
         "Impl" -> return Val("W: struct {{\n    a: Int\n}}\n\nimpl W.Add(Int) {marker} {{\n    add: fn(self, rhs: Int) -> W {{ return W{{a: self.a + rhs}} }}\n}}\n\nrun: fn() {{\n}}\n")
         "Block" -> return Val("run: fn() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n")
         "Statement" -> return Val("run: fn() {{\n    {marker} print(\"ok\")\n}}\n")

@@ -12,11 +12,11 @@ use {
 // sources, inputs, and outputs, all project-relative. `ignored_root` is the
 // explicit build root the project input walk leaves out.
 CcInvocation: struct {
-    argv: [String]
-    sources: [String]
-    inputs: [String]
-    outputs: [String]
-    ignored_root: String?
+    argv: [String],
+    sources: [String],
+    inputs: [String],
+    outputs: [String],
+    ignored_root: String?,
 }
 
 // `jet cc` / `jet c++` entry, reached from the CLI before flag parsing.
@@ -413,9 +413,9 @@ cli_cc_validate_source: fn(root: String, working_dir: String, raw: String) -[FS]
 // could not be read, else what the set holds (`size`) against its `cap`.
 #Error
 CcProjectInputError: struct {
-    reason: String
-    size: String?
-    cap: String
+    reason: String,
+    size: String?,
+    cap: String,
 
     unreadable: fn(reason: String) -> CcProjectInputError Never! {
         CcProjectInputError{reason: reason, size: None, cap: ""}
@@ -435,11 +435,11 @@ cli_cc_collect_project_inputs: fn(root: String, excluded: [String], ignored_root
 }
 
 CcProjectInputWalk: struct {
-    root: String
-    excluded: [String]
-    ignored_root: String?
-    inputs: [String]
-    bytes: Int
+    root: String,
+    excluded: [String],
+    ignored_root: String?,
+    inputs: [String],
+    bytes: Int,
 
     visit: fn(&self, directory: String) -[FS]> CcProjectInputError! {
         entries := files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))

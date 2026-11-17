@@ -17,9 +17,9 @@ enum_case_test_names: fn(program: Program) -> String {
 #Test("enum cases, payload cases and grouped cases are declared bare") {
     program: parser_test_program(
         `Signal: enum {
-    Stop
-    Go(speed: Int)
-    Warn { Soft Loud(level: Int) }
+    Stop,
+    Go(speed: Int),
+    Warn { Soft, Loud(level: Int) },
 }
 Shape: enum { Circle(Float), Empty }
 `,
@@ -58,7 +58,7 @@ Shape: enum { Circle(Float), Empty }
 #Test("a marker above a nested impl in an enum body is the impl's marker") {
     program: parser_test_program(
         `AppErr: enum {
-    File(FileErr)
+    File(FileErr),
 
     #Audited
     impl From(FileErr) {
@@ -74,7 +74,7 @@ Shape: enum { Circle(Float), Empty }
     assert_eq(definition.trait_impls[0].markers.len(), 1)
     assert_eq(definition.trait_impls[0].markers[0].name, "Audited")
     expected: `AppErr: enum {
-    File(FileErr)
+    File(FileErr),
 
     #Audited
     impl From(FileErr) {
@@ -86,7 +86,7 @@ Shape: enum { Circle(Float), Empty }
     assert_eq(
         parser_test_stable(
             `AppErr: enum {
-    File(FileErr)
+    File(FileErr),
     #Audited
     impl From(FileErr) { from: fn(error: FileErr) -> AppErr { AppErr.File(error) } }
 }

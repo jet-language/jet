@@ -11,16 +11,16 @@ use jet_foundation.[EFFECT_VOCABULARY_ROOTS, effect_vocabulary_enum_cases, effec
 BUILD_EFFECT_COUNT: #run build_effect_count(embed_file("BuildEffect.jet"), EFFECT_VOCABULARY_ROOTS)
 
 BuildEffect: enum {
-    Net
-    FS
-    IO
-    DB
-    Time
-    Rand
-    Env
-    Exec
-    Log
-    GPU
+    Net,
+    FS,
+    IO,
+    DB,
+    Time,
+    Rand,
+    Env,
+    Exec,
+    Log,
+    GPU,
 
     name: fn(self) -> String Never! {
         if self == {
@@ -150,8 +150,8 @@ build_effect_problem: fn(text: String, roots: [String]) -> String {
 
 #Test("each BuildEffect case is a declared effect root, and a stray is named") {
     roots: [String]{"Net", "FS", "DB", "Mem"}
-    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net\n    FS\n    DB\n\n    name: fn(self) -> String {{\n}}\n", roots), "")
-    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net\n    Disk\n}}\n", roots), "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [Disk]")
-    assert(build_effect_problem("BuildEffect: enum {{\n    Mem\n}}\n", roots).contains("do not give back [Mem]"))
+    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net,\n    FS,\n    DB,\n\n    name: fn(self) -> String {{\n}}\n", roots), "")
+    assert_eq(build_effect_problem("BuildEffect: enum {{\n    Net,\n    Disk,\n}}\n", roots), "BuildEffect.jet: BuildEffect names effects the effect sources (Compiler/Prelude/Effects.jet, Core/Effects/Effects.jet, Core/Compiler/Meta.jet) do not declare: [Disk]")
+    assert(build_effect_problem("BuildEffect: enum {{\n    Mem,\n}}\n", roots).contains("do not give back [Mem]"))
     assert_eq(BUILD_EFFECT_COUNT, 10)
 }

@@ -14,29 +14,29 @@ use jetpack_foundation.[
 
 // The realize axis for a package (U10).
 PackageKind: enum {
-    Library
-    Executable
+    Library,
+    Executable,
 }
 
 // One build target of a package (Rust `Blocks::Target`).
 PackageTarget: enum {
-    Library
-    Executable
-    Test
-    Example
-    Plugin(export: String?)
+    Library,
+    Executable,
+    Test,
+    Example,
+    Plugin(export: String?),
 }
 
 // One entry in the `packages: { … }` block.
 PackageEntry: struct {
-    name: String
-    targets: [PackageTarget]
+    name: String,
+    targets: [PackageTarget],
 }
 
 // Why a target-profile identity or selection set was refused.
 #Error
 TargetProfileError: struct {
-    detail: String
+    detail: String,
 
     message: fn(self) -> String Never! { self.detail }
 }
@@ -50,10 +50,10 @@ TARGET_PROFILE_WEB_NO_OS: "web.no_os"
 // The exact identity selected for a package target. Built-in web identities
 // are closed; any other identity names a typed target-profile declaration.
 TargetProfileIdentity: enum {
-    WebBrowser
-    WebWasiServer
-    WebNoOS
-    Named(String)
+    WebBrowser,
+    WebWasiServer,
+    WebNoOS,
+    Named(String),
 
     // Parse one exact target-profile identity.
     parse: fn(input: String) -> TargetProfileIdentity TargetProfileError! {
@@ -112,13 +112,13 @@ TargetProfileIdentity: enum {
 
 // One named package target and the exact profile it selects.
 TargetProfileSelection: struct {
-    name: String
-    profile: TargetProfileIdentity
+    name: String,
+    profile: TargetProfileIdentity,
 }
 
 // Target-profile selections keyed by target name.
 PackageTargets: struct {
-    priv selections: [String:TargetProfileSelection]
+    priv selections: [String:TargetProfileSelection],
 
     empty: fn() -> PackageTargets Never! {
         PackageTargets{selections: [String:TargetProfileSelection]{}}

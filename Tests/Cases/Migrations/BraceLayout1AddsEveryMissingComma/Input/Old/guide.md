@@ -1,0 +1,17 @@
+# Shapes
+
+A struct lists its fields:
+
+```jet
+Size: struct {
+    w: Int
+    h: Int
+}
+```
+
+A shell fence stays as written:
+
+```sh
+echo '{ a
+b }'
+```

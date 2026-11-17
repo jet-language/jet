@@ -41,37 +41,37 @@ use jet_foundation.[
 ]
 
 SemaMarkerRuleArgumentObservation: struct {
-    ty: Type?
-    constant: TComptimeValue?
+    ty: Type?,
+    constant: TComptimeValue?,
     // The argument checked against the rule's expected type.
-    checked: Bool
-    comptime_requests: [SemaComptimeRequest]
-    comptime_source: SemaComptimeItemSource?
-    diagnostics: [Diagnostic]
+    checked: Bool,
+    comptime_requests: [SemaComptimeRequest],
+    comptime_source: SemaComptimeItemSource?,
+    diagnostics: [Diagnostic],
 }
 
 SemaMarkerRuleArgumentFact: struct {
-    marker_span: Span
-    source_index: Int
-    parameter_index: Int?
-    kind: TAppliedRuleArgKind
-    ty: Type?
-    constant: TComptimeValue?
-    checked: Bool
-    comptime_requests: [SemaComptimeRequest]
+    marker_span: Span,
+    source_index: Int,
+    parameter_index: Int?,
+    kind: TAppliedRuleArgKind,
+    ty: Type?,
+    constant: TComptimeValue?,
+    checked: Bool,
+    comptime_requests: [SemaComptimeRequest],
 }
 
 SemaMarkerRulesCheckResult: struct {
-    diagnostics: [Diagnostic]
-    argument_facts: [SemaMarkerRuleArgumentFact]
-    comptime_sources: [SemaComptimeItemSource]
-    comptime_requests: [SemaComptimeRequest]
+    diagnostics: [Diagnostic],
+    argument_facts: [SemaMarkerRuleArgumentFact],
+    comptime_sources: [SemaComptimeItemSource],
+    comptime_requests: [SemaComptimeRequest],
 }
 
 SemaMarkerRuleArgumentBinding: struct {
-    source_index: Int
-    parameter_index: Int?
-    kind: TAppliedRuleArgKind
+    source_index: Int,
+    parameter_index: Int?,
+    kind: TAppliedRuleArgKind,
 }
 
 sema_marker_rules_append_name: fn(values: &[String], name: String) Never! {
@@ -223,7 +223,7 @@ sema_marker_rules_metadata_names: fn(declaration: MarkerDecl, name: String, site
 
 // A declared `companion` setting; `site` is None when the rule declares none.
 SemaMarkerRulesCompanion: struct {
-    site: TAppliedRuleCompanionSite?
+    site: TAppliedRuleCompanionSite?,
 }
 
 sema_marker_rules_companion: fn(declaration: MarkerDecl) -> SemaMarkerRulesCompanion? {
@@ -1917,9 +1917,9 @@ sema_marker_rules_check: fn(registry: SemaScopeMembersMarkerRegistry, source_pro
 }
 
 SemaMarkerRulesDeclaredTypeCheck: struct {
-    resolved_type: Type?
-    diagnostics: [Diagnostic]
-    complete: Bool
+    resolved_type: Type?,
+    diagnostics: [Diagnostic],
+    complete: Bool,
 }
 
 sema_marker_rules_builtin_type: fn(name: String) -> Type? {
@@ -1955,12 +1955,12 @@ sema_marker_rules_builtin_type: fn(name: String) -> Type? {
 SEMA_INLINE_ALWAYS_MAX_STMTS: 40
 
 SemaInlineAlwaysScan: struct {
-    target: String
-    stmt_count: Int
-    self_recursive: Bool
+    target: String,
+    stmt_count: Int,
+    self_recursive: Bool,
     // The file's imports.
-    imports: [ImportDecl]
-    method: Bool
+    imports: [ImportDecl],
+    method: Bool,
 }
 
 sema_inline_always_scan_body: fn(statements: [Stmt], scan: &SemaInlineAlwaysScan) {
@@ -2244,10 +2244,10 @@ sema_inline_always_why: fn(reason: String) -> String Never! {
 // One call between two `#Inline(Always)` functions (indexes into the marked
 // list of sema_inline_always_check_calls), at `span` in module `module`.
 SemaInlineAlwaysEdge: struct {
-    caller: Int
-    callee: Int
-    module: Int
-    span: Span
+    caller: Int,
+    callee: Int,
+    module: Int,
+    span: Span,
 }
 
 // The whole-program half for calls, read from the call facts: a marked

@@ -27,15 +27,15 @@ SANDBOX_FALLBACK_WARNING: "build sandboxing is unavailable; local executable act
 SANDBOX_FALLBACK_FIX: "provide a trusted substitute or approved remote builder, or enable the native sandbox"
 
 SandboxLevel: enum {
-    Strong
-    Fallback
+    Strong,
+    Fallback,
 }
 
 SandboxStatus: struct {
-    level: SandboxLevel
-    mechanism: String
-    policy: String
-    reason: String
+    level: SandboxLevel,
+    mechanism: String,
+    policy: String,
+    reason: String,
 
     fallback: fn(mechanism: String, reason: String) -> SandboxStatus Never! {
         SandboxStatus{level: SandboxLevel.Fallback, mechanism: mechanism, policy: SANDBOX_NOT_ENFORCED, reason: reason}

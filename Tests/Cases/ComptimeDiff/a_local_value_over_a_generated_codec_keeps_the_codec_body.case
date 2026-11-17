@@ -7,7 +7,7 @@
 # result demanded nothing and IR found Point's encode method unlowered.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int, y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
 step: jet run main.jet
 exit: 0
 stdout: ~ '{"x":3,"y":4}' # the built `show` calls Point's generated encode body

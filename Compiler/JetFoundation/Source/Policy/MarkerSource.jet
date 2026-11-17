@@ -41,15 +41,15 @@ MARKER_SOURCE_RESOLUTIONS: [String]{"SiteBound", "Override", "Merge", "Tighten"}
 // Tracks bracket depth and string literals so a separator inside either is
 // never mistaken for a top-level one.
 MarkerSourceScan: struct {
-    depth: Int
-    in_string: Bool
-    escaped: Bool
+    depth: Int,
+    in_string: Bool,
+    escaped: Bool,
 }
 
 // `Type{default}` split on its outer braces.
 MarkerSourceDefault: struct {
-    type_text: String
-    default: String
+    type_text: String,
+    default: String,
 }
 
 // True when this byte sits at top level and outside a string.
@@ -440,7 +440,7 @@ marker_decl_signature: fn(declaration: MarkerDecl, source: String) -> String Nev
             settings.push("{key}: {value}")
         }
     }
-    block: if settings.len() == 0 -> "impl Marker {{}}" else -> "impl Marker {{ {settings.join("; ")} }}"
+    block: if settings.len() == 0 -> "impl Marker {{}}" else -> "impl Marker {{ {settings.join(", ")} }}"
     parts.push(block)
     "{declaration.name}: struct {{ {parts.join(", ")} }}"
 }

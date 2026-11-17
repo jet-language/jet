@@ -20,8 +20,8 @@ CORE_DECLARATIONS_SURFACE_PATH: "Compiler/JetFoundation/Data/Syntax/CoreSurface.
 
 // One toolchain file a comptime read embedded: its root-relative path and text.
 CoreDeclarationFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // One exported Core type: its kind (`plain` or `crypto_nominal`), its enum
@@ -32,26 +32,26 @@ CoreDeclarationFile: struct {
 // definition's kind, variants, payloads and arity and keeps the module it
 // names.
 CoreDeclarationType: struct {
-    name: String
-    kind: String
-    variants: [String]
-    payloads: [String]
-    generic_arity: Int
-    from_module: String
+    name: String,
+    kind: String,
+    variants: [String],
+    payloads: [String],
+    generic_arity: Int,
+    from_module: String,
 }
 
 // One `module` line; `line` is its Core.rows line.
 CoreDeclarationModule: struct {
-    name: String
-    members: [String]
-    types: [CoreDeclarationType]
-    dependencies: [String]
-    line: Int
+    name: String,
+    members: [String],
+    types: [CoreDeclarationType],
+    dependencies: [String],
+    line: Int,
 }
 
 CoreBootstrapStep: struct {
-    name: String
-    dependencies: [String]
+    name: String,
+    dependencies: [String],
 }
 
 // One CORE_SOURCE_OWNED_ROWS row before its type exports are looked up: a
@@ -59,56 +59,56 @@ CoreBootstrapStep: struct {
 // or a runtime unit (`line` 0). `owned_types` are a Core.rows row's
 // source-owned nominals.
 CoreDeclarationSource: struct {
-    module_name: String
-    alias: String
-    path: String
-    owner: String
-    members: [String]
-    owned_types: [String]
-    impl_types: [String]
-    runtime: Bool
-    line: Int
+    module_name: String,
+    alias: String,
+    path: String,
+    owner: String,
+    members: [String],
+    owned_types: [String],
+    impl_types: [String],
+    runtime: Bool,
+    line: Int,
 }
 
 // One `dispatcher_row`: its kind, its module ("" for `-`) and member, its
 // Core.rows line, the Rust constructor its expression starts with and the
 // record the expression builds.
 CoreDeclarationDispatcher: struct {
-    kind: String
-    module_name: String
-    member: String
-    line: Int
-    constructor: String
-    record: CoreCallRecord
+    kind: String,
+    module_name: String,
+    member: String,
+    line: Int,
+    constructor: String,
+    record: CoreCallRecord,
 }
 
 // One `format_row <Variant> <module> <Label>` line.
 CoreDeclarationFormat: struct {
-    variant: String
-    module_name: String
-    label: String
-    line: Int
+    variant: String,
+    module_name: String,
+    label: String,
+    line: Int,
 }
 
 // Everything Core.rows declares, in declaration order, every `from()` type
 // resolved to its canonical definition, with the parts and runtime units.
 CoreDeclarations: struct {
-    source_rows: [CoreDeclarationSource]
-    parts: [CoreDeclarationSource]
-    runtime: [CoreDeclarationSource]
-    modules: [CoreDeclarationModule]
-    bootstraps: [CoreBootstrapStep]
-    root_types: [String]
-    namespace_only: [String]
-    error_types: [String]
-    dispatchers: [CoreDeclarationDispatcher]
-    formats: [CoreDeclarationFormat]
+    source_rows: [CoreDeclarationSource],
+    parts: [CoreDeclarationSource],
+    runtime: [CoreDeclarationSource],
+    modules: [CoreDeclarationModule],
+    bootstraps: [CoreBootstrapStep],
+    root_types: [String],
+    namespace_only: [String],
+    error_types: [String],
+    dispatchers: [CoreDeclarationDispatcher],
+    formats: [CoreDeclarationFormat],
 }
 
 // One word or bracketed body of a Core.rows line and the byte after it.
 CoreDeclTake: struct {
-    text: String
-    end: Int
+    text: String,
+    end: Int,
 }
 
 // Every Syntax file, whose string constants dispatcher rows may name.
@@ -650,9 +650,9 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
 // source declaration.
 
 CoreDeclPublic: struct {
-    module_name: String
-    member: String
-    line: Int
+    module_name: String,
+    member: String,
+    line: Int,
 }
 
 // The byte offsets of `CoreCallRecord::new(` and

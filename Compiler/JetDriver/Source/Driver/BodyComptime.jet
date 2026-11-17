@@ -45,16 +45,16 @@ use {
 }
 
 JetDriverComptimeBodyResult: struct {
-    graph: SemaGraphResult
-    values: [SemaComptimeItemValue]
-    functions: [SemaComptimeFunctionResult]
-    trace: JetDriverCompileTrace
-    complete: Bool
-    soft_stop: Bool
-    internal_problem: String?
+    graph: SemaGraphResult,
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    trace: JetDriverCompileTrace,
+    complete: Bool,
+    soft_stop: Bool,
+    internal_problem: String?,
     // The registration graph the caller moved in, handed back on every exit
     // (a borrowed graph moved into a comptime run was copied whole).
-    registration: SemaRegistrationGraph?{None}
+    registration: SemaRegistrationGraph?{None},
 }
 
 // `result` with the registration graph moved back into it.
@@ -649,7 +649,7 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
 // on: whether a landing ended with a site pending, after which no later
 // landing runs.
 JetDriverLanding: struct {
-    stopped: Bool
+    stopped: Bool,
 }
 
 // Lands each body comptime pass whose pending sites are all local values in
@@ -807,9 +807,9 @@ jet_driver_land_local_values: fn(
 // boxed edges and copy facts as its graph facts, and the fixed-length write
 // parameters, which the run does not read, held until they go back.
 JetDriverLentFacts: struct {
-    memory_plan: [SemaFunctionMemoryPlan]
-    graph_facts: SemaComptimeGraphFacts?
-    fixed_length_write_params: [String]
+    memory_plan: [SemaFunctionMemoryPlan],
+    graph_facts: SemaComptimeGraphFacts?,
+    fixed_length_write_params: [String],
 }
 
 // Moves the facts out of `carried` (sema_finalize_pass_close) for a

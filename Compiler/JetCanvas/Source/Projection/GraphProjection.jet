@@ -11,93 +11,93 @@ use {
 GRAPH_SCHEMA_VERSION: 1
 
 InlineExpr: struct {
-    id: String
-    span: Span
+    id: String,
+    span: Span,
 }
 
 GraphEditAnchor: struct {
-    graph_id: String
-    insert_offset: Int
-    fallible: Bool
+    graph_id: String,
+    insert_offset: Int,
+    fallible: Bool,
 }
 
 NodeQueryRef: struct {
-    graph_id: String
-    node_id: String
-    kind: String
-    title: String
-    span: Span
+    graph_id: String,
+    node_id: String,
+    kind: String,
+    title: String,
+    span: Span,
 }
 
 // The graph document and the spans Canvas edits and queries address.
 Projection: struct {
-    json: String
-    inline_exprs: [InlineExpr]
-    graph_anchors: [GraphEditAnchor]
-    node_refs: [NodeQueryRef]
+    json: String,
+    inline_exprs: [InlineExpr],
+    graph_anchors: [GraphEditAnchor],
+    node_refs: [NodeQueryRef],
 }
 
 GraphBuilder: struct {
-    graph_id: String
+    graph_id: String,
     // The AST tables of the function's module.
-    tables: ASTTables
-    nodes: [NodeRec]{[NodeRec]{}}
-    pins: [PinRec]{[PinRec]{}}
-    wires: [WireRec]{[WireRec]{}}
-    regions: [String]{[String]{}}
-    inline_exprs: [InlineRec]{[InlineRec]{}}
-    local_pins: [String:String]{[String:String]{}}
-    local_types: [String:String]{[String:String]{}}
-    getter_pins: [String:String]{[String:String]{}}
-    next_wire: Int{0}
+    tables: ASTTables,
+    nodes: [NodeRec]{[NodeRec]{}},
+    pins: [PinRec]{[PinRec]{}},
+    wires: [WireRec]{[WireRec]{}},
+    regions: [String]{[String]{}},
+    inline_exprs: [InlineRec]{[InlineRec]{}},
+    local_pins: [String:String]{[String:String]{}},
+    local_types: [String:String]{[String:String]{}},
+    getter_pins: [String:String]{[String:String]{}},
+    next_wire: Int{0},
 }
 
 NodeRec: struct {
-    id: String
-    kind: String
-    archetype: String
-    title: String
-    span: Span
-    x: Int
-    y: Int
-    badges: [String]
-    affordances: [String]
-    meta_json: String?
+    id: String,
+    kind: String,
+    archetype: String,
+    title: String,
+    span: Span,
+    x: Int,
+    y: Int,
+    badges: [String],
+    affordances: [String],
+    meta_json: String?,
 }
 
 PinRec: struct {
-    id: String
-    node_id: String
-    name: String
-    direction: String
-    ty: String
-    role: String?
-    pattern_source: String?
-    ability: String
-    fallible: Bool
-    effect_grant_need: String?
-    span: Span
-    pattern_source_span: Span?
-    append_op: String?
-    element_index: Int?
+    id: String,
+    node_id: String,
+    name: String,
+    direction: String,
+    ty: String,
+    role: String?,
+    pattern_source: String?,
+    ability: String,
+    fallible: Bool,
+    effect_grant_need: String?,
+    span: Span,
+    pattern_source_span: Span?,
+    append_op: String?,
+    element_index: Int?,
 }
 
 WireRec: struct {
-    id: String
-    from_pin: String
-    to_pin: String
-    kind: String
-    span: Span?
-    from_span: Span?
-    to_span: Span?
+    id: String,
+    from_pin: String,
+    to_pin: String,
+    kind: String,
+    span: Span?,
+    from_span: Span?,
+    to_span: Span?,
 }
 
 InlineRec: struct {
-    id: String
-    node_id: String
-    role: String
-    source: String
-    span: Span
+    id: String,
+    node_id: String,
+    role: String,
+    source: String,
+    span: Span,
 }
 
 // The graph document of `src`, the checked entry `source_id` names. Graphs
@@ -119,10 +119,10 @@ canvas_graph_projection: fn(source_id: String, src: String, modules: [JetDriverD
 
 // Where the graphs of the walked modules go.
 GraphSink: struct {
-    graphs: [String]
-    inline_exprs: [InlineExpr]
-    anchors: [GraphEditAnchor]
-    node_refs: [NodeQueryRef]
+    graphs: [String],
+    inline_exprs: [InlineExpr],
+    anchors: [GraphEditAnchor],
+    node_refs: [NodeQueryRef],
 }
 
 effect_projection_json: fn(projection: SemEffectProjection) -> String Never! {

@@ -112,15 +112,15 @@ Options:
 """
 
 Kind: enum {
-    Usage
-    Blocked
-    Regression
+    Usage,
+    Blocked,
+    Regression,
 }
 
 #Error
 Failure: struct {
-    kind: Kind
-    message: String
+    kind: Kind,
+    message: String,
 }
 
 usage_error: fn(message: String) -> Failure { Failure{kind: .Usage, message: message} }
@@ -140,66 +140,66 @@ need: fn<T>(value: T?, message: String) -> T Failure! {
 }
 
 Options: struct {
-    config: String
-    capsule: String
-    llms: String
-    tasks: String
-    baseline: String
-    output: String
-    jet_bin: String
-    mode: String
-    record: Bool
-    check: Bool
-    help: Bool
+    config: String,
+    capsule: String,
+    llms: String,
+    tasks: String,
+    baseline: String,
+    output: String,
+    jet_bin: String,
+    mode: String,
+    record: Bool,
+    check: Bool,
+    help: Bool,
 }
 
 Probe: struct {
-    method: String
-    path: String
-    status: Int
-    body: String
-    content_type: String
+    method: String,
+    path: String,
+    status: Int,
+    body: String,
+    content_type: String,
 }
 
 Task: struct {
-    id: String
-    mode: String
-    prompt: String
-    args: [String]
-    stdin: String?
-    expected: String
-    files: [{name: String, text: String}]
-    ready_path: String
-    probes: [Probe]
-    spec: Dyn
+    id: String,
+    mode: String,
+    prompt: String,
+    args: [String],
+    stdin: String?,
+    expected: String,
+    files: [{name: String, text: String}],
+    ready_path: String,
+    probes: [Probe],
+    spec: Dyn,
 }
 
 Adapter: struct {
-    id: String
-    family: String
-    transport_env: String
-    spec: Dyn
+    id: String,
+    family: String,
+    transport_env: String,
+    spec: Dyn,
 }
 
 Resolved: struct {
-    adapter: Adapter
-    transport: String
+    adapter: Adapter,
+    transport: String,
 }
 
 Preflight: struct {
-    resolved: [Resolved]
-    blocked: [String]
+    resolved: [Resolved],
+    blocked: [String],
 }
 
 // What a child did; `spawn` when it never started.
 Outcome: struct {
-    code: Int
-    signal: Bool
-    timed_out: Bool
-    limit: Bool
-    spawn: Bool
-    output: String
-    errors: String
+    code: Int,
+    signal: Bool,
+    timed_out: Bool,
+    limit: Bool,
+    spawn: Bool,
+    output: String,
+    errors: String,
 
     // Whether it failed to start or finish with status 0.
     bad: fn(self) -> Bool {
@@ -208,14 +208,14 @@ Outcome: struct {
 }
 
 Inputs: struct {
-    capsule_text: String
-    control_text: String
-    tasks: [Task]
-    adapters: [Adapter]
-    capsule: Dyn
-    control: Dyn
-    fixtures: Dyn
-    harness: Dyn
+    capsule_text: String,
+    control_text: String,
+    tasks: [Task],
+    adapters: [Adapter],
+    capsule: Dyn,
+    control: Dyn,
+    fixtures: Dyn,
+    harness: Dyn,
 }
 
 // ---- JSON values ----

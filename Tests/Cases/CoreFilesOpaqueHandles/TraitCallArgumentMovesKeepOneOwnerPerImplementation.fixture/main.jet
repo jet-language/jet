@@ -16,11 +16,11 @@ lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {n
 consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
 
 Meter: trait {
-    read: fn(self, n: Int) -[]> Int
+    read: fn(self, n: Int) -[]> Int,
 }
 
 Small: struct {
-    k: Int
+    k: Int,
 
     impl Meter {
         read: fn(self, n: Int) -[]> Int { self.k + n }
@@ -28,7 +28,7 @@ Small: struct {
 }
 
 Large: struct {
-    k: Int
+    k: Int,
 
     impl Meter {
         read: fn(self, n: Int) -[]> Int { self.k * n }

@@ -2,7 +2,7 @@
 // call's result: a stop inside `next` would close `a` in `next` and again with
 // `h`, so the take is refused before anything runs.
 Res: struct {
-    name: String
+    name: String,
 
     impl Close {
         close: fn(&&self) { print("close {self.name}") }
@@ -15,7 +15,7 @@ next: fn(r: &&Res) -> Res {
 }
 
 Holder: struct {
-    r: Res
+    r: Res,
 
     step: fn(&self) { self.r = next(self.r.move()) }
 }

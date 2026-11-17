@@ -18,12 +18,12 @@ rust_source_starts_with: fn(raw: [U8], at: Int, prefix: [U8]) -> Bool Never! {
 
 // Where the Rust lexer is while masking.
 RustSourceMaskState: enum {
-    Code
-    LineComment
-    BlockComment(Int)
-    Str(Bool)
-    RawStr(Int)
-    Char(Bool)
+    Code,
+    LineComment,
+    BlockComment(Int),
+    Str(Bool),
+    RawStr(Int),
+    Char(Bool),
 }
 
 // `source` with comments, strings and character literals replaced by spaces,
@@ -150,8 +150,8 @@ rust_source_all_hashes: fn(bytes: [U8], start: Int, count: Int) -> Bool Never! {
 }
 
 RustSourceRawStringStart: struct {
-    prefix_len: Int
-    hashes: Int
+    prefix_len: Int,
+    hashes: Int,
 }
 
 // A raw string opener at `at` (`r"`, `r#"`, `br##"`, ...): the opener's byte
@@ -369,8 +369,8 @@ rust_source_escaped_char_ends: fn(bytes: [U8]) -> [Int] Never! {
 }
 
 RustSourceItemEnds: struct {
-    body: [Int]
-    semicolon: [Int]
+    body: [Int],
+    semicolon: [Int],
 }
 
 // Suffix DP retains Rust's header/bracket/angle semantics in O(n), including
@@ -413,8 +413,8 @@ rust_source_item_ends: fn(code: [U8], closes: [Int]) -> RustSourceItemEnds Never
 }
 
 RustSourceLeading: struct {
-    start: Int
-    above: Int
+    start: Int,
+    above: Int,
 }
 
 // Prefix DP at line starts replaces repeated backwards doc/attribute scans.

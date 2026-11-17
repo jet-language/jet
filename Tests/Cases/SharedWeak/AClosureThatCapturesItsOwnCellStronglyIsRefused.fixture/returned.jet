@@ -1,7 +1,7 @@
 // A listener built elsewhere captures the feed strongly; storing it in the
 // feed's own list would keep the feed (and its stream) alive forever.
 Stream: struct {
-    fd: Int
+    fd: Int,
 
     impl Close {
         close: fn(&&self) { print("closed {self.fd}") }
@@ -9,8 +9,8 @@ Stream: struct {
 }
 
 Feed: struct {
-    stream: Stream
-    listeners: [fn() -> Int]
+    stream: Stream,
+    listeners: [fn() -> Int],
 }
 
 reader: fn(feed: Shared<Feed>) -> fn() -> Int { fn() { feed.strong_count() } }

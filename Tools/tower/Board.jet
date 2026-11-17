@@ -54,20 +54,20 @@ CARD_WORDS: [String]{"card", "cards", "issue", "issues"}
 
 #Error
 Failure: struct {
-    code: String
-    message: String
+    code: String,
+    message: String,
 }
 
 Request: struct {
-    words: [String]
-    flags: [String:String]
+    words: [String],
+    flags: [String:String],
 }
 
 // Where the board lives: its data directory and its live store file.
 Place: struct {
-    dir: String
-    file: String
-    note: String
+    dir: String,
+    file: String,
+    note: String,
 }
 
 // The live board as Tower normalizes it, one row per record: the fields the
@@ -75,40 +75,40 @@ Place: struct {
 // parses back only for a record it prints. A row is decoded from one record
 // at a time, so no tree of the whole board is ever built.
 Live: struct {
-    cards: [CardRow]
-    decisions: [DecisionRow]
-    questions: [QuestionRow]
-    milestones: [Dyn]
-    events: [EventRow]
+    cards: [CardRow],
+    decisions: [DecisionRow],
+    questions: [QuestionRow],
+    milestones: [Dyn],
+    events: [EventRow],
     // Whether the ballot that supersedes the pre-field verdict is on the board.
-    tier1: Bool
+    tier1: Bool,
 }
 
 Archive: struct {
-    cards: [CardRow]
-    decisions: [DecisionRow]
+    cards: [CardRow],
+    decisions: [DecisionRow],
 }
 
 // A store, history file or history shard; any other member is skipped unread.
 #Codable(only: .Decode)
 BoardFile: struct {
-    cards: [CardRow]?
-    decisions: [DecisionRow]?
-    questions: [QuestionRow]?
-    milestones: [Dyn]?
-    events: [EventRow]?
+    cards: [CardRow]?,
+    decisions: [DecisionRow]?,
+    questions: [QuestionRow]?,
+    milestones: [Dyn]?,
+    events: [EventRow]?,
 }
 
 CardRow: struct {
-    id: String
-    num: Int?
+    id: String,
+    num: Int?,
     // `num` as JSON, for a blocker's label.
-    num_text: String
-    phase: String
-    milestone: String
+    num_text: String,
+    phase: String,
+    milestone: String,
     // Why the record fails Tower's normalization, "" when it does not.
-    invalid: String
-    record: String
+    invalid: String,
+    record: String,
 
     impl Decode {
         decode: fn(tree: Dyn) -> CardRow [FieldError]! {
@@ -124,13 +124,13 @@ CardRow: struct {
 }
 
 DecisionRow: struct {
-    id: String
-    card_id: String
-    status: String
-    group: String
-    draft: Bool
-    invalid: String
-    record: String
+    id: String,
+    card_id: String,
+    status: String,
+    group: String,
+    draft: Bool,
+    invalid: String,
+    record: String,
 
     impl Decode {
         decode: fn(tree: Dyn) -> DecisionRow [FieldError]! {
@@ -146,11 +146,11 @@ DecisionRow: struct {
 }
 
 QuestionRow: struct {
-    card_id: String
-    decision_id: String
-    kind: String
-    status: String
-    record: String
+    card_id: String,
+    decision_id: String,
+    kind: String,
+    status: String,
+    record: String,
 
     impl Decode {
         decode: fn(tree: Dyn) -> QuestionRow [FieldError]! {
@@ -161,9 +161,9 @@ QuestionRow: struct {
 }
 
 EventRow: struct {
-    draft: Bool
+    draft: Bool,
     // The text of a present `ref`.
-    ref: String?
+    ref: String?,
 
     impl Decode {
         decode: fn(tree: Dyn) -> EventRow [FieldError]! {
@@ -526,9 +526,9 @@ shard_failure: fn(file: String) -> Failure Never! {
 // What an archive load keeps of each record's JSON text: the index verbs read
 // only row fields, and a show verb only the record it asks for.
 ArchiveKeep: enum {
-    Index
-    Card(String)
-    Decision(String)
+    Index,
+    Card(String),
+    Decision(String),
 }
 
 load_archive: fn(place: Place, keep: ArchiveKeep) -[FS]> Archive Failure! {
@@ -818,8 +818,8 @@ normalize_milestone: fn(milestone: Dyn) -> Dyn Failure! {
 
 // A card linked to a milestone: all its progress reads.
 Linked: struct {
-    id: String
-    phase: String
+    id: String,
+    phase: String,
 }
 
 // The cards linked to each milestone: archived first, a live card replacing
@@ -1187,9 +1187,9 @@ docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
 
 // Every place each missing ID is cited, in first-citation order.
 Citations: struct {
-    order: [String]
-    slots: [String:Int]
-    locations: [[String]]
+    order: [String],
+    slots: [String:Int],
+    locations: [[String]],
 }
 
 cite: fn(citations: &Citations, id: String, at: String) Never! {

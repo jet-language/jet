@@ -3,10 +3,10 @@
 // composition inherits #4433/#4403/#4393 and #4437/#4444/#4446/#4449; keep the
 // real APIs, never replace consent or Attempt with reduced carriers.
 CapturePolicy: struct {
-    mode: CaptureMode
-    package: PackageCapturePolicy
-    no_capture: NoCaptureOverrideFact
-    explicit_capture: Bool
+    mode: CaptureMode,
+    package: PackageCapturePolicy,
+    no_capture: NoCaptureOverrideFact,
+    explicit_capture: Bool,
     default: fn() -> CapturePolicy Never! { CapturePolicy.development() }
     new: fn(mode: CaptureMode, package: PackageCapturePolicy, no_capture: NoCaptureOverrideFact) -> CapturePolicy Never! {
         CapturePolicy{mode, package, no_capture, explicit_capture: false}
@@ -53,13 +53,13 @@ CapturePolicy: struct {
 
 // Receipts contain identity and capture outcome, never captured source values.
 CaptureStartFact: struct {
-    identity: CaptureIdentity
-    mode: CaptureMode
-    package: PackageCapturePolicy
-    no_capture: NoCaptureOverrideFact
-    explicit_capture: Bool
-    budget: CaptureBudget
-    eligibility: CaptureEligibility
+    identity: CaptureIdentity,
+    mode: CaptureMode,
+    package: PackageCapturePolicy,
+    no_capture: NoCaptureOverrideFact,
+    explicit_capture: Bool,
+    budget: CaptureBudget,
+    eligibility: CaptureEligibility,
     new: fn(policy: CapturePolicy, attempt: CaptureAttempt) -> CaptureStartFact Never! {
         CaptureStartFact{identity: attempt.identity.copy(), mode: policy.mode, package: policy.package, no_capture: policy.no_capture, explicit_capture: policy.explicit_capture, budget: policy.budget(), eligibility: policy.eligibility(attempt)}
     }
@@ -69,11 +69,11 @@ CaptureStartFact: struct {
     }
 }
 CaptureFaultFact: struct {
-    identity: CaptureIdentity
-    mode: CaptureMode
-    fault_code: String
-    location: CaptureLocation?
-    eligibility: CaptureEligibility
+    identity: CaptureIdentity,
+    mode: CaptureMode,
+    fault_code: String,
+    location: CaptureLocation?,
+    eligibility: CaptureEligibility,
     new: fn(start: CaptureStartFact, fault_code: &&String, location: &&CaptureLocation?) -> CaptureFaultFact Never! {
         CaptureFaultFact{identity: start.identity.copy(), mode: start.mode, fault_code: fault_code.move(), location: location.move(), eligibility: start.eligibility.copy()}
     }
@@ -84,7 +84,7 @@ CaptureFaultFact: struct {
 // Actual native associated-error contract: implementations mutate their index
 // owner and read receipt facts. No filesystem implementation or fake adapter.
 RecordIndexCaptureSink: trait {
-    Error: type
-    record_capture_start: fn(&self, &&fact: CaptureStartFact) Error!
-    record_capture_fault: fn(&self, &&fact: CaptureFaultFact) Error!
+    Error: type,
+    record_capture_start: fn(&self, &&fact: CaptureStartFact) Error!,
+    record_capture_fault: fn(&self, &&fact: CaptureFaultFact) Error!,
 }

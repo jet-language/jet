@@ -9,26 +9,26 @@ use {
 }
 
 S1RepairFile: struct {
-    path: String
-    source: String
+    path: String,
+    source: String,
 }
 
 S1RepairEdit: struct {
-    code: String
-    file: String
-    start: Int
-    end: Int
-    new_text: String
+    code: String,
+    file: String,
+    start: Int,
+    end: Int,
+    new_text: String,
 }
 
 S1RepairReport: struct {
-    code: String
-    edits: [S1RepairEdit]
+    code: String,
+    edits: [S1RepairEdit],
 }
 
 S1RepairDone: struct {
-    state: [S1RepairFile]
-    rounds: Int
+    state: [S1RepairFile],
+    rounds: Int,
 }
 
 s1_repair_field: fn(tree: encoding.Dyn, key: String) -> encoding.Dyn {
@@ -123,7 +123,7 @@ s1_repair_codes: fn(reports: [S1RepairReport]) -> [String] Never! {
 
 #Error
 S1RepairError: enum {
-    Failed(String)
+    Failed(String),
 }
 
 s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1RepairFile] S1RepairError! {

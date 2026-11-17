@@ -21,28 +21,28 @@ use jetpack_foundation.[
 // `Named` is a source declared in an `env.jet` that resolves to an
 // upstream/pin through a `SourceTable`.
 RefSource: enum {
-    Jetpack
-    Nixpkgs
-    Github
-    Path
-    Cran
-    LuaRocks
-    RubyGems
-    Cpan
-    Packagist
-    JetRegistry
-    Npm
-    Cargo
-    PyPI
-    SwiftPM
-    Maven
-    NuGet
-    Conan
-    Vcpkg
-    Homebrew
-    Binary
-    Releases
-    Named(String)
+    Jetpack,
+    Nixpkgs,
+    Github,
+    Path,
+    Cran,
+    LuaRocks,
+    RubyGems,
+    Cpan,
+    Packagist,
+    JetRegistry,
+    Npm,
+    Cargo,
+    PyPI,
+    SwiftPM,
+    Maven,
+    NuGet,
+    Conan,
+    Vcpkg,
+    Homebrew,
+    Binary,
+    Releases,
+    Named(String),
 
     // The canonical Jetpack package catalog.
     // The nixpkgs collection, retained as an internal migration alias; its
@@ -136,26 +136,26 @@ RefSource: enum {
 // source's kind depends on whether the remote repo carries a `package.jet`,
 // which only a realize-time probe can answer. It never reaches a provider.
 ProviderKind: enum {
-    Nix
-    Core
-    Cran
-    LuaRocks
-    RubyGems
-    Cpan
-    Packagist
-    JetRegistry
-    Npm
-    Cargo
-    PyPI
-    SwiftPM
-    Maven
-    NuGet
-    Conan
-    Vcpkg
-    Homebrew
-    Binary
-    JetPackage
-    Infer
+    Nix,
+    Core,
+    Cran,
+    LuaRocks,
+    RubyGems,
+    Cpan,
+    Packagist,
+    JetRegistry,
+    Npm,
+    Cargo,
+    PyPI,
+    SwiftPM,
+    Maven,
+    NuGet,
+    Conan,
+    Vcpkg,
+    Homebrew,
+    Binary,
+    JetPackage,
+    Infer,
 
     // A native Jetpack release-artifact recipe.
     // Decide `Nix` vs `Core` at realize time by peeking the source's
@@ -213,27 +213,27 @@ ProviderKind: enum {
 // RefSource and ProviderKind. Their contracts and first-party split are in
 // Provider/Source/Federation/ProviderFamily.jet.
 ProviderFamily: enum {
-    Core
-    Nix
-    Path
-    Github
-    JetRegistry
-    Npm
-    PyPI
-    Cargo
-    SwiftPM
-    Maven
-    NuGet
-    Conan
-    Vcpkg
-    Homebrew
-    Binary
-    Cran
-    LuaRocks
-    RubyGems
-    Cpan
-    Packagist
-    JetPackage
+    Core,
+    Nix,
+    Path,
+    Github,
+    JetRegistry,
+    Npm,
+    PyPI,
+    Cargo,
+    SwiftPM,
+    Maven,
+    NuGet,
+    Conan,
+    Vcpkg,
+    Homebrew,
+    Binary,
+    Cran,
+    LuaRocks,
+    RubyGems,
+    Cpan,
+    Packagist,
+    JetPackage,
 
     // The first provider row holding this family.
     label: fn(self) -> String Never! {
@@ -258,9 +258,9 @@ ProviderFamily: enum {
 
 // Who is allowed to move a source pin.
 ChannelPolicy: enum {
-    Pinned
-    Manual
-    Automatic
+    Pinned,
+    Manual,
+    Automatic,
 
     // No channel marker: the declaration never moves.
     // Existing channel declarations move only through `jetpack update`.
@@ -299,23 +299,23 @@ ChannelPolicy: enum {
 
 // One `(name, upstream, provider)` source declaration.
 NamedSourceDecl: struct {
-    name: String
-    upstream: String
-    via: ProviderKind
+    name: String,
+    upstream: String,
+    via: ProviderKind,
 }
 
 SourceTableEntry: struct {
-    upstream: String
-    via: ProviderKind
-    policy: ChannelPolicy
-    raw: String
+    upstream: String,
+    via: ProviderKind,
+    policy: ChannelPolicy,
+    raw: String,
 }
 
 // The named sources an `env.jet` declares name -> upstream/pin and
 // the provider that realizes it. Built-in sources always resolve and are not
 // stored here. Every listing is in name order.
 SourceTable: struct {
-    priv named: [String:SourceTableEntry]
+    priv named: [String:SourceTableEntry],
 
     // A table with no declared sources: only the built-ins resolve. This is
     // the table for direct CLI refs (`jetpack use fastfetch@jetpack`).
@@ -404,9 +404,9 @@ SourceTable: struct {
 // A classified ref. `package` is the target before the final `@`: an attr
 // name for nixpkgs or an `owner/repo[/subpath]` for GitHub.
 RefSpec: struct {
-    source: RefSource
-    package: String
-    raw: String
+    source: RefSource,
+    package: String,
+    raw: String,
 
     // A short, human display name for the package (last path segment).
     short_name: fn(self) -> String Never! {
@@ -517,13 +517,13 @@ RefSpec: struct {
 // ref forms.
 #Error
 RefError: enum {
-    MissingSeparator(String)
-    EmptyHalf(String)
-    Malformed(String)
-    UnknownSource(source: String, raw: String, declared: [String])
-    AmbiguousBare(String)
-    AmbiguousMember(query: String, candidates: [String])
-    UnknownMember(query: String, suggestions: [String])
+    MissingSeparator(String),
+    EmptyHalf(String),
+    Malformed(String),
+    UnknownSource(source: String, raw: String, declared: [String]),
+    AmbiguousBare(String),
+    AmbiguousMember(query: String, candidates: [String]),
+    UnknownMember(query: String, suggestions: [String]),
 
     // No `@` separator at all, e.g. `fastfetch`.
     // An empty source or package half, e.g. `@jetpack` or `fastfetch@`.
@@ -552,8 +552,8 @@ RefError: enum {
 
 // One workspace member: its name and normalized relative path.
 WorkspaceMember: struct {
-    name: String
-    path: String
+    name: String,
+    path: String,
 }
 
 // A queryable index of the current workspace's members (Slice B), consulted
@@ -561,7 +561,7 @@ WorkspaceMember: struct {
 // and bare-form (`logging`) addressing.
 WorkspaceIndex: struct {
     // Members in workspace source order, paths normalized.
-    priv members: [WorkspaceMember]
+    priv members: [WorkspaceMember],
 
     // An index with no members: path refs remain unresolved, while bare
     // package refs fall through to the Jetpack catalog.
@@ -745,9 +745,9 @@ pkg_edit_distance: fn(a: String, b: String) -> Int Never! {
 // A source ref tracking intent, resolved only by update
 // verbs and stored exact in `.jet/lock`.
 ChannelRef: enum {
-    Latest
-    Main
-    SemverMask(String)
+    Latest,
+    Main,
+    SemverMask(String),
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -787,11 +787,11 @@ pkg_is_semver_mask: fn(selector: String) -> Bool Never! {
 // (or path for a bare path); `target` is the upstream locator (a repo+rev, a
 // local path, a channel/pin).
 ProviderRef: struct {
-    provider: RefSource
-    target: String
-    channel: ChannelRef?
-    policy: ChannelPolicy
-    raw: String
+    provider: RefSource,
+    target: String,
+    channel: ChannelRef?,
+    policy: ChannelPolicy,
+    raw: String,
 
     // Reconstruct the provider-first upstream form without dropping a channel
     // selector. The source table uses this form for lock/update resolution,

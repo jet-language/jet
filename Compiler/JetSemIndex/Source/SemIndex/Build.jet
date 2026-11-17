@@ -66,61 +66,61 @@ use {
 }
 
 SemCallerFrame: struct {
-    name: String
-    owner: String?
-    identity: String
+    name: String,
+    owner: String?,
+    identity: String,
 }
 
 // `SymbolDB` without the LSP hover/inlay projections.
 SemDB: struct {
-    defs: [SemDef]
-    refs: [SemRef]
-    calls: [SemCall]
-    members: [SemMember]
-    arithmetic: [SemArithmetic]
-    nodes: [SemNode]
-    bypasses: [SemBypass]
-    slot_boundaries: [SemSlotBoundary]
-    view_provenance: [String:ViewProvenanceMap]
-    structural_ordinals: [String:Int]
+    defs: [SemDef],
+    refs: [SemRef],
+    calls: [SemCall],
+    members: [SemMember],
+    arithmetic: [SemArithmetic],
+    nodes: [SemNode],
+    bypasses: [SemBypass],
+    slot_boundaries: [SemSlotBoundary],
+    view_provenance: [String:ViewProvenanceMap],
+    structural_ordinals: [String:Int],
     // `module_path:start:end` of each walked free (non-method) call's name.
-    free_calls: [String:Bool]
+    free_calls: [String:Bool],
 }
 
 // `display_prefix` is the code-module path the name ledger prints before a
 // nested declaration (`Inner.`).
 SemWalk: struct {
-    module_path: String
-    source: String
+    module_path: String,
+    source: String,
     // The module's AST tables: the walked nodes' handles index them.
-    tables: ASTTables
-    scope_identity: String
-    display_prefix: String
-    caller: SemCallerFrame?
-    structural_parents: [Int]
-    structural_slot: String
-    structural_slot_kind: String
-    block_spans: [Span]
+    tables: ASTTables,
+    scope_identity: String,
+    display_prefix: String,
+    caller: SemCallerFrame?,
+    structural_parents: [Int],
+    structural_slot: String,
+    structural_slot_kind: String,
+    block_spans: [Span],
     // Union-find successor over `block_spans` (claims are by start and end): `block_next[i] == i`
     // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
-    block_next: [Int]
-    references: [SemaNameReferenceFact]
+    block_next: [Int],
+    references: [SemaNameReferenceFact],
     // A reference's module id -> the path of the doc module whose name is
     // that module's identity text.
-    module_paths: [Int:String]
+    module_paths: [Int:String],
     // Top-level function span start -> its written return type span, for a
     // function whose checked row lost it (semindex_written_returns).
-    written_returns: [Int:Span]
+    written_returns: [Int:Span],
     // A let-bound local's checked type by name and name span
     // (semindex_local_types): an unannotated binding parses with no type.
-    local_types: [String:Type]
+    local_types: [String:Type],
     // An immutable local's stage by the same key (semindex_local_stages).
-    local_stages: [String:SemLocalStage]
+    local_stages: [String:SemLocalStage],
 }
 
 SemSlotSave: struct {
-    name: String
-    kind: String
+    name: String,
+    kind: String,
 }
 
 semindex_db: fn() -> SemDB Never! {
@@ -1609,21 +1609,21 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
 
 // One checked function's effect summary under its qualified key.
 SemSummary: struct {
-    key: String
-    local: String
-    raw_key: String
-    direct: [String]
-    direct_spans: [Span]
-    edges: [String]
-    raw_edges: [String]
+    key: String,
+    local: String,
+    raw_key: String,
+    direct: [String],
+    direct_spans: [Span],
+    edges: [String],
+    raw_edges: [String],
     // The local key of each `raw_edges` entry ("" for an edge that names no
     // checked function).
-    edge_locals: [String]
-    solved: [String]
-    maximal: Bool
-    maximal_span: Span?
+    edge_locals: [String],
+    solved: [String],
+    maximal: Bool,
+    maximal_span: Span?,
     // Its calls into callees outside the indexed modules, in call order.
-    boundary_calls: [SemBoundaryCall]
+    boundary_calls: [SemBoundaryCall],
 }
 
 // A call from an indexed function into a callee no indexed module defines (a
@@ -1631,9 +1631,9 @@ SemSummary: struct {
 // written row (`row`, the call's effect bound) is what the call is seen to
 // reach, at the call's `span`. `callee` names it as an edge does.
 SemBoundaryCall: struct {
-    callee: String
-    row: [String]
-    span: Span
+    callee: String,
+    row: [String],
+    span: Span,
 }
 
 semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
@@ -1659,8 +1659,8 @@ semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
 // path), so the owner and name are the last two fields and the identity is
 // everything between.
 SemFunctionKey: struct {
-    module_identity: String
-    local: String
+    module_identity: String,
+    local: String,
 }
 
 semindex_function_key: fn(key: String) -> SemFunctionKey? Never! {
@@ -1805,8 +1805,8 @@ semindex_call_span: fn(summary: SemSummary, callee: String, modules: [JetDriverD
 }
 
 SemWitness: struct {
-    path: [String]
-    spans: [Span]
+    path: [String],
+    spans: [Span],
 }
 
 // `convert_effects` `witness`: the first call path that reaches `effect` from
@@ -1888,14 +1888,14 @@ semindex_effects: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> 
 }
 
 SemCallTarget: struct {
-    key: String
-    span: Span
+    key: String,
+    span: Span,
 }
 
 SemEffectIndex: struct {
-    by_key: [String:Int]
-    by_caller: [String:Int]
-    callers: [[SemCallTarget]]
+    by_key: [String:Int],
+    by_caller: [String:Int],
+    callers: [[SemCallTarget]],
 }
 
 semindex_index: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> SemEffectIndex {
@@ -2038,8 +2038,8 @@ semindex_apply_inferred_rows: fn(db: &SemDB, doc_module: JetDriverDocModule, sum
 // One definition's solved effect row: its callable carrying the row, and the
 // signature its member rows show.
 SemInferredRow: struct {
-    callable: SemCallable
-    signature: String
+    callable: SemCallable,
+    signature: String,
 }
 
 semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, summaries: [SemSummary], prefix: String, inline_keys: [String:String], view_provenance: [String:ViewProvenanceMap]) -> SemInferredRow? {
@@ -2289,10 +2289,10 @@ semindex_normalize_definition: fn(source: String) -> String {
 
 // One non-local definition, keyed for semindex_definition_facts: module, start, listing order.
 SemDefinitionAt: struct {
-    module_path: String
-    start: Int
-    end: Int
-    index: Int
+    module_path: String,
+    start: Int,
+    end: Int,
+    index: Int,
 }
 
 // `build_definition_facts`: one fact per top-level item, for the first non-local

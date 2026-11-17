@@ -364,33 +364,33 @@ PARSER_CHUNK_SCRATCH_PER_SOURCE_BYTE: 4
 // What every chunk thread reads. The one-row lists hand the token stream and
 // the tables back to the caller after the join without copying them.
 ParserChunkShared: struct {
-    tokens: [[Token]]
-    tables: [TokenTables]
-    source: [U8]
-    line_starts: [Int]
-    source_end: Int
-    allow_environment_reads: Bool
+    tokens: [[Token]],
+    tables: [TokenTables],
+    source: [U8],
+    line_starts: [Int],
+    source_end: Int,
+    allow_environment_reads: Bool,
     // The whole stream's marker declarations, read before the cut.
-    marker_scopes: [ParserMarkerScope]
+    marker_scopes: [ParserMarkerScope],
 }
 
 // One thread's chunk: the token range `start..<end` it parses, and after the
 // parse its one output row.
 ParserChunkPart: struct {
-    start: Int
-    end: Int
-    outputs: [ParserChunkOutput]
+    start: Int,
+    end: Int,
+    outputs: [ParserChunkOutput],
 }
 
 // A chunk's program and the parser-state side tables the whole-file program
 // is joined from.
 ParserChunkOutput: struct {
-    program: Program
-    diagnostics: [Diagnostic]
-    block_spans: [Span]
-    else_arms: [ElseArmSpan]
-    block_policy_declarations: [PolicyDeclaration]
-    statement_rules: [AppliedRuleApplication]
+    program: Program,
+    diagnostics: [Diagnostic],
+    block_spans: [Span],
+    else_arms: [ElseArmSpan],
+    block_policy_declarations: [PolicyDeclaration],
+    statement_rules: [AppliedRuleApplication],
 }
 
 // A token kind that opens a top-level item after a terminator: the item
@@ -433,9 +433,9 @@ parser_chunk_file_rules: fn(tables: TokenTables) -> [Int] Never! {
 // A cut scan of one token range: whether the range keeps the stream whole,
 // whether it holds a fence token, and its cut candidates.
 ParserChunkScan: struct {
-    whole: Bool
-    fences: Bool
-    candidates: [Int]
+    whole: Bool,
+    fences: Bool,
+    candidates: [Int],
 }
 
 // The cut scan of `tokens[from..<to]` from the state the one-thread scan
@@ -512,24 +512,24 @@ parser_chunk_bounds_of: fn(candidates: [Int], count: Int, workers: Int) -> [Int]
 // The cut and fence facts of the whole stream, scanned per lexer item run
 // on the threads.
 ParserRunBounds: struct {
-    tokens: [Token]
-    bounds: [Int]
-    fences: Bool
+    tokens: [Token],
+    bounds: [Int],
+    fences: Bool,
 }
 
 // What every run scan thread reads.
 ParserRunShared: struct {
-    tokens: [[Token]]
-    source: [U8]
-    file_rules: [Int]
+    tokens: [[Token]],
+    source: [U8],
+    file_rules: [Int],
 }
 
 // One thread's item runs `runs[start..<end]` and, after the scan, its one
 // output row.
 ParserRunPart: struct {
-    start: Int
-    end: Int
-    outputs: [ParserChunkScan]
+    start: Int,
+    end: Int,
+    outputs: [ParserChunkScan],
 }
 
 // parser_chunk_bounds over the lexer's item runs: the cut scan of each run

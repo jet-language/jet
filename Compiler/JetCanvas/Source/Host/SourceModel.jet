@@ -16,7 +16,7 @@ SOURCE_TEMP_ATTEMPTS: 100
 // Why a Canvas source path could not be read or written.
 #Error
 CanvasSourceError: struct {
-    message: String
+    message: String,
 }
 
 canvas_source_error: fn(message: String) -> CanvasSourceError Never! {
@@ -25,13 +25,13 @@ canvas_source_error: fn(message: String) -> CanvasSourceError Never! {
 
 #Error
 SourceWriteError: enum {
-    Conflict
-    Failed(error: CanvasSourceError)
+    Conflict,
+    Failed(error: CanvasSourceError),
 }
 
 ReplaceResult: enum {
-    Applied
-    Conflict
+    Applied,
+    Conflict,
 }
 
 source_revision: fn(src: String) -> String Never! { "sha256-{sha256_hex(src)}" }
@@ -130,13 +130,13 @@ source_replace_if_unchanged: fn(path: String, expected: String?, candidate: Stri
 
 // The held parent directory of a source path and the final name in it.
 SourceTarget: struct {
-    parent: Directory
-    name: String
+    parent: Directory,
+    name: String,
 }
 
 SourceCurrentFile: struct {
-    bytes: [U8]
-    mode: Int
+    bytes: [U8],
+    mode: Int,
 }
 
 source_open_base: fn(path: String) -> Directory CanvasSourceError! {

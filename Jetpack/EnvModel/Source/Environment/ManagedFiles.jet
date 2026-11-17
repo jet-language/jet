@@ -10,9 +10,9 @@ use {
 // Jet-owned content object; `Seed` preserves an existing destination and
 // `Copy` owns the destination after the first successful application.
 FileMode: enum {
-    Symlink
-    Seed
-    Copy
+    Symlink,
+    Seed,
+    Copy,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -27,7 +27,7 @@ FileMode: enum {
 // overwrites an unmanaged destination; the user must resolve that choice in
 // source before `jet env sync` can apply it.
 FileConflict: enum {
-    Refuse
+    Refuse,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -37,20 +37,20 @@ FileConflict: enum {
 }
 
 ManagedFile: struct {
-    destination: String{""}
+    destination: String{""},
     // A project-relative source path, when the declaration names one.
-    source: String?{None}
+    source: String?{None},
     // Inline bytes after comptime evaluation, when the declaration supplies a
     // value rather than a source path.
-    content: [U8]?{None}
-    mode: FileMode{FileMode.Symlink}
-    permissions: Int?{None}
-    sensitive: Bool{false}
-    generation: String?{None}
+    content: [U8]?{None},
+    mode: FileMode{FileMode.Symlink},
+    permissions: Int?{None},
+    sensitive: Bool{false},
+    generation: String?{None},
     // Hash of the declarative source identity. Jetpack re-hashes source bytes
     // before applying a path-backed entry.
-    source_digest: String{""}
-    conflict: FileConflict{FileConflict.Refuse}
+    source_digest: String{""},
+    conflict: FileConflict{FileConflict.Refuse},
 
     fingerprint: fn(self) -> String Never! {
         source: self.source ?? "<inline>"
@@ -74,11 +74,11 @@ ManagedFile: struct {
 
 #Error
 ManagedFileError: enum {
-    InvalidDestination(String)
-    InvalidSource(String)
-    InvalidEntry(String)
-    InvalidMode(String)
-    InvalidPermissions(String)
+    InvalidDestination(String),
+    InvalidSource(String),
+    InvalidEntry(String),
+    InvalidMode(String),
+    InvalidPermissions(String),
 
     message: fn(self) -> String Never! {
         if self == {
@@ -96,8 +96,8 @@ impl EnvironmentFactError -> ManagedFileError { ManagedFileError.InvalidEntry(se
 
 // One declared destination and its still-unlowered value.
 ManagedFileEntry: struct {
-    destination: String
-    value: CtValue
+    destination: String,
+    value: CtValue,
 }
 
 // Convert the closed `files: [destination: value]` fact into deterministic

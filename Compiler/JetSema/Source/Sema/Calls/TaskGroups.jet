@@ -47,58 +47,58 @@ use {
 }
 
 SemaTaskGroupOrigin: enum {
-    Lexical
-    Parameter
+    Lexical,
+    Parameter,
 }
 
 SemaTaskGroupPendingSpawn: struct {
-    binding: String?
-    span: Span
+    binding: String?,
+    span: Span,
 }
 
 SemaTaskGroupBorrow: struct {
-    name: String
-    place: SemaOwnershipPlace
-    access: AccessConvention
+    name: String,
+    place: SemaOwnershipPlace,
+    access: AccessConvention,
     // Lent through a captured window (`left: &xs[0]`), which the parent
     // may no longer change or (for a write) read until the group joins.
-    window: Bool{false}
+    window: Bool{false},
 }
 
 SemaTaskGroupFrame: struct {
-    name: String
-    origin: SemaTaskGroupOrigin
-    pending: [SemaTaskGroupPendingSpawn]
-    borrows: [SemaTaskGroupBorrow]
-    handle_span: Span
-    synth_counter: Int
+    name: String,
+    origin: SemaTaskGroupOrigin,
+    pending: [SemaTaskGroupPendingSpawn],
+    borrows: [SemaTaskGroupBorrow],
+    handle_span: Span,
+    synth_counter: Int,
 }
 
 SemaTaskGroupState: struct {
-    stack: [SemaTaskGroupFrame]
-    in_spawn: Bool
-    spawn_group_floor: Int
-    scoped_loan_read_reported: Bool
-    time_effects: [TEffectSpan]
+    stack: [SemaTaskGroupFrame],
+    in_spawn: Bool,
+    spawn_group_floor: Int,
+    scoped_loan_read_reported: Bool,
+    time_effects: [TEffectSpan],
     // (Rust `current_binding_name` / `task_spawn_binding_name`):
     // the binding whose initializer is being checked, and the binding a task
     // spawn initializes while its body is checked.
-    binding_name: String?{None}
-    spawn_binding: String?{None}
+    binding_name: String?{None},
+    spawn_binding: String?{None},
     // (Rust `view_borrow_escape_tasks` / `view_capture_tasks`): the
     // task bindings whose spawn captured a view borrow (E1106 at `.detach()`)
     // or failed sendability another way (E1103 at `.detach()`).
-    detach_view_tasks: [String]{[String]{}}
-    detach_unsound_tasks: [String]{[String]{}}
+    detach_view_tasks: [String]{[String]{}},
+    detach_unsound_tasks: [String]{[String]{}},
     // The lambda about to be checked is a `task` body. Its
     // lambda check consumes the fact, so nested lambdas never see it.
-    spawn_body: Bool{false}
+    spawn_body: Bool{false},
     // The expression being checked is the branch list of a scoped combinator
     // (`task.all`, `task.race`, `task.any`), which joins every branch before
     // it returns. A task spawned as one of its branches borrows what it reads
     // until then, as a `task.group` child does until its group's join. The
     // spawn check clears it for the task's own body.
-    combinator_branch: Bool{false}
+    combinator_branch: Bool{false},
 }
 
 sema_taskgroup_state_init: fn() -> SemaTaskGroupState Never! {
@@ -1226,24 +1226,24 @@ sema_call_check_channel: fn(call: Call, expected: Type?, environment: SemaScopeE
 // `value, receiver` and `after duration` in a one-field tuple whose `after`
 // field name no source can spell.
 SemaReadinessHead: enum {
-    Receive(binding: String, source: Expr)
-    After(duration: Expr)
+    Receive(binding: String, source: Expr),
+    After(duration: Expr),
 }
 
 // One checked readiness arm. `ordinal` counts the arms of its own kind in
 // source order: the scheduler numbers receive arms first, then timer arms.
 SemaReadinessArm: enum {
-    Receive(local: TLocal, receiver: TExpr, ordinal: Int)
-    After(duration: TExpr, ordinal: Int)
+    Receive(local: TLocal, receiver: TExpr, ordinal: Int),
+    After(duration: TExpr, ordinal: Int),
 }
 
 // The arms of one readiness table as they are checked; an arm whose head did
 // not check is None.
 SemaReadinessTable: struct {
-    arms: [SemaReadinessArm?]
-    element: Type?
-    receivers: Int
-    timers: Int
+    arms: [SemaReadinessArm?],
+    element: Type?,
+    receivers: Int,
+    timers: Int,
 }
 
 sema_readiness_head: fn(cond: Expr) -> SemaReadinessHead? Never! {

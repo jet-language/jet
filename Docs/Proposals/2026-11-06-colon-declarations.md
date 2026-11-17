@@ -129,8 +129,8 @@ Today:
 
 ```jet
 package {
-    name: "functions_never_return"
-    version: "0.1.0"
+    name: "functions_never_return",
+    version: "0.1.0",
     authority: { allow: [Exec, IO, Mem.Alloc] }
 }
 
@@ -248,13 +248,13 @@ cache: module<K>(capacity: Int) {
     COMPUTED_SIZE: comptime { BASE + 1 }
 
     Entry: struct {
-        priv key: K
-        priv limit: Int -> capacity
+        priv key: K,
+        priv limit: Int -> capacity,
     }
 
     Slot: enum {
-        Empty
-        Value(K)
+        Empty,
+        Value(K),
     }
 
     entry: fn(k: K) -> Entry { return Entry{key: k} }
@@ -274,8 +274,8 @@ forward_cache: int_cache
 int_cache: cache<Int>(32)
 
 Mode: enum {
-    Fast
-    Safe
+    Fast,
+    Safe,
 }
 
 tier_zero: module(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
@@ -305,7 +305,7 @@ kinds: annotation_kinds<GoodToken>(8)
 
 fixed_buffer: module<T>(capacity: Int) {
     Buffer: struct {
-        priv items: [T#capacity]
+        priv items: [T#capacity],
     }
 
     echo: fn(values: [T#capacity]) -> [T#capacity] { return values.copy() }
@@ -315,26 +315,26 @@ three_ints: fixed_buffer<Int>(3)
 
 local_laws: module<T> {
     Reveal: trait {
-        Output: type
-        reveal: fn(self) -> T
+        Output: type,
+        reveal: fn(self) -> T,
     }
 
     Wrapped: struct {
-        priv value: T
+        priv value: T,
     }
 
     impl Wrapped.Reveal {
-        Output: T
+        Output: T,
 
         reveal: fn(self) -> T { self.value }
     }
 
     SourceErr: enum {
-        Bad(T)
+        Bad(T),
     }
 
     TargetErr: enum {
-        Wrapped(SourceErr)
+        Wrapped(SourceErr),
     }
 
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
@@ -385,18 +385,18 @@ MAX_ITEMS: 100
 DEFAULT_NAME: "untitled"
 
 Priority: enum {
-    Low
-    High
+    Low,
+    High,
 }
 
 Task: struct {
-    title: String
-    priority: Priority
-    done: Bool
+    title: String,
+    priority: Priority,
+    done: Bool,
 }
 
 Inbox: struct {
-    tasks: [Task]
+    tasks: [Task],
 }
 
 impl Inbox {

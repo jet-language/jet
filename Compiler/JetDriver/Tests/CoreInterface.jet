@@ -37,7 +37,7 @@ use {
     jet_sema.[SEMA_UNITS_CATALOG, sema_units_catalog_names, sema_units_source_mentions]
 }
 
-INTERFACE_FIXTURE: "Sized: trait {{\n    size: fn(self) -> Int Never! {{ 1 }}\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n    impl Sized {{\n        size: fn(self) -> Int Never! {{ self.width }}\n    }}\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nnothing: fn() Never! {{}}\n\nLIMIT: 3\n"
+INTERFACE_FIXTURE: "Sized: trait {{\n    size: fn(self) -> Int Never! {{ 1 }}\n}}\n\nShape: struct {{\n    width: Int,\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n    impl Sized {{\n        size: fn(self) -> Int Never! {{ self.width }}\n    }}\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nnothing: fn() Never! {{}}\n\nLIMIT: 3\n"
 
 // The fixture as the one Core unit `core.devtools`.
 interface_test_fixture_rows: fn() -> [JetDriverCoreSource] {
@@ -170,7 +170,7 @@ interface_test_core_rows: fn() -> [JetDriverCoreSource] {
 
 // An interface file, read by range as jet reads its runtime part.
 InterfaceTestReader: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     impl JetDriverCoreInterfaceReader {
         read: fn(self, at: Int, size: Int) -[Env, FFI.Asm]> [U8]? {
@@ -192,7 +192,7 @@ InterfaceTestReader: struct {
 // A trace sink that keeps the load's counters and the parse's Core token
 // deltas in `path`, one per line.
 InterfaceTestTrace: struct {
-    path: String
+    path: String,
 
     impl CompilerTraceSink {
         begin: fn(self, name: String, detail: String, index: Int, total: Int) -[FS, Time]> Never! {}
@@ -241,8 +241,8 @@ interface_test_request: fn(source: String, rows: [JetDriverCoreSource], interfac
 
 // A load and the counters it traced.
 InterfaceTestLoad: struct {
-    load: JetDriverLoadResult
-    counters: [String:Int]
+    load: JetDriverLoadResult,
+    counters: [String:Int],
 }
 
 // The load of `source` over Core `rows` on four compiler threads, reading
@@ -544,7 +544,7 @@ interface_test_differ: fn(eager: JetDriverLoadResult, lazy: JetDriverLoadResult,
 // holds a declaration either way, so the ready parses of its kept bodies
 // come from a parse that holds too.
 interface_test_marked_rows: fn() -> [JetDriverCoreSource] {
-    text: "#SingleUse Token: struct {{\n    id: Int\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nShape: struct {{\n    width: Int\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
+    text: "#SingleUse Token: struct {{\n    id: Int,\n}}\n\ntwice: fn(value: Int) -> Int Never! {{\n    value * 2\n}}\n\nShape: struct {{\n    width: Int,\n    area: fn(self) -> Int Never! {{ self.width * 2 }}\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n"
     [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools", path: "Core/interface-marked.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(text)},
     }

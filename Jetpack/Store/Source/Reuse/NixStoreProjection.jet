@@ -10,15 +10,15 @@ use {
 
 // One projected object: its logical store path, Hangar digest, and source.
 NixStoreProjection: struct {
-    logical: String
-    digest: String
-    primary: Bool
-    source: String
+    logical: String,
+    digest: String,
+    primary: Bool,
+    source: String,
 }
 
 // Nix entries by every output digest they own, each list in id order.
 NixProjectionIndex: struct {
-    priv by_digest: [String:[StoreEntry]]
+    priv by_digest: [String:[StoreEntry]],
 
     from_entries: fn(entries: [StoreEntry]) -> NixProjectionIndex Never! {
         by_digest := [String:[StoreEntry]]{}
@@ -308,8 +308,8 @@ store_reuse_validate_direct_projection_seals: fn(verification: &StoreVerificatio
 
 // The pinned projection sources and their stability witnesses.
 OpenedNixProjection: struct {
-    stable: [NixProjectionPath]
-    bindings: [NixProjectionBinding]
+    stable: [NixProjectionPath],
+    bindings: [NixProjectionBinding],
 }
 
 // Rust `open_nix_projection_sources` (Linux): pin each source no-follow. A

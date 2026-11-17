@@ -15,10 +15,10 @@ use {
 
 // The (device, inode, size, mtime) tuple an invocation digest is valid for.
 DigestStamp: struct {
-    device: Int
-    inode: Int
-    size: Int
-    modified_ns: Int
+    device: Int,
+    inode: Int,
+    size: Int,
+    modified_ns: Int,
 }
 
 store_object_stamp: fn(info: files.Stat) -> DigestStamp Never! {
@@ -27,9 +27,9 @@ store_object_stamp: fn(info: files.Stat) -> DigestStamp Never! {
 
 // One memoized digest: which kind of digest it is, and the stamp it holds for.
 VerifiedDigestMemo: struct {
-    path: String
-    stamp: DigestStamp
-    digest: String
+    path: String,
+    stamp: DigestStamp,
+    digest: String,
 }
 
 // Verified digest memos and test miss counts live in the invocation's
@@ -61,9 +61,9 @@ store_verified_digest_hash_count: fn(verification: &StoreVerification, path: Str
 }
 
 VerificationStatus: struct {
-    reused: Bool
-    resealed: Bool
-    reseal_needed: Bool
+    reused: Bool,
+    resealed: Bool,
+    reseal_needed: Bool,
 }
 
 store_try_entry_output_hash: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) -[FS, Env]> String StoreError! {
@@ -123,8 +123,8 @@ store_read_only_output_hash: fn(verification: &StoreVerification, path: String, 
 }
 
 VerifiedOutputHash: struct {
-    digest: String
-    status: VerificationStatus
+    digest: String,
+    status: VerificationStatus,
 }
 
 store_verified_output_hash_persistent_with_status: fn(verification: &StoreVerification, path: String, hangar_root: String?, allow_semantic_xattrs: Bool, force_full: Bool) -[FS, Env]> VerifiedOutputHash StoreError! {
@@ -273,21 +273,21 @@ STORE_HASH_WORKERS: 16
 // The canonical digest of the tree at `root` ("" for none) and the content
 // SHA-256 hex of each file in `paths`, in order.
 StoreTreeHashes: struct {
-    tree: String
-    files: [String]
+    tree: String,
+    files: [String],
 }
 
 // One worker's share of a hashing pass.
 StoreHashLane: struct {
-    root: String
-    paths: [String]
-    slots: [Int]
+    root: String,
+    paths: [String],
+    slots: [Int],
 }
 
 StoreHashLaneResult: struct {
-    tree: String
-    digests: [String]
-    failure: String
+    tree: String,
+    digests: [String],
+    failure: String,
 }
 
 // Hash a tree and a set of files on worker tasks at once. The canonical
@@ -375,7 +375,7 @@ store_probe_output_readable: fn(path: String) -[FS]> StoreError! {
 // Directories made writable for a quarantine move, restored afterwards.
 // Rust restores on `Drop`; Jet callers call `restore()` on every exit.
 MovePathPermissions: struct {
-    priv original: [MovedPathMode]
+    priv original: [MovedPathMode],
 
     // Rust `Default`: nothing made writable yet.
     default: fn() -> MovePathPermissions Never! { MovePathPermissions{original: [MovedPathMode]{}} }
@@ -434,8 +434,8 @@ MovePathPermissions: struct {
 }
 
 MovedPathMode: struct {
-    path: String
-    mode: Int
+    path: String,
+    mode: Int,
 }
 
 STORE_QUARANTINE_SEQUENCE: Shared{ProcessSequence{next: 0}}
@@ -556,33 +556,33 @@ store_now_secs: fn() -[Time]> Int Never! {
 // (`out` required) to its source path. `cache_identity` records the
 // fingerprints Hangar already stores for the deriver/action.
 IngestRequest: struct {
-    name: String
-    version: String
-    reference: String
-    cache_identity: CacheIdentity
-    references: [String]
-    outputs: [String:String]
-    signature: String
-    provenance: String
+    name: String,
+    version: String,
+    reference: String,
+    cache_identity: CacheIdentity,
+    references: [String],
+    outputs: [String:String],
+    signature: String,
+    provenance: String,
     // Explicit platform artifact kind. Empty rejects semantic xattrs;
     // non-empty is the product surface that keeps them (plan E4-JP1).
-    platform_artifact_kind: String
+    platform_artifact_kind: String,
 
     allow_semantic_xattrs: fn(self) -> Bool Never! { self.platform_artifact_kind != "" }
 }
 
 IngestedObject: struct {
-    entry: StoreEntry
+    entry: StoreEntry,
     // True when an existing content-identical object was reused.
-    deduplicated: Bool
+    deduplicated: Bool,
 }
 
 #Error
 IngestError: enum {
-    PathLaw(PathLawError)
-    Mutated(String)
-    Invalid(String)
-    IO(String)
+    PathLaw(PathLawError),
+    Mutated(String),
+    Invalid(String),
+    IO(String),
 
     code: fn(self) -> String Never! {
         if self == {
@@ -892,10 +892,10 @@ store_copy_semantic_xattrs_node: fn(source: String, destination: String) -[FS]> 
 
 // Identity used to detect a source that mutates while it is copied.
 StableMetaIdentity: struct {
-    device: Int
-    inode: Int
-    size: Int
-    mode: Int
+    device: Int,
+    inode: Int,
+    size: Int,
+    mode: Int,
 }
 
 store_stable_meta_identity: fn(info: files.Stat) -> StableMetaIdentity Never! {
@@ -903,8 +903,8 @@ store_stable_meta_identity: fn(info: files.Stat) -> StableMetaIdentity Never! {
 }
 
 DirectorySnapshotEntry: struct {
-    name: String
-    identity: StableMetaIdentity
+    name: String,
+    identity: StableMetaIdentity,
 }
 
 store_directory_snapshot: fn(source: String) -[FS]> [DirectorySnapshotEntry] IngestError! {

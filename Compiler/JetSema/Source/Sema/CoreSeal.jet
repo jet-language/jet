@@ -50,10 +50,10 @@ SEMA_CORE_SEAL_PANIC_EDGE: "__jet_panic__"
 // (sema_effect_core_seal_rows): its key, its solved row without the stop,
 // whether it reaches a stop, and whether its reach writes module state.
 SemaCoreSealEffects: struct {
-    key: String
-    effects: [String]
-    panic: Bool
-    writes: Bool
+    key: String,
+    effects: [String],
+    panic: Bool,
+    writes: Bool,
 }
 
 // The failure summaries of the Core library's check
@@ -65,11 +65,11 @@ SemaCoreSealEffects: struct {
 // checked return carries view provenance, which a caller's check reads
 // from the checked body, so none of them is a stand-in.
 SemaCoreSealFailure: struct {
-    infallible: [Int:Bool]
-    unclean: [Int:Bool]
-    general: [Int:Bool]
-    keys: [String]
-    views: [Int:Bool]{[Int:Bool]{}}
+    infallible: [Int:Bool],
+    unclean: [Int:Bool],
+    general: [Int:Bool],
+    keys: [String],
+    views: [Int:Bool]{[Int:Bool]{}},
 }
 
 sema_core_seal_failure_none: fn() -> SemaCoreSealFailure Never! {
@@ -268,13 +268,13 @@ sema_core_seal_lines: fn(graph: SemaRegistrationGraph, failure: SemaCoreSealFail
 // it reads only the lines of the Core functions it names, never the whole
 // seal.
 SemaCoreSeal: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 // One seal line: its flags and its effects.
 SemaCoreSealLine: struct {
-    flags: String
-    effects: [String]
+    flags: String,
+    effects: [String],
 }
 
 // The newline that ends a seal line, and the tab that ends its key.
@@ -357,7 +357,7 @@ sema_core_seal_key_order: fn(bytes: [U8], start: Int, wanted: [U8]) -> Int Never
 // first names a deferred Core body (CoreDemand.jet sema_core_stand_in_bind),
 // so a run whose demand names none never reads the seal.
 SemaCoreSealSource: trait {
-    read: fn(self) -[FS, Env]> SemaCoreSeal?
+    read: fn(self) -[FS, Env]> SemaCoreSeal?,
 }
 
 // Whether the host hooks behind `access` hold a Core seal not yet read.
@@ -411,8 +411,8 @@ sema_core_seal_stand_in_failure: fn(line: SemaCoreSealLine, key: String) -> Sema
 
 // What the check of a stand-in takes from the Core seal for its body.
 SemaCoreStandIn: struct {
-    effects: TEffectFacts
-    failure: SemaFunctionFailureFacts
+    effects: TEffectFacts,
+    failure: SemaFunctionFailureFacts,
 }
 
 // The seal facts of the function `key`, whose source is `span`, when its

@@ -23,16 +23,16 @@ use {
 /// or DER error mbedtls adds to the DHM code.
 #Error
 DHMError: enum {
-    BadInput
-    ReadParamsFailed(bn.MpiError)
-    MakeParamsFailed(bn.MpiError?)
-    ReadPublicFailed(bn.MpiError)
-    MakePublicFailed(bn.MpiError?)
-    CalcSecretFailed(bn.MpiError)
-    InvalidFormat(asn1.ASN1Error)
-    SetGroupFailed(bn.MpiError)
-    Mpi(bn.MpiError)
-    PEM(pem.PEMError)
+    BadInput,
+    ReadParamsFailed(bn.MpiError),
+    MakeParamsFailed(bn.MpiError?),
+    ReadPublicFailed(bn.MpiError),
+    MakePublicFailed(bn.MpiError?),
+    CalcSecretFailed(bn.MpiError),
+    InvalidFormat(asn1.ASN1Error),
+    SetGroupFailed(bn.MpiError),
+    Mpi(bn.MpiError),
+    PEM(pem.PEMError),
 }
 
 /// Bad input parameters, or a public value outside 2..p - 2
@@ -53,12 +53,12 @@ impl bn.MpiError -> DHMError { DHMError.Mpi(self) }
 
 /// One value of a DHM context, for dhm_get_value (mbedtls_dhm_parameter).
 DHMParam: enum {
-    P
-    G
-    X
-    GX
-    GY
-    K
+    P,
+    G,
+    X,
+    GX,
+    GY,
+    K,
 }
 
 /// The prime modulus.
@@ -73,16 +73,16 @@ DHMParam: enum {
 /// R^2 mod p, and the blinding pair vi, vf = vi^-x for the private value px
 /// they were made for.
 DHMContext: struct {
-    p: bn.Mpi
-    g: bn.Mpi
-    x: bn.Mpi
-    gx: bn.Mpi
-    gy: bn.Mpi
-    k: bn.Mpi
-    rp: bn.Mpi
-    vi: bn.Mpi
-    vf: bn.Mpi
-    px: bn.Mpi
+    p: bn.Mpi,
+    g: bn.Mpi,
+    x: bn.Mpi,
+    gx: bn.Mpi,
+    gy: bn.Mpi,
+    k: bn.Mpi,
+    rp: bn.Mpi,
+    vi: bn.Mpi,
+    vf: bn.Mpi,
+    px: bn.Mpi,
 }
 
 /// An empty context (mbedtls_dhm_init).

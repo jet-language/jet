@@ -39,75 +39,75 @@ JET_CLI_DOC_SCHEMA_VERSION: 1
 JET_CLI_DOC_EXPECT_MARKER: "// =>"
 
 JetCLIDocSource: struct {
-    path: String
-    start: Int
-    end: Int
-    line: Int
-    column: Int
-    link: String
+    path: String,
+    start: Int,
+    end: Int,
+    line: Int,
+    column: Int,
+    link: String,
 }
 
 JetCLIDocItem: struct {
-    kind: String
-    name: String
-    qualified_name: String
-    module_path: String
-    public: Bool
-    package_public: Bool
-    signature: String
+    kind: String,
+    name: String,
+    qualified_name: String,
+    module_path: String,
+    public: Bool,
+    package_public: Bool,
+    signature: String,
     // Effective failure carrier and its provenance from the checked callable
     // fact; `None` for a non-callable item or a callable with no fact.
-    failure_contract: String?
-    failure_source: String?
-    summary: String
-    examples: [String]
-    markers: [String]
-    source: JetCLIDocSource
+    failure_contract: String?,
+    failure_source: String?,
+    summary: String,
+    examples: [String],
+    markers: [String],
+    source: JetCLIDocSource,
 }
 
 JetCLIDocModule: struct {
-    name: String
-    path: String
-    public: Bool
-    summary: String
-    source: JetCLIDocSource
+    name: String,
+    path: String,
+    public: Bool,
+    summary: String,
+    source: JetCLIDocSource,
 }
 
 JetCLIDocImpl: struct {
-    kind: String
-    type_name: String
-    trait_name: String?
-    module_path: String
-    public: Bool
-    methods: [String]
-    source: JetCLIDocSource
+    kind: String,
+    type_name: String,
+    trait_name: String?,
+    module_path: String,
+    public: Bool,
+    methods: [String],
+    source: JetCLIDocSource,
 }
 
 // `line` is the 1-based source line the `// =>` claim is written on.
 JetCLIDocExpectation: struct {
-    expression: String
-    expected: String
-    line: Int
+    expression: String,
+    expected: String,
+    line: Int,
 }
 
 JetCLIDocTest: struct {
-    module_path: String
-    line: Int
-    setup: [String]
-    expectations: [JetCLIDocExpectation]
-    source: JetCLIDocSource
+    module_path: String,
+    line: Int,
+    setup: [String],
+    expectations: [JetCLIDocExpectation],
+    source: JetCLIDocSource,
 }
 
 // `effect_projection` holds the application-boundary roles from the same
 // checked program `jet build` authorizes (Authority.jet).
 JetCLIDocGraph: struct {
-    schema_version: Int
-    root: String
-    effect_projection: SemEffectProjection
-    modules: [JetCLIDocModule]
-    items: [JetCLIDocItem]
-    impls: [JetCLIDocImpl]
-    doctests: [JetCLIDocTest]
+    schema_version: Int,
+    root: String,
+    effect_projection: SemEffectProjection,
+    modules: [JetCLIDocModule],
+    items: [JetCLIDocItem],
+    impls: [JetCLIDocImpl],
+    doctests: [JetCLIDocTest],
 }
 
 jet_cli_doc_is_space: fn(byte: U8) -> Bool Never! {
@@ -254,8 +254,8 @@ jet_cli_doc_marker_names: fn(markers: [Marker]) -> [String] Never! {
 
 // Where one module's items are documented from.
 JetCLIDocUnit: struct {
-    path: String
-    source: String
+    path: String,
+    source: String,
 }
 
 jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {

@@ -22,126 +22,126 @@ use {
     core.encoding.json
 }
 
-PACKAGE: "name: \"core_activation\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time, Net, FS, Env]\n\n}}\n"
+PACKAGE: "name: \"core_activation\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time, Net, FS, Env],\n\n}}\n"
 
 ARMS: ["control", "import", "use"]
 
 Battery: struct {
-    use_line: String
-    call: String
+    use_line: String,
+    call: String,
 }
 
 // A finished run: its exit status (None when it did not start or a signal
 // ended it), its output and its wall time.
 Ran: struct {
-    status: Int?
-    stdout: String
-    stderr: String
-    wall_ns: Int
+    status: Int?,
+    stdout: String,
+    stderr: String,
+    wall_ns: Int,
 }
 
 // A command's exit (null when it has none) and wall time, with the end of its
 // output when the build failed.
 #Codable(only: .Encode)
 Step: struct {
-    exit: Dyn
-    wall_ns: Int
-    stderr_tail: String?
+    exit: Dyn,
+    wall_ns: Int,
+    stderr_tail: String?,
 }
 
 #Codable(only: .Encode)
 Binary: struct {
-    bytes: Int
-    sha256: String
-    sections: Dyn
-    defined_symbols: Dyn
+    bytes: Int,
+    sha256: String,
+    sections: Dyn,
+    defined_symbols: Dyn,
 }
 
 #Codable(only: .Encode)
 Reach: struct {
-    generated_rust_bytes: Int
-    modules: [String]
+    generated_rust_bytes: Int,
+    modules: [String],
 }
 
 // The startup runs: measured, with every sample, or unavailable at the run
 // that failed.
 #Codable(only: .Encode)
 Startup: struct {
-    status: String
-    reason: String?
-    stderr: String?
-    samples: [Int]?
-    median_ns: Int?
-    stdout: String?
+    status: String,
+    reason: String?,
+    stderr: String?,
+    samples: [Int]?,
+    median_ns: Int?,
+    stdout: String?,
 }
 
 #Codable(only: .Encode)
 Unavailable: struct {
-    status: String
-    reason: String
+    status: String,
+    reason: String,
 }
 
 #Codable(only: .Encode)
 JITRun: struct {
-    exit: Dyn
-    wall_ns: Int
-    stdout: String
+    exit: Dyn,
+    wall_ns: Int,
+    stdout: String,
 }
 
 // One arm's row; a build that failed ends it at its status and reason.
 #Codable(only: .Encode)
 Row: struct {
-    battery: String
-    arm: String
-    source: String
-    check: Step
-    build: Step
-    binary: Binary?
-    reach: Dyn?
-    startup: Startup?
-    alloc: Dyn?
-    jit: JITRun?
-    status: String
-    reason: String?
+    battery: String,
+    arm: String,
+    source: String,
+    check: Step,
+    build: Step,
+    binary: Binary?,
+    reach: Dyn?,
+    startup: Startup?,
+    alloc: Dyn?,
+    jit: JITRun?,
+    status: String,
+    reason: String?,
 }
 
 #Codable(only: .Encode)
 Delta: struct {
-    battery: String
-    arm: String
-    check_wall_ns: Dyn
-    build_wall_ns: Dyn
-    binary_bytes: Dyn
-    text_bytes: Dyn
-    rodata_bytes: Dyn
-    defined_symbols: Dyn
-    generated_rust_bytes: Dyn
-    startup_median_ns: Dyn
-    allocations: Dyn
-    peak_live_bytes: Dyn
-    jit_wall_ns: Dyn
+    battery: String,
+    arm: String,
+    check_wall_ns: Dyn,
+    build_wall_ns: Dyn,
+    binary_bytes: Dyn,
+    text_bytes: Dyn,
+    rodata_bytes: Dyn,
+    defined_symbols: Dyn,
+    generated_rust_bytes: Dyn,
+    startup_median_ns: Dyn,
+    allocations: Dyn,
+    peak_live_bytes: Dyn,
+    jit_wall_ns: Dyn,
 }
 
 #Codable(only: .Encode)
 Targets: struct {
-    host_aot: String
-    jet_run: String
-    other_targets: String
+    host_aot: String,
+    jet_run: String,
+    other_targets: String,
 }
 
 #Codable(only: .Encode)
 Report: struct {
-    card: Int
-    finding: String
-    commit: String
-    dirty_tree: Bool
-    jet: String
-    jet_version: String
-    host: String
-    samples: Int
-    targets: Targets
-    rows: [Row]
-    deltas: [Delta]
+    card: Int,
+    finding: String,
+    commit: String,
+    dirty_tree: Bool,
+    jet: String,
+    jet_version: String,
+    host: String,
+    samples: Int,
+    targets: Targets,
+    rows: [Row],
+    deltas: [Delta],
 }
 
 // Every battery by name, in the order the report runs them by default.

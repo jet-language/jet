@@ -29,8 +29,8 @@ use {
 }
 
 GeneratedFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // The file's text, or None when it does not exist.
@@ -218,30 +218,30 @@ run: fn() {
 
 #Error
 GeneratorError: struct {
-    message: String
+    message: String,
 }
 
 generator_fail: fn(message: String) -> GeneratorError Never! { GeneratorError{message: message} }
 
 // One named literal of a generated table.
 MessageLiteral: struct {
-    name: String
-    text: String
+    name: String,
+    text: String,
 }
 
 // A Core library stop that carries a registered code (core.rt.__coded_stop),
 // and the exit status it ends the program with: a constant generated from
 // Compiler/JetFoundation/Source/Registry/ExitCodes.jet.
 CodedStop: struct {
-    code: String
-    exit: String
+    code: String,
+    exit: String,
 }
 
 // A word of a literal: its byte offset, signed value, and byte count (1-8).
 TextWord: struct {
-    offset: Int
-    value: Int
-    count: Int
+    offset: Int,
+    value: Int,
+    count: Int,
 }
 
 // Bytes `start..<end` of `text`. String.find reports UTF-8 byte offsets, so
@@ -303,8 +303,8 @@ REGISTRY_PATH: "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
 // The value of the quoted literal that starts at `text`'s first byte (a `"`),
 // and the byte length of its source spelling.
 QuotedLiteral: struct {
-    value: String
-    spelling_len: Int
+    value: String,
+    spelling_len: Int,
 }
 
 quoted_literal: fn(text: String) -> QuotedLiteral? Never! {
@@ -795,8 +795,8 @@ debug_intervals: fn(debug: String) -> [Int] GeneratorError! {
 }
 
 TrapOutputs: struct {
-    source: String
-    defects: String
+    source: String,
+    defects: String,
 }
 
 render_trap_messages: fn(registry: String, routes: String, debug: String) -> TrapOutputs GeneratorError! {
@@ -975,9 +975,9 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
 }
 
 TrapWritePlan: struct {
-    write_source: Bool
-    write_defects: Bool
-    message: String
+    write_source: Bool,
+    write_defects: Bool,
+    message: String,
 }
 
 // What one run writes. The ordinary projection is frozen under
@@ -1077,19 +1077,19 @@ EXPORT_MARK: "#Export(c)"
 MAX_LIFECYCLE_PRIORITY: 65535
 
 RuntimeSource: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // One #Export(c) function; `lifecycle` is `init N`, `fini N` or empty.
 RuntimeExport: struct {
-    name: String
-    lifecycle: String
+    name: String,
+    lifecycle: String,
 }
 
 ParsedExports: struct {
-    exports: [RuntimeExport]
-    problems: [String]
+    exports: [RuntimeExport],
+    problems: [String],
 }
 
 is_space_byte: fn(code: Int) -> Bool Never! { code == 32 || (code >= 9 && code <= 13) }
@@ -1125,9 +1125,9 @@ skip_spaces: fn(bytes: [U8], at: Int) -> Int Never! {
 // the line is not one (a `}` before the body's `{` also means it is not a
 // declaration head).
 ExportHead: struct {
-    name: String
-    signature: String
-    body: Int
+    name: String,
+    signature: String,
+    body: Int,
 }
 
 export_head: fn(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
@@ -1162,9 +1162,9 @@ export_head: fn(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
 // [when guard,...]` line names; None for any other line. `guards` is the
 // comma-separated module storage list, or empty.
 LifecycleHook: struct {
-    kind: String
-    priority: Int
-    guards: String
+    kind: String,
+    priority: Int,
+    guards: String,
 }
 
 lifecycle_hook: fn(line: String) -> LifecycleHook? Never! {
@@ -1200,10 +1200,10 @@ lifecycle_hook: fn(line: String) -> LifecycleHook? Never! {
 // Reviewed parameter-only widening: these exports take a narrower C integer
 // parameter as an I64 word and must mask it to its low bits in their own body.
 MaskedParameter: struct {
-    symbol: String
-    index: Int
-    bits: Int
-    mask: Int
+    symbol: String,
+    index: Int,
+    bits: Int,
+    mask: Int,
 }
 
 masked_word_parameters: fn() -> [MaskedParameter] Never! {
@@ -1347,9 +1347,9 @@ runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
 
 // One #Export(c) function of a runtime source set and the file declaring it.
 PlacedExport: struct {
-    name: String
-    path: String
-    lifecycle: String
+    name: String,
+    path: String,
+    lifecycle: String,
 }
 
 // Every #Export(c) function of `sources`, in source order; a duplicate, a bad
@@ -1593,8 +1593,8 @@ MAX_SCALAR: 1114111
 
 // An inclusive scalar range.
 TextRange: struct {
-    lo: Int
-    hi: Int
+    lo: Int,
+    hi: Int,
 }
 
 hex_digit_value: fn(code: Int) -> Int Never! {
@@ -1971,9 +1971,9 @@ unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
 // (`name: fn`) or after the name (a nested `fn name`) and the spaces that
 // follow it.
 FunctionHead: struct {
-    start: Int
-    name: String
-    end: Int
+    start: Int,
+    name: String,
+    end: Int,
 }
 
 // The `name: fn` head of a declaration starting the line at `line`: optional
@@ -2082,8 +2082,8 @@ bound_names: fn(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [
 // The direct named calls of `code[from..<to]`: identifiers followed on the same
 // line by `(`, except member calls (`.name(`). `open` is the offset after `(`.
 NamedCall: struct {
-    name: String
-    open: Int
+    name: String,
+    open: Int,
 }
 
 named_calls: fn(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Never! {
@@ -2128,8 +2128,8 @@ word_after: fn(text: String, code: [U8], at: Int, to: Int) -> String Never! {
 // calls are named edges too, so a rail behind a hook keeps its callers'
 // stop facts. Other code words stay callback effects, outside the graph.
 RailInstall: struct {
-    word: String
-    address: String
+    word: String,
+    address: String,
 }
 
 rail_installs: fn(text: String, code: [U8]) -> [RailInstall] Never! {
@@ -2522,13 +2522,13 @@ MUSL_ASSETS_DIRECTORY: "Compiler/JetRuntime/Assets/MuslErrno1_2_5"
 
 // errno.h `#define ENAME VALUE` rows; VALUE is a number or another name.
 ErrnoDefinition: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 ErrnoMessage: struct {
-    number: Int
-    text: String
+    number: Int,
+    text: String,
 }
 
 is_word: fn(text: String) -> Bool Never! {
@@ -2798,8 +2798,8 @@ HOST_CARRIERS_TARGET_PATH: "Compiler/JetRuntime/Source/HostEnums.jet"
 
 // One carrier table: the constant prefix and its Core enum's variants.
 HostCarrierTable: struct {
-    prefix: String
-    values: [String]
+    prefix: String,
+    values: [String],
 }
 
 // The variants of Core enum `name` in declaration order, from exactly one of
@@ -3023,8 +3023,8 @@ DYN_KIND_BEGIN: "// Generated by Tools/Agent/RuntimeGenerators.jet from core.enc
 DYN_KIND_END: "// End of the generated dyn_kind rows."
 
 DynKind: struct {
-    variant: String
-    word: String
+    variant: String,
+    word: String,
 }
 
 // The `.Variant -> "word"` arms of __dyn_kind in `source`, in order.
@@ -3157,9 +3157,9 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
 FAULT_REPORT_TARGET_PATH: "Compiler/JetBackend/Source/X64/FaultReport.jet"
 
 FaultReportSource: struct {
-    path: String
-    name: String
-    doc: String
+    path: String,
+    name: String,
+    doc: String,
 }
 
 fault_report_sources: fn() -> [FaultReportSource] Never! {
@@ -3330,9 +3330,9 @@ EXIT_GUARD_UNBUILT: [String]{"Compiler/JetDevServer"}
 EXIT_GUARDED: [String]{"70", "101"}
 
 ExitCode: struct {
-    name: String
-    value: String
-    doc: [String]
+    name: String,
+    value: String,
+    doc: [String],
 }
 
 // The `EXIT_NAME: N` rows of the exit-code table, each with the comment
@@ -3602,10 +3602,10 @@ PROCESS_GRANT_ROW: "AuthorityProcessGrant{{"
 
 // One AUTHORITY_PROCESS_GRANTS row; `right` keeps its source escapes.
 ProcessGrant: struct {
-    name: String
-    right: String
-    workspace: Bool
-    program: Bool
+    name: String,
+    right: String,
+    workspace: Bool,
+    program: Bool,
 }
 
 // The text of `row`'s `key: "..."` field with its escapes kept, if any.

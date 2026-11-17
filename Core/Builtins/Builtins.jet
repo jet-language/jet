@@ -27,19 +27,19 @@
 // exactly once (E1014 for a second filler; E1015 when `jet check Core` finds
 // one unfilled). Tests/UI/core_role_* put a probe after `RoleKind: enum {`.
 RoleKind: enum {
-    AbsF32
-    AbsI64
-    PowFloat
-    PowF32
-    TextInputDrop
+    AbsF32,
+    AbsI64,
+    PowFloat,
+    PowF32,
+    TextInputDrop,
 }
 
 // `#Builtin.Role(.X)` on a Core function makes it the one that fills role X.
 Role: struct {
-    kind: RoleKind
+    kind: RoleKind,
 
     impl Marker {
-        sites: [.Function]
+        sites: [.Function],
     }
 }
 
@@ -49,15 +49,15 @@ Role: struct {
 
 // `evidence_read(path)`: a snapshot, golden or fixture file's text.
 EvidenceRead: struct {
-    ok: Bool
-    text: String
-    missing: Bool
+    ok: Bool,
+    text: String,
+    missing: Bool,
 }
 
 // `temp_facts()`: the process and thread a temporary directory is named for.
 TempFacts: struct {
-    pid: U64
-    thread: String
+    pid: U64,
+    thread: String,
 }
 
 // `temp_join(name)`: a path under the temporary root. `path` is the host's
@@ -65,21 +65,21 @@ TempFacts: struct {
 // temp_create unchanged, never built, sliced, decoded or edited. `text` is
 // its lossy display form.
 TempPath: struct {
-    path: [U8]
-    text: String
+    path: [U8],
+    text: String,
 }
 
 // `temp_remove(path)`: whether the old directory is gone.
 TempRemove: struct {
-    ok: Bool
-    missing: Bool
-    cause: String
+    ok: Bool,
+    missing: Bool,
+    cause: String,
 }
 
 // `temp_create(path)`: whether the new directory exists.
 TempCreate: struct {
-    ok: Bool
-    cause: String
+    ok: Bool,
+    cause: String,
 }
 
 // The descriptor operations core.files.sealed reads and writes files through
@@ -91,25 +91,25 @@ TempCreate: struct {
 // is what jetc_read read. `linux` is a compile-time host capability,
 // consumed once at parent open.
 JetcRaw: struct {
-    value: Int
-    errno: Int
-    bytes: [U8]
-    linux: Bool
+    value: Int,
+    errno: Int,
+    bytes: [U8],
+    linux: Bool,
 }
 
 // `jetc_stat(fd)`: an open descriptor's metadata, `status` negative on
 // failure with `errno` set.
 JetcStat: struct {
-    status: Int
-    errno: Int
-    dev: Int
-    ino: Int
-    len: Int
-    mtime: Int
-    mtime_ns: Int
-    nlink: Int
-    is_file: Bool
-    is_dir: Bool
+    status: Int,
+    errno: Int,
+    dev: Int,
+    ino: Int,
+    len: Int,
+    mtime: Int,
+    mtime_ns: Int,
+    nlink: Int,
+    is_file: Bool,
+    is_dir: Bool,
 }
 
 // The advisory-lock operations core.files' lock and try_lock run on
@@ -121,30 +121,30 @@ JetcStat: struct {
 // What lock_open and lock_try return: `value` is the descriptor or result,
 // negative on failure.
 LockCall: struct {
-    value: Int
-    errno: Int
-    platform: Int
+    value: Int,
+    errno: Int,
+    platform: Int,
 }
 
 // What lock_fd_identity and lock_path_identity return: the file a descriptor
 // or path names, so a replaced lock file is told apart from the held one.
 LockIdentity: struct {
-    device: Int
-    low: Int
-    high: Int
-    regular: Bool
-    reparse: Bool
-    errno: Int
-    platform: Int
+    device: Int,
+    low: Int,
+    high: Int,
+    regular: Bool,
+    reparse: Bool,
+    errno: Int,
+    platform: Int,
 }
 
 // What lock_wait returns: whether the lock was taken before `deadline_ns`.
 LockWait: struct {
-    acquired: Bool
-    timed_out: Bool
-    errno: Int
-    platform: Int
-    deadline_ns: Int
+    acquired: Bool,
+    timed_out: Bool,
+    errno: Int,
+    platform: Int,
+    deadline_ns: Int,
 }
 
 // `resolve_ordered(host, port)`: core.net's name resolution. It answers
@@ -152,34 +152,34 @@ LockWait: struct {
 // failure class core.net maps to a NetError, and `os_code` counts only when
 // `has_os_code` is set.
 ResolveError: struct {
-    kind: Int
-    has_os_code: Bool
-    os_code: Int
-    message: String
+    kind: Int,
+    has_os_code: Bool,
+    os_code: Int,
+    message: String,
 }
 
 // The operation an `IOContext` failed in. It stays a payload-free runtime
 // `Copy` enum, and only Core source may name it in an annotation.
 IOOperation: enum {
-    Read
-    Write
-    Flush
-    Connect
-    Accept
-    Close
-    Resolve
-    Codec
+    Read,
+    Write,
+    Flush,
+    Connect,
+    Accept,
+    Close,
+    Resolve,
+    Codec,
 }
 
 // The limit a process or pipeline ran out of, the payload of
 // `IOError.ResourceLimit` and a receipt's `limit_hit`. The runtime builds it
 // by its position (jet.runtime.process).
 ProcessResourceLimit: enum {
-    WallTime
-    CPUTime
-    Memory
-    OpenFiles
-    Output
+    WallTime,
+    CPUTime,
+    Memory,
+    OpenFiles,
+    Output,
 }
 
 // The file steps of an upload endpoint (core.app's uploads). core.web asks
@@ -193,22 +193,22 @@ ProcessResourceLimit: enum {
 // answers. The other steps end that request, answer a blob's GET by its id,
 // or remove what a server that stopped left staged, as a server starts.
 FileStep: enum {
-    Open
-    Write(name: String, piece: [U8])
-    Abandon(String)
-    Claim(String)
-    Finish
-    Serve(String)
-    Clean
+    Open,
+    Write(name: String, piece: [U8]),
+    Abandon(String),
+    Claim(String),
+    Finish,
+    Serve(String),
+    Clean,
 }
 
 // What a file step gave: its status, 200 when it did what it was asked;
 // for a blob's GET, the blob's bytes and their content type; the name of
 // the file `Open` staged; and the size of the file `Claim` handed over.
 FileDone: struct {
-    status: Int
-    body: [U8]
-    media: String
-    staged: String{""}
-    bytes: Int{0}
+    status: Int,
+    body: [U8],
+    media: String,
+    staged: String{""},
+    bytes: Int{0},
 }

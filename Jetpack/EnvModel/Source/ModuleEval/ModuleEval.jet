@@ -152,18 +152,18 @@ envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [
 
 // The module values and the environment fields' values, computed once.
 ComputedValues: struct {
-    globals: [String:CtValue]
-    values: [Int:CtValue]
+    globals: [String:CtValue],
+    values: [Int:CtValue],
 }
 
 // The source's module values: every immutable `NAME: value`, with or without
 // `#run`, its name and span, and the values of those written as plain
 // literals, beside the environment reads.
 ModuleConstants: struct {
-    names: [String]
-    spans: [Span]
-    globals: [String:CtValue]
-    all_plain: Bool
+    names: [String],
+    spans: [Span],
+    globals: [String:CtValue],
+    all_plain: Bool,
 }
 
 envmodel_module_constants: fn(items: [Item], environment_globals: [String:CtValue]) -> ModuleConstants Never! {
@@ -418,8 +418,8 @@ envmodel_merge_all: fn(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeE
 
 // One merged `(namespace, path)` entry.
 MergedModuleEntry: struct {
-    key: ModuleEntryKey
-    entry: MergedEntry
+    key: ModuleEntryKey,
+    entry: MergedEntry,
 }
 
 // The merged entry for `key`, if any module contributed to it.
@@ -465,9 +465,9 @@ envmodel_evaluate_hosts: fn(entries: [HostEntry], src: String, scope: ModuleEval
 // module source, computed with the module's values as module fields are.
 // Port reused from 45acf6f8f SystemFleetEval.jet, matched to the current oracle.
 HostOverrideRecord: struct {
-    source: String
-    wrapped: String
-    lit: SystemLit
+    source: String,
+    wrapped: String,
+    lit: SystemLit,
 }
 
 envmodel_host_override_record: fn(bytes: [U8], span: Span) -> HostOverrideRecord EnvModelEvalError! {

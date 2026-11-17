@@ -15,7 +15,7 @@ STORE_TRANSACTION_SEQUENCE: Shared{ProcessSequence{next: 0}}
 // Test seam (Rust thread-local ADMISSION_FAILURE): 0 = none, else the
 // 1-based `AdmissionFailurePoint` tag that fails after that step.
 AdmissionFailureSeam: struct {
-    armed: Int
+    armed: Int,
 }
 
 STORE_ADMISSION_FAILURE: Shared{AdmissionFailureSeam{armed: 0}}
@@ -24,24 +24,24 @@ STORE_ADMISSION_FAILURE: Shared{AdmissionFailureSeam{armed: 0}}
 // bytes were fetched and hashed; the transaction owns their durable
 // publication.
 AdmissionObject: struct {
-    source: String
-    digest: String
-    bytes: Int
-    allow_semantic_xattrs: Bool
-    repair_corrupt: Bool
+    source: String,
+    digest: String,
+    bytes: Int,
+    allow_semantic_xattrs: Bool,
+    repair_corrupt: Bool,
 }
 
 // A format-specific receipt whose atomic publication is shared with package
 // receipts. Nix builds the closure receipt bytes; Hangar publishes them.
 AdmissionReceipt: struct {
-    digest: String
-    bytes: [U8]
+    digest: String,
+    bytes: [U8],
 }
 
 AdmissionFailurePoint: enum {
-    AfterObjectPublication
-    AfterReceiptPublication
-    AfterClosureRegistration
+    AfterObjectPublication,
+    AfterReceiptPublication,
+    AfterClosureRegistration,
 
     tag: fn(self) -> Int Never! {
         if self == {
@@ -78,22 +78,22 @@ store_injected_failure: fn(point: AdmissionFailurePoint) StoreError! {
 }
 
 PublishedObject: struct {
-    destination: String
-    original_source: String?
-    held_source: String?
-    backup: String?
-    pending: String?
-    created: Bool
+    destination: String,
+    original_source: String?,
+    held_source: String?,
+    backup: String?,
+    pending: String?,
+    created: Bool,
 }
 
 AdmissionTransaction: struct {
-    priv verification: StoreVerification
-    priv roots: HangarRoots
-    priv stage: String
-    priv objects: [AdmissionObject]
-    priv published: [PublishedObject]
-    priv receipts: [String]
-    priv committed: Bool
+    priv verification: StoreVerification,
+    priv roots: HangarRoots,
+    priv stage: String,
+    priv objects: [AdmissionObject],
+    priv published: [PublishedObject],
+    priv receipts: [String],
+    priv committed: Bool,
 
     new: fn(verification: &StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar: roots.hangar_dir()

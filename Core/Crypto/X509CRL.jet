@@ -24,10 +24,10 @@ use {
 /// serial number, the revocation date and the crlEntryExtensions, which
 /// are absent (p -1) when the entry has none.
 X509CrlEntry: struct {
-    raw: asn1.ASN1Buf
-    serial: asn1.ASN1Buf
-    revocation_date: x509.X509Time
-    entry_ext: asn1.ASN1Buf
+    raw: asn1.ASN1Buf,
+    serial: asn1.ASN1Buf,
+    revocation_date: x509.X509Time,
+    entry_ext: asn1.ASN1Buf,
 }
 
 /// One parsed CRL (mbedtls_x509_crl).
@@ -37,20 +37,20 @@ X509CrlEntry: struct {
 /// - `sig_md`, `sig_pk`, `sig_opts`: the signature algorithm, with the
 ///   RSASSA-PSS options when it is RSASSA-PSS.
 X509Crl: struct {
-    raw: [U8]
-    tbs: asn1.ASN1Buf
-    version: Int
-    sig_oid: asn1.ASN1Buf
-    issuer_raw: asn1.ASN1Buf
-    issuer: [asn1.NamedData]
-    this_update: x509.X509Time
-    next_update: x509.X509Time
-    entries: [X509CrlEntry]
-    crl_ext: asn1.ASN1Buf
-    sig: asn1.ASN1Buf
-    sig_md: hashes.Md?
-    sig_pk: oids.PKType?
-    sig_opts: pk.PSSOptions?
+    raw: [U8],
+    tbs: asn1.ASN1Buf,
+    version: Int,
+    sig_oid: asn1.ASN1Buf,
+    issuer_raw: asn1.ASN1Buf,
+    issuer: [asn1.NamedData],
+    this_update: x509.X509Time,
+    next_update: x509.X509Time,
+    entries: [X509CrlEntry],
+    crl_ext: asn1.ASN1Buf,
+    sig: asn1.ASN1Buf,
+    sig_md: hashes.Md?,
+    sig_pk: oids.PKType?,
+    sig_opts: pk.PSSOptions?,
 }
 
 // The SEQUENCE tag, constructed.

@@ -41,32 +41,32 @@ use jet_foundation.[
 
 SemaComptimeUseScan: struct {
     // The AST tables of the scanned module.
-    tables: ASTTables
+    tables: ASTTables,
     // Every name the module's imports bind.
-    import_locals: [String:Bool]
+    import_locals: [String:Bool],
     // The names a `#run use` binds -> its `#run ` prefix, the span
     // the fix deletes to make the import plain.
-    comptime_locals: [String:Span]
+    comptime_locals: [String:Span],
     // The callables whose arguments are compile-time: the module's own
     // `#run fn`s and the imported ones, as a call spells them.
-    comptime_callees: [String:Bool]
+    comptime_callees: [String:Bool],
     // The module's source when spans index it directly, else empty.
-    source: [U8]
+    source: [U8],
     // The names the current function binds itself; a reference to one is
     // not an import reference.
-    bound: [String:Bool]
+    bound: [String:Bool],
     // The current binding initializer or constant value a reference sits
     // in, which can move into a `#run {}` block as a whole.
-    wrap: Span?
-    pending: [SemaComptimeUseReference]
-    runtime_names: [String:Bool]
-    diagnostics: [Diagnostic]
+    wrap: Span?,
+    pending: [SemaComptimeUseReference],
+    runtime_names: [String:Bool],
+    diagnostics: [Diagnostic],
 }
 
 SemaComptimeUseReference: struct {
-    name: String
-    span: Span
-    wrap: Span?
+    name: String,
+    span: Span,
+    wrap: Span?,
 }
 
 // Checks every user module, then records the build-only modules and, per
@@ -126,9 +126,9 @@ SEMA_COMPTIME_USE_MIN_BYTES_PER_THREAD: 262144
 
 // One module's scan results.
 SemaComptimeUseScanned: struct {
-    module_index: Int
-    runtime_names: [String:Bool]
-    diagnostics: [Diagnostic]
+    module_index: Int,
+    runtime_names: [String:Bool],
+    diagnostics: [Diagnostic],
 }
 
 // One graph scan: the graph (a list of one, so it moves back out), the
@@ -138,35 +138,35 @@ SemaComptimeUseScanned: struct {
 // the scan (sema_graph_scan_row). Every such scan reads the graph and the
 // checked modules and writes only its own findings.
 SemaGraphScan: struct {
-    graphs: [SemaRegistrationGraph]
-    modules: [SemaGraphModuleResult]
-    rows: [Int]
-    order: [Int]
-    queue: SemaFinalizeCoreQueue
+    graphs: [SemaRegistrationGraph],
+    modules: [SemaGraphModuleResult],
+    rows: [Int],
+    order: [Int],
+    queue: SemaFinalizeCoreQueue,
     // Each graph module's own `#run fn` callees.
-    own_callees: [[String:Bool]]?
+    own_callees: [[String:Bool]]?,
     // Every graph module's qualified keys, once found.
-    qualified: SemaQualifiedJobs?
+    qualified: SemaQualifiedJobs?,
     // A divergence wave's function rows.
-    divergence: SemaDivergenceWave?
+    divergence: SemaDivergenceWave?,
 }
 
 // A graph scan's results: the graph, the checked modules, the rows, their
 // order, and each row's findings by position.
 SemaGraphScanDone: struct {
-    graph: SemaRegistrationGraph
-    modules: [SemaGraphModuleResult]
-    rows: [Int]
-    order: [Int]
-    found: [SemaGraphScanFound?]
+    graph: SemaRegistrationGraph,
+    modules: [SemaGraphModuleResult],
+    rows: [Int],
+    order: [Int],
+    found: [SemaGraphScanFound?],
 }
 
 // One row's findings, by the scan that found them.
 SemaGraphScanFound: struct {
-    position: Int
-    comptime: SemaComptimeUseScanned?
-    qualified: SemaQualifiedFound?
-    divergence: SemaDivergenceWalked?
+    position: Int,
+    comptime: SemaComptimeUseScanned?,
+    qualified: SemaQualifiedFound?,
+    divergence: SemaDivergenceWalked?,
 }
 
 // A scan over `rows`, claimed in `order`, with no inputs yet.

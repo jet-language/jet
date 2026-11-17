@@ -52,23 +52,23 @@ FFI_SHARED_DEPS_SCHEMA: "jet-ffi-shared-deps-v1"
 
 // How the sandboxed Cargo build ran, recorded in provenance.
 CargoBridgeReceipt: struct {
-    sandbox_class: String
-    sandbox_policy: String
-    compile_time_code: Bool
+    sandbox_class: String,
+    sandbox_policy: String,
+    compile_time_code: Bool,
 }
 
 // Every input of one bridge cache key.
 RustBridgeKeyInputs: struct {
-    entries: [ExternEntry]
-    deps: [String:String]
-    handle_facts: [FFIHandleFact]
-    record_source: String
-    link_closure: FFILinkClosure
-    selected_target: String
+    entries: [ExternEntry],
+    deps: [String:String],
+    handle_facts: [FFIHandleFact],
+    record_source: String,
+    link_closure: FFILinkClosure,
+    selected_target: String,
     // `pkg_ffi_native_toolchain_identity()`, resolved once per build.
-    rust_toolchain: String
-    native_toolchain: InlineNativeToolchain?
-    native_link_args: [String]
+    rust_toolchain: String,
+    native_toolchain: InlineNativeToolchain?,
+    native_link_args: [String],
 
     // The content-addressed key: every field that can change the generated
     // crate, its dependency graph, or the toolchain that builds it.
@@ -200,17 +200,17 @@ pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args:
 // the shared dir.
 BridgePaths: struct {
     // Per-key inputs and lock.
-    cache_root: String
-    crate_name: String
+    cache_root: String,
+    crate_name: String,
     // Shared Cargo target dir (`CARGO_TARGET_DIR`).
-    target_dir: String
+    target_dir: String,
     // `<target_dir>/<triple>/release`: every blessed artifact and the
     // digest sidecar that blesses it.
-    target: String
-    rlib: String
-    target_deps_dir: String
-    host_deps_dir: String
-    provenance: String
+    target: String,
+    rlib: String,
+    target_deps_dir: String,
+    host_deps_dir: String,
+    provenance: String,
 }
 
 pkg_ffi_bridge_paths: fn(key: String, selected_target: String, native_link_args: [String], rust_toolchain: String) -[Env]> BridgePaths Never! {
@@ -555,11 +555,11 @@ pkg_ffi_diagnostic_from_row: fn(code: String, fields: [{name: String, value: Str
 
 // One `[[package]]` table of a Cargo.lock.
 CargoLockPackage: struct {
-    name: String?
-    version: String?
-    source: String?
-    checksum: String?
-    dependencies: [String]
+    name: String?,
+    version: String?,
+    source: String?,
+    checksum: String?,
+    dependencies: [String],
 
     empty: fn() -> CargoLockPackage Never! {
         CargoLockPackage{name: None, version: None, source: None, checksum: None, dependencies: [String]{}}

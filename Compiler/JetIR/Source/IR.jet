@@ -102,58 +102,58 @@
 use jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
 IROp: enum {
-    Nop
-    Const
-    ConstText
-    ConstBigInt
-    Copy
-    Move
-    Drop
-    Close
-    Add
-    Sub
-    Mul
-    Div
-    Rem
-    FloorDiv
-    Mod
-    BitAnd
-    BitOr
-    BitXor
-    Shl
-    Shr
-    Eq
-    Ne
-    Lt
-    Le
-    Gt
-    Ge
-    Neg
-    Not
-    Convert
-    Concat
-    Call
-    CallRuntime
-    CallIndirect
-    FunctionAddress
-    DataAddress
-    Load
-    Store
-    StackAddress
-    Offset
-    CopyBytes
-    Block
-    Loop
-    If
-    Else
-    End
-    Br
-    BrIf
-    Return
-    Unreachable
-    Sqrt
-    IntBig
-    StreamStore
+    Nop,
+    Const,
+    ConstText,
+    ConstBigInt,
+    Copy,
+    Move,
+    Drop,
+    Close,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    FloorDiv,
+    Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Neg,
+    Not,
+    Convert,
+    Concat,
+    Call,
+    CallRuntime,
+    CallIndirect,
+    FunctionAddress,
+    DataAddress,
+    Load,
+    Store,
+    StackAddress,
+    Offset,
+    CopyBytes,
+    Block,
+    Loop,
+    If,
+    Else,
+    End,
+    Br,
+    BrIf,
+    Return,
+    Unreachable,
+    Sqrt,
+    IntBig,
+    StreamStore,
 }
 
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
@@ -213,24 +213,24 @@ IR_STACK_MARK_KEY: "jet_ir_stack_mark#asm"
 // carrier the runtime manages (String, List, boxes); `Aggregate` bytes
 // passed by hidden pointer (IRType.size).
 IRTypeKind: enum {
-    Unit
-    Bool
-    Int
-    Word
-    Float
-    Float32
-    Char
-    String
-    Pointer
-    Aggregate
+    Unit,
+    Bool,
+    Int,
+    Word,
+    Float,
+    Float32,
+    Char,
+    String,
+    Pointer,
+    Aggregate,
 }
 
 // The System V class of one value.
 IRClass: enum {
-    Integer
-    Pointer
-    Float
-    Memory
+    Integer,
+    Pointer,
+    Float,
+    Memory,
 }
 
 // One interned type row: the checked type and its machine layout.
@@ -241,23 +241,23 @@ IRClass: enum {
 // marks one whose absent word is null, not that niche (an optional raw
 // pointer).
 IRType: struct {
-    ty: Type
-    kind: IRTypeKind
-    size: Int
-    align: Int
-    class: IRClass
-    signed: Bool
-    bits: Int
-    drop: String
-    clone: String{""}
-    option_word: Bool{false}
-    option_null: Bool{false}
+    ty: Type,
+    kind: IRTypeKind,
+    size: Int,
+    align: Int,
+    class: IRClass,
+    signed: Bool,
+    bits: Int,
+    drop: String,
+    clone: String{""},
+    option_word: Bool{false},
+    option_null: Bool{false},
 }
 
 IRSlotKind: enum {
-    Param
-    Local
-    Temp
+    Param,
+    Local,
+    Temp,
 }
 
 // IntBig's width for the test that an exact Int is inline at all (its
@@ -284,67 +284,67 @@ IR_CODE_TYPE: "#code"
 // `symbol_hash` is the stable id of `key` that ends `symbol` (0: the symbol
 // carries no hash; ir_hashed_function).
 IRFunction: struct {
-    name: String
-    key: String
-    symbol: String
-    source_file: String
-    line: Int
-    param_count: Int
-    result: Int
-    slot_type: [Int]
-    slot_kind: [IRSlotKind]
-    slot_name: [Int]
-    slot_line: [Int]
-    op: [IROp]
-    dst: [Int]
-    a: [Int]
-    b: [Int]
-    c: [Int]
+    name: String,
+    key: String,
+    symbol: String,
+    source_file: String,
+    line: Int,
+    param_count: Int,
+    result: Int,
+    slot_type: [Int],
+    slot_kind: [IRSlotKind],
+    slot_name: [Int],
+    slot_line: [Int],
+    op: [IROp],
+    dst: [Int],
+    a: [Int],
+    b: [Int],
+    c: [Int],
     // Each instruction's source line; from bit 32 up, the inline site it
     // came from (ir_code_line_site; 0: the function's own code).
-    code_line: [Int]
-    args: [Int]
+    code_line: [Int],
+    args: [Int],
     // Open structured-control instructions while building (indexes into `op`).
-    open: [Int]
-    asm: IRAsmLeaf?
-    inline_always: Bool
-    symbol_hash: U64
+    open: [Int],
+    asm: IRAsmLeaf?,
+    inline_always: Bool,
+    symbol_hash: U64,
     // The counted loops of this body sema's loop proof covers, as built
     // (ir_range_loop).
-    loop_proofs: [IRLoopProof]{[IRLoopProof]{}}
+    loop_proofs: [IRLoopProof]{[IRLoopProof]{}},
     // The source line of each masked branch of this body, as built
     // (BuildMask.jet).
-    masked: [Int]{[Int]{}}
+    masked: [Int]{[Int]{}},
     // Code that runs at most once and off the program's work (Opt.jet
     // ir_opt_mark_cold): optimized for size.
-    cold: Bool{false}
+    cold: Bool{false},
     // The C symbol a host defines in this runtime export's place
     // (IR_HOST_PROVIDER, set by ir_build_library), else empty.
-    host_symbol: String{""}
+    host_symbol: String{""},
     // The inline sites of the body (OptInline.jet ir_opt_splice),
     // IR_INLINE_SITE_WORDS words each: the function inlined there, the site
     // it sits in (0: the function's own code) and the source line of the
     // call there. Site s (from 1) starts at word 3s - 3.
-    inline_sites: [Int]{[Int]{}}
+    inline_sites: [Int]{[Int]{}},
     // Per slot, whether it holds a `timing: .Fixed` value: the builder marks
     // each scalar slot whose checked type carries a fixed tag
     // (BuildMask.jet ir_fix_slot), a pass that copies a slot copies its bit,
     // and IR Lint follows the values computed from these (Lint.jet
     // ir_lint_fixed). ir_slot adds every slot unmarked.
-    slot_fixed: [Bool]{[Bool]{}}
+    slot_fixed: [Bool]{[Bool]{}},
     // The bytes sema's frame model bounds this function's frame by
     // (FnBody.frame_bound), plus the bound of each body inlined into it
     // (OptInline.jet ir_opt_splice); -1 none. Selection checks the frame it
     // lays out against it (X64Select.jet ir_x64_compile_body).
-    frame_bound: Int{-1}
+    frame_bound: Int{-1},
     // `#MaxDepth(n)` (FnBody.max_depth): at most n calls of the function are
     // live at once on one thread; 0 when unmarked. The stack report counts a
     // call cycle through it n times (X64Stack.jet).
-    max_depth: Int{0}
+    max_depth: Int{0},
     // The index of the poll of the check the build put at the start of the
     // body (Build.jet ir_entry_check), -1 for none. ir_recursion_checks
     // keeps that check only in a recursive body and resets this to -1.
-    entry_check: Int{-1}
+    entry_check: Int{-1},
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into
@@ -379,16 +379,16 @@ IR_HOST_PROVIDER: [String]{
 // (`recorded`) and how many of those the build lowered with no bounds check
 // (`lowered`). A loop lowers one scalar round per index.
 IRLoopProof: struct {
-    line: Int
-    local: String
-    extent: Int
-    element: String
-    no_aliasing: Bool
-    no_early_exit: Bool
-    effect_free: Bool
-    independent: Bool
-    recorded: Int
-    lowered: Int
+    line: Int,
+    local: String,
+    extent: Int,
+    element: String,
+    no_aliasing: Bool,
+    no_early_exit: Bool,
+    effect_free: Bool,
+    independent: Bool,
+    recorded: Int,
+    lowered: Int,
 }
 
 // One row per loop proof of `m`'s functions (`jet inspect decisions`, taken
@@ -422,20 +422,20 @@ ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
 // bound to (`regs[i]`), the register holding its result (-1 for none), and
 // whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet).
 IRAsmLeaf: struct {
-    code: [U8]
-    regs: [Int]
-    result: Int
-    quiet: Bool{false}
+    code: [U8],
+    regs: [Int],
+    result: Int,
+    quiet: Bool{false},
 }
 
 // A word of a static object (IRModule.data_relocs) that holds an address:
 // data row `target` plus `addend` bytes, or (`text`) the immortal String of
 // data row `target`'s bytes, the same value a ConstText of that row gives.
 IRDataReloc: struct {
-    offset: Int
-    target: Int
-    addend: Int
-    text: Bool
+    offset: Int,
+    target: Int,
+    addend: Int,
+    text: Bool,
 }
 
 // The program: interned types and names, read-only data rows, functions.
@@ -508,58 +508,58 @@ IRDataReloc: struct {
 // element row, for the DWARF list types (none for a list laid out only
 // inside a struct's layout); merged rows in the merged module.
 IRModule: struct {
-    types: [IRType]
-    type_keys: [String]
-    type_rows: NameRows
-    key_rows: NameRows
-    key_lists: [[Int]]
-    names: [String]
-    name_rows: NameRows
-    data: [[U8]]
-    data_rows: NameRows
-    data_relocs: [Int:[IRDataReloc]]
-    constant_rows: NameRows
-    functions: [IRFunction]
-    function_rows: NameRows
-    entry: Int
+    types: [IRType],
+    type_keys: [String],
+    type_rows: NameRows,
+    key_rows: NameRows,
+    key_lists: [[Int]],
+    names: [String],
+    name_rows: NameRows,
+    data: [[U8]],
+    data_rows: NameRows,
+    data_relocs: [Int:[IRDataReloc]],
+    constant_rows: NameRows,
+    functions: [IRFunction],
+    function_rows: NameRows,
+    entry: Int,
     // The rows `dead_code: keep` builds as roots beside `entry`
     // (ir_build_program): the object keeps them though nothing calls them.
-    kept: [Int]{[Int]{}}
-    layouts: NameRows
-    layout_low: Int
-    struct_members: NameRows
-    variant_members: NameRows
-    member_lists: [[IRMember]]
-    enum_sizes: NameRows
-    handle_rows: NameRows
-    value_types: TypeTable{TypeTable{}}
-    value_rows: [Int]{[Int]{}}
-    close_free: [Int:Bool]
-    scalar_rows: [Int]
-    ids: [Int]
-    instances: NameRows
-    queue: [IRQueued]
-    lambdas: [IRLambdaJob]
-    close_glue: NameRows
-    helper_errors: NameRows
-    helper_messages: [String]
-    stop_points: Bool{false}
-    owned_main: Bool{false}
-    owned_attach: Bool{false}
-    single_thread: Bool{false}
-    user_values: Bool{false}
-    dropped_early: Bool{false}
-    marked_inlined: Bool{false}
-    debug_directory: String{""}
-    host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
-    struct_fields: [String]{[String]{}}
-    debug_members: [Int:[IRMember]]{[Int:[IRMember]]{}}
-    list_elements: [Int:Int]{[Int:Int]{}}
+    kept: [Int]{[Int]{}},
+    layouts: NameRows,
+    layout_low: Int,
+    struct_members: NameRows,
+    variant_members: NameRows,
+    member_lists: [[IRMember]],
+    enum_sizes: NameRows,
+    handle_rows: NameRows,
+    value_types: TypeTable{TypeTable{}},
+    value_rows: [Int]{[Int]{}},
+    close_free: [Int:Bool],
+    scalar_rows: [Int],
+    ids: [Int],
+    instances: NameRows,
+    queue: [IRQueued],
+    lambdas: [IRLambdaJob],
+    close_glue: NameRows,
+    helper_errors: NameRows,
+    helper_messages: [String],
+    stop_points: Bool{false},
+    owned_main: Bool{false},
+    owned_attach: Bool{false},
+    single_thread: Bool{false},
+    user_values: Bool{false},
+    dropped_early: Bool{false},
+    marked_inlined: Bool{false},
+    debug_directory: String{""},
+    host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}},
+    struct_fields: [String]{[String]{}},
+    debug_members: [Int:[IRMember]]{[Int:[IRMember]]{}},
+    list_elements: [Int:Int]{[Int:Int]{}},
     // The data rows that are Core cells of the runtime image the program
     // binds to (BuildCore.jet ir_core_cells_bind), by row: the symbol of
     // the image's cell, which x86-64 selection addresses instead of the
     // row's own copy (X64Select.jet DataAddress).
-    core_cells: [Int:String]{[Int:String]{}}
+    core_cells: [Int:String]{[Int:String]{}},
 }
 
 ir_module_new: fn() -> IRModule Never! {

@@ -203,9 +203,9 @@ paren_tuple1_markdown: fn(path: String, text: String) -> MigrationOutcome {
 // The body of a Markdown ```jet fence: the bytes between its opening and
 // closing lines, and the line its opening fence is on.
 ParenTupleFence: struct {
-    start: Int
-    end: Int
-    line: Int
+    start: Int,
+    end: Int,
+    line: Int,
 }
 
 paren_tuple1_fences: fn(bytes: [U8]) -> [ParenTupleFence] {
@@ -246,16 +246,22 @@ paren_tuple1_fences: fn(bytes: [U8]) -> [ParenTupleFence] {
 // means, or None when it does. The parser no longer reads paren records, so
 // `before` is read in the rewrite's own terms: the plan's rewrite of it,
 // which changes only delimiters, is what `after` must mean.
-// A Jet source's two texts must parse to the same program
-// (paren_tuple1_same_source); a Markdown file's ```jet fences must, one by
-// one, and its other text must stay as written.
 paren_tuple1_same_meaning: fn(path: String, before: String, after: String, source: Bool) -> String? {
     if before == after -> return None
-    if source || path.ends_with(".jet") || path.ends_with(".template") {
-        return paren_tuple1_same_source(paren_tuple1_source(path, before).text, after)
+    if !source && !path.ends_with(".jet") && !path.ends_with(".template") && !path.ends_with(".md") {
+        return Val("the plan rewrites no such file")
     }
-    if !path.ends_with(".md") -> return Val("the plan rewrites no such file")
-    planned: paren_tuple1_markdown(path, before).text
+    paren_tuple1_same_as_planned(path, paren_tuple1_file(path, before, source).text, after, source)
+}
+
+// Why `after` does not mean what `planned`, a plan's own rewrite of the
+// file, means, or None when it does. A Jet source's two texts must parse to
+// the same program (paren_tuple1_same_source); a Markdown file's ```jet
+// fences must, one by one, and its other text must stay as written.
+paren_tuple1_same_as_planned: fn(path: String, planned: String, after: String, source: Bool) -> String? {
+    if source || path.ends_with(".jet") || path.ends_with(".template") {
+        return paren_tuple1_same_source(planned, after)
+    }
     old: planned.bytes()
     new: after.bytes()
     old_fences: paren_tuple1_fences(old)

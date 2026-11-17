@@ -58,8 +58,8 @@ PathLiteralError: struct {
 // encoded path component, so its slashes and dot segments never become path
 // grammar.
 impl Path.CheckedText {
-    Error: PathLiteralError
-    Hole: String
+    Error: PathLiteralError,
+    Hole: String,
 
     check: fn(text: String) -[]> PathLiteralError! {
         if text.bytes().contains(U8{0}) {
@@ -95,8 +95,8 @@ path_component_encode: fn(component: String) -> String Never! {
 }
 
 DirEntry: struct {
-    name: String
-    path: String
+    name: String,
+    path: String,
     is_dir: Bool
 }
 
@@ -105,10 +105,10 @@ DirEntry: struct {
 /// valid UTF-8, and then `name` and `path` show each non-ASCII byte as U+FFFD,
 /// so only `raw_name` identifies the entry exactly.
 DirectoryEntry: struct {
-    name: String
-    path: String
-    is_dir: Bool
-    raw_name: [U8]
+    name: String,
+    path: String,
+    is_dir: Bool,
+    raw_name: [U8],
     name_is_unicode: Bool
 }
 
@@ -141,14 +141,14 @@ raw_name_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
 /// Whether `create` may replace an existing file.
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 CreateIfExists: enum {
-    Replace
+    Replace,
     Refuse
 }
 
 /// Whether a call follows a final symbolic link. `Refuse`
 /// reports `IOError.InvalidInput` when the path ends in a link.
 LinkPolicy: enum {
-    Follow
+    Follow,
     Refuse
 }
 
@@ -156,8 +156,8 @@ LinkPolicy: enum {
 /// `Refuse` reports `IOError.AlreadyExists`; `Swap` exchanges both names in
 /// one step and reports `IOError.Unsupported` where the system cannot.
 RenameIfExists: enum {
-    Replace
-    Refuse
+    Replace,
+    Refuse,
     Swap
 }
 
@@ -167,11 +167,11 @@ RenameIfExists: enum {
 /// reading the file into memory now, `DontNeed` drops its cached pages,
 /// `NoReuse` marks the data as read once, and `Normal` restores the default.
 Advice: enum {
-    Normal
-    Sequential
-    Random
-    WillNeed
-    DontNeed
+    Normal,
+    Sequential,
+    Random,
+    WillNeed,
+    DontNeed,
     NoReuse
 }
 
@@ -185,15 +185,15 @@ Advice: enum {
 /// the ones the runtime reports.
 #[Specified, Layout(U8)]
 MapKind: enum {
-    Clone = 1
-    Held = 2
+    Clone = 1,
+    Held = 2,
     Copy = 3
 }
 
 /// A file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
 FileID: struct {
-    device: Int
+    device: Int,
     inode: Int
 }
 
@@ -203,20 +203,20 @@ FileID: struct {
 /// birth time. Times are wall-clock `DateTime` values with nanosecond
 /// precision.
 Stat: struct {
-    size: Int
-    kind: String
-    mode: Int
-    readonly: Bool
-    is_file: Bool
-    is_dir: Bool
-    is_symlink: Bool
-    id: FileID
-    links: Int
-    owner: Int?
+    size: Int,
+    kind: String,
+    mode: Int,
+    readonly: Bool,
+    is_file: Bool,
+    is_dir: Bool,
+    is_symlink: Bool,
+    id: FileID,
+    links: Int,
+    owner: Int?,
     /// Unix reports allocated 512-byte blocks multiplied by 512 with signed saturation; Windows and other non-Unix platforms report logical file length in bytes, not allocated space.
-    size_on_disk: Int
-    modified: DateTime
-    changed: DateTime
+    size_on_disk: Int,
+    modified: DateTime,
+    changed: DateTime,
     created: DateTime?
 }
 
@@ -225,9 +225,9 @@ Stat: struct {
 /// may fill, what is left after the blocks the system keeps for its
 /// superuser.
 DiskSpace: struct {
-    total: Int
-    free: Int
-    available: Int
+    total: Int,
+    free: Int,
+    available: Int,
 
     /// The bytes in use: everything that is not free.
     used: fn(self) -> Int Never! { self.total - self.free }
@@ -244,14 +244,14 @@ DiskSpace: struct {
 }
 
 WalkEntry: struct {
-    path: String
-    relative: String
-    is_dir: Bool
+    path: String,
+    relative: String,
+    is_dir: Bool,
     depth: Int
 }
 
 FileScope: struct {
-    authority: Authority
+    authority: Authority,
 
     /// Read only through the authority's descriptor-relative no-follow roots.
     read: fn(self, path: String) -[FS.Read]> String IOError! { scoped_read(self, path) }
@@ -265,10 +265,10 @@ FileScope: struct {
 // Equatable and Comparable derives.
 #[!Equatable, !Comparable]
 MappedFile: struct {
-    priv stored_path: String
-    path: String -> stored_path
-    bytes: [U8]
-    priv handle: Int
+    priv stored_path: String,
+    path: String -> stored_path,
+    bytes: [U8],
+    priv handle: Int,
 
     /// Tell the system how the mapped bytes will be read (posix_madvise over
     /// the whole map). Advice only plans paging: the map holds the same file
@@ -287,23 +287,23 @@ MappedFile: struct {
 
 #[!Equatable, !Comparable]
 TempDir: struct {
-    priv stored_path: String
-    path: String -> stored_path
-    is_dir: Bool
+    priv stored_path: String,
+    path: String -> stored_path,
+    is_dir: Bool,
     priv handle: Int
 }
 
 #[!Equatable, !Comparable]
 TempFile: struct {
-    priv stored_path: String
-    path: String -> stored_path
+    priv stored_path: String,
+    path: String -> stored_path,
     priv handle: Int
 }
 
 #[!Equatable, !Comparable]
 FileLock: struct {
-    priv stored_path: String
-    path: String -> stored_path
+    priv stored_path: String,
+    path: String -> stored_path,
     priv handle: Int
 }
 
@@ -312,7 +312,7 @@ FileLock: struct {
 // Close reads the consumed receiver in place. Rebinding it (`held := self.move()`)
 // would make a second owner whose scope-end Close re-enters this one.
 priv LockFd: struct {
-    fd: Int
+    fd: Int,
 
     impl Close {
         close: fn(&&self) { _: builtin.lock_close(self.fd) }
@@ -331,7 +331,7 @@ lock_owner: fn(path: &&String, fd: &LockFd) -> FileLock Never! {
 /// An exclusive advisory lock on a held directory. Closing this owner releases
 /// the OS lock without removing any filesystem name.
 AdvisoryLock: struct {
-    priv handle: Int
+    priv handle: Int,
 
     impl Close {
         close: fn(&&self) { core.files.__close_directory(self.handle) }
@@ -346,9 +346,9 @@ AdvisoryLock: struct {
 /// cannot forge one.
 #[!Equatable, !Comparable]
 FileReader: struct {
-    priv stored_path: String
-    path: String -> stored_path
-    priv handle: Int
+    priv stored_path: String,
+    path: String -> stored_path,
+    priv handle: Int,
 
     /// What the open file is now (fstat). Comparing
     /// `id` with a later `files.stat(path).id` shows whether the path was
@@ -382,9 +382,9 @@ FileReader: struct {
 /// cannot forge one.
 #[!Equatable, !Comparable]
 FileWriter: struct {
-    priv stored_path: String
-    path: String -> stored_path
-    priv handle: Int
+    priv stored_path: String,
+    path: String -> stored_path,
+    priv handle: Int,
 
     /// What the open file is now (fstat). Bytes still
     /// buffered are not counted until `flush` or `fsync`.
@@ -466,9 +466,9 @@ rename_code: fn(if_exists: RenameIfExists) -> Int Never! {
 /// `IOError.InvalidInput`. The handle is close-on-exec and closes when it
 /// leaves scope or at `close(directory)`.
 Directory: struct {
-    priv stored_path: String
-    path: String -> stored_path
-    priv handle: Int
+    priv stored_path: String,
+    path: String -> stored_path,
+    priv handle: Int,
 
     /// Open the regular file `name` for reading.
     open: fn(self, name: String) -[FS.Read]> FileReader IOError! {
@@ -1663,7 +1663,7 @@ symlink: fn(original: String | Path, link: String | Path, replace: Bool{false}) 
 /// is the record) and the run reports what failed once, through `failed()`,
 /// `report()` or `failures`.
 BestEffort: struct {
-    failures: [IOError]
+    failures: [IOError],
 
     copy_file: fn(&self, from: String | Path, to: String | Path) -[FS]> Never! {
         if core.files.copy(from, to) == .Err(failure) -> self.failures.push(failure)
@@ -2016,8 +2016,8 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
 // One directory of a walk being read: the entries and child directories it
 // has still to yield, each in reverse walk order.
 priv WalkFrame: struct {
-    entries: [WalkEntry]
-    children: [{key: String, directory: Int}]
+    entries: [WalkEntry],
+    children: [{key: String, directory: Int}],
     depth: Int
 }
 
@@ -2027,10 +2027,10 @@ priv WalkFrame: struct {
 /// that can't be read yields its error where its entries would be, and the
 /// walk goes on. Leaving the loop early closes the walk.
 Walk: struct {
-    priv root: String
-    priv ignore: String?
-    priv files_only: Bool
-    priv skip: [String]
+    priv root: String,
+    priv ignore: String?,
+    priv files_only: Bool,
+    priv skip: [String],
 
     /// Every entry in walk order, or the first error the walk meets.
     list: fn(&&self) -[FS]> [WalkEntry] IOError! {
@@ -2044,7 +2044,7 @@ Walk: struct {
     }
 
     impl Iterable {
-        Iter: WalkCursor
+        Iter: WalkCursor,
 
         iter: fn(&&self) -> WalkCursor {
             WalkCursor{root: self.root, ignore: self.ignore, files_only: self.files_only, skip: self.skip, context: 0, frames: [WalkFrame]{}, done: false}
@@ -2055,16 +2055,16 @@ Walk: struct {
 // A walk being read: its context, 0 until the first step opens it, and the
 // directories still to finish, the deepest last.
 priv WalkCursor: struct {
-    root: String
-    ignore: String?
-    files_only: Bool
-    skip: [String]
-    context: Int
-    frames: [WalkFrame]
-    done: Bool
+    root: String,
+    ignore: String?,
+    files_only: Bool,
+    skip: [String],
+    context: Int,
+    frames: [WalkFrame],
+    done: Bool,
 
     impl Iterator {
-        Item: WalkEntry IOError!
+        Item: WalkEntry IOError!,
 
         // Yield the next entry, descending first into each child directory whose
         // subtree key sorts before it.
@@ -2843,7 +2843,7 @@ scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError!
 // One read root of a file scope. Only an `FS.Read("<path>")` right names one,
 // so a bare `FS.Read` never becomes an ambient file-system handle.
 ScopeRoot: struct {
-    encoded: [U8]
+    encoded: [U8],
     absolute: Bool
 }
 

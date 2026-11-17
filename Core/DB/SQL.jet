@@ -33,19 +33,19 @@ use {
 // Rust JetSqlAggregate:8–28.
 #Equatable
 JetSQLAggregate: enum {
-    Count
-    Sum
-    Avg
-    Min
+    Count,
+    Sum,
+    Avg,
+    Min,
     Max
 }
 
 // Rust JetSqlSelectItem:30–74. Public projection carrier for SQL consumers.
 #Equatable
 JetSQLSelectItem: enum {
-    Wildcard
-    Field(field: String, alias: String?)
-    Aggregate(function: JetSQLAggregate, field: String?, alias: String?)
+    Wildcard,
+    Field(field: String, alias: String?),
+    Aggregate(function: JetSQLAggregate, field: String?, alias: String?),
 
     // Rust output_name:45–58.
     output_name: fn(self) -> String Never! {
@@ -208,17 +208,17 @@ identifier: fn(value: String?, role: String) -> String Err! {
 // Rust JetSqlGroupKey:76–80, JetSqlQuery:82–90.
 #Equatable
 JetSQLGroupKey: enum {
-    Field(String)
+    Field(String),
     Ordinal(U64)
 }
 
 #Equatable
 JetSQLQuery: struct {
-    source: String
-    projection: [JetSQLSelectItem]
-    group_by: [JetSQLGroupKey]
-    filter: {field: String, operator: String, value: String}?
-    order: {field: String, descending: Bool}?
+    source: String,
+    projection: [JetSQLSelectItem],
+    group_by: [JetSQLGroupKey],
+    filter: {field: String, operator: String, value: String}?,
+    order: {field: String, descending: Bool}?,
     limit: U64?
 }
 
@@ -338,11 +338,11 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
 // Core Dyn/DBValue; adapters marshal only at entry.
 #Equatable
 JetSQLValue: enum {
-    Null
-    Bool(Bool)
-    Int(I64)
-    Float(Float)
-    Text(String)
+    Null,
+    Bool(Bool),
+    Int(I64),
+    Float(Float),
+    Text(String),
 
     literal: fn(token: String) -> JetSQLValue Never! {
         trimmed := sql_text.trim(token)  // #4303
@@ -361,7 +361,7 @@ JetSQLValue: enum {
 
 #Equatable
 JetSQLResultRow: struct {
-    fields: [{field: String, value: JetSQLValue}]
+    fields: [{field: String, value: JetSQLValue}],
     source_indices: [U64]
 }
 
@@ -1007,7 +1007,7 @@ priv internal: module {
     }
 
     SQLOrderedRow: struct {
-        row: JetSQLResultRow
+        row: JetSQLResultRow,
         order: JetSQLValue?
     }
 

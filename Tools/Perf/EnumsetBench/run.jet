@@ -26,7 +26,7 @@ PHASES: [String]{"construction", "update", "membership", "setops", "iteration", 
 
 ARMS: [String]{"rust_native", "rust_btreeset", "jet_set_enum", "jet_bits", "jet_int_mask", "jet_packed_fields"}
 
-PACKAGE: "name: \"enumset_bench\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time]\n\n}}\n"
+PACKAGE: "name: \"enumset_bench\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time],\n\n}}\n"
 
 PROGRAM: "enumset_bench.py"
 
@@ -34,39 +34,39 @@ CR: String.from_bytes_lossy([U8]{13})
 
 #[CLI, Doc("Dense enum-set representations on matched workloads: Rust u64 and BTreeSet peers against four Jet representations, per phase.")]
 Args: struct {
-    #Doc("timed runs of each arm after one warm-up run") samples: Int{5}
-    #Doc("workload rounds of each phase") rounds: Int{200000}
-    #Doc("comma-separated case counts, each in 1..64") sizes: String{"8,32,64"}
-    #[Doc("where the JSON report goes"), Arg(flag_only: true)] json: String
-    #Doc("the jet that builds the Jet arms; $JET_STATE_ROOT/safe-jet.sh by default") jet: String?
+    #Doc("timed runs of each arm after one warm-up run") samples: Int{5},
+    #Doc("workload rounds of each phase") rounds: Int{200000},
+    #Doc("comma-separated case counts, each in 1..64") sizes: String{"8,32,64"},
+    #[Doc("where the JSON report goes"), Arg(flag_only: true)] json: String,
+    #Doc("the jet that builds the Jet arms; $JET_STATE_ROOT/safe-jet.sh by default") jet: String?,
 }
 
 // What every arm's build and run needs.
 Bench: struct {
-    root: String
-    work: String
-    jet: String
-    rounds: Int
-    samples: Int
-    counter: String?
+    root: String,
+    work: String,
+    jet: String,
+    rounds: Int,
+    samples: Int,
+    counter: String?,
 }
 
 // One finished command: its exit code (minus the signal that ended it), its
 // output, how long it ran and its peak RSS in KiB.
 Ran: struct {
-    code: Int
-    out: String
-    err: String
-    wall_ns: Int
-    peak_kib: Int
+    code: Int,
+    out: String,
+    err: String,
+    wall_ns: Int,
+    peak_kib: Int,
 }
 
 // One arm's report keys in the original's order, with its stdout and phase
 // medians when it was measured.
 Arm: struct {
-    fields: [{key: String, value: Dyn}]
-    stdout: String?
-    phase_ns: [Int]
+    fields: [{key: String, value: Dyn}],
+    stdout: String?,
+    phase_ns: [Int],
 }
 
 // A file or command that fails ends the bench, as the original's raise does:
@@ -331,7 +331,7 @@ jet_source: fn(arm: String, k: Int, rounds: Int) -> String {
     names := [String]{}
     members := [String]{}
     loop i in 0..<k {
-        names.push("    C{i}")
+        names.push("    C{i},")
         members.push("Case.C{i}")
     }
     cases: names.join("\n")

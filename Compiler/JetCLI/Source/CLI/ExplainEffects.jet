@@ -34,49 +34,49 @@ JET_CLI_EXPLAIN_EFFECTS_RUN: "everything else allowed; --deny wins"
 
 // One rung of the ladder: what is written there and the line that writes it.
 JetCLIEffectsRung: struct {
-    rung: String
-    text: String
-    written: Bool
-    site: String
+    rung: String,
+    text: String,
+    written: Bool,
+    site: String,
 }
 
 // One effect the site reaches: the first call chain that reaches it (the
 // chain E0749 prints) and the `file:line` of its first step at the site.
 JetCLIEffectsReach: struct {
-    name: String
-    chain: [String]
-    site: String
+    name: String,
+    chain: [String],
+    site: String,
 }
 
 // A scope inside a function body that holds the site: a `#FX` block, a
 // lambda, or comptime code. A lambda carries its own checked effect facts.
 JetCLIEffectsScope: struct {
-    rung: String
-    text: String
-    span: Span
-    lambda: Bool
-    direct: [String]
-    edges: [String]
+    rung: String,
+    text: String,
+    span: Span,
+    lambda: Bool,
+    direct: [String],
+    edges: [String],
 }
 
 // The innermost function holding the site, its effect-graph key, and the
 // inline module, type and trait caps around the site, outermost first; each
 // cap's `scope` names its rung.
 JetCLIEffectsSite: struct {
-    key: String
-    function: Func?
-    caps: [ModuleCap]
+    key: String,
+    function: Func?,
+    caps: [ModuleCap],
 }
 
 // One written cap for `--caps`: `kind` is `file`, `module`, `type` or
 // `trait`, and `name` the module, type or trait it caps (empty for a file
 // head).
 JetCLIEffectsCapRow: struct {
-    file: String
-    line: Int
-    cap: String
-    kind: String
-    name: String
+    file: String,
+    line: Int,
+    cap: String,
+    kind: String,
+    name: String,
 }
 
 // The site the command line names, resolved before anything is compiled. A

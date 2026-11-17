@@ -34,53 +34,53 @@ use jet_foundation.[
 ]
 
 SemaCallFacts: struct {
-    return_type: Type
-    failure_carrier: TFailureCarrier
-    effect_bound: [EffectRowEntry]?
-    type_args: [Type]
-    default_refs: [FunctionDefaultRef]
+    return_type: Type,
+    failure_carrier: TFailureCarrier,
+    effect_bound: [EffectRowEntry]?,
+    type_args: [Type],
+    default_refs: [FunctionDefaultRef],
     // The call goes through a `:` local bound to a lambda written in this
     // body, whose effect facts these are (SemaScopeBinding.lambda_effects).
-    local_lambda: TEffectFacts?{None}
+    local_lambda: TEffectFacts?{None},
 }
 
 SemaCallChecked: struct {
-    value: TExpr
-    binding: SemaCallBinding
-    facts: SemaCallFacts
-    return_view_facts: [SemaCallReturnViewFact]
+    value: TExpr,
+    binding: SemaCallBinding,
+    facts: SemaCallFacts,
+    return_view_facts: [SemaCallReturnViewFact],
 }
 
 // Registration resolves these references against the owning declaration and
 // passes the original expression here. A missing row is never replaced with a
 // fabricated unit/default expression.
 SemaCallDefaultValue: struct {
-    reference: FunctionDefaultRef
-    expression: Expr
+    reference: FunctionDefaultRef,
+    expression: Expr,
 }
 
 SemaCallDirectTarget: struct {
-    symbol: Symbol
-    signature: Type
-    type_args: [Type]
-    generic_params: [SemaInferenceTypeParam]
-    generic_substitutions: [SemaInferenceBinding]
-    generic_evidence: [SemaInferenceBoundEvidence]
+    symbol: Symbol,
+    signature: Type,
+    type_args: [Type],
+    generic_params: [SemaInferenceTypeParam],
+    generic_substitutions: [SemaInferenceBinding],
+    generic_evidence: [SemaInferenceBoundEvidence],
 }
 
 // Registration supplies one row for every viable method/trait/Core candidate.
 // `signature` includes the receiver at `receiver_offset`; `method` is the
 // canonical checked-tree reference and is never reconstructed from source spelling.
 SemaCallMethodCandidate: struct {
-    method: TMethodRef
-    signature: Type
-    receiver_type: Type?
-    receiver_convention: AccessConvention
-    receiver_offset: Int
-    type_args: [Type]
-    generic_params: [SemaInferenceTypeParam]
-    generic_substitutions: [SemaInferenceBinding]
-    generic_evidence: [SemaInferenceBoundEvidence]
+    method: TMethodRef,
+    signature: Type,
+    receiver_type: Type?,
+    receiver_convention: AccessConvention,
+    receiver_offset: Int,
+    type_args: [Type],
+    generic_params: [SemaInferenceTypeParam],
+    generic_substitutions: [SemaInferenceBinding],
+    generic_evidence: [SemaInferenceBoundEvidence],
 }
 
 sema_call_signature_return: fn(signature: Type) -> Type? {

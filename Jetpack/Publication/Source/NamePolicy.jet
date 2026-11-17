@@ -13,20 +13,20 @@ PUBLICATION_NAME_POLICY_BLOCK_DISTANCE: 1
 PUBLICATION_RESERVED_SUFFIXES: [String]{"-fixed", "-patched", "-bin"}
 
 PublicationNamePolicyThresholds: struct {
-    warn_distance: Int{PUBLICATION_NAME_POLICY_WARN_DISTANCE}
-    block_distance: Int{PUBLICATION_NAME_POLICY_BLOCK_DISTANCE}
+    warn_distance: Int{PUBLICATION_NAME_POLICY_WARN_DISTANCE},
+    block_distance: Int{PUBLICATION_NAME_POLICY_BLOCK_DISTANCE},
 }
 
 PublicationNamePolicyFinding: enum {
-    ReservedSuffix(String)
-    Confusable(existing: String)
-    EditDistance(existing: String, distance: Int)
+    ReservedSuffix(String),
+    Confusable(existing: String),
+    EditDistance(existing: String, distance: Int),
 }
 
 PublicationNamePolicyDecision: enum {
-    Allow
-    Warn(PublicationNamePolicyFinding)
-    Block(PublicationNamePolicyFinding)
+    Allow,
+    Warn(PublicationNamePolicyFinding),
+    Block(PublicationNamePolicyFinding),
 }
 
 publication_name_finding_reason: fn(finding: PublicationNamePolicyFinding) -> String Never! {

@@ -6,10 +6,10 @@
 // reads only the marked type's own methods, so importing a package that
 // declares commands adds none to it.
 Command: struct {
-    help: String
+    help: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
 
         // A command takes at most three arguments, each one `run` parses.
         expand: fn(self, target: Target) {
@@ -38,7 +38,7 @@ Command: struct {
 
 Console: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) -[Meta.Generate]> {
             tname: target.name
@@ -155,8 +155,8 @@ parse_bool: fn(text: String) -> Bool? {
 }
 
 TooManyArguments: struct {
-    command: String
-    count: Int
+    command: String,
+    count: Int,
 
     impl Diagnostic {
         what: fn(self) -> String {
@@ -172,9 +172,9 @@ TooManyArguments: struct {
 }
 
 UnparsableArgument: struct {
-    command: String
-    param: String
-    type: String
+    command: String,
+    param: String,
+    type: String,
 
     impl Diagnostic {
         what: fn(self) -> String {

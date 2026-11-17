@@ -35,7 +35,7 @@ LIST_OPEN: ":plain("
 
 #Error
 CoreEnumCasesError: struct {
-    message: String
+    message: String,
 }
 
 cases_fail: fn(message: String) -> CoreEnumCasesError Never! {
@@ -44,19 +44,19 @@ cases_fail: fn(message: String) -> CoreEnumCasesError Never! {
 
 // One enum leaf whose written list differs from its declaration.
 StaleList: struct {
-    module_name: String
-    name: String
-    written: String
-    declared: String
-    path: String
+    module_name: String,
+    name: String,
+    written: String,
+    declared: String,
+    path: String,
 }
 
 // The rewritten Core.rows text and the lists it changed.
 CaseLists: struct {
-    text: String
-    stale: [StaleList]
-    written: Int
-    residue: Int
+    text: String,
+    stale: [StaleList],
+    written: Int,
+    residue: Int,
 }
 
 space_byte: fn(code: Int) -> Bool Never! {
@@ -320,14 +320,14 @@ core_enum_cases_main: fn(args: [String]) -[FS]> String CoreEnumCasesError! {
 run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.message)) }
 
 #Test("an enum's cases are its top-level upper-case names before its first method") {
-    text: "// Mode: enum {{ Wrong }}\npub Mode: enum {{\n    Fast // the default\n    Slow(after: Int)\n    Named {{ inner: Kind }}\n\n    impl Show {{ Hidden }}\n}}\nOther: struct {{}}\n"
+    text: "// Mode: enum {{ Wrong }}\npub Mode: enum {{\n    Fast, // the default\n    Slow(after: Int),\n    Named {{ inner: Kind }},\n\n    impl Show {{ Hidden }}\n}}\nOther: struct {{}}\n"
     assert_eq((declared_cases(text, "Mode") ?? [String]{}).join("|"), "Fast|Slow|Named")
     assert(declared_cases(text, "Other") == None)
     assert(declared_cases(text, "Absent") == None)
 }
 
 #Test("a list carries the payloads only when it can carry every payload of the enum") {
-    text: "Event: enum {{\n    Null\n    Bytes( [U8] )\n    Text(String)\n    Last(Int?) // the final one\n}}\nMixed: enum {{\n    Plain(String)\n    Labeled(limit: Int)\n}}\nPair: enum {{\n    Two(Int, Int)\n}}\n"
+    text: "Event: enum {{\n    Null,\n    Bytes( [U8] ),\n    Text(String),\n    Last(Int?), // the final one\n}}\nMixed: enum {{\n    Plain(String),\n    Labeled(limit: Int),\n}}\nPair: enum {{\n    Two(Int, Int),\n}}\n"
     assert_eq((declared_cases(text, "Event") ?? [String]{}).join("|"), "Null|Bytes([U8])|Text(String)|Last(Int?)")
     assert_eq((declared_cases(text, "Mixed") ?? [String]{}).join("|"), "Plain|Labeled")
     assert_eq((declared_cases(text, "Pair") ?? [String]{}).join("|"), "Two")
@@ -336,8 +336,8 @@ run: fn() { print(core_enum_cases_main(process.args()) ?? process.fail(1, err.me
 #Test("a module line's lists follow the declarations of the module's sources") {
     sources: module_sources("source_module core.demo path Core/Demo/Demo.jet alias demo owns {{ }}\n", "# module\towner\tpath\n__core_demo_part\tcore.demo\tCore/Demo/Part.jet\t__core_demo_part\t\t\n")
     texts := [String:String]{}
-    texts["Core/Demo/Demo.jet"] = "Mode: enum {{\n    Fast\n    Slow\n}}\n"
-    texts["Core/Demo/Part.jet"] = "Kind: enum {{\n    One\n}}\n"
+    texts["Core/Demo/Demo.jet"] = "Mode: enum {{\n    Fast,\n    Slow,\n}}\n"
+    texts["Core/Demo/Part.jet"] = "Kind: enum {{\n    One,\n}}\n"
     rows: "// head\nmodule core.demo exports {{ Mode, Kind, Gone }} types {{ Mode:plain(Fast), Kind:plain(One), Gone:plain(A|B), Box:plain }} depends_on []\n"
     lists: case_lists(rows, texts, sources) ?? panic(err.message)
     assert(lists.text.contains("types {{ Mode:plain(Fast|Slow), Kind:plain(One), Gone:plain(A|B), Box:plain }} depends_on []"))

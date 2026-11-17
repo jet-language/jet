@@ -43,26 +43,26 @@ use {
 // `glob` (relative to the directory it walks) and the SHA-256 of its sorted
 // membership (jet_driver_comptime_glob_digest).
 JetDriverComptimeInputRecord: struct {
-    path: String
-    file: String
-    sha256: String
-    glob: String{""}
+    path: String,
+    file: String,
+    sha256: String,
+    glob: String{""},
 }
 
 JetDriverComptimeInputLog: struct {
-    records: [JetDriverComptimeInputRecord]
+    records: [JetDriverComptimeInputRecord],
 }
 
 JetDriverComptimeInputs: struct {
-    inputs: JetDriverSharedBuildInputs
+    inputs: JetDriverSharedBuildInputs,
     // The request's build HTTP transport, for an HTTP(S) `net.fetch`.
-    http_inputs: JetDriverSharedBuildHTTPInputs?{None}
-    base_dir: String
-    log: Shared<JetDriverComptimeInputLog>?
+    http_inputs: JetDriverSharedBuildHTTPInputs?{None},
+    base_dir: String,
+    log: Shared<JetDriverComptimeInputLog>?,
     // The physical path of the file doing the embedding, and the toolchain
     // tree its `toolchain:` inputs read (None: the compile has none).
-    file: String
-    toolchain: Shared<JetDriverToolchainTree>?
+    file: String,
+    toolchain: Shared<JetDriverToolchainTree>?,
 
     impl JetEvalComptimeInputAdapter {
         clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
@@ -101,8 +101,8 @@ JetDriverComptimeInputs: struct {
 // (`text`, the Core row's shared cell). Core is part of the compiler, so the
 // program's comptime input lock doesn't record these reads.
 JetDriverCoreComptimeInputs: struct {
-    text: Shared<JetDriverCoreText>
-    base_dir: String
+    text: Shared<JetDriverCoreText>,
+    base_dir: String,
 
     impl JetEvalComptimeInputAdapter {
         clone_input_adapter: fn(self) -[]> JetEvalComptimeInputAdapter Never! {
@@ -337,9 +337,9 @@ jet_driver_comptime_literal_input: fn(expression: BodyExpr) -> JetDriverComptime
 }
 
 JetDriverComptimeLiteralInput: struct {
-    builtin: String
-    path: String
-    span: Span
+    builtin: String,
+    path: String,
+    span: Span,
 }
 
 // Reads the literal comptime input `input` names for an item in `source_file`.

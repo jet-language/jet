@@ -34,64 +34,64 @@ SPECIAL_ROUTES_PATH: "Tools/Hardening/special-routes.tsv"
 
 // One file the manifest reads, by repository-relative path.
 SourceFile: struct {
-    path: String
-    text: String
+    path: String,
+    text: String,
 }
 
 // Where a declaration sits.
 Declared: struct {
-    path: String
-    line: Int
+    path: String,
+    line: Int,
 }
 
 // The declarations of every Core source file, keyed for route lookups.
 ParsedCore: struct {
     // "<module>.<fn>" for top-level functions.
-    fns: [String:Declared]
+    fns: [String:Declared],
     // "<module>.<fn>" -> the declared return type; absent means Unit.
-    returns: [String:Type]
+    returns: [String:Type],
     // "<type>" for every struct, enum, distinct, alias and trait.
-    types: [String:Declared]
+    types: [String:Declared],
     // "<type>.<method>" for struct and impl methods.
-    methods: [String:Declared]
-    method_returns: [String:Type]
+    methods: [String:Declared],
+    method_returns: [String:Type],
     // "<type>.<field>" for struct fields.
-    fields: [String:Declared]
-    enums: [String:Bool]
+    fields: [String:Declared],
+    enums: [String:Bool],
     // Structs that declare at least one field.
-    records: [String:Bool]
-    errors: [String]
+    records: [String:Bool],
+    errors: [String],
 }
 
 Route: struct {
-    kind: String
-    path: String
-    line: Int
-    symbol: String
+    kind: String,
+    path: String,
+    line: Int,
+    symbol: String,
 }
 
 SurfaceRow: struct {
-    id: String
-    kind: String
-    owner: String
-    member: String
-    route: Route?
-    problem: String
-    declared_aot: Bool
-    result_type: String
-    result_class: String
+    id: String,
+    kind: String,
+    owner: String,
+    member: String,
+    route: Route?,
+    problem: String,
+    declared_aot: Bool,
+    result_type: String,
+    result_class: String,
 }
 
 SpecialRoute: struct {
-    key: String
-    path: String
-    needle: String
-    row: Int
+    key: String,
+    path: String,
+    needle: String,
+    row: Int,
 }
 
 Surface: struct {
-    rows: [SurfaceRow]
-    errors: [String]
+    rows: [SurfaceRow],
+    errors: [String],
 }
 
 // The 1-based line holding byte `offset`.

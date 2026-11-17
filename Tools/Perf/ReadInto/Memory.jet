@@ -63,84 +63,84 @@ print("ALLOCATOR-FACTS mode=%d allocations=%d high_water=%d" % (word(root + 144)
 `
 
 Row: struct {
-    id: String
-    surface_source: String
-    plain_source: String
-    expected_output: String
-    memory_evidence_file: String?
+    id: String,
+    surface_source: String,
+    plain_source: String,
+    expected_output: String,
+    memory_evidence_file: String?,
 }
 
 Pairs: struct {
-    pairs: [Row]
+    pairs: [Row],
 }
 
 Manifest: struct {
-    performance_surface_pairs: Pairs
+    performance_surface_pairs: Pairs,
 }
 
 Sample: struct {
-    exit_code: Int
-    peak_rss_kb: Int
+    exit_code: Int,
+    peak_rss_kb: Int,
 }
 
 Counted: struct {
-    allocations: Int
-    reads: Int
-    allocations_per_read: Float
-    peak_live_heap_bytes: Int
+    allocations: Int,
+    reads: Int,
+    allocations_per_read: Float,
+    peak_live_heap_bytes: Int,
 }
 
 Interval: struct {
-    lower: Float
-    upper: Float
+    lower: Float,
+    upper: Float,
 }
 
 Host: struct {
-    platform: String
-    release: String
-    arch: String
-    cpu_model: String?
-    cpu_count: Int
+    platform: String,
+    release: String,
+    arch: String,
+    cpu_model: String?,
+    cpu_count: Int,
 }
 
 CountedRuns: struct {
-    surface: [Counted]
-    plain: [Counted]
+    surface: [Counted],
+    plain: [Counted],
 }
 
 Verdicts: struct {
-    allocations_per_read: String
-    peak_live_heap_bytes: String
-    peak_rss_kb: String
+    allocations_per_read: String,
+    peak_live_heap_bytes: String,
+    peak_rss_kb: String,
 }
 
 Evidence: struct {
-    schema: String
-    id: String
-    surface_source_sha256: String
-    plain_source_sha256: String
-    expected_output: String
-    target: String
-    artifact_sha256: String
-    host: Host
-    generated_command: String
-    counting_policy: String
+    schema: String,
+    id: String,
+    surface_source_sha256: String,
+    plain_source_sha256: String,
+    expected_output: String,
+    target: String,
+    artifact_sha256: String,
+    host: Host,
+    generated_command: String,
+    counting_policy: String,
     // The per-run vectors: the evidence file keeps them, the printed summary
     // leaves them out (None is not encoded).
-    counted_runs: CountedRuns?
-    rss_runs: Int
-    surface_allocations_per_read: Float
-    plain_allocations_per_read: Float
-    surface_peak_live_heap_bytes: Int
-    plain_peak_live_heap_bytes: Int
-    surface_peak_rss_kb: Int
-    plain_peak_rss_kb: Int
-    peak_rss_ratio: Float
-    peak_rss_ratio_lower95: Float
-    peak_rss_ratio_upper95: Float
-    surface_rss_kb: [Int]?
-    plain_rss_kb: [Int]?
-    metric_verdicts: Verdicts
+    counted_runs: CountedRuns?,
+    rss_runs: Int,
+    surface_allocations_per_read: Float,
+    plain_allocations_per_read: Float,
+    surface_peak_live_heap_bytes: Int,
+    plain_peak_live_heap_bytes: Int,
+    surface_peak_rss_kb: Int,
+    plain_peak_rss_kb: Int,
+    peak_rss_ratio: Float,
+    peak_rss_ratio_lower95: Float,
+    peak_rss_ratio_upper95: Float,
+    surface_rss_kb: [Int]?,
+    plain_rss_kb: [Int]?,
+    metric_verdicts: Verdicts,
 }
 
 fail: fn(message: String) -[Exec, IO]> Never { process.fail(1, "memory: {message}") }

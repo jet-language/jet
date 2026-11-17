@@ -39,54 +39,54 @@ use {
 }
 
 Method: struct {
-    rounds: Int
-    warmup: Int
-    runs: Int
-    slow_ms: Int
-    slow_warmup: Int
-    slow_runs: Int
+    rounds: Int,
+    warmup: Int,
+    runs: Int,
+    slow_ms: Int,
+    slow_warmup: Int,
+    slow_runs: Int,
     timeout_s: Int
 }
 
 Peer: struct {
-    name: String
-    file: String
+    name: String,
+    file: String,
     argv: [String]
 }
 
 Server: struct {
-    port: Int
+    port: Int,
     delay_ms: Int
 }
 
 Workload: struct {
-    id: String
-    dir: String
-    what: String
-    cards: [String]
-    args: [String]
-    servers: [Server]
+    id: String,
+    dir: String,
+    what: String,
+    cards: [String],
+    args: [String],
+    servers: [Server],
     peers: [String]
 }
 
 Manifest: struct {
-    method: Method
-    hyperfine: String
-    server: [String]
-    path: [String]
-    report_only: [String]
-    peers: [Peer]
+    method: Method,
+    hyperfine: String,
+    server: [String],
+    path: [String],
+    report_only: [String],
+    peers: [Peer],
     workloads: [Workload]
 }
 
 // One timed command: a Jet tier or a peer.
 Command: struct {
-    name: String
-    argv: [String]
-    slow: Bool
+    name: String,
+    argv: [String],
+    slow: Bool,
     // The user cache (XDG_CACHE_HOME) a jet-run phase runs under; "" inherits
     // the caller's.
-    cache: String
+    cache: String,
     // What hyperfine runs before each timed run ("" for nothing).
     prepare: String
 }
@@ -94,20 +94,20 @@ Command: struct {
 // What the rounds measured for one command. wall is the median run, cpu the
 // mean user + system, rss the largest peak; times are microseconds, rss bytes.
 Stat: struct {
-    name: String
-    wall: Int
-    cpu: Int
-    rss: Int
+    name: String,
+    wall: Int,
+    cpu: Int,
+    rss: Int,
     timed_out: Bool
 }
 
 Options: struct {
-    list: Bool
-    check_floor: Bool
-    only: [String]
-    data: String
-    out: String
-    jet: String
+    list: Bool,
+    check_floor: Bool,
+    only: [String],
+    data: String,
+    out: String,
+    jet: String,
     edit: String
 }
 
@@ -377,8 +377,8 @@ check: fn(m: Manifest, opts: Options, c: Command, expected: String, wid: String)
 // per timed run in microseconds, and the peak memory of the round's memory run
 // in bytes.
 Sample: struct {
-    walls: [Int]
-    cpu: [Int]
+    walls: [Int],
+    cpu: [Int],
     rss: [Int]
 }
 

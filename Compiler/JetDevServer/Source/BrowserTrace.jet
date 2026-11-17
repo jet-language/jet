@@ -22,31 +22,31 @@ BrowserTraceError: struct { message: String }
 browser_trace_error: fn(message: String) -> BrowserTraceError { BrowserTraceError{message: message} }
 
 BrowserTraceSymbol: struct {
-    name: String
-    kind: String
+    name: String,
+    kind: String,
 }
 
 // One compiler-identified browser source and the symbols it defines.
 BrowserTraceSource: struct {
-    path: String
-    sha256: String
-    symbols: [BrowserTraceSymbol]
+    path: String,
+    sha256: String,
+    symbols: [BrowserTraceSymbol],
 }
 
 // The compiler trace identity a web manifest carries.
 BrowserTraceIdentity: struct {
-    sources: [BrowserTraceSource]
-    source_map: String?
+    sources: [BrowserTraceSource],
+    source_map: String?,
 }
 
 // The owner-only relay file of this process; rows past the bound are dropped
 // after one truncation marker.
 BrowserTraceRelay: struct {
-    writer: FileWriter
-    nonce: String
-    path: String
-    rows: Int
-    started: Instant
+    writer: FileWriter,
+    nonce: String,
+    path: String,
+    rows: Int,
+    started: Instant,
 
     new: fn(manifest: String) -> BrowserTraceRelay BrowserTraceError! {
         browser_trace_supported()

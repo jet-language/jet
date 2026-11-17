@@ -41,12 +41,12 @@ use {
 
 #Equatable
 DBValue: enum {
-    Null
-    Int(Int)
-    Float(Float)
-    Text(String)
-    Bool(Bool)
-    Blob([U8])
+    Null,
+    Int(Int),
+    Float(Float),
+    Text(String),
+    Bool(Bool),
+    Blob([U8]),
 
     impl Display {
         display: fn(self) -> String { render_value(self) }
@@ -95,8 +95,8 @@ DBValue: enum {
 
 #Equatable
 priv PoolLifecycle: enum {
-    Open
-    Draining
+    Open,
+    Draining,
     Drained
 }
 
@@ -104,19 +104,19 @@ priv PoolLifecycle: enum {
 // source owns their exact counters, equality and textual projection.
 #Equatable
 DBPoolReceipt: struct {
-    lifecycle: PoolLifecycle
-    max: Int
-    available: Int
-    leased: Int
-    opening: Int
-    ready: Bool
-    acquires: Int
-    releases: Int
-    timeouts: Int
-    open_failures: Int
-    unhealthy: Int
-    replacements: Int
-    replacement_failures: Int
+    lifecycle: PoolLifecycle,
+    max: Int,
+    available: Int,
+    leased: Int,
+    opening: Int,
+    ready: Bool,
+    acquires: Int,
+    releases: Int,
+    timeouts: Int,
+    open_failures: Int,
+    unhealthy: Int,
+    replacements: Int,
+    replacement_failures: Int,
 
     impl Display {
         display: fn(self) -> String { pool_receipt_text(self) }
@@ -167,9 +167,9 @@ pool_receipt_text: fn(receipt: DBPoolReceipt) -> String Never! {
 // or `Table.add` finding the key in a row the caller may not read.
 #[Error, Equatable]
 DBError: enum {
-    Failed(String)
-    Exists
-    Denied
+    Failed(String),
+    Exists,
+    Denied,
 
     // The failure in one line.
     message: fn(self) -> String {
@@ -309,8 +309,8 @@ priv db_closed: fn() -> DBError Never! { db_error("database connection is closed
 // becomes one bound DBValue, never query text.
 #Equatable
 SQL: struct {
-    text: String
-    values: [DBValue]
+    text: String,
+    values: [DBValue],
 
     raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [DBValue]{}} }
 
@@ -323,8 +323,8 @@ SQL: struct {
     }
 
     impl CheckedText {
-        Error: Never
-        Hole: DBValue
+        Error: Never,
+        Hole: DBValue,
 
         // Every SQL text is accepted; its holes are what keeps a query safe.
         check: fn(_text: String) -[]> Never! { return Ok() }
@@ -360,7 +360,7 @@ priv sql_raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [D
 // Row policies: a table plus either `true` (allow all) or `owner == user`.
 #Equatable
 RowPolicy: struct {
-    table: String
+    table: String,
     owner: Bool
 }
 
@@ -418,8 +418,8 @@ priv sql_identifier: fn(raw: [U8]) -> Bool Never! {
 // comments, one simple target table, and an owner predicate when required.
 
 priv SQLToken: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
     word: String
 }
 
@@ -629,7 +629,7 @@ priv sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
 }
 
 priv SQLInsertShape: struct {
-    columns: Int
+    columns: Int,
     owner: Int
 }
 
@@ -815,16 +815,16 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
 // that is (0: none, or one a `begin` opened); `ended` wakes the statements
 // waiting for it to end (`db_free`).
 priv DBState: struct {
-    driver: DBDriver
-    path: String
+    driver: DBDriver,
+    path: String,
     // Names the store among the open ones, as its job outbox
     // (app.CallOutbox): its path, or for an in-memory database, one of its own.
-    store: String
-    written: [DBWritten]
-    ended: Condition
-    open: Int{0}
-    began: Int{0}
-    call: Int{0}
+    store: String,
+    written: [DBWritten],
+    ended: Condition,
+    open: Int{0},
+    began: Int{0},
+    call: Int{0},
 
     // A write that changed `table` marks the live bindings that read it for a
     // re-run once the write is committed: at once outside a transaction, and
@@ -857,7 +857,7 @@ priv DBState: struct {
 // its `jet_row` text) its writes replaced, removed or added, or None once a
 // write did not name them, as a SQL statement does not.
 priv DBWritten: struct {
-    table: String
+    table: String,
     rows: [String]?
 }
 
@@ -901,7 +901,7 @@ priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never!
 }
 
 Store: struct {
-    state: Shared<DBState>
+    state: Shared<DBState>,
 
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
@@ -931,9 +931,9 @@ Store: struct {
 }
 
 DBScope: struct {
-    state: Shared<DBState>
-    policy: RowPolicy
-    user: String
+    state: Shared<DBState>,
+    policy: RowPolicy,
+    user: String,
 
     // A live binding over one policy-checked SELECT. `app.state` reads
     // it; each re-run applies this scope's policy again, and a write to the
@@ -980,8 +980,8 @@ DBScope: struct {
 // One dropped while still open, by a cancelled task or a stop unwinding past
 // it, is rolled back: it writes nothing, and the connection can begin again.
 #SingleUse DBTransaction: struct {
-    priv state: Shared<DBState>
-    priv number: Int
+    priv state: Shared<DBState>,
+    priv number: Int,
 
     commit: fn(&&self) -[DB]> DBError! { db_commit(self.state) }
 
@@ -1008,9 +1008,9 @@ TABLE_KEY_COLUMN: "key"
 // The operation a table's row policy judges.
 #Equatable
 Op: enum {
-    Read
-    Insert
-    Update
+    Read,
+    Insert,
+    Update,
     Delete
 }
 
@@ -1021,8 +1021,8 @@ Op: enum {
 // does. No row policy limits `System`, and a guarded table never asks it.
 #Equatable
 Who: enum {
-    Account(auth.AccountID)
-    System
+    Account(auth.AccountID),
+    System,
     Anonymous
 }
 
@@ -1045,10 +1045,10 @@ Who: enum {
 // sees the transaction's earlier writes; it runs before the write it judges,
 // which it therefore cannot see.
 Table: struct<K: [Encode, Decode, Comparable], T: [Encode, Decode]> {
-    priv state: Shared<DBState>
-    priv name: String
-    priv key_of: fn(T) -[]> K
-    priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?
+    priv state: Shared<DBState>,
+    priv name: String,
+    priv key_of: fn(T) -[]> K,
+    priv policy: (fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!)?,
 
     // This table judged by the row policy `policy`, in place of any it had.
     guard: fn(self, policy: &&fn(T, Op, Who, Store) -[DB.Read]> Bool DBError!) -> Table<K, T> Never! {
@@ -1975,7 +1975,7 @@ priv db_kept_written: fn(held: &DBState) Never! {
 
 #Codable
 priv CallCount: struct {
-    id: Int
+    id: Int,
     count: Int
 }
 
@@ -2370,16 +2370,16 @@ priv LIVE_POLL_MS: 1000
 // version its last poll saw, and this process's writes to it since, which
 // re-ran its bindings already.
 priv LiveWatched: struct {
-    table: String
-    version: Int
+    table: String,
+    version: Int,
     own: Int
 }
 
 // A database file whose version map this process polls, through `state`,
 // the connection that first read it for a live binding.
 priv LiveWatch: struct {
-    path: String
-    state: Shared<DBState>
+    path: String,
+    state: Shared<DBState>,
     tables: [LiveWatched]
 }
 
@@ -2504,7 +2504,7 @@ priv db_live_polled: fn(path: String) -> [String]? Never! {
 
 #Codable
 priv LiveTestChore: struct {
-    id: Int
+    id: Int,
     team: String
 }
 
@@ -2680,19 +2680,19 @@ priv ledger_columns: fn() -> [String] Never! {
 }
 
 priv LedgerRow: struct {
-    transition_key: String
-    migration_key: String
-    target: String
-    target_identity: String
-    database_identity: String
-    source_identity: String
-    schema_identity: String
-    operation: String
-    status: String
-    from_version: Int
-    to_version: Int
-    step_count: Int
-    step_ids: Int
+    transition_key: String,
+    migration_key: String,
+    target: String,
+    target_identity: String,
+    database_identity: String,
+    source_identity: String,
+    schema_identity: String,
+    operation: String,
+    status: String,
+    from_version: Int,
+    to_version: Int,
+    step_count: Int,
+    step_ids: Int,
     checksum: String
 }
 
@@ -2999,25 +2999,25 @@ priv migration_transition_key: fn(name: String, checksum: String, predecessor: S
 // the pure monotonic clock, so no wall-clock authority is involved.
 
 priv PoolState: struct {
-    url: String
-    lifecycle: PoolLifecycle
-    max: Int
-    available: [DBDriver]
-    leased: Int
-    opening: Int
-    waiters: [Int]
-    next_ticket: Int
-    acquires: Int
-    releases: Int
-    timeouts: Int
-    open_failures: Int
-    unhealthy: Int
-    replacements: Int
+    url: String,
+    lifecycle: PoolLifecycle,
+    max: Int,
+    available: [DBDriver],
+    leased: Int,
+    opening: Int,
+    waiters: [Int],
+    next_ticket: Int,
+    acquires: Int,
+    releases: Int,
+    timeouts: Int,
+    open_failures: Int,
+    unhealthy: Int,
+    replacements: Int,
     replacement_failures: Int
 }
 
 DBPool: struct {
-    state: Shared<PoolState>
+    state: Shared<PoolState>,
 
     acquire: fn(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
         deadline_ns: pool_deadline(deadline)
@@ -3064,8 +3064,8 @@ DBPool: struct {
 }
 
 priv LeaseState: struct {
-    pool: Shared<PoolState>
-    drivers: [DBDriver]
+    pool: Shared<PoolState>,
+    drivers: [DBDriver],
 
     impl Close {
         close: fn(&&self) {
@@ -3081,8 +3081,8 @@ priv LeaseState: struct {
 // A queued acquire's place in line. Closing it leaves the queue, so an acquire
 // that ends early (its task cancelled at the wait) never blocks later waiters.
 priv PoolWaiter: struct {
-    pool: Shared<PoolState>
-    ticket: Int
+    pool: Shared<PoolState>,
+    ticket: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -3096,7 +3096,7 @@ priv PoolWaiter: struct {
 }
 
 DBLease: struct {
-    state: Shared<LeaseState>
+    state: Shared<LeaseState>,
 
     close: fn(self) -[DB]> DBError! {
         guard := self.state.guard_edit()
@@ -3195,9 +3195,9 @@ priv pool_release: fn(pool: Shared<PoolState>, driver: &&DBDriver) Never! {
 }
 
 priv PoolClaim: struct {
-    drivers: [DBDriver]
-    failure: DBError?
-    ticket: Int
+    drivers: [DBDriver],
+    failure: DBError?,
+    ticket: Int,
     retry: Bool
 }
 
@@ -3367,7 +3367,7 @@ decode: fn<T: Decode>(row: [String:DBValue], names: [{db_name: String, key: Stri
 // One cached prepared statement: its engine statement slot (-1 when SQLite
 // prepared no statement, as for empty SQL) and the trimmed SQL it caches.
 CachedStatement: struct {
-    stmt: Int
+    stmt: Int,
     sql: String
 }
 
@@ -3376,9 +3376,9 @@ CachedStatement: struct {
 // The connection is the Jet engine's; `live` is false once it is shut down.
 // The fields are `priv`: only core.db opens, drives and closes a connection.
 priv DBDriver: struct {
-    priv database: conn.Conn
-    priv cache: [CachedStatement]
-    priv live: Bool
+    priv database: conn.Conn,
+    priv cache: [CachedStatement],
+    priv live: Bool,
 
     impl Close {
         close: fn(&&self) {

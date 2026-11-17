@@ -30,95 +30,95 @@ JobQueueDeliveryPolicy: enum {
 }
 
 JobQueueState: enum {
-    Queued
-    Running
-    Retrying
-    Completed
-    Failed
-    DeadLettered
+    Queued,
+    Running,
+    Retrying,
+    Completed,
+    Failed,
+    DeadLettered,
     Cancelled
 }
 
 JobPayload: struct {
-    type_id: String
-    bytes: [U8]
+    type_id: String,
+    bytes: [U8],
     publish: Bool
 }
 
 JobResult: struct {
-    type_id: String
-    bytes: [U8]
+    type_id: String,
+    bytes: [U8],
     publish: Bool
 }
 
 JobError: struct {
-    type_id: String
-    reason: String
+    type_id: String,
+    reason: String,
     detail: String?
 }
 
 JobQueueReceipt: struct {
-    id: String
-    authority: String
-    queue: String
-    job_type: String
-    state: JobQueueState
-    sequence: Int
-    attempts: Int
-    due_at_ms: Int
-    accepted_at_ms: Int
-    request_id: String?
-    idempotency_key: String?
-    lease_until_ms: Int?
-    duration_ms: Int?
-    error_reason: String?
-    delivery: JobQueueDeliveryPolicy
-    duplicate: Bool
+    id: String,
+    authority: String,
+    queue: String,
+    job_type: String,
+    state: JobQueueState,
+    sequence: Int,
+    attempts: Int,
+    due_at_ms: Int,
+    accepted_at_ms: Int,
+    request_id: String?,
+    idempotency_key: String?,
+    lease_until_ms: Int?,
+    duration_ms: Int?,
+    error_reason: String?,
+    delivery: JobQueueDeliveryPolicy,
+    duplicate: Bool,
     signature: String
 }
 
 JobQueueClaim: struct {
-    receipt: JobQueueReceipt
-    payload: JobPayload
-    worker: String
-    lease_token: String
+    receipt: JobQueueReceipt,
+    payload: JobPayload,
+    worker: String,
+    lease_token: String,
     lease_until_ms: Int
 }
 
 JobQueueEvent: struct {
-    sequence: Int
-    state: JobQueueState
-    attempts: Int
-    timestamp_ms: Int
-    reason: String?
-    duration_ms: Int?
+    sequence: Int,
+    state: JobQueueState,
+    attempts: Int,
+    timestamp_ms: Int,
+    reason: String?,
+    duration_ms: Int?,
     worker: String?
 }
 
 JobQueueRecord: struct {
-    receipt: JobQueueReceipt
-    payload: JobPayload?
-    result: JobResult?
-    error: JobError?
-    started_at_ms: Int?
+    receipt: JobQueueReceipt,
+    payload: JobPayload?,
+    result: JobResult?,
+    error: JobError?,
+    started_at_ms: Int?,
     finished_at_ms: Int?
 }
 
 JobQueueStatus: struct {
-    queue: String
-    authority: String
-    queued: Int
-    running: Int
-    retrying: Int
-    completed: Int
-    failed: Int
-    dead_lettered: Int
-    cancelled: Int
-    depth: Int
-    wait_ms: Int
-    throughput: Int
-    capacity: Int
-    paused: Bool
+    queue: String,
+    authority: String,
+    queued: Int,
+    running: Int,
+    retrying: Int,
+    completed: Int,
+    failed: Int,
+    dead_lettered: Int,
+    cancelled: Int,
+    depth: Int,
+    wait_ms: Int,
+    throughput: Int,
+    capacity: Int,
+    paused: Bool,
     freshness_ms: Int
 }
 
@@ -168,10 +168,10 @@ QueueData: struct {
 }
 
 JobQueue: struct {
-    data: Shared<QueueData>
-    endpoint: ServiceEndpoint
-    authority: String
-    name: String
+    data: Shared<QueueData>,
+    endpoint: ServiceEndpoint,
+    authority: String,
+    name: String,
 
     receipt: fn(self, id: String) -[DB]> JobQueueReceipt ServiceError! {
         service.__authority_validate(self.endpoint) ?? return Err(err)
@@ -663,34 +663,34 @@ is_cancelled: fn(state: JobQueueState) -> Bool Never! { state == JobQueueState.C
 // The durable queue keeps its SQLite bindings and row projections in this
 // module. No queue value is serialized through a second provider carrier.
 StoredJob: struct {
-    id: String
-    authority: String
-    queue: String
-    job_type: String
-    payload_type: String
-    payload: [U8]
-    payload_public: Bool
-    idempotency_key: String?
-    request_id: String?
-    sequence: Int
-    state: JobQueueState
-    due_at_ms: Int
-    accepted_at_ms: Int
-    started_at_ms: Int?
-    finished_at_ms: Int?
-    attempts: Int
-    lease_owner: String?
-    lease_token: String?
-    lease_until_ms: Int?
-    result_type: String?
-    result: [U8]?
-    result_public: Bool
-    error_type: String?
-    error_reason: String?
-    error_detail: String?
-    retry_at_ms: Int?
-    updated_at_ms: Int
-    signature: String
+    id: String,
+    authority: String,
+    queue: String,
+    job_type: String,
+    payload_type: String,
+    payload: [U8],
+    payload_public: Bool,
+    idempotency_key: String?,
+    request_id: String?,
+    sequence: Int,
+    state: JobQueueState,
+    due_at_ms: Int,
+    accepted_at_ms: Int,
+    started_at_ms: Int?,
+    finished_at_ms: Int?,
+    attempts: Int,
+    lease_owner: String?,
+    lease_token: String?,
+    lease_until_ms: Int?,
+    result_type: String?,
+    result: [U8]?,
+    result_public: Bool,
+    error_type: String?,
+    error_reason: String?,
+    error_detail: String?,
+    retry_at_ms: Int?,
+    updated_at_ms: Int,
+    signature: String,
     event_sequence: Int
 }
 
@@ -1237,26 +1237,26 @@ queue_require_claim: fn(record: StoredJob, claim: JobQueueClaim) ServiceError! {
 }
 
 EnqueueRequest: struct {
-    job_type: String
-    payload: JobPayload
-    idempotency_key: String?
-    request_id: String?
+    job_type: String,
+    payload: JobPayload,
+    idempotency_key: String?,
+    request_id: String?,
     delay_ms: Int
 }
 
 QueueTransition: struct {
-    event: String
-    authority: String
-    queue: String
-    job_type: String
-    job_id: String
-    sequence: Int
-    state: JobQueueState
-    attempts: Int
-    timestamp_ms: Int
-    reason: String?
-    duration_ms: Int?
-    worker: String?
+    event: String,
+    authority: String,
+    queue: String,
+    job_type: String,
+    job_id: String,
+    sequence: Int,
+    state: JobQueueState,
+    attempts: Int,
+    timestamp_ms: Int,
+    reason: String?,
+    duration_ms: Int?,
+    worker: String?,
     request_id: String?
 }
 

@@ -48,17 +48,17 @@ WebHostFrame: struct { status: Int, body: String }
 // builds: `version` is the last published one, `candidate` the one a build
 // in flight or a failed build would publish.
 WebHostFacts: struct {
-    file: String
-    port: Int
-    state: String
-    code: String
-    diagnostic: String
-    last_build_ms: Int
-    candidate: Int?
-    version: Int
-    published: Bool
-    clients: Int
-    reconnecting: Bool
+    file: String,
+    port: Int,
+    state: String,
+    code: String,
+    diagnostic: String,
+    last_build_ms: Int,
+    candidate: Int?,
+    version: Int,
+    published: Bool,
+    clients: Int,
+    reconnecting: Bool,
 
     next_candidate: fn(self) -> Int Never! {
         if self.published -> self.version + 1 else -> self.version
@@ -145,44 +145,44 @@ web_host_development_policy: fn() -> JetReleaseDevtoolsPolicy Never! {
 // One host: the status facts, the resident session the tick owns, the
 // handlers' inbox and the frames the tick prepared for them.
 WebHostState: struct {
-    facts: WebHostFacts
-    session: ResidentDevSession
-    session_id: String
-    root: String
-    secret: String
-    policy: JetReleaseDevtoolsPolicy
-    color: Bool
+    facts: WebHostFacts,
+    session: ResidentDevSession,
+    session_id: String,
+    root: String,
+    secret: String,
+    policy: JetReleaseDevtoolsPolicy,
+    color: Bool,
     // stderr is a terminal and the status block redraws in place.
-    pinned: Bool
-    verbose: Bool
-    trace_enabled: Bool
+    pinned: Bool,
+    verbose: Bool,
+    trace_enabled: Bool,
     // The browser-trace relay of the current build, at most one.
-    relays: [BrowserTraceRelay]
+    relays: [BrowserTraceRelay],
     // The relay's nonce, "" when none is open.
-    nonce: String
+    nonce: String,
     // The handlers' inbox, which the tick empties.
-    noted: [String]
-    dropped: [String]
-    beacons: [[U8]]
-    envelopes: [JetDevtoolsDecodedEnvelope]
+    noted: [String],
+    dropped: [String],
+    beacons: [[U8]],
+    envelopes: [JetDevtoolsDecodedEnvelope],
     // Selection bodies the handlers checked, which the tick applies to the
     // session.
-    selections: [String]
+    selections: [String],
     // The browser devtools view: the tick syncs it from the session, and the
     // page, state, reconnect and action routes answer from it.
-    browser: BrowserWebState
-    requests: [String]
+    browser: BrowserWebState,
+    requests: [String],
     // Take-once frames the tick refills.
-    commands: WebHostFrame?
-    assets: String?
-    recording: String
+    commands: WebHostFrame?,
+    assets: String?,
+    recording: String,
     // Ticks the recording is refreshed for after a page asked for it.
-    recording_ticks: Int
+    recording_ticks: Int,
     // Finished terminal lines the next tick writes.
-    log: [String]
-    dirty: Bool
-    block_lines: Int
-    stopped: String?
+    log: [String],
+    dirty: Bool,
+    block_lines: Int,
+    stopped: String?,
 
     is_release: fn(self) -> Bool Never! { self.policy.inspect != None }
 }

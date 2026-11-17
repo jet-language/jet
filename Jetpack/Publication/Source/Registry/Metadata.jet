@@ -14,22 +14,22 @@ PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE: "registry.json"
 PUBLICATION_MAX_REGISTRY_PACKAGE_METADATA_BYTES: 1048576
 
 PublicationRegistryDependency: struct {
-    name: String
-    requirements: [String]
+    name: String,
+    requirements: [String],
     // Rust BTreeSet fields are sorted unique lists.
-    roles: [String]
-    prefer: [String]
-    reject: [String]
-    strict: Bool
-    enabled_by_default: Bool
+    roles: [String],
+    prefer: [String],
+    reject: [String],
+    strict: Bool,
+    enabled_by_default: Bool,
 }
 
 PublicationRegistryPackageMetadata: struct {
-    name: String
-    version: String
-    dependencies: [PublicationRegistryDependency]
-    active_features: [String]
-    canonical_text: String
+    name: String,
+    version: String,
+    dependencies: [PublicationRegistryDependency],
+    active_features: [String],
+    canonical_text: String,
 
     active_dependencies: fn(self) -> [PublicationRegistryDependency] Never! {
         out := [PublicationRegistryDependency]{}
@@ -202,11 +202,11 @@ publication_merge_registry_dependency: fn(dependencies: &[String:PublicationRegi
 }
 
 PublicationRegistryDependencyDescriptor: struct {
-    requirements: [String]
-    prefer: [String]
-    reject: [String]
-    strict: Bool
-    enabled_by_default: Bool
+    requirements: [String],
+    prefer: [String],
+    reject: [String],
+    strict: Bool,
+    enabled_by_default: Bool,
 }
 
 publication_parse_registry_dependency_descriptor: fn(descriptor: Dyn) -> PublicationRegistryDependencyDescriptor IOError! {

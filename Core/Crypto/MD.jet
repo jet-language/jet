@@ -207,17 +207,17 @@ C_KECCAK_RHO: [U64]{1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14, 27, 41, 56, 8, 2
 
 // SHA3xN is SHA3-N.
 Md: enum {
-    MD5
-    RIPEMD160
-    SHA1
-    SHA224
-    SHA256
-    SHA384
-    SHA512
-    SHA3x224
-    SHA3x256
-    SHA3x384
-    SHA3x512
+    MD5,
+    RIPEMD160,
+    SHA1,
+    SHA224,
+    SHA256,
+    SHA384,
+    SHA512,
+    SHA3x224,
+    SHA3x256,
+    SHA3x384,
+    SHA3x512,
 }
 
 /// The digest length in bytes.
@@ -247,17 +247,17 @@ md_block: fn(md: Md) -> Int Never! {
 }
 
 HashCtx: struct {
-    md: Md
+    md: Md,
     // MD5 (4 words), SHA-1 and RIPEMD-160 (5 words) and SHA-224/256 (8
     // words) chaining state.
-    s32: [U32]
+    s32: [U32],
     // SHA-384/512 (8 words) chaining state, or the 25 Keccak lanes.
-    s64: [U64]
+    s64: [U64],
     // One block of pending input, `used` bytes filled.
-    buf: [U8]
-    used: Int
+    buf: [U8],
+    used: Int,
     // Bytes absorbed so far.
-    total: Int
+    total: Int,
 
     impl Close {
         close: fn(&&self) {
@@ -275,9 +275,9 @@ HashCtx: struct {
 /// block and the bytes absorbed. These follow the input's lengths and never
 /// its bytes, so a context keyed with a secret still steers on them.
 HashShape: struct {
-    md: Md
-    used: Int
-    total: Int
+    md: Md,
+    used: Int,
+    total: Int,
 }
 
 /// `ctx`'s shape, public whatever its state holds.
@@ -343,13 +343,13 @@ hash_clone: fn(ctx: HashCtx) -> HashCtx Never! {
 /// its padding and output.
 HashFamily: trait {
     /// A fresh `md` context.
-    start: fn(self, md: Md) -> HashCtx Never!
+    start: fn(self, md: Md) -> HashCtx Never!,
     /// The `count` blocks at `msg[off]` compressed into the state of an `md`
     /// context.
-    compress: fn(self, md: Md, s32: &[U32], s64: &[U64], msg: [U8], off: Int, count: Int) Never!
+    compress: fn(self, md: Md, s32: &[U32], s64: &[U64], msg: [U8], off: Int, count: Int) Never!,
     /// The digest of `ctx`, which holds `used` pending bytes of the `total`
     /// it absorbed: its last blocks padded and compressed.
-    finish: fn(self, md: Md, ctx: &HashCtx, used: Int, total: Int) -> [U8] Never!
+    finish: fn(self, md: Md, ctx: &HashCtx, used: Int, total: Int) -> [U8] Never!,
 }
 
 /// MD5.
@@ -910,9 +910,9 @@ keccak_absorb: fn(lanes: &[U64], msg: [U8], off: Int, count: Int, rate: Int) Nev
 /// A keyed HMAC: the hash contexts that have absorbed the inner and outer
 /// padded keys. Clone `inner` to MAC a message; the key itself is not kept.
 HMACKey: struct {
-    md: Md
-    inner: HashCtx
-    outer: HashCtx
+    md: Md,
+    inner: HashCtx,
+    outer: HashCtx,
 }
 
 hmac_key: fn(md: Md, key: [#Secret U8]) -> HMACKey Never! { hmac_key_with(AnyHash{}, md, key) }

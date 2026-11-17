@@ -44,47 +44,47 @@ server: module
 // The operation a target cannot run (HTTPError.UnsupportedTarget); the
 // runtime's HTTP provider reports it by position.
 HTTPOperation: enum {
-    ClientConnect
-    ServerBind
+    ClientConnect,
+    ServerBind,
     ServeListener
 }
 
 #Error
 HTTPError: enum {
-    InvalidMethod
-    InvalidURL
-    InvalidHeader
-    InvalidStatus
-    BodyConsumed
-    InvalidFraming
-    UnsupportedEncoding
-    Cancelled
-    BodyTooLarge(limit: Int)
-    Resolve(host: String)
-    Connect(address: String)
-    TLS(stage: String)
-    Timeout(phase: String)
-    Proxy(stage: String)
-    Redirect(reason: String)
-    Protocol(version: String)
-    IO(operation: String)
-    Policy(reason: String)
-    ResourceUnavailable(resource: String)
-    Internal(incident_id: String)
+    InvalidMethod,
+    InvalidURL,
+    InvalidHeader,
+    InvalidStatus,
+    BodyConsumed,
+    InvalidFraming,
+    UnsupportedEncoding,
+    Cancelled,
+    BodyTooLarge(limit: Int),
+    Resolve(host: String),
+    Connect(address: String),
+    TLS(stage: String),
+    Timeout(phase: String),
+    Proxy(stage: String),
+    Redirect(reason: String),
+    Protocol(version: String),
+    IO(operation: String),
+    Policy(reason: String),
+    ResourceUnavailable(resource: String),
+    Internal(incident_id: String),
     UnsupportedTarget(operation: HTTPOperation)
 }
 
 Method: enum {
-    Get
-    Head
-    Post
-    Put
-    Patch
-    Delete
-    Options
-    Trace
-    Connect
-    Custom(String)
+    Get,
+    Head,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Options,
+    Trace,
+    Connect,
+    Custom(String),
 
     /// The method named by `token`: a standard method is its own variant and
     /// any other RFC 9110 token is `Custom`. Methods are case-sensitive, so
@@ -103,10 +103,10 @@ Method: enum {
 }
 
 Version: enum {
-    HTTP10
-    HTTP11
-    HTTP2
-    HTTP3
+    HTTP10,
+    HTTP11,
+    HTTP2,
+    HTTP3,
 
     http_1_0: fn() -> Version Never! { Version.HTTP10 }
 
@@ -120,8 +120,8 @@ Version: enum {
 }
 
 Status: struct {
-    code: Int
-    reason: String
+    code: Int,
+    reason: String,
 
     /// The status `code` with its reason phrase; a code outside 100..=599 is
     /// InvalidStatus.
@@ -136,7 +136,7 @@ Status: struct {
 }
 
 Header: struct {
-    name: String
+    name: String,
     value: String
 }
 
@@ -146,7 +146,7 @@ Headers: struct {
 
 /// A checked field name: one RFC 9110 token (`HeaderName.new`).
 HeaderName: struct {
-    __text: String
+    __text: String,
 
     /// `name` as a field name; a name that is not one token is InvalidHeader.
     new: fn(name: String) -> HeaderName HTTPError! {
@@ -162,7 +162,7 @@ HeaderName: struct {
 /// A checked field value: HTAB, space, visible ASCII and obs-text bytes
 /// (`HeaderValue.new`).
 HeaderValue: struct {
-    __text: String
+    __text: String,
 
     /// `value` as a field value; a control byte other than HTAB is
     /// InvalidHeader.
@@ -182,7 +182,7 @@ HeaderValue: struct {
 // Bodies come from requests, responses and the `body_*` constructors.
 priv body_carrier: module {
     BodyStream: struct {
-        held: [U8]
+        held: [U8],
         live: Shared<provider.LiveBody>?
     }
 }
@@ -191,7 +191,7 @@ priv body_carrier: module {
 /// `body_empty`, `body_text`, `body_bytes` and the `Body.*` constructors;
 /// its contents are private to core.http.
 Body: struct {
-    priv stream: body_carrier.BodyStream
+    priv stream: body_carrier.BodyStream,
 
     /// The body's bytes when there are at most `limit` (0..=1 GiB) of them.
     bytes: fn(self, limit: Int) -[Net]> [U8] HTTPError! { body_bytes_within(self, limit) }
@@ -239,7 +239,7 @@ priv HTTPBodyCell: struct {
 // shared by every copy, so core.net.ws.upgrade can take the connection over.
 // An upgraded connection gets no HTTP response from the server.
 priv HTTPUpgradeCell: struct {
-    fd: Int
+    fd: Int,
     upgraded: Bool
 }
 
@@ -247,41 +247,41 @@ priv HTTPUpgradeCell: struct {
 /// parses and routes. The method, path, body and headers are public facts;
 /// the rest is the client's send configuration and the server's route state.
 HTTPRequest: struct {
-    method: String
-    path: String
-    body: Body
-    headers: Headers
-    __url: String{""}
-    __trailers: Headers?{None}
-    __header_error: HTTPError?{None}
-    __body_set: Bool{false}
-    __params: [Header]{[]}
-    __route_template: String?{None}
-    __timeout_ms: Int?{None}
-    __connect_timeout_ms: Int?{None}
-    __read_timeout_ms: Int?{None}
-    __total_timeout_ms: Int?{None}
-    __dns_timeout_ms: Int?{None}
-    __tls_timeout_ms: Int?{None}
-    __write_timeout_ms: Int?{None}
-    __first_byte_timeout_ms: Int?{None}
-    __redirects: Int?{None}
-    __proxy: String?{None}
-    __cookies: [Header]{[]}
-    __form: [Header]{[]}
-    __multipart: [Header]{[]}
-    __cell: Shared<HTTPBodyCell>?{None}
-    __upgrade: Shared<HTTPUpgradeCell>?{None}
+    method: String,
+    path: String,
+    body: Body,
+    headers: Headers,
+    __url: String{""},
+    __trailers: Headers?{None},
+    __header_error: HTTPError?{None},
+    __body_set: Bool{false},
+    __params: [Header]{[]},
+    __route_template: String?{None},
+    __timeout_ms: Int?{None},
+    __connect_timeout_ms: Int?{None},
+    __read_timeout_ms: Int?{None},
+    __total_timeout_ms: Int?{None},
+    __dns_timeout_ms: Int?{None},
+    __tls_timeout_ms: Int?{None},
+    __write_timeout_ms: Int?{None},
+    __first_byte_timeout_ms: Int?{None},
+    __redirects: Int?{None},
+    __proxy: String?{None},
+    __cookies: [Header]{[]},
+    __form: [Header]{[]},
+    __multipart: [Header]{[]},
+    __cell: Shared<HTTPBodyCell>?{None},
+    __upgrade: Shared<HTTPUpgradeCell>?{None},
     // The server side's peer address without its port, which per-network
     // limits count (`app.Limit`); "" on a client request.
-    __peer: String{""}
+    __peer: String{""},
     // The second, since the Unix epoch, the server read the request at; 0 on
     // a client request.
-    __received: Int{0}
+    __received: Int{0},
     // On a server, the name an admitted route's spool gave the place it
     // streamed the request's body to (core.http.server `__route_add_admitted`);
     // the request's own body is then empty. None on any other request.
-    __spooled: String?{None}
+    __spooled: String?{None},
 
     method: fn(self) -> String Never! { self.method.copy() }
 
@@ -460,16 +460,16 @@ HTTPRequest: struct {
 /// One HTTP response: the status, body and headers, plus the client's
 /// transport facts (redirects followed, phase timings, connection reuse).
 HTTPResponse: struct {
-    status: Int
-    body: Body
-    headers: Headers
-    __trailers: Headers?{None}
-    __redirect_history: [String]{[]}
-    __timings: [Int]{[]}
-    __reused: Bool{false}
-    __raw_encoding: String?{None}
-    __body_error: HTTPError?{None}
-    __cell: Shared<HTTPBodyCell>?{None}
+    status: Int,
+    body: Body,
+    headers: Headers,
+    __trailers: Headers?{None},
+    __redirect_history: [String]{[]},
+    __timings: [Int]{[]},
+    __reused: Bool{false},
+    __raw_encoding: String?{None},
+    __body_error: HTTPError?{None},
+    __cell: Shared<HTTPBodyCell>?{None},
 
     status: fn(self) -> Int Never! { self.status }
 
@@ -523,13 +523,13 @@ HTTPResponse: struct {
 /// A body read in bounded pieces: `loop chunk in body.chunks(n)` yields each
 /// piece of at most `n` bytes as `[U8] HTTPError!`.
 HTTPBodyChunks: struct {
-    __bytes: [U8]
-    __max: Int
-    __error: HTTPError?{None}
-    __live: Shared<provider.LiveBody>?{None}
+    __bytes: [U8],
+    __max: Int,
+    __error: HTTPError?{None},
+    __live: Shared<provider.LiveBody>?{None},
 
     impl Iterable {
-        Iter: HTTPBodyCursor
+        Iter: HTTPBodyCursor,
 
         iter: fn(&&self) -> HTTPBodyCursor {
             HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false, live: self.__live}
@@ -538,15 +538,15 @@ HTTPBodyChunks: struct {
 }
 
 priv HTTPBodyCursor: struct {
-    bytes: [U8]
-    max: Int
-    at: Int
-    error: HTTPError?
-    done: Bool
-    live: Shared<provider.LiveBody>?
+    bytes: [U8],
+    max: Int,
+    at: Int,
+    error: HTTPError?,
+    done: Bool,
+    live: Shared<provider.LiveBody>?,
 
     impl Iterator {
-        Item: [U8] HTTPError!
+        Item: [U8] HTTPError!,
 
         next: fn(&self) -[Net]> ([U8] HTTPError!)? {
             if self.done -> return None
@@ -742,8 +742,8 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
 /// request without a listener, and `web.openapi(router)` renders the same
 /// routes. Copies share the one route table; routes match as an App's do.
 HTTPRouter: struct {
-    __mux: HTTPMux
-    __state: Shared<HTTPRouterState>
+    __mux: HTTPMux,
+    __state: Shared<HTTPRouterState>,
 
     // `router.get(pattern, handler)` and its sibling verbs land here with the
     // route's checked contract (sema sema_call_try_http_router). The route
@@ -1423,7 +1423,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
 }
 
 StatusLine: struct {
-    version: Version
+    version: Version,
     status: Status
 }
 
@@ -1518,13 +1518,13 @@ split_lines: fn(text: String) -> [String] Never! {
 }
 
 Cookie: struct {
-    name: String
-    value: String
-    domain: String
-    path: String
-    secure: Bool
-    http_only: Bool
-    same_site: String
+    name: String,
+    value: String,
+    domain: String,
+    path: String,
+    secure: Bool,
+    http_only: Bool,
+    same_site: String,
     max_age: Int
 }
 
@@ -1533,7 +1533,7 @@ Query: struct {
 }
 
 QueryPair: struct {
-    key: String
+    key: String,
     value: String
 }
 
@@ -1595,15 +1595,15 @@ query_encode: fn(q: Query) -> String Never! {
 // both instead; code whose decoded value picks a file, path, account or other
 // identity uses it, since %FF and %FE both read as U+FFFD when tolerant.
 FormPolicy: enum {
-    Tolerant
+    Tolerant,
     Strict
 }
 
 // Why a strict form or query decode refused its input.
 #Error
 FormDecodeError: enum {
-    Escape
-    UTF8
+    Escape,
+    UTF8,
     TooLarge
 }
 
@@ -2208,7 +2208,7 @@ starts: fn(text: String, prefix: String) -> Bool {
 }
 
 FragmentSplit: struct {
-    url: String
+    url: String,
     fragment: String
 }
 

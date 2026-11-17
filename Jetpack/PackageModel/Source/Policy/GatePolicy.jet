@@ -19,7 +19,7 @@ use {
 
 #Error
 PackageGateError: struct {
-    diagnostics: [Diagnostic]
+    diagnostics: [Diagnostic],
 
     message: fn(self) -> String Never! {
         messages := [String]{}
@@ -48,10 +48,10 @@ pkg_gate_refusal: fn(key: PolicyKey, site: String, span: Span?, declarations: [P
 // `authority: { deny: [...] }` denies every package; no package row lifts
 // either.
 PackageOrganizationPolicy: struct {
-    declarations: [PolicyDeclaration]
-    deny: [String]
+    declarations: [PolicyDeclaration],
+    deny: [String],
     // The configured file ("" when none is configured).
-    source: String
+    source: String,
 }
 
 pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy PackageGateError! {

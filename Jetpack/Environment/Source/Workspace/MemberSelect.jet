@@ -27,7 +27,7 @@ MEMBER_INPUT_HASHES: "member-input-hashes"
 // A selection failure carries the registered diagnostic the CLI renders.
 #Error
 MemberSelectError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 
     message: fn(self) -> String Never! { self.diagnostic.what }
 }
@@ -39,11 +39,11 @@ impl AuthorityError -> MemberSelectError {
 // The CLI selection request for a workspace command.
 SelectRequest: struct {
     // Exact member names from repeated `-p <member>`.
-    packages: [String]
+    packages: [String],
     // `--affected`: diff the working tree against recorded input hashes.
-    affected: Bool
+    affected: Bool,
     // `--affected-since <ref>`: members changed since this git ref.
-    affected_since: String?
+    affected_since: String?,
 
     all: fn() -> SelectRequest Never! {
         SelectRequest{packages: [String]{}, affected: false, affected_since: None}

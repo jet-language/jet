@@ -110,42 +110,42 @@ use jet_foundation.[
 ]
 
 SemaEffectFunctionSource: struct {
-    key: String
-    name: String
-    span: Span
+    key: String,
+    name: String,
+    span: Span,
     // The function's name, where trait-bound reports (E0742) point.
-    name_span: Span?{None}
-    declared_effects: [EffectRowEntry]?
-    is_pure: Bool
-    is_replayable: Bool
-    is_unsafe: Bool
-    unsafe_reason: String?
-    unsafe_span: Span?
-    replayable_span: Span?
-    effect_via: NamedSpan?
+    name_span: Span?{None},
+    declared_effects: [EffectRowEntry]?,
+    is_pure: Bool,
+    is_replayable: Bool,
+    is_unsafe: Bool,
+    unsafe_reason: String?,
+    unsafe_span: Span?,
+    replayable_span: Span?,
+    effect_via: NamedSpan?,
     // The body's `#FX(…)` regions with valid cap lists (E0712).
-    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
+    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}},
     // Loop statement spans; memory work inside one has no
     // static execution count.
-    loop_spans: [Span]{[Span]{}}
+    loop_spans: [Span]{[Span]{}},
     // `assume_deterministic` blocks suspend E3403.
-    assume_det_spans: [Span]{[Span]{}}
+    assume_det_spans: [Span]{[Span]{}},
     // The authored `#Transact` blocks, outermost only: a call in one whose
     // callee declares no row is held to the transaction wall once rows are
     // solved (E0746).
-    transact_spans: [Span]{[Span]{}}
+    transact_spans: [Span]{[Span]{}},
     // The first `#Memo` marker of a non-comptime function (E0938).
-    memo_span: Span?{None}
+    memo_span: Span?{None},
     // A top-level `#Kernel(.parallel)` whose declaration obligations hold
     // (sema_kernel_pending): E1102 judges its effect and body obligations.
-    kernel: SemaKernelPending?{None}
+    kernel: SemaKernelPending?{None},
     // The `#FX(…)` caps of the modules enclosing this function (E0749).
-    module_caps: [ModuleCap]{[ModuleCap]{}}
+    module_caps: [ModuleCap]{[ModuleCap]{}},
     // The `#FX(…)` cap of the struct or enum this method belongs to (E0749).
-    type_cap: SemaEffectModuleCap?{None}
+    type_cap: SemaEffectModuleCap?{None},
     // The trait this impl method implements, resolved where its `impl`
     // block is written; None for any other function (E0754).
-    trait_symbol: SymbolID?{None}
+    trait_symbol: SymbolID?{None},
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -153,107 +153,107 @@ SemaEffectFunctionSource: struct {
 // `deep` region with no caps: it may reach only the effects that never need a
 // grant (E0713).
 SemaEffectFxRegion: struct {
-    caps: [String]
-    caps_span: Span
-    span: Span
-    deep: Bool{false}
+    caps: [String],
+    caps_span: Span,
+    span: Span,
+    deep: Bool{false},
 }
 
 // One checked module's effect inputs. The module's functions and call facts
 // are read in place from `modules[module_index]` (sema_effects_check_modules).
 SemaEffectModuleInput: struct {
-    module_index: Int
-    sources: [SemaEffectFunctionSource]
-    source_segments: [SemaSourceSegment]
+    module_index: Int,
+    sources: [SemaEffectFunctionSource],
+    source_segments: [SemaSourceSegment],
     // This rule trait-method effect ceilings this module declares (E0742).
-    trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}}
+    trait_bounds: [SemaEffectTraitBound]{[SemaEffectTraitBound]{}},
     // `{trait}::{owner}` implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
-    trait_implementers: [String]{[String]{}}
+    trait_implementers: [String]{[String]{}},
     // The owned trait each method of an `impl Owner.Add` or `impl
     // Owner.CheckedText` block implements, by function key: the trait has no
     // source row, so the checked body is a plain method (E0742 still bounds it).
-    owned_trait_hooks: [String:String]{[String:String]{}}
+    owned_trait_hooks: [String:String]{[String:String]{}},
     // The library effect names this module may write (sema_library_effect_view).
-    library_effects: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
+    library_effects: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}},
 }
 
 SemaEffectDispatchSite: struct {
-    dispatch: TEffectSpan
-    module_index: Int
+    dispatch: TEffectSpan,
+    module_index: Int,
 }
 
 // One bounded trait method: an impl of `trait_name.method` may use only the
 // effects in `bound` (`-[]>` is the empty bound).
 SemaEffectTraitBound: struct {
-    trait_name: String
-    method: String
-    bound: [String]
+    trait_name: String,
+    method: String,
+    bound: [String],
 }
 
 SemaEffectGraphResult: struct {
-    diagnostics: [Diagnostic]
-    complete: Bool
-    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
-    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
+    diagnostics: [Diagnostic],
+    complete: Bool,
+    memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}},
+    memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}},
     // With `seal`, the Core library's check: each Core function's effect
     // summary a bound program may take for its reach (sema_effect_core_seal_rows).
-    core_seal: [SemaCoreSealEffects]{[SemaCoreSealEffects]{}}
+    core_seal: [SemaCoreSealEffects]{[SemaCoreSealEffects]{}},
     // Whether a check walked the call graph past a body for what its reach
     // does (a memory or stack denial, a kernel, a program function's cap),
     // which a Core stand-in's missing edges would cut short.
-    walks: Bool{false}
+    walks: Bool{false},
     // How many of `diagnostics`' errors read no Core body a stand-in leaves
     // out: each e3401 on a `-[]>` function outside Core, which reads that
     // function's own body and the solved rows of what it calls.
-    exact_errors: Int{0}
+    exact_errors: Int{0},
     // The run's symbol table the check borrowed, handed back to its graph.
-    symbols: SymbolTable
+    symbols: SymbolTable,
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
 // is "alloc", "rc" or "arena"; an arena event's `bytes` is its proven upper
 // bound (None is unprovable); `executions` is None inside a loop.
 SemaMemoryEvent: struct {
-    span: Span
-    operation: String
-    kind: String{"alloc"}
-    bytes: Int?{None}
-    executions: Int?{Val(1)}
+    span: Span,
+    operation: String,
+    kind: String{"alloc"},
+    bytes: Int?{None},
+    executions: Int?{Val(1)},
 }
 
 // A call site to a user function, for arena multiplicity (Rust `MemoryCall`).
 // `target` is the callee's node once the graph's edges are final
 // (sema_effect_resolve_edges).
 SemaMemoryCall: struct {
-    callee: String
-    span: Span
-    executions: Int?
-    target: Int{-1}
+    callee: String,
+    span: Span,
+    executions: Int?,
+    target: Int{-1},
 }
 
 // A place a strict memory fact cannot see through (Rust `OpenMemoryDispatch`).
 SemaMemoryOpen: struct {
-    span: Span
-    source: String
-    reason: String
+    span: Span,
+    source: String,
+    reason: String,
 }
 
 // The first violation on a path: an event (in node `owner`) or an open
 // dispatch, and the arena bytes used up to it.
 SemaMemoryFinding: struct {
-    event: SemaMemoryEvent?
-    owner: Int
-    open: SemaMemoryOpen?
-    path: [String]
-    used: Int
+    event: SemaMemoryEvent?,
+    owner: Int,
+    open: SemaMemoryOpen?,
+    path: [String],
+    used: Int,
 }
 
 // Rust `ArenaProof`, or the finding that stops the proof.
 SemaMemoryArena: struct {
-    bytes: Int
-    witness: SemaMemoryFinding?
-    failure: SemaMemoryFinding?
+    bytes: Int,
+    witness: SemaMemoryFinding?,
+    failure: SemaMemoryFinding?,
 }
 
 sema_effect_is_fixed_list: fn(ty: Type) -> Bool Never! {
@@ -273,27 +273,27 @@ sema_effect_source_display: fn(path: String) -> String Never! {
 // to `bound` and kept clear of `denied` once every row is solved (E0747 at
 // `span`).
 SemaEffectCallbackBound: struct {
-    callee: String
-    row: SemaEffectCallbackRow
-    span: Span
+    callee: String,
+    row: SemaEffectCallbackRow,
+    span: Span,
 }
 
 // A closed callback row: the effects it allows and the ones it denies
 // (`fn(Int) -[IO, !Panic]> Int` allows IO and denies Panic).
 SemaEffectCallbackRow: struct {
-    bound: [String]
-    denied: [String]
+    bound: [String],
+    denied: [String],
 }
 
 // A lambda in a slot with a closed effect row: the lambda's own row, its call
 // facts and what its body walk charges, held to the slot's row once every row
 // is solved (E0747 at `span`).
 SemaEffectLambdaBound: struct {
-    direct: [String]
-    call_edges: [String]
-    maximal: Bool
-    row: SemaEffectCallbackRow
-    span: Span
+    direct: [String],
+    call_edges: [String],
+    maximal: Bool,
+    row: SemaEffectCallbackRow,
+    span: Span,
 }
 
 // A lambda handed the root's `Compiler` value: one that takes it, or the
@@ -301,11 +301,11 @@ SemaEffectLambdaBound: struct {
 // handler does. Its own row is held to launch no process once every row is
 // solved (E3410 at `span`, sema_effect_check_compiler_hooks).
 SemaEffectHookLambda: struct {
-    direct: [String]
-    call_edges: [String]
-    maximal: Bool
-    taken: String
-    span: Span
+    direct: [String],
+    call_edges: [String],
+    maximal: Bool,
+    taken: String,
+    span: Span,
 }
 
 // A call through a type parameter's trait bound (`self.inner.work()` with
@@ -313,9 +313,9 @@ SemaEffectHookLambda: struct {
 // instantiation is written, so the call's effects belong to the caller that
 // binds `param`, not to this function's own row.
 SemaEffectParamDispatch: struct {
-    param: String
+    param: String,
     // `{trait module}|{trait}::{method}`, the `trait_impls` key prefix.
-    impls_key: String
+    impls_key: String,
 }
 
 // A call into a generic function or a generic type's method, with the type
@@ -323,162 +323,162 @@ SemaEffectParamDispatch: struct {
 // `callee_node` is the callee's node once the graph's edges are final
 // (sema_effect_resolve_edges).
 SemaEffectInstantiation: struct {
-    callee: String
-    owner_args: [Type]
-    type_args: [Type]
+    callee: String,
+    owner_args: [Type],
+    type_args: [Type],
     // `Traced<Loud>` or `apply<Loud>`: the instantiation a report names.
-    label: String
-    span: Span
-    callee_node: Int{-1}
+    label: String,
+    span: Span,
+    callee_node: Int{-1},
 }
 
 // A call site that binds callee parameter vertex `to` to a larger type
 // holding caller parameter vertex `from`: instantiation `site` of `node`.
 SemaEffectExpandingSite: struct {
-    from: Int
-    to: Int
-    node: Int
-    site: Int
+    from: Int,
+    to: Int,
+    node: Int,
+    site: Int,
 }
 
 // An implementation a caller runs through an instantiation it writes, and
 // its node once the graph's edges are final (sema_effect_resolve_edges).
 SemaEffectInstanceReach: struct {
-    label: String
-    target: String
-    span: Span
-    target_node: Int{-1}
+    label: String,
+    target: String,
+    span: Span,
+    target_node: Int{-1},
 }
 
 // An instance reach with its target's solved row, for reports.
 SemaEffectInstanceNote: struct {
-    label: String
-    callee: String
-    row: [String]
-    span: Span
+    label: String,
+    callee: String,
+    row: [String],
+    span: Span,
 }
 
 SemaEffectNode: struct {
-    key: String
-    name: String
-    module_identity: ModuleID
-    module_index: Int
-    span: Span
-    name_span: Span
-    direct: [String]
-    direct_spans: [TEffectSpan]
-    call_edges: [String]
-    maximal: Bool
-    maximal_span: Span?
-    declared: [String]
-    prohibited: [String]
-    has_declared_row: Bool
-    is_pure: Bool
-    is_replayable: Bool
-    replayable_span: Span?
-    is_unsafe: Bool
-    unsafe_reason: String?
-    unsafe_span: Span?
-    effect_via: NamedSpan?
+    key: String,
+    name: String,
+    module_identity: ModuleID,
+    module_index: Int,
+    span: Span,
+    name_span: Span,
+    direct: [String],
+    direct_spans: [TEffectSpan],
+    call_edges: [String],
+    maximal: Bool,
+    maximal_span: Span?,
+    declared: [String],
+    prohibited: [String],
+    has_declared_row: Bool,
+    is_pure: Bool,
+    is_replayable: Bool,
+    replayable_span: Span?,
+    is_unsafe: Bool,
+    unsafe_reason: String?,
+    unsafe_span: Span?,
+    effect_via: NamedSpan?,
     // Calls through a trait value with no bound: the trait method declares
     // no row, the trait has no `#FX(…)` ceiling, and the program's
     // implementations can't be summed. A ceiling above them is E0743.
-    dispatches: [TEffectSpan]
+    dispatches: [TEffectSpan],
     // The node each `call_edges` entry names, by position, or -1 for an edge
     // with no node; `rare.value_targets` does the same for `rare.value_edges`.
     // Filled once the graph's edges are final (sema_effect_resolve_edges); the
     // graph's walks follow these.
-    call_targets: [Int]{[Int]{}}
+    call_targets: [Int]{[Int]{}},
     // Whether this body calls through a function value, whose context reads
     // no edge shows (sema_effect_context_reach).
-    context_open: Bool{false}
+    context_open: Bool{false},
     // The memory operations this body performs directly.
-    memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
+    memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}},
     // User-function call sites and loop spans for arena multiplicity.
-    memory_calls: [SemaMemoryCall]{[SemaMemoryCall]{}}
-    loop_spans: [Span]{[Span]{}}
+    memory_calls: [SemaMemoryCall]{[SemaMemoryCall]{}},
+    loop_spans: [Span]{[Span]{}},
     // This pure body made a non-deterministic Core call (E3403 reported).
-    nondeterministic_call: Bool{false}
-    memo_span: Span?{None}
-    kernel: SemaKernelPending?{None}
+    nondeterministic_call: Bool{false},
+    memo_span: Span?{None},
+    kernel: SemaKernelPending?{None},
     // `module.name` in call paths and the source file name in reports.
-    display_key: String{""}
-    source_display: String{""}
+    display_key: String{""},
+    source_display: String{""},
     // The name a denial's call chain shows for this function: `name`, or
     // `Owner.name` for a method (its effect key, dotted).
-    chain_name: String{""}
+    chain_name: String{""},
     // The first `#Unsafe` gate this body opens itself outside Core, as
     // `file:line` (sema_effect_record_unsafe_gate); "" when it opens none.
-    unsafe_site: String{""}
+    unsafe_site: String{""},
     // The first entry of the declared effect row (E0740's span) and its first
     // `!` prohibition (E0749's span).
-    row_span: Span?{None}
-    prohibition_span: Span?{None}
+    row_span: Span?{None},
+    prohibition_span: Span?{None},
     // The `#FX(…)` cap of the struct or enum this method belongs to.
-    type_cap: SemaEffectModuleCap?{None}
+    type_cap: SemaEffectModuleCap?{None},
     // The trait this method implements, None for any other function.
-    trait_symbol: SymbolID?{None}
+    trait_symbol: SymbolID?{None},
     // This function's type parameters, its owner type's first, and the
     // owner type's parameters in the order its type arguments bind them.
-    type_params: [String]{[String]{}}
-    owner_params: [String]{[String]{}}
+    type_params: [String]{[String]{}},
+    owner_params: [String]{[String]{}},
     // Calls that bind type parameters.
-    instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}}
+    instantiations: [SemaEffectInstantiation]{[SemaEffectInstantiation]{}},
     // Whether the first parameter is `path`, as a Core scope publisher's is.
-    path_first: Bool{false}
+    path_first: Bool{false},
     // The rows few bodies fill, boxed apart: None until one of them gains an
     // entry (sema_effect_node_rare_open), so a node that fills none holds
     // one empty word in their place.
-    rare: SemaEffectNodeRare?{None}
+    rare: SemaEffectNodeRare?{None},
 }
 
 // The rows of a graph node that few bodies fill (SemaEffectNode.rare).
 SemaEffectNodeRare: struct {
     // The functions this body takes as values (TEffectFacts.value_edges),
     // and the node each names, by position, or -1 for an edge with no node.
-    value_edges: [String]{[String]{}}
-    value_targets: [Int]{[Int]{}}
+    value_edges: [String]{[String]{}},
+    value_targets: [Int]{[Int]{}},
     // The module state this body writes (TEffectFacts.module_writes).
-    module_writes: [TEffectSpan]{[TEffectSpan]{}}
+    module_writes: [TEffectSpan]{[TEffectSpan]{}},
     // The comptime inputs this body makes (`embed_file`, `embed_bytes`,
     // `find`, `net.fetch`), by name and call span: the compiler answers them
     // while compiling only (sema_effect_runtime_input_paths).
-    comptime_inputs: [TEffectSpan]{[TEffectSpan]{}}
+    comptime_inputs: [TEffectSpan]{[TEffectSpan]{}},
     // The task context fields this body reads (`context.<field>`) and the
     // context keys it reads (`context.get(key)`) (sema_effect_context_reach).
-    context_reads: [String]{[String]{}}
-    context_keys: [TEffectContextKey]{[TEffectContextKey]{}}
+    context_reads: [String]{[String]{}},
+    context_keys: [TEffectContextKey]{[TEffectContextKey]{}},
     // The `-[!Mem.*]>` denials its signature declares (E0921).
-    memory_denials: [EffectRowEntry]{[EffectRowEntry]{}}
-    memory_opens: [SemaMemoryOpen]{[SemaMemoryOpen]{}}
-    assume_det_spans: [Span]{[Span]{}}
+    memory_denials: [EffectRowEntry]{[EffectRowEntry]{}},
+    memory_opens: [SemaMemoryOpen]{[SemaMemoryOpen]{}},
+    assume_det_spans: [Span]{[Span]{}},
     // The `#FX(…)` caps of the inline modules enclosing this function.
-    module_caps: [ModuleCap]{[ModuleCap]{}}
+    module_caps: [ModuleCap]{[ModuleCap]{}},
     // The bounded callback slots this body fills with named functions and
     // with lambdas.
-    callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
-    lambda_bounds: [SemaEffectLambdaBound]{[SemaEffectLambdaBound]{}}
+    callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}},
+    lambda_bounds: [SemaEffectLambdaBound]{[SemaEffectLambdaBound]{}},
     // The lambdas this body hands the root's `Compiler` value to (a
     // `meta.events` handler), held to launch no process.
-    hook_lambdas: [SemaEffectHookLambda]{[SemaEffectHookLambda]{}}
+    hook_lambdas: [SemaEffectHookLambda]{[SemaEffectHookLambda]{}},
     // Calls through a type parameter; once sema_effect_resolve_type_params
     // has run, also those a call forwards from a callee's parameters.
-    param_dispatches: [SemaEffectParamDispatch]{[SemaEffectParamDispatch]{}}
+    param_dispatches: [SemaEffectParamDispatch]{[SemaEffectParamDispatch]{}},
     // What calls that bind type parameters reach through them.
-    instance_reaches: [SemaEffectInstanceReach]{[SemaEffectInstanceReach]{}}
+    instance_reaches: [SemaEffectInstanceReach]{[SemaEffectInstanceReach]{}},
     // The library effects its declared row names, each with the kernel
     // effects it lists (E0756), and those its row denies (E0749).
-    library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}}
-    library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}}
+    library_rows: [SemaLibraryEffectName]{[SemaLibraryEffectName]{}},
+    library_denials: [SemaLibraryEffectDenial]{[SemaLibraryEffectDenial]{}},
     // The Prelude effects its declared row names itself, without the kernel
     // effects its library rows add to `declared` (E0759).
-    written_declared: [String]{[String]{}}
+    written_declared: [String]{[String]{}},
     // Calls to a Core scope publisher with a constant argument
     // (effect_scope_published_effect): the callee's bare effect reaches this
     // body as the scoped one. A publisher it also calls with a run-time
     // argument is in `bare_scope_callees`, and reaches it bare as well.
-    scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}}
-    bare_scope_callees: [String]{[String]{}}
+    scoped_calls: [SemaEffectScopedCall]{[SemaEffectScopedCall]{}},
+    bare_scope_callees: [String]{[String]{}},
 }
 
 // The rare rows of a node that fills none of them.
@@ -502,20 +502,20 @@ sema_effect_node_value_target: fn(node: SemaEffectNode, at: Int) -> Int Never! {
 }
 
 SemaEffectScopedCall: struct {
-    callee: String
-    published: String
-    scoped: String
+    callee: String,
+    published: String,
+    scoped: String,
 }
 
 // The effect facts a function's body gives its effect source: its `#FX(…)`
 // regions, loop spans, `assume_deterministic` spans and `#Transact` spans, and
 // for a top-level function its pending kernel (sema_kernel_pending).
 SemaEffectBodyFacts: struct {
-    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
-    loop_spans: [Span]{[Span]{}}
-    assume_det_spans: [Span]{[Span]{}}
-    transact_spans: [Span]{[Span]{}}
-    kernel: SemaKernelPending?{None}
+    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}},
+    loop_spans: [Span]{[Span]{}},
+    assume_det_spans: [Span]{[Span]{}},
+    transact_spans: [Span]{[Span]{}},
+    kernel: SemaKernelPending?{None},
 }
 
 // The body facts of `func`, walked from its body, its kernel left out.
@@ -840,8 +840,8 @@ sema_effect_set_add: fn(set: &[String], value: String) -> Bool Never! {
 
 // One value of a set being ordered, with its root's rank.
 SemaEffectRanked: struct {
-    rank: Int
-    name: String
+    rank: Int,
+    name: String,
 }
 
 // The set sema_effect_set_add builds from `values` added in any order: each
@@ -1245,8 +1245,8 @@ sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], p
 // modules: the package's own row (`organization` is ""), or the organization
 // policy file's at `organization`, which no package row lifts.
 SemaEffectDenial: struct {
-    name: String
-    organization: String
+    name: String,
+    organization: String,
 }
 
 // A package `authority.deny` row, or the organization policy's, reached by
@@ -1643,14 +1643,14 @@ sema_effect_compiler_hook_diagnostic: fn(subject: String, taken: String, chain: 
 // the cap is written (`run.jet:1`) when it isn't in the function's own file;
 // a cap in the function's file is labeled in the report.
 SemaEffectModuleCap: struct {
-    cap: ModuleCap
-    site: String?
+    cap: ModuleCap,
+    site: String?,
 }
 
 // A struct's, enum's or trait's cap and the module that declares it.
 SemaEffectTypeCap: struct {
-    module_identity: ModuleID
-    cap: SemaEffectModuleCap
+    module_identity: ModuleID,
+    cap: SemaEffectModuleCap,
 }
 
 // A module's or type's `#FX(…)` cap over one function: the function-row rule,
@@ -2162,8 +2162,8 @@ sema_effect_panic_chain: fn(first: String, panic_steps: [String]) -> [String] Ne
 // denied function (`steps`, as sema_effect_panic_steps gives them) and the
 // gate the chain ends at as `file:line`, or "" when it ends at an opaque call.
 SemaEffectUnsafeReach: struct {
-    steps: [String]
-    gate: String
+    steps: [String],
+    gate: String,
 }
 
 // Whether a function brings the Unsafe fact in itself: outside Core, it
@@ -2256,8 +2256,8 @@ sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode],
 // Summary construction
 
 SemaEffectSourceIndex: struct {
-    by_key: [String:Int]
-    by_name: [String:Int]
+    by_key: [String:Int],
+    by_name: [String:Int],
 }
 
 sema_effect_source_index: fn(sources: [SemaEffectFunctionSource]) -> SemaEffectSourceIndex Never! {
@@ -2360,11 +2360,11 @@ sema_effect_function_nodes_part: fn(modules: [SemaGraphModuleResult], inputs: [S
 // One node's call edges, value edges, instance reaches, memory calls and
 // instantiations as node indices (-1 for a key without a node).
 SemaEffectNodeTargets: struct {
-    calls: [Int]
-    values: [Int]
-    reaches: [Int]
-    memory: [Int]
-    instantiations: [Int]
+    calls: [Int],
+    values: [Int],
+    reaches: [Int],
+    memory: [Int],
+    instantiations: [Int],
 }
 
 // Each node's call edges, value edges and memory calls as node indices, once
@@ -2780,45 +2780,45 @@ sema_effect_record_memory_open: fn(nodes: &[SemaEffectNode], node_index: Int, sp
 // each walk names its module in its caller (SemaEffectCaller), so walks of
 // different modules read the one index at once.
 SemaEffectCallIndex: struct {
-    modules: [SemaEffectModuleCalls]
-    node_by_key: NameRows
+    modules: [SemaEffectModuleCalls],
+    node_by_key: NameRows,
     // Rust `seed_trait_dispatch_effects` `<static>` inputs: implementing type
     // names by trait name, and `{trait}::{method}` -> implementing type ->
     // that type's own method node.
-    trait_implementers: [String:[String]]{[String:[String]]{}}
+    trait_implementers: [String:[String]]{[String:[String]]{}},
     // Owner type name -> the keys of that type's own `close` methods
     // (`…::{Owner}:close`), the targets of `close(value)`.
-    close_methods: [String:[String]]{[String:[String]]{}}
+    close_methods: [String:[String]]{[String:[String]]{}},
     // "{module}|{trait}::{method}#{implementing type leaf}" -> that
     // implementation's own summary key, one flat map (no per-trait map copied
     // on every insert).
-    trait_impls: [String:String]{[String:String]{}}
+    trait_impls: [String:String]{[String:String]{}},
     // "{module}|{trait}::{method}" (sema_effect_trait_cap_key) -> the keys
     // of every implementation of the method in the program, inherited
     // defaults included: the targets of a call through a trait value.
-    dyn_impls: [String:[String]]{[String:[String]]{}}
+    dyn_impls: [String:[String]]{[String:[String]]{}},
     // The `#FX(…)` cap of each capped trait, by its SymbolID
     // (sema_effect_trait_caps).
-    trait_caps: [U32:SemaEffectTypeCap]{[U32:SemaEffectTypeCap]{}}
+    trait_caps: [U32:SemaEffectTypeCap]{[U32:SemaEffectTypeCap]{}},
     // The name of the node each `#Unsafe` function's key names
     // (`node_by_key`), so an unsafe-call check reads no node.
-    unsafe_names: [String:String]{[String:String]{}}
+    unsafe_names: [String:String]{[String:String]{}},
     // The node of each registered declaration with a body, by DeclID row
     // (-1: none), so a direct call finds its callee's node without its key.
-    node_by_decl: [Int]{[Int]{}}
+    node_by_decl: [Int]{[Int]{}},
     // The run's symbol table: the key of a fact's or a body node's id (a
     // walk reads a body's own ids from its tree).
-    symbols: SymbolTable{symbol_table()}
+    symbols: SymbolTable{symbol_table()},
     // Each node's key, in node order, so a walk names its callee's node
     // without reading that node: a collecting thread holds only its own
     // node's row (sema_effect_collect_claimed).
-    node_keys: [String]{[String]{}}
+    node_keys: [String]{[String]{}},
     // Each node's module identity, in node order, for the same reason.
-    node_modules: [ModuleID]{[ModuleID]{}}
+    node_modules: [ModuleID]{[ModuleID]{}},
     // The effect each Core scope publisher publishes, by key
     // (effect_scope_published_effect), read off its node before the walks:
     // a collecting thread holds only its own node's row.
-    published_effects: [String:String]{[String:String]{}}
+    published_effects: [String:String]{[String:String]{}},
 }
 
 // The key of a run-wide `id`; a body's own id names no declaration here.
@@ -2854,8 +2854,8 @@ sema_effect_nodes_by_decl: fn(node_by_key: NameRows, node_decls: [Int], decl_row
 // The caller a walk reads its call facts under: its module's row in the call
 // index and its slot among that module's callers (-1 when it owns no facts).
 SemaEffectCaller: struct {
-    module_index: Int
-    slot: Int
+    module_index: Int,
+    slot: Int,
 }
 
 // A module's call facts by caller. Caller `slot`'s facts are
@@ -2863,10 +2863,10 @@ SemaEffectCaller: struct {
 // ordered by span start and then source order, so its facts of one start are
 // a run found by a binary search.
 SemaEffectModuleCalls: struct {
-    facts: [SemaCallSiteFact]
-    caller_slots: [String:Int]
-    caller_ends: [Int]
-    positions: [Int]
+    facts: [SemaCallSiteFact],
+    caller_slots: [String:Int],
+    caller_ends: [Int],
+    positions: [Int],
 }
 
 sema_effect_module_calls: fn(facts: [SemaCallSiteFact]) -> SemaEffectModuleCalls Never! {
@@ -4218,8 +4218,8 @@ sema_effect_deep_check_diagnostic: fn(over: [String], span: Span) -> Diagnostic 
 // and the names sema_effect_parse_name rejects, in cap order, so a cap list
 // checked against many functions (a package policy) is parsed once.
 SemaEffectScopeBounds: struct {
-    bounds: [String]
-    unknown: [String]
+    bounds: [String],
+    unknown: [String],
 }
 
 // `e0747` for a denial: the callback reaches an effect its parameter's row
@@ -4271,8 +4271,8 @@ sema_effect_check_callback_bound: fn(callback_effects: [String], bounds: [String
 // Call-graph fixed point and public graph hook
 
 SemaEffectPending: struct {
-    node: Int
-    name: String
+    node: Int,
+    name: String,
 }
 
 // Each node's callers, in caller and call-edge order: the reverse call graph
@@ -4818,14 +4818,14 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], index: Int, visiting:
 // the path into it.
 SemaHeapWalk: struct {
     // 0 not seen, 1 on the walk, 2 settled.
-    state: [Int]
+    state: [Int],
     // The node's arena bytes; -1 unbounded.
-    bytes: [Int]
+    bytes: [Int],
     // Why the node is unbounded when it is itself the reason; "" when the
     // reason is in `next`.
-    why: [String]
+    why: [String],
     // The callee an unbounded node's path goes through; -1 none.
-    next: [Int]
+    next: [Int],
 }
 
 sema_effect_heap_open: fn(walk: &SemaHeapWalk, index: Int, why: String, next: Int) Never! {
@@ -4964,15 +4964,15 @@ sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], called: [Bool]) -> [String]
 // function with no checked body as a value, a node's calls through function
 // values are `open` instead, with the reason; "" when they are not.
 SemaStackFrames: struct {
-    own: [Int]
-    why: [String]
-    depth: [Int]
-    edges: [[Int]]
-    carried: [Int]
-    carrier: [Int]
-    sealed: [String]
-    dynamic_calls: [[Span]]
-    open: [String]
+    own: [Int],
+    why: [String],
+    depth: [Int],
+    edges: [[Int]],
+    carried: [Int],
+    carrier: [Int],
+    sealed: [String],
+    dynamic_calls: [[Span]],
+    open: [String],
 }
 
 // What the program's bodies do with function and trait values: the calls
@@ -4981,25 +4981,25 @@ SemaStackFrames: struct {
 // body they take as values, and in an executable build the implementations
 // each trait-value call may run.
 SemaStackValues: struct {
-    calls: [SemaStackDynamicCall]
-    lambdas: [SemaStackLambda]
-    wrappers: [SemaStackTaken]
-    bodiless: [SemaStackTaken]
-    dispatches: [SemaStackDispatch]
+    calls: [SemaStackDynamicCall],
+    lambdas: [SemaStackLambda],
+    wrappers: [SemaStackTaken],
+    bodiless: [SemaStackTaken],
+    dispatches: [SemaStackDispatch],
 }
 
 // A function value `node` makes: a node, or for one with no checked body,
 // -1 and its `name`.
 SemaStackTaken: struct {
-    node: Int
-    target: Int
-    name: String
+    node: Int,
+    target: Int,
+    name: String,
 }
 
 // A call through a trait value in `node` and the implementations it may run.
 SemaStackDispatch: struct {
-    node: Int
-    targets: [Int]
+    node: Int,
+    targets: [Int],
 }
 
 // Each function's own frame and what its body does with function and trait
@@ -5009,12 +5009,12 @@ SemaStackDispatch: struct {
 // bytes, or -1 when `why` names a value with no known size ("" otherwise).
 // `values` holds the rows' function values in the same order.
 SemaStackBodies: struct {
-    node: [Int]
-    depth: [Int]
-    arity: [Int]
-    own: [Int]
-    why: [String]
-    values: SemaStackValues
+    node: [Int],
+    depth: [Int],
+    arity: [Int],
+    own: [Int],
+    why: [String],
+    values: SemaStackValues,
 }
 
 sema_effect_stack_bodies_empty: fn() -> SemaStackBodies Never! {
@@ -5117,16 +5117,16 @@ sema_effect_stack_bodies: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffe
 // nodes, the call index and the program's frame types: each function's
 // module, its row there and its node; and whether the build is closed.
 SemaStackJobs: struct {
-    module_index: [Int]
-    function: [Int]
-    node: [Int]
-    closed: Bool
+    module_index: [Int],
+    function: [Int],
+    node: [Int],
+    closed: Bool,
 }
 
 // A part one thread sized: its number and its functions' rows.
 SemaStackBodiesPart: struct {
-    part: Int
-    bodies: SemaStackBodies
+    part: Int,
+    bodies: SemaStackBodies,
 }
 
 // Appends a part's rows (all but its nodes) to `bodies`, leaving the part
@@ -5205,16 +5205,16 @@ sema_effect_stack_node_targets: fn(node: SemaEffectNode) -> [Int] Never! {
 // there that code it hands the value to may call: the argument count and
 // the span.
 SemaStackDynamicCall: struct {
-    node: Int
-    arity: Int
-    span: Span
+    node: Int,
+    arity: Int,
+    span: Span,
 }
 
 // A lambda written in `node`: its parameter count and the nodes it calls.
 SemaStackLambda: struct {
-    node: Int
-    arity: Int
-    edges: [Int]
+    node: Int,
+    arity: Int,
+    edges: [Int],
 }
 
 sema_effect_stack_lambda: fn(node_index: Int, value: BodyLambda, node_by_key: NameRows) -> SemaStackLambda Never! {
@@ -5404,13 +5404,13 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], ar
 // lambdas and calls through values in reached code, and each node's sealed
 // targets as distinct name ids in order (sema_effect_stack_name_add).
 SemaStackSeal: struct {
-    reached: [Bool]
-    pending: [Int]
-    taken: [Bool]
-    takens: [Int]
-    lambdas: [Int]
-    calls: [Int]
-    names: [[Int]]
+    reached: [Bool],
+    pending: [Int],
+    taken: [Bool],
+    takens: [Int],
+    lambdas: [Int],
+    calls: [Int],
+    names: [[Int]],
 }
 
 sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
@@ -5561,30 +5561,30 @@ sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, bodies: &SemaS
 // marked; under the last, the deepest callee outside the part.
 SemaStackWalk: struct {
     // 0 not seen, 1 visited with its part not settled, 2 settled.
-    state: [Int]
+    state: [Int],
     // The node's path bytes; -1 unbounded.
-    bytes: [Int]
+    bytes: [Int],
     // Why the node is unbounded when it is itself the reason; "" when the
     // reason is in `next`.
-    why: [String]
+    why: [String],
     // The callee the node's deepest or unbounded path goes through; -1 none.
-    next: [Int]
+    next: [Int],
     // Each node's visit order and the lowest order it reaches back to, and
     // the visited nodes whose part is not settled yet.
-    order: [Int]
-    low: [Int]
-    pending: [Int]
-    visited: Int
+    order: [Int],
+    low: [Int],
+    pending: [Int],
+    visited: Int,
     // The settled part each node is in, named by its first visited node;
     // -1 before.
-    part: [Int]
+    part: [Int],
     // The deepest segment from each node of a part with a cycle: -2 not
     // measured, -3 being measured.
-    segment: [Int]
+    segment: [Int],
     // Whether a `!Mem.Stack(above: N)` denial reaches the node: only these
     // nodes' frames are stamped with their bound (FnBody.frame_bound), which
     // the backend then holds each laid-out frame to.
-    guarded: [Bool]
+    guarded: [Bool],
 }
 
 sema_effect_stack_walk: fn(nodes: [SemaEffectNode]) -> SemaStackWalk Never! {
@@ -5815,8 +5815,8 @@ sema_effect_stack_times: fn(count: Int, bytes: Int) -> Int Never! {
 // The path a stack walk settled a node by, each step with its own frame
 // bound, and why the path is unbounded ("" when it is bounded).
 SemaStackTrail: struct {
-    path: String
-    why: String
+    path: String,
+    why: String,
 }
 
 sema_effect_stack_trail: fn(walk: SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], index: Int) -> SemaStackTrail Never! {
@@ -6521,12 +6521,12 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
 // (-1: none) and the diagnostics building them reported), the index of its
 // effect sources and the index of its call facts, all in input order.
 SemaEffectPrepared: struct {
-    nodes: [SemaEffectNode]
-    node_keys: [String]
-    node_decls: [Int]
-    diagnostics: [Diagnostic]
-    source_indices: [SemaEffectSourceIndex]
-    calls: [SemaEffectModuleCalls]
+    nodes: [SemaEffectNode],
+    node_keys: [String],
+    node_decls: [Int],
+    diagnostics: [Diagnostic],
+    source_indices: [SemaEffectSourceIndex],
+    calls: [SemaEffectModuleCalls],
 }
 
 sema_effect_prepared_empty: fn() -> SemaEffectPrepared Never! {
@@ -6599,14 +6599,14 @@ sema_effect_node_key_table: fn(node_keys: [String]) -> NameRows Never! {
 // joins its `{module}|{trait}::{method}` group (`dyn_lists` by
 // `dyn_groups`), the targets of a call through a trait value.
 SemaEffectImplTables: struct {
-    implementer_groups: [String:Int]{[String:Int]{}}
-    implementer_keys: [String]{[String]{}}
-    implementer_lists: [[String]]{[[String]]{}}
-    implementer_seen: [String:Bool]{[String:Bool]{}}
-    trait_impls: [String:String]{[String:String]{}}
-    dyn_groups: [String:Int]{[String:Int]{}}
-    dyn_keys: [String]{[String]{}}
-    dyn_lists: [[String]]{[[String]]{}}
+    implementer_groups: [String:Int]{[String:Int]{}},
+    implementer_keys: [String]{[String]{}},
+    implementer_lists: [[String]]{[[String]]{}},
+    implementer_seen: [String:Bool]{[String:Bool]{}},
+    trait_impls: [String:String]{[String:String]{}},
+    dyn_groups: [String:Int]{[String:Int]{}},
+    dyn_keys: [String]{[String]{}},
+    dyn_lists: [[String]]{[[String]]{}},
 }
 
 // `owner` as an implementing type of trait `trait_key`, once.
@@ -6787,37 +6787,37 @@ sema_effect_collect_threads: fn(modules: [SemaGraphModuleResult], inputs: [SemaE
 // module, function and next job of its unit; each unit's first job and node;
 // and whether the graph has an `#Unsafe` function.
 SemaEffectCollectJobs: struct {
-    module_rows: [Int]
-    job_input: [Int]
-    job_function: [Int]
-    job_next: [Int]
-    unit_first: [Int]
-    unit_nodes: [Int]
-    any_unsafe: Bool
+    module_rows: [Int],
+    job_input: [Int],
+    job_function: [Int],
+    job_next: [Int],
+    unit_first: [Int],
+    unit_nodes: [Int],
+    any_unsafe: Bool,
 }
 
 // The next unclaimed part of the collection, taken with one atomic add under
 // a read guard each thread holds for its run.
 SemaEffectCollectQueue: struct {
-    next: Atomic<Int>
+    next: Atomic<Int>,
 }
 
 // One function's reports, not yet located.
 SemaEffectCollectReport: struct {
-    job: Int
-    diagnostics: [Diagnostic]
+    job: Int,
+    diagnostics: [Diagnostic],
 }
 
 // One unit's collected node row and its functions' nonempty reports.
 SemaEffectCollected: struct {
-    node: SemaEffectNode
-    reports: [SemaEffectCollectReport]
+    node: SemaEffectNode,
+    reports: [SemaEffectCollectReport],
 }
 
 // A part one thread collected: its number and, last first, its units' rows.
 SemaEffectCollectedPart: struct {
-    part: Int
-    collected: [SemaEffectCollected]
+    part: Int,
+    collected: [SemaEffectCollected],
 }
 
 // Moves each unit's collected node row into the graph's nodes, then
@@ -6976,11 +6976,11 @@ sema_effect_check_hole_headers: fn(call_facts: [SemaCallSiteFact], module_row: S
 // FailureLaw's prelude-conversion demand walk
 // sema_prelude_conversion_demands_enter, whose state is its one row).
 SemaEffectWalk: enum {
-    Collect(node_index: Int)
-    Unsafe(audited: Bool)
-    Region(node_index: Int, region: Span)
-    PreludeDemands(state: Shared<SemaPreludeDemandWalk>)
-    LambdaBody(node_index: Int)
+    Collect(node_index: Int),
+    Unsafe(audited: Bool),
+    Region(node_index: Int, region: Span),
+    PreludeDemands(state: Shared<SemaPreludeDemandWalk>),
+    LambdaBody(node_index: Int),
 }
 
 // A lambda body: its Iterable loops, value reads and stops, none of which

@@ -15,7 +15,7 @@ envmodel_test_output_error: fn(source: String) -> String Never! {
 }
 
 #Test("Package outputs project System and Fleet facts with a stable identity") {
-    facts: envmodel_test_output_facts("name: \"demo\"\noutputs: {{\n    workstation: System{{\n        name: \"workstation\"\n        target: linux.x64\n        packages: [ripgrep, \"fd@nixpkgs\", ripgrep]\n        services: {{ ssh: {{ enable: true, ports: [22] }} }}\n        options: {{ network: {{ hostName: \"workstation\" }} }}\n    }}\n    prod: Fleet{{ hosts: {{ edge: \"system.workstation\" }} }}\n}}")
+    facts: envmodel_test_output_facts("name: \"demo\"\noutputs: {{\n    workstation: System{{\n        name: \"workstation\",\n        target: linux.x64,\n        packages: [ripgrep, \"fd@nixpkgs\", ripgrep],\n        services: {{ ssh: {{ enable: true, ports: [22] }} }},\n        options: {{ network: {{ hostName: \"workstation\" }} }},\n    }},\n    prod: Fleet{{ hosts: {{ edge: \"system.workstation\" }} }},\n}}")
     first: envmodel_project_package_outputs(facts) ?? panic("projects: {err.text()}")
     second: envmodel_project_package_outputs(facts) ?? panic("projects: {err.text()}")
     assert_eq(first.graph_identity, second.graph_identity)
@@ -38,15 +38,15 @@ envmodel_test_output_error: fn(source: String) -> String Never! {
 }
 
 #Test("a Fleet host that could escape generation storage is refused") {
-    rendered: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    prod: Fleet{{ hosts: {{ \"../escape\": system.workstation }} }}\n}}")
+    rendered: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }},\n    prod: Fleet{{ hosts: {{ \"../escape\": system.workstation }} }},\n}}")
     assert(rendered.contains("../escape"), rendered)
     assert(rendered.contains("safe path component"), rendered)
 }
 
 #Test("duplicate Fleet names and colliding host paths are refused") {
-    duplicate: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    blue: Fleet{{ name: \"prod\", hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ name: \"prod\", hosts: {{ other: system.workstation }} }}\n}}")
+    duplicate: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }},\n    blue: Fleet{{ name: \"prod\", hosts: {{ edge: system.workstation }} }},\n    green: Fleet{{ name: \"prod\", hosts: {{ other: system.workstation }} }},\n}}")
     assert(duplicate.contains("fleet prod is declared more than once"), duplicate)
-    collision: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    laptop: System{{ target: linux.arm64 }}\n    blue: Fleet{{ hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ hosts: {{ edge: system.laptop }} }}\n}}")
+    collision: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }},\n    laptop: System{{ target: linux.arm64 }},\n    blue: Fleet{{ hosts: {{ edge: system.workstation }} }},\n    green: Fleet{{ hosts: {{ edge: system.laptop }} }},\n}}")
     assert(collision.contains("outputs.green.hosts.edge"), collision)
     assert(collision.contains("collides with Fleet host"), collision)
 }

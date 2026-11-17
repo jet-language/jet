@@ -213,9 +213,9 @@ LINK_FAULT_REPORT_OBJECT: "<linker fault report>"
 
 // Which fault report a link writes.
 LinkFaultReport: enum {
-    Full
-    Addresses
-    Import
+    Full,
+    Addresses,
+    Import,
 }
 
 // The report naming Jet frames from the image's own .debug_jetline
@@ -226,133 +226,133 @@ LinkFaultReport: enum {
 // None: a runtime pack imports the name, and the program's link writes it.
 
 LinkContext: struct {
-    bufs: [[U8]]
-    archives: [LinkArchive]
+    bufs: [[U8]],
+    archives: [LinkArchive],
     // archive_buffer[i] is the buffer of archives[i].
-    archive_buffer: [Int]
+    archive_buffer: [Int],
     // Every symbol name the link meets (archive symbols, globals, COMDAT
     // signatures), each with a row in the per-name columns (link_name).
-    names: NameTable
+    names: NameTable,
     // Per name: the archive symbol's archive * LINK_MEMBER_SCALE + member,
     // the first archive (and the first entry in it) winning; -1: none.
-    name_member: [Int]
+    name_member: [Int],
     // Per name: its global symbol, or -1.
-    name_global: [Int]
+    name_global: [Int],
     // Per name: whether a COMDAT group with that signature is loaded.
-    name_comdat: [Bool]
+    name_comdat: [Bool],
     // Keys of the archive members already loaded.
-    pulled: [Int:Bool]
+    pulled: [Int:Bool],
     // Objects: the name for reports, the buffer and absolute offsets of the
     // ELF header, section header table, section name table, symbol table,
     // symbol string table and extended section index table (-1: none); the
     // section count, the first global symbol index, and the first global
     // section and symbol ids.
-    obj_name: [String]
-    obj_buffer: [Int]
-    obj_base: [Int]
-    obj_shoff: [Int]
-    obj_names: [Int]
-    obj_symtab: [Int]
-    obj_strtab: [Int]
-    obj_shndx: [Int]
-    obj_count: [Int]
-    obj_first_global: [Int]
-    obj_first_section: [Int]
-    obj_first_symbol: [Int]
-    obj_sym_count: [Int]
+    obj_name: [String],
+    obj_buffer: [Int],
+    obj_base: [Int],
+    obj_shoff: [Int],
+    obj_names: [Int],
+    obj_symtab: [Int],
+    obj_strtab: [Int],
+    obj_shndx: [Int],
+    obj_count: [Int],
+    obj_first_global: [Int],
+    obj_first_section: [Int],
+    obj_first_symbol: [Int],
+    obj_sym_count: [Int],
     // Init/fini arrays, `.init`/`.fini` code and SHF_GNU_RETAIN sections:
     // collection roots.
-    roots: [Int]
+    roots: [Int],
     // The `.init` (0) and `.fini` (1) code sections: each is one function
     // assembled from pieces in input order (crti.o's prologue, crtn.o's
     // epilogue), so link_order keeps each group contiguous.
-    init_code: [Int:Int]
+    init_code: [Int:Int],
     // Conditional roots: an init/fini array section with SHF_INFO_LINK (a
     // runtime lifecycle hook of a service, Image/Object.jet) is live exactly
     // when the section its sh_info names is; per row, that array section and
     // its guard section. A system linker ignores the flag and keeps the hook.
-    cond_roots: [Int]
-    cond_guards: [Int]
+    cond_roots: [Int],
+    cond_guards: [Int],
     // A section's RELA section when it is not the header right after it.
-    rela: [Int:Int]
-    discarded: [Int:Bool]
+    rela: [Int:Int],
+    discarded: [Int:Bool],
     // Global symbol of each file symbol, by its index across the loaded
     // files (obj_first_symbol); -1 for a local one.
-    sym_global: [Int]
+    sym_global: [Int],
     // Global symbols: the name and its id in `names` (name_global).
-    g_name: [String]
-    g_name_id: [Int]
-    g_kind: [Int]
+    g_name: [String],
+    g_name_id: [Int],
+    g_kind: [Int],
     // The definition (LINK_G_FILE): section (or LINK_ABS), value and size.
-    g_section: [Int]
-    g_value: [Int]
-    g_size: [Int]
-    g_obj: [Int]
-    g_weak_def: [Bool]
-    g_strong_ref: [Bool]
+    g_section: [Int],
+    g_value: [Int],
+    g_size: [Int],
+    g_obj: [Int],
+    g_weak_def: [Bool],
+    g_strong_ref: [Bool],
     // Another global this name stands for (LFS64 names), or -1.
-    g_alias: [Int]
+    g_alias: [Int],
     // Address of a LINK_G_COMMON or LINK_G_LINKER symbol.
-    g_addr: [Int]
-    g_common_size: [Int]
-    g_common_align: [Int]
-    pending: [Int]
-    pending_head: Int
+    g_addr: [Int],
+    g_common_size: [Int],
+    g_common_align: [Int],
+    pending: [Int],
+    pending_head: Int,
     // Live sections: the row of each section id (-1: not live; sized by
     // collection, when the inputs are final), then per row the section,
     // class and address.
-    live: [Int]
-    live_secs: [Int]
-    live_class: [Int]
-    live_addr: [Int]
+    live: [Int],
+    live_secs: [Int],
+    live_class: [Int],
+    live_addr: [Int],
     // `.eh_frame` records ("pieces"): the section and its object, start and
     // length; the CIE piece of an FDE; the symbol index its pc_begin names
     // until collection, then the section it describes (-1: none); its
     // relocations (row range in the section's RELA table); the next FDE
     // describing the same section; whether it is kept and its output offset.
-    ep_sec: [Int]
-    ep_obj: [Int]
-    ep_start: [Int]
-    ep_len: [Int]
-    ep_cie: [Int]
-    ep_target: [Int]
-    ep_first_reloc: [Int]
-    ep_reloc_count: [Int]
-    ep_next: [Int]
-    ep_keep: [Bool]
-    ep_out: [Int]
+    ep_sec: [Int],
+    ep_obj: [Int],
+    ep_start: [Int],
+    ep_len: [Int],
+    ep_cie: [Int],
+    ep_target: [Int],
+    ep_first_reloc: [Int],
+    ep_reloc_count: [Int],
+    ep_next: [Int],
+    ep_keep: [Bool],
+    ep_out: [Int],
     // First FDE describing each section id (-1: none), sized like `live`.
-    sec_fde: [Int]
+    sec_fde: [Int],
     // GOT slot per relocation target key (global id, or -1 - file symbol).
-    got: [Int:Int]
-    got_keys: [Int]
+    got: [Int:Int],
+    got_keys: [Int],
     // Per live row, the index in `rel_slot` of its first relocation; per
     // relocation of a live section, its GOT slot or -1 (link_scan_reloc).
-    rel_base: [Int]
-    rel_slot: [Int]
+    rel_base: [Int],
+    rel_slot: [Int],
     // Layout results.
-    got_start: Int
-    tls_start: Int
-    tls_end: Int
-    tls_align: Int
-    eh_start: Int
-    eh_size: Int
+    got_start: Int,
+    tls_start: Int,
+    tls_end: Int,
+    tls_align: Int,
+    eh_start: Int,
+    eh_size: Int,
     // The unwind tables leave the loaded image for the side debug file, as
     // `.debug_frame` (link_eh_unloaded, link_debug_frame).
-    eh_debug: Bool
+    eh_debug: Bool,
     // The address of the first loaded byte (the ELF header).
-    base: Int
-    fault_report: LinkFaultReport
+    base: Int,
+    fault_report: LinkFaultReport,
     // The fault report's section (link_fault_report; -1: none) and the first
     // live section calling it, which the report follows in the image
     // (link_rows_in_order).
-    fault_report_section: Int
-    fault_report_caller: Int
-    errors: [String]
+    fault_report_section: Int,
+    fault_report_caller: Int,
+    errors: [String],
     // Every global live code strongly references and nothing defines, once
     // each, in scan order (link_scan_reloc; x64_link_live_undefined, and a
     // link stopped at them, X64ExecutableResult.undefined).
-    undefined: [String]
+    undefined: [String],
 }
 
 link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
@@ -1129,17 +1129,17 @@ link_alloc_shim_target: fn(name: String) -> String? Never! {
 // and loads like any input, so one path resolves and relocates it.
 
 LinkSynth: struct {
-    text: [U8]
-    data: [U8]
-    bss: Int
-    def_names: [String]
+    text: [U8],
+    data: [U8],
+    bss: Int,
+    def_names: [String],
     // 1 .text, 2 .data, 3 .bss
-    def_sections: [Int]
-    def_values: [Int]
-    rel_at: [Int]
-    rel_names: [String]
-    rel_types: [Int]
-    rel_addends: [Int]
+    def_sections: [Int],
+    def_values: [Int],
+    rel_at: [Int],
+    rel_names: [String],
+    rel_types: [Int],
+    rel_addends: [Int],
 }
 
 link_synth: fn() -> LinkSynth Never! {
@@ -1979,24 +1979,24 @@ link_place: fn(c: &LinkContext, rows: [Int], start: Int) -> Int Never! {
 }
 
 LinkLayout: struct {
-    order: [[Int]]
-    phnum: Int
-    r_end: Int
-    text_start: Int
-    text_end: Int
-    rw_start: Int
-    file_end: Int
-    mem_end: Int
-    has_rw: Bool
-    has_tls: Bool
-    tdata_end: Int
-    init_start: Int
-    init_end: Int
-    fini_start: Int
-    fini_end: Int
-    preinit_start: Int
-    preinit_end: Int
-    bss_start: Int
+    order: [[Int]],
+    phnum: Int,
+    r_end: Int,
+    text_start: Int,
+    text_end: Int,
+    rw_start: Int,
+    file_end: Int,
+    mem_end: Int,
+    has_rw: Bool,
+    has_tls: Bool,
+    tdata_end: Int,
+    init_start: Int,
+    init_end: Int,
+    fini_start: Int,
+    fini_end: Int,
+    preinit_start: Int,
+    preinit_end: Int,
+    bss_start: Int,
     // A packed layout (a plain executable's) keeps the read-write segment's
     // pages apart from the code's in memory, not in the file: its file bytes
     // follow the read-only segment's, `rw_shift` below their addresses'
@@ -2004,13 +2004,13 @@ LinkLayout: struct {
     // non-executable mappings read. The code is written last, from a page of
     // its own (link_write_code), so its mapping reads nothing but code and the
     // file's end: one page gap in the file instead of two.
-    packed: Bool
-    rw_shift: Int
+    packed: Bool,
+    rw_shift: Int,
     // The build-id note's address, right after the program headers; 0 when
     // the image has none.
-    note_at: Int
+    note_at: Int,
     // Keeps the layout from deriving comparisons over its nested lists.
-    notes: [Int:Int]
+    notes: [Int:Int],
 }
 
 // The image's layout at the link base, with a build-id note when `note`,
@@ -2439,12 +2439,12 @@ link_emit_eh: fn(c: &LinkContext, out: &[U8]) Never! {
 // its initial instructions; whether its FDEs carry augmentation data (`z`);
 // the encoding of their pc_begin and pc_range (DW_EH_PE_*).
 LinkEhCie: struct {
-    fields: Int
-    ra_at: Int
-    ra: Int
-    instructions: Int
-    z: Bool
-    encoding: Int
+    fields: Int,
+    ra_at: Int,
+    ra: Int,
+    instructions: Int,
+    z: Bool,
+    encoding: Int,
 }
 
 // The CIE record at `at` in `bytes`, when `.debug_frame` can say what it
@@ -2512,12 +2512,12 @@ link_frame_finish: fn(out: &[U8], start: Int, size: Int) Never! {
 // offset (the record's own for a CIE) and, for an FDE, its pc_begin and
 // pc_range and the offset of its instructions.
 LinkEhRecord: struct {
-    at: Int
-    end: Int
-    cie_at: Int
-    begin: Int
-    range: Int
-    instructions: Int
+    at: Int,
+    end: Int,
+    cie_at: Int,
+    begin: Int,
+    range: Int,
+    instructions: Int,
 }
 
 // The kept unwind records as `.debug_frame` (DWARF 5 section 6.4.1), for the
@@ -2760,8 +2760,8 @@ link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkP
 // live row, built ahead on the compiler threads (link_emit_pieces). With no
 // rows (link_no_pieces) the image writer emits every row in place.
 LinkPieces: struct {
-    bytes: [[U8]]
-    errors: [[String]]
+    bytes: [[U8]],
+    errors: [[String]],
 }
 
 link_no_pieces: fn() -> LinkPieces Never! { LinkPieces{bytes: [[U8]]{}, errors: [[String]]{}} }
@@ -2809,22 +2809,22 @@ link_row_weight: fn(c: LinkContext, row: Int) -> Int Never! {
 // The emitting threads' inputs, read only: the link context (moved in and
 // back out, one row) and the rows in emit order.
 LinkEmitInputs: struct {
-    contexts: [LinkContext]
-    rows: [Int]
+    contexts: [LinkContext],
+    rows: [Int],
 }
 
 // One thread's consecutive range of `rows` and, once it finished, the
 // range's pieces and reports in row order.
 LinkEmitPart: struct {
-    start: Int
-    end: Int
-    bytes: [[U8]]
-    errors: [[String]]
+    start: Int,
+    end: Int,
+    bytes: [[U8]],
+    errors: [[String]],
 }
 
 LinkEmitted: struct {
-    context: LinkContext
-    pieces: LinkPieces
+    context: LinkContext,
+    pieces: LinkPieces,
 }
 
 // Every emitted row's piece (link_emit_section into an empty piece), built
@@ -2922,22 +2922,22 @@ LINK_DEBUG: -3
 // Output `.debug_*` sections: names in first-seen order, and per name the
 // rows of its input sections in input order and its size.
 LinkDebug: struct {
-    names: [String]
-    rows: [[Int]]
-    sizes: [Int]
+    names: [String],
+    rows: [[Int]],
+    sizes: [Int],
 }
 
 LinkSectionHeader: struct {
-    name: String
-    kind: Int
-    flags: Int
-    addr: Int
-    offset: Int
-    size: Int
-    link: Int
-    info: Int
-    align: Int
-    entry_size: Int
+    name: String,
+    kind: Int,
+    flags: Int,
+    addr: Int,
+    offset: Int,
+    size: Int,
+    link: Int,
+    info: Int,
+    align: Int,
+    entry_size: Int,
 }
 
 // Give every unloaded, uncompressed, non-empty `.debug_*` section of a
@@ -3436,50 +3436,50 @@ link_has_startup: fn(c: LinkContext) -> Bool Never! {
 // Descriptive canonical linker facts only. The verified held-output producer
 // must bind them to the SAME approved runtime pack before issuing a lease.
 X64ResidentLinkRequest: struct {
-    runtime_input: Int
-    callable_exports: [String]
+    runtime_input: Int,
+    callable_exports: [String],
 }
 
 X64ResidentSymbol: struct {
-    symbol: String
-    defining_symbol: String
-    input: Int
-    object_offset: Int
-    address: Int
+    symbol: String,
+    defining_symbol: String,
+    input: Int,
+    object_offset: Int,
+    address: Int,
     // Zero is preserved when the ELF producer does not give a symbol size.
-    size: Int
-    section_end: Int
+    size: Int,
+    section_end: Int,
 }
 
 X64ResidentSegment: struct {
-    address: Int
-    file_size: Int
-    memory_size: Int
-    align: Int
-    flags: Int
+    address: Int,
+    file_size: Int,
+    memory_size: Int,
+    align: Int,
+    flags: Int,
 }
 
 X64ResidentLinkFacts: struct {
-    base: Int
-    entry: Int
-    segments: [X64ResidentSegment]
-    tls: X64ResidentSegment?
-    preinit_start: Int
-    preinit_end: Int
-    init_start: Int
-    init_end: Int
-    fini_start: Int
-    fini_end: Int
-    symbols: [X64ResidentSymbol]
+    base: Int,
+    entry: Int,
+    segments: [X64ResidentSegment],
+    tls: X64ResidentSegment?,
+    preinit_start: Int,
+    preinit_end: Int,
+    init_start: Int,
+    init_end: Int,
+    fini_start: Int,
+    fini_end: Int,
+    symbols: [X64ResidentSymbol],
 }
 
 // The linked image, else (`image.errors` not empty) why it failed; with a
 // split link, its side debug file and build id (else both empty).
 X64ResidentLinkResult: struct {
-    image: X64ExecutableResult
-    facts: X64ResidentLinkFacts?
-    debug_file: [U8]
-    build_id: [U8]
+    image: X64ExecutableResult,
+    facts: X64ResidentLinkFacts?,
+    debug_file: [U8],
+    build_id: [U8],
 }
 
 link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
@@ -3501,8 +3501,8 @@ x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: Com
 
 // What x64_link_live_undefined found, with the inputs it was given.
 X64LiveUndefined: struct {
-    symbols: [String]
-    bufs: [[U8]]
+    symbols: [String],
+    bufs: [[U8]],
 }
 
 // The symbols live code of the link inputs `bufs` references that no input
@@ -3533,16 +3533,16 @@ X64SplitExecutableResult: struct {
     // note, section headers naming that note (debuggers read the id from it)
     // and the `.gnu_debuglink` naming the side file, and no symbol table or
     // debug section.
-    bytes: [U8]
+    bytes: [U8],
     // The side debug file: an ELF file of the build-id note, the debug
     // sections, the symbol table and the section headers, the loaded ones
     // SHT_NOBITS; a debugger or profiler finds it by the build id.
-    debug_file: [U8]
+    debug_file: [U8],
     // The 20-byte id both files' notes hold.
-    build_id: [U8]
-    errors: [String]
+    build_id: [U8],
+    errors: [String],
     // As X64ExecutableResult.undefined.
-    undefined: [String]
+    undefined: [String],
 }
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a

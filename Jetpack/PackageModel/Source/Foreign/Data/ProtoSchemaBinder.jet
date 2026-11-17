@@ -125,10 +125,10 @@ pkg_data_proto_trim_dots: fn(name: String) -> String Never! {
 
 // One proto token.
 ProtoToken: enum {
-    Word(String)
-    Number(String)
-    StringLiteral(String)
-    Symbol(String)
+    Word(String),
+    Number(String),
+    StringLiteral(String),
+    Symbol(String),
 }
 
 // Words, numbers (decimal, hexadecimal, fraction, exponent), quoted strings
@@ -358,16 +358,16 @@ pkg_data_proto_scalar: fn(type_name: String) -> String? Never! {
 }
 
 ProtoField: struct {
-    wire_name: String
-    type_name: String
-    repeated: Bool
-    optional: Bool
-    number: Int
+    wire_name: String,
+    type_name: String,
+    repeated: Bool,
+    optional: Bool,
+    number: Int,
 }
 
 ProtoReserved: struct {
-    names: [String]
-    ranges: [{end: Int, start: Int}]
+    names: [String],
+    ranges: [{end: Int, start: Int}],
 
     empty: fn() -> ProtoReserved Never! {
         ProtoReserved{names: [String]{}, ranges: [{end: Int, start: Int}]{}}
@@ -383,40 +383,40 @@ ProtoReserved: struct {
 }
 
 ProtoMessage: struct {
-    source_name: String
-    short_name: String
-    fields: [ProtoField]
+    source_name: String,
+    short_name: String,
+    fields: [ProtoField],
 }
 
 ProtoEnum: struct {
-    source_name: String
+    source_name: String,
 }
 
 ProtoSchema: struct {
-    messages: [ProtoMessage]
-    enums: [ProtoEnum]
+    messages: [ProtoMessage],
+    enums: [ProtoEnum],
 }
 
 // What an option value was; only booleans are inspected (`allow_alias`).
 ProtoOptionValue: enum {
-    Flag(Bool)
-    Text
-    Number
-    Identifier
-    Aggregate
+    Flag(Bool),
+    Text,
+    Number,
+    Identifier,
+    Aggregate,
 }
 
 ProtoParser: struct {
-    tokens: [ProtoToken]
-    pos: Int
-    messages: [ProtoMessage]
-    enums: [ProtoEnum]
-    message_names: [String]
-    enum_names: [String]
-    package: String?
-    syntax_seen: Bool
-    body_started: Bool
-    lex_error: String?
+    tokens: [ProtoToken],
+    pos: Int,
+    messages: [ProtoMessage],
+    enums: [ProtoEnum],
+    message_names: [String],
+    enum_names: [String],
+    package: String?,
+    syntax_seen: Bool,
+    body_started: Bool,
+    lex_error: String?,
 
     new: fn(input: String) -> ProtoParser Never! {
         parser := ProtoParser{

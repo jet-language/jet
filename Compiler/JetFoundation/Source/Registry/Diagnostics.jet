@@ -2,9 +2,9 @@ use diagnostic_unicode: core.text
 
 // A retired row is never reported; it stays so `jet explain` reads old logs.
 DiagnosticRegistryStatus: enum {
-    Active
-    Reserved
-    Retired
+    Active,
+    Reserved,
+    Retired,
 }
 
 // Which commands a row's report fails: the cases of Core's `DiagnosticTier`
@@ -15,20 +15,20 @@ DiagnosticRegistryStatus: enum {
 // while `jet run`, `jet dev` and `jet test` never stop for it and show it
 // only under `--verbose` (diagnostic_is_tidy).
 DiagnosticTier: enum {
-    Error
-    Tidy
+    Error,
+    Tidy,
 }
 
 DiagnosticRegistryFix: enum {
-    SourceEdit
-    SuggestedSourceEdit
-    CryptoMisuse
-    Replace(from: String, to: String)
-    Remove(text: String)
-    GeneratedMarkerGroup
-    GeneratedMissingArms
-    GeneratedScriptRun
-    GeneratedRedundantTailReturn
+    SourceEdit,
+    SuggestedSourceEdit,
+    CryptoMisuse,
+    Replace(from: String, to: String),
+    Remove(text: String),
+    GeneratedMarkerGroup,
+    GeneratedMissingArms,
+    GeneratedScriptRun,
+    GeneratedRedundantTailReturn,
 }
 
 // This is a generated view of the Diagnostic impls in
@@ -38,22 +38,22 @@ DiagnosticRegistryFix: enum {
 // authored input, while moment, severity, row edits, grades, and no-fix facts
 // come from the generated row. `name` is the diagnostic's type name.
 DiagnosticRegistryRow: struct {
-    code: String
-    name: String
-    lint_name: String?
-    stage: String
-    severity: Int
-    tier: DiagnosticTier
-    moment: DiagnosticMoment
-    status: DiagnosticRegistryStatus
-    meaning: String
-    what: String
-    why: String
-    fix: String
-    detail: Bool
-    structured_fix: DiagnosticRegistryFix?
-    fix_safety: DiagnosticFixSafety?
-    no_fix_reason: DiagnosticNoFixReason?
+    code: String,
+    name: String,
+    lint_name: String?,
+    stage: String,
+    severity: Int,
+    tier: DiagnosticTier,
+    moment: DiagnosticMoment,
+    status: DiagnosticRegistryStatus,
+    meaning: String,
+    what: String,
+    why: String,
+    fix: String,
+    detail: Bool,
+    structured_fix: DiagnosticRegistryFix?,
+    fix_safety: DiagnosticFixSafety?,
+    no_fix_reason: DiagnosticNoFixReason?,
 
     has_stage: fn(self, stage: String) -> Bool Never! {
         loop component in self.stage.split("/") {
@@ -199,11 +199,11 @@ diagnostic_sentence_case_line: fn(value: String) -> String Never! {
 // clash compares, and `qualifier` the module as the user writes it: `crypto`
 // for `<corelib>/core.crypto::Secret`, the file stem for a source module.
 DiagnosticIdentity: struct {
-    start: Int
-    end: Int
-    name: String
-    head: String
-    qualifier: String
+    start: Int,
+    end: Int,
+    name: String,
+    head: String,
+    qualifier: String,
 }
 
 // A message names a type by its plain name. Only when two different types in

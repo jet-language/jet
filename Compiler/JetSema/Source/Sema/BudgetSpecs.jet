@@ -64,94 +64,94 @@ sema_budget_unit_scale: fn(suffix: String) -> Int? Never! {
 }
 
 BudgetSpec: struct {
-    role: String
-    name: String
-    metric: String
-    scope: String
-    provider: String
-    applicability: BudgetApplicability
-    enforcement: String
-    comparison: String
-    limit: String
-    comparison_fact: BudgetComparisonFact
-    limit_fact: BudgetLimitFact
+    role: String,
+    name: String,
+    metric: String,
+    scope: String,
+    provider: String,
+    applicability: BudgetApplicability,
+    enforcement: String,
+    comparison: String,
+    limit: String,
+    comparison_fact: BudgetComparisonFact,
+    limit_fact: BudgetLimitFact,
     // The exact named workload behind a compiler probe. Clean and NoChange
     // carry no patch; Edit resolves here, once, against the role's typed
     // workload map.
-    compile_workload: CompileWorkloadFact?
-    span: Span
-    field_spans: [String:Span]
+    compile_workload: CompileWorkloadFact?,
+    span: Span,
+    field_spans: [String:Span],
 }
 
 CompileWorkloadFact: struct {
-    mode: String
-    name: String?
-    target: String
-    patch: String?
+    mode: String,
+    name: String?,
+    target: String,
+    patch: String?,
 }
 
 // A spec with the position in `graph.modules` of the module that owns its
 // source span.
 LocatedBudgetSpec: struct {
-    spec: BudgetSpec
-    module_index: Int
+    spec: BudgetSpec,
+    module_index: Int,
 }
 
 BudgetComparisonFact: struct {
-    kind: String
-    baseline: String?
+    kind: String,
+    baseline: String?,
 }
 
 BudgetLimitFact: struct {
-    kind: String
-    quantity: BudgetQuantity
-    raw: BudgetRawQuantity
+    kind: String,
+    quantity: BudgetQuantity,
+    raw: BudgetRawQuantity,
 }
 
 // Normalized limit values; each stays within the unsigned 128-bit range.
 BudgetQuantity: enum {
-    DurationNs(value: Int)
-    Bytes(value: Int)
-    Count(value: Int)
-    Rate(numerator: Int, denominator_ns: Int)
-    PercentBasisPoints(value: Int)
+    DurationNs(value: Int),
+    Bytes(value: Int),
+    Count(value: Int),
+    Rate(numerator: Int, denominator_ns: Int),
+    PercentBasisPoints(value: Int),
 }
 
 BudgetRawQuantity: enum {
-    Scalar(digits: String, suffix: String?)
-    Rate(count_digits: String, per_digits: String, per_suffix: String)
+    Scalar(digits: String, suffix: String?),
+    Rate(count_digits: String, per_digits: String, per_suffix: String),
 }
 
 BudgetApplicability: struct {
-    targets: BudgetAxis
-    profiles: BudgetAxis
+    targets: BudgetAxis,
+    profiles: BudgetAxis,
 }
 
 // `Only` holds its selectors sorted and unique.
 BudgetAxis: enum {
-    Current
-    All
-    Only(selectors: [String])
+    Current,
+    All,
+    Only(selectors: [String]),
 }
 
 #Error
 BudgetSpecError: struct {
-    diagnostics: [Diagnostic]
+    diagnostics: [Diagnostic],
 }
 
 // The attachments budgets may name, collected per owning package.
 BudgetAttachmentCatalog: struct {
-    envs: [String]
-    services: [String]
-    targets: [String]
-    scenes: [String]
-    tests: [String]
+    envs: [String],
+    services: [String],
+    targets: [String],
+    scenes: [String],
+    tests: [String],
 }
 
 // One written Budget field: its value and the span of its name.
 BudgetFieldEntry: struct {
-    value: Expr
-    span: Span
+    value: Expr,
+    span: Span,
 }
 
 // Rust `collect_located_budget_specs_bundle`: collect budgets while
@@ -176,8 +176,8 @@ sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDi
 
 // One budget diagnostic and the `graph.modules` position of its source.
 BudgetLocatedDiagnostic: struct {
-    module_index: Int
-    diagnostic: Diagnostic
+    module_index: Int,
+    diagnostic: Diagnostic,
 }
 
 // Every module's budgets in module order, Core's among them, then each
@@ -400,8 +400,8 @@ sema_budget_unresolved: fn(spec: BudgetSpec, attachment: String, why: String, fi
 }
 
 BudgetNamedKey: struct {
-    kind: String
-    name: String
+    kind: String,
+    name: String,
 }
 
 // `Kind(name)` split into its kind and name.
@@ -632,8 +632,8 @@ sema_budget_closed_provider: fn(name: String, expr: Expr) -> String BudgetSpecEr
 }
 
 BudgetMetricPair: struct {
-    metric: String
-    variant: String
+    metric: String,
+    variant: String,
 }
 
 // The value of one enum-literal argument, positional or named.
@@ -793,8 +793,8 @@ sema_budget_provider_identity: fn(provider: String) -> String? Never! {
 }
 
 BudgetStructLit: struct {
-    type_name: String
-    fields: [ExprField]
+    type_name: String,
+    fields: [ExprField],
 }
 
 // A typed record literal (`BudgetApplies{...}`, `Rate{...}`): its type name
@@ -1046,8 +1046,8 @@ sema_budget_normalize_limit: fn(name: String, metric: String, limit: String, exp
 }
 
 BudgetPercent: struct {
-    basis_points: Int
-    raw: BudgetRawQuantity
+    basis_points: Int,
+    raw: BudgetRawQuantity,
 }
 
 sema_budget_digits: fn(text: String) -> Bool Never! {
@@ -1081,8 +1081,8 @@ sema_budget_normalize_percent: fn(value: Expr) -> BudgetPercent? Never! {
 }
 
 BudgetRate: struct {
-    quantity: BudgetQuantity
-    raw: BudgetRawQuantity
+    quantity: BudgetQuantity,
+    raw: BudgetRawQuantity,
 }
 
 sema_budget_normalize_rate: fn(name: String, value: Expr) -> BudgetRate BudgetSpecError! {

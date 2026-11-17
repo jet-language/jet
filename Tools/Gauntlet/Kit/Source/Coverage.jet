@@ -30,116 +30,116 @@ SCRIPTBENCH_TIER: "jet-bin"
 // A peer's twin: the file or directory holding its program (None when the
 // ScriptBench manifest names no file for the peer).
 Twin: struct {
-    peer: String
-    path: String?
+    peer: String,
+    path: String?,
 }
 
 // A gauntlet program's loss owner for one metric category.
 OwnerCard: struct {
-    category: String
-    card: Int
+    category: String,
+    card: Int,
 }
 
 // One program of the corpus with its matched peers (each with its twin) and
 // loss owners: a gauntlet program's cards by metric category, a workload's
 // cards.
 CoverageProgram: struct {
-    source: String
-    name: String
-    key: String
-    cells: [String]
-    peers: [Twin]
-    owner_cards: [OwnerCard]
-    cards: [String]
+    source: String,
+    name: String,
+    key: String,
+    cells: [String],
+    peers: [Twin],
+    owner_cards: [OwnerCard],
+    cards: [String],
 }
 
 // One row of ScriptBench's cells.tsv; a column the header lacks is None.
 ScriptBenchCell: struct {
-    workload: String?
-    tier: String?
-    peer: String?
-    metric: String?
-    jet: String?
-    peer_value: String?
-    ratio: String?
-    verdict: String?
+    workload: String?,
+    tier: String?,
+    peer: String?,
+    metric: String?,
+    jet: String?,
+    peer_value: String?,
+    ratio: String?,
+    verdict: String?,
 }
 
 #Codable
 CoverageSources: struct {
-    gauntlet: Int
-    scriptbench: Int
+    gauntlet: Int,
+    scriptbench: Int,
 }
 
 #Codable
 CoverageLoss: struct {
-    source: String
-    program: String
-    cells: [String]
-    peer: String
-    metric: String
-    jet: Float?
-    peer_value: Float?
-    ratio: Float
-    owner: String
+    source: String,
+    program: String,
+    cells: [String],
+    peer: String,
+    metric: String,
+    jet: Float?,
+    peer_value: Float?,
+    ratio: Float,
+    owner: String,
 }
 
 #Codable
 CoverageGap: struct {
-    source: String
-    program: String
-    cells: [String]
-    peer: String
-    metric: String
-    reason: String
+    source: String,
+    program: String,
+    cells: [String],
+    peer: String,
+    metric: String,
+    reason: String,
 }
 
 #Codable
 LossRoot: struct {
-    owner: String
-    losses: [CoverageLoss]
+    owner: String,
+    losses: [CoverageLoss],
 }
 
 #Codable
 CoverageCensus: struct {
-    programs: Int
-    sources: CoverageSources
-    measured: Int
-    losses: [CoverageLoss]
-    uncovered: [CoverageGap]
-    roots: [LossRoot]
+    programs: Int,
+    sources: CoverageSources,
+    measured: Int,
+    losses: [CoverageLoss],
+    uncovered: [CoverageGap],
+    roots: [LossRoot],
 }
 
 // The census file `--out` writes (contract gauntlet-coverage-census-v1):
 // its inputs and corpus issues beside the census.
 #Codable
 CensusFile: struct {
-    contract: String
-    generated: String
-    gauntlet_report: String
-    scriptbench: String
-    corpus_issues: [String]
-    #Codable(.Flatten) census: CoverageCensus
+    contract: String,
+    generated: String,
+    gauntlet_report: String,
+    scriptbench: String,
+    corpus_issues: [String],
+    #Codable(.Flatten) census: CoverageCensus,
 }
 
 // A lost reading's values: Jet's, the peer's and their ratio Jet/peer.
 Lost: struct {
-    jet: Float?
-    peer: Float?
-    ratio: Float
+    jet: Float?,
+    peer: Float?,
+    ratio: Float,
 }
 
 Reading: enum {
-    NotApplicable
-    Uncovered(String)
-    Won
-    Lost(Lost)
+    NotApplicable,
+    Uncovered(String),
+    Won,
+    Lost(Lost),
 }
 
 // Why the corpus cannot be read: the file and its read or parse error.
 #Error
 CoverageError: struct {
-    message: String
+    message: String,
 
     impl Display {
         display: fn(self) -> String { self.message.copy() }

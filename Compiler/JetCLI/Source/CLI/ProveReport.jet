@@ -65,10 +65,10 @@ JET_CLI_PROVE_ARTIFACT_LIMIT: 268435456
 // One proof member: its normalized display `path`, canonical `absolute` path,
 // UTF-8 text and SHA-256.
 JetCLIProveMember: struct {
-    path: String
-    absolute: String
-    source: String
-    sha256: String
+    path: String,
+    absolute: String,
+    source: String,
+    sha256: String,
 }
 
 // One front-end compile: the member it was started from (`entry`), its
@@ -76,64 +76,64 @@ JetCLIProveMember: struct {
 // a member it covers declares a `#Test`, where its named tests are, and its
 // package's `policy.claims.min` floor.
 JetCLIProveGroup: struct {
-    entry: Int
-    diagnostics: [Diagnostic]
-    files: [String]
-    has_tests: Bool
-    sites: [JetCLIProveTestSite]
-    floor: ClaimsGrade?
+    entry: Int,
+    diagnostics: [Diagnostic],
+    files: [String],
+    has_tests: Bool,
+    sites: [JetCLIProveTestSite],
+    floor: ClaimsGrade?,
 }
 
 // A named `#Test` and the member line that declares it. `jet test` records
 // every test against its entry file; this places each one where it is written.
 JetCLIProveTestSite: struct {
-    name: String
-    path: String
-    line: Int
+    name: String,
+    path: String,
+    line: Int,
 }
 
 // One labelled field of a proof digest (`proof_digest`).
 JetCLIProveField: struct {
-    label: String
-    value: String
+    label: String,
+    value: String,
 }
 
 // `resolve_target`'s identity: the canonical target inputs and the digests
 // every evidence row and derivation is bound to. `profile` is the build
 // profile the target's programs compile under.
 JetCLIProveIdentity: struct {
-    kind: String
-    root: String
-    authority_root: String
-    input_sha256: String
-    members: [JetDriverRunReceiptInput]
-    source_digest: String
-    lock_digest: String
-    build_digest: String
-    core_abi: String
-    profile: String
-    mir_hash: String
-    mir_json: String
+    kind: String,
+    root: String,
+    authority_root: String,
+    input_sha256: String,
+    members: [JetDriverRunReceiptInput],
+    source_digest: String,
+    lock_digest: String,
+    build_digest: String,
+    core_abi: String,
+    profile: String,
+    mir_hash: String,
+    mir_json: String,
 }
 
 // One front-end evidence item: a semantic fact, or one error (`diagnostic`).
 // `owner` is the member whose text renders a diagnostic without an origin.
 JetCLIProveFrontItem: struct {
-    id: String
-    path: String
-    facet: String
-    line: Int
-    column: Int
-    diagnostic: Diagnostic?
-    owner: Int
+    id: String,
+    path: String,
+    facet: String,
+    line: Int,
+    column: Int,
+    diagnostic: Diagnostic?,
+    owner: Int,
 }
 
 // The front end's evidence: items in member order, then warnings, and the
 // `#Pre`/`#Post` clauses the members declare, none yet observed.
 JetCLIProveFront: struct {
-    items: [JetCLIProveFrontItem]
-    warnings: [JetCLIProveFrontItem]
-    contracts: [JetCLIProveContract]
+    items: [JetCLIProveFrontItem],
+    warnings: [JetCLIProveFrontItem],
+    contracts: [JetCLIProveContract],
 }
 
 // One declared `#Pre`/`#Post` clause (Rust `ContractDeclaration`): its
@@ -142,92 +142,92 @@ JetCLIProveFront: struct {
 // where a test expected it to; `evidence` is the test record that observed
 // it, and `message` a failure's stop text.
 JetCLIProveContract: struct {
-    id: String
-    marker: String
-    path: String
-    line: Int
-    column: Int
-    state: Int
-    evidence: String
-    message: String
+    id: String,
+    marker: String,
+    path: String,
+    line: Int,
+    column: Int,
+    state: Int,
+    evidence: String,
+    message: String,
 }
 
 // One contract outcome a test report recorded (a Contract record).
 // `expected` when it failed and no test's stop of it was unexpected.
 JetCLIProveObserved: struct {
-    marker: String
-    path: String
-    line: Int
-    column: Int
-    held: Bool
-    expected: Bool
-    evidence: String
-    message: String
+    marker: String,
+    path: String,
+    line: Int,
+    column: Int,
+    held: Bool,
+    expected: Bool,
+    evidence: String,
+    message: String,
 }
 
 // One test-producer item (`TestItem`): `kind` is the evidence kind code and
 // `state` 0 passed, 1 failed, 2 skipped, 3 unavailable. A property test also
 // carries its run.
 JetCLIProveTestItem: struct {
-    id: String
-    kind: Int
-    state: Int
-    name: String
-    message: String
-    code: String
-    path: String
-    line: Int
-    property: JetCLIProveProperty?{None}
+    id: String,
+    kind: Int,
+    state: Int,
+    name: String,
+    message: String,
+    code: String,
+    path: String,
+    line: Int,
+    property: JetCLIProveProperty?{None},
 }
 
 // A property test's run: the generated cases, the failing case's 0-based
 // index (0 when it passed), the seed the cases came from and the minimized
 // inputs of a failure (empty when it passed or shrinking found none).
 JetCLIProveProperty: struct {
-    cases: Int
-    case_index: Int
-    seed: Int
-    minimized: String
+    cases: Int,
+    case_index: Int,
+    seed: Int,
+    minimized: String,
 }
 
 // The producers' results: items, the declared contracts as observed, the
 // evidence they consumed, the producer exit class, and child stderr worth
 // showing when a producer gave no report.
 JetCLIProveTests: struct {
-    items: [JetCLIProveTestItem]
-    contracts: [JetCLIProveContract]
-    consumed: [JetDriverRecordLink]
-    exit_code: Int
-    errors: String
+    items: [JetCLIProveTestItem],
+    contracts: [JetCLIProveContract],
+    consumed: [JetDriverRecordLink],
+    exit_code: Int,
+    errors: String,
 }
 
 // One stop record of a test report, paired with the failed test it ended.
 // `caught` when the test caught it (`caught_by`: a failed assertion or a
 // property case); an uncaught stop the test didn't expect is a runtime stop.
 JetCLIProveStopRecord: struct {
-    code: String
-    message: String
-    path: String
-    line: Int
-    caught: Bool
-    expected: Bool
-    used: Bool
+    code: String,
+    message: String,
+    path: String,
+    line: Int,
+    caught: Bool,
+    expected: Bool,
+    used: Bool,
 }
 
 // One evidence row before its derivation link is added.
 JetCLIProveRow: struct {
-    id: String
-    kind: String
-    producer: String
-    outcome: String
-    state: String
-    body: String
+    id: String,
+    kind: String,
+    producer: String,
+    outcome: String,
+    state: String,
+    body: String,
 }
 
 // A front-end compile that refused, or failed inside Jet: its output stands.
 #Error
 JetCLIProveStop: struct {
-    output: JetDriverVerbOutput
+    output: JetDriverVerbOutput,
 }
 
 jet_cli_prove_run: fn(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
@@ -1229,10 +1229,10 @@ jet_cli_prove_count: fn(tests: [JetCLIProveTestItem], kinds: [Int], low: Int, hi
 // is met or failed by its recorded policy outcome, and unavailable when its
 // evidence was. Prove selects every compatible budget, so none is skipped.
 JetCLIProveBudgetCount: struct {
-    selected: Int{0}
-    met: Int{0}
-    failed: Int{0}
-    unavailable: Int{0}
+    selected: Int{0},
+    met: Int{0},
+    failed: Int{0},
+    unavailable: Int{0},
 }
 
 jet_cli_prove_budget_count: fn(count: &JetCLIProveBudgetCount, fact: JetCLIBudgetFact) Never! {

@@ -22,16 +22,16 @@ BINDER_TOOL_FAILURE_DETAIL: "the foreign tool returned a failure status"
 // language keeps its diagnostic text on the one carrier.
 #Error
 ForeignBindError: enum {
-    Source(String)
-    IO(String)
-    ToolMissing(String)
-    SelectedToolMissing(String)
-    ToolFailed(tool: String, action: String, detail: String)
-    ToolchainRejected(String)
-    ABIMismatch(String)
-    UnsupportedHost(String)
-    PlainToolMissing(String)
-    PlainToolFailed(tool: String, action: String, detail: String)
+    Source(String),
+    IO(String),
+    ToolMissing(String),
+    SelectedToolMissing(String),
+    ToolFailed(tool: String, action: String, detail: String),
+    ToolchainRejected(String),
+    ABIMismatch(String),
+    UnsupportedHost(String),
+    PlainToolMissing(String),
+    PlainToolFailed(tool: String, action: String, detail: String),
 
     // Python/JavaScript binders spell the tool without backticks.
 
@@ -58,19 +58,19 @@ pkg_binder_bridge_error: fn(error: ForeignBridgeError) -> ForeignBindError Never
 
 // The four-part result shared by binders that publish one archive.
 ForeignBindResult: struct {
-    source: String
-    bound: [String]
-    archive: String
-    provenance: String
+    source: String,
+    bound: [String],
+    archive: String,
+    provenance: String,
 }
 
 // One supervised tool run: exit success, whether the wall-clock limit ended
 // it, and each captured stream bounded by the capture limit.
 BinderToolOutput: struct {
-    success: Bool
-    timed_out: Bool
-    stdout: [U8]
-    stderr: [U8]
+    success: Bool,
+    timed_out: Bool,
+    stdout: [U8],
+    stderr: [U8],
 }
 
 // Run `argv` with captured, bounded output under `timeout`. A tool that does

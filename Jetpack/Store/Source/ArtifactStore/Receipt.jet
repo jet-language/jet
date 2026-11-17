@@ -46,31 +46,31 @@ STORE_RECEIPT_SECTION_FACTS: 6
 // One leaf read by a recorded check: a project-relative path (or a stable label
 // such as `<corelib>/…`) and the SHA-256 of its exact bytes.
 ReceiptInput: struct {
-    path: String
-    digest: String
+    path: String,
+    digest: String,
 }
 
 // One verb-owned typed projection of the checked program.
 ReceiptFact: struct {
-    name: String
-    value: String
+    name: String,
+    value: String,
 }
 
 // The typed result of one recorded invocation.
 ReceiptRecord: struct {
-    schema: String
-    verb: String
+    schema: String,
+    verb: String,
     // The closure digest the record answers.
-    closure: String
+    closure: String,
     // Module sources in the closure. Each is one `Check` node.
-    modules: [ReceiptInput]
+    modules: [ReceiptInput],
     // Inputs discovered while checking (for example compile-time file reads).
     // A hit requires every one to still hash to the recorded digest.
-    inputs: [ReceiptInput]
-    diagnostics: [Diagnostic]
+    inputs: [ReceiptInput],
+    diagnostics: [Diagnostic],
     // Verb-owned typed projections of the checked program, ordered by name
     // (Rust `BTreeMap<String, String>`).
-    facts: [ReceiptFact]
+    facts: [ReceiptFact],
 
     // Inputs sorted and deduplicated, facts keyed by name in name order (a
     // later fact replaces an earlier one).

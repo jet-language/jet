@@ -8,14 +8,14 @@ use jet_foundation.[
 ]
 
 SemaComputeCallFact: struct {
-    method: String
-    span: Span
+    method: String,
+    span: Span,
 }
 
 SemaAutodiffObligation: struct {
-    method: String
-    target: String
-    span: Span
+    method: String,
+    target: String,
+    span: Span,
 }
 
 // One checked function's proof obligations that only the whole program can
@@ -24,13 +24,13 @@ SemaAutodiffObligation: struct {
 // (Ownership/GenericCrossings.jet). No field has a default, so a builder that
 // spells the struct field by field can't leave one of them out.
 SemaComputeFunctionFacts: struct {
-    function_key: String
-    compute_calls: [SemaComputeCallFact]
-    autodiff_obligations: [SemaAutodiffObligation]
-    autodiff_safe_panic: Bool
-    autodiff_unsafe_panic: Bool
-    generic_crossings: [SemaGenericCrossing]
-    generic_calls: [SemaGenericCall]
+    function_key: String,
+    compute_calls: [SemaComputeCallFact],
+    autodiff_obligations: [SemaAutodiffObligation],
+    autodiff_safe_panic: Bool,
+    autodiff_unsafe_panic: Bool,
+    generic_crossings: [SemaGenericCrossing],
+    generic_calls: [SemaGenericCall],
 }
 
 // The facts of a body that was not checked, or whose facts were not kept.
@@ -49,21 +49,21 @@ sema_compute_facts_empty: fn(function_key: String) -> SemaComputeFunctionFacts N
 // Positions loan the already solved module products; no function body or
 // compute-fact payload is materialized for this global validation.
 SemaComputePosition: struct {
-    module_index: Int
-    row_index: Int
+    module_index: Int,
+    row_index: Int,
 }
 
 SemaComputeIndex: struct {
-    functions: [String:SemaComputePosition]
-    facts: [String:SemaComputePosition]
+    functions: [String:SemaComputePosition],
+    facts: [String:SemaComputePosition],
 }
 
 SemaComputeValidationWork: struct {
-    counting: Bool{false}
-    indexed_functions: Int{0}
-    indexed_facts: Int{0}
-    function_queries: Int{0}
-    fact_queries: Int{0}
+    counting: Bool{false},
+    indexed_functions: Int{0},
+    indexed_facts: Int{0},
+    function_queries: Int{0},
+    fact_queries: Int{0},
 }
 
 sema_compute_index: fn(modules: [SemaGraphModuleResult], work: &SemaComputeValidationWork) -> SemaComputeIndex {
@@ -90,8 +90,8 @@ sema_compute_index: fn(modules: [SemaGraphModuleResult], work: &SemaComputeValid
 }
 
 SemaComputePanicMemo: struct {
-    function_key: String
-    safe: Bool
+    function_key: String,
+    safe: Bool,
 }
 
 sema_compute_record_core_call: fn(record: CoreCallRecord, span: Span, context: &SemaCheckContext) -> Bool Never! {

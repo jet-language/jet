@@ -24,7 +24,7 @@ use {
 }
 
 Session: struct {
-    priv value: Int
+    priv value: Int,
 
     impl Close {
         close: fn(&&self) { abi.close(self.value) }
@@ -32,8 +32,8 @@ Session: struct {
 }
 
 TableView: struct {
-    priv session: Int
-    priv table: Int
+    priv session: Int,
+    priv table: Int,
 
     impl Close {
         close: fn(&&self) { abi.view_release(self.session, self.table) }
@@ -42,12 +42,12 @@ TableView: struct {
 
 #Error
 LuaError: enum {
-    NotRunning
-    Timeout
-    Cancelled
-    Protocol
-    CommandFailed
-    Limit
+    NotRunning,
+    Timeout,
+    Cancelled,
+    Protocol,
+    CommandFailed,
+    Limit,
 }
 
 decode_status: fn(code: Int) -> Bool LuaError! {

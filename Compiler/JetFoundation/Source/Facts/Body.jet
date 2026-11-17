@@ -13,32 +13,32 @@
 // expression-type rows name their types by index into `types`, which holds
 // each distinct type once (type_table_intern).
 BodyTree: struct {
-    nodes: [BodyNode]
-    stmts: [StmtKind]
-    expr_types: [TExprType]
-    types: TypeTable{TypeTable{}}
+    nodes: [BodyNode],
+    stmts: [StmtKind],
+    expr_types: [TExprType],
+    types: TypeTable{TypeTable{}},
     // A nested check's arena continues its enclosing check's rows: its first
     // node row is index `node_base` and its first statement row `stmt_base`,
     // and every row index into it subtracts them. Every other tree starts at 0.
-    node_base: Int{0}
-    stmt_base: Int{0}
+    node_base: Int{0},
+    stmt_base: Int{0},
     // The keys of the body's own symbol ids (SYMBOL_LOCAL_BIT): its locals
     // and the keys it minted that no registration holds (symbol_key).
-    symbols: SymbolLocalKeys{symbol_local_keys()}
+    symbols: SymbolLocalKeys{symbol_local_keys()},
 }
 
 // One expression: its node id, its checked form and its source span. Its type
 // is the tree's expression-type row (body_type).
 BodyNode: struct {
-    id: Int
-    kind: NodeKind
-    span: Span
+    id: Int,
+    kind: NodeKind,
+    span: Span,
 }
 
 // A standalone checked expression (a comptime request) and its tree.
 BodyExpr: struct {
-    root: Int
-    tree: BodyTree
+    root: Int,
+    tree: BodyTree,
 }
 
 body_tree_new: fn() -> BodyTree Never! {
@@ -141,134 +141,134 @@ body_type_id: fn(tree: BodyTree, id: Int) -> Int Never! {
 body_stmt: fn(tree: BodyTree, index: Int) -> StmtKind Never! { tree.stmts[index - tree.stmt_base] }
 
 BodyStrPart: enum {
-    Literal(text: String)
-    Interpolation(value: Int, format: TStrFormat)
+    Literal(text: String),
+    Interpolation(value: Int, format: TStrFormat),
 }
 
 // A unit conversion's rounding: its mode and the digits expression's node.
 BodyUnitRounding: struct {
-    mode: TUnitRoundingMode
-    digits: Int
+    mode: TUnitRoundingMode,
+    digits: Int,
 }
 
 BodyCallArg: struct {
-    value: Int
-    template_items: [SymbolID]
-    borrow: Bool
-    mut_borrow: Bool
-    fn_coerce: TFnCoerce?
-    widen_to_vec: Bool
-    widen_to_union: Type?
-    box_as_trait: Type?
-    label: String?
-    spread: Bool
+    value: Int,
+    template_items: [SymbolID],
+    borrow: Bool,
+    mut_borrow: Bool,
+    fn_coerce: TFnCoerce?,
+    widen_to_vec: Bool,
+    widen_to_union: Type?,
+    box_as_trait: Type?,
+    label: String?,
+    spread: Bool,
 }
 
 BodyEnumArg: struct {
-    value: Int
+    value: Int,
 }
 
 BodyEnumPayload: enum {
-    Unit
-    Positional(args: [BodyEnumArg])
-    Named(fields: [BodyNamedEnumArg])
+    Unit,
+    Positional(args: [BodyEnumArg]),
+    Named(fields: [BodyNamedEnumArg]),
 }
 
 BodyNamedEnumArg: struct {
-    name: String
-    value: BodyEnumArg
+    name: String,
+    value: BodyEnumArg,
 }
 
 BodyPatternShape: enum {
-    Variant(variant: String, bindings: [BodyPatternBinding], leading_dot: Bool, span: Span)
-    Present(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
-    Absent(span: Span)
-    Ok(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
-    Err(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
-    Range(lo: Int, hi: Int, span: Span)
-    Or(alternatives: [BodyPatternShape], span: Span)
-    Struct(fields: [BodyPatternField], span: Span)
-    List(items: [BodyPatternBinding], rest: TListPatternRest?, span: Span)
-    Map(entries: [BodyMapPatternEntry], rest: Bool, span: Span)
-    Text(parts: [TTextPatternPart], span: Span)
-    Binary(parts: [TBinaryPatternPart], span: Span)
+    Variant(variant: String, bindings: [BodyPatternBinding], leading_dot: Bool, span: Span),
+    Present(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span),
+    Absent(span: Span),
+    Ok(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span),
+    Err(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span),
+    Range(lo: Int, hi: Int, span: Span),
+    Or(alternatives: [BodyPatternShape], span: Span),
+    Struct(fields: [BodyPatternField], span: Span),
+    List(items: [BodyPatternBinding], rest: TListPatternRest?, span: Span),
+    Map(entries: [BodyMapPatternEntry], rest: Bool, span: Span),
+    Text(parts: [TTextPatternPart], span: Span),
+    Binary(parts: [TBinaryPatternPart], span: Span),
 }
 
 // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
 
 // S31: a checked nested payload pattern with the payload type's owner.
 BodyNestedPattern: struct {
-    shape: BodyPatternShape
-    enum_type: SymbolID?
+    shape: BodyPatternShape,
+    enum_type: SymbolID?,
 }
 
 BodyPattern: struct {
-    shape: BodyPatternShape
-    bindings: [TPatternBindingFact]
-    enum_type: SymbolID?
-    position: TPatternPosition
-    mutable: Bool
-    boxed: Bool
+    shape: BodyPatternShape,
+    bindings: [TPatternBindingFact],
+    enum_type: SymbolID?,
+    position: TPatternPosition,
+    mutable: Bool,
+    boxed: Bool,
 }
 
 BodyPatternBinding: enum {
-    Wildcard
-    Bind(name: String, span: Span)
-    Range(lo: Int, hi: Int)
-    Nested(pattern: BodyNestedPattern)
-    Value(value: Int)
+    Wildcard,
+    Bind(name: String, span: Span),
+    Range(lo: Int, hi: Int),
+    Nested(pattern: BodyNestedPattern),
+    Value(value: Int),
 }
 
 BodyPatternField: enum {
-    Bind(field: String, local: String, span: Span)
-    Value(field: String, value: Int, span: Span)
-    Nested(field: String, pattern: BodyNestedPattern, span: Span)
+    Bind(field: String, local: String, span: Span),
+    Value(field: String, value: Int, span: Span),
+    Nested(field: String, pattern: BodyNestedPattern, span: Span),
 }
 
 BodyMapPatternEntry: struct {
-    key: Int
-    optional: Bool
-    slot: BodyPatternBinding
-    span: Span
+    key: Int,
+    optional: Bool,
+    slot: BodyPatternBinding,
+    span: Span,
 }
 
 BodyMatchArm: struct {
-    pattern: BodyPattern
-    body: [Int]
+    pattern: BodyPattern,
+    body: [Int],
 }
 
 BodyIfCond: enum {
-    Plain(value: Int)
-    And(left: BodyIfCond, right: BodyIfCond)
-    IfLet(pattern: BodyPattern, subj: Int)
+    Plain(value: Int),
+    And(left: BodyIfCond, right: BodyIfCond),
+    IfLet(pattern: BodyPattern, subj: Int),
 }
 
 BodyContract: struct {
-    kind: TContractKind
-    condition: Int
-    message: Int
-    file: String
-    line: Int
-    span: Span
-    disposition: TContractDisposition
-    site: TContractSite
+    kind: TContractKind,
+    condition: Int,
+    message: Int,
+    file: String,
+    line: Int,
+    span: Span,
+    disposition: TContractDisposition,
+    site: TContractSite,
 }
 
 // `task.group g(limit: n, stack: bytes)`'s argument node ids.
 BodyTaskGroupArgs: struct {
-    limit: Int?
-    stack: Int?
+    limit: Int?,
+    stack: Int?,
 }
 
 BodyRangeArm: struct {
-    lo: Int
-    hi: Int
-    body: [Int]
+    lo: Int,
+    hi: Int,
+    body: [Int],
 }
 
 BodyMixedArm: struct {
-    condition: Int
-    body: [Int]
+    condition: Int,
+    body: [Int],
 }
 
 // One `#Context` guard: a context field (`allocator`, or a `#Deadline`
@@ -276,9 +276,9 @@ BodyMixedArm: struct {
 // `key` set a value on the task's key chain, `key` being a `#ContextKey`
 // constant's SymbolID key text or CONTEXT_ON_STOP_KEY.
 BodyContextGuard: struct {
-    field: String
-    value: Int
-    key: String{""}
+    field: String,
+    value: Int,
+    key: String{""},
 }
 
 // The key text `context.on_stop` and `#Context(on_stop:)` carry the stop
@@ -289,105 +289,105 @@ BodyContextGuard: struct {
 CONTEXT_ON_STOP_KEY: "context:on_stop"
 
 NodeKind: enum {
-    IntLit(value: Int, width: TIntegerWidth?)
-    FloatLit(value: Float)
-    BoolLit(value: Bool)
-    CharLit(value: Int)
-    StrLit(parts: [BodyStrPart])
-    Local(local: TLocal)
-    Unit
-    InlineBlock(body: [Int])
-    Uninit
-    CtLit(value: TComptimeValue)
-    ConstRef(symbol: SymbolID)
-    TraitConst(owner: Type, trait_name: String, name: String)
-    NumberParam(param: Type)
-    CopyPhase(owner: SymbolID, preparation: SymbolID, build: SymbolID, runtime: SymbolID)
-    GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
-    Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
-    IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)
-    MethodCall(receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg])
-    DistinctCtor(argument: Int)
-    DistinctConvert(owner: SymbolID, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
-    TraitBox(value: Int, target: Type)
-    UnitConvert(argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
-    MathBuiltin(type_name: String, function: String, args: [Int])
-    PreciseBuiltin(type_name: String, function: String, args: [Int])
-    Print(value: Int)
-    Drop(value: Int)
-    Close(value: Int)
-    Move(value: Int)
-    RequireStop(kind: BodyRequireKind, location: TPanicLoc, always_stops: Bool)
-    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: Int, rhs: Int)
-    CompareChain(operands: [Int], operators: [TBinaryOp], hooks: [Bool])
-    Unary(op: TUnaryOp, operand: Int)
-    StructLit(fields: [BodyStructFieldValue])
-    Field(receiver: Int, field: TFieldRef)
-    Index(base: Int, index: Int, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
-    Slice(base: Int, start: Int, end: Int, range: Int?, location: TPanicLoc)
-    Range(start: Int, end: Int, exclusive: Bool)
-    Tuple(values: [Int])
-    List(values: [Int], trait_coercion: Type?)
-    Map(entries: [BodyMapEntry])
-    EnumCtor(owner: SymbolID, variant: SymbolID, payload: BodyEnumPayload)
-    Try(value: Int, conversion: TTryConvert, failure: TFailureCarrier)
-    TryWithContext(inner: Int, note: Int?, convert: TTryConvert, file: String, line: Int, function: String)
-    Lambda(value: BodyLambda)
-    Borrow(place: Int, access: AccessConvention)
-    RawAddressOf(place: BodyPlace)
-    Deref(value: Int)
-    PtrFromAddr(address: Int, element: Type)
-    LayoutLiteral(value: Int)
-    LayoutCompare(op: TBinaryOp, lhs: Int, rhs: Int)
-    SharedGuardValue(guard: Int)
-    SharedGuardMap(guard: Int, path: [TFieldRef], editable: Bool)
-    SharedGuardSplit(guard: Int, first: [TFieldRef], second: [TFieldRef], editable: Bool)
-    SharedGuardWait(guard: Int, condition: Int, predicate: BodyLambda)
-    ConditionNotify(condition: Int, all: Bool)
-    CoreCall(record: CoreCallRecord, args: [Int], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
-    HostCall(call: BodyHostCall)
-    AllocNew(ctor: TAllocCtor, args: [BodyCallArg])
-    EnumLit(enum_type: String, variant: String, payload: BodyEnumPayload)
-    JSONLit(variant: String, arg: Int?, clone_arg: Bool)
-    ListLit(values: [Int])
-    ListSpread(parts: [BodyListSpreadPart])
-    MapLit(entries: [BodyMapEntry])
-    PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
-    Clone(value: Int, fact: CopyFact)
-    ExplicitCopy(value: Int)
-    MaterializeView(value: Int)
-    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg])
-    DecodeUnder(segment: Int, inner: Int)
-    BuiltinMethod(receiver: Int, operation: TBuiltinOp, args: [Int])
-    IfExpr(cond: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int)
-    RawOf(value: Int)
-    InvariantViolation(construct: String, span: Span)
-    DistinctRaw(value: Int)
-    Present(value: Int)
-    Absent
-    Ok(value: Int)
-    Err(value: Int)
-    OrFallback(value: Int, fallback: BodyOrFallback, ambient_err: TLocal?)
-    OptField(base: Int, member: String, flatten: Bool)
-    OptMethodCall(base: Int, binding: TLocal, call: Int, flatten: Bool)
-    PatternMatches(subject: Int, pattern: BodyPattern)
-    OptionLift2(function: Int, left: Int, right: Int)
-    ClosureMethod(receiver: Int, operation: TClosureOp, args: [Int])
-    NumericMethod(receiver: Int, operation: TNumericOp)
-    NumericBinaryMethod(receiver: Int, operation: TNumericOp, argument: Int)
-    OverflowOpt(prefix: String, operation: String, line: Int, lhs: Int, rhs: Int)
-    HandleMethod(receiver: Int, operation: BodyHandleOp, args: [Int])
-    CoreClosureCall(kind: BodyCoreClosureKind)
-    TaskGroupAll(tasks: Int)
-    TaskGroupRace(tasks: Int)
-    TaskGroupAny(tasks: Int)
-    SelectStart
-    SelectRecv(builder: Int, channel: Int)
-    SelectAfter(builder: Int, duration: Int, value: Int?)
-    SelectWait(builder: Int, nonblocking: Bool)
-    FnValue(kind: BodyFnValueKind)
-    Never(reason: String, line: Int)
-    TypeTest(subject: Type, target: Type)
+    IntLit(value: Int, width: TIntegerWidth?),
+    FloatLit(value: Float),
+    BoolLit(value: Bool),
+    CharLit(value: Int),
+    StrLit(parts: [BodyStrPart]),
+    Local(local: TLocal),
+    Unit,
+    InlineBlock(body: [Int]),
+    Uninit,
+    CtLit(value: TComptimeValue),
+    ConstRef(symbol: SymbolID),
+    TraitConst(owner: Type, trait_name: String, name: String),
+    NumberParam(param: Type),
+    CopyPhase(owner: SymbolID, preparation: SymbolID, build: SymbolID, runtime: SymbolID),
+    GlobalShared(initializer: DeclID, lifetime: SharedLifetime),
+    Call(callee: DeclID, type_args: [Type], args: [BodyCallArg]),
+    IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type),
+    MethodCall(receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg]),
+    DistinctCtor(argument: Int),
+    DistinctConvert(owner: SymbolID, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool),
+    TraitBox(value: Int, target: Type),
+    UnitConvert(argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int),
+    MathBuiltin(type_name: String, function: String, args: [Int]),
+    PreciseBuiltin(type_name: String, function: String, args: [Int]),
+    Print(value: Int),
+    Drop(value: Int),
+    Close(value: Int),
+    Move(value: Int),
+    RequireStop(kind: BodyRequireKind, location: TPanicLoc, always_stops: Bool),
+    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: Int, rhs: Int),
+    CompareChain(operands: [Int], operators: [TBinaryOp], hooks: [Bool]),
+    Unary(op: TUnaryOp, operand: Int),
+    StructLit(fields: [BodyStructFieldValue]),
+    Field(receiver: Int, field: TFieldRef),
+    Index(base: Int, index: Int, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc),
+    Slice(base: Int, start: Int, end: Int, range: Int?, location: TPanicLoc),
+    Range(start: Int, end: Int, exclusive: Bool),
+    Tuple(values: [Int]),
+    List(values: [Int], trait_coercion: Type?),
+    Map(entries: [BodyMapEntry]),
+    EnumCtor(owner: SymbolID, variant: SymbolID, payload: BodyEnumPayload),
+    Try(value: Int, conversion: TTryConvert, failure: TFailureCarrier),
+    TryWithContext(inner: Int, note: Int?, convert: TTryConvert, file: String, line: Int, function: String),
+    Lambda(value: BodyLambda),
+    Borrow(place: Int, access: AccessConvention),
+    RawAddressOf(place: BodyPlace),
+    Deref(value: Int),
+    PtrFromAddr(address: Int, element: Type),
+    LayoutLiteral(value: Int),
+    LayoutCompare(op: TBinaryOp, lhs: Int, rhs: Int),
+    SharedGuardValue(guard: Int),
+    SharedGuardMap(guard: Int, path: [TFieldRef], editable: Bool),
+    SharedGuardSplit(guard: Int, first: [TFieldRef], second: [TFieldRef], editable: Bool),
+    SharedGuardWait(guard: Int, condition: Int, predicate: BodyLambda),
+    ConditionNotify(condition: Int, all: Bool),
+    CoreCall(record: CoreCallRecord, args: [Int], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier),
+    HostCall(call: BodyHostCall),
+    AllocNew(ctor: TAllocCtor, args: [BodyCallArg]),
+    EnumLit(enum_type: String, variant: String, payload: BodyEnumPayload),
+    JSONLit(variant: String, arg: Int?, clone_arg: Bool),
+    ListLit(values: [Int]),
+    ListSpread(parts: [BodyListSpreadPart]),
+    MapLit(entries: [BodyMapEntry]),
+    PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String),
+    Clone(value: Int, fact: CopyFact),
+    ExplicitCopy(value: Int),
+    MaterializeView(value: Int),
+    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg]),
+    DecodeUnder(segment: Int, inner: Int),
+    BuiltinMethod(receiver: Int, operation: TBuiltinOp, args: [Int]),
+    IfExpr(cond: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int),
+    RawOf(value: Int),
+    InvariantViolation(construct: String, span: Span),
+    DistinctRaw(value: Int),
+    Present(value: Int),
+    Absent,
+    Ok(value: Int),
+    Err(value: Int),
+    OrFallback(value: Int, fallback: BodyOrFallback, ambient_err: TLocal?),
+    OptField(base: Int, member: String, flatten: Bool),
+    OptMethodCall(base: Int, binding: TLocal, call: Int, flatten: Bool),
+    PatternMatches(subject: Int, pattern: BodyPattern),
+    OptionLift2(function: Int, left: Int, right: Int),
+    ClosureMethod(receiver: Int, operation: TClosureOp, args: [Int]),
+    NumericMethod(receiver: Int, operation: TNumericOp),
+    NumericBinaryMethod(receiver: Int, operation: TNumericOp, argument: Int),
+    OverflowOpt(prefix: String, operation: String, line: Int, lhs: Int, rhs: Int),
+    HandleMethod(receiver: Int, operation: BodyHandleOp, args: [Int]),
+    CoreClosureCall(kind: BodyCoreClosureKind),
+    TaskGroupAll(tasks: Int),
+    TaskGroupRace(tasks: Int),
+    TaskGroupAny(tasks: Int),
+    SelectStart,
+    SelectRecv(builder: Int, channel: Int),
+    SelectAfter(builder: Int, duration: Int, value: Int?),
+    SelectWait(builder: Int, nonblocking: Bool),
+    FnValue(kind: BodyFnValueKind),
+    Never(reason: String, line: Int),
+    TypeTest(subject: Type, target: Type),
 }
 
 // `T.name` for a trait constant over a type parameter: the build reads
@@ -408,37 +408,37 @@ NodeKind: enum {
 // holds one, and the IR folds that `if` to the arm its instance keeps.
 
 BodyStructFieldValue: struct {
-    field: TFieldRef
-    value: Int
-    boxed: Bool
+    field: TFieldRef,
+    value: Int,
+    boxed: Bool,
 }
 
 BodyMapEntry: struct {
-    key: Int
-    value: Int
+    key: Int,
+    value: Int,
 }
 
 BodyListSpreadPart: enum {
-    Element(value: Int)
-    Spread(value: Int)
+    Element(value: Int),
+    Spread(value: Int),
 }
 
 BodyScopeMemberKind: enum {
-    Setup
-    ExpectFail(code: String?, message: String?)
-    Timeout(duration: Int)
-    Measure
-    Skip
+    Setup,
+    ExpectFail(code: String?, message: String?),
+    Timeout(duration: Int),
+    Measure,
+    Skip,
 }
 
 BodyOrFallback: enum {
-    Value(value: Int)
-    Return(value: Int?)
-    Panic(message: Int, location: TPanicLoc)
-    Break
-    Continue
-    BreakLabel(label: String)
-    ContinueLabel(label: String)
+    Value(value: Int),
+    Return(value: Int?),
+    Panic(message: Int, location: TPanicLoc),
+    Break,
+    Continue,
+    BreakLabel(label: String),
+    ContinueLabel(label: String),
 }
 
 // The prefix of a comptime input named in the toolchain tree the compile takes
@@ -447,274 +447,274 @@ BodyOrFallback: enum {
 JET_COMPTIME_TOOLCHAIN_PREFIX: "toolchain:"
 
 BodyCoreClosureKind: enum {
-    Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)
-    Guard(executable: BodyLambda)
-    OnCommit(handle_name: String, executable: BodyLambda)
-    OnRollback(handle_name: String, executable: BodyLambda)
-    UIClickSlot(executable: BodyLambda)
-    UIDropSlot(executable: BodyLambda)
-    ReactiveDerived(executable: BodyLambda)
-    ReactiveEffect(executable: BodyLambda)
-    UIReactiveRender(executable: BodyLambda)
+    Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda),
+    Guard(executable: BodyLambda),
+    OnCommit(handle_name: String, executable: BodyLambda),
+    OnRollback(handle_name: String, executable: BodyLambda),
+    UIClickSlot(executable: BodyLambda),
+    UIDropSlot(executable: BodyLambda),
+    ReactiveDerived(executable: BodyLambda),
+    ReactiveEffect(executable: BodyLambda),
+    UIReactiveRender(executable: BodyLambda),
 }
 
 BodyFnValueKind: enum {
-    NamedFn(function: DeclID?, lambda: BodyLambda?)
-    Policy(fn_type: Type, policy_args: [BodyCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: Int)
-    Call(callee: Int, args: [BodyCallArg])
-    Send(value: Int)
+    NamedFn(function: DeclID?, lambda: BodyLambda?),
+    Policy(fn_type: Type, policy_args: [BodyCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: Int),
+    Call(callee: Int, args: [BodyCallArg]),
+    Send(value: Int),
 }
 
 BodyHandleOp: enum {
-    Hardware(operation: THardwareCall)
-    DurationNew(unit: String, float: Bool)
-    FileReaderReadLine
-    FileReaderRead(into: Bool)
-    FileReaderSeek
-    FileReaderPath
-    MappedFileWindow
-    MappedFileWindowLen
-    MappedFileLines
-    LinesIter
-    MappedFileLen
-    MappedFileIsEmpty
-    FileWriterWriteLine
-    FileWriterFlush
-    FileWriterWriteAll
-    FileWriterFsync
-    FileWriterPath
-    JSONLReaderNext
-    JSONLWriterWrite
-    JSONLWriterFlush
-    JSONLWriterFinish
-    DataStreamNext
-    XMLReaderNext
-    XMLWriterWrite
-    XMLWriterFlush
-    XMLWriterFinish
-    StdinReadLine
-    StdoutWrite
-    StdoutWriteLine
-    StdoutWriteBytes
-    StdoutFlush
-    StdoutIsTTY
-    StderrWrite
-    StderrWriteLine
-    StderrWriteBytes
-    StderrFlush
-    StderrIsTTY
-    WorldNow
-    WorldAdvance
-    WorldWaitIdle
-    WorldHistory
-    RealtimeNextDeadline
-    RealtimeReceipt
-    RealtimeCancel
-    RealtimeIsCancelled
-    GameSceneNew
-    GameReplayRecord
-    GameBackendHeadless
-    GameBackendShouldContinue
-    GameBackendPresent
-    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?)
-    GameSceneComponent
-    GameSceneQuery
-    GameAssetsImage
-    GameAssetsSound
-    GameInputBind
-    GameInputPressed
-    RNGInt
-    RNGFloat
-    RNGFloatRange
-    RNGBool
-    RNGBoolP
-    RNGNormal
-    RNGExponential
-    RNGBytes
-    RNGSplit
-    RNGPick
-    RNGWeightedPick
-    RNGSample
-    RNGShuffle
-    DurationIn
-    DurationIsZero
-    DurationTotalSeconds
-    DurationDifference
-    TestSuiteRun
-    TestSetting
-    DurationAbs
-    DurationNegated
-    DurationSign
-    DurationTotalIn
-    DurationRound
-    DurationNsValue
-    DurationScale
-    DurationDivide
-    AllocAlloc
-    AllocTryAlloc
-    AllocReset
-    PreciseMethod(type_name: String, method: String)
-    TCPListenerAccept
-    TCPListenerAcceptDeadline
-    TCPListenerLocalAddr
-    TCPStreamRead
-    TCPStreamPeerAddr
-    TCPStreamLocalAddr
-    TCPStreamClose
-    TCPStreamReadBytes(into: Bool)
-    TCPStreamReadBytesDeadline(into: Bool)
-    TCPStreamReadText
-    TCPStreamReadTextDeadline
-    TCPStreamWriteBytes
-    TCPStreamWriteBytesDeadline
-    TCPStreamWriteAllBytes
-    TCPStreamWriteAllBytesDeadline
-    TCPStreamWriteText
-    TCPStreamWriteTextDeadline
-    TCPStreamShutdown
-    TCPStreamReady
-    UDPSocketReady
-    UDPSocketClose
-    UDPSocketReceiveDeadline
-    UDPSocketSendToDeadline
-    UnixListenerAcceptDeadline
-    UnixStreamReadDeadline(into: Bool)
-    UnixStreamWriteAllDeadline
-    UnixStreamReady
-    UnixStreamClose
-    UnixStreamSetTimeout
-    HTTPClientNew
-    ArgsSpecFlag
-    ArgsSpecFlagShort
-    ArgsSpecOption
-    ArgsSpecOptionShort
-    ArgsSpecOptionDefault
-    ArgsSpecOptionEnv
-    ArgsSpecOptionInt
-    ArgsSpecOptionFloat
-    ArgsSpecOptionChoice
-    ArgsSpecRepeat
-    ArgsSpecRequiredOption
-    ArgsSpecPositional
-    ArgsSpecDescription
-    ArgsSpecSubcommand
-    ArgsSpecVersion
-    ArgsSpecCompletion
-    ArgsSpecHelp
-    ArgsSpecParse
-    ArgsSpecParseOrExit
-    ParsedArgsFlag
-    ParsedArgsOption
-    ParsedArgsOptionInt
-    ParsedArgsOptionFloat
-    ParsedArgsOptions
-    ParsedArgsSubcommand
-    ParsedArgsPositional
-    ProcessSpecMethod(method: String, args_len: Int)
-    TerminalSessionResize
-    ProcessStdinWrite
-    ProcessStdinWriteText
-    ProcessStdinClose
-    ProcessStdinWriteAll
-    ProcessStdoutRead
-    ProcessStderrRead
-    ReflectValueRead(method: String)
-    ReflectValueFields
-    ReflectFieldName
-    ReflectFieldValue
-    TaskJoin
-    TaskDetach
-    TaskPause
-    TaskResume
-    TaskCancel
-    ChannelReceive
-    ChannelTryReceive
-    ChannelIsTimer
-    ChannelIsInterval
-    ChannelIsCancelled
-    ChannelIsReady
-    ChannelDelayMs
-    ChannelClose
-    SenderSend
-    MathMethod(type_name: String, method: String)
-    ReactiveGet
-    ReactiveSet
-    ReactiveEffectMethod
-    EventMethod(method: String)
-    LayoutMethod(method: String)
-    HTTPClientMethod(kind: String, method: String)
-    HTTPServerMethod(kind: String, method: String)
-    DynField
-    DynAt
-    DynInt
-    DynText
-    DynBool
-    DynFloat
-    DynToText
-    DynEqualUnordered
-    DynDecode(ty: Type, stored: Bool)
-    DynIndexKey(site: String, location: TPanicLoc)
-    DynIndexAt(site: String, location: TPanicLoc)
-    DynGetKey
-    DynGetAt
-    DynHas
-    DynKeys
-    DynLen(site: String, location: TPanicLoc)
-    DynRemove
-    DynBinary(op: String, site: String, location: TPanicLoc)
-    DynCompare(op: String, site: String, location: TPanicLoc)
-    DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
-    SerdeEncode(stored: Bool)
-    JSONField
-    JSONAt
-    JSONInt
-    JSONText
-    JSONBool
-    JSONFloat
-    JSONToText
-    JSONEqualUnordered
-    PathFrom
-    PathHome
-    PathJoin
-    PathParent
-    PathExtension
-    PathStem
-    PathNormalize
-    PathIsWithin
-    PathToString
-    PathWalk
-    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
-    ReaderOver(owned: Bool)
-    ReaderReadU8
-    ReaderReadI8
-    ReaderReadU16Le
-    ReaderReadU16Be
-    ReaderReadI16Le
-    ReaderReadI16Be
-    ReaderReadU32Le
-    ReaderReadU32Be
-    ReaderReadI32Le
-    ReaderReadI32Be
-    ReaderReadU64Le
-    ReaderReadU64Be
-    ReaderReadI64Le
-    ReaderReadI64Be
-    ReaderReadF32Le
-    ReaderReadF32Be
-    ReaderReadF64Le
-    ReaderReadF64Be
-    ReaderPeek
-    ReaderSeek
-    ReaderSkip
-    ReaderTake
-    ReaderRemaining
-    ReaderAtEnd
-    CursorOver
-    CursorTakeUntil
-    CursorSkipWs
-    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField])
-    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField])
-    ProcessLines
+    Hardware(operation: THardwareCall),
+    DurationNew(unit: String, float: Bool),
+    FileReaderReadLine,
+    FileReaderRead(into: Bool),
+    FileReaderSeek,
+    FileReaderPath,
+    MappedFileWindow,
+    MappedFileWindowLen,
+    MappedFileLines,
+    LinesIter,
+    MappedFileLen,
+    MappedFileIsEmpty,
+    FileWriterWriteLine,
+    FileWriterFlush,
+    FileWriterWriteAll,
+    FileWriterFsync,
+    FileWriterPath,
+    JSONLReaderNext,
+    JSONLWriterWrite,
+    JSONLWriterFlush,
+    JSONLWriterFinish,
+    DataStreamNext,
+    XMLReaderNext,
+    XMLWriterWrite,
+    XMLWriterFlush,
+    XMLWriterFinish,
+    StdinReadLine,
+    StdoutWrite,
+    StdoutWriteLine,
+    StdoutWriteBytes,
+    StdoutFlush,
+    StdoutIsTTY,
+    StderrWrite,
+    StderrWriteLine,
+    StderrWriteBytes,
+    StderrFlush,
+    StderrIsTTY,
+    WorldNow,
+    WorldAdvance,
+    WorldWaitIdle,
+    WorldHistory,
+    RealtimeNextDeadline,
+    RealtimeReceipt,
+    RealtimeCancel,
+    RealtimeIsCancelled,
+    GameSceneNew,
+    GameReplayRecord,
+    GameBackendHeadless,
+    GameBackendShouldContinue,
+    GameBackendPresent,
+    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?),
+    GameSceneComponent,
+    GameSceneQuery,
+    GameAssetsImage,
+    GameAssetsSound,
+    GameInputBind,
+    GameInputPressed,
+    RNGInt,
+    RNGFloat,
+    RNGFloatRange,
+    RNGBool,
+    RNGBoolP,
+    RNGNormal,
+    RNGExponential,
+    RNGBytes,
+    RNGSplit,
+    RNGPick,
+    RNGWeightedPick,
+    RNGSample,
+    RNGShuffle,
+    DurationIn,
+    DurationIsZero,
+    DurationTotalSeconds,
+    DurationDifference,
+    TestSuiteRun,
+    TestSetting,
+    DurationAbs,
+    DurationNegated,
+    DurationSign,
+    DurationTotalIn,
+    DurationRound,
+    DurationNsValue,
+    DurationScale,
+    DurationDivide,
+    AllocAlloc,
+    AllocTryAlloc,
+    AllocReset,
+    PreciseMethod(type_name: String, method: String),
+    TCPListenerAccept,
+    TCPListenerAcceptDeadline,
+    TCPListenerLocalAddr,
+    TCPStreamRead,
+    TCPStreamPeerAddr,
+    TCPStreamLocalAddr,
+    TCPStreamClose,
+    TCPStreamReadBytes(into: Bool),
+    TCPStreamReadBytesDeadline(into: Bool),
+    TCPStreamReadText,
+    TCPStreamReadTextDeadline,
+    TCPStreamWriteBytes,
+    TCPStreamWriteBytesDeadline,
+    TCPStreamWriteAllBytes,
+    TCPStreamWriteAllBytesDeadline,
+    TCPStreamWriteText,
+    TCPStreamWriteTextDeadline,
+    TCPStreamShutdown,
+    TCPStreamReady,
+    UDPSocketReady,
+    UDPSocketClose,
+    UDPSocketReceiveDeadline,
+    UDPSocketSendToDeadline,
+    UnixListenerAcceptDeadline,
+    UnixStreamReadDeadline(into: Bool),
+    UnixStreamWriteAllDeadline,
+    UnixStreamReady,
+    UnixStreamClose,
+    UnixStreamSetTimeout,
+    HTTPClientNew,
+    ArgsSpecFlag,
+    ArgsSpecFlagShort,
+    ArgsSpecOption,
+    ArgsSpecOptionShort,
+    ArgsSpecOptionDefault,
+    ArgsSpecOptionEnv,
+    ArgsSpecOptionInt,
+    ArgsSpecOptionFloat,
+    ArgsSpecOptionChoice,
+    ArgsSpecRepeat,
+    ArgsSpecRequiredOption,
+    ArgsSpecPositional,
+    ArgsSpecDescription,
+    ArgsSpecSubcommand,
+    ArgsSpecVersion,
+    ArgsSpecCompletion,
+    ArgsSpecHelp,
+    ArgsSpecParse,
+    ArgsSpecParseOrExit,
+    ParsedArgsFlag,
+    ParsedArgsOption,
+    ParsedArgsOptionInt,
+    ParsedArgsOptionFloat,
+    ParsedArgsOptions,
+    ParsedArgsSubcommand,
+    ParsedArgsPositional,
+    ProcessSpecMethod(method: String, args_len: Int),
+    TerminalSessionResize,
+    ProcessStdinWrite,
+    ProcessStdinWriteText,
+    ProcessStdinClose,
+    ProcessStdinWriteAll,
+    ProcessStdoutRead,
+    ProcessStderrRead,
+    ReflectValueRead(method: String),
+    ReflectValueFields,
+    ReflectFieldName,
+    ReflectFieldValue,
+    TaskJoin,
+    TaskDetach,
+    TaskPause,
+    TaskResume,
+    TaskCancel,
+    ChannelReceive,
+    ChannelTryReceive,
+    ChannelIsTimer,
+    ChannelIsInterval,
+    ChannelIsCancelled,
+    ChannelIsReady,
+    ChannelDelayMs,
+    ChannelClose,
+    SenderSend,
+    MathMethod(type_name: String, method: String),
+    ReactiveGet,
+    ReactiveSet,
+    ReactiveEffectMethod,
+    EventMethod(method: String),
+    LayoutMethod(method: String),
+    HTTPClientMethod(kind: String, method: String),
+    HTTPServerMethod(kind: String, method: String),
+    DynField,
+    DynAt,
+    DynInt,
+    DynText,
+    DynBool,
+    DynFloat,
+    DynToText,
+    DynEqualUnordered,
+    DynDecode(ty: Type, stored: Bool),
+    DynIndexKey(site: String, location: TPanicLoc),
+    DynIndexAt(site: String, location: TPanicLoc),
+    DynGetKey,
+    DynGetAt,
+    DynHas,
+    DynKeys,
+    DynLen(site: String, location: TPanicLoc),
+    DynRemove,
+    DynBinary(op: String, site: String, location: TPanicLoc),
+    DynCompare(op: String, site: String, location: TPanicLoc),
+    DynSetPath(keys: [Bool], site: String, location: TPanicLoc),
+    SerdeEncode(stored: Bool),
+    JSONField,
+    JSONAt,
+    JSONInt,
+    JSONText,
+    JSONBool,
+    JSONFloat,
+    JSONToText,
+    JSONEqualUnordered,
+    PathFrom,
+    PathHome,
+    PathJoin,
+    PathParent,
+    PathExtension,
+    PathStem,
+    PathNormalize,
+    PathIsWithin,
+    PathToString,
+    PathWalk,
+    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor),
+    ReaderOver(owned: Bool),
+    ReaderReadU8,
+    ReaderReadI8,
+    ReaderReadU16Le,
+    ReaderReadU16Be,
+    ReaderReadI16Le,
+    ReaderReadI16Be,
+    ReaderReadU32Le,
+    ReaderReadU32Be,
+    ReaderReadI32Le,
+    ReaderReadI32Be,
+    ReaderReadU64Le,
+    ReaderReadU64Be,
+    ReaderReadI64Le,
+    ReaderReadI64Be,
+    ReaderReadF32Le,
+    ReaderReadF32Be,
+    ReaderReadF64Le,
+    ReaderReadF64Be,
+    ReaderPeek,
+    ReaderSeek,
+    ReaderSkip,
+    ReaderTake,
+    ReaderRemaining,
+    ReaderAtEnd,
+    CursorOver,
+    CursorTakeUntil,
+    CursorSkipWs,
+    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField]),
+    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField]),
+    ProcessLines,
 }
 
 // `into`: read_into, appending to the caller's [U8] (#5976).
@@ -724,132 +724,132 @@ BodyHandleOp: enum {
 // skips.
 
 BodyRequireKind: enum {
-    Require(cond: Int, msg: Int?)
-    RequireEq(left: Int, right: Int, hook: TMethodRef?)
-    Panic(msg: Int)
+    Require(cond: Int, msg: Int?),
+    RequireEq(left: Int, right: Int, hook: TMethodRef?),
+    Panic(msg: Int),
 }
 
 // `hook`: the authored `equal`/`compare` the sides compare through.
 
 BodyLambda: struct {
-    executable: BodyLambdaBody
-    source_span: Span
-    frame_schedule: FrameSchedule?
-    frame_schedule_derivation: DerivationRef?
-    capture_facts: TCaptureFacts
-    failure_carrier: TFailureCarrier
-    effects: TEffectFacts
-    host_param_conventions: [AccessConvention]?
-    source_params: [String]
-    source_param_symbols: [SymbolID]
-    param_types: [Type]
-    ret: Type?
-    is_move: Bool
-    boxed: Bool
-    rc: Bool
-    captures: [TCapture]
-    materialized_captures: [String]
-    frozen_captures: [String]
-    uses_stack_sentry: Bool
+    executable: BodyLambdaBody,
+    source_span: Span,
+    frame_schedule: FrameSchedule?,
+    frame_schedule_derivation: DerivationRef?,
+    capture_facts: TCaptureFacts,
+    failure_carrier: TFailureCarrier,
+    effects: TEffectFacts,
+    host_param_conventions: [AccessConvention]?,
+    source_params: [String],
+    source_param_symbols: [SymbolID],
+    param_types: [Type],
+    ret: Type?,
+    is_move: Bool,
+    boxed: Bool,
+    rc: Bool,
+    captures: [TCapture],
+    materialized_captures: [String],
+    frozen_captures: [String],
+    uses_stack_sentry: Bool,
     // As FnBody.effect_scope, for a lambda with its own written row; an
     // inline loop body has none (it builds into its owner's code).
-    effect_scope: String{""}
+    effect_scope: String{""},
 }
 
 BodyLambdaBody: enum {
-    Expr(value: Int)
-    Block(body: [Int])
+    Expr(value: Int),
+    Block(body: [Int]),
 }
 
 FnBody: struct {
-    name: String
-    module_name: String
-    module_identity: ModuleID
-    key: String
-    source_file: String
-    source_span: Span
-    failure_carrier: TFailureCarrier
-    effects: TEffectFacts
-    web_bucket: WebBucket?
+    name: String,
+    module_name: String,
+    module_identity: ModuleID,
+    key: String,
+    source_file: String,
+    source_span: Span,
+    failure_carrier: TFailureCarrier,
+    effects: TEffectFacts,
+    web_bucket: WebBucket?,
     // Why the web partition (JetSema WebPartition.jet) put this function in
     // `web_bucket`, for `jet inspect choices`; "" when the program does not
     // opt in to the partition.
-    web_reason: String{""}
-    web_marker: WebPartitionMarker?
+    web_reason: String{""},
+    web_marker: WebPartitionMarker?,
     // The marker that makes this method an endpoint, as written
     // (`#App.SignedIn`, `#Server.Get("/orders/:id")`), for `jet inspect
     // choices`; "" when no endpoint marker marks it (JetSema
     // sema_function_endpoint).
-    endpoint: String{""}
+    endpoint: String{""},
     // The server-only app marker that runs this method as the system, as
     // written (`#App.Job`, `#App.Every(cron: "0 8 * * *")`), for `jet
     // inspect choices`; "" when none marks it (JetSema
     // sema_function_system_run).
-    system_run: String{""}
+    system_run: String{""},
     // The jet_builtins role this Core function fills (`#Builtin.Role(.AbsF32)`
     // gives "AbsF32"), by which lowering finds it; "" when it fills none
     // (JetSema sema_core_role).
-    role: String{""}
-    visibility: TVisibility
-    foreign: TForeignProvenance?
-    params: [BodyParameter]
-    web_param_reconstructions: [TWebParamReconstruction]
-    ret: Type?
-    gc_return: Bool
-    gc_scope: Bool
-    return_view_provenance: ViewProvenanceMap?
-    generic_params: [TGenericParam]
-    is_main: Bool
-    line: Int
-    synthetic: Bool
-    is_unsafe: Bool
-    unsafe_gate: TUnsafeGate?
-    is_pure: Bool
-    memo_bound: Int?
-    memo_unbounded: Bool
-    is_reactive: Bool
-    reactive_upgrades: [String]
-    is_inline: Bool
-    is_inline_always: Bool
-    is_scalar: Bool
-    kernel_proof: KernelProof?
-    uses_stack_sentry: Bool
+    role: String{""},
+    visibility: TVisibility,
+    foreign: TForeignProvenance?,
+    params: [BodyParameter],
+    web_param_reconstructions: [TWebParamReconstruction],
+    ret: Type?,
+    gc_return: Bool,
+    gc_scope: Bool,
+    return_view_provenance: ViewProvenanceMap?,
+    generic_params: [TGenericParam],
+    is_main: Bool,
+    line: Int,
+    synthetic: Bool,
+    is_unsafe: Bool,
+    unsafe_gate: TUnsafeGate?,
+    is_pure: Bool,
+    memo_bound: Int?,
+    memo_unbounded: Bool,
+    is_reactive: Bool,
+    reactive_upgrades: [String],
+    is_inline: Bool,
+    is_inline_always: Bool,
+    is_scalar: Bool,
+    kernel_proof: KernelProof?,
+    uses_stack_sentry: Bool,
     // For a function nothing calls (an entry is one): the worst-case heap
     // every call path from it may take, by the proof `!Mem.Alloc(above: N)`
     // checks (JetSema Effects/Checks.jet sema_effect_heap_bounds): "N B" of
     // arena storage, or "unbounded, <why> via <path>"; else "".
-    heap: String{""}
+    heap: String{""},
     // For a function nothing calls: the worst-case stack every call path
     // from it may take, by the proof `!Mem.Stack(above: N)` checks (JetSema
     // Effects/Checks.jet sema_effect_stack_bounds): "N B via <path>", each
     // step with its frame bound, or "unbounded, <why> via <path>"; else "".
-    stack: String{""}
+    stack: String{""},
     // The bytes sema's frame model (Target/Frame.jet) bounds this function's
     // own frame by when a `!Mem.Stack(above: N)` denial reaches it; the
     // backend checks its real frame against that. -1 when no stack denial
     // reaches it or a value in it has no known size.
-    frame_bound: Int{-1}
+    frame_bound: Int{-1},
     // `#MaxDepth(n)`: at most n calls of this function wait at once on one
     // thread, which the IR builder enforces and the stack bound counts on a
     // recursive path; 0 when unmarked.
-    max_depth: Int{0}
-    body: [Int]
-    kind: TFuncKind
-    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
-    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    max_depth: Int{0},
+    body: [Int],
+    kind: TFuncKind,
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}},
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}},
     // The fixed-list indexes sema proved in range, and the function's checked
     // `#Pre` clauses; only the solver reads them.
-    index_proofs: [TIndexProof]{[TIndexProof]{}}
-    pre: [BodyContract]{[BodyContract]{}}
+    index_proofs: [TIndexProof]{[TIndexProof]{}},
+    pre: [BodyContract]{[BodyContract]{}},
     // The branches on a `timing: .Fixed` value that sema masked (JetSema
     // Taint.jet sema_taint_mask_branch), by span: the IR builds each with
     // no jump (JetIR BuildMask.jet).
-    masked: [Span]{[Span]{}}
+    masked: [Span]{[Span]{}},
     // The `timing: .Fixed` tags of the function's module (JetSema Taint.jet
     // sema_taint_fixed_tags) when one of the body's checked types carries
     // one, else empty: the IR builder marks each slot of such a type fixed
     // (JetIR IRFunction.slot_fixed).
-    fixed_tags: [String]{[String]{}}
+    fixed_tags: [String]{[String]{}},
     // The run-time half of a written row that scopes FS or Net (JetRuntime
     // Authority.jet "Effect-scope frames"): the function's name, then the
     // row's FS and Net entries, one per line (a denial keeps its `!`), for a
@@ -860,26 +860,26 @@ FnBody: struct {
     // sema_effect_cap_frames). The IR builder enters every frame, outermost
     // first, on entry and leaves them on every exit (JetIR
     // ir_effect_scope_frame).
-    effect_scope: String{""}
+    effect_scope: String{""},
     // The frames of the body's `#FX(…)` blocks whose caps scope FS or Net,
     // each keyed by its block's span (the lowered region's): the IR builder
     // enters one around its block (JetIR ir_effect_scope_region).
-    effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}}
+    effect_scope_regions: [BodyEffectScopeRegion]{[BodyEffectScopeRegion]{}},
     // A Core function a bound `jet run` checked as a stand-in (JetSema
     // CoreSeal.jet): its signature only, with the Core seal's effect and
     // failure facts and an empty body. Every call of it binds to the Core
     // image's code, so the IR builder never builds it (JetIR
     // ir_function_row_id).
-    stand_in: Bool{false}
+    stand_in: Bool{false},
     // The function's nodes, statements and expression-type column.
-    tree: BodyTree
+    tree: BodyTree,
 }
 
 // One `#FX(…)` block's effect-scope frame (FnBody.effect_scope_regions): the
 // block's span and its descriptor, spelled as a function's is.
 BodyEffectScopeRegion: struct {
-    span: Span
-    descriptor: String
+    span: Span,
+    descriptor: String,
 }
 
 // Whether a body of `functions` holds a `timing: .Fixed` value
@@ -893,20 +893,20 @@ body_fixed_timing: fn(functions: [FnBody]) -> Bool Never! {
 }
 
 BodyParameter: struct {
-    local: TLocal
-    name: String
-    span: Span
-    ty: Type
-    convention: AccessConvention
-    public_label: String
-    zone: ParamZone
-    default: Int?
-    variadic: Bool
+    local: TLocal,
+    name: String,
+    span: Span,
+    ty: Type,
+    convention: AccessConvention,
+    public_label: String,
+    zone: ParamZone,
+    default: Int?,
+    variadic: Bool,
 }
 
 BodyPlace: enum {
-    Local(local: TLocal)
-    Expr(value: Int)
+    Local(local: TLocal),
+    Expr(value: Int),
 }
 
 // Child walkers: each visits the node id of every expression reachable from

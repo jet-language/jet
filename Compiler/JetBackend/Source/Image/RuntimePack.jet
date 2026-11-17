@@ -24,29 +24,29 @@ use jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS, CompilerThreads, NameTable, n
 LinkPack: struct {
     // Kept sections in input order: live row per ordinal, ordinal per live
     // row, and the output section header index per ordinal.
-    ord_row: [Int]
-    row_ord: [Int]
-    sec_out: [Int]
+    ord_row: [Int],
+    row_ord: [Int],
+    sec_out: [Int],
     // Named local symbols, by file symbol id (locals) or -1 - global id
     // (localized definitions): name, info, output section index (or
     // LINK_ABS), value and size. Negative sentinels cannot alias a real
     // output section index in the ELF reserved-index range.
-    local_index: [Int:Int]
-    l_name: [String]
-    l_info: [Int]
-    l_shndx: [Int]
-    l_value: [Int]
-    l_size: [Int]
+    local_index: [Int:Int],
+    l_name: [String],
+    l_info: [Int],
+    l_shndx: [Int],
+    l_value: [Int],
+    l_size: [Int],
     // Global symbols by final global id.
-    global_index: [Int:Int]
-    gl_id: [Int]
-    exports: [Int:Bool]
+    global_index: [Int:Int],
+    gl_id: [Int],
+    exports: [Int:Bool],
     // Relocation rows: offset, type, symbol reference (>= 0: local symbol
     // index; < 0: -1 - global ordinal) and addend.
-    r_off: [Int]
-    r_type: [Int]
-    r_sym: [Int]
-    r_add: [Int]
+    r_off: [Int],
+    r_type: [Int],
+    r_sym: [Int],
+    r_add: [Int],
 }
 
 link_pack_rust_symbol: fn(name: String) -> Bool Never! {
@@ -248,15 +248,15 @@ link_pack_rela: fn(bytes: &[U8], p: LinkPack, first: Int, end: Int, first_global
 }
 
 LinkPackHeaders: struct {
-    name: [Int]
-    kind: [Int]
-    flags: [Int]
-    offset: [Int]
-    size: [Int]
-    link: [Int]
-    info: [Int]
-    align: [Int]
-    entry_size: [Int]
+    name: [Int],
+    kind: [Int],
+    flags: [Int],
+    offset: [Int],
+    size: [Int],
+    link: [Int],
+    info: [Int],
+    align: [Int],
+    entry_size: [Int],
 }
 
 link_pack_header: fn(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offset: Int, size: Int, link: Int, info: Int, align: Int, entry_size: Int) Never! {

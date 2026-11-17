@@ -16,10 +16,10 @@ SEMANTIC_LOCK_SOURCE_MAP_HEADER: "[[source_map]]"
 
 // The block a header line opens.
 SemanticLockSection: enum {
-    Record
-    Rationale
-    Input
-    SourceMap
+    Record,
+    Rationale,
+    Input,
+    SourceMap,
 
     from_header: fn(line: String) -> SemanticLockSection? Never! {
         if line == {
@@ -91,13 +91,13 @@ trust_strip_semantic_sections: fn(raw: String) -> String Never! {
 
 // A record under construction; `finish` requires `kind` and `key`.
 PartialSemanticRecord: struct {
-    kind: LockRecordKind?
-    key: String?
-    exact: String?
-    hash: String?
-    platform: String?
-    rationales: [LockRationale]
-    future_fields: [String:String]
+    kind: LockRecordKind?,
+    key: String?,
+    exact: String?,
+    hash: String?,
+    platform: String?,
+    rationales: [LockRationale],
+    future_fields: [String:String],
 
     empty: fn() -> PartialSemanticRecord Never! {
         PartialSemanticRecord{kind: None, key: None, exact: None, hash: None, platform: None, rationales: [LockRationale]{}, future_fields: [String:String]{}}
@@ -124,9 +124,9 @@ PartialSemanticRecord: struct {
 }
 
 PartialLockInput: struct {
-    name: String?
-    url: String?
-    follows: String
+    name: String?,
+    url: String?,
+    follows: String,
 
     set: fn(&self, key: String, value: String) Never! {
         if key == {
@@ -144,8 +144,8 @@ PartialLockInput: struct {
 }
 
 PartialSourceMap: struct {
-    pattern: String?
-    sources: [String]
+    pattern: String?,
+    sources: [String],
 
     set: fn(&self, key: String, value: String) Never! {
         if key == {
@@ -164,15 +164,15 @@ PartialSourceMap: struct {
 
 // Line-driven reader state. Each `in_*` flag says whether that block is open.
 SemanticLockReader: struct {
-    lock: SemanticLockFile
-    record: PartialSemanticRecord
-    in_record: Bool
-    rationale: LockRationale
-    in_rationale: Bool
-    input: PartialLockInput
-    in_input: Bool
-    source_map: PartialSourceMap
-    in_source_map: Bool
+    lock: SemanticLockFile,
+    record: PartialSemanticRecord,
+    in_record: Bool,
+    rationale: LockRationale,
+    in_rationale: Bool,
+    input: PartialLockInput,
+    in_input: Bool,
+    source_map: PartialSourceMap,
+    in_source_map: Bool,
 
     new: fn() -> SemanticLockReader Never! {
         SemanticLockReader{

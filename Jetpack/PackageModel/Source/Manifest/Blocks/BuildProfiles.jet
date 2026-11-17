@@ -21,9 +21,9 @@ use {
 
 // The `optimize:` level of a profile: O0, O1 or O2.
 BuildOptimize: enum {
-    O0
-    O1
-    O2
+    O0,
+    O1,
+    O2,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -37,26 +37,26 @@ BuildOptimize: enum {
 }
 
 BuildPanic: enum {
-    Unwind
-    Abort
+    Unwind,
+    Abort,
 }
 
 // Development-time replay policy from the package's `dev: { … }` block.
 DevRecordsBudget: struct {
-    max_bytes: Int
+    max_bytes: Int,
 
     default: fn() -> DevRecordsBudget Never! { DevRecordsBudget{max_bytes: 268435456} }
 }
 
 DevCaptureSetting: enum {
-    Default
-    On
-    Off
+    Default,
+    On,
+    Off,
 }
 
 DevRecordsPolicy: struct {
-    capture: DevCaptureSetting
-    budget: DevRecordsBudget
+    capture: DevCaptureSetting,
+    budget: DevRecordsBudget,
 
     default: fn() -> DevRecordsPolicy Never! {
         DevRecordsPolicy{capture: DevCaptureSetting.Default, budget: DevRecordsBudget.default()}
@@ -64,8 +64,8 @@ DevRecordsPolicy: struct {
 }
 
 DevPolicy: struct {
-    swap: Bool
-    records: DevRecordsPolicy
+    swap: Bool,
+    records: DevRecordsPolicy,
 
     default: fn() -> DevPolicy Never! { DevPolicy{swap: true, records: DevRecordsPolicy.default()} }
 }
@@ -74,18 +74,18 @@ DevPolicy: struct {
 // `optimize` is a layer over the command's stock: None when the profile leaves
 // it to the command.
 BuildProfileDef: struct {
-    name: String
-    optimize: BuildOptimize?
-    debug_info: Bool
-    small: Bool
-    panic: BuildPanic?
+    name: String,
+    optimize: BuildOptimize?,
+    debug_info: Bool,
+    small: Bool,
+    panic: BuildPanic?,
     // Profile contributions to declared typed settings.
-    settings: [String:String]
+    settings: [String:String],
     // Release-only devtools presence form.
-    inspect: JetReleaseInspect
+    inspect: JetReleaseInspect,
     // Game packaging policy resolved from this named profile.
-    game_development_stripping: Bool?
-    game_cook_mode: String?
+    game_development_stripping: Bool?,
+    game_cook_mode: String?,
 }
 
 // `Blocks::record_body`: the text between the first `{` and the last `}`.

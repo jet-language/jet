@@ -34,26 +34,26 @@ use jet_foundation.[
 // One body's ways out: a path reaches the next statement (`normal`), returns
 // to the caller, stops the program, or leaves the loop around it.
 SemaDivergenceFlow: struct {
-    normal: Bool
-    returned: Bool
-    diverged: Bool
-    broke: Bool
-    continued: Bool
+    normal: Bool,
+    returned: Bool,
+    diverged: Bool,
+    broke: Bool,
+    continued: Bool,
 }
 
 // Where a body's calls resolve: its module's row and the names its
 // parameters bind, which shadow a module function of the same name. The
 // walk records in `consulted` each callee it found not yet diverging.
 SemaDivergenceScope: struct {
-    module_index: Int
-    locals: [String]
-    consulted: [U32]
+    module_index: Int,
+    locals: [String],
+    consulted: [U32],
 }
 
 // One user function to walk: its graph module and function row.
 SemaDivergenceRow: struct {
-    module_index: Int
-    row: Int
+    module_index: Int,
+    row: Int,
 }
 
 // Every user function is walked once, then again only when a callee its
@@ -161,14 +161,14 @@ SEMA_DIVERGENCE_MIN_BYTES_PER_THREAD: 65536
 // What a wave's walks read besides the graph: each walk's function row, by
 // position (the graph scan's rows hold its graph module).
 SemaDivergenceWave: struct {
-    functions: [Int]
+    functions: [Int],
 }
 
 // One function's walk: whether every path of its body stops, and each callee
 // it found not yet diverging.
 SemaDivergenceWalked: struct {
-    diverges: Bool
-    consulted: [U32]
+    diverges: Bool,
+    consulted: [U32],
 }
 
 // Walks function `row` of graph module `module_index` against the set so far.

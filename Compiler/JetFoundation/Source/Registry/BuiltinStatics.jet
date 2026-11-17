@@ -14,15 +14,15 @@
 // arguments, then the expected result, and otherwise default to `Int`.
 
 BuiltinStaticLowering: enum {
-    ArgumentBuiltin(operation: TBuiltinOp)
-    IntFromRadix
-    UnitBuiltin(operation: TBuiltinOp)
-    PreludeStatic(rooted: Bool, path: String, generics: [TPreludeArg])
-    DurationNew(unit: String)
-    CoreCall(module_name: String, member: String)
-    EmptyMap
-    Numeric(operation: TNumericOp)
-    Precise(type_name: String, function: String)
+    ArgumentBuiltin(operation: TBuiltinOp),
+    IntFromRadix,
+    UnitBuiltin(operation: TBuiltinOp),
+    PreludeStatic(rooted: Bool, path: String, generics: [TPreludeArg]),
+    DurationNew(unit: String),
+    CoreCall(module_name: String, member: String),
+    EmptyMap,
+    Numeric(operation: TNumericOp),
+    Precise(type_name: String, function: String),
 }
 
 // The first value argument becomes the builtin receiver.
@@ -34,42 +34,42 @@ BuiltinStaticLowering: enum {
 // A registered Core call; every value argument is a Core argument.
 
 BuiltinStaticOwnerRule: enum {
-    Inferred
-    AtomicScalar
+    Inferred,
+    AtomicScalar,
 }
 
 // `Atomic<T>`: the owner names T explicitly and T is a lock-free scalar.
 
 BuiltinStaticRow: struct {
     // "" is an ambient built-in owner; otherwise the Core module exporting it.
-    module_name: String
-    owner: String
-    method: String
-    type_params: [String]
-    owner_type_params: Int
-    owner_rule: BuiltinStaticOwnerRule
-    parameters: [Type]
+    module_name: String,
+    owner: String,
+    method: String,
+    type_params: [String],
+    owner_type_params: Int,
+    owner_rule: BuiltinStaticOwnerRule,
+    parameters: [Type],
     // How every argument passes: Read, or Move for a row that owns its
     // payload (`Shared{expr}`).
-    parameter_convention: AccessConvention
-    return_type: Type
-    lowering: BuiltinStaticLowering
-    arity_code: String
+    parameter_convention: AccessConvention,
+    return_type: Type,
+    lowering: BuiltinStaticLowering,
+    arity_code: String,
 }
 
 BuiltinNumericKind: struct {
-    name: String
-    ty: Type
-    rust: String
-    integer: Bool
-    fixed: Bool
-    signed: Bool
-    bits: Int
+    name: String,
+    ty: Type,
+    rust: String,
+    integer: Bool,
+    fixed: Bool,
+    signed: Bool,
+    bits: Int,
 }
 
 BuiltinNumericSource: struct {
-    method: String
-    source: String
+    method: String,
+    source: String,
 }
 
 builtin_static: fn(owner: String, method: String, parameters: [Type], return_type: Type, lowering: BuiltinStaticLowering) -> BuiltinStaticRow Never! {

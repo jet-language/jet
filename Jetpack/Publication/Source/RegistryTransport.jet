@@ -13,12 +13,12 @@ use {
 
 #Error
 PublicationRegistryAuthorityError: struct {
-    detail: String
+    detail: String,
 }
 
 PublicationRegistryAuthority: struct {
-    host: String
-    port: Int?
+    host: String,
+    port: Int?,
 }
 
 publication_parse_registry_port: fn(port: String?) -> Int? PublicationRegistryAuthorityError! {
@@ -71,8 +71,8 @@ publication_registry_host: fn(host: String) -> String Never! {
 // Pre-DNS parse preserves refusal precedence, including case-sensitive file://.
 // Network validation must subsequently reject EVERY non-public DNS answer.
 PublicationRegistryEndpoint: enum {
-    Local
-    Network(scheme: String, host: String, port: Int, explicit_port: Bool)
+    Local,
+    Network(scheme: String, host: String, port: Int, explicit_port: Bool),
 }
 
 publication_parse_registry_endpoint: fn(registry: PublicationRegistryConfig) -> PublicationRegistryEndpoint PublicationDiagnosticError! {
@@ -108,8 +108,8 @@ publication_parse_registry_endpoint: fn(registry: PublicationRegistryConfig) -> 
 // Rust RegistryTransport: the address is the FIRST member of the complete,
 // validated resolver answer set. It is never obtained by string re-parsing.
 PublicationRegistryTransport: enum {
-    Local
-    Network(scheme: String, host: String, port: Int, explicit_port: Bool, address: [U8])
+    Local,
+    Network(scheme: String, host: String, port: Int, explicit_port: Bool, address: [U8]),
 
     remote: fn(self, url: String) -> String Never! {
         if self == {
@@ -206,8 +206,8 @@ publication_addresses_public: fn(addresses: [[U8]]) -> Bool Never! {
 // the remote a clone fetches from. PublicationRegistryNetwork, the real
 // resolver and pinned transport, is its one production implementation.
 PublicationRegistryNet: trait {
-    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError!
-    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never!
+    resolve: fn(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError!,
+    fetch_remote: fn(self, url: String, transport: PublicationRegistryTransport) -> String Never!,
 }
 
 PublicationRegistryNetwork: struct {

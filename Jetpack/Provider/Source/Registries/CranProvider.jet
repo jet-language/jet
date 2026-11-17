@@ -15,23 +15,23 @@ CRAN_DEFAULT_REPOSITORY: "https://cloud.r-project.org"
 // One `Depends`/`Imports`/`LinkingTo` entry: a package and an optional
 // `(operator version)` requirement.
 CranDependency: struct {
-    name: String
-    requirement: {operator: String, wanted: String}?
+    name: String,
+    requirement: {operator: String, wanted: String}?,
 }
 
 // One `PACKAGES` paragraph.
 CranRecord: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
     // Non-base dependencies, sorted by name, without repeats.
-    dependencies: [CranDependency]
+    dependencies: [CranDependency],
 }
 
 // A fetched source tarball of the closure.
 CranSourceArtifact: struct {
-    record: CranRecord
-    path: String
-    hash: String
+    record: CranRecord,
+    path: String,
+    hash: String,
 }
 
 CranProvider: struct {
@@ -307,10 +307,10 @@ provider_cran_dependency_order: fn(root: String, records: [String:CranRecord]) -
 }
 
 CranOrderWalk: struct {
-    records: [String:CranRecord]
-    active: [String]
-    done: [String]
-    out: [String]
+    records: [String:CranRecord],
+    active: [String],
+    done: [String],
+    out: [String],
 
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) {

@@ -72,12 +72,12 @@ RELEASE_COMPATIBILITY_POLICY_ACTIVE: false
 
 // The current release identity, independent of the package SemVer.
 ReleaseStatus: struct {
-    channel: String
-    disposition: String
-    readiness: String
-    policy: String
-    policy_disposition: String
-    policy_active: Bool
+    channel: String,
+    disposition: String,
+    readiness: String,
+    policy: String,
+    policy_disposition: String,
+    policy_active: Bool,
 }
 
 // One executable source for the current release/readiness projection.
@@ -140,10 +140,10 @@ pkg_e2001: fn(requested: String) -> Diagnostic Never! {
 // commit's first 10 hex digits>` for a dev build, `a0.0.43-dev` for a build of
 // an unknown commit. `commit` (40 hex) and `date` are "" when unknown.
 JetBuild: struct {
-    version: String
-    commit: String
-    date: String
-    released: Bool
+    version: String,
+    commit: String,
+    date: String,
+    released: Bool,
 }
 
 // The build its stamps describe (None: no such file). A VERSION stamp counts
@@ -252,23 +252,23 @@ pkg_version_json: fn(build: JetBuild) -> String Never! {
 // diagnostic the load or check stopped on.
 #Error
 ManifestError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 }
 
 Manifest: struct {
-    package: PackageMeta
+    package: PackageMeta,
     // Root metadata policy carried into fetch.
-    policy: PackagePolicy
+    policy: PackagePolicy,
     // Package authority policy.
-    authority: PackageAuthority
+    authority: PackageAuthority,
     // Package-owned import boundary policy.
-    boundaries: [ImportBoundary]
+    boundaries: [ImportBoundary],
     // Jet package dependencies.
-    dependencies: [String:DepSpec]
+    dependencies: [String:DepSpec],
     // Never parsed from `package.jet` (each block pins its own version).
-    dependencies_rust: [String:String]
+    dependencies_rust: [String:String],
     // Raw `package.jet` text, kept for comment-preserving edits.
-    raw: String
+    raw: String,
 
     // Parse a `package.jet` manifest from its text.
     parse: fn(path: String, raw: String) -> Manifest ManifestError! {
@@ -277,26 +277,26 @@ Manifest: struct {
 }
 
 PackageMeta: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
     // `edition: "..."` None tracks the newest stable edition.
-    edition: String?
+    edition: String?,
     // Toolchain constraint from `jet: "..."`.
-    jet_constraint: String?
-    description: String?
-    license: String?
-    repository: String?
+    jet_constraint: String?,
+    description: String?,
+    license: String?,
+    repository: String?,
     // Optional runtime ceiling from `runtime:`.
-    layer: RuntimeLayer?
+    layer: RuntimeLayer?,
     // Selected hosted whole-program allocator.
-    allocator: AllocatorPolicy
+    allocator: AllocatorPolicy,
 }
 
 DepSpec: enum {
-    Path(path: String)
-    Git(url: String, selector: GitSelector)
-    Registry(String)
-    Foreign(language: ForeignLanguage, reference: String)
+    Path(path: String),
+    Git(url: String, selector: GitSelector),
+    Registry(String),
+    Foreign(language: ForeignLanguage, reference: String),
 }
 
 // Path dependency: `helpers: ../helpers`.
@@ -305,9 +305,9 @@ DepSpec: enum {
 // This rule project-tier dependency.
 
 GitSelector: enum {
-    Tag(String)
-    Branch(String)
-    Rev(String)
+    Tag(String),
+    Branch(String),
+    Rev(String),
 
     is_moving: fn(self) -> Bool Never! {
         if self == {

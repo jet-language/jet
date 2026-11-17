@@ -49,20 +49,20 @@ use {
 
 // One language's `inspect bind` surface.
 JetCLIForeignBinder: struct {
-    language: ForeignLanguage
+    language: ForeignLanguage,
     // The usage line after `jet inspect bind `.
-    usage: String
+    usage: String,
     // The help-only line printed under the usage ("" for none).
-    summary: String
+    summary: String,
     // The value flags beyond `--pkg` and `-o`/`--out`.
-    flags: [String]
+    flags: [String],
     // Whether a default library name is ASCII-lowercased.
-    lower: Bool
+    lower: Bool,
     // The source a read failure names ("the script").
-    input: String
+    input: String,
     // What the E3208 report could not generate ("bindings").
-    subject: String
-    fix: String
+    subject: String,
+    fix: String,
 }
 
 // The binder `inspect bind <root>` runs, or `None` for a root without one
@@ -138,25 +138,25 @@ jet_cli_foreign_scalar: fn(language: ForeignLanguage, source: String, lower: Boo
 
 // One `inspect bind <language>` invocation's operands.
 JetCLIForeignBindRequest: struct {
-    path: String
-    pkg: String?
-    out: String?
+    path: String,
+    pkg: String?,
+    out: String?,
     // `dart --jet`, `js --runtime`, and `cobol --copybook`.
-    companion: String?
+    companion: String?,
     // `cpp`'s selected toolchain, search paths, and instantiations.
-    target: String?
-    clang: String?
-    archiver: String?
-    include_dirs: [String]
-    library_dirs: [String]
-    libraries: [String]
-    namespaces: [String]
-    templates: [CppTemplateInstantiation]
+    target: String?,
+    clang: String?,
+    archiver: String?,
+    include_dirs: [String],
+    library_dirs: [String],
+    libraries: [String],
+    namespaces: [String],
+    templates: [CppTemplateInstantiation],
 }
 
 JetCLIForeignParse: enum {
-    Parsed(request: JetCLIForeignBindRequest)
-    Done(output: JetDriverVerbOutput)
+    Parsed(request: JetCLIForeignBindRequest),
+    Done(output: JetDriverVerbOutput),
 }
 
 jet_cli_foreign_usage: fn(binder: JetCLIForeignBinder) -> String Never! {
@@ -248,8 +248,8 @@ jet_cli_foreign_fail: fn(binder: JetCLIForeignBinder, path: String, why: String,
 }
 
 JetCLIForeignOutput: enum {
-    Given(path: String)
-    Refused(output: JetDriverVerbOutput)
+    Given(path: String),
+    Refused(output: JetDriverVerbOutput),
 }
 
 // `-o`, or the language's binding cache under the selected project root of
@@ -266,16 +266,16 @@ jet_cli_foreign_output: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBi
 
 // One published file and what a failure to write it names.
 JetCLIForeignFile: struct {
-    path: String
-    text: String
-    what: String
+    path: String,
+    text: String,
+    what: String,
 }
 
 // A generated binding: its files in publication order (the cache first) and
 // the confirmation.
 JetCLIForeignBound: struct {
-    files: [JetCLIForeignFile]
-    stdout: String
+    files: [JetCLIForeignFile],
+    stdout: String,
 }
 
 jet_cli_foreign_count: fn(count: Int, noun: String) -> String Never! {

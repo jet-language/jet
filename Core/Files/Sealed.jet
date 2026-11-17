@@ -34,7 +34,7 @@ use {
 // The descriptor seal reads and writes through jet_builtins' descriptor
 // operations and their records (`JetcRaw`, `JetcStat`).
 JetcFd: struct {
-    priv fd: Int
+    priv fd: Int,
 
     // Close reads the consumed receiver in place. Rebinding it (`owner: &&self`)
     // would make a second owner whose scope-end Close re-enters this one.
@@ -47,8 +47,8 @@ JetcFd: struct {
 
 // priv: a literal elsewhere could close any descriptor at scope end
 JetcTemp: struct {
-    file: JetcFd
-    path: String?
+    file: JetcFd,
+    path: String?,
 
     impl Close {
         close: fn(&&self) {
@@ -63,7 +63,7 @@ JetcTemp: struct {
 // Bytes read from a descriptor or opened from a record. Plaintext passes
 // through here, so the buffer is wiped when it closes.
 JetcBytes: struct {
-    bytes: [U8]
+    bytes: [U8],
 
     impl Close {
         close: fn(&&self) {
@@ -177,11 +177,11 @@ migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destinati
 }
 
 JetcParent: struct {
-    directory: JetcFd
-    path: String
-    destination: String
-    name: String
-    metadata: JetcStat
+    directory: JetcFd,
+    path: String,
+    destination: String,
+    name: String,
+    metadata: JetcStat,
     linux: Bool
 }
 

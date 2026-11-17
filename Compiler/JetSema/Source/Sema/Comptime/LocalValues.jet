@@ -45,8 +45,8 @@ use jet_foundation.[
 // why it stays run-time code. Neither when it was not staged or has not
 // landed yet.
 SemaComptimeLocalValue: struct {
-    value: TExpr?
-    reason: String?
+    value: TExpr?,
+    reason: String?,
 }
 
 sema_comptime_local_value: fn(
@@ -341,8 +341,8 @@ sema_comptime_local_value_ahead_stmts: fn(sources: &[SemaComptimeItemSource], so
 // it calls code (a call or a typed literal), and whether it names nothing
 // of the function's and holds only expressions read here.
 SemaComptimeLocalValueAheadScan: struct {
-    calls: Bool
-    readable: Bool
+    calls: Bool,
+    readable: Bool,
 }
 
 sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, scan: &SemaComptimeLocalValueAheadScan) Never! {
@@ -444,9 +444,9 @@ sema_comptime_local_value_ahead_expr: fn(expr: Expr, function: Func, scan: &Sema
 SemaComptimeLocalValuesAhead: struct {
     // Each as its site's own value under the site's key: a value whose type
     // is the site's, or why the site stays run-time code.
-    values: [SemaComptimeItemValue]
+    values: [SemaComptimeItemValue],
     // Whether each source of `pending` has its value in `values`.
-    covered: [Bool]
+    covered: [Bool],
 }
 
 sema_comptime_local_values_ahead: fn(values: [SemaComptimeItemValue], pending: [SemaComptimeBodySource]) -> SemaComptimeLocalValuesAhead {

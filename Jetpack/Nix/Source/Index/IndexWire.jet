@@ -46,10 +46,10 @@ NIX_INDEX_COVERAGE_REASONS: [String]{"evaluation-failed", "unsupported-value", "
 
 #Error
 NixIndexError: enum {
-    Invalid(String)
-    NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String)
-    Offline(String)
-    Transport(String)
+    Invalid(String),
+    NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String),
+    Offline(String),
+    Transport(String),
 
     code: fn(self) -> Int Never! {
         if self == {
@@ -70,19 +70,19 @@ NixIndexError: enum {
 }
 
 NixIndexKey: struct {
-    channel: String
-    revision: String
-    system: String
-    attrpath: [String]
+    channel: String,
+    revision: String,
+    system: String,
+    attrpath: [String],
 }
 
 // One indexed package: its attribute path, version, derivation and named
 // output store paths (key-ordered).
 NixIndexRecord: struct {
-    attrpath: [String]
-    version: String
-    drv_path: String
-    outputs: [String:String]
+    attrpath: [String],
+    version: String,
+    drv_path: String,
+    outputs: [String:String],
 
     canonical_json: fn(self) -> String Never! {
         pkg_json_render(NixIndexRecordWire.from_record(self).tree())
@@ -92,12 +92,12 @@ NixIndexRecord: struct {
 // A local, unsigned Jetpack-native recipe. It is a document separate from the
 // nixpkgs mapping, so a native artifact never looks Nix-backed.
 NixNativeRecipe: struct {
-    name: String
-    version: String
-    kind: String
-    url: String
-    sha256: String
-    bin: String
+    name: String,
+    version: String,
+    kind: String,
+    url: String,
+    sha256: String,
+    bin: String,
 
     tree: fn(self) -> Dyn Never! {
         Dyn.Object(
@@ -117,17 +117,17 @@ NixNativeRecipe: struct {
 
 // What a resolved record was verified against.
 NixIndexProof: struct {
-    schema: Int
-    channel: String
-    revision: String
-    system: String
-    attrpath: [String]
-    manifest_generation: Int
-    manifest_sha256: String
-    index_sha256: String
-    record_sha256: String
-    jet_key_id: String
-    jet_signature: String
+    schema: Int,
+    channel: String,
+    revision: String,
+    system: String,
+    attrpath: [String],
+    manifest_generation: Int,
+    manifest_sha256: String,
+    index_sha256: String,
+    record_sha256: String,
+    jet_key_id: String,
+    jet_signature: String,
 
     canonical_json: fn(self) -> String Never! {
         pkg_json_render(
@@ -151,8 +151,8 @@ NixIndexProof: struct {
 }
 
 NixIndexTrustTier: enum {
-    OfficialSigned
-    LocalUnofficial
+    OfficialSigned,
+    LocalUnofficial,
 
     label: fn(self) -> String Never! {
         if self == {
@@ -177,14 +177,14 @@ NixIndexTrustTier: enum {
 }
 
 NixVerifiedIndexRecord: struct {
-    record: NixIndexRecord
-    proof: NixIndexProof
-    trust: NixIndexTrustTier
+    record: NixIndexRecord,
+    proof: NixIndexProof,
+    trust: NixIndexTrustTier,
 }
 
 NixIndexOutputWire: struct {
-    name: String
-    store_path: String
+    name: String,
+    store_path: String,
 
     tree: fn(self) -> Dyn Never! {
         Dyn.Object(["name": Dyn.Text(self.name.copy()), "storePath": Dyn.Text(self.store_path.copy())])
@@ -192,10 +192,10 @@ NixIndexOutputWire: struct {
 }
 
 NixIndexRecordWire: struct {
-    attrpath: [String]
-    version: String
-    drv_path: String
-    outputs: [NixIndexOutputWire]
+    attrpath: [String],
+    version: String,
+    drv_path: String,
+    outputs: [NixIndexOutputWire],
 
     from_record: fn(record: NixIndexRecord) -> NixIndexRecordWire Never! {
         outputs := [NixIndexOutputWire]{}
@@ -234,8 +234,8 @@ NixIndexRecordWire: struct {
 }
 
 NixIndexCoverageMiss: struct {
-    attrpath: [String]
-    reason: String
+    attrpath: [String],
+    reason: String,
 
     tree: fn(self) -> Dyn Never! {
         Dyn.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": Dyn.Text(self.reason.copy())])
@@ -243,18 +243,18 @@ NixIndexCoverageMiss: struct {
 }
 
 NixIndexCoverage: struct {
-    indexed: [[String]]
-    not_indexed: [NixIndexCoverageMiss]
+    indexed: [[String]],
+    not_indexed: [NixIndexCoverageMiss],
 }
 
 NixIndexDocument: struct {
-    schema: Int
-    channel: String
-    revision: String
-    system: String
-    released_unix: Int
-    records: [NixIndexRecordWire]
-    coverage: NixIndexCoverage
+    schema: Int,
+    channel: String,
+    revision: String,
+    system: String,
+    released_unix: Int,
+    records: [NixIndexRecordWire],
+    coverage: NixIndexCoverage,
 
     // Strict parse: known fields only, then validation, then byte equality
     // with the canonical re-encoding.
@@ -406,10 +406,10 @@ NixIndexDocument: struct {
 }
 
 NixIndexSignature: struct {
-    schema: Int
-    key_id: String
-    algorithm: String
-    signature: String
+    schema: Int,
+    key_id: String,
+    algorithm: String,
+    signature: String,
 
     parse: fn(bytes: [U8]) -> NixIndexSignature NixIndexError! {
         text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
@@ -449,17 +449,17 @@ NixIndexSignature: struct {
 // One signed channel target: where the compressed index and its signature
 // sidecar live and what they must measure.
 NixIndexManifestTarget: struct {
-    revision: String
-    system: String
-    url: String
-    signature_url: String
-    sha256: String
-    compressed_length: Int
-    decoded_length: Int
-    record_count: Int
+    revision: String,
+    system: String,
+    url: String,
+    signature_url: String,
+    sha256: String,
+    compressed_length: Int,
+    decoded_length: Int,
+    record_count: Int,
     // The manifest's `index_signature_sha256`.
-    signature_sha256: String
-    discoverable: Bool
+    signature_sha256: String,
+    discoverable: Bool,
 
     tree: fn(self) -> Dyn Never! {
         Dyn.Object(
@@ -480,12 +480,12 @@ NixIndexManifestTarget: struct {
 }
 
 NixIndexChannelManifest: struct {
-    schema: Int
-    channel: String
-    generation: Int
-    issued_unix: Int
-    expires_unix: Int
-    targets: [NixIndexManifestTarget]
+    schema: Int,
+    channel: String,
+    generation: Int,
+    issued_unix: Int,
+    expires_unix: Int,
+    targets: [NixIndexManifestTarget],
 
     parse: fn(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
         text: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))

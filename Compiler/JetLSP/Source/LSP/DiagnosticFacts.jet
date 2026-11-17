@@ -3,9 +3,9 @@
 
 // An open editor document: its file path, unsaved text and editor version.
 LSPDocument: struct {
-    path: String
-    text: String
-    version: Int
+    path: String,
+    text: String,
+    version: Int,
 
     replace_text: fn(&self, text: String) Never! { self.text = text }
 
@@ -17,13 +17,13 @@ LSPDocument: struct {
 }
 
 LSPDiagnosticState: struct {
-    docs: [String:LSPDocument]
+    docs: [String:LSPDocument],
     // Documents edited since their diagnostics were last published.
-    dirty: [String:Bool]
+    dirty: [String:Bool],
     // The URIs each root's last publication wrote diagnostics for.
-    diagnostic_targets: [String:[String:Bool]]
+    diagnostic_targets: [String:[String:Bool]],
     // The file paths each root's last check read.
-    checked_modules: [String:[String]]
+    checked_modules: [String:[String]],
 }
 
 lsp_diagnostic_state: fn() -> LSPDiagnosticState Never! {

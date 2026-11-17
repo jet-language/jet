@@ -6,79 +6,79 @@
 
 // Parsed global flags shared by every command.
 CLIFlags: struct {
-    color: ColorChoice
-    fixtures: String?
+    color: ColorChoice,
+    fixtures: String?,
     // Explicit local unofficial nixpkgs catalog. It has no publisher
     // signature and is never selected by default.
-    local_nix_catalog: String?
-    offline: Bool
-    online: Bool
+    local_nix_catalog: String?,
+    offline: Bool,
+    online: Bool,
     // U19: one-shot bypass of the env/dev trust gate (`--trust`); it never
     // persists a grant.
-    trust: Bool
+    trust: Bool,
     // U16: ad-hoc packages from `-p <pkg>...`, repeatable.
-    packages: [String]
+    packages: [String],
     // U16: force foreign-flake/devenv detection over declared `env.*`.
-    flake: Bool
+    flake: Bool,
     // U16: isolate the foreign projected shell from host variables.
-    pure: Bool
+    pure: Bool,
     // Materialize without entering a shell.
-    prep: Bool
+    prep: Bool,
     // Card #2214: show the full environment acquisition plan.
-    explain_plan: Bool
+    explain_plan: Bool,
     // The registry ref or local layout `image --push` targets.
-    push: String?
+    push: String?,
     // The generic `--name <name>` flag (`hangar ingest`).
-    name: String?
+    name: String?,
     // The named environment composition under `presets:`.
-    preset: String?
+    preset: String?,
     // Explicit selector for one `env.<name>` module.
-    environment: String?
+    environment: String?,
     // U20: `jetpack add <ref> --adapt` drafts an adapter declaration.
-    adapt: Bool
+    adapt: Bool,
     // Emit machine-readable output where the command has a structured form.
-    json: Bool
+    json: Bool,
     // U27: open a shell in preserved failed build scratch.
-    shell_on_fail: Bool
+    shell_on_fail: Bool,
     // `jet trust grant <selector> --scope repo|user`.
-    trust_scope: String?
+    trust_scope: String?,
     // Bypass mutation confirmation gates (`-y` / `--yes`).
-    assume_yes: Bool
+    assume_yes: Bool,
     // Narrow `jetpack update` to project dependencies or
     // to user tools.
-    update_deps: Bool
-    update_tools: Bool
+    update_deps: Bool,
+    update_tools: Bool,
     // Card #2218: git revision used by `jetpack lock diff`.
-    lock_against: String?
+    lock_against: String?,
     // `jetpack tool install <ref> --as <name>`.
-    as_name: String?
+    as_name: String?,
     // (#1187): browser lock/provision inputs; `--version` is also the
     // `hangar ingest` object version.
-    browser_binary: String?
-    version: String?
-    browser_protocol: String?
-    browser_driver: String?
+    browser_binary: String?,
+    version: String?,
+    browser_protocol: String?,
+    browser_driver: String?,
     // Hangar archive destination, signer, and source.
-    archive_to: String?
-    archive_key: String?
-    archive_from: String?
+    archive_to: String?,
+    archive_key: String?,
+    archive_from: String?,
     // Export only the selected object, not its closure.
-    archive_no_deps: Bool
+    archive_no_deps: Bool,
     // Explicit expert escape hatch for a local unsigned archive.
-    archive_allow_unsigned: Bool
+    archive_allow_unsigned: Bool,
     // Host-owned cache role and typed credential
     // provider label (never a secret) the write grant.
-    cache_role: String?
-    cache_credential: String?
-    cache_write: Bool
+    cache_role: String?,
+    cache_credential: String?,
+    cache_write: Bool,
     // Hangar switches: `du --all`, `doctor --repair`, `shared enroll --read-only`.
-    hangar_all: Bool
-    hangar_repair: Bool
-    read_only: Bool
+    hangar_all: Bool,
+    hangar_repair: Bool,
+    read_only: Bool,
     // `secrets keygen --force` overwrites an existing identity.
-    force: Bool
+    force: Bool,
     // `split|fold --check` previews the transition without writing.
-    transition_check: Bool
+    transition_check: Bool,
 
     empty: fn() -> CLIFlags Never! {
         CLIFlags{
@@ -129,10 +129,10 @@ CLIFlags: struct {
 
 // Flags, positional arguments, and the command after a `--`.
 CLIParsed: struct {
-    flags: CLIFlags
-    positional: [String]
+    flags: CLIFlags,
+    positional: [String],
     // Everything after a `--`, if present.
-    command: [String]?
+    command: [String]?,
 }
 
 // `args[start..]` as an owned list.

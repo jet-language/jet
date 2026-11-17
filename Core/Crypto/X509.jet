@@ -140,30 +140,30 @@ X509_SET: 0x31
 /// code, or the error of the layer below that mbedtls passes on unchanged.
 #Error
 X509Error: enum {
-    FeatureUnavailable(oids.OIDError?)
-    UnknownOid
-    InvalidFormat(asn1.ASN1Error?)
-    InvalidVersion(asn1.ASN1Error?)
-    InvalidSerial(asn1.ASN1Error?)
-    InvalidAlg(asn1.ASN1Error?)
-    InvalidAlgOid(oids.OIDError)
-    InvalidName(asn1.ASN1Error?)
-    InvalidDate(asn1.ASN1Error?)
-    InvalidSignature(asn1.ASN1Error?)
-    InvalidExtensions(asn1.ASN1Error?)
-    UnknownVersion
-    UnknownSigAlg(oids.OIDError?)
-    SigMismatch
-    CertVerifyFailed(Int)
-    CertUnknownFormat
-    BadInput
-    BufferTooSmall
-    FatalError
-    Callback(Int)
-    Asn1(asn1.ASN1Error)
-    PK(pk.PKError)
-    PEM(pem.PEMError)
-    OID(oids.OIDError)
+    FeatureUnavailable(oids.OIDError?),
+    UnknownOid,
+    InvalidFormat(asn1.ASN1Error?),
+    InvalidVersion(asn1.ASN1Error?),
+    InvalidSerial(asn1.ASN1Error?),
+    InvalidAlg(asn1.ASN1Error?),
+    InvalidAlgOid(oids.OIDError),
+    InvalidName(asn1.ASN1Error?),
+    InvalidDate(asn1.ASN1Error?),
+    InvalidSignature(asn1.ASN1Error?),
+    InvalidExtensions(asn1.ASN1Error?),
+    UnknownVersion,
+    UnknownSigAlg(oids.OIDError?),
+    SigMismatch,
+    CertVerifyFailed(Int),
+    CertUnknownFormat,
+    BadInput,
+    BufferTooSmall,
+    FatalError,
+    Callback(Int),
+    Asn1(asn1.ASN1Error),
+    PK(pk.PKError),
+    PEM(pem.PEMError),
+    OID(oids.OIDError),
 }
 
 /// An unsupported feature (FEATURE_UNAVAILABLE, -0x2080): a critical
@@ -206,48 +206,48 @@ X509Error: enum {
 
 /// A date and time to the second (mbedtls_x509_time).
 X509Time: struct {
-    year: Int
-    mon: Int
-    day: Int
-    hour: Int
-    min: Int
-    sec: Int
+    year: Int,
+    mon: Int,
+    day: Int,
+    hour: Int,
+    min: Int,
+    sec: Int,
 }
 
 /// The hardwareModuleName of an otherName (RFC 4108): its type-id, the
 /// hwType OID and the hwSerialNum (mbedtls_x509_san_other_name).
 SanOtherName: struct {
-    type_id: asn1.ASN1Buf
-    hw_type: asn1.ASN1Buf
-    hw_serial: asn1.ASN1Buf
+    type_id: asn1.ASN1Buf,
+    hw_type: asn1.ASN1Buf,
+    hw_serial: asn1.ASN1Buf,
 }
 
 /// One subject alternative name of a type mbedtls reads
 /// (mbedtls_x509_subject_alternative_name); the buffers hold the name's
 /// content.
 SubjectAltName: enum {
-    OtherName(SanOtherName)
-    Rfc822Name(asn1.ASN1Buf)
-    DNSName(asn1.ASN1Buf)
-    DirectoryName([asn1.NamedData])
-    UniformResourceIdentifier(asn1.ASN1Buf)
-    IPAddress(asn1.ASN1Buf)
+    OtherName(SanOtherName),
+    Rfc822Name(asn1.ASN1Buf),
+    DNSName(asn1.ASN1Buf),
+    DirectoryName([asn1.NamedData]),
+    UniformResourceIdentifier(asn1.ASN1Buf),
+    IPAddress(asn1.ASN1Buf),
 }
 
 /// RSASSA-PSS-params: the message digest, the MGF1 digest and the salt
 /// length, SHA-1, SHA-1 and 20 when absent.
 X509PssParams: struct {
-    md: hashes.Md
-    mgf1_md: hashes.Md
-    salt_len: Int
+    md: hashes.Md,
+    mgf1_md: hashes.Md,
+    salt_len: Int,
 }
 
 /// A signature algorithm: its digest (None for RSASSA-PSS's OID row), its
 /// key type and, for RSASSA-PSS, the options its parameters give.
 X509SigAlg: struct {
-    md: hashes.Md?
-    pk: oids.PKType
-    pss: pk.PSSOptions?
+    md: hashes.Md?,
+    pk: oids.PKType,
+    pss: pk.PSSOptions?,
 }
 
 /// A CertificateSerialNumber: an INTEGER, or the [2] form some CRLs carry

@@ -12,84 +12,84 @@ use {
 }
 
 JetLiveValue: struct {
-    value_id: String
-    type_identity: String
-    disposition: String
-    reason: String
-    rendered_value: String?
+    value_id: String,
+    type_identity: String,
+    disposition: String,
+    reason: String,
+    rendered_value: String?,
 }
 
 JetLiveTask: struct {
-    id: Int
-    parent: Int
-    state: String
-    wait: String
-    deadline_ms: Int?
-    cancelled: Bool
+    id: Int,
+    parent: Int,
+    state: String,
+    wait: String,
+    deadline_ms: Int?,
+    cancelled: Bool,
 }
 
 JetLiveChannel: struct {
-    id: Int
-    depth: Int
-    capacity: Int?
-    send_waiters: Int
-    recv_waiters: Int
-    closed: Bool
+    id: Int,
+    depth: Int,
+    capacity: Int?,
+    send_waiters: Int,
+    recv_waiters: Int,
+    closed: Bool,
 }
 
 JetLiveRuntime: struct {
-    elapsed_ns: Int
-    cpu_ns: Int?
-    exit: Bool
+    elapsed_ns: Int,
+    cpu_ns: Int?,
+    exit: Bool,
 }
 
 JetLiveEvent: struct {
-    sequence: Int
-    source: String
-    event_id: Int
-    owner_id: Int
-    subscription_id: Int
-    dispatch_id: Int
-    lifecycle: String
-    queued: Int
-    blocked: Int
-    running: Int
-    capacity: Int
-    overflow: String
-    priority: Int
-    failure: String
-    terminal: String
+    sequence: Int,
+    source: String,
+    event_id: Int,
+    owner_id: Int,
+    subscription_id: Int,
+    dispatch_id: Int,
+    lifecycle: String,
+    queued: Int,
+    blocked: Int,
+    running: Int,
+    capacity: Int,
+    overflow: String,
+    priority: Int,
+    failure: String,
+    terminal: String,
 }
 
 // start_id and runtime.cpu_ns come from the process (jet_live_bind);
 // boot_ns, start_ticks and clock_hz are the writer's facts for that binding.
 // `events` is a reader's rendering of event_records; the codec leaves it None.
 JetLiveSnapshot: struct {
-    protocol: String
-    session_id: String
-    source_id: String
-    build_id: String
-    revision: String
-    world_id: String
-    pid: Int
-    start_id: String
-    captured_ms: Int
-    values: [JetLiveValue]
-    tasks: [JetLiveTask]
-    channels: [JetLiveChannel]
-    effects: [String:Int]
-    resources: [String:Int]
-    runtime: JetLiveRuntime
-    event_records: [JetLiveEvent]
-    events: String?
-    boot_ns: U64
-    start_ticks: U64
-    clock_hz: Int
+    protocol: String,
+    session_id: String,
+    source_id: String,
+    build_id: String,
+    revision: String,
+    world_id: String,
+    pid: Int,
+    start_id: String,
+    captured_ms: Int,
+    values: [JetLiveValue],
+    tasks: [JetLiveTask],
+    channels: [JetLiveChannel],
+    effects: [String:Int],
+    resources: [String:Int],
+    runtime: JetLiveRuntime,
+    event_records: [JetLiveEvent],
+    events: String?,
+    boot_ns: U64,
+    start_ticks: U64,
+    clock_hz: Int,
 }
 
 #Error
 JetLiveSnapshotError: struct {
-    message: String
+    message: String,
 }
 
 jet_live_error: fn(message: String) -> JetLiveSnapshotError Never! {
@@ -104,8 +104,8 @@ JET_LIVE_ABSENT: U64{18446744073709551615}
 JET_LIVE_INT_MAX: U64{9223372036854775807}
 
 JetLiveCursor: struct {
-    bytes: [U8]
-    at: Int
+    bytes: [U8],
+    at: Int,
 }
 
 jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {

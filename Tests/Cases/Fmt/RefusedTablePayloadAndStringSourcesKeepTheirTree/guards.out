@@ -1,21 +1,17 @@
 // A variant arm's guard may test a different enum value: `form == .Iterator`
 // compares `form`, never the switch subject.
-Form: enum {
-    Unconditional
-    Counted
-    Iterator
-}
+Form: enum { Unconditional, Counted, Iterator }
 
 Op: enum {
-    RangeInit(a: Int, b: Int)
-    IterInit(a: Int, b: Int)
-    IterAdvance(a: Int, value: Int)
-    Other
+    RangeInit(a: Int, b: Int),
+    IterInit(a: Int, b: Int),
+    IterAdvance(a: Int, value: Int),
+    Other,
 }
 
 Instr: struct {
-    operation: Op
-    result: Int?
+    operation: Op,
+    result: Int?,
 }
 
 pick: fn(instructions: [Instr], form: Form) -> Int? {

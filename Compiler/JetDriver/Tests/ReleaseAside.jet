@@ -22,7 +22,7 @@ use {
 }
 
 release_aside_front: fn(aside: Bool, steps: Int, mode: JetDriverCompileMode) -> JetDriverLoweringInputsResult {
-    source := "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+    source := "Shape: enum {{\n    Circle(radius: Int),\n    Square(side: Int),\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
     loop step in 0..<steps -> source = "{source}step{step}: fn(x: Int) -> Int {{ x + {step} }}\n"
     snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: [JetDriverAuthorizedSourceRoot]{

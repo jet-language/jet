@@ -16,7 +16,7 @@ use {
 // A rejected environment fact, carrying its exact user-facing message.
 #Error
 EnvironmentFactError: struct {
-    message: String
+    message: String,
 
     new: fn(message: String) -> EnvironmentFactError Never! {
         EnvironmentFactError{message: message}
@@ -41,8 +41,8 @@ envmodel_presets_from_value: fn(value: CtValue) -> [PresetSpec] EnvironmentFactE
 
 // One named preset declaration awaiting its record reader.
 EnvNamedValue: struct {
-    name: String
-    value: CtValue
+    name: String,
+    value: CtValue,
 }
 
 envmodel_preset_entries: fn(value: CtValue) -> [EnvNamedValue] EnvironmentFactError! {
@@ -706,8 +706,8 @@ envmodel_optional_string_field: fn(fields: [String:CtValue], name: String) -> St
 // Record fields keyed by name. A repeated name must repeat the same value;
 // `conflict` names the first one that does not.
 EnvFieldDedupe: struct {
-    fields: [String:CtValue]
-    conflict: String?
+    fields: [String:CtValue],
+    conflict: String?,
 }
 
 envmodel_dedupe_fields: fn(fields: [NamedCtValue]) -> EnvFieldDedupe Never! {
@@ -797,10 +797,10 @@ envmodel_has_whitespace: fn(text: String) -> Bool Never! {
 // One component of a Unix path as `std::path::Path::components` yields it:
 // separators collapse, `.` survives only as the leading component.
 EnvPathComponent: enum {
-    Root
-    CurDir
-    ParentDir
-    Normal(String)
+    Root,
+    CurDir,
+    ParentDir,
+    Normal(String),
 }
 
 envmodel_path_components: fn(path: String) -> [EnvPathComponent] Never! {

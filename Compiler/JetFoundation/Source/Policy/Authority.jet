@@ -57,10 +57,10 @@ authority_grantable_roots: fn() -> [String] Never! {
 // it, its spelling, whether `Authority.workspace()` holds it, and whether the
 // root also enforces one program, `Exec("/usr/bin/git")`.
 AuthorityProcessGrant: struct {
-    name: String
-    right: String
-    workspace: Bool
-    program: Bool
+    name: String,
+    right: String,
+    workspace: Bool,
+    program: Bool,
 }
 
 // The grants an authority-bound process may hold; it refuses any other before
@@ -78,9 +78,9 @@ AUTHORITY_PROCESS_GRANTS: [AuthorityProcessGrant]{
 
 // The one verdict every checkpoint answers.
 AuthorityVerdict: enum {
-    Allowed
-    Denied
-    Missing
+    Allowed,
+    Denied,
+    Missing,
 }
 
 // A rights set: sorted with duplicates removed (Rust `Holds`).
@@ -180,7 +180,7 @@ authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
 // A requested scope that would widen its parent authority.
 #Error
 AuthorityTightenError: struct {
-    uncovered: [String]
+    uncovered: [String],
 
     message: fn(self) -> String Never! {
         "authority scope widens its parent for `{self.uncovered.join(", ")}`"
@@ -191,7 +191,7 @@ AuthorityTightenError: struct {
 // adapters. Sandbox wrappers must not keep a second grant set.
 // Shared consumers use this same public constructor and read-only holds field.
 CanonicalAuthority: struct {
-    holds: [String]
+    holds: [String],
 
     // Unknown spellings are retained for the caller's diagnostic; policy
     // checks still fail closed because no known hold covers them.

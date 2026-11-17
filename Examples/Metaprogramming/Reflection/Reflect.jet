@@ -28,7 +28,7 @@ build: fn(b: Build) {
 // Runtime `reflect.of` uses the same ledger as `T.reflect()`, so a value
 // reports its type name and its module path.
 Point: struct {
-    value: Int
+    value: Int,
 
     impl Display {
         display: fn(self) -> String { "Point({self.value})" }
@@ -50,7 +50,7 @@ Severity: distinct Int(0..10)
 Order: struct {
     state { Draft, Published }
 
-    value: Int
+    value: Int,
 }
 
 send_report: fn() -[IO]> {}
@@ -79,7 +79,7 @@ MATURITY: #run send_report.reflect().maturity
 
 Summarize: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
 
         expand: fn(self, target: Target) {
             info: target.reflect()
@@ -107,9 +107,9 @@ Summarize: struct {
 // `false` for a type that only qualifies for auto-derive.
 #Summarize
 Widget: struct {
-    label: String
-    priv secret: Int
-    level: Int(0..10)
+    label: String,
+    priv secret: Int,
+    level: Int(0..10),
 
     #Inline show: fn(self) -> String { self.label.copy() }
 }

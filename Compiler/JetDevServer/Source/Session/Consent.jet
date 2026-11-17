@@ -9,13 +9,13 @@ use {
 // Rust CaptureIdentity.exact/is_exact/matches. The sole constructor takes all
 // seven canonical facts; there is no three-field compatibility constructor.
 CaptureIdentity: struct {
-    target_inputs_sha256: String
-    tool_version: String
-    engine: String
-    session_id: String
-    source_id: String
-    build_id: String
-    revision: String
+    target_inputs_sha256: String,
+    tool_version: String,
+    engine: String,
+    session_id: String,
+    source_id: String,
+    build_id: String,
+    revision: String,
     exact: fn(target_inputs_sha256: &&String, tool_version: &&String, engine: &&String, session_id: &&String, source_id: &&String, build_id: &&String, revision: &&String) -> CaptureIdentity Never! {
         CaptureIdentity{target_inputs_sha256: target_inputs_sha256.move(), tool_version: tool_version.move(), engine: engine.move(), session_id: session_id.move(), source_id: source_id.move(), build_id: build_id.move(), revision: revision.move()}
     }
@@ -29,14 +29,14 @@ capture_identity_field_is_exact: fn(value: String) -> Bool Never! { value != "" 
 // Rust CaptureConsentScope.default/new/for_budget/canonicalize/digest and
 // frame/frame_vec. Scope defaults legitimately have no disclosure lineage.
 CaptureConsentScope: struct {
-    authorities: [String]
-    hosts: [String]
-    streams: [String]
-    disclosures: [String]
-    destination: String
-    byte_limit: U64
-    mode: CaptureMode
-    source_kinds: [CaptureSource]
+    authorities: [String],
+    hosts: [String],
+    streams: [String],
+    disclosures: [String],
+    destination: String,
+    byte_limit: U64,
+    mode: CaptureMode,
+    source_kinds: [CaptureSource],
     default: fn() -> CaptureConsentScope Never! {
         CaptureConsentScope{authorities: [String]{}, hosts: [String]{}, streams: [String]{}, disclosures: [String]{}, destination: "", byte_limit: DEFAULT_CAPTURE_BUDGET_BYTES, mode: CaptureMode.Development, source_kinds: [CaptureSource]{}}
     }
@@ -125,8 +125,8 @@ capture_consent_frame_vec: fn(output: &[U8], key: String, values: [String]) Neve
 // require is_exact(): live consent and receipt validation are separate seams.
 #!Printable
 SensitiveCaptureConsent: struct {
-    _identity: CaptureIdentity
-    _scope: CaptureConsentScope
+    _identity: CaptureIdentity,
+    _scope: CaptureConsentScope,
     new: fn(identity: &&CaptureIdentity, scope: &&CaptureConsentScope) -> SensitiveCaptureConsent Never! {
         canonical := scope.move()
         canonical.canonicalize()
@@ -164,11 +164,11 @@ SensitiveCaptureConsent: struct {
 // Production keeps the exact carrier and protected formatter. Even #!Debug is
 // ignored for native derives, so the focused proof excludes this carrier closure.
 CaptureAttempt: struct {
-    identity: CaptureIdentity
-    sources: [CaptureSourceFact]
-    scope: CaptureConsentScope
-    consent: SensitiveCaptureConsent?
-    terminal_available: Bool
+    identity: CaptureIdentity,
+    sources: [CaptureSourceFact],
+    scope: CaptureConsentScope,
+    consent: SensitiveCaptureConsent?,
+    terminal_available: Bool,
     new: fn(identity: &&CaptureIdentity) -> CaptureAttempt Never! {
         CaptureAttempt{identity: identity.move(), sources: [CaptureSourceFact]{}, scope: CaptureConsentScope.default(), consent: None, terminal_available: true}
     }
@@ -198,12 +198,12 @@ CaptureAttempt: struct {
 // Rust CaptureSkipReason.source/code/reason_text/Display and CaptureSkip
 // requires_sensitive_consent/reason_text/status_line; source location survives.
 CaptureSkipReason: enum {
-    ReleaseMode
-    PackagePolicy
-    NoCaptureOverride
-    Unavailable(reason: String)
-    UnsafeSource(source: CaptureSourceFact)
-    SensitiveConsentScopeChanged(source: CaptureSourceFact)
+    ReleaseMode,
+    PackagePolicy,
+    NoCaptureOverride,
+    Unavailable(reason: String),
+    UnsafeSource(source: CaptureSourceFact),
+    SensitiveConsentScopeChanged(source: CaptureSourceFact),
     source: fn(self) -> CaptureSourceFact? Never! {
         if self == {
             .UnsafeSource(source) -> Val(source)
@@ -235,8 +235,8 @@ CaptureSkipReason: enum {
     impl Display { display: fn(self) -> String { self.reason_text() } }
 }
 CaptureSkip: struct {
-    reason: CaptureSkipReason
-    terminal_available: Bool
+    reason: CaptureSkipReason,
+    terminal_available: Bool,
     requires_sensitive_consent: fn(self) -> Bool Never! {
         if self.reason == {
             .UnsafeSource(_) -> true
@@ -259,9 +259,9 @@ CaptureSkip: struct {
 
 // Rust CaptureEligibility.is_allowed/is_sensitive/kind/budget/skip.
 CaptureEligibility: enum {
-    SafeClock(budget: CaptureBudget)
-    Sensitive(budget: CaptureBudget)
-    Skipped(skip: CaptureSkip)
+    SafeClock(budget: CaptureBudget),
+    Sensitive(budget: CaptureBudget),
+    Skipped(skip: CaptureSkip),
     is_allowed: fn(self) -> Bool Never! {
         if self == {
             .Skipped(_) -> false

@@ -593,8 +593,8 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
 // value's resolved type. None when it names no struct, the struct has no
 // visible `#As` field, or that field's type does not fill `required`.
 SemaExpressionAsField: struct {
-    ty: Type
-    field: TFieldRef
+    ty: Type,
+    field: TFieldRef,
 }
 
 sema_expression_as_field: fn(offered: Type, required: Type, use_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaExpressionAsField? {
@@ -1021,9 +1021,9 @@ sema_expression_computed_field_named: fn(ty: Type, member: String, getter: Bool,
 // window or write argument and no take reaches it, directly or through a
 // field, element or range below it. A read stays its getter's value.
 SemaComputedPlace: struct {
-    owner: Type
-    member: String
-    span: Span
+    owner: Type,
+    member: String,
+    span: Span,
 }
 
 // The first computed step of the checked write place `place`: a stored-field
@@ -1281,8 +1281,8 @@ sema_expression_core_member_unknown: fn(module_row: SemaRegistrationModule, memb
 // `read` is None where no function type is expected or the type has no such
 // method.
 SemaBoundMethodRead: struct {
-    read: Expr?
-    invalid: Bool
+    read: Expr?,
+    invalid: Bool,
 }
 
 sema_expression_bound_method: fn(base: Expr, member: String, span: Span, receiver: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaBoundMethodRead {
@@ -1395,8 +1395,8 @@ sema_expression_method_read_without_call: fn(owner_name: String, member: String,
 // is a call of the declaration's own lane reads: `lane` for one lane,
 // `__swizzleN` for N. A write is `__swizzle_setN` (Statements.jet).
 SemaCoreVectorSwizzle: struct {
-    read: Expr?
-    invalid: Bool
+    read: Expr?,
+    invalid: Bool,
 }
 
 sema_expression_core_vector_swizzle: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCoreVectorSwizzle {
@@ -1440,9 +1440,9 @@ sema_expression_core_vector_name: fn(ty: Type, environment: SemaScopeEnvironment
 // four x/y/z/w lanes of a vector or swizzleable SIMD lane type. One lane reads
 // the scalar; several build a VecN, or the same lane type when all are named.
 SemaMathSwizzleParse: enum {
-    NotSwizzle
-    InvalidLane
-    Lanes(packed: Int, count: Int, overlaps: Bool)
+    NotSwizzle,
+    InvalidLane,
+    Lanes(packed: Int, count: Int, overlaps: Bool),
 }
 
 sema_expression_math_swizzle_parse: fn(type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaMathSwizzleParse {

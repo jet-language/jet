@@ -29,52 +29,52 @@ DISPOSITIONS: [String]{"planned", "implemented-unqualified", "passed", "failed",
 REVISION_RULE: "Regenerate with `jet run Tools/Hardening/Main.jet -- --write .jet/hardening-manifest.json`. A change to any snapshot file changes source_snapshot.hash, and evidence recorded under an older hash is stale."
 
 Exclusion: struct {
-    key: String
-    reason: String
-    owner: String
-    decision: String
+    key: String,
+    reason: String,
+    owner: String,
+    decision: String,
 }
 
 SnapshotFile: struct {
-    path: String
-    sha256: String
+    path: String,
+    sha256: String,
 }
 
 SnapshotPart: struct {
-    name: String
-    hash: String
+    name: String,
+    hash: String,
 }
 
 Snapshot: struct {
-    hash: String
-    parts: [SnapshotPart]
-    files: [SnapshotFile]
+    hash: String,
+    parts: [SnapshotPart],
+    files: [SnapshotFile],
 }
 
 WitnessFacts: struct {
-    path: String
-    sha256: String
-    errors: [String]
+    path: String,
+    sha256: String,
+    errors: [String],
 }
 
 ManifestRow: struct {
-    surface: SurfaceRow
-    status: String
-    witness: WitnessFacts?
-    sink: Sink?
-    exclusion: Exclusion?
+    surface: SurfaceRow,
+    status: String,
+    witness: WitnessFacts?,
+    sink: Sink?,
+    exclusion: Exclusion?,
 }
 
 Orphan: struct {
-    path: String
-    key: String
+    path: String,
+    key: String,
 }
 
 Manifest: struct {
-    snapshot: Snapshot
-    rows: [ManifestRow]
-    exclusions: [Exclusion]
-    orphans: [Orphan]
+    snapshot: Snapshot,
+    rows: [ManifestRow],
+    exclusions: [Exclusion],
+    orphans: [Orphan],
 }
 
 digest: fn(text: String) -> String Never! { "sha256:{sha256_hex(text)}" }

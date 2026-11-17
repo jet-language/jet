@@ -40,35 +40,35 @@ IR_STATIC_INT_TAG: 4611686018427387904
 // or an address (`target` a local object, else a module data row, or the
 // immortal String of a data row when `text`).
 IRStaticWord: struct {
-    word: Int
-    target: Int{-1}
-    addend: Int{0}
-    local: Bool{false}
-    text: Bool{false}
+    word: Int,
+    target: Int{-1},
+    addend: Int{0},
+    local: Bool{false},
+    text: Bool{false},
 }
 
 IRStaticReloc: struct {
-    offset: Int
-    target: Int
-    addend: Int
-    local: Bool
-    text: Bool
+    offset: Int,
+    target: Int,
+    addend: Int,
+    local: Bool,
+    text: Bool,
 }
 
 // The objects of one constant, numbered locally until they become data rows.
 IRStaticBuild: struct {
-    bytes: [[U8]]
-    relocs: [[IRStaticReloc]]
+    bytes: [[U8]],
+    relocs: [[IRStaticReloc]],
 }
 
 // Where a struct value's field `name` goes, found once for every struct value
 // of one type (ir_static_struct): its member's position, its declared type
 // and, once a field value needs it, that type's value row (-1 before).
 IRStaticField: struct {
-    name: String
-    member: Int
-    ty: Type
-    row: Int
+    name: String,
+    member: Int,
+    ty: Type,
+    row: Int,
 }
 
 ir_static_new: fn(s: &IRStaticBuild, size: Int) -> Int Never! {

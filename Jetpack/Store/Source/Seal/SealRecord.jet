@@ -26,7 +26,7 @@ STORE_SEAL_SEQUENCE: Shared{ProcessSequence{next: 0}}
 // the same shared ledger; no request copies the memo, census, digest, or
 // proven-member maps.
 StoreVerification: struct {
-    state: Shared<StoreVerificationState>
+    state: Shared<StoreVerificationState>,
 
     new: fn() -[Env]> StoreVerification Never! {
         StoreVerification{
@@ -45,24 +45,24 @@ StoreVerification: struct {
 }
 
 StoreVerificationState: struct {
-    seal_memo_armed: Bool
-    seal_memo: [String:String]
-    seal_census_enabled: Bool
-    seal_census: [String:Int]
-    verified_digests: [String:VerifiedDigestMemo]
-    verified_digest_hash_counts: [String:Int]
+    seal_memo_armed: Bool,
+    seal_memo: [String:String],
+    seal_census_enabled: Bool,
+    seal_census: [String:Int],
+    verified_digests: [String:VerifiedDigestMemo],
+    verified_digest_hash_counts: [String:Int],
     // Closure members proven against their seals, keyed by
     // `store_proven_member_key(hangar, digest)` (Rust `PROVEN_MEMBERS`).
-    proven_members: [String:Bool]
+    proven_members: [String:Bool],
     // The signed narinfos the last Nix download plan verified, keyed by
     // `store_nix_planned_key(roots, endpoint)` (Rust `PLANNED_NARINFOS`).
-    planned_narinfos: [String:[String:FetchedInfo]]
+    planned_narinfos: [String:[String:FetchedInfo]],
 }
 
 SealRootKind: enum {
-    Directory
-    File
-    Symlink
+    Directory,
+    File,
+    Symlink,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -83,10 +83,10 @@ SealRootKind: enum {
 }
 
 SealRecord: struct {
-    digest: String
-    root_kind: SealRootKind
-    tuple_count: Int
-    tuple_digest: String
+    digest: String,
+    root_kind: SealRootKind,
+    tuple_count: Int,
+    tuple_digest: String,
 }
 
 store_seal_census_note: fn(verification: &StoreVerification, path: String) Never! {

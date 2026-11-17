@@ -36,7 +36,7 @@ JET_COMPILER_SERVICE_MODULE_VALUES: "module-values"
 // config source.
 #Error
 ComptimeEvalError: struct {
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic,
 }
 
 JET_CONFIG_VALUE_NAME: "JET_CONFIG_VALUE"
@@ -61,8 +61,8 @@ jet_config_eval_placed: fn(expr: Expr, diagnostic: Diagnostic) -> ComptimeEvalEr
 // The value of one config-value program, or the spanless diagnostic that
 // refused it; the requester places that diagnostic on its config expression.
 JetConfigOutcome: enum {
-    Value(value: CtValue)
-    Refused(diagnostic: Diagnostic)
+    Value(value: CtValue),
+    Refused(diagnostic: Diagnostic),
 }
 
 // The module values of a module-values program: each top-level immutable
@@ -70,8 +70,8 @@ JetConfigOutcome: enum {
 // (a function, say). Or the first error of the program's check, its span a
 // span of the program, or None when it lies outside the program.
 JetModuleValuesOutcome: enum {
-    Values(values: [NamedCtValue], unreadable: [String])
-    Refused(diagnostic: Diagnostic)
+    Values(values: [NamedCtValue], unreadable: [String]),
+    Refused(diagnostic: Diagnostic),
 }
 
 // A string with no interpolation, a whole number, or a truth value: the
@@ -253,8 +253,8 @@ compiler_service_rows: fn(value: Dyn) -> [Dyn]? Never! {
 
 // The one tag and payload of a `{"Tag": payload}` object.
 CompilerServiceTagged: struct {
-    label: String
-    payload: Dyn
+    label: String,
+    payload: Dyn,
 }
 
 compiler_service_tagged: fn(value: Dyn) -> CompilerServiceTagged? Never! {

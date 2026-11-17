@@ -6,18 +6,18 @@
 
 // The importer's editable result.
 ImportPlan: struct {
-    source_kind: String
-    packages: [ImportedPackage]
-    deps: [ImportedDep]
-    generated_files: [GeneratedFile]
-    adapters: [AdapterDraft]
-    ffi_stubs: [FFIStub]
-    todos: [ImportTodo]
-    migration: [MigrationStatus]
+    source_kind: String,
+    packages: [ImportedPackage],
+    deps: [ImportedDep],
+    generated_files: [GeneratedFile],
+    adapters: [AdapterDraft],
+    ffi_stubs: [FFIStub],
+    todos: [ImportTodo],
+    migration: [MigrationStatus],
     // One shared provider-fact record per imported provider reference.
     // Losses remain on the record so generated files cannot hide an
     // unresolved fact.
-    provider_facts: [String:ProviderFacts]
+    provider_facts: [String:ProviderFacts],
 
     empty: fn(kind: String) -> ImportPlan Never! {
         ImportPlan{
@@ -127,54 +127,54 @@ ImportPlan: struct {
 }
 
 ImportedPackage: struct {
-    name: String
-    version: String
+    name: String,
+    version: String,
 }
 
 ImportedDep: struct {
-    name: String
-    provider_ref: String
-    locked_version: String
-    dev: Bool
+    name: String,
+    provider_ref: String,
+    locked_version: String,
+    dev: Bool,
 }
 
 GeneratedFile: struct {
-    path: String
-    contents: String
-    owned: Bool
+    path: String,
+    contents: String,
+    owned: Bool,
 }
 
 AdapterDraft: struct {
-    name: String
-    source: String
-    recipe: String
+    name: String,
+    source: String,
+    recipe: String,
 }
 
 FFIStub: struct {
-    path: String
-    symbol: String
+    path: String,
+    symbol: String,
 }
 
 ImportTodo: struct {
-    source_path: String
-    message: String
-    suggested_surface: String?
+    source_path: String,
+    message: String,
+    suggested_surface: String?,
 }
 
 // Where one imported package stands on the way to a native replacement.
 MigrationStatus: enum {
-    ForeignDependencyRetained(name: String)
-    AdapterWrapped(name: String)
-    FFIStubGenerated(name: String)
-    NativeReplacementCandidate(name: String)
-    CompatibilityProved(name: String)
-    NativeReplacementActive(name: String)
+    ForeignDependencyRetained(name: String),
+    AdapterWrapped(name: String),
+    FFIStubGenerated(name: String),
+    NativeReplacementCandidate(name: String),
+    CompatibilityProved(name: String),
+    NativeReplacementActive(name: String),
 }
 
 // A regenerated file would overwrite a user edit.
 #Error
 ImportConflict: enum {
-    UserEditedGeneratedLine(path: String)
+    UserEditedGeneratedLine(path: String),
 
     message: fn(self) -> String Never! {
         if self == {

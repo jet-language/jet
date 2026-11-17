@@ -21,35 +21,35 @@ use {
 
 // The source edits one project rename makes, one change per touched file.
 ProjectRenamePlan: struct {
-    changes: [ProjectChange]
+    changes: [ProjectChange],
 }
 
 // One project source with the semantic index of its own check.
 ProjectRenameSource: struct {
-    path: String
-    source_id: String
-    source: String
-    index: SemIndex
+    path: String,
+    source_id: String,
+    source: String,
+    index: SemIndex,
 }
 
 // Why a project rename can't be planned: the transaction error kind and its
 // message.
 #Error
 ProjectRenameError: struct {
-    kind: String
-    message: String
+    kind: String,
+    message: String,
 }
 
 // One rename edit site: the index of its source and the span it replaces.
 ProjectRenameSite: struct {
-    source: Int
-    span: Span
+    source: Int,
+    span: Span,
 }
 
 // A half-open byte range inside one source text.
 ByteRange: struct {
-    start: Int
-    end: Int
+    start: Int,
+    end: Int,
 }
 
 // The files a transaction request names, each with the revision it was drawn
@@ -70,28 +70,28 @@ required_project_touched_files: fn(request: String) -> [TouchedProjectFile] Err!
 // ---- Game selection field edits ----
 
 GameSelectionTarget: struct {
-    source_id: String
-    revision: String
-    authored_instance_id: String
-    source_span: Span
+    source_id: String,
+    revision: String,
+    authored_instance_id: String,
+    source_span: Span,
 }
 
 GameSelectionPatch: struct {
-    field: String
-    value: String
+    field: String,
+    value: String,
 }
 
 // One source file a game selection edits, read once.
 GameSelectionSource: struct {
-    rel: String
-    path: String
-    before: String
+    rel: String,
+    path: String,
+    before: String,
 }
 
 // One field edit, keyed by the source it lands in.
 GameSelectionEdit: struct {
-    rel: String
-    edit: TextEdit
+    rel: String,
+    edit: TextEdit,
 }
 
 apply_project_edit_game_selection: fn(checker: LSPChecker, ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {

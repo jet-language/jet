@@ -14,24 +14,24 @@ FOREIGN_BRIDGE_LOCAL_ARCHIVE_SUFFIXES: [String]{".a", ".so", ".dylib", ".dll", "
 // so a declaration, runtime, header, or generated worker cannot be mistaken
 // for another file merely because both have the same bytes.
 BridgeSource: struct {
-    role: String
-    path: String
+    role: String,
+    path: String,
 }
 
 // A local native archive candidate used by a binding or link record.
 // `bytes == None` is deliberate evidence that the candidate was absent or
 // unreadable when the identity was made; never a permission to fall back.
 ArchiveInput: struct {
-    library: String
-    path: String
-    bytes: [U8]?
+    library: String,
+    path: String,
+    bytes: [U8]?,
 }
 
 // Parsed artifact provenance. Repeated fields keep insertion order.
 ForeignProvenance: struct {
-    schema: String
-    identity: String
-    fields: [String:[String]]
+    schema: String,
+    identity: String,
+    fields: [String:[String]],
 
     // The first value recorded for a field.
     value: fn(self, name: String) -> String? Never! {
@@ -171,9 +171,9 @@ pkg_bridge_append_boundary_for_artifact: fn(text: &String, descriptor: BinderDes
 
 // The parsed schema, optional identity, and repeated fields of a sidecar.
 ForeignProvenanceText: struct {
-    schema: String
-    identity: String?
-    fields: [String:[String]]
+    schema: String,
+    identity: String?,
+    fields: [String:[String]],
 }
 
 pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText ForeignBridgeError! {
