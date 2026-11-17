@@ -3027,6 +3027,13 @@ the build with E1220, naming the dependency, the effect and the call path
 (D-AUTH-DEFAULT1). A grant line is one the user writes; `jet add` writes
 none. See
 [`Examples/Modules/Packages/GrantLine`](../../Examples/Modules/Packages/GrantLine/package.jet).
+An effect a dependency declares as its own root, a kind of no Prelude effect,
+is governed by these rows like a Prelude root, under the name the manifest
+gives it: `ledger.Ledger` for the `Ledger` effect of the dependency `ledger`.
+`allow: [IO, ledger.Ledger]` admits it, a `grants` line names it the same
+way, a `deny` row refuses it, and a kind of it is governed through it. A new
+package effect needs no edit to the compiler's policy code. A dependency
+effect that is a kind of a Prelude effect is governed through that effect.
 Code run straight from a URL or the registry
 is pinned by content hash and asks before its first run in a terminal; its
 own `allow` rows acknowledge nothing. A yes is kept with the pinned bytes, and

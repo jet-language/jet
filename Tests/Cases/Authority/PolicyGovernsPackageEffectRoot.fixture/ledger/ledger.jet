@@ -1,0 +1,14 @@
+// The package's own effect root, and a kind of it.
+Ledger: struct {
+    impl Effect {}
+}
+
+Post: struct {
+    impl Effect {
+        parent: Ledger,
+    }
+}
+
+record: fn(entry: String) -[Ledger]> Int { entry.len() }
+
+post: fn(entry: String) -[Post]> Int { entry.len() + 1 }

@@ -322,12 +322,41 @@ authority_effect_action: fn(right: String) -> String Never! {
     }
 }
 
-// The canonical spellings of `names`, dropping unknown ones.
+// The canonical spellings of `names`, dropping unknown ones; a package
+// effect root (authority_package_effect) keeps its written spelling.
 authority_parse_rights: fn(names: [String]) -> [String] Never! {
     out := [String]{}
     loop name in names {
+        if authority_package_effect(name) {
+            out.push(name.trim())
+            next
+        }
         parsed: authority_parse_right(name) ?? next
         out.push(parsed)
     }
     authority_holds(out)
+}
+
+// Whether `right` names a package effect root as a manifest writes one
+// (`ledger.Ledger`): a dependency's manifest name, then the PascalCase name of
+// an effect that dependency declares, with no case or scope. A first segment
+// that names a vocabulary root (`net.Connect`) keeps naming that root.
+authority_package_effect: fn(right: String) -> Bool Never! {
+    split: right.trim().cut_last(".") ?? return false
+    if split.before.contains(".") || authority_parse_root(split.before) != None -> return false
+    authority_identifier_from(split.before, 97, 122) && authority_identifier_from(split.after, 65, 90)
+}
+
+// Whether `text` is an ASCII identifier whose first byte lies in
+// `first_low...first_high` (`a`-`z` is 97...122, `A`-`Z` 65...90).
+authority_identifier_from: fn(text: String, first_low: Int, first_high: Int) -> Bool Never! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return false
+    loop index in 0..<raw.len() {
+        byte: Int{raw[index]}
+        if index == 0 && (byte < first_low || byte > first_high) -> return false
+        letter: (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90)
+        if !letter && (byte < 48 || byte > 57) && byte != 95 -> return false
+    }
+    true
 }

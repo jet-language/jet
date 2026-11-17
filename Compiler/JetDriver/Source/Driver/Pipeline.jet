@@ -147,12 +147,20 @@ use {
         SemaCompilerModuleSource,
         sema_inline_member_module,
         sema_inline_member_source_name,
+        SemaLibraryEffect,
+        SemaLibraryEffectName,
+        sema_library_effect_collect,
+        sema_library_effect_find,
+        sema_library_effect_resolve,
+        sema_library_effect_view,
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
         authority_expert_only,
         effect_scope_read_paths,
+        effect_value_base,
+        EffectRowEntry,
         body_fixed_timing,
         BuildSettingOverride,
         DeepChecks,
@@ -6326,7 +6334,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
         }
         if check_entry == .Val(budget_entry) && jet_driver_effect_budget_root(load) != None {
-            rows: jet_driver_package_effect_rows(load, checked_functions, budget_entry, jet_driver_effect_budget_name_spans(load, registration_graph))
+            rows: jet_driver_package_effect_rows(load, checked_functions, budget_entry, jet_driver_effect_budget_name_spans(load, registration_graph), jet_driver_package_effect_roots(load, registration_graph))
             if rows == .Val(found) {
                 budget := jet_driver_effect_budget_diagnostics(load, found)
                 if jet_driver_has_errors(budget) {
@@ -6415,6 +6423,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     job_rows := jet_driver_job_rows(registration_graph, load.entry_module_identity)
     command_record: sema_cli_command_record(registration_graph)
     budget_spans: jet_driver_effect_budget_name_spans(load, registration_graph)
+    budget_roots: jet_driver_package_effect_roots(load, registration_graph)
     // A user module only compile-time code uses is left out like an
     // unreached Core module, and a dependency package's top-level bodies are
     // lowered only when reached, as Core's are; under `dead_code: remove` on
@@ -6515,7 +6524,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     package_effects := [PackageEffects]{}
     if request.mode != JetDriverCompileMode.Test && request.mode != JetDriverCompileMode.Eval && entry_key == .Val(budget_entry) {
         jet_driver_trace_step_begin(request.trace_sink, "driver.result.budget")
-        rows: jet_driver_package_effect_rows(load, sema_functions, budget_entry, budget_spans)
+        rows: jet_driver_package_effect_rows(load, sema_functions, budget_entry, budget_spans, budget_roots)
         if rows == .Val(found) {
             budget := jet_driver_effect_budget_diagnostics(load, found)
             if kg.enabled -> jet_driver_keep_going_diagnostics(kg, "assemble", budget)
@@ -6789,6 +6798,84 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
     spans
 }
 
+// The package effect roots each function's own row names, by function key,
+// each spelled as a manifest names it: `{dependency}.{Effect}`. A package
+// effect root is an effect a dependency declares that is a kind of no
+// Prelude effect, and a kind of it names it too. No Prelude root covers it,
+// so the root package's `authority` rows govern it by that name, as they do
+// a Prelude root (jet_driver_effect_budget_diagnostics). A kind of a Prelude
+// effect stays governed through that effect, and the root package's own
+// effects are its own. Empty when the build has no dependency.
+jet_driver_package_effect_roots: fn(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> [String:[String]] Never! {
+    roots := [String:[String]]{}
+    names := [String:String]{}
+    if jet_driver_dependency_roots(load, names).len() == 0 -> return roots
+    // The effects the build's packages declare, each parent resolved.
+    built := (loop _ in graph.modules -> false)
+    effects := [SemaLibraryEffect]{}
+    loop (module_index, registered) in graph.modules {
+        if module_is_core(registered.module_identity) -> next
+        loop package in load.packages {
+            if package.identity == registered.package_identity -> built[module_index] = true
+        }
+        if built[module_index] {
+            sema_library_effect_collect(effects, registered.package_identity, module_index, registered.program.items)
+        }
+    }
+    if effects.len() == 0 -> return roots
+    states := (loop _ in effects -> 0)
+    loop index in 0..<effects.len() -> sema_library_effect_resolve(effects, graph, states, index)
+    loop (module_index, registered) in graph.modules {
+        if !built[module_index] -> next
+        view: sema_library_effect_view(effects, registered)
+        if view.len() == 0 -> next
+        loop function in registered.functions {
+            jet_driver_package_effect_root_row(roots, view, names, load.package_identity, symbol_table_key(graph.symbols, function.symbol.id), function.declaration.declared_effects)
+        }
+        loop nominal in registered.nominals {
+            loop method in nominal.methods {
+                jet_driver_package_effect_root_row(roots, view, names, load.package_identity, symbol_table_key(graph.symbols, method.symbol.id), method.declaration.declared_effects)
+            }
+        }
+    }
+    roots
+}
+
+// The package effect roots the effect row `row` names (`view` holds the
+// effect names its module may write), under the function key `key` of
+// `roots`. A dependency is named by `names`, by its package identity.
+jet_driver_package_effect_root_row: fn(roots: &[String:[String]], view: [SemaLibraryEffectName], names: [String:String], root_identity: String, key: String, row: [EffectRowEntry]?) Never! {
+    entries: row ?? return
+    found := [String]{}
+    loop entry in entries {
+        if entry.name.starts_with("!") || entry.name.starts_with("..") -> next
+        named: sema_library_effect_find(view, entry.name) ?? next
+        // A kind's ancestors end at its root: a package effect's token, or
+        // the Prelude effect it is a kind of.
+        last: named.ancestors.len() - 1
+        spelled: if {
+            last < 0 -> jet_driver_package_effect_spelling(named.token, names, root_identity)
+            named.ancestors[last].contains("/") -> jet_driver_package_effect_spelling(named.ancestors[last], names, root_identity)
+            else -> None
+        }
+        effect_name: spelled ?? next
+        if !found.contains(effect_name) -> found.push(effect_name)
+    }
+    if found.len() > 0 -> roots[key] = found
+}
+
+// How the root package's manifest names the package effect whose token is
+// `token` (`{package identity}/{Effect}`, then any case or value):
+// `{dependency}.{Effect}`; None for the root package's own effect or one no
+// dependency name reaches.
+jet_driver_package_effect_spelling: fn(token: String, names: [String:String], root_identity: String) -> String? Never! {
+    split: effect_value_base(token).cut_last("/") ?? return None
+    if split.before == root_identity -> return None
+    dependency: names.get(split.before) ?? return None
+    effect_name: split.after.split(".").to_list()[0]
+    Val("{dependency}.{effect_name}")
+}
+
 // Each package's inferred effect row for one entry's build
 // (pkg_compute_package_effects; `root` names the building package), with the
 // program view a budget diagnostic is located through
@@ -6815,7 +6902,7 @@ JetDriverPackageEffectRows: struct {
 // the package whose code reaches the effect. As for the application's
 // required effects (jet_driver_required_effects), an open-world call's
 // maximal row is a ceiling fact, not a reached effect.
-jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String:Span]) -> JetDriverPackageEffectRows? {
+jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String:Span], package_roots: [String:[String]]) -> JetDriverPackageEffectRows? {
     root: load.packages[jet_driver_entry_package_index(load) ?? return None]
     // Each dependency's name, by its source root and by its package identity.
     dep_names := [String:String]{}
@@ -6892,6 +6979,12 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         if cli[index] -> next
         loop effect_name in functions[index].effects.direct {
             if !local[index].contains(effect_name) -> local[index].push(effect_name.copy())
+        }
+        // A package effect root a function's row names (no Prelude root
+        // covers it, so `direct` doesn't show it).
+        own_roots: package_roots.get(functions[index].key) ?? [String]{}
+        loop effect_name in own_roots {
+            if !local[index].contains(effect_name) -> local[index].push(effect_name)
         }
         if functions[index].effects.call_edges.contains(EFFECT_PANIC_EDGE) && !local[index].contains(AUTHORITY_PANIC_ROOT) {
             local[index].push(AUTHORITY_PANIC_ROOT)
