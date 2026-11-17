@@ -20,49 +20,49 @@ GROWTH_KB: 8192
 // A struct in an enum's list payload (Field -> Ty -> [Field]).
 Field: struct {
     name: String,
-    ty: Ty
+    ty: Ty,
 }
 
 Ty: enum {
     Int,
     Named(name: String),
-    Tuple(fields: [Field])
+    Tuple(fields: [Field]),
 }
 
 // A struct reaching itself through an Option field.
 Node: struct {
     name: String,
-    next: Node?
+    next: Node?,
 }
 
 // A struct reaching itself through Map values.
 Tree: struct {
     name: String,
-    kids: [String:Tree]
+    kids: [String:Tree],
 }
 
 // A struct reaching itself through a tuple field and an enum.
 Pairing: struct {
     name: String,
-    pair: {label: String, link: Link}
+    pair: {label: String, link: Link},
 }
 
 Link: enum {
     End,
-    To(pairing: Pairing)
+    To(pairing: Pairing),
 }
 
 // A struct reaching itself through a struct field and a list: writes
 // through one copy's edge must not show in the others.
 Outer: struct {
     name: String,
-    inner: Inner
+    inner: Inner,
 }
 
 Inner: struct {
     n: Int,
     tag: String,
-    back: [Outer]
+    back: [Outer],
 }
 
 // An edge value written as a constant: the struct may borrow the constant's
@@ -73,28 +73,28 @@ BLANK: Inner{n: 3, tag: "blank", back: []}
 // Mutually recursive enums with a struct on the cycle (Left -> Middle -> Right -> Left).
 Left: enum {
     Leaf(n: String),
-    Wrap(middle: Middle)
+    Wrap(middle: Middle),
 }
 
 Middle: struct {
     name: String,
-    right: Right
+    right: Right,
 }
 
 Right: enum {
     Leaf(n: String),
-    Wrap(left: Left)
+    Wrap(left: Left),
 }
 
 // A struct whose only field is the recursive edge, also captured by a closure.
 CycleOnly: struct {
-    ty: Shape
+    ty: Shape,
 }
 
 Shape: enum {
     Int,
     Named(name: String),
-    Other(items: [CycleOnly])
+    Other(items: [CycleOnly]),
 }
 
 peak_kb: fn() -> Int {

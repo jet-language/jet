@@ -9,12 +9,12 @@ package: {
 }
 
 Context: struct {
-    id: Int
+    id: Int,
 }
 
 Sink: trait {
     finish: fn(&&self) -[]> Int,
-    peek: fn(self) -[]> Int
+    peek: fn(self) -[]> Int,
 }
 
 Worker: struct {
@@ -30,7 +30,7 @@ Worker: struct {
 
 Rack: struct {
     sinks: [Sink],
-    spare: Sink?
+    spare: Sink?,
 }
 
 make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
