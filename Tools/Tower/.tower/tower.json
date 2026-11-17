@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111975,
+    "rev": 111981,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83056,7 +83056,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -83064,16 +83064,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 met on p278 (ea15368aa5): trait Language replaces FFILanguage/ForeignLanguage; package_adds_root passes."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "`trait Language` is declared in Core and the c binder implements it; `FFILanguage` and `ForeignLanguage` are gone; E1002's reserved-root list is a trait lookup; and a test package adds a root without a compiler change (D-EXTEND-ARCH1=A). Proof: `git grep -nE 'FFILanguage|ForeignLanguage' -- Compiler Core Jetpack` prints nothing and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:01:06.699Z"
+          "evidence": "Landed in ea15368aa5 (dev, p278 batch compiler 0921df52d9). `git grep -nE \"FFILanguage|ForeignLanguage\" -- Compiler Core Jetpack` prints nothing, Core/Prelude/Prelude.jet declares `Language: trait`, and `jet test Compiler --profile cases --filter FFILanguage/package_adds_root` passes 1/1. The ui ffi_unknown_ rows pass 2/2.",
+          "at": "2026-11-17T22:04:14.298Z"
         }
       ],
       "refs": [],
@@ -83084,9 +83090,10 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:52.833Z",
-      "updated": "2026-11-17T01:43:07.885Z",
+      "updated": "2026-11-17T22:04:23.460Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-17T22:04:23.460Z"
     },
     {
       "id": "c0wv2wmp",
@@ -84226,7 +84233,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T21:21:35.427Z",
-      "updated": "2026-11-17T01:43:21.642Z",
+      "updated": "2026-11-17T22:10:18.876Z",
       "updatedBy": "Main"
     },
     {
@@ -85027,6 +85034,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T05:23:36.643Z"
+        },
+        {
+          "n": 10,
+          "text": "Sema's web-target refusal of an API the web host does not provide also catches calls through a bare import (use { app.[open_folder] } then open_folder(...)), not only qualified app.open_folder(...) calls. Found by IfHole on p279. Proof: a UI snapshot of the refusal for the bare-imported spelling on a web build.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T22:08:44.927Z"
         }
       ],
       "refs": [],
@@ -85038,9 +85054,9 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:34.688Z",
-      "updated": "2026-11-17T05:23:36.643Z",
+      "updated": "2026-11-17T22:08:44.927Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c017cddb",
@@ -96214,7 +96230,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-17T18:41:53.327Z",
+      "updated": "2026-11-17T22:10:20.341Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -105441,12 +105457,12 @@
         },
         {
           "n": 2,
-          "text": "After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom, and core-library.md documents it; no second upsert spelling exists.",
+          "text": "D-MAP-SLOT1=A is built: m[k, or: default] is a writable slot that does one hash lookup (compound assignment and &slot.method calls insert the default once), runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom (counts[w, or: 0] += 1), and core-library.md documents it; no second upsert spelling exists. Probe today: counts[w, or: 0] += 1 fails to parse with E0003 (gate-p277).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:07:39.209Z",
+          "at": "2026-11-17T21:54:33.208Z",
           "proof": {
             "profile": "cases",
             "filter": "CoreLib/map_upsert"
@@ -105461,7 +105477,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-17T21:54:29.759Z",
+      "updated": "2026-11-17T21:54:33.208Z",
       "updatedBy": "Main"
     },
     {
@@ -212207,6 +212223,423 @@
       "draft": true,
       "status": "open",
       "created": "2026-11-17T21:36:27.090Z"
+    },
+    {
+      "id": "D-FNVAL-COPY1",
+      "cardId": "c0zy9mhn",
+      "group": "language",
+      "title": "Copying a function value shares its captured environment",
+      "situation": "A function value is code kept in a name, sometimes with remembered data called captures. Today an explicit copy is refused, including a copy of a button holding a callback. An older test expects two copied callbacks to update one remembered list. This vote chooses sharing, copying the captures separately, or refusing copies; sharing is recommended, with ownership and concurrency checks preserved.",
+      "gist": "Should copying a function value share its remembered state, copy its captures, or stay refused?",
+      "lesson": "A callback can remember a list. Borrowing that callback shares the list during the call. Keeping another callback needs an explicit copy. Sharing a callback is not a snapshot, and reference counting alone does not prevent races or leaks.",
+      "explainer": "Beginners copy a callback when two buttons should run the same action. Experts make a new callback with explicit starting data when they need separate state. Calling the maker again restarts state; it does not snapshot the current callback.",
+      "story": "Mia puts one counted action in two menus. Copying her Button should keep one click history, not silently fork it. A background task must not race either menu.",
+      "inWild": "Swift closure aliases share an environment, but escaping and reference cycles still need care. Kotlin closures capture surrounding state; OCaml functions can share captured reference cells. Rust separates Fn, FnMut and FnOnce, derives Clone from captures, and checks Send and Sync separately. C++ std::function copies its target; value captures can separate while reference or shared-pointer captures still share. These are useful choices, not evidence that either copying policy is universally better.",
+      "detail": "All current-behavior receipts were independently run with gate-p277 on 2026-11-17. In new/probes, fnval-fc1 and fc3 reject copy() with E0211, including a read-only Int capture. fc2 and fc4 reject use after binding or aggregate transfer with E0121. fc9 rejects copying Button. fc5 prints 303 then 303 when a helper borrows and calls the callback twice. fc6 and fc10 print 101 after an explicit task transfer. fc7 prints 11 then 12 for a read-only callback used by both sides. None proves copied callbacks work today.\n\nfc8 compiles and prints 102 then 201 while a task and creator call the same mutating callback. The numbers do not prove a particular race schedule. The accepted concurrent accesses expose missing safety enforcement, already recorded on #6048 c5. Every option requires that repair; refusing explicit copies does not fix it.\n\nTests/Fixtures/shared_owner_topology.jet:70-77 contains the callback copy. The independent run stops at E0211 on line 72. Tests/Cases/RunRegressions/shared_owner_topology.out:10-14 records 102, 202, 302, 2, 1; these are oracle bytes, not current runtime output. Option A preserves their intended topology. Option B changes that oracle's meaning, so it requires an explicit owner-authorized oracle amendment, never routine re-blessing.\n\nRead-only Tower records confirm outcome A for D-COPY-WORD1, D-SHARED-CYCLE2, D-CONC-CROSS1, D-FNVAL-WRITE1, D-CALLSITE-MARK2 and D-MOVE-SIGIL1. D-COPY-WORD1 changes spelling, not copy semantics. A explicitly amends its independent-value wording for function handles. D-FNVAL-WRITE1 preserves S47's invocation lock; no option silently removes it. Compiler/JetSema/Source/Sema/Ownership/Crossings.jet:325-338 accepts certain moved function types without inspecting captures. Move alone is not proof of exclusive environment ownership after sharing.\n\nCompiler/JetSema/Source/Sema/SharedCycles.jet:80-98 treats function-bearing containers as hidden owning paths; :197-200 follows copies back to their source. The independent review/cycle-callback.jet is refused with E0221 for a callback capturing its destination cell. That is one exercised refusal, not proof of complete cycle coverage. D-SHARED-CYCLE2 requires alias and helper summaries, including later mutation. No safe-code leak or new automatic collector is authorized.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Share the environment",
+          "detail": "copy() creates another owned handle to the same code and captures. Calls through either handle advance the same counter. A plain binding still transfers ownership.",
+          "code": "// PROPOSED; make_counter is fnval-fc1's maker\ncounter: make_counter()\nalias: counter.copy()\nprint(counter(1)) // 101\nprint(alias(2))   // 202\nprint(counter(3)) // 303",
+          "technical": "Use the ordinary counted-owner mechanism for the environment, not a second closure-only ownership system. A copy retains the environment without copying captures. Environment creation may allocate; retain and release may require atomic operations. Capture-free or provably local values may avoid those costs. These are design requirements, not measured speed or allocation claims.\n\nThe final handle drops the captures, including each remaining cleanup duty, exactly once. A copy of a borrowing local closure must not extend any loan's lifetime. If it escapes, apply the ordinary escaping-capture checks. A callback that consumes a capture remains uncopyable; neither a function slot nor an aggregate may erase that fact.\n\nPreserve S47's one invocation guard per mutable environment, shared by all aliases. Read-only aliases do not need that guard. Same-environment reentry must get a registered borrow-conflict diagnostic or runtime fault, not a recursive mutable loan or silent self-deadlock. Separate environments and explicit arguments still need ordinary alias checks.\n\nInvocation guards can contend; callbacks that wait on tasks can form lock cycles. Prefer task-local makers or message passing for those workloads, and never promise deadlock freedom.\n\nUse D-CONC-CROSS1's single crossing proof for tasks, channels, workers and nested containers. A handle move is insufficient when another handle or captured loan remains. Require sendable owned captures, or synchronized shared state, and safe environment access. Unknown erased capture facts are refused, with a fix using explicit data or a checked maker. Do not infer safety from body writes alone: a read-only body can reach thread-confined state through another callback.\n\nInclude copied environments in the existing cycle graph at every store and later capture mutation. Follow nested callbacks, fields, collections, helper returns and erased values. Unknown reach is refused; weak back-links, IDs or existing explicit collection are the mitigations. Sharing a function adds edges, not permission to leak.\n\nStructs and containers use their ordinary component copy rules; function components share. Update diagnostics without claiming every function is copyable: consuming captures and escaping loans remain exceptions. No new user spelling or marker is added; the existing copy() syntax stays canonical under I7 and I8. This is an ownership feature, not a claimed performance surface."
+        },
+        {
+          "key": "B",
+          "name": "Copy each capture",
+          "detail": "Copying a function creates a new environment using each capture's existing copy rule. Mutable value captures separate; Shared and other reference-like captures keep their sharing.",
+          "code": "// PROPOSED; same maker and calls\ncounter: make_counter()\nalias: counter.copy()\nprint(counter(1)) // 101\nprint(alias(2))   // 102\nprint(counter(3)) // 203",
+          "technical": "Copy each capture using the ordinary copy law, with a generated operation for the hidden environment. Carry copy eligibility through fields, helper returns and exported summaries, just as A must retain consuming-capture and crossing facts. Erasure alone must not lose an otherwise proved capability. Do not require every closure to be copyable merely to form a function value.\n\nA copy is rejected when a capture cannot be copied, or its eligibility cannot be proved. The original callback remains usable by move or loan. Keep an uncopyable resource outside the callback, or put deliberately shared state behind an explicit owner. Export a checked capture-copy promise when a generic interface needs copying; unknown facts must not become unchecked runtime guesses. This strengthens the draft's source-visible-only option without a second copy spelling.\n\nA new environment costs storage and capture-copy work; lists may defer data copying until mutation. Shared and reference-like captures retain their own meaning, so independent environments do not imply independent effects. Use owned snapshot data for isolation. The topology witness would require 103, 103, 203, 3, 1 at its five affected lines, rather than A's oracle. Those are proposed results derived from its arithmetic, not executed output.\n\nCopying must read a stable source environment under its existing invocation guard. New environments get separate guards, while shared captures keep ordinary synchronization and cycle checks. Copying cannot rescue a borrowed or thread-confined capture. Prefer explicit state when repeated environment copies would be expensive.\n\nRust's selective Clone closure capability is a serious precedent, not a reason to require all captures to be Copy. A published copy-eligibility contract adds interface work, but A also needs capture facts to prevent copying consuming callbacks. This ballot selects the semantics of copies, not an excuse to discard either option's facts at erasure."
+        },
+        {
+          "key": "C",
+          "name": "Refuse function copies",
+          "detail": "Keep callbacks and aggregates containing them uncopyable. Share explicit state between newly made callbacks when two menus need one action.",
+          "code": "State: struct { seen: [Int] }\nmake_action: fn(state: &&Shared<State>) -> fn(Int) -> Int { return fn(value: Int) {\n    state.seen.push(value)\n    state.seen.len() * 100 + value\n} }\nrun: fn() {\n    state: Shared{State{seen: [Int]{}}}\n    first: make_action(state.copy())\n    second: make_action(state.copy())\n    print(first(1))\n    print(second(2))\n    print(first(3))\n}",
+          "technical": "Retain E0211 and repair E0121's misleading copy fix for function values. The two-menu workaround needs a factory accepting explicit state, or one dispatcher both menus reach. It may require source changes across APIs; calling an unavailable maker is not a universal remedy. The complete review/explicit-state.jet factory prints 101, 202, 303 today without copying a function.\n\nThis policy avoids adding explicit function aliases and their retain traffic. It does not prevent implicit task aliases or borrowed invocation races; #6048 c5 and S47 still apply. The fixed topology oracle cannot pass unchanged. Selecting C explicitly authorizes replacing that copy-based scenario with a separate explicit-state witness; never silently weaken its assertions."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Closure aliases share one environment. Escaping is a separate lifetime permission, and reference cycles need explicit care.",
+          "source": "https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/LanguageGuide/Closures.md"
+        },
+        {
+          "lang": "Rust",
+          "note": "FnOnce consumes self on invocation; FnMut and Fn borrow differently. Clone copies captures under trait rules, while Send and Sync separately govern threads.",
+          "source": "https://doc.rust-lang.org/reference/types/closure.html#other-traits"
+        },
+        {
+          "lang": "C++",
+          "note": "std::function copies its target, not every referenced object. This supports independent value state or deliberate sharing through reference-like captures.",
+          "source": "https://en.cppreference.com/w/cpp/utility/functional/function/function"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Functions are first-class values and lambdas can use outer variables. Captured mutable state is not an isolation guarantee.",
+          "source": "https://kotlinlang.org/docs/lambdas.html#closures"
+        },
+        {
+          "lang": "OCaml",
+          "note": "Bindings name values; functions close over their environment. Mutable reference cells make shared state explicit without cloning a closure's environment.",
+          "source": "https://ocaml.org/docs/values-and-functions"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Sharing fits one action kept by two menus and preserves the topology oracle. It does not replace lifetime, invocation, crossing or cycle checks.",
+        "gains": [
+          "Callback copies preserve one action's state."
+        ],
+        "losses": [
+          {
+            "loss": "A copy is not a snapshot.",
+            "mitigation": "Use a maker with explicit snapshot data; simply calling it again restarts state."
+          },
+          {
+            "loss": "Aliases retain captures and may contend during calls.",
+            "mitigation": "Drop unused handles promptly; use task-local makers or message passing for concurrent work."
+          },
+          {
+            "loss": "Hidden captures can prevent proving safe sharing.",
+            "mitigation": "Carry checked summaries; otherwise reject the crossing or store and show explicit-state or weak-link fixes."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Separate value state is useful, but copying resource captures can fail and reference-like captures still share. Shared action identity better fits the two-menu job."
+          },
+          {
+            "key": "C",
+            "reason": "It avoids explicit aliases, but two-menu state sharing needs a factory rewrite and existing task safety defects remain."
+          }
+        ],
+        "tradeoff": "Share action identity, not snapshots; keep all safety checks and expose counting and contention costs."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview2. A holds within stated safety limits after repairing the competing option, concurrency contract, cycle claims and snapshot advice."
+      },
+      "checkInstructions": "Implementation acceptance: run the unchanged topology oracle at O0, O1 and O2. Exercise copies through callbacks, containers and returned values. Cover loans, consuming captures, cleanup after final release, panic paths and same-environment reentry. Repair #6048 c5 for implicit and explicit aliases. Test nested callbacks, hidden thread-confined state and unknown capture summaries at every crossing. Test cycles through copied callbacks and later mutation. Register diagnostics and UI snapshots; preserve S47's invocation guard. Do not claim performance without matched measurements.",
+      "surface": {
+        "gist": "Should copying a function value share its remembered state, copy its captures, or stay refused?",
+        "lesson": "A callback can remember a list. A shared copy advances that same list; a capture copy makes a new environment. Neither counting references nor copying captures alone proves thread safety.",
+        "trio": {
+          "current": {
+            "note": "Explicit copies fail, even though the move error suggests making one.",
+            "code": "counter: make_counter()\nalias: counter.copy()\n// E0211: function value cannot be copied"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "The published counter example aliases one closure. Escaping and safe concurrent access remain separate concerns.",
+            "code": "// Swift book: Closures Are Reference Types\nlet alsoIncrementByTen = incrementByTen\nalsoIncrementByTen() // published result: 50\nincrementByTen()     // published result: 60"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Share the environment",
+            "gist": "Two owned handles call one action with one remembered state.",
+            "gains": [
+              "Both menus keep one click history.",
+              "The topology oracle keeps its meaning."
+            ],
+            "losses": [
+              "A copy is not a snapshot.",
+              "Counting, longer capture lifetimes and guarded calls have costs."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\ncounter: make_counter()\nalias: counter.copy()\nprint(counter(1)) // 101\nprint(alias(2))   // 202\nprint(counter(3)) // 303"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Copy each capture",
+            "gist": "Copy value state; preserve sharing for reference-like captures.",
+            "gains": [
+              "Value-state counters can advance separately."
+            ],
+            "losses": [
+              "Noncopyable captures prevent callback copies.",
+              "New environments cost storage; shared captures still interact."
+            ],
+            "proposed": {
+              "code": "// PROPOSED; same maker and calls\ncounter: make_counter()\nalias: counter.copy()\nprint(counter(1)) // 101\nprint(alias(2))   // 102\nprint(counter(3)) // 203"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Refuse function copies",
+            "gist": "Create callbacks separately over explicit shared state.",
+            "gains": [
+              "No explicit function aliases or closure-copy retain traffic."
+            ],
+            "losses": [
+              "Callback structs stay uncopyable; factories may need rewriting.",
+              "Existing concurrent-call defects still require repair."
+            ],
+            "proposed": {
+              "code": "State: struct { seen: [Int] }\nmake_action: fn(state: &&Shared<State>) -> fn(Int) -> Int { return fn(value: Int) {\n    state.seen.push(value)\n    state.seen.len() * 100 + value\n} }\nrun: fn() {\n    state: Shared{State{seen: [Int]{}}}\n    first: make_action(state.copy())\n    second: make_action(state.copy())\n    print(first(1))\n    print(second(2))\n    print(first(3))\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Sharing fits one action kept by two menus. Preserve lifetime, invocation, crossing and cycle checks; sharing alone is not safety.",
+          "gains": [
+            "Callback copies preserve one action's state."
+          ],
+          "losses": [
+            {
+              "loss": "A copy is not a snapshot.",
+              "mitigation": "Use a maker with explicit snapshot data; simply calling it again restarts state."
+            },
+            {
+              "loss": "Aliases retain captures and may contend during calls.",
+              "mitigation": "Drop unused handles promptly; use task-local makers or message passing for concurrent work."
+            },
+            {
+              "loss": "Hidden captures can prevent proving safe sharing.",
+              "mitigation": "Carry checked summaries; otherwise reject and show explicit-state or weak-link fixes."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Useful for separate value state, but copying resource captures can fail and reference-like captures still share."
+            },
+            {
+              "key": "C",
+              "reason": "Avoids explicit aliases, but requires factory rewrites and does not fix existing task races."
+            }
+          ],
+          "tradeoff": "Keep action identity; pay for safe sharing, not hidden snapshots."
+        }
+      },
+      "designAway": [
+        "No second copy spelling or closure-only ownership counter.",
+        "No copy-count-based thread-safety shortcut; preserve S47 and the common crossing proof.",
+        "No claim that the cycle checker is complete because one refusal works.",
+        "No consuming callback becomes copyable through a function slot.",
+        "No snapshot claim for restarting a maker; use explicit state data."
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReview2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T22:10:18.876Z"
+    },
+    {
+      "id": "D-CALLBACK-ONCE1",
+      "cardId": "c08zzpo5",
+      "group": "language",
+      "title": "A checked #Once parameter permits one consuming callback call",
+      "situation": "A helper may call its callback once, yet Jet rejects a callback that moves its remembered log into that call. Moving out is safe only if nobody can call the same callback again. Today callers can rewrite the operation or pass the log as a separate argument. This vote recommends a checked, nonescaping #Once parameter contract, while comparing a stored consuming callable fairly.",
+      "gist": "Should a checked #Once parameter let a callback move a capture, or should one-shot callbacks be storable values?",
+      "lesson": "At most once means zero or one call, not exactly one. It does not mean nonescaping or safe across tasks. The recommended contract explicitly adds a synchronous, nonescaping limit; ownership transfer still uses &&.",
+      "explainer": "The helper's signature tells callers which moving callbacks are accepted. Its body must prove the promise, including forwarding through other helpers. Uncalled callbacks still drop owned captures, but must not silently discard a required consume duty.",
+      "story": "Ravi moves a buffered Log into keep after finding an optional code. The gate probe uses a struct containing strings, not an open file. Copying that buffer changes ownership and may cost work; it cannot model duplicating an uncopyable file.",
+      "inWild": "Rust Option::map accepts FnOnce and can consume captures; thread::spawn separately requires Send and a sufficient lifetime. Kotlin callsInPlace separates invocation count from its during-the-call restriction. Swift escaping is a lifetime permission, not a one-call promise. C++ move_only_function is move-only, but calling its rvalue-qualified operator does not consume or empty the wrapper. OCaml closures can share references but ordinary function types do not impose an affine call contract.",
+      "detail": "Independent gate-p277 runs on 2026-11-17 reproduce new/probes/once-on1 and once-on2b: moving Log from the passed lambda is E0121, even when the helper body calls once. once-on3b prints 8 by passing Log as an explicit owned argument. once-on5 prints 8 then 1 using a copy and retaining the original buffer. once-on6 prints 8 using explicit optional branching. These are same-job alternatives, with different source or copying costs.\n\nreview/once-local.jet prints 8 when the moving callback stays local and is called directly. This is not evidence that stored or returned one-shot callbacks work. review/marker-once.jet fails E0927: Once is not a registered applied rule. All proposed snippets require compiler changes; only C's existing explicit-state version runs today.\n\nDocs/Spec/spec.md:1685-1695 already gives several callback positions a run-once fact. Compiler/JetSema/Source/Sema/Ownership/Checks.jet:129-158 holds once-call metadata. Generalize that fact rather than adding a helper-name allowlist. D-MOVE-SIGIL1's && still means ownership transfer, not invocation count. D-CALLSITE-MARK2 keeps calls plain and contracts in signatures.\n\nCompiler/JetFoundation/Data/Syntax/Markers.jet:4-6 names Compiler/Prelude/Markers.jet as the marker source. Register Once there, with the Parameter site and no arguments; do not add a second name registry to Syntax. Compiler/JetParser/Source/Parser/Items.jet:876-887 currently handles one prefix marker with special Root handling. Registering a name alone will not preserve a new parameter contract. Parser, AST, type slots, sema, exported signatures, formatter and tooling must retain it end to end.\n\nThe existing SingleUse marker is registered at Type in Compiler/Prelude/Markers.jet:388-391. Compiler/JetSema/Source/Sema/Ownership/SingleUse.jet:1-15 defines a required consume duty, not an optional one-call allowance. Do not overload it or treat an at-most-once callback as fulfilling that duty. A zero-call path is legal only when ordinary capture destruction is legal.\n\nThe function-value task race on #6048 c5 exists independently of invocation counts. A callback that runs once can still alias thread-confined or concurrently accessed captured state. All choices preserve D-CONC-CROSS1's common crossing proof, S47's invocation guard where required, D-SHARED-CYCLE2's ownership graph, and I1 leak and race safety.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Checked synchronous #Once parameter",
+          "detail": "Add #Once to a taken function parameter. The callee may call or forward it at most once, during this call only. A moving lambda can fill that parameter without a wrapper.",
+          "code": "// PROPOSED; Log and keep are once-on1's definitions\nfinish: fn(code: Int, #Once done: &&fn(Int) -> Int) -> Int {\n    done(code)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) }))\n}",
+          "technical": "Require #Once only on && function parameters. && transfers ownership using the existing rule; #Once adds the call-count and no-escape contract. The mark is not inherited by unrelated parameters or scope. Calls keep ordinary syntax, without a new move or invocation operator.\n\nCheck the contract with the existing ownership flow: one call consumes that callback's invocation permission before entering user code. Mutually exclusive branches may each call once. Loops are refused unless existing control-flow reasoning proves at most one reachable call. A second call, alias copy, retained loan, plain-parameter forwarding, return or persistent store is refused. Moving to another checked #Once parameter transfers the same permission. Merely renaming the local must not reset its count.\n\nNonescaping means no task handoff, even by move, and no return or stored nested closure. A nested local callback may use the permission only when the same checker proves it nonescaping and called at most once. An uncalled path destroys the callback and ordinary captures. Captures with mandatory SingleUse duties need a verified discharge on every path; otherwise reject construction. Error returns, panic unwinding and cancellation must release remaining ordinary captures once. No retry recreates a consumed permission.\n\nRecord #Once in every function signature slot, including unnamed parameters in function types, generic constraints, methods, exported metadata and function-valued fields. Proposed type spelling is fn(Int, #Once &&fn(Int) -> Int) -> Int. It is the same Parameter rule, not a second function-type marker. The parser must retain registered prefix markers, reject duplicates, validate sites and preserve Root behavior.\n\nA function implementing the stronger #Once promise may be viewed through an otherwise identical signature without it; callers then lose permission to supply moving lambdas. The reverse conversion is rejected. Preserve ownership modes in both cases. Inferred function values retain the contract. A consuming callback itself cannot become an ordinary repeatable function value, or be copied through an aggregate.\n\nReplace existing synchronous run-once helper exceptions with the same contract and checker in one cutover. Built-in task bodies use the same invocation-permission fact, but keep their separate crossing and lifetime obligations; they do not become #Once parameter escapes. Audit optional/result helpers, chaining and forwarding implementations.\n\nAdopting && is a public ownership change: migrate callers retaining repeatable callbacks to an explicit copy where supported, or keep state external. Do not claim annotations alone preserve every caller.\n\nThis option cannot represent a stored one-shot completion. Explicit payload plus a plain function preserves some cases, but changes interfaces and can expose heterogeneous captured types. A dedicated typed payload or message protocol is the best mitigation here, not an equivalent universal replacement. Choose B instead if arbitrary stored closures are required by this decision. No extra allocation or runtime test is mandated for A; that is a design constraint, not a measured claim."
+        },
+        {
+          "key": "B",
+          "name": "One owned callable value",
+          "detail": "Instead of #Once parameters, provide a noncopyable Once<F> callable whose call method takes self. It supports passing, returning and storing one-shot callbacks, including deferred completions.",
+          "code": "// PROPOSED; Log and keep are once-on1's definitions\nfinish: fn(code: Int, done: &&Once<fn(Int) -> Int>) -> Int {\n    done.call(code)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, Once{fn(code) { keep(log.move(), code) }}))\n}",
+          "technical": "This is a strong owned-callable alternative, not just a runtime flag on a repeatable function. The compiler checks construction against one consuming invocation. Once is noncopyable through all containers; its ordinary call method takes &&self, using existing move tracking. The inner function spelling supplies the signature, never an extractable repeatable function. Named functions and repeatable lambdas may also be wrapped. No new call-site grammar is needed.\n\nConstruction requires compiler support: wrapping today's repeatable fn cannot legalize moving captures. Use one contextual consuming-call check and the existing ownership facts, rather than a second closure checker. Construct the wrapper explicitly with ordinary typed-value syntax; diagnose a repeated use at its second consuming call.\n\nA stored owner can be called, forwarded, returned or cancelled by ordinary destruction. Moving the wrapper invalidates its source; a later second use is an ownership error. Keep cleanup and mandatory consume-duty checks on zero-call paths. Tasks additionally require safe captures and lifetimes, never merely a wrapper. Cycles remain checked through its capture graph.\n\nThis avoids A's synchronous-only restriction and is close to Rust's boxed FnOnce use case. A generic inline form need not allocate; an erased heterogeneous stored form may need environment storage. Do not assert inevitable allocation, virtual dispatch or runtime call flags. There is real API and spelling cost: a wrapper, construction rules and call method replace direct fn parameters and f(x). Keep wrapping explicit and show the direct call-method repair in diagnostics.\n\nSelecting B retires A's proposed #Once marker rather than shipping both one-shot mechanisms. Existing immediate run-once positions use the same consuming-call fact internally. Compared with A, the generic callable representation and erased construction contract are broader compiler and library commitments, not evidence of worse generated code."
+        },
+        {
+          "key": "C",
+          "name": "Keep explicit state or branching",
+          "detail": "Keep the current function contract. Pass Log as a taken argument to a reusable callback, or branch on the optional before moving Log.",
+          "code": "// WORKS TODAY; Log and keep are once-on1's definitions\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code, l: &&Log) { keep(l, code) }, log))\n}",
+          "technical": "once-on3b runs this explicit-state version and prints 8. once-on6 performs optional branching instead and prints 8. Both avoid copying and keep today's move checking. They are strong solutions when the caller owns the helper or branching stays small.\n\nThe cost is less composable callback APIs, explicit payload types and wider signatures. Heterogeneous stored callbacks and library-owned helpers can require substantial restructuring. Encapsulate a typed payload or move the branch beside its owner. Copying a Log buffer is another observed workaround, not a remedy for noncopyable resources. Existing special run-once positions remain non-general; choosing C must not market that limitation as a new safety guarantee."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Option::map accepts FnOnce. Its consuming invocation supports moved captures without requiring Clone. thread::spawn additionally requires Send and a sufficient lifetime.",
+          "source": "https://doc.rust-lang.org/std/option/enum.Option.html#method.map"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "callsInPlace promises invocation during the owning call; AT_MOST_ONCE separately bounds count. It is not Jet's ownership-transfer proof.",
+          "source": "https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.contracts/-contract-builder/calls-in-place.html"
+        },
+        {
+          "lang": "Swift",
+          "note": "An escaping parameter may be called after return. That permission does not restrict invocation count or prove safe captured-state access.",
+          "source": "https://raw.githubusercontent.com/swiftlang/swift-book/main/TSPL.docc/LanguageGuide/Closures.md"
+        },
+        {
+          "lang": "C++",
+          "note": "move_only_function<R() &&> invokes its target as an rvalue. The specified operator does not empty the wrapper or statically prevent another invocation.",
+          "source": "https://en.cppreference.com/w/cpp/utility/functional/move_only_function/operator()"
+        },
+        {
+          "lang": "OCaml",
+          "note": "First-class functions and shared reference cells solve ordinary callbacks. They do not provide Rust-style consuming invocation in ordinary function types.",
+          "source": "https://ocaml.org/docs/mutability-imperative-control-flow"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A directly generalizes checked synchronous helpers without a wrapper. Its narrower contract is explicit; stored arbitrary one-shot closures would justify B instead.",
+        "gains": [
+          "Moving callbacks compose through checked synchronous helpers."
+        ],
+        "losses": [
+          {
+            "loss": "Arbitrary stored or asynchronous one-shot callbacks remain unavailable.",
+            "mitigation": "Use typed payloads and messages, accepting interface changes; choose B if arbitrary stored closures are required."
+          },
+          {
+            "loss": "Adding owned parameters can break callers retaining callbacks.",
+            "mitigation": "Migrate all helpers and callers together; copy only repeatable callbacks where supported, or keep state external."
+          },
+          {
+            "loss": "A mark and its no-escape rule need explanation.",
+            "mitigation": "Show the rejected escape or second-call path and a concrete explicit-state repair."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B is stronger for deferred completions, but commits to a new callable representation for this synchronous-helper problem."
+          },
+          {
+            "key": "C",
+            "reason": "It already works without copying, but propagates payload types and branching through callback APIs."
+          }
+        ],
+        "tradeoff": "Prefer a narrow synchronous contract, openly foregoing arbitrary stored one-shot closures in exchange for direct callback syntax."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview2. A holds only with explicit no-escape and ownership contracts; B remains the stronger choice for arbitrary deferred callbacks, not a costly straw man."
+      },
+      "checkInstructions": "Implementation acceptance: exercise zero and one calls, disjoint branches, loops, forwarding, renaming, nested closures, two calls and reentry. Refuse escape, task handoff, copying and plain-type erasure of consuming callbacks. Check inferred and exported function types, fields and conversion direction. Test SingleUse captures on zero-call paths, errors and unwinding.\n\nRegister Once at Parameter through the one registry, including unnamed function-type slots; test duplicate and wrong-site markers and formatter roundtrips. Migrate every synchronous run-once helper and caller. Keep task-body invocation facts and crossing proofs unified. Run UI and runtime cases on all tiers and O0, O1 and O2; repair #6048 c5 independently.",
+      "surface": {
+        "gist": "Should #Once unlock synchronous moving callbacks, or should one-shot callbacks be storable values?",
+        "lesson": "At most once permits zero calls. A also forbids escape; that is an explicit extra promise, not a consequence of call count. Ownership still uses &&, and tasks still need safe captures.",
+        "trio": {
+          "current": {
+            "note": "Moving the captured Log is rejected even when finish calls once. Log here is a buffer, not a file.",
+            "code": "print(finish(7, fn(code) {\n    keep(log.move(), code)\n})) // E0121"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Published Option::map signature: FnOnce consumes its callable. Thread handoff separately requires Send and sufficient lifetimes.",
+            "code": "// Rust standard library signature excerpt\npub fn map<U, F>(self, f: F) -> Option<U>\nwhere\n    F: FnOnce(T) -> U"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Checked #Once parameter",
+            "gist": "An owned callback may run at most once during this call.",
+            "gains": [
+              "Moving lambdas keep direct callback syntax."
+            ],
+            "losses": [
+              "Stored completions and task handoff remain unsupported.",
+              "Adding owned parameters can break retaining callers."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nfinish: fn(code: Int, #Once done: &&fn(Int) -> Int) -> Int {\n    done(code)\n}\nprint(finish(7, fn(code) { keep(log.move(), code) }))"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Owned callable value",
+            "gist": "A noncopyable wrapper consumes itself when called and can be stored.",
+            "gains": [
+              "Supports deferred completions, returns and cancellation."
+            ],
+            "losses": [
+              "Adds a callable representation and wrapper syntax."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nfinish: fn(code: Int, done: &&Once<fn(Int) -> Int>) -> Int {\n    done.call(code)\n}\nprint(finish(7, Once{fn(code) { keep(log.move(), code) }}))"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Explicit state or branching",
+            "gist": "Keep current rules; pass Log separately or branch before moving it.",
+            "gains": [
+              "Works today without copying or new syntax."
+            ],
+            "losses": [
+              "Payload types and branches spread through callback APIs."
+            ],
+            "proposed": {
+              "code": "// WORKS TODAY\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}\nprint(finish(7, fn(code, l: &&Log) { keep(l, code) }, log))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A directly fixes synchronous helpers. B is stronger for stored arbitrary closures; choose it if that broader requirement matters here.",
+          "gains": [
+            "Moving callbacks compose through checked helpers."
+          ],
+          "losses": [
+            {
+              "loss": "Arbitrary stored one-shot callbacks remain unavailable.",
+              "mitigation": "Use typed payloads and messages, accepting interface changes; choose B if arbitrary stored closures are required."
+            },
+            {
+              "loss": "Owned parameters can break callers retaining callbacks.",
+              "mitigation": "Migrate helpers and callers together; copy only repeatable callbacks where supported, or keep state external."
+            },
+            {
+              "loss": "The mark and no-escape rule need explanation.",
+              "mitigation": "Show the rejected escape or second-call path and an explicit-state repair."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Stronger for deferred work, but introduces a new callable representation."
+            },
+            {
+              "key": "C",
+              "reason": "Works now, but propagates explicit payload types and branching."
+            }
+          ],
+          "tradeoff": "Choose direct synchronous callbacks, not arbitrary stored one-shot closures."
+        }
+      },
+      "designAway": [
+        "One checked invocation-permission fact, not a helper-name allowlist.",
+        "No assertion that at-most-once implies nonescape, sendability or mandatory consumption.",
+        "No move-only C++ wrapper described as statically call-once.",
+        "One marker registry and one signature contract, retained through function values.",
+        "No simultaneous parameter and wrapper mechanisms for the same one-shot meaning."
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "BallotReview2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T22:10:20.341Z"
     }
   ],
   "questions": [
@@ -215554,6 +215987,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T22:10:20.341Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CALLBACK-ONCE1",
+      "note": "A checked #Once parameter permits one consuming callback call"
+    },
+    {
+      "at": "2026-11-17T22:10:18.876Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FNVAL-COPY1",
+      "note": "Copying a function value shares its captured environment"
+    },
+    {
+      "at": "2026-11-17T22:08:44.927Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0tjjr66",
+      "note": "9 criteria, soft limit 6: a gap in this card's web refusal"
+    },
+    {
+      "at": "2026-11-17T22:08:44.927Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tjjr66",
+      "note": "#10 Sema's web-target refusal of an API the web host does not pr"
+    },
+    {
+      "at": "2026-11-17T22:04:23.461Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pf4ki0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T22:04:14.298Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pf4ki0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T21:54:33.208Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w8b7vb",
+      "note": "#2: name the ratified spelling D-MAP-SLOT1 instead of a future ballot; was: After ratification, the chosen method does one hash lookup, runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom, and core-library"
+    },
     {
       "at": "2026-11-17T21:54:29.759Z",
       "by": "Main",
@@ -219018,720 +219500,6 @@
       "action": "card.update",
       "ref": "c04wn01h",
       "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:50.121Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itin1p",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:44.989Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zvan7c",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:41.062Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kkogun",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:37.315Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05nyh21",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:31.264Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qqeaqb",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:26.379Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ioa1t9",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:20.579Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0povfh0",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:16.306Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0abvxai",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:12.615Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tzvhij",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:07.610Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0daqpmn",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:51:02.923Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wqva91",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:57.147Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gz9snm",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:52.692Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00c8a58",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:48.823Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0huq0g8",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:45.199Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y0053a",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:41.279Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0c7739a",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:37.546Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kwu568",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:33.654Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02z1dax",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:28.557Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qtfr3u",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:22.042Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05nw9a0",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:18.485Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ndv80x",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:15.943Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07qvm0k",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:13.160Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sbl400",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:10.738Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dbs1yh",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:08.478Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sttk1s",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:06.046Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rw1zt7",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:04.418Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0d4kf8m",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:02.861Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vtg2ov",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:50:00.994Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ozqnbt",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:59.398Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09hk13a",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:57.698Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06lmp17",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:56.038Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rn7rnu",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:54.518Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yhga63",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:52.981Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hicd7a",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:51.462Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zlqnvv",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:49.936Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yljhgc",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:48.395Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jk9aer",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:46.829Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04plfgh",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:45.265Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qetodj",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:43.696Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0brdtmy",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:42.203Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xbfhbt",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:40.713Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itl587",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:39.170Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bd75d8",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:37.562Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wowe4m",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:36.019Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hzex6k",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:34.470Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01q17ls",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:32.906Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mbiq9g",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:31.356Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06tzcrf",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:29.817Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s1vode",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:28.241Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rl2anf",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:26.699Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0aha21c",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:25.130Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0t5gnhs",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:23.579Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i4ehbt",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:21.710Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00gioxt",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:20.173Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jt78qz",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:18.630Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gxq09x",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:17.079Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yuouhx",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:15.571Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c038h2n6",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:14.045Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m0b2xt",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:12.530Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0t3qh8f",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:10.986Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ujz0kr",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:09.412Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqtmrp",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:08.247Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jjbpij",
-      "note": "#32 No Core constant declaration or reference uses a leading `@`"
-    },
-    {
-      "at": "2026-11-17T01:49:07.323Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c087ot9q",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:05.754Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c065br2r",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:04.206Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r8ohhq",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:02.632Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0v54mn1",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:49:01.055Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pdkpef",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:59.516Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00zrgpr",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:57.967Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zii3oj",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:56.434Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jjbpij",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:54.918Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0t02esm",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:53.389Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ejfsdq",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:51.862Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zutf08",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:50.320Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kgt885",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:48.888Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T01:48:48.888Z"
-    },
-    {
-      "at": "2026-11-17T01:48:48.088Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05ghhdo",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:46.564Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qpy1t3",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:44.684Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0blttm0",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:43.162Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w8b7vb",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:41.641Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fyhb2p",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:40.155Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:39.016Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00bn0zc",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:37.490Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:35.813Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m0czk2",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:34.334Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vqsfl8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:33.401Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sf9ixl",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:31.919Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x9nq8j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:30.772Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rwl15m",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:29.244Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:27.747Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06r93ai",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:26.284Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jd9jl3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:25.371Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09qojqz",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:23.691Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o8f1p4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:21.273Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uxxmpm",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:19.765Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c077ihdp",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:18.842Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gbe4aj",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:17.254Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:16.102Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01gyy9b",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:14.564Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03ai7mm",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:13.175Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ho9o8j",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:11.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l0ygs4",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
