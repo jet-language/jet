@@ -1,0 +1,71 @@
+// Crewboard in a Linux window whose board screen reads a live binding: the
+// panel's color comes from the board's settings. Once the window has drawn
+// the board, a background write changes the color and invalidates the
+// binding, with no input, and the window draws the board again in the new
+// color. Closing the window ends the app.
+use {
+    app
+    ui: core.ui
+    files: core.files
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Settings: struct {
+    red: Bool,
+}
+
+SETTINGS: Shared{Settings{red: false}}
+
+panel_red: fn() -[DB.Read]> Bool BoardError! {
+    held: SETTINGS.guard_read()
+    Ok(held.value.red)
+}
+
+// A background write: the board's panel turns red.
+paint_red: fn() {
+    held := SETTINGS.guard_edit()
+    held.value.red = true
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    red: if app.state(app.live(panel_red)) == {
+        .Loaded(red) -> red
+        .Failed(_) | .Idle | .Loading -> false
+    }
+    color: if red -> Color{r: 204, g: 51, b: 51, a: 255} else -> Color{r: 51, g: 102, b: 255, a: 255}
+    ui.box([ui.node_color("", 200.0, 30.0, color)])
+}
+
+run: fn() {
+    // The compositor says it has seen the first frame by writing
+    // first.frame. A later run starts without the one an earlier run wrote.
+    if files.exists("first.frame") {
+        files.remove("first.frame") ?? panic("remove first.frame: {err}")
+    }
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100)
+    if !graph.launch() {
+        return
+    }
+    loop _ in 0..<6000 {
+        if app.notices().len() > 0 || files.exists("first.frame") -> break
+        tasks.sleep(10)
+    }
+    if app.notices().len() == 0 {
+        paint_red()
+        app.invalidate(panel_red)
+        // The compositor closes the window once it sees the new color,
+        // which ends the app; it waits up to a minute for that.
+        loop _ in 0..<6000 -> tasks.sleep(10)
+    }
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}

@@ -415,6 +415,13 @@ Connection: struct {
     priv frame_keys: [Int],
     priv events: [UIEvent],
     priv failure: UIError?,
+    // A pipe whose write end another task writes to wake the frame loop
+    // from its wait for the compositor (`waker`): the next frame comes at
+    // once, with no events, so the program can draw new data. `woken` says
+    // a wake arrived since the last frame.
+    priv wake_read: sys.Fd,
+    priv wake_write: sys.Fd,
+    priv woken: Bool,
 
     width: fn(self) -> Int { self.width }
 
@@ -424,6 +431,10 @@ Connection: struct {
     scale: fn(self) -> Float { Float{self.scale120} / 120.0 }
 
     failure: fn(self) -> UIError? { self.failure }
+
+    // A descriptor whose write wakes the frame loop: a duplicate of the
+    // write end of the window's wake pipe, None when it can't be made.
+    waker: fn(self) -[Env]> sys.Fd? { Val(self.wake_write.duplicate() ?? return None) }
 
     // The current frame's predicted presentation time since the first
     // frame's, and the step from the frame before, in nanoseconds.
@@ -486,6 +497,9 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
     }
     path: if display.starts_with("/") -> display else -> "{runtime}/{display}"
     stream: net.unix_connect(path) ?? return Err(UIError.Connect("{path}: {err}"))
+    wake := sys.open_pipe() ?? return Err(UIError.Protocol("opening the window's wake pipe failed: {err}"))
+    wake_write: wake.pop() ?? return Err(UIError.Protocol("opening the window's wake pipe gave no write end"))
+    wake_read: wake.pop() ?? return Err(UIError.Protocol("opening the window's wake pipe gave no read end"))
     // Replaced by the first `allocate`; a page until then.
     memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
     chrome_memory: sys.shared_memory(4096) ?? return Err(UIError.Protocol("allocating window buffers failed: {err}"))
@@ -652,6 +666,9 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         frame_keys: [Int]{},
         events: [UIEvent]{},
         failure: None,
+        wake_read: wake_read,
+        wake_write: wake_write,
+        woken: false,
     }
     c.registry = new_id(c)
     request(c, DISPLAY, 1, words([Int]{c.registry}))
@@ -739,8 +756,9 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
 // `time_ns` is that vblank, predicted from presentation feedback, so
 // motion computed from it keeps its speed even when a frame is late.
 //
-// A frame that presents nothing lets the window sleep until input
-// arrives. A failure ends the stream with `.Close`; `failure()` says why.
+// A frame that presents nothing lets the window sleep until input or a
+// wake (`waker`) arrives. A failure ends the stream with `.Close`;
+// `failure()` says why.
 next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
     // Uncapped, nothing waits for the callback: read what has arrived.
     if c.uncapped && c.mapped -> receive(c, 0)
@@ -803,17 +821,18 @@ next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
     }
     if c.failure == None && !has_close(c.events) && c.drops.len() > 0 -> take_drops(c)
     c.frame_start = rt.clock_mono_ns()
+    c.woken = false
     events: c.events.copy()
     c.events.clear()
     events
 }
 
 // Whether input a person waits to see has arrived (a key, text, a
-// composition, a button or a drop) and a buffer is free to show it in;
-// uncapped, a free buffer alone is enough.
+// composition, a button or a drop), or a wake (`waker`), and a buffer is
+// free to show it in; uncapped, a free buffer alone is enough.
 urgent: fn(c: Connection) -> Bool {
     if !c.mapped || free_buffer(c) < 0 -> return false
-    if c.uncapped || c.drops.len() > 0 -> return true
+    if c.uncapped || c.woken || c.drops.len() > 0 -> return true
     loop event in c.events {
         if event == {
             .KeyDown(_) -> return true
@@ -1153,17 +1172,23 @@ flush: fn(c: &Connection) -[Net, Time]> {
 // Waits up to `timeout_ns` (negative: until something arrives) for the
 // compositor on this OS thread, then reads and handles what arrived. A held
 // key's next repeat ends the wait early, and so does the next look at the
-// settings portal while it is followed.
+// settings portal while it is followed, and a wake (`waker`), which the
+// next frame answers.
 receive: fn(c: &Connection, timeout_ns: Int) -[Env, Net, Time]> {
     if c.failure != None {
         return
     }
     wait_ns: portal_wait(c, repeat_wait(c, timeout_ns))
-    ready: net.unix_wait(c.stream, wait_ns) ?? {
+    ready: net.unix_wait_wake(c.stream, c.wake_read, wait_ns) ?? {
         fail(c, UIError.Protocol("waiting for the compositor failed: {err}"))
         return
     }
-    if ready {
+    if (ready & 2) != 0 {
+        // Every wake so far is one: the pipe is emptied.
+        _: c.wake_read.read(4096, 0) ?? [U8]{}
+        c.woken = true
+    }
+    if (ready & 1) != 0 {
         message: net.unix_receive(c.stream, RECEIVE_MAX) ?? {
             fail(c, UIError.Protocol("reading from the compositor failed: {err}"))
             return
