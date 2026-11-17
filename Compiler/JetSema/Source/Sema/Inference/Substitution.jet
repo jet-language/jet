@@ -99,12 +99,45 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
         .Union(members) -> {
             normalized: loop member in members -> sema_inference_substitute_type_inner(member, bindings, seen, chain)
+            if sema_inference_union_binds_member(members, bindings, chain) {
+                return sema_inference_failure_union(normalized)
+            }
             Type.Union{members: normalized}
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), dimension: dimension.copy()}
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
+}
+
+// Whether a member of a union is a type parameter the bindings bind. Only a
+// failure union names one (`(ShopError | E)!`): a value union holds closed
+// types alone (E0363).
+sema_inference_union_binds_member: fn(members: [Type], bindings: [SemaInferenceBinding], chain: Bool) -[]> Bool {
+    loop member in members {
+        if member == .Named(_) && sema_inference_type_changes(member, bindings, chain) {
+            return true
+        }
+    }
+    false
+}
+
+// A failure union once its type parameters are bound, read as the failure it
+// now names: a bound union's members join it, a member twice is one, and a
+// `Never` member, a callback that can't fail, leaves it. `(ShopError | E)!`
+// at `E = Never` is `ShopError!`, at `E = ShopError | KeyError` it is
+// `(KeyError | ShopError)!`, and a union every member of which is `Never` is
+// `Never`.
+sema_inference_failure_union: fn(members: [Type]) -[]> Type {
+    flat := [Type]{}
+    loop member in members -> sema_failure_union_flatten(member, flat)
+    index := flat.len()
+    loop index > 0 {
+        index -= 1
+        if flat[index] == (Type.Named{name: "Never"}) -> _ := flat.remove(index, .Slot)
+    }
+    if flat.len() == 0 -> return Type.Named{name: "Never"}
+    sema_failure_union_canonical(flat)
 }
 
 // The length of `[T#N]` under the bindings: a `<N: Int>` number

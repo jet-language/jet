@@ -218,14 +218,17 @@ read_keyword_rows: fn(syntax_dir: String) -[FS]> [KeywordRow] KeywordRowsError! 
     keyword_rows(mapping, parts.join("\n"), tokens, tags)
 }
 
+// The value that tells `rows` apart from byte `offset` on, its lines at
+// `indent`.
 branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     if rows.len() == 1 {
         row: rows[0]
+        if offset == row.bytes.len() -> return "{row.tag}"
         checks := [String]{}
         loop index in offset..<row.bytes.len() {
             checks.push("byte_at(source, start + {index}) == {row.bytes[index]}")
         }
-        return "{indent}if {checks.join(" && ")} -> {row.tag} else -> K_IDENT // Syntax::{row.constant}\n"
+        return "if {checks.join(" && ")} -> {row.tag} else -> K_IDENT"
     }
     order := [Int]{}
     groups := [Int:[KeywordRow]]{}
@@ -237,17 +240,19 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
         groups[byte] = group
     }
     order.sort()
-    out := "{indent}if byte_at(source, start + {offset}) == {{\n"
+    out := "if byte_at(source, start + {offset}) == {{\n"
     loop byte in order {
         group: groups.get(byte) ?? [KeywordRow]{}
-        out = "{out}{indent}    {byte} -> {{\n"
-        out = if {
-            offset + 1 == group[0].bytes.len() -> "{out}{indent}        {group[0].tag} // Syntax::{group[0].constant}\n"
-            else -> "{out}{branches(group, offset + 1, "{indent}        ")}"
-        }
-        out = "{out}{indent}    }}\n"
+        out = "{out}{arm(group, "{byte}", offset + 1, "{indent}    ")}"
     }
-    "{out}{indent}    else -> K_IDENT\n{indent}}}\n"
+    "{out}{indent}    else -> K_IDENT\n{indent}}}"
+}
+
+// The arm `key -> value` for `rows`; an arm that settles one keyword names
+// its Syntax constant on the line above, where `jet fmt` keeps a comment.
+arm: fn(rows: [KeywordRow], key: String, offset: Int, indent: String) -> String Never! {
+    note: if rows.len() == 1 -> "{indent}// Syntax::{rows[0].constant}\n" else -> ""
+    "{note}{indent}{key} -> {branches(rows, offset, indent)}\n"
 }
 
 // The table's spellings as one generated list: the active rows or the
@@ -275,7 +280,7 @@ render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
     out := "{SPANS_HEADER}word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {{\n    kind: if end - start == {{\n"
     loop length in order {
         group: lengths.get(length) ?? [KeywordRow]{}
-        out = "{out}        {length} -> {{\n{branches(group, 0, "            ")}        }}\n"
+        out = "{out}{arm(group, "{length}", 0, "        ")}"
     }
     words: "{out}        else -> K_IDENT\n    }}\n    // Only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}}\n"
     active: spelling_list("LEXER_KEYWORD_SPELLINGS", rows, retired: false)
@@ -331,7 +336,7 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
         assert_eq(generated.split("// Syntax::{row.constant}\n").to_list().len() - 1, 1)
         assert(generated.contains(row.tag))
     }
-    assert(generated.contains("if byte_at(source, start + 0) == 102 && byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT // Syntax::KW_FN"))
+    assert(generated.contains("        // Syntax::KW_FN\n        2 -> if byte_at(source, start + 0) == 102 && byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT\n"))
     assert(generated.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n    \"for\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n}}\n"))
     retired_spans: render_keyword_spans(keyword_rows(mapping.replace("\"K_FOR\", retired: false", "\"K_FOR\", retired: true"), syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags) ?? panic("the retired table did not parse: {err.message}"))
     assert(retired_spans.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n    \"for\",\n}}\n"))

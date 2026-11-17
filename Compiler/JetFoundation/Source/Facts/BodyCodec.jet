@@ -2901,11 +2901,15 @@ body_codec_put_nodekind: fn(out: &BodyCodecOut, value: NodeKind) Never! {
             body_codec_put_type(out, p0)
             body_codec_put_type(out, p1)
         }
+        .TypePath(p0) -> {
+            body_codec_put_tag(out, 99)
+            body_codec_put_type(out, p0)
+        }
     }
 }
 
 body_codec_get_nodekind: fn(bytes: [U8], input: &BodyCodecIn) -> NodeKind Never! {
-    position: body_codec_get_tag(bytes, input, 99, 6)
+    position: body_codec_get_tag(bytes, input, 100, 6)
     if position == {
         0 -> {
             f0: body_codec_get_int(bytes, input)
@@ -3418,6 +3422,10 @@ body_codec_get_nodekind: fn(bytes: [U8], input: &BodyCodecIn) -> NodeKind Never!
             f0: body_codec_get_type(bytes, input)
             f1: body_codec_get_type(bytes, input)
             NodeKind.TypeTest{subject: f0, target: f1}
+        }
+        99 -> {
+            f0: body_codec_get_type(bytes, input)
+            NodeKind.TypePath{ty: f0}
         }
         else -> NodeKind.Unit
     }

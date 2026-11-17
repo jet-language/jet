@@ -388,6 +388,7 @@ NodeKind: enum {
     FnValue(kind: BodyFnValueKind),
     Never(reason: String, line: Int),
     TypeTest(subject: Type, target: Type),
+    TypePath(ty: Type),
 }
 
 // `T.name` for a trait constant over a type parameter: the build reads
@@ -1390,7 +1391,7 @@ body_each_node_kind_child: fn(tree: BodyTree, value: NodeKind, visit: fn(Int) -[
         }
         .SelectWait(f0, _) -> { visit(f0) }
         .FnValue(f0) -> { body_each_fn_value_kind_child(tree, f0, visit) }
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
 

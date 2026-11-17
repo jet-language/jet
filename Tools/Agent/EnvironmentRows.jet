@@ -244,20 +244,24 @@ foundation_constant: fn(row: EnvironmentRow) -> String Never! {
     "{name}: \"{text}\"\n"
 }
 
-// The runtime's accessor for `row`: its name, and the text it yields.
+// The runtime's accessor for `row`: its name, and the text it yields, on the
+// head's line when that fits the 100 columns `jet fmt` keeps a line within.
 runtime_accessor: fn(row: EnvironmentRow) -> String Never! {
     text: row.name.removesuffix("*")
     name: if text != row.name -> "env_prefix_{text.removesuffix("_").lower()}" else -> "env_name_{text.lower()}"
+    line: "{name}: fn() -> I64 {{ rt_static_text(\"{text}\") }}"
+    if line.chars().len() <= 100 -> return "{line}\n"
     "{name}: fn() -> I64 {{\n    rt_static_text(\"{text}\")\n}}\n"
 }
 
-// A constant file for `registry` under `header`: one constant per row, in order.
+// A constant file for `registry` under `header`: one constant per row, in
+// order, a blank line apart.
 render_constants: fn(registry: String, header: String) -> String EnvironmentRowsError! {
     sections: read_sections(registry) ?? return Err(err)
     rows: read_rows(registry, sections) ?? return Err(err)
-    out := "{header}\n"
-    loop row in rows -> out = "{out}{foundation_constant(row)}"
-    Ok(out)
+    constants := [String]{}
+    loop row in rows -> constants.push(foundation_constant(row))
+    Ok("{header}\n{constants.join("\n")}")
 }
 
 // The kit's constant file: the constants, then KIT_CONTROL_VARIABLES from `controls`.
@@ -379,8 +383,8 @@ MINIMAL_CONTROLS: "// controls\nJET_CLI_CONTROLS: #run {{ [JetCLIControlSpec]{{\
 #Test("the runtime file spells each exact row's name and each family's prefix through one accessor") {
     rendered: render_runtime(MINIMAL_REGISTRY) ?? panic(err.message)
     assert(rendered.starts_with(RUNTIME_HEADER), rendered)
-    assert(rendered.contains("\nenv_name_jet_a: fn() -> I64 {{\n    rt_static_text(\"JET_A\")\n}}\n"), rendered)
-    assert(rendered.ends_with("\nenv_prefix_jet_b: fn() -> I64 {{\n    rt_static_text(\"JET_B_\")\n}}\n"), rendered)
+    assert(rendered.contains("\nenv_name_jet_a: fn() -> I64 {{ rt_static_text(\"JET_A\") }}\n"), rendered)
+    assert(rendered.ends_with("\nenv_prefix_jet_b: fn() -> I64 {{ rt_static_text(\"JET_B_\") }}\n"), rendered)
 }
 
 #Test("a registry or page the tables cannot come from is refused") {

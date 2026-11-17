@@ -375,11 +375,11 @@ render_rows: fn() -[FS]> String PreludeRowsError! {
         text: literal(out, constant.ty, constant.value, true, constant.name, constant.name) ?? return Err(err)
         lines := [String]{"{constant.name}: {text}"}
         loop line in compiler_take_rows<String>(out.nodes) -> lines.push(line)
-        blocks.push(lines.join("\n"))
+        blocks.push(lines.join("\n\n"))
     }
     names := loop (name, position) in out.index if out.shapes[position].used -> "{name}"
     names.sort()
-    Ok("{HEADER}\nuse {{\n    jet_foundation.[{names.join(", ")}]\n}}\n\n{blocks.join("\n\n")}\n")
+    Ok("{HEADER}\nuse jet_foundation.[{names.join(", ")}]\n\n{blocks.join("\n\n")}\n")
 }
 
 prelude_rows_main: fn(args: [String]) -[FS]> String PreludeRowsError! {

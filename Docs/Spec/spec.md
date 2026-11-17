@@ -1736,6 +1736,15 @@ named error domain. The supported forms are:
 - `T (E1 | E2)!` — an explicit error union; mark the success type optional for
   `T? (E1 | E2)!`. (D-UNIONTYPE1=A)
 
+A failure union may name one of the function's own type parameters beside the
+errors the function owns: `total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!)
+-> Int (ShopError | E)!` fails with its own `ShopError` or with whatever
+`weigh` fails with. Each call reads the union at its binding of `E`: a
+callback that can't fail binds `Never`, which leaves `ShopError!`; a member
+named twice is one, and a bound union's members join it, so
+`E = ShopError | KeyError` gives `(ShopError | KeyError)!`. Every other member
+must still be an error domain (E2417). (D-CALLBACK-ERR1=A)
+
 The explicit `!` must name an error domain; ordinary failure leaves the error
 contract implicit. The entry function `run: fn()` has the default fallible
 `Result<(), Err>` carrier, so it may propagate a standard-library failure
@@ -3802,8 +3811,12 @@ static type of a name or field path, read without evaluating it. Two `Type`
 values are equal exactly when they name one type, generic arguments included:
 `Box<Int>` and `Box<String>` are different keys. A builtin type's name is one
 as a declared type's is: `counts[Int] = 1` keys a map by `Int`, and
-`type_of(n) == Int` holds for an `Int` binding. A `Type` displays its path,
-each declared type qualified by its module. Only the compiler builds one.
+`type_of(n) == Int` holds for an `Int` binding. Inside a generic body a type
+parameter is one too: `Type{V}`, or `V` where a `Type` is expected, names the
+type each instance fills `V` with, and is equal to that type's written
+`Type{…}`; `Type{Box<V>}` is `Type{Box<Int>}` at `V = Int`. A `Type` displays
+its path, each declared type qualified by its module. Only the compiler builds
+one.
 
 Anywhere else a type is not a value: binding, passing or printing a type, such
 as `t: Rock` or `print(Rock)`, reports **E0636**. Build a value of the type,

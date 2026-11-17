@@ -32,10 +32,10 @@ INPUTS: [String]{
     "CompositionExclusions.txt",
     "EastAsianWidth.txt",
     "DerivedNormalizationProps.txt",
-    "emoji/emoji-data.txt",
-    "auxiliary/GraphemeBreakProperty.txt",
-    "auxiliary/WordBreakProperty.txt",
-    "auxiliary/SentenceBreakProperty.txt",
+    "Emoji/emoji-data.txt",
+    "Auxiliary/GraphemeBreakProperty.txt",
+    "Auxiliary/WordBreakProperty.txt",
+    "Auxiliary/SentenceBreakProperty.txt",
     "DerivedCoreProperties.txt",
     "PropList.txt",
 }
@@ -308,7 +308,7 @@ with_tags: fn(spans: [Span], tags: [Int]) -> [Span] {
 // --- inputs -------------------------------------------------------------------
 
 pinned_digest: fn(sums: String, name: String) -> String TableError! {
-    pinned: "ucd/{name}"
+    pinned: "Ucd/{name}"
     loop raw in sums.split("\n") {
         fields: raw.partition("  ")
         if fields.sep != "" && fields.tail.trim() == pinned -> return Ok(fields.head.trim().copy())
@@ -465,13 +465,13 @@ read_ucd: fn() -[FS]> Ucd TableError! {
         class: if width == "A" -> 1 else -> (if width == "W" || width == "F" -> 2 else -> 0)
         ucd.east_asian_width.push(Span{a: row.a, b: row.b, label: class})
     }
-    emoji: prop_rows(texts.get("emoji/emoji-data.txt") ?? "")
+    emoji: prop_rows(texts.get("Emoji/emoji-data.txt") ?? "")
     ucd.extended_pictographic = spans_where(emoji, 0, "Extended_Pictographic")
     ucd.emoji_presentation = spans_where(emoji, 0, "Emoji_Presentation")
     ucd.emoji = spans_where(emoji, 0, "Emoji")
-    ucd.grapheme = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/GraphemeBreakProperty.txt") ?? ""), 0, GRAPHEME_TAGS))
-    ucd.word = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/WordBreakProperty.txt") ?? ""), 0, WORD_TAGS))
-    ucd.sentence = merge_tagged(tagged_rows(prop_rows(texts.get("auxiliary/SentenceBreakProperty.txt") ?? ""), 0, SENTENCE_TAGS))
+    ucd.grapheme = merge_tagged(tagged_rows(prop_rows(texts.get("Auxiliary/GraphemeBreakProperty.txt") ?? ""), 0, GRAPHEME_TAGS))
+    ucd.word = merge_tagged(tagged_rows(prop_rows(texts.get("Auxiliary/WordBreakProperty.txt") ?? ""), 0, WORD_TAGS))
+    ucd.sentence = merge_tagged(tagged_rows(prop_rows(texts.get("Auxiliary/SentenceBreakProperty.txt") ?? ""), 0, SENTENCE_TAGS))
     core: prop_rows(texts.get("DerivedCoreProperties.txt") ?? "")
     incb := [PropRow]{}
     loop row in core {
@@ -574,8 +574,10 @@ table_text: fn(leaves: [Leaf], key_digits: Int, value_digits: Int) -> String Tab
     Ok(String.from_bytes_lossy(out))
 }
 
-// The lookup line answering a scalar below 128 from the dense ASCII block of
-// `values` (one per scalar), its value followed by `test`.
+// The lookup lines answering a scalar below 128 from the dense ASCII block of
+// `values` (one per scalar), its value followed by `test`. The block's 128
+// digits never fit the `if` line in `jet fmt`'s 100 columns, so the return
+// has a line of its own, as `jet fmt` writes it.
 ascii_line: fn(values: [Int], test: String) -> String TableError! {
     high := 0
     loop value in values {
@@ -584,7 +586,7 @@ ascii_line: fn(values: [Int], test: String) -> String TableError! {
     digits: digits_for(high)
     out := [U8]{}
     loop value in values -> table_digits(out, value, digits)
-    Ok("    if (cp < I64{{{ASCII_SCALARS}}}) {{ return unicode_table_dense(rt_static_text(\"{String.from_bytes_lossy(out)}\"), cp, I64{{{digits}}}){test} }}\n")
+    Ok("    if (cp < I64{{{ASCII_SCALARS}}}) {{\n        return unicode_table_dense(rt_static_text(\"{String.from_bytes_lossy(out)}\"), cp, I64{{{digits}}}){test}\n    }}\n")
 }
 
 // The value of the leaf holding `key`, or `missing`.
@@ -1012,7 +1014,9 @@ string_kernel: fn(assets: [Asset]) -[FS]> String TableError! {
         }
         if declared -> lines.push("    text_{item.unit}: core.text.runtime.assets.{item.unit}")
     }
-    Ok([String]{opened.head, STRING_BEGIN, "\n", lines.join("\n"), "\n    ", STRING_END, closed.tail}.join(""))
+    // The block closes the `use` it opens in; `jet fmt` sets the END marker
+    // after that closer.
+    Ok([String]{opened.head, STRING_BEGIN, "\n", lines.join("\n"), "\n}}\n\n", STRING_END, closed.tail}.join(""))
 }
 
 generated: fn() -[FS]> [Output] TableError! {

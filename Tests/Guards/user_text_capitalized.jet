@@ -1,36 +1,49 @@
-// Text the CLI prints starts with a capital: a readout line, a report
-// heading, a label and a help line. Labels and headings are Title Case and
-// prose is sentence case. A line that opens with a code span, an
-// interpolation, a number, a path, a flag or an identifier (a word with `_`,
-// `-` or `.`, or the program's own name) stays as written, and so do machine
-// formats.
+// Text people read starts with a capital: a CLI readout line, a report
+// heading, a label, a help line, a diagnostic's texts and an app's labels.
+// Labels and headings are Title Case and prose is sentence case. A line that
+// opens with a code span, an interpolation, a number, a path, a flag or an
+// identifier (a word with `_`, `-`, `.` or `/`, or the program's own name)
+// stays as written, and so do machine formats.
 //
-// The census reads the Jet sources of the CLI: the commands, the driver's
-// verb readouts, the package manager's CLI and the command registry's help.
-// Component tests (a `Tests` folder), `#Test` blocks and build output are
-// left out. It reads three kinds of string literal:
-// - a literal that ends a line (holds `\n`) is printed text, and each line
-//   in it is read;
-// - a literal given straight to a `print` or `eprint` call is a printed
-//   line, and each line in it is read;
-// - a literal given to a `help:`, `summary:`, `label:` or `title:` field is a
-//   help line or a label, and its first line is read.
+// The census reads three areas (UTC_AREAS): the Jet sources of the CLI, the
+// diagnostic registry and the Core.UI sources. Component tests (a `Tests`
+// folder), `#Test` blocks and build output are left out. It reads these
+// string literals:
+// - in the CLI, a literal that ends a line (holds `\n`) is printed text, and
+//   each line in it is read;
+// - in the CLI, a literal given straight to a `print` or `eprint` call is a
+//   printed line, and each line in it is read;
+// - a literal given to one of the area's fields (a help line, a label, a
+//   heading or a diagnostic's meaning, what, why, fix and next step) is read
+//   by its first line.
 // A line fails when it opens with a lowercase label (`word:` or `two words:`),
 // or with lowercase prose (a word and a space, or a lone word) that starts a
 // paragraph rather than continuing the line before it. A line continues the
 // one before when that line ends in a lowercase letter, `,`, `;`, `(`, `-`
-// or a backtick. A diagnostic's what, why and fix are not read here: the
-// renderer starts each of their lines with a capital.
+// or a backtick.
 //
 // The files below keep lowercase lines, each for its reason, and the count
 // pins how many.
 use utc_files: core.files
 
-UTC_CLI_ROOTS: [String]{
-    "Compiler/JetCLI/Source",
-    "Compiler/JetDriver/Source",
-    "Jetpack/CLI/Source",
-    "Compiler/JetFoundation/Source/Registry/CLICommands.jet",
+// One census: the sources under `roots`, the fields whose text is read, and
+// whether printed text (a literal that ends a line, or one given to `print`)
+// is read too.
+UtcArea: struct {
+    roots: [String],
+    fields: [String],
+    printed: Bool,
+}
+
+UTC_AREAS: [UtcArea]{
+    // The CLI: the commands, the driver's verb readouts, the package
+    // manager's CLI and the command registry's help.
+    UtcArea{roots: [String]{"Compiler/JetCLI/Source", "Compiler/JetDriver/Source", "Jetpack/CLI/Source", "Compiler/JetFoundation/Source/Registry/CLICommands.jet"}, fields: [String]{"help: ", "summary: ", "label: ", "title: "}, printed: true},
+    // The diagnostic registry: each diagnostic's meaning, heading (its
+    // what), why, fix and next step, as `jet explain` and a report show them.
+    UtcArea{roots: [String]{"Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"}, fields: [String]{"meaning: ", "what: ", "why: ", "fix: ", "next: "}, printed: false},
+    // Core.UI: the labels, titles and notices an app shows.
+    UtcArea{roots: [String]{"Core/UI", "Core/App"}, fields: [String]{"label: ", "title: ", "text: ", "placeholder: ", "hint: "}, printed: false},
 }
 
 UTC_SKIPPED: [String]{"Tests", ".jet"}
@@ -38,9 +51,6 @@ UTC_SKIPPED: [String]{"Tests", ".jet"}
 // The program names: identifiers, written lowercase where a line opens with
 // them.
 UTC_NAMES: [String]{"jet", "jetpack"}
-
-// The fields whose text is a help line or a label.
-UTC_LABEL_FIELDS: [String]{"help: ", "summary: ", "label: ", "title: "}
 
 UserTextRow: struct {
     path: String,
@@ -217,9 +227,9 @@ utc_literal_flags: fn(lines: [String], whole: Bool) -> [String] Never! {
     flagged
 }
 
-// The lines that open lowercase in the literals of one source line. A `//`
-// outside a string ends the code of the line.
-utc_line_flags: fn(line: String) -> [String] Never! {
+// The lines that open lowercase in the literals of one source line, read as
+// `area` reads them. A `//` outside a string ends the code of the line.
+utc_line_flags: fn(line: String, area: UtcArea) -> [String] Never! {
     bytes: line.bytes()
     flagged := [String]{}
     at := 0
@@ -234,12 +244,12 @@ utc_line_flags: fn(line: String) -> [String] Never! {
         literal: utc_literal(bytes, at + 1)
         at = literal.end + 1
         labeled := false
-        loop field in UTC_LABEL_FIELDS {
+        loop field in area.fields {
             if before.ends_with(field) -> labeled = true
         }
-        printed: before.ends_with("print(")
-        if literal.lines.len() > 1 || labeled || printed {
-            loop text in utc_literal_flags(literal.lines, literal.lines.len() > 1 || printed) {
+        printed: area.printed && before.ends_with("print(")
+        if (area.printed && literal.lines.len() > 1) || labeled || printed {
+            loop text in utc_literal_flags(literal.lines, (area.printed && literal.lines.len() > 1) || printed) {
                 flagged.push(text)
             }
         }
@@ -247,8 +257,8 @@ utc_line_flags: fn(line: String) -> [String] Never! {
     flagged
 }
 
-// Each line `source` prints lowercase, as `path:line: text`.
-utc_source_flags: fn(path: String, source: String) -> [String] Never! {
+// Each line of `source` that opens lowercase, as `path:line: text`.
+utc_source_flags: fn(path: String, source: String, area: UtcArea) -> [String] Never! {
     flagged := [String]{}
     testing := false
     loop (index, line) in source.lines() {
@@ -262,7 +272,7 @@ utc_source_flags: fn(path: String, source: String) -> [String] Never! {
             next
         }
         if word.starts_with("//") -> next
-        loop text in utc_line_flags(line) -> flagged.push("{path}:{index + 1}: {text}")
+        loop text in utc_line_flags(line, area) -> flagged.push("{path}:{index + 1}: {text}")
     }
     flagged
 }
@@ -305,22 +315,26 @@ utc_findings: fn(found: [String:[String]], allowed_rows: [UserTextRow]) -> [Stri
     findings
 }
 
-// Every lowercase line of the sources under `roots`, by file.
-utc_census: fn(roots: [String]) -> [String:[String]] {
-    sources := [String]{}
-    loop root in roots -> utc_walk(root, sources)
-    assert(sources.len() > 100, "the census found only {sources.len()} Jet sources")
+// Every lowercase line of the sources of each area, by file.
+utc_census: fn(areas: [UtcArea]) -> [String:[String]] {
     found := [String:[String]]{}
-    loop path in sources {
-        flagged: utc_source_flags(path, utc_files.read(path) ?? panic("read {path}: {err}"))
-        if flagged.len() > 0 -> found[path] = flagged
+    read := 0
+    loop area in areas {
+        sources := [String]{}
+        loop root in area.roots -> utc_walk(root, sources)
+        read += sources.len()
+        loop path in sources {
+            flagged: utc_source_flags(path, utc_files.read(path) ?? panic("read {path}: {err}"), area)
+            if flagged.len() > 0 -> found[path] = flagged
+        }
     }
+    assert(read > 100, "the census found only {read} Jet sources")
     found
 }
 
-#Test("user_text_capitalized: the CLI prints every readout, heading, label and help line with a capital") {
+#Test("user_text_capitalized: the CLI, the diagnostic registry and Core.UI show every readout, heading, label and help line with a capital") {
     guards_enter_root()
-    assert_eq(utc_findings(utc_census(UTC_CLI_ROOTS), UTC_ALLOWED).join("\n"), "")
+    assert_eq(utc_findings(utc_census(UTC_AREAS), UTC_ALLOWED).join("\n"), "")
 }
 
 #Test("user_text_capitalized: the census reads printed lines and labels, not identifiers or continued prose") {
@@ -339,10 +353,13 @@ utc_census: fn(roots: [String]) -> [String:[String]] {
         "}}",
         "// \"comment: x\\n\"",
     }.join("\n")
-    flagged: utc_source_flags("a.jet", source)
+    flagged: utc_source_flags("a.jet", source, UTC_AREAS[0])
     assert_eq(flagged.join("|"), "a.jet:1: usage: jet x|a.jet:2: {{}}ready now|a.jet:4: shows the plan|a.jet:5: {{}}two words: z|a.jet:6: lone|a.jet:7: {{}}  indented: x|a.jet:8: no file here")
     found := [String:[String]]{}
     found["a.jet"] = flagged
     rows: [UserTextRow]{UserTextRow{path: "b.jet", count: 1, reason: "test"}}
     assert_eq(utc_findings(found, rows).len(), 2)
+    // Outside the CLI only the area's fields are read.
+    registry: "    what: \"struct errors\",\n    why: \"`code` first\",\n    note: \"left alone\\nsecond line\\n\",\n    meaning: \"Protocol line\","
+    assert_eq(utc_source_flags("r.jet", registry, UTC_AREAS[1]).join("|"), "r.jet:1: struct errors")
 }

@@ -579,7 +579,7 @@ InvalidEnumDiscriminant: struct {
         safety_class: .Soundness,
         safety_reason: "The discriminant sets the enum's layout, and a value that is unknown or does not fit would corrupt it.",
         expert_path: "none: the layout needs a known number that fits the representation",
-        meaning: "enum discriminant is not a computable integer",
+        meaning: "Enum discriminant is not a computable integer",
         detail: true,
 
         what: fn(self) -> String {
@@ -3006,14 +3006,14 @@ ProtocolExpansionFailed: struct {
         safety_class: .Soundness,
         safety_reason: "The protocol's handle types failed to generate, so there are no types to check calls against.",
         expert_path: "none: no handle types exist to use",
-        meaning: "protocol expansion failed to parse a generated handle fragment",
+        meaning: "Protocol expansion failed to parse a generated handle fragment",
         detail: true,
         fix_next: "Check the protocol declaration for typos; if this persists, file a bug.",
 
         what: fn(self) -> String { "Protocol `{self.name}` failed to expand into handle types." }
 
         why: fn(self) -> String {
-            "protocol/session types: the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse."
+            "Protocol/session types: the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the `protocol` block — a generated fragment did not parse."
         }
 
         fix: fn(self) -> String {
@@ -3139,7 +3139,7 @@ ProtocolLineMissingSender: struct {
         safety_reason: "Without a sender the line has no direction, so the generated handles cannot know who sends.",
         expert_path: "none: each protocol line needs one sender",
         stage: [.Parse],
-        meaning: "protocol line does not use sender form `client:` or `server:`",
+        meaning: "Protocol line does not use sender form `client:` or `server:`",
         detail: true,
 
         what: fn(self) -> String {
@@ -4681,7 +4681,7 @@ InvalidConstructionField: struct {
         no_fix: None,
         fix_safety: .NeedsReview,
 
-        what: fn(self) -> String { "struct/variant construction field errors" }
+        what: fn(self) -> String { "Struct/variant construction field errors" }
 
         why: fn(self) -> String {
             "A struct or variant is built with each of its fields written once, and only the fields it declares"
@@ -4839,7 +4839,7 @@ UnknownMethod: struct {
         safety_class: .Soundness,
         safety_reason: "The receiver has no such method in the form called, so the call has no code to run.",
         expert_path: "none: no opt-in calls a method the receiver does not have",
-        meaning: "static/instance method confusion or missing receiver method",
+        meaning: "Static/instance method confusion or missing receiver method",
         detail: true,
         structured_fix: .SuggestedSourceEdit,
         no_fix: None,
@@ -11595,7 +11595,7 @@ PointerAcrossCBoundary: struct {
         safety_class: .Soundness,
         safety_reason: "A pointer or gated type crossing to C escapes memory checks, so it needs an audited region.",
         expert_path: "`use core.mem` and an `#Unsafe` region",
-        meaning: "pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem`",
+        meaning: "Pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem`",
         detail: true,
 
         what: fn(self) -> String { "Type `{self.ty}` cannot cross the C boundary here." }
@@ -13601,7 +13601,7 @@ UnknownMigrationVerb: struct {
         safety_reason: "A word that is no migration verb names no change, so the migration would leave the data in an unknown shape.",
         expert_path: "none: migrations use `rename`, `add`, `remove` and `change`",
         stage: [.Parse],
-        meaning: "migration block uses a word that is not a migration verb",
+        meaning: "Migration block uses a word that is not a migration verb",
         no_fix: .Ambiguous,
 
         what: fn(self) -> String { "A migration block uses a word that is not a migration verb" }
@@ -14616,7 +14616,7 @@ InvalidModuleContribution: struct {
         safety_reason: "The merge reads a contribution as its namespace's type, so another value would be combined as the wrong type.",
         expert_path: "none: the contribution is a struct literal of its namespace's type",
         stage: [.Jetpack],
-        meaning: "module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`)",
+        meaning: "Module contribution value isn't a struct literal of its namespace's type (`Env`/`System`/`Image`)",
         detail: true,
         no_fix: .Behavior,
 
@@ -16359,7 +16359,7 @@ ColumnarMethodNotSupported: struct {
         }
 
         why: fn(self) -> String {
-            "v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled."
+            "Version 1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled."
         }
 
         fix: fn(self) -> String {
@@ -23627,7 +23627,7 @@ FreezeNotSnapshotable: struct {
         safety_class: .Soundness,
         safety_reason: "A snapshot with a shared handle, resource, function, trait value or mutable view inside could still change under the tasks that read it.",
         expert_path: "none: `freeze` takes owned, cloneable values",
-        meaning: "freeze source is not deeply snapshot-able",
+        meaning: "Freeze source is not deeply snapshot-able",
         detail: true,
 
         what: fn(self) -> String { "`freeze` cannot snapshot `{self.ty}`: {self.reason}" }
