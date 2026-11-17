@@ -18,7 +18,8 @@
 // strict parse errors stay on their original EncodingError location rail.
 //
 // Duplicate object names: `parse` and `decode` reject them with the key's
-// path, line, and column. The named `parse_allow_duplicates` keeps the later
+// path, the repeat's line and column, and the first name's line and column in
+// the reason. The named `parse_allow_duplicates` keeps the later
 // value in the first key's position. The duplicate check scans the object's
 // members, or past JSON_SEEN_SCAN of them their key map, so the input bound
 // (`EncodingLimits.safe().max_item_bytes`) also bounds it.
@@ -338,12 +339,14 @@ Parser: struct {
     exact_numbers: Bool,
     // The typed-decode cursor (`impl Parser.__DecodeSource`): the first
     // syntax error, which ends every later read; per open container, whether
-    // it is an Object, whether no member is read yet, and where its keys
-    // start in `seen`; the open Objects' keys, and the key map of an Object
-    // past JSON_SEEN_SCAN keys (`names`, owned by frame `names_frame`).
+    // it is an Object, whether no member is read yet, where its bracket is,
+    // and where its keys start in `seen`; the open Objects' keys, and the key
+    // map of an Object past JSON_SEEN_SCAN keys (`names`, owned by frame
+    // `names_frame`).
     failure: EncodingError?,
     open: [Bool],
     fresh: [Bool],
+    opened_at: [Int],
     seen_base: [Int],
     seen: [String],
     names: [[String:Bool]],
@@ -365,6 +368,7 @@ Parser: struct {
             failure: None,
             open: [Bool]{},
             fresh: [Bool]{},
+            opened_at: [Int]{},
             seen_base: [Int]{},
             seen: [String]{},
             names: [[String:Bool]]{},
@@ -399,6 +403,44 @@ Parser: struct {
             "/{self.path.join("/")}",
             reason,
         )
+    }
+
+    // A repeated object name's error: at the repeat, naming the key and where
+    // the Object opened at `object_at` first names it.
+    __duplicate: fn(&self, object_at: Int, key: String) -> EncodingError Never! {
+        first: self.__first_name(object_at, key)
+        self.err("duplicate object key `{key}` (first at {first})")
+    }
+
+    // "line L, column C" of the opening quote of the first member named `key`
+    // in the Object whose `{` is at `object_at`. It reads that Object's
+    // members again and then puts the parser back where it was, so only a
+    // failing parse pays for it.
+    __first_name: fn(&self, object_at: Int, key: String) -> String Never! {
+        index: self.index
+        line: self.line
+        column: self.column
+        depth: self.depth
+        steps: self.path.len()
+        self.index = object_at + 1
+        first := object_at
+        loop self.__ws_scan() && (self.peek() ?? (U8{0})) == (U8{34}) {
+            at: self.index
+            name: self.parse_string() ?? break
+            if name == key {
+                first = at
+                break
+            }
+            if !self.__ws_scan() || !self.expect(U8{58}) -> break
+            self.__cursor_skip() ?? break
+            if !self.__ws_scan() || !self.expect(U8{44}) -> break
+        }
+        self.index = index
+        self.line = line
+        self.column = column
+        self.depth = depth
+        loop self.path.len() > steps -> _ := self.path.pop()
+        json_place(self.bytes, first)
     }
 
     // Whitespace is read in place, without a per-byte `U8?`; false when the
@@ -671,6 +713,7 @@ Parser: struct {
     }
 
     parse_object: fn(&self) -> Dyn EncodingError! {
+        object_at: self.index
         if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         entries := [{key: String, value: Dyn}]{}
@@ -707,9 +750,8 @@ Parser: struct {
                 if position < 0 -> _: positions.add(key.copy(), entries.len())
             }
             if position >= 0 && !self.allow_duplicates {
-                reason: "duplicate object key `{key}`"
-                self.path.push(key)
-                error: self.err(reason)
+                self.path.push(key.copy())
+                error: self.__duplicate(object_at, key)
                 _: self.path.pop()
                 return Err(error)
             }
@@ -781,6 +823,7 @@ Parser: struct {
         }
         self.open.push(object)
         self.fresh.push(true)
+        self.opened_at.push(self.index - 1)
         self.seen_base.push(self.seen.len())
         true
     }
@@ -796,6 +839,7 @@ Parser: struct {
         }
         _ := self.open.pop()
         _ := self.fresh.pop()
+        _ := self.opened_at.pop()
         _ := self.seen_base.pop()
         self.depth -= 1
     }
@@ -889,6 +933,7 @@ Parser: struct {
 
     // parse_object, keeping only the member names, for its duplicate check.
     __cursor_skip_object: fn(&self) EncodingError! {
+        object_at: self.index
         if !self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
         if !self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
         names := [String:Bool]{}
@@ -908,7 +953,7 @@ Parser: struct {
             if !self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
             self.path.push(key.copy())
             if names.get(key) != None && !self.allow_duplicates {
-                error: self.err("duplicate object key `{key}`")
+                error: self.__duplicate(object_at, key)
                 _: self.path.pop()
                 return Err(error)
             }
@@ -996,7 +1041,9 @@ Parser: struct {
                 return false
             }
             if self.__cursor_repeated(key) {
-                self.__cursor_fail(self.err("duplicate object key `{key}`"))
+                opened: self.opened_at[top]
+                error: self.__duplicate(opened, key)
+                self.__cursor_fail(error)
                 return false
             }
             self.key = key
@@ -1139,6 +1186,20 @@ Parser: struct {
 // An Object's keys are scanned for a repeat up to this many; past it they
 // are looked up in a map.
 JSON_SEEN_SCAN: 16
+
+// "line L, column C" of byte `at`, counted as the parser counts: a line per
+// newline, a column per byte.
+priv json_place: fn(bytes: [U8], at: Int) -> String Never! {
+    line := 1
+    column := 1
+    loop index in 0..<at {
+        if bytes[index] == (U8{10}) {
+            line += 1
+            column = 1
+        } else { column += 1 }
+    }
+    "line {line}, column {column}"
+}
 
 parse_json: fn(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> Dyn EncodingError! {
     raw: text.bytes()
@@ -2108,6 +2169,17 @@ patch_step: fn(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
 #Test("JSON duplicate replacement retains the first member position") {
     tree: parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("JSON parse")
     assert_eq(to_string(tree) ?? panic("encode replacement tree"), "{{\"z\":3,\"a\":2}}")
+}
+
+#Test("JSON names a repeated key, where it repeats and where it first appears") {
+    if parse("{{\"a\": {{\"b\": 1}},\n \"a\": 2}}") == {
+        .Ok(_) -> { panic("a repeated key must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate object key `a` (first at line 1, column 2)")
+            assert(error.line == Val(2) && error.column == Val(6))
+            assert_eq(error.path, "/a")
+        }
+    }
 }
 
 #Test("typed JSON retains number lexemes until Decode") {

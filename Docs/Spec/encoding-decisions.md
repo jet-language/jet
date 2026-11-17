@@ -33,8 +33,10 @@ Use one `Dyn` for untyped values. Its closed variants are `Null`, `Bool`,
 (D-INFER-PRIVATE1=A; D-DATATREE-RULES1=A). `Int` owns an exact Jet integer,
 including values wider than machine integers; `Number` owns a parsed number's
 exact source spelling until a typed read checks the destination's range.
-Objects preserve insertion order; duplicate keys are a parse error, except
-`parse_allow_duplicates`, which keeps the later value. Integers and floats
+Objects preserve insertion order; duplicate keys are a parse error that names
+the key, where it repeats and where it first appears, except under each
+DataTree decoder's `parse_allow_duplicates` (JSON, YAML and TOML), which keeps
+the later value at the first key's position. Integers and floats
 remain distinct. A codec must reject malformed
 input instead of fabricating a value. Base64, base32, and hex are scalar byte
 helpers, not `Dyn` adapters. This keeps one tree walker and one set of

@@ -1,0 +1,30 @@
+// A key defined twice in a TOML document is a parse error at the repeat that
+// names the dotted key and where it was first defined: in one table, in one
+// table of an array of tables, through a dotted key into an inline table,
+// and inside one inline table. `parse_allow_duplicates` keeps the later
+// value at the first definition's position. Each table of an array of
+// tables keeps its own keys.
+use {
+    json: core.encoding.json
+    toml: core.encoding.toml
+}
+
+show: fn(name: String, text: String) {
+    tree: toml.parse(text) ?? {
+        line: err.line ?? 0
+        column: err.column ?? 0
+        print("{name} parse: `{err.path}` line {line} column {column}: {err.reason}")
+        later: toml.parse_allow_duplicates(text) ?? panic("allowed parse")
+        print("{name} allow: {json.to_string(later) ?? panic("render")}")
+        return
+    }
+    print("{name} parse: {json.to_string(tree) ?? panic("render")}")
+}
+
+run: fn() {
+    show("table", "[server]\nport = 1\nhost = \"a\"\nport = 2\n")
+    show("array", "[[item]]\nname = \"a\"\n[[item]]\nname = \"b\"\nname = \"c\"\n")
+    show("dotted", "a = {{ b = 1 }}\na.b = 2\n")
+    show("inline", "point = {{ x = 1, y = 2, x = 3 }}\n")
+    show("distinct", "[[item]]\nname = \"a\"\n[[item]]\nname = \"b\"\n")
+}

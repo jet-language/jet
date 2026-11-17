@@ -245,8 +245,11 @@ JSONPull: struct<R: Reader> {
     // Each open object's keys, from `seen_starts` on: a strict reader keeps
     // all of them to reject a repeated key, a duplicate-allowing reader only
     // the current one. The last is the key the error path names.
+    // `seen_places` holds each kept key's line and column, two entries a key,
+    // so a repeat names where the key first appeared.
     allow_duplicates: Bool,
     seen_keys: [String],
+    seen_places: [Int],
     seen_starts: [Int],
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
@@ -292,8 +295,11 @@ JSONPull: struct<R: Reader> {
         bytes += mem.__list_capacity<U8>(self.buffer)
         self.buffer = [U8]{}
         self.buffered = 0
-        loop key in self.seen_keys -> bytes += key.count_bytes() + mem.__type_size<String>()
+        loop key in self.seen_keys {
+            bytes += key.count_bytes() + mem.__type_size<String>() + 2 * mem.__type_size<Int>()
+        }
         self.seen_keys = [String]{}
+        self.seen_places = [Int]{}
         self.seen_starts = [Int]{}
         self.allocation.release(bytes + self.output_heap)
         self.output_heap = 0
@@ -307,7 +313,9 @@ JSONPull: struct<R: Reader> {
     drop_keys: fn(&self, start: Int) Never! {
         loop self.seen_keys.len() > start {
             key: self.seen_keys.pop() ?? panic("retained JSON object key")
-            self.allocation.release(key.count_bytes() + mem.__type_size<String>())
+            _ := self.seen_places.pop()
+            _ := self.seen_places.pop()
+            self.allocation.release(key.count_bytes() + mem.__type_size<String>() + 2 * mem.__type_size<Int>())
         }
     }
 
@@ -784,22 +792,26 @@ JSONPull: struct<R: Reader> {
                     if byte != (Val(U8{34})) {
                         return Err(self.error(.Syntax, "expected a quoted object key"))
                     }
+                    line: self.line
+                    column: self.column
                     _: self.consume()
                     key: self.read_string()
                     start: self.seen_starts[self.seen_starts.len() - 1]
                     if self.allow_duplicates -> self.drop_keys(start) else {
                         loop index in start..<self.seen_keys.len() {
                             if self.seen_keys[index] == key {
-                                error := self.error(.Syntax, "duplicate object key `{key}`")
+                                error := self.error(.Syntax, "duplicate object key `{key}` (first at line {self.seen_places[2 * index]}, column {self.seen_places[2 * index + 1]})")
                                 error.path = "{self.path()}[{quote_path(key)}]"
                                 return Err(error)
                             }
                         }
                     }
-                    if !self.allocation.charge(key.count_bytes() + mem.__type_size<String>()) {
+                    if !self.allocation.charge(key.count_bytes() + mem.__type_size<String>() + 2 * mem.__type_size<Int>()) {
                         return Err(self.item_error("string"))
                     }
                     self.seen_keys.push(key.copy())
+                    self.seen_places.push(line)
+                    self.seen_places.push(column)
                     self.frames[count - 1] = .ObjectColonValue
                     return Ok(Val(DataEvent.Key(key)))
                 }
@@ -938,7 +950,7 @@ fold_reserve: fn<T, R: Reader>(parser: &JSONPull<R>, values: &[T], heap: &FoldBu
 
 json_reader: fn<R: Reader>(input: &&R, limits: EncodingLimits, allow_duplicates: Bool) -> JSONPull<R> EncodingError! {
     validate_limits(limits)
-    Ok(JSONPull<R>{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, buffer: [U8]{}, buffered: 0, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_starts: [Int]{}})
+    Ok(JSONPull<R>{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, buffer: [U8]{}, buffered: 0, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_places: [Int]{}, seen_starts: [Int]{}})
 }
 
 valid_number: fn(bytes: [U8]) -> Bool Never! {

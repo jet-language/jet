@@ -31,14 +31,23 @@ priv unsupported_error: fn(reason: String) -> EncodingError Never! {
 // flow collections as values, a leading `---` document marker, `|` / `>`
 // folded scalars, comments, !!binary, and offset timestamps. Unknown syntax,
 // anchors and aliases included, fails closed rather than silently delegating.
-parse: fn(text: String) -> Dyn EncodingError! { parse_yaml(text) }
+//
+// A key repeated in one map is a Syntax error at the repeat that names the
+// key and the line and column of its first appearance.
+// `parse_allow_duplicates` keeps the later value in the first key's position
+// instead. A JSON-shaped document is JSON's, with JSON's rule.
+parse: fn(text: String) -> Dyn EncodingError! { parse_yaml(text, 1, 0, false) }
 
-decode: fn(text: String) -> Dyn EncodingError! { parse_yaml(text) }
+/// YAML → `Dyn`, except that a key repeated in one map keeps the later value
+/// at the first key's position.
+parse_allow_duplicates: fn(text: String) -> Dyn EncodingError! { parse_yaml(text, 1, 0, true) }
+
+decode: fn(text: String) -> Dyn EncodingError! { parse_yaml(text, 1, 0, false) }
 
 // Compiler-private typed entry for `yaml.decode<T>(text)`: the document's
 // tree decodes into the target, a parse failure as one root FieldError.
 __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
-    tree: parse_yaml(text) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid YAML: {err.reason}"}})
+    tree: parse_yaml(text, 1, 0, false) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid YAML: {err.reason}"}})
     value: tree.decode<Target>() ?? return Err(err)
     Ok(value)
 }
@@ -48,11 +57,87 @@ to_string: fn<T: Encode>(value: T) -> String Never! {
     if text == "" -> "{{}}" else -> text
 }
 
-parse_yaml: fn(text: String) -> Dyn EncodingError! {
+// Where a row starts in the source: its line, the column of its first byte
+// and its byte offset.
+priv YAMLPlace: struct {
+    line: Int,
+    column: Int,
+    offset: Int,
+}
+
+priv yaml_error: fn(place: YAMLPlace, path: String, reason: String) -> EncodingError Never! {
+    syntax_error(EncodingFormat.YAML, place.offset, place.line, place.column, path, reason)
+}
+
+// The place `skipped` bytes after `place`, on its line.
+priv shifted: fn(place: YAMLPlace, skipped: Int) -> YAMLPlace Never! {
+    YAMLPlace{line: place.line, column: place.column + skipped, offset: place.offset + skipped}
+}
+
+// The place of the first non-blank byte of `row`, which starts at `place`.
+priv row_place: fn(place: YAMLPlace, row: String) -> YAMLPlace Never! {
+    shifted(place, row.count_bytes() - lstrip(row).count_bytes())
+}
+
+// `text` starts at source line `line`, column 1, byte `offset`.
+priv parse_yaml: fn(text: String, line: Int, offset: Int, allow_duplicates: Bool) -> Dyn EncodingError! {
     trimmed: trim_yaml(text)
     if trimmed.len() == 0 -> return Ok(Dyn.Null)
-    if looks_json(trimmed) -> return json.parse(trimmed)
-    parse_block(trimmed)
+    if looks_json(trimmed) -> return parse_json_document(text, line, offset, allow_duplicates)
+    raw: text.bytes()
+    start := 0
+    row_line := line
+    column := 1
+    loop start < raw.len() && (raw[start] == (U8{32}) || raw[start] == (U8{9}) || raw[start] == (U8{10}) || raw[start] == (U8{13})) {
+        if raw[start] == (U8{10}) {
+            row_line += 1
+            column = 1
+        } else { column += 1 }
+        start += 1
+    }
+    end := raw.len()
+    loop end > start && (raw[end - 1] == (U8{32}) || raw[end - 1] == (U8{9}) || raw[end - 1] == (U8{10}) || raw[end - 1] == (U8{13})) {
+        end -= 1
+    }
+    rows := [String]{}
+    places := [YAMLPlace]{}
+    row_start := start
+    buf := [U8]{}
+    loop index in start..<end {
+        b: raw[index]
+        if b == (U8{10}) {
+            place: YAMLPlace{line: row_line, column: column, offset: offset + row_start}
+            rows.push(String.from_bytes(buf) ?? return Err(yaml_error(place, "", "invalid UTF-8 in YAML input")))
+            places.push(place)
+            buf = [U8]{}
+            row_line += 1
+            column = 1
+            row_start = index + 1
+            next
+        }
+        if b == (U8{13}) -> next
+        buf.push(b)
+    }
+    if buf.len() > 0 {
+        place: YAMLPlace{line: row_line, column: column, offset: offset + row_start}
+        rows.push(String.from_bytes(buf) ?? return Err(yaml_error(place, "", "invalid UTF-8 in YAML input")))
+        places.push(place)
+    }
+    parse_block(rows, places, allow_duplicates)
+}
+
+// A JSON-shaped document, read by JSON with its positions in the YAML
+// source: blanks then line breaks stand in for the text before it.
+priv parse_json_document: fn(text: String, line: Int, offset: Int, allow_duplicates: Bool) -> Dyn EncodingError! {
+    if offset == 0 {
+        return if allow_duplicates -> json.parse_allow_duplicates(text) else -> json.parse(text)
+    }
+    padded := [U8]{}
+    loop _ in 0..<(offset - (line - 1)) -> padded.push(U8{32})
+    loop _ in 0..<(line - 1) -> padded.push(U8{10})
+    loop b in text.bytes() -> padded.push(b)
+    source: String.from_bytes(padded) ?? panic("ASCII blanks before UTF-8 text keep it UTF-8")
+    if allow_duplicates -> json.parse_allow_duplicates(source) else -> json.parse(source)
 }
 
 looks_json: fn(text: String) -> Bool Never! {
@@ -64,21 +149,8 @@ looks_json: fn(text: String) -> Bool Never! {
     false
 }
 
-parse_block: fn(text: String) -> Dyn EncodingError! {
-    rows := [String]{}
-    buf := [U8]{}
-    loop b in text.bytes() {
-        if b == (U8{10}) {
-            rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
-            buf = [U8]{}
-            next
-        }
-        if b == (U8{13}) -> next
-        buf.push(b)
-    }
-    if buf.len() > 0 {
-        rows.push(String.from_bytes(buf) ?? return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "invalid UTF-8 in YAML input")))
-    }
+// `rows` with where each starts in the source (`places`).
+priv parse_block: fn(rows: [String], places: [YAMLPlace], allow_duplicates: Bool) -> Dyn EncodingError! {
     if rows.len() == 0 -> return Ok(Dyn.Null)
     first := ""
     first_index := 0
@@ -93,18 +165,24 @@ parse_block: fn(text: String) -> Dyn EncodingError! {
     if first.len() == 0 -> return Ok(Dyn.Null)
     first_body: trim_yaml(strip_inline_comment(first))
     if first_body == "---" {
+        if first_index + 1 >= rows.len() -> return Ok(Dyn.Null)
         document := [String]{}
         loop j in first_index + 1..<rows.len() -> document.push(rows[j].copy())
-        return parse_yaml(join_lines(document))
+        start: places[first_index + 1]
+        return parse_yaml(join_lines(document), start.line, start.offset, allow_duplicates)
     }
     if first_body == "|" || first_body == ">" || first_body == "!!binary |" || first_body == "!!binary >" {
         block: parse_block_scalar(rows, first_index, leading_spaces(first), first_body == ">" || first_body == "!!binary >")
-        if first_body.starts_with("!!binary") -> return parse_scalar("!!binary {block.value}")
+        if first_body.starts_with("!!binary") {
+            return parse_scalar("!!binary {block.value}", allow_duplicates)
+        }
         return Ok(Dyn.Text(block.value))
     }
-    if starts_list(first) -> return parse_list(rows, leading_spaces(first))
-    if !is_map_entry(first) -> return parse_scalar(trim_yaml(first))
-    parse_map(rows, leading_spaces(first))
+    if starts_list(first) {
+        return parse_list(rows, places, leading_spaces(first), allow_duplicates)
+    }
+    if !is_map_entry(first) -> return parse_scalar(trim_yaml(first), allow_duplicates)
+    parse_map(rows, places, leading_spaces(first), allow_duplicates)
 }
 
 starts_list: fn(line: String) -> Bool Never! {
@@ -182,11 +260,13 @@ strip_indent: fn(text: String, columns: Int) -> String Never! {
     String.from_bytes(raw[i..raw.len() - 1]) ?? ""
 }
 
-parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
-    // Keys keep arrival order; the temporary key set
-    // rejects a repeated name and is freed with the map.
+priv parse_map: fn(rows: [String], places: [YAMLPlace], indent: Int, allow_duplicates: Bool) -> Dyn EncodingError! {
+    // Keys keep arrival order. The temporary `seen` maps each key to its
+    // entry, and `firsts` holds where each entry's key is, for a repeat's
+    // report; both are freed with the map.
     entries := [{key: String, value: Dyn}]{}
-    seen := [String:Bool]{}
+    firsts := [YAMLPlace]{}
+    seen := [String:Int]{}
     i := 0
     loop i < rows.len() {
         line: rows[i]
@@ -196,30 +276,28 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         }
         pad: leading_spaces(line)
         if pad < indent -> break
-        if pad > indent {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML map"))
-        }
+        place: row_place(places[i], line)
+        if pad > indent -> return Err(yaml_error(place, "", "unexpected indentation in YAML map"))
         body: lstrip(line)
         cut: split_once(body, 58)
-        if cut.before == body {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map entry needs ':'"))
-        }
+        if cut.before == body -> return Err(yaml_error(place, "", "YAML map entry needs ':'"))
         key: trim_yaml(cut.before)
-        if key.len() == 0 {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
+        if key.len() == 0 -> return Err(yaml_error(place, "", "YAML map key is empty"))
+        at: seen.get(key) ?? -1
+        if at >= 0 && !allow_duplicates {
+            first: firsts[at]
+            return Err(yaml_error(place, key, "duplicate key `{key}` (first at line {first.line}, column {first.column})"))
         }
-        if seen.has_key(key) {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
-        }
-        _: seen.add(key.copy(), true)
         rest: trim_yaml(strip_inline_comment(cut.after))
         i += 1
+        value := Dyn.Null
         if rest == "|" || rest == ">" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">")
-            entries.push({key: key, value: Dyn.Text(block.value)})
+            value = Dyn.Text(block.value)
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
+            child_places := [YAMLPlace]{}
             loop i < rows.len() {
                 child: rows[i]
                 if is_blank_or_comment(child) {
@@ -228,15 +306,22 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                 }
                 if leading_spaces(child) <= pad -> break
                 child_rows.push(child.copy())
+                child_places.push(places[i])
                 i += 1
             }
-            entries.push({key: key, value: parse_block(join_lines(child_rows))})
-        } else { entries.push({key: key, value: parse_scalar(rest)}) }
+            value = parse_block(child_rows, child_places, allow_duplicates)
+        } else { value = parse_scalar(rest, allow_duplicates) }
+        // parse_allow_duplicates: the later value, at the first key's position.
+        if at >= 0 -> entries[at].value = value else {
+            _: seen.add(key.copy(), entries.len())
+            entries.push({key: key, value: value})
+            firsts.push(place)
+        }
     }
     Ok(stream.object_from_entries(entries))
 }
 
-parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
+priv parse_list: fn(rows: [String], places: [YAMLPlace], indent: Int, allow_duplicates: Bool) -> Dyn EncodingError! {
     items := [Dyn]{}
     i := 0
     loop i < rows.len() {
@@ -248,24 +333,25 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         pad: leading_spaces(line)
         if pad < indent -> break
         if pad > indent {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "unexpected indentation in YAML list"))
+            return Err(yaml_error(row_place(places[i], line), "", "unexpected indentation in YAML list"))
         }
         body: lstrip(line)
         bytes: body.bytes()
         if bytes.len() == 0 || bytes[0] != (U8{45}) {
-            return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML list item needs '-'"))
+            return Err(yaml_error(row_place(places[i], line), "", "YAML list item needs '-'"))
         }
         rest := ""
         if bytes.len() > 1 -> rest = trim_yaml(drop_prefix(body, 2))
         i += 1
         if rest == "|" || rest == ">" || rest == "!!binary |" || rest == "!!binary >" {
             block: parse_block_scalar(rows, i - 1, pad, rest == ">" || rest == "!!binary >")
-            if rest.starts_with("!!binary") -> items.push(parse_scalar("!!binary {block.value}")) else {
-                items.push(Dyn.Text(block.value))
-            }
+            if rest.starts_with("!!binary") {
+                items.push(parse_scalar("!!binary {block.value}", allow_duplicates))
+            } else { items.push(Dyn.Text(block.value)) }
             i = block.next
         } else if rest.len() == 0 {
             child_rows := [String]{}
+            child_places := [YAMLPlace]{}
             loop i < rows.len() {
                 child: rows[i]
                 if is_blank_or_comment(child) {
@@ -274,29 +360,36 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                 }
                 if leading_spaces(child) <= pad -> break
                 child_rows.push(child.copy())
+                child_places.push(places[i])
                 i += 1
             }
-            items.push(parse_block(join_lines(child_rows)))
+            items.push(parse_block(child_rows, child_places, allow_duplicates))
         } else if is_map_entry(rest) {
+            // The item's map: its first entry follows the `-`, the rest
+            // are the deeper rows below it, each with its indent removed.
             map_rows := [String]{rest}
+            map_places := [YAMLPlace]{shifted(places[i - 1], line.count_bytes() - lstrip(drop_prefix(body, 2)).count_bytes())}
             loop i < rows.len() {
                 child: rows[i]
                 if is_blank_or_comment(child) {
                     map_rows.push("")
+                    map_places.push(places[i])
                     i += 1
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                map_rows.push(strip_indent(child, pad + 2))
+                entry: strip_indent(child, pad + 2)
+                map_places.push(shifted(places[i], child.count_bytes() - entry.count_bytes()))
+                map_rows.push(entry)
                 i += 1
             }
-            items.push(parse_map(map_rows, 0))
-        } else { items.push(parse_scalar(strip_inline_comment(rest))) }
+            items.push(parse_map(map_rows, map_places, 0, allow_duplicates))
+        } else { items.push(parse_scalar(strip_inline_comment(rest), allow_duplicates)) }
     }
     Ok(Dyn.Array(items))
 }
 
-parse_scalar: fn(text: String) -> Dyn EncodingError! {
+priv parse_scalar: fn(text: String, allow_duplicates: Bool) -> Dyn EncodingError! {
     clean: trim_yaml(strip_inline_comment(text))
     if clean.starts_with("&") || clean.starts_with("*") {
         return Err(unsupported_error("YAML anchors and aliases (&name, *name) are not supported"))
@@ -329,6 +422,9 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
         return Ok(Dyn.DateTime(z))
     }
     if clean.starts_with("[") || clean.starts_with("{{") {
+        if allow_duplicates {
+            return json.parse_allow_duplicates(clean) ?? return Err(unsupported_error("YAML flow collections must be JSON"))
+        }
         return json.parse(clean) ?? return Err(unsupported_error("YAML flow collections must be JSON"))
     }
     if clean.starts_with("\"") || clean.starts_with("'") -> return Ok(Dyn.Text(unquote(clean)))
@@ -681,4 +777,39 @@ unquote: fn(text: String) -> String Never! {
         .Ok(_) -> { panic("a non-JSON flow collection must fail closed") }
         .Err(error) -> assert_eq(error.reason, "YAML flow collections must be JSON")
     }
+}
+
+#Test("YAML names a repeated key, where it repeats and where it first appears") {
+    if parse("a: 1\nb: 2\na: 3\n") == {
+        .Ok(_) -> { panic("a repeated key must fail") }
+        .Err(error) -> {
+            assert(error.kind == EncodingErrorKind.Syntax)
+            assert_eq(error.reason, "duplicate key `a` (first at line 1, column 1)")
+            assert(error.line == Val(3) && error.column == Val(1) && error.byte_offset == 10)
+            assert_eq(error.path, "a")
+        }
+    }
+    if parse("name: a\nb:\n  c: 1\n  c: 2\n") == {
+        .Ok(_) -> { panic("a repeated nested key must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate key `c` (first at line 3, column 3)")
+            assert(error.line == Val(4) && error.column == Val(3))
+        }
+    }
+    if parse("list:\n  - id: 1\n    id: 2\n") == {
+        .Ok(_) -> { panic("a key repeated in a list item's map must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate key `id` (first at line 2, column 5)")
+            assert(error.line == Val(3) && error.column == Val(5))
+        }
+    }
+    if parse("---\n{{\"a\": 1, \"a\": 2}}") == {
+        .Ok(_) -> { panic("a repeated name in a JSON document must fail") }
+        .Err(error) -> {
+            assert_eq(error.reason, "duplicate object key `a` (first at line 2, column 2)")
+            assert(error.line == Val(2))
+        }
+    }
+    tree: parse_allow_duplicates("a: 1\nb: 2\na: 3\n") ?? panic("allowed YAML")
+    assert_eq(json.to_string(tree) ?? panic("JSON"), "{{\"a\":3,\"b\":2}}")
 }
