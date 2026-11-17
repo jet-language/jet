@@ -47,14 +47,14 @@ extern void jet_rt_handle_drop_io_operation(int64_t *);
 extern bool jet_rt_handle_eq_io_operation(int64_t *,int64_t *);
 #define VARIANT(name) extern Error *jet_rt_record_new_io_error_##name(Context *); extern Context *jet_rt_record_get_io_error_##name(Error *)
 VARIANT(invalid_input); VARIANT(not_found); VARIANT(permission_denied); VARIANT(timed_out);
-VARIANT(cancelled); VARIANT(closed); VARIANT(protocol); VARIANT(other);
+VARIANT(canceled); VARIANT(closed); VARIANT(protocol); VARIANT(other);
 VARIANT(already_exists); VARIANT(unsupported);
 #undef VARIANT
 typedef Error *(*Ctor)(Context *);
 typedef Context *(*Get)(Error *);
-static const Ctor ctors[]={jet_rt_record_new_io_error_invalid_input,jet_rt_record_new_io_error_not_found,jet_rt_record_new_io_error_permission_denied,jet_rt_record_new_io_error_timed_out,jet_rt_record_new_io_error_cancelled,jet_rt_record_new_io_error_closed,jet_rt_record_new_io_error_protocol,jet_rt_record_new_io_error_other,jet_rt_record_new_io_error_already_exists,jet_rt_record_new_io_error_unsupported};
-static const Get getters[]={jet_rt_record_get_io_error_invalid_input,jet_rt_record_get_io_error_not_found,jet_rt_record_get_io_error_permission_denied,jet_rt_record_get_io_error_timed_out,jet_rt_record_get_io_error_cancelled,jet_rt_record_get_io_error_closed,jet_rt_record_get_io_error_protocol,jet_rt_record_get_io_error_other,jet_rt_record_get_io_error_already_exists,jet_rt_record_get_io_error_unsupported};
-static const char *const variants[]={"InvalidInput","NotFound","PermissionDenied","TimedOut","Cancelled","Closed","Protocol","Other","AlreadyExists","Unsupported"};
+static const Ctor ctors[]={jet_rt_record_new_io_error_invalid_input,jet_rt_record_new_io_error_not_found,jet_rt_record_new_io_error_permission_denied,jet_rt_record_new_io_error_timed_out,jet_rt_record_new_io_error_canceled,jet_rt_record_new_io_error_closed,jet_rt_record_new_io_error_protocol,jet_rt_record_new_io_error_other,jet_rt_record_new_io_error_already_exists,jet_rt_record_new_io_error_unsupported};
+static const Get getters[]={jet_rt_record_get_io_error_invalid_input,jet_rt_record_get_io_error_not_found,jet_rt_record_get_io_error_permission_denied,jet_rt_record_get_io_error_timed_out,jet_rt_record_get_io_error_canceled,jet_rt_record_get_io_error_closed,jet_rt_record_get_io_error_protocol,jet_rt_record_get_io_error_other,jet_rt_record_get_io_error_already_exists,jet_rt_record_get_io_error_unsupported};
+static const char *const variants[]={"InvalidInput","NotFound","PermissionDenied","TimedOut","Canceled","Closed","Protocol","Other","AlreadyExists","Unsupported"};
 static const char *const kinds[]={"invalid input","not found","permission denied","timed out","canceled","closed","protocol error","I/O error","I/O error","I/O error"};
 static const char *const operations[]={"Read","Write","Flush","Connect","Accept","Close","Resolve","Codec"};
 static const char *const lower_ops[]={"read","write","flush","connect","accept","close","resolve","codec"};

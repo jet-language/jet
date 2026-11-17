@@ -5825,7 +5825,7 @@ index, not a substitute for that law.
 - **D-IOERROR-TREE1=A**: every `core.term.Reader`/`Writer` adapter returns one
   closed `IOError` tree: `InvalidInput(IOContext)`, `NotFound(IOContext)`,
   `PermissionDenied(IOContext)`, `TimedOut(IOContext)`,
-  `Cancelled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
+  `Canceled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
   `Other(IOContext)`.
   `IOContext` has `operation: IOOperation`, `resource: ?String`,
   `os_code: ?Int`, and `cause: ?String`. `IOOperation` is exactly `Read`,
